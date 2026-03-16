@@ -114,7 +114,7 @@ let llama_default = {
 
 let claude_opus = {
   provider = Claude;
-  model_id = "claude-opus-4-6";
+  model_id = Env_config.Claude.default_model;
   max_context = 200000;
   api_url = "https://api.anthropic.com";
   api_key_env = Some "ANTHROPIC_API_KEY";
@@ -232,7 +232,9 @@ let rec model_spec_of_string s =
         | Some adapter when adapter.canonical_name = "codex-api" ->
           Ok { openai_default with model_id }
         | Some adapter when adapter.canonical_name = "glm" ->
-          Ok { glm_cloud with model_id }
+          (* "auto" or empty → Glm_pool selects at runtime *)
+          let effective_id = if model_id = "auto" then "" else model_id in
+          Ok { glm_cloud with model_id = effective_id }
         | Some adapter when adapter.canonical_name = "openrouter" ->
           Ok {
             provider = OpenRouter;

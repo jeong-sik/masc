@@ -64,18 +64,23 @@ let default_config_path () =
       | first :: _ -> first
       | [] -> Filename.concat (Sys.getcwd ()) "config/llm_cascade.json")
 
+(** Build a provider:model label, filtering out empty models. *)
+let label provider model =
+  if model = "" then None
+  else Some (Printf.sprintf "%s:%s" provider model)
+
+(** Build a label list, discarding entries with empty models. *)
+let labels_of pairs =
+  List.filter_map (fun (p, m) -> label p m) pairs
+
 let default_model_strings ~cascade_name =
+  let llama_model = Env_config.Llama.default_model in
+  let glm_model = Env_config.Llm.default_model in
+  let glm_flash = Env_config.Llm.flash_model in
+  (* llama + glm:auto — Glm_pool selects model at runtime *)
   let llama_glm =
-    [
-      Printf.sprintf "llama:%s" Env_config.Llama.default_model;
-      Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-    ]
-  in
-  let local_llama_glm =
-    [
-      Printf.sprintf "llama:%s" Env_config.Llama.default_model;
-      Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-    ]
+    (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
+    @ [ "glm:auto" ]
   in
   match cascade_name with
   (* heartbeat — llama first, glm fallback *)
@@ -89,43 +94,40 @@ let default_model_strings ~cascade_name =
   (* gardener — llama first, glm fallback *)
   | "gardener_spawn" -> llama_glm
   (* classification — local llama, glm fallback *)
-  | "classification" | "context_router" | "capability_match" -> local_llama_glm
+  | "classification" | "context_router" | "capability_match" -> llama_glm
   (* theory of mind — local llama, glm fallback *)
-  | "tom" -> local_llama_glm
+  | "tom" -> llama_glm
   (* verifier — local llama, glm fallback *)
-  | "verifier" -> local_llama_glm
+  | "verifier" -> llama_glm
   (* trpg — local llama, glm fallback *)
-  | "trpg_intent" -> local_llama_glm
-  (* briefing — llama first, flash-tier cloud chain, local llama final fallback *)
+  | "trpg_intent" -> llama_glm
+  (* briefing — llama first, flash-tier cloud chain, glm fallback *)
   | "briefing" ->
-      [
-        Printf.sprintf "llama:%s" Env_config.Llama.default_model;
-        Printf.sprintf "glm:%s" Env_config.Llm.flash_model;
-        Printf.sprintf "gemini:%s" Env_config.Gemini.flash_model;
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-      ]
+      (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
+      @ labels_of [ ("glm", glm_flash); ("gemini", Env_config.Gemini.flash_model) ]
+      @ [ "glm:auto" ]
   | "governance_judge" | "operator_judge" -> llama_glm
   (* walph — default execution models *)
   | "walph" -> llama_glm
   (* auto_responder — agent_type-specific cascades *)
   | "auto_responder_claude" ->
-      [ Printf.sprintf "claude:%s" Env_config.Claude.default_model;
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+      labels_of [ ("claude", Env_config.Claude.default_model) ]
+      @ [ "glm:auto" ]
   | "auto_responder_gemini" ->
-      [ Printf.sprintf "gemini:%s" Env_config.Gemini.flash_model;
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+      labels_of [ ("gemini", Env_config.Gemini.flash_model) ]
+      @ [ "glm:auto" ]
   | "auto_responder_glm" ->
-      [ Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+      labels_of [ ("glm", glm_model) ]
+      @ [ "glm:auto" ]
   | "auto_responder" -> llama_glm
-  (* spawn glm — cloud cascade for spawn_eio direct client path *)
+  (* spawn glm — cloud cascade via Glm_pool *)
   | "spawn_glm" ->
-      [ Printf.sprintf "glm:%s" Env_config.Llm.default_model;
-        Printf.sprintf "glm:%s" Env_config.Llm.flash_model;
-        "glm:glm-5"; "glm:glm-5-code" ]
+      labels_of [ ("glm", glm_model); ("glm", glm_flash) ]
+      @ [ "glm:auto" ]
   (* topic extraction — fast local model, glm fallback *)
   | "topic_extraction" ->
-      [ Printf.sprintf "ollama:%s" Env_config.Llm.flash_model;
-        Printf.sprintf "glm:%s" Env_config.Llm.default_model ]
+      labels_of [ ("ollama", glm_flash) ]
+      @ [ "glm:auto" ]
   (* unregistered cascade: llama + glm as safety net *)
   | _ -> llama_glm
 

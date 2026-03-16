@@ -203,7 +203,7 @@ let llama_default = {
 
 let claude_opus = {
   provider = Claude;
-  model_id = "claude-opus-4-6";
+  model_id = Env_config.Claude.default_model;
   max_context = 200000;
   api_url = "https://api.anthropic.com";
   api_key_env = Some "ANTHROPIC_API_KEY";

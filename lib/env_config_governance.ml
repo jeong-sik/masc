@@ -74,9 +74,10 @@ module Llm = struct
       (get_int ~default:timeout_seconds_int
          "MASC_GARDENER_SPAWN_LLM_TIMEOUT_SEC")
 
-  (** Default GLM model for Z.ai API calls *)
+  (** Default GLM model for Z.ai API calls.
+      Empty = let Glm_pool select at runtime. *)
   let default_model =
-    get_string ~default:"glm-4.7" "MASC_GLM_DEFAULT_MODEL"
+    get_string ~default:"" "MASC_GLM_DEFAULT_MODEL"
 
   (** Enable LLM response cache (L1+L2). *)
   let cache_enabled =
@@ -106,37 +107,42 @@ module Llm = struct
     |> String.trim
     |> String.lowercase_ascii
 
-  (** Default GLM flash model for lightweight tasks *)
+  (** Default GLM flash model for lightweight tasks.
+      Empty = provider decides. *)
   let flash_model =
-    get_string ~default:"glm-4.7-flash" "MASC_GLM_FLASH_MODEL"
+    get_string ~default:"" "MASC_GLM_FLASH_MODEL"
 end
 
 (** {1 Gemini Configuration} *)
 
 module Gemini = struct
-  (** Default Gemini model *)
+  (** Default Gemini model.
+      Empty = skip Gemini in cascades unless env-var overridden. *)
   let default_model =
-    get_string ~default:"gemini-2.5-pro" "MASC_GEMINI_DEFAULT_MODEL"
+    get_string ~default:"" "MASC_GEMINI_DEFAULT_MODEL"
 
-  (** Gemini flash model for lightweight tasks *)
+  (** Gemini flash model for lightweight tasks.
+      Empty = skip Gemini flash in cascades. *)
   let flash_model =
-    get_string ~default:"gemini-2.5-flash" "MASC_GEMINI_FLASH_MODEL"
+    get_string ~default:"" "MASC_GEMINI_FLASH_MODEL"
 end
 
 (** {1 Claude Configuration} *)
 
 module Claude = struct
-  (** Default Claude model *)
+  (** Default Claude model.
+      Empty = skip Claude in cascades unless env-var overridden. *)
   let default_model =
-    get_string ~default:"claude-sonnet-4-5-20250929" "MASC_CLAUDE_DEFAULT_MODEL"
+    get_string ~default:"" "MASC_CLAUDE_DEFAULT_MODEL"
 end
 
 (** {1 OpenAI Configuration} *)
 
 module OpenAI = struct
-  (** Default OpenAI model *)
+  (** Default OpenAI model.
+      Empty = skip OpenAI in cascades unless env-var overridden. *)
   let default_model =
-    get_string ~default:"gpt-5" "MASC_OPENAI_DEFAULT_MODEL"
+    get_string ~default:"" "MASC_OPENAI_DEFAULT_MODEL"
 end
 
 (** {1 Rate Limit Cleanup Configuration} *)

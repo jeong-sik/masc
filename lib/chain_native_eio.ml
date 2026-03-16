@@ -252,8 +252,8 @@ let model_runner_of_string raw =
       match Provider_adapter.explicit_llama_model_label_result () with
       | Ok label -> direct label
       | Error msg -> Error msg)
-  | "glm" | "glm-4.7" ->
-      direct (Printf.sprintf "glm:%s" Env_config.Llm.default_model)
+  | "glm" ->
+      direct "glm:auto"
   | "stub" | "mock" -> Ok Stub
   | "codex" | "gpt-5.2" -> Ok (Spawn "codex")
   | value when starts_with ~prefix:"codex:" value -> Ok (Spawn "codex")

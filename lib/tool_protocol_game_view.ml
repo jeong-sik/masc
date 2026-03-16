@@ -554,9 +554,11 @@ let handle_experiment_canonical (ctx : context) ~canonical_tool ~legacy_name
            ~details:(`Assoc [ ("legacy_tool", `String legacy_name) ])
            ())
   | None ->
+      Printf.eprintf "[dispatch] NOT_IMPLEMENTED: experiment %s (canonical: %s)\n%!"
+        legacy_name canonical_tool;
       Error
         (err_json ~canonical_tool ~code:"NOT_IMPLEMENTED"
-           ~message:(Printf.sprintf "legacy dispatcher unavailable: %s" legacy_name)
+           ~message:(Printf.sprintf "legacy dispatcher unavailable: %s. Use canonical tool names from dispatch table." legacy_name)
            ())
 
 let sanitize_room_id (s : string) =
@@ -757,8 +759,10 @@ let handle_trpg_canonical (ctx : context) ~canonical_tool ~legacy_name args :
         ~details:(`Assoc [ ("legacy_tool", `String legacy_name) ])
         ()
   | None ->
+      Printf.eprintf "[dispatch] NOT_IMPLEMENTED: trpg %s (canonical: %s)\n%!"
+        legacy_name canonical_tool;
       err_json ~canonical_tool ~code:"NOT_IMPLEMENTED"
-        ~message:(Printf.sprintf "legacy dispatcher unavailable: %s" legacy_name)
+        ~message:(Printf.sprintf "legacy dispatcher unavailable: %s. Use canonical tool names from dispatch table." legacy_name)
         ()
 
 let handle_client_session_open (ctx : context) ~canonical_tool args :
@@ -888,7 +892,19 @@ let handle_client_input_transition (ctx : context) ~canonical_tool ~status
         Game_view_state.transition_client_input ctx.config ~session_id ~input_id
           ~status ~handled_by:ctx.agent_name ~reject_reason
       with
-      | Ok item -> Ok (ok_json ~canonical_tool (client_input_payload item))
+      | Ok item ->
+          let event_type = match status with
+            | Game_view_state.Approved -> "client_input_approved"
+            | Game_view_state.Rejected -> "client_input_rejected"
+            | Game_view_state.Pending  -> "client_input_updated"
+          in
+          (try
+            broadcast_masc_event ~event_type ~agent:ctx.agent_name
+              ~data:(client_input_payload item) ()
+          with exn ->
+            Printf.eprintf "[client_input] SSE %s broadcast failed: %s\n%!"
+              event_type (Printexc.to_string exn));
+          Ok (ok_json ~canonical_tool (client_input_payload item))
       | Error msg ->
           let code =
             if String.starts_with ~prefix:"input not found" msg then "NOT_FOUND"
@@ -1066,9 +1082,11 @@ let handle_legacy_alias (ctx : context) ~legacy_name ~canonical_tool args :
       | None ->
           (false, Printf.sprintf "legacy trpg dispatcher unavailable for %s" name))
   | _ ->
+      Printf.eprintf "[dispatch] NOT_IMPLEMENTED: legacy alias %s -> %s\n%!"
+        legacy_name canonical_tool;
       err_json ~canonical_tool ~legacy_alias:legacy_name ~code:"NOT_IMPLEMENTED"
         ~message:
-          (Printf.sprintf "legacy alias not supported: %s -> %s" legacy_name canonical_tool)
+          (Printf.sprintf "legacy alias not supported: %s -> %s. Use canonical tool names from dispatch table." legacy_name canonical_tool)
         ()
 
 let dispatch (ctx : context) ~name ~args : tool_result option =

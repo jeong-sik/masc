@@ -23,6 +23,12 @@ val can_checkin : agent_name:string -> min_gap_s:float -> bool
 
 (** {1 Rate Limiting} *)
 
+(** Minimum gap between posts in seconds. *)
+val min_post_gap : float
+
+(** Minimum gap between comments in seconds. *)
+val min_comment_gap : float
+
 (** Maximum posts per day per agent. *)
 val max_posts_per_day : int
 

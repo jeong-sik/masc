@@ -1,7 +1,48 @@
 (** Internal guardian loops (no external watchdog dependency).
-    Migrated to Pulse tick engine for unified timer/cancellation. *)
+    Migrated to Pulse tick engine for unified timer/cancellation.
+    OAS-integrated: exports Agent Card, publishes events via Event_bus. *)
 
 open Printf
+
+(* ── OAS Agent Card ──────────────────────────────────────── *)
+
+let agent_card : Agent_card.agent_card = {
+  name = "guardian";
+  version = "2.95.0";
+  description = Some "Internal housekeeping: zombie cleanup, garbage collection, lodge loops";
+  provider = Some { organization = "MASC"; url = None };
+  protocol_versions = ["0.3"];
+  capabilities = { streaming = false; push_notifications = false; extended_agent_card = false };
+  skills = [
+    { id = "zombie-cleanup"; name = "Zombie Cleanup";
+      description = Some "Remove stale room entries";
+      input_modes = []; output_modes = ["application/json"] };
+    { id = "garbage-collection"; name = "Garbage Collection";
+      description = Some "Purge old records beyond retention window";
+      input_modes = []; output_modes = ["application/json"] };
+  ];
+  supported_interfaces = [];
+  security_schemes = [];
+  default_input_modes = ["application/json"];
+  default_output_modes = ["application/json"];
+  extensions = [];
+  signatures = [];
+  icon_url = None;
+  documentation_url = None;
+  created_at = "2026-03-16T00:00:00Z";
+  updated_at = "2026-03-16T00:00:00Z";
+}
+
+(* ── Event_bus ref (set once at start, shared across consumers) ── *)
+
+let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
+
+let publish_event name payload =
+  match !bus_ref with
+  | Some bus ->
+      Agent_sdk.Event_bus.publish bus
+        (Agent_sdk.Event_bus.Custom (name, payload))
+  | None -> ()
 
 module Mode = struct
   type t = Masc | Lodge | Both
@@ -128,6 +169,12 @@ let make_zombie_consumer config : (module Pulse.Consumer) =
         last_zombie_result := Some result;
         set_last last_zombie_cleanup;
         log_debug result;
+        publish_event "masc:guardian:zombie_cleanup"
+          (`Assoc [
+            ("agent_name", `String "guardian");
+            ("result", `String result);
+            ("timestamp", `Float (Time_compat.now ()));
+          ]);
         Ok ()
       with exn ->
         let msg = sprintf "zombie cleanup failed: %s" (Printexc.to_string exn) in
@@ -145,6 +192,13 @@ let make_gc_consumer config : (module Pulse.Consumer) =
         last_gc_result := Some result;
         set_last last_gc;
         log_debug (sprintf "gc: %s" result);
+        publish_event "masc:guardian:gc"
+          (`Assoc [
+            ("agent_name", `String "guardian");
+            ("result", `String result);
+            ("gc_days", `Int gc_days);
+            ("timestamp", `Float (Time_compat.now ()));
+          ]);
         Ok ()
       with exn ->
         let msg = sprintf "gc failed: %s" (Printexc.to_string exn) in
@@ -230,7 +284,8 @@ let status_json () : Yojson.Safe.t =
 
 (* ── Start ─────────────────────────────────────────────────── *)
 
-let start_masc_loops_internal ~owner ~respect_guardian_toggle ~sw ~clock config =
+let start_masc_loops_internal ~owner ~respect_guardian_toggle ?bus ~sw ~clock config =
+  bus_ref := bus;
   let can_start = if respect_guardian_toggle then masc_enabled else true in
   if not can_start then begin
     log_debug "masc guardian disabled";
@@ -271,13 +326,13 @@ let start_masc_loops_internal ~owner ~respect_guardian_toggle ~sw ~clock config 
       log_debug "masc guardian loops disabled by interval configuration"
   end
 
-let start_masc_loops ~sw ~clock config =
+let start_masc_loops ?bus ~sw ~clock config =
   start_masc_loops_internal ~owner:Guardian_runtime ~respect_guardian_toggle:true
-    ~sw ~clock config
+    ?bus ~sw ~clock config
 
-let start_embedded_masc_loops ~sw ~clock config =
+let start_embedded_masc_loops ?bus ~sw ~clock config =
   start_masc_loops_internal ~owner:Sentinel_runtime ~respect_guardian_toggle:false
-    ~sw ~clock config
+    ?bus ~sw ~clock config
 
 let start_lodge_loop ~sw ~clock ~net =
   if not lodge_enabled then begin
@@ -301,11 +356,11 @@ let start_lodge_loop ~sw ~clock ~net =
     Pulse.run ~sw p
   end
 
-let start ~sw ~clock ~net room_config =
+let start ?bus ~sw ~clock ~net room_config =
   if not enabled then begin
     log_debug "guardian disabled (set MASC_GUARDIAN_ENABLED=true)";
   end else begin
-    start_masc_loops ~sw ~clock room_config;
+    start_masc_loops ?bus ~sw ~clock room_config;
     start_lodge_loop ~sw ~clock ~net;
     log_info (sprintf "guardian started (mode=%s)" (Mode.to_string mode))
   end

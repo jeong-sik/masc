@@ -28,10 +28,10 @@ type rate_state = {
 
 let rate_states : (string, rate_state) Hashtbl.t = Hashtbl.create 10
 
-let min_post_gap = 1800.0       (** 30 min between posts *)
-let min_comment_gap = 20.0      (** 20 sec between comments *)
-let max_posts_per_day = 5
-let max_comments_per_day = 20
+let min_post_gap = Env_config_governance.LodgeV2.min_post_gap_seconds
+let min_comment_gap = Env_config_governance.LodgeV2.min_comment_gap_seconds
+let max_posts_per_day = Env_config_governance.LodgeV2.max_posts_per_day
+let max_comments_per_day = Env_config_governance.LodgeV2.max_comments_per_day
 
 (** Get or create rate state for agent *)
 let get_rate_state ~agent_name =

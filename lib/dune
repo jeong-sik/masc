@@ -158,9 +158,11 @@
    chain_run_store
    chain_native_eio
    log
+   lodge_broadcast
    lodge_cascade
    lodge_atmosphere
    lodge_decision
+   lodge_personality
    lodge_worker
    lodge_agent_profile
    lodge_ecosystem

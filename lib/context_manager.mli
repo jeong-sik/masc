@@ -95,6 +95,21 @@ val compact : working_context -> compaction_strategy list -> working_context
     into the OAS Context scoped keys. Called automatically by [compact]. *)
 val sync_oas_context : working_context -> working_context
 
+(** {1 OAS Context_reducer Integration} *)
+
+(** Convert a masc compaction_strategy to an OAS Context_reducer strategy. *)
+val oas_strategy_of_compaction : compaction_strategy -> Agent_sdk.Context_reducer.strategy
+
+(** Apply compaction via the OAS Context_reducer pipeline.
+    Functionally equivalent to [compact] but shares logic with OAS. *)
+val compact_via_oas : working_context -> compaction_strategy list -> working_context
+
+(** Convert a masc message to OAS message with role tag for lossless roundtrip. *)
+val masc_msg_to_oas_tagged : Llm_client.message -> Agent_sdk.Types.message
+
+(** Recover a masc message from a tagged OAS message. *)
+val oas_msg_to_masc_tagged : Agent_sdk.Types.message -> Llm_client.message
+
 (** Extract [STATE] ... [/STATE] blocks from free-form text.
     Returns the block bodies in appearance order. *)
 val extract_state_blocks : string -> string list

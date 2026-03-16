@@ -86,16 +86,18 @@ let init_task_backend () =
 let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
+  (* OAS Event_bus: shared instance for cross-subsystem communication *)
+  let event_bus = Agent_sdk.Event_bus.create () in
   let cancel_orchestrator =
     Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config
   in
   Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator;
   Social_runtime.start ~sw ~clock ~config:state.room_config;
-  Gardener.start ~sw ~clock ~room_config:state.room_config;
+  Gardener.start ~bus:event_bus ~sw ~clock ~room_config:state.room_config ();
   if Env_config.Sentinel.enabled then begin
-    Sentinel.start ~sw ~clock ~net state.room_config;
+    Sentinel.start ~bus:event_bus ~sw ~clock ~net state.room_config;
     if Env_config.Guardian.enabled then Guardian.start_lodge_loop ~sw ~clock ~net
-  end else Guardian.start ~sw ~clock ~net state.room_config;
+  end else Guardian.start ~bus:event_bus ~sw ~clock ~net state.room_config;
   Dashboard_governance_judge.start ~sw ~clock
     ~base_path:state.room_config.base_path
     ~build_facts:(fun () ->

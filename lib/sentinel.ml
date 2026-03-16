@@ -1,4 +1,4 @@
-(** Sentinel — MASC default resident agent.
+(** Sentinel — MASC default resident agent (OAS-integrated).
 
     Ensures at least one agent is always alive when the server runs.
     Integrates Guardian's zombie/gc consumers and adds:
@@ -10,12 +10,60 @@
     LLM judgment layer via Prompt_registry + Lodge_cascade.
     When LLM is unavailable, judgment consumers skip silently.
 
+    OAS integration: exports Agent Card, publishes events via Event_bus.
+
     Opt-out via MASC_SENTINEL_ENABLED=false.
     LLM layer opt-out via MASC_SENTINEL_LLM_ENABLED=false. *)
 
 open Printf
 
 let agent_name = "sentinel"
+
+(* ── OAS Agent Card ──────────────────────────────────────── *)
+
+let agent_card : Agent_card.agent_card = {
+  name = "sentinel";
+  version = "2.95.0";
+  description = Some "Default resident agent: heartbeat, board patrol, task hygiene, keeper health";
+  provider = Some { organization = "MASC"; url = None };
+  protocol_versions = ["0.3"];
+  capabilities = { streaming = false; push_notifications = false; extended_agent_card = false };
+  skills = [
+    { id = "heartbeat"; name = "Heartbeat";
+      description = Some "Keep sentinel visible in the room";
+      input_modes = []; output_modes = ["application/json"] };
+    { id = "board-patrol"; name = "Board Patrol";
+      description = Some "LLM-driven stale post detection";
+      input_modes = []; output_modes = ["application/json"] };
+    { id = "task-hygiene"; name = "Task Hygiene";
+      description = Some "LLM-driven orphaned/stuck task detection";
+      input_modes = []; output_modes = ["application/json"] };
+    { id = "keeper-health"; name = "Keeper Health";
+      description = Some "LLM-driven stale keeper monitoring";
+      input_modes = []; output_modes = ["application/json"] };
+  ];
+  supported_interfaces = [];
+  security_schemes = [];
+  default_input_modes = ["application/json"];
+  default_output_modes = ["application/json"];
+  extensions = [];
+  signatures = [];
+  icon_url = None;
+  documentation_url = None;
+  created_at = "2026-03-16T00:00:00Z";
+  updated_at = "2026-03-16T00:00:00Z";
+}
+
+(* ── Event_bus ref ───────────────────────────────────────── *)
+
+let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
+
+let publish_event name payload =
+  match !bus_ref with
+  | Some bus ->
+      Agent_sdk.Event_bus.publish bus
+        (Agent_sdk.Event_bus.Custom (name, payload))
+  | None -> ()
 
 let log_debug msg = Log.Sentinel.debug "%s" msg
 let log_info msg = Log.Sentinel.info "%s" msg
@@ -209,6 +257,14 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
                                 ~visibility:Board.Internal
                                 ~hearth:"sentinel" () with
                         | Ok _post ->
+                            publish_event "masc:sentinel:board_patrol"
+                              (`Assoc [
+                                ("agent_name", `String agent_name);
+                                ("action", `String "posted");
+                                ("stale_count", `Int stale_posts);
+                                ("reason", match decision.reason with Some r -> `String r | None -> `Null);
+                                ("timestamp", `Float now_f);
+                              ]);
                             record_result ~checked_at:now_f ~action:"posted"
                               ?reason:decision.reason ~stale_count:stale_posts ();
                             log_info "board patrol attention posted"
@@ -272,6 +328,9 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
           ) !candidates in
           let task_list_str = String.concat "\n" task_lines in
 
+          let orphan_count = List.length (List.filter (fun (_, _, _, alive, _) -> not alive) !candidates) in
+          let stuck_count = List.length !candidates - orphan_count in
+
           (* LLM-first: let LLM assess each task *)
           let llm_result = call_sentinel_llm
             ~cascade_name:"sentinel_task"
@@ -283,6 +342,7 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
                log_debug
                  (sprintf "task hygiene LLM assessed %d tasks" (List.length items));
                let warnings = ref [] in
+               let reassigned = ref 0 in
                List.iter
                  (fun item ->
                    let open Yojson.Safe.Util in
@@ -309,6 +369,7 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
                          Room.force_release_task_r config ~agent_name ~task_id ()
                        with
                        | Ok _msg ->
+                           incr reassigned;
                            Log.Sentinel.info "auto-released %s → todo (%s)" task_id
                              reason;
                            Sse.broadcast
@@ -345,7 +406,15 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
                          `List (List.map (fun w -> `String w) all_warnings) );
                        ("ts", `String (Types.now_iso ()));
                      ])
-               end
+               end;
+               publish_event "masc:sentinel:task_hygiene"
+                 (`Assoc [
+                   ("agent_name", `String agent_name);
+                   ("orphan_count", `Int orphan_count);
+                   ("stuck_count", `Int stuck_count);
+                   ("reassigned", `Int !reassigned);
+                   ("timestamp", `Float (Time_compat.now ()));
+                 ])
            | _ ->
                log_debug
                  (sprintf "%d candidate stuck tasks, LLM unavailable — skipping"
@@ -431,6 +500,103 @@ let make_keeper_health_consumer _config : (module Pulse.Consumer) =
         Error msg
   end)
 
+(** Governance sweep consumer: detects stuck tasks and keeper failures,
+    then auto-generates governance petitions via Governance_v2.
+    No LLM dependency — purely data-driven threshold checks. *)
+let make_governance_sweep_consumer config : (module Pulse.Consumer) =
+  (module struct
+    let name = "sentinel-governance-sweep"
+    let should_act _beat = Env_config.Sentinel.governance_enabled
+    let on_beat _beat =
+      try
+        let base_path = config.Room_utils.base_path in
+        let now_f = Time_compat.now () in
+        let petitions_created = ref 0 in
+        let submit ~title ~subject_type ~risk_class =
+          match Council.Governance_v2.submit_petition base_path
+            ~title ~origin:"sentinel" ~subject_type ~risk_class
+            ~requested_action:None ~source_refs:[] ~created_by:agent_name with
+          | Ok result ->
+              incr petitions_created;
+              let merged_label = if result.merged then " (merged)" else "" in
+              log_info (sprintf "governance petition: %s -> case %s%s"
+                title result.case_.id merged_label)
+          | Error msg ->
+              log_warn (sprintf "governance petition failed: %s -- %s" title msg)
+        in
+
+        (* 1. Tasks stuck > threshold (default 24h) *)
+        let stuck_threshold = Env_config.Sentinel.governance_task_stuck_sec in
+        let backlog = Room.read_backlog config in
+        List.iter (fun (t : Types.task) ->
+          match t.task_status with
+          | Types.Claimed { assignee; claimed_at } ->
+              let age = now_f -. (parse_iso_or_epoch claimed_at) in
+              if age > stuck_threshold then
+                submit
+                  ~title:(sprintf "Stuck task: %s (claimed by %s, %.0fh ago)"
+                    t.title assignee (age /. 3600.0))
+                  ~subject_type:"task" ~risk_class:Council.Governance_v2.Low
+          | Types.InProgress { assignee; started_at } ->
+              let age = now_f -. (parse_iso_or_epoch started_at) in
+              if age > stuck_threshold then
+                submit
+                  ~title:(sprintf "Stuck task: %s (in_progress by %s, %.0fh ago)"
+                    t.title assignee (age /. 3600.0))
+                  ~subject_type:"task" ~risk_class:Council.Governance_v2.Low
+          | _ -> ()
+        ) backlog.tasks;
+
+        (* 2. Keepers with 3+ consecutive failures *)
+        let keepers_dir =
+          match Env_config.me_root_opt () with
+          | Some root -> Filename.concat root ".masc/keepers"
+          | None -> ".masc/keepers"
+        in
+        if Sys.file_exists keepers_dir && Sys.is_directory keepers_dir then
+          Sys.readdir keepers_dir |> Array.iter (fun fname ->
+            if Filename.check_suffix fname ".json" then begin
+              let path = Filename.concat keepers_dir fname in
+              try
+                let json = Yojson.Safe.from_file path in
+                let consecutive_failures =
+                  match Yojson.Safe.Util.member "consecutive_failures" json with
+                  | `Int n -> n
+                  | _ -> 0
+                in
+                if consecutive_failures >= 3 then begin
+                  let keeper_name = Filename.chop_suffix fname ".json" in
+                  submit
+                    ~title:(sprintf "Keeper %s failing (%d consecutive failures)"
+                      keeper_name consecutive_failures)
+                    ~subject_type:"keeper" ~risk_class:Council.Governance_v2.High
+                end
+              with _ -> ()
+            end
+          );
+
+        (* 3. Board posts with high downvote ratio *)
+        let board_posts = (try Board_dispatch.list_posts ~limit:50 ()
+                           with _ -> []) in
+        List.iter (fun (p : Board.post) ->
+          if p.votes_down >= 3 && p.votes_down > p.votes_up then
+            submit
+              ~title:(sprintf "Flagged post by %s (down=%d, up=%d)"
+                (Board.Agent_id.to_string p.author) p.votes_down p.votes_up)
+              ~subject_type:"board_post" ~risk_class:Council.Governance_v2.Low
+        ) board_posts;
+
+        if !petitions_created > 0 then
+          log_info (sprintf "governance sweep: %d petition(s) created" !petitions_created)
+        else
+          log_debug "governance sweep: no issues detected";
+        Ok ()
+      with exn ->
+        let msg = sprintf "governance sweep failed: %s" (Printexc.to_string exn) in
+        log_warn msg;
+        Error msg
+  end)
+
 (* ── Status ────────────────────────────────────────────────── *)
 
 let started = ref false
@@ -468,6 +634,10 @@ let status_json () : Yojson.Safe.t =
       `String "sentinel-task-hygiene";
       `String "sentinel-keeper-health";
     ]
+    @
+    (if Env_config.Sentinel.governance_enabled then
+       [ `String "sentinel-governance-sweep" ]
+     else [])
   in
   `Assoc [
     ("enabled", `Bool Env_config.Sentinel.enabled);
@@ -490,7 +660,8 @@ let status_json () : Yojson.Safe.t =
 
 (* ── Start ─────────────────────────────────────────────────── *)
 
-let start ~sw ~clock ~net config =
+let start ?bus ~sw ~clock ~net config =
+  bus_ref := bus;
   if not Env_config.Sentinel.enabled then
     log_debug "disabled (set MASC_SENTINEL_ENABLED=true)"
   else begin
@@ -509,7 +680,7 @@ let start ~sw ~clock ~net config =
     Pulse.run ~sw p_hb;
 
     (* 3. Embedded guardian masc loops: zombie + gc stay under sentinel ownership. *)
-    Guardian.start_embedded_masc_loops ~sw ~clock config;
+    Guardian.start_embedded_masc_loops ?bus ~sw ~clock config;
 
     (* 4. Board patrol (10min) *)
     let p_board = Pulse.create
@@ -532,8 +703,20 @@ let start ~sw ~clock ~net config =
     in
     Pulse.run ~sw p_ops;
 
+    (* 6. Governance sweep (30min) *)
+    if Env_config.Sentinel.governance_enabled then begin
+      let p_gov = Pulse.create
+        ~clock
+        ~rhythm:(Guardian.fixed_rhythm Env_config.Sentinel.governance_interval_sec)
+        ~lifecycle:Perpetual
+        ~consumers:[make_governance_sweep_consumer config]
+      in
+      Pulse.run ~sw p_gov
+    end;
+
     started := true;
     start_ts := Time_compat.now ();
     ignore net;  (* net reserved for future HTTP-based health checks *)
-    log_info "started (heartbeat, embedded zombie/gc, board-patrol, task-hygiene, keeper-health)"
+    let gov_label = if Env_config.Sentinel.governance_enabled then ", governance-sweep" else "" in
+    log_info (sprintf "started (heartbeat, embedded zombie/gc, board-patrol, task-hygiene, keeper-health%s)" gov_label)
   end

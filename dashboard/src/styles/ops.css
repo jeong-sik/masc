@@ -379,6 +379,37 @@
   font-size: 11px;
 }
 
+.ops-entity-goal,
+.ops-detail-goal {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ops-detail-goal {
+  white-space: normal;
+  margin-top: 6px;
+  padding: 4px 6px;
+  background: var(--bg-card);
+  border-radius: 4px;
+}
+
+.ops-entity-stats {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.ops-entity-stats .keepalive-active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .ops-feed-meta strong,
 .ops-log-head strong,
 .ops-detail-title,

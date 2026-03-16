@@ -1,19 +1,25 @@
-(** Sentinel — MASC default resident agent.
+(** Sentinel — MASC default resident agent (OAS-integrated).
 
     Ensures at least one housekeeping agent is always alive.
     Integrates Guardian zombie/gc consumers and adds board patrol,
     task hygiene, and keeper health monitoring.
+
+    OAS integration: exports Agent Card, publishes events via Event_bus.
 
     Opt-out: MASC_SENTINEL_ENABLED=false *)
 
 (** The sentinel agent's room identity. *)
 val agent_name : string
 
+(** A2A v0.3 Agent Card for sentinel. *)
+val agent_card : Agent_card.agent_card
+
 (** Start the sentinel agent. Joins the room and spawns all pulse consumers.
     No-op if MASC_SENTINEL_ENABLED=false.
     When sentinel is active, Guardian.start should NOT be called separately
     (sentinel already includes zombie + gc consumers). *)
 val start :
+  ?bus:Agent_sdk.Event_bus.t ->
   sw:Eio.Switch.t ->
   clock:'a Eio.Time.clock ->
   net:'b Eio.Net.t ->

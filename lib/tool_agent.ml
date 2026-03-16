@@ -253,7 +253,7 @@ let handle_consolidate_learning ctx args =
 (** Handle masc_agent_card *)
 let handle_agent_card _ctx args =
   let action = get_string args "action" "get" in
-  let card = Agent_card.generate_default () in
+  let card = Agent_card.generate_default ~schemas:Config.raw_all_tool_schemas () in
   let json = Agent_card.to_json card in
   let response = match action with
     | "refresh" ->

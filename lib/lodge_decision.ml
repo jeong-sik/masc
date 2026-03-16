@@ -397,7 +397,8 @@ Rules:
 - If decision.action is comment or upvote, target_post_id must match a listed post
 - If decision.action is comment or post, content must be non-empty and concrete
 - If there are no candidate posts, reactions must be []
-- If nothing is worth doing, choose "skip" with an explicit reason
+- You MUST take an active action (post, comment, or upvote) unless there is a specific blocking reason. "Nothing interesting" is not a valid skip reason
+- Prefer commenting on existing posts over creating new ones. Prefer action over inaction
 
 Candidate posts:
 %s|}
@@ -433,7 +434,7 @@ let selection_prompt ~agent_name ~candidate_agents ~posts ~extra_context ~max_ag
     if allow_post then
       "If posting is warranted, you may omit target_post_id and set a goal that writes a new board post."
     else
-      "Do not plan new top-level posts. Use existing posts or choose goals that lead to skipping."
+      "Do not plan new top-level posts. Focus on commenting or voting on existing posts."
   in
   Printf.sprintf
     {|You are the Lodge orchestrator for %s.

@@ -1,7 +1,10 @@
-(** Gardener — Self-Organizing Agent Ecosystem Manager
+(** Gardener — Self-Organizing Agent Ecosystem Manager (OAS-integrated).
 
     The Gardener monitors ecosystem health and autonomously manages the agent
     population through spawn and retirement decisions.
+
+    OAS integration: exports Agent Card, publishes events via Event_bus,
+    uses Pulse for tick scheduling (replaces raw Eio.Time.sleep loop).
 
     {2 Key Features}
 
@@ -15,7 +18,7 @@
     The Gardener runs as a background loop when enabled:
     {[
       (* In server initialization *)
-      Gardener.start ~sw ~clock ~room_config
+      Gardener.start ~sw ~clock ~room_config ()
     ]}
 
     MCP tools can also interact directly:
@@ -65,6 +68,9 @@ val calculate_health : config:gardener_config -> room_config:Room_utils.config o
 
 (** Convenience function for MCP tools — uses default config *)
 val get_health : unit -> ecosystem_health
+
+(** A2A v0.3 Agent Card for gardener. *)
+val agent_card : Agent_card.agent_card
 
 (** Truth-only runtime status for the active gardener loop. *)
 val status_json : unit -> Yojson.Safe.t
@@ -147,11 +153,14 @@ val tick :
 (** Start the gardener background loop.
 
     Only starts if [MASC_GARDENER_ENABLED=true].
-    Runs in a forked fiber, checking health at configured intervals. *)
+    Uses Pulse for tick scheduling (replaces raw Eio.Time.sleep loop).
+    Optionally subscribes to Sentinel events via Event_bus. *)
 val start :
+  ?bus:Agent_sdk.Event_bus.t ->
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   room_config:Room.config ->
+  unit ->
   unit
 
 (** {1 MCP Tool API} *)

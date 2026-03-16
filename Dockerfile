@@ -28,6 +28,7 @@ RUN mkdir -p /app/.masc
 
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
+ENV MASC_WORKSPACE_ROOT=/app
 
 EXPOSE 8080
 

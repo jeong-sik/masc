@@ -29,8 +29,8 @@ let test_ci_sync_and_asset_contracts () =
     (file_contains_pattern "scripts/check-pr-sync.sh" "workflow payload head");
   check bool "ci workflow verifies pr sync" true
     (file_contains_pattern ".github/workflows/ci.yml" "Verify PR sync");
-  check bool "pr hygiene checks dashboard assets" true
-    (file_contains_pattern "scripts/check-pr-hygiene.sh" "dashboard source or Vite config changed but assets/dashboard was not updated")
+  check bool "pr hygiene no longer checks dashboard assets (gitignored)" true
+    (not (file_contains_pattern "scripts/check-pr-hygiene.sh" "dashboard source or Vite config changed but assets/dashboard was not updated"))
 
 let test_health_and_ci_runner_diagnostics () =
   check bool "health snapshot records baseline source" true

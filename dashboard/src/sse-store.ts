@@ -82,13 +82,24 @@ export function setupSSEReaction(): () => void {
       scheduleRefresh('execution', refreshExecution)
     }
 
-    // Keeper lifecycle events → execution + mission refresh
+    // Keeper lifecycle events → execution + operator refresh
     if (
       event.type === 'keeper_handoff'
       || event.type === 'keeper_compaction'
       || event.type === 'keeper_guardrail'
+      || event.type === 'keeper_turn_complete'
     ) {
       scheduleRefresh('execution', refreshExecution)
+      scheduleRefresh('operator', () => _refreshOperatorFn?.(), 600)
+    }
+
+    // Client input approval/rejection → operator refresh
+    if (
+      event.type === 'client_input_approved'
+      || event.type === 'client_input_rejected'
+      || event.type === 'client_input_updated'
+    ) {
+      scheduleRefresh('operator', () => _refreshOperatorFn?.(), 300)
     }
 
     // Board events → board refresh only

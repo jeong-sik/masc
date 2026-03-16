@@ -26,7 +26,9 @@
         test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
         test_keeper_memory
         test_keeper_deliberation
-        test_tool_tier)
+        test_metrics_rotation
+        test_tool_tier
+        test_tool_exposure)
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
           test_graphql_endpoint
@@ -39,7 +41,9 @@
           test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
           test_keeper_memory
           test_keeper_deliberation
-          test_tool_tier)
+          test_metrics_rotation
+          test_tool_tier
+          test_tool_exposure)
  (libraries masc_mcp alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))
 
@@ -150,6 +154,12 @@
  (modules test_oas_integration)
  (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
 
+; Subsystem OAS integration tests (Agent Cards, Event_bus, Pulse migration)
+(test
+ (name test_subsystem_events)
+ (modules test_subsystem_events)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
+
 (test
  (name test_agent_swarm_unit)
  (modules test_agent_swarm_unit)
@@ -257,6 +267,12 @@
  (name test_lodge_topic)
  (modules test_lodge_topic)
  (libraries masc_mcp alcotest str yojson unix))
+
+; Lodge_personality module tests (mood → temperature mapping + OAS Context)
+(test
+ (name test_lodge_personality)
+ (modules test_lodge_personality)
+ (libraries masc_mcp agent_sdk alcotest str yojson unix))
 
 ; Lodge_reaction module tests (Emergent Identity System)
 (test

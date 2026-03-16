@@ -129,6 +129,8 @@ let record_checkin = Lodge_rate_limit.record_checkin
 let can_checkin = Lodge_rate_limit.can_checkin
 let can_agent_comment = Lodge_rate_limit.can_agent_comment
 let record_agent_comment = Lodge_rate_limit.record_agent_comment
+let min_post_gap = Lodge_rate_limit.min_post_gap
+let min_comment_gap = Lodge_rate_limit.min_comment_gap
 let max_posts_per_day = Lodge_rate_limit.max_posts_per_day
 let max_comments_per_day = Lodge_rate_limit.max_comments_per_day
 let max_comments_per_agent_per_post = Lodge_rate_limit.max_comments_per_agent_per_post
@@ -1177,10 +1179,17 @@ let generate_agent_content ~agent_name ~context:_ ~action_type =
   let (tokens, max_tokens, msg_count) = get_context_stats ~name:agent_name in
   Eio.traceln "   📊 [%s] Context: %d/%d tokens (%d msgs)" agent_name tokens max_tokens msg_count;
 
+  (* Compute dynamic temperature from mood and activity *)
+  let mood = Lodge_atmosphere.compute_mood
+    ~positive_ratio:0.5 ~activity_level:profile.activity_level in
+  let temperature = Lodge_personality.compute_temperature ~mood ~curiosity:0.5 in
+  Eio.traceln "   🎭 [%s] Mood: %s → temp: %.2f"
+    agent_name (Lodge_daemon.string_of_mood mood) temperature;
+
   (* LLM call via cascade abstraction *)
   let response =
     match Lodge_cascade.call ~cascade_name:"lodge_comment"
-        ~prompt:user_prompt ~temperature:0.7 ~timeout_sec:30
+        ~prompt:user_prompt ~temperature ~timeout_sec:30
         ~max_tokens:120 ~system:system_with_context () with
     | Ok r -> r.response
     | Error _ -> ""
@@ -1276,22 +1285,22 @@ let heartbeat_response_accepted ?(require_json = false)
     (resp : Llm_client.completion_response) =
   heartbeat_response_is_valid ~require_json resp.content
 
-let run_heartbeat_llm_once ?(require_json = false) ~agent_name ~prompt () =
+let run_heartbeat_llm_once ?(require_json = false) ?(temperature = 0.7) ~agent_name ~prompt () =
   let accept = heartbeat_response_accepted ~require_json in
   match Lodge_cascade.call ~cascade_name:"heartbeat_action"
-      ~prompt ~temperature:0.7 ~timeout_sec:60 ~max_tokens:1200 ~accept () with
+      ~prompt ~temperature ~timeout_sec:60 ~max_tokens:1200 ~accept () with
   | Ok r -> r
   | Error err ->
       Printf.printf "   ❌ [%s] Heartbeat cascade failed: %s\n%!" agent_name err;
       { Lodge_cascade.response = ""; llm_used = "none"; duration_ms = 0 }
 
-let run_heartbeat_llm_traced ?(require_json = false) ~agent_name ~phase ~prompt () =
+let run_heartbeat_llm_traced ?(require_json = false) ?(temperature = 0.7) ~agent_name ~phase ~prompt () =
   let tick_id =
     Printf.sprintf "%s-%d" agent_name
       (int_of_float (Time_compat.now () *. 1000.0) mod 1000000)
   in
   let cascade_result =
-    run_heartbeat_llm_once ~require_json ~agent_name ~prompt ()
+    run_heartbeat_llm_once ~require_json ~temperature ~agent_name ~prompt ()
   in
   Lodge_trace.save
     {
@@ -1306,6 +1315,14 @@ let run_heartbeat_llm_traced ?(require_json = false) ~agent_name ~phase ~prompt 
       timestamp = Time_compat.now ();
     };
   cascade_result
+
+(** Compute dynamic temperature for an agent based on current mood.
+    Uses time-of-day + jitter when actual reaction signals are unavailable.
+    [agent_name] is accepted but unused — extension point for per-agent
+    curiosity from Neo4j (planned: Track B+, OAS migration). *)
+let agent_temperature ~agent_name:_ =
+  let mood = Lodge_atmosphere.compute_mood_default () in
+  Lodge_personality.compute_temperature ~mood ~curiosity:0.5
 
 let trigger_allows_post = function
   | Scheduled | ManualTrigger -> true
@@ -1426,7 +1443,8 @@ let select_tool_loop_assignment ~agent_name ~trigger ~trigger_reason ~recent_pos
   in
   let cascade_result =
     run_heartbeat_llm_traced
-      ~require_json:true ~agent_name ~phase:"lodge_tool_assignment" ~prompt ()
+      ~require_json:true ~temperature:(agent_temperature ~agent_name)
+      ~agent_name ~phase:"lodge_tool_assignment" ~prompt ()
   in
   match
     Lodge_decision.parse_selection_plan ~allowed_agents:[ agent_name ]
@@ -1515,7 +1533,8 @@ let decide_agent_action ~agent_name ~trigger ~trigger_reason ~recent_posts =
   in
   let cascade_result =
     run_heartbeat_llm_traced
-      ~require_json:true ~agent_name ~phase:"lodge_decision" ~prompt ()
+      ~require_json:true ~temperature:(agent_temperature ~agent_name)
+      ~agent_name ~phase:"lodge_decision" ~prompt ()
   in
   let llm_used = Some cascade_result.Lodge_cascade.llm_used in
   let response = cascade_result.Lodge_cascade.response in
@@ -1595,7 +1614,7 @@ let execute_agent_action ~agent_name ~action =
         (Eio.traceln "   ⚠️ [%s] Content too short, skipping" agent_name;
          Skipped "post_content_too_short")
       else if not (check_rate_limit ~agent_name `Post) then
-        (Eio.traceln "   ⏳ [%s] POST rate-limited (30min gap / %d/day max)" agent_name max_posts_per_day;
+        (Eio.traceln "   ⏳ [%s] POST rate-limited (%.0fs gap / %d/day max)" agent_name min_post_gap max_posts_per_day;
          Skipped "post_rate_limited")
       else if is_duplicate_post ~agent_name ~content then
         (Eio.traceln "   🔄 [%s] Similar post already exists, skipping to avoid repetition" agent_name;
@@ -1636,7 +1655,7 @@ let execute_agent_action ~agent_name ~action =
         (Eio.traceln "   ⚠️ [%s] Comment too short, skipping" agent_name;
          Skipped "comment_content_too_short")
       else if not (check_rate_limit ~agent_name `Comment) then
-        (Eio.traceln "   ⏳ [%s] COMMENT rate-limited (20s gap / %d/day max)" agent_name max_comments_per_day;
+        (Eio.traceln "   ⏳ [%s] COMMENT rate-limited (%.0fs gap / %d/day max)" agent_name min_comment_gap max_comments_per_day;
          Skipped "comment_rate_limited")
       else if not (can_agent_comment ~agent_name ~post_id) then
         (Eio.traceln "   🚫 [%s] Already commented %d times on %s, skipping" agent_name max_comments_per_agent_per_post post_id;
@@ -1696,7 +1715,8 @@ let execute_agent_action ~agent_name ~action =
     Wraps the LLM cascade in a simple (prompt -> string) signature. *)
 let make_call_llm ~agent_name : (prompt:string -> string) =
   fun ~prompt ->
-    (run_heartbeat_llm_once ~agent_name ~prompt ()).Lodge_cascade.response
+    let temperature = agent_temperature ~agent_name in
+    (run_heartbeat_llm_once ~temperature ~agent_name ~prompt ()).Lodge_cascade.response
 
 (** {1 Plan-based Agent Selection} *)
 

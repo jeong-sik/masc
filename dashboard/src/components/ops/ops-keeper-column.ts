@@ -16,6 +16,10 @@ import {
   targetTypeLabel,
 } from './helpers'
 
+function truncateGoal(goal: string, maxLen = 60): string {
+  return goal.length > maxLen ? goal.slice(0, maxLen) + '...' : goal
+}
+
 export function OpsKeeperColumn() {
   const snapshot = operatorSnapshot.value
   const keepers = snapshot?.keepers ?? []
@@ -44,9 +48,17 @@ export function OpsKeeperColumn() {
                 <span class="status-badge ${keeper.status ?? 'idle'}">${displayStatus(keeper.status)}</span>
               </div>
               <div class="ops-entity-meta">
-                <span>${keeper.model ?? 'model 확인 필요'}</span>
-                <span>${typeof keeper.context_ratio === 'number' ? `${Math.round(keeper.context_ratio * 100)}% ctx` : 'ctx 확인 필요'}</span>
+                <span>${keeper.last_model_used ?? keeper.model ?? 'model 확인 필요'}</span>
+                <span>${typeof keeper.context_ratio === 'number' ? `${Math.round(keeper.context_ratio * 100)}% ctx` : typeof keeper.context_tokens === 'number' ? `${Math.round(keeper.context_tokens / 1000)}k tok` : 'ctx 확인 필요'}</span>
                 <span>${relativeAge(keeper.last_turn_ago_s)}</span>
+              </div>
+              ${keeper.short_goal || keeper.goal ? html`
+                <div class="ops-entity-goal" title=${keeper.goal ?? ''}>${truncateGoal(keeper.short_goal ?? keeper.goal ?? '')}</div>
+              ` : null}
+              <div class="ops-entity-stats">
+                ${typeof keeper.turn_count === 'number' ? html`<span>turns: ${keeper.turn_count}</span>` : null}
+                ${typeof keeper.autonomous_action_count === 'number' ? html`<span>actions: ${keeper.autonomous_action_count}</span>` : null}
+                ${keeper.keepalive_running ? html`<span class="keepalive-active">keepalive</span>` : null}
               </div>
             </button>
           `)}
@@ -85,7 +97,10 @@ export function OpsKeeperColumn() {
               <span>자율성: ${selectedKeeper.autonomy_level ?? '확인 없음'}</span>
               <span>세대: ${selectedKeeper.generation ?? 0}</span>
               <span>활성 목표: ${selectedKeeper.active_goal_ids?.length ?? 0}</span>
+              ${typeof selectedKeeper.turn_count === 'number' ? html`<span>턴: ${selectedKeeper.turn_count}</span>` : null}
+              ${selectedKeeper.last_model_used ? html`<span>모델: ${selectedKeeper.last_model_used}</span>` : null}
             </div>
+            ${selectedKeeper.goal ? html`<div class="ops-detail-goal">${selectedKeeper.goal}</div>` : null}
           </div>
           <${KeeperConversationPanel}
             keeperName=${selectedKeeper.name}

@@ -350,11 +350,17 @@
    tool_schemas_auth
    tool_schemas_agent
    tool_schemas_room
+   tool_schemas_core
+   tool_schemas_core_01
+   tool_schemas_core_02
+   tool_schemas_core_03
    tool_plan
    tool_run
    tool_bridge
    tool_cache
    tool_tempo
+   mitosis_helpers
+   mitosis_spawn
    tool_mitosis
    tool_portal
    tool_worktree
@@ -534,6 +540,7 @@
    trpg_handlers_core
    trpg_handlers_actors
    trpg_handlers_session
+   trpg_round_run_handler
    tool_trpg
    trpg_store
    trpg_preset_store
@@ -576,6 +583,12 @@
    mcts_tree
    speculative_engine)
 (private_modules
+ tool_schemas_core_01
+ tool_schemas_core_02
+ tool_schemas_core_03
+ mitosis_helpers
+ mitosis_spawn
+ trpg_round_run_handler
  dashboard_execution_helpers
  dashboard_execution_fixture
  dashboard_execution_builders

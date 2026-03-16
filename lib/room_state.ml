@@ -49,8 +49,9 @@ let write_state config state =
   write_json config (state_path config) (room_state_to_yojson state);
   if is_pg_backend config then begin
     let json_str = Yojson.Safe.to_string (room_state_to_yojson state) in
-    let _ = backend_set config ~key:"room:state" ~value:json_str in
-    ()
+    (match backend_set config ~key:"room:state" ~value:json_str with
+     | Ok () -> ()
+     | Error e -> Log.Misc.error "room_state write_state backend_set failed: %s" e)
   end
 
 (** Update state with function - uses file lock for atomic read-modify-write *)
@@ -343,10 +344,10 @@ let broadcast_in_room config ~room_id ~from_agent ~content =
       (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
   in
   write_json scoped msg_file (message_to_yojson msg);
-  let _ =
-    backend_publish scoped ~channel:(Printf.sprintf "broadcast:%s" room_id)
-      ~message:(Yojson.Safe.to_string (message_to_yojson msg))
-  in
+  (match backend_publish scoped ~channel:(Printf.sprintf "broadcast:%s" room_id)
+      ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
+   | Ok () -> ()
+   | Error e -> Log.Misc.error "broadcast_scoped publish failed for %s: %s" room_id e);
   Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
 
 let broadcast config ~from_agent ~content =
@@ -369,10 +370,10 @@ let broadcast config ~from_agent ~content =
   in
   write_json config msg_file (message_to_yojson msg);
   let room_id = match config.scope with Default -> "default" | Named id -> id in
-  let _ =
-    backend_publish config ~channel:(Printf.sprintf "broadcast:%s" room_id)
-      ~message:(Yojson.Safe.to_string (message_to_yojson msg))
-  in
+  (match backend_publish config ~channel:(Printf.sprintf "broadcast:%s" room_id)
+      ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
+   | Ok () -> ()
+   | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id e);
   Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
 
 (* ============================================ *)

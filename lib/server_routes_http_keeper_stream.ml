@@ -244,7 +244,8 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let close_stream () =
     if not !closed then begin
       closed := true;
-      (try Httpun.Body.Writer.close writer with _ -> ())
+      (try Httpun.Body.Writer.close writer
+       with exn -> Log.Misc.warn "keeper_stream writer close: %s" (Printexc.to_string exn))
     end
   in
   let now_id () =

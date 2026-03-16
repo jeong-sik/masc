@@ -169,6 +169,22 @@ if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1 && [ "${MASC_ALLOW_PORT_RE
     exit 1
 fi
 
+# Dashboard SPA build (Vite) — assets/dashboard/ is no longer committed to git.
+# Build if missing or if source is newer than the build output.
+if [ -f "$SCRIPT_DIR/dashboard/package.json" ]; then
+    DASHBOARD_INDEX="$SCRIPT_DIR/assets/dashboard/index.html"
+    if [ ! -f "$DASHBOARD_INDEX" ] || \
+       find "$SCRIPT_DIR/dashboard/src" -type f -newer "$DASHBOARD_INDEX" 2>/dev/null | head -n 1 | grep -q .; then
+        echo "[dashboard] Building SPA..." >&2
+        if command -v npm >/dev/null 2>&1; then
+            (cd "$SCRIPT_DIR/dashboard" && npm install --prefer-offline --no-audit 2>&1 | tail -1 >&2 && npm run build 2>&1 | tail -3 >&2) || \
+                echo "[dashboard] Build failed (non-fatal, server will show fallback page)." >&2
+        else
+            echo "[dashboard] npm not found, skipping dashboard build." >&2
+        fi
+    fi
+fi
+
 # Resolve executable path
 # Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
 RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"

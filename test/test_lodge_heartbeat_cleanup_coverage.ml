@@ -54,9 +54,9 @@ let test_lodge_heartbeat_uses_tool_assignment_prompt () =
     (file_contains_pattern "lib/lodge_heartbeat.ml" "A2a_tools.emit_heartbeat_task")
 
 let test_lodge_graphql_defaults_and_guards () =
-  check bool "heartbeat GraphQL uses shared endpoint helper"
+  check bool "heartbeat GraphQL uses shared client"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "Graphql_endpoint.graphql_url ()");
+    (file_contains_pattern "lib/lodge_heartbeat.ml" "Graphql_client.request");
   check bool "tool_lodge GraphQL uses shared endpoint helper"
     true
     (file_contains_pattern "lib/tool_lodge_config_http.ml"
@@ -71,9 +71,9 @@ let test_lodge_graphql_defaults_and_guards () =
     true
     (file_contains_pattern "lib/graphql_endpoint.ml"
        "https://second-brain-graphql-production.up.railway.app/graphql");
-  check bool "HTML GraphQL guard present in heartbeat"
+  check bool "HTML GraphQL guard present in shared client"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "endpoint returned HTML instead of JSON");
+    (file_contains_pattern "lib/graphql_client.ml" "endpoint returned HTML instead of JSON");
   check bool "HTML GraphQL guard present in tool_lodge"
     true
     (file_contains_pattern "lib/tool_lodge_config_http.ml"
@@ -84,14 +84,10 @@ let test_lodge_graphql_defaults_and_guards () =
   check bool "null agents guard present in tool_lodge"
     true
     (file_contains_pattern "lib/tool_lodge_config_http.ml" "GraphQL agents is null");
-  check bool "heartbeat has unix curl fallback"
+  check bool "shared client has curl fallback"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml"
-       "trying Unix curl fallback");
-  check bool "tool_lodge has unix curl fallback"
-    true
-    (file_contains_pattern "lib/tool_lodge_config_http.ml"
-       "trying Unix curl fallback")
+    (file_contains_pattern "lib/graphql_client.ml"
+       "curl fallback")
 
 let test_lodge_heartbeat_updates_self_summary () =
   check bool "reflection updates self summary"

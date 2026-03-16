@@ -1,5 +1,7 @@
 # MASC MCP Server - Production Dockerfile
 # Runtime image for the CI-built Linux Eio binary.
+# NOTE: Dashboard SPA (assets/dashboard/) is not included.
+# To add it, use a multi-stage build with Node.js or COPY from CI artifact.
 
 FROM ubuntu:24.04
 

@@ -1,7 +1,7 @@
 # masc-mcp Makefile
 # Enterprise-ready development commands
 
-.PHONY: build test test-unit test-contract test-contract-live test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
+.PHONY: build test test-unit test-contract test-contract-live test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
 
 # Default target
 all: build
@@ -9,6 +9,13 @@ all: build
 # Build the project
 build:
 	dune build --root .
+
+# Build dashboard SPA (Vite)
+dashboard:
+	cd dashboard && npm install --prefer-offline --no-audit && npm run build
+
+# Build everything (OCaml + dashboard)
+build-all: build dashboard
 
 # Run tests (alias for test-unit)
 test:

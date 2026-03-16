@@ -52,6 +52,7 @@ logs/
 # Dashboard SPA (Vite)
 dashboard/node_modules/
 dashboard/dist/
+assets/dashboard/
 viewer/dist-build/
 
 # Local Claude session scratch

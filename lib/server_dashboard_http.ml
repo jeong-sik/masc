@@ -2638,7 +2638,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     ~config:state.Mcp_server.room_config ~sw ~clock
     ~proc_mgr:state.Mcp_server.proc_mgr ()
 
-let dashboard_room_truth_focus_json ~initialized ~operator_digest_json ~top_queue =
+let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =
     json_assoc_field "recommendation_summary" operator_digest_json
   in
@@ -2770,22 +2770,29 @@ let dashboard_room_truth_focus_json ~initialized ~operator_digest_json ~top_queu
           match top_queue with
           | `Assoc _ as queue -> focus_of_queue queue
           | _ ->
+              let label, reason, source, provenance =
+                if not initialized then
+                  ( "초기 room truth",
+                    "방이 아직 초기화되지 않았습니다. 기본 room 상태부터 확인하세요.",
+                    "orchestra",
+                    "derived" )
+                else if agent_count = 0 then
+                  ( "에이전트가 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.",
+                    "No agents joined yet; room is idle.",
+                    "room",
+                    "fallback" )
+                else
+                  ( "지금은 방 전체가 비교적 안정적입니다",
+                    "Room-wide view is healthy enough; start from the command overview.",
+                    "room",
+                    "fallback" )
+              in
               `Assoc
                 [
-                  ( "label",
-                    `String
-                      (if initialized then
-                         "지금은 방 전체가 비교적 안정적입니다"
-                       else
-                         "초기 room truth") );
-                  ( "reason",
-                    `String
-                      (if initialized then
-                         "Room-wide view is healthy enough; start from the command overview."
-                       else
-                         "방이 아직 초기화되지 않았습니다. 기본 room 상태부터 확인하세요.") );
-                  ("source", `String (if initialized then "room" else "orchestra"));
-                  ("provenance", `String (if initialized then "fallback" else "derived"));
+                  ("label", `String label);
+                  ("reason", `String reason);
+                  ("source", `String source);
+                  ("provenance", `String provenance);
                   ("target_kind", `String "node");
                   ("target_id", `String "room:default");
                   ("suggested_tab", `String "command");
@@ -2925,9 +2932,11 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
         ("provenance", `String "truth");
       ]
   in
+  let agent_count = json_int_field "agents" (json_assoc_field "counts" shell_json) ~default:0 in
   let focus_json =
     dashboard_room_truth_focus_json
       ~initialized:(Room.is_initialized config)
+      ~agent_count
       ~operator_digest_json ~top_queue
   in
   `Assoc

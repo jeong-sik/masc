@@ -226,7 +226,7 @@ export function Social() {
         <${GraphView} data=${data} />
         <div class="monitor-meta" style="margin-top:8px">
           <span>생성 시각: ${data.generated_at}</span>
-          <span>이벤트 윈도우: ${data.window.limit}</span>
+          <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
           ${data.window.room_id ? html`<span>room: ${data.window.room_id}</span>` : null}
         </div>
       <//>

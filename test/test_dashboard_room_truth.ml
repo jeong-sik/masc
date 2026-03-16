@@ -74,6 +74,51 @@ let test_dashboard_room_truth_execution_fixture () =
           (json |> member "execution" |> member "top_queue" |> member "target_id" |> to_string);
       ))
 
+let test_dashboard_room_truth_empty_room_focus_label () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_room_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/room-truth")
+        in
+        let open Yojson.Safe.Util in
+        let focus_label = json |> member "focus" |> member "label" |> to_string in
+        check bool "empty room focus mentions no agents"
+          true
+          (String.length focus_label > 0
+           && focus_label <> "지금은 방 전체가 비교적 안정적입니다");
+      ))
+
+let test_operator_digest_shape_matches_room_truth () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Server_dashboard_http.dashboard_room_truth_http_json
+            ~state ~sw ~clock:(Eio.Stdenv.clock env)
+            (request "/api/v1/dashboard/room-truth")
+        in
+        let open Yojson.Safe.Util in
+        let operator = json |> member "operator" in
+        let expected_keys = ["health"; "attention_summary"; "recommendation_summary"; "pending_confirm_summary"; "provenance"] in
+        List.iter (fun key ->
+          let value = operator |> member key in
+          check bool (Printf.sprintf "operator.%s present" key)
+            true
+            (value <> `Null)
+        ) expected_keys;
+      ))
+
 let () =
   Alcotest.run "Dashboard Room Truth"
     [
@@ -81,5 +126,7 @@ let () =
         [
           test_case "empty room shape" `Quick test_dashboard_room_truth_empty_room;
           test_case "execution fixture surfaces top queue" `Quick test_dashboard_room_truth_execution_fixture;
+          test_case "empty room focus label reflects no agents" `Quick test_dashboard_room_truth_empty_room_focus_label;
+          test_case "operator digest shape matches room-truth" `Quick test_operator_digest_shape_matches_room_truth;
         ] );
     ]

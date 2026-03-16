@@ -214,9 +214,14 @@ let operator_digest_http_json ~state ~sw ~clock request =
     ?target_type ?target_id ?include_workers ctx
 
 let dashboard_mission_http_json ~state ~sw ~clock request =
-  Dashboard_mission.json ?actor:(operator_actor_hint request)
-    ~config:state.Mcp_server.room_config ~sw ~clock
-    ~proc_mgr:state.Mcp_server.proc_mgr ()
+  let actor = operator_actor_hint request in
+  let cache_key =
+    Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
+  in
+  Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+    Dashboard_mission.json ?actor
+      ~config:state.Mcp_server.room_config ~sw ~clock
+      ~proc_mgr:state.Mcp_server.proc_mgr ())
 
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
@@ -370,9 +375,16 @@ let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let fixture = query_param request "fixture" in
-  Dashboard_execution.json ?actor:(operator_actor_hint request) ?fixture
-    ~config:state.Mcp_server.room_config ~sw ~clock
-    ~proc_mgr:state.Mcp_server.proc_mgr ()
+  let actor = operator_actor_hint request in
+  let cache_key =
+    Printf.sprintf "execution:%s:%s"
+      (Option.value ~default:"" actor)
+      (Option.value ~default:"" fixture)
+  in
+  Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+    Dashboard_execution.json ?actor ?fixture
+      ~config:state.Mcp_server.room_config ~sw ~clock
+      ~proc_mgr:state.Mcp_server.proc_mgr ())
 
 let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =
@@ -538,12 +550,16 @@ let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_j
 
 let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let config = state.Mcp_server.room_config in
-  let shell_json = dashboard_shell_http_json config in
+  let shell_json =
+    Dashboard_cache.get_or_compute "shell" ~ttl:3.0 (fun () ->
+      dashboard_shell_http_json config)
+  in
   let execution_json = dashboard_execution_http_json ~state ~sw ~clock request in
   let command_summary_json =
     if Room.is_initialized config then
       try
-        Server_command_plane_http.command_plane_summary_http_json ~state
+        Dashboard_cache.get_or_compute "command_summary" ~ttl:3.0 (fun () ->
+          Server_command_plane_http.command_plane_summary_http_json ~state)
       with exn ->
         Log.Dashboard.warn "command_plane_summary: %s" (Printexc.to_string exn);
         `Assoc []

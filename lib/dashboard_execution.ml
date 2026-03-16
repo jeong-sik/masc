@@ -1886,27 +1886,35 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
         else []
       in
       let snapshot_json =
-        Operator_control.snapshot_json
-          ~actor:effective_actor
-          ~view:"summary"
-          ~include_messages:false
-          ~include_sessions:true
-          ~include_keepers:true
-          ~sessions
-          ctx
+        Dashboard_cache.get_or_compute
+          (Printf.sprintf "snapshot:%s" effective_actor)
+          ~ttl:3.0
+          (fun () ->
+            Operator_control.snapshot_json
+              ~actor:effective_actor
+              ~view:"summary"
+              ~include_messages:false
+              ~include_sessions:true
+              ~include_keepers:true
+              ~sessions
+              ctx)
       in
       let digest_json =
-        match Operator_control.digest_json ~actor:effective_actor ctx with
-        | Ok json -> json
-        | Error message ->
-            `Assoc
-              [
-                ("health", `String "warn");
-                ("attention_items", `List []);
-                ("recommended_actions", `List []);
-                ("session_cards", `List []);
-                ("error", `String message);
-              ]
+        Dashboard_cache.get_or_compute
+          (Printf.sprintf "digest:%s" effective_actor)
+          ~ttl:5.0
+          (fun () ->
+            match Operator_control.digest_json ~actor:effective_actor ctx with
+            | Ok json -> json
+            | Error message ->
+                `Assoc
+                  [
+                    ("health", `String "warn");
+                    ("attention_items", `List []);
+                    ("recommended_actions", `List []);
+                    ("session_cards", `List []);
+                    ("error", `String message);
+                  ])
       in
       let session_cards = list_field "session_cards" digest_json in
       let session_seeds =
@@ -1917,6 +1925,10 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
             |> List.filter_map (fun json -> build_session_seed json session_cards)
         | _ -> []
       in
+      (* Yield between heavy computation phases to prevent fiber starvation.
+         Eio's cooperative scheduler needs explicit yields in CPU-bound paths
+         so other fibers (SSE, health checks) can progress. *)
+      Eio.Fiber.yield ();
       let command_plane_json = member_assoc "command_plane" snapshot_json in
       let operation_contexts = build_operation_contexts command_plane_json in
       let session_contexts =
@@ -1931,6 +1943,7 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
         | `List items -> items
         | _ -> []
       in
+      Eio.Fiber.yield ();
       let now_ts = Time_compat.now () in
       let worker_rows =
         build_worker_support_briefs ~now_ts ~tasks ~agents ~messages session_contexts

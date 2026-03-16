@@ -540,8 +540,10 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
   | `GET, p when String.length p > 18
                && String.sub p 0 18 = "/dashboard/assets/" ->
       let filename = String.sub p 18 (String.length p - 18) in
-      if not (Web_dashboard.is_safe_asset_relative_path filename) then
-        h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found
+      if not (Web_dashboard.is_safe_asset_relative_path filename) then begin
+        h2_respond_text h2_reqd "404 Not Found" ~status:`Not_found;
+        true
+      end
       else
         let file_path = Filename.concat (dashboard_asset_root ()) ("assets/" ^ filename) in
         (match read_file file_path with

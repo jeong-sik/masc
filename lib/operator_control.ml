@@ -1,11 +1,5 @@
-module U = Yojson.Safe.Util
 open Tool_args
 
-let ( let* ) = Result.bind
-
-include Operator_pending_confirm
-include Operator_digest
-include Operator_control_snapshot
 include Operator_control_action
 
 let json_of_dispatch_output body =

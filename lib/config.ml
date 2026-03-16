@@ -206,10 +206,7 @@ let enabled_tool_schemas ?(include_hidden = false) ?(include_deprecated = false)
   visible_tool_schemas ~include_hidden ~include_deprecated ()
   |> List.filter (fun (schema : Types.tool_schema) ->
          if include_hidden then true
-         else
-           let meta = Tool_catalog.metadata schema.name in
-           meta.Tool_catalog.visibility = Tool_catalog.Hidden
-           || Mode.is_tool_enabled enabled_categories schema.name)
+         else Mode.is_tool_enabled enabled_categories schema.name)
 
 (** Switch to a preset mode *)
 let switch_mode ?actor ?source room_path mode =

@@ -21,6 +21,14 @@ let schemas : tool_schema list = [
           ("type", `String "boolean");
           ("description", `String "Include deprecated tools in the catalog");
         ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max tools per page (default 50, max 500)");
+        ]);
+        ("offset", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Skip first N tools for pagination (default 0)");
+        ]);
       ]);
     ];
   };

@@ -525,10 +525,23 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
         let base_path = config.Room_utils.base_path in
         let now_f = Time_compat.now () in
         let petitions_created = ref 0 in
+        (* Track titles already submitted to avoid duplicate petitions per sweep *)
+        let submitted_keys : (string, unit) Hashtbl.t = Hashtbl.create 8 in
         let submit ~title ~subject_type ~risk_class ?(source_refs=[]) () =
+          (* Dedup within a single sweep: skip if we already submitted this title *)
+          if Hashtbl.mem submitted_keys title then ()
+          else begin
+          Hashtbl.replace submitted_keys title ();
+          let default_action : Council.Governance_v2.action_request option =
+            match subject_type with
+            | "task" -> Some { action_type = "release_task"; target_type = Some "task"; target_id = None; payload = None }
+            | "keeper" -> Some { action_type = "restart_keeper"; target_type = Some "keeper"; target_id = None; payload = None }
+            | "board_post" -> Some { action_type = "flag_post"; target_type = Some "board_post"; target_id = None; payload = None }
+            | _ -> None
+          in
           match Council.Governance_v2.submit_petition base_path
             ~title ~origin:"sentinel" ~subject_type ~risk_class
-            ~requested_action:None ~source_refs ~created_by:agent_name with
+            ~requested_action:default_action ~source_refs ~created_by:agent_name with
           | Ok result ->
               incr petitions_created;
               (* Auto-submit brief for new cases to unblock ruling pipeline *)
@@ -551,6 +564,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
                 title result.case_.id merged_label)
           | Error msg ->
               log_warn (sprintf "governance petition failed: %s -- %s" title msg)
+          end
         in
 
         (* 1. Tasks stuck > threshold (default 24h) *)

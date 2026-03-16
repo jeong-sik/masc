@@ -70,9 +70,36 @@ let get_or_compute_simple key ~ttl compute =
     Hashtbl.replace table key (Ready { value; expires_at = now () +. ttl });
     value
 
+let timeout_error_json key timeout_sec =
+  `Assoc [
+    ("error", `String "computation_timeout");
+    ("message", `String (Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec));
+    ("generated_at", `String (Types.now_iso ()));
+  ]
+
 let get_or_compute key ~ttl compute =
   if !eio_available then get_or_compute_eio key ~ttl compute
   else get_or_compute_simple key ~ttl compute
+
+exception Compute_timeout of string
+
+(** Compute with Eio timeout. On timeout, raises [Compute_timeout] inside the
+    compute closure so [get_or_compute_eio] removes the [Computing] slot and
+    broadcasts waiters. The outer [try] catches [Compute_timeout] and returns
+    a timeout-error JSON without caching it. *)
+let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
+  try
+    get_or_compute key ~ttl (fun () ->
+      match
+        Eio.Time.with_timeout clock timeout_sec (fun () ->
+          Ok (compute ()))
+      with
+      | Ok value -> value
+      | Error `Timeout ->
+        Printf.eprintf "[WARN] Dashboard cache compute timeout: %s (%.0fs)\n%!" key timeout_sec;
+        raise (Compute_timeout key))
+  with Compute_timeout k ->
+    timeout_error_json k timeout_sec
 
 let invalidate key =
   if !eio_available then

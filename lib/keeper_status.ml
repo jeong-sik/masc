@@ -905,6 +905,9 @@ let handle_keeper_eval ctx args : tool_result =
           ("keeper", `String name);
           ("trace_id", `String m.trace_id);
           ("generation", `Int m.generation);
+          ("total_turns", `Int m.total_turns);
+          ("total_input_tokens", `Int m.total_input_tokens);
+          ("total_output_tokens", `Int m.total_output_tokens);
           ("total_tool_calls", `Int total);
           ("unique_tools", `Int (List.length unique_tools));
           ("tool_distribution", `List tool_stats);

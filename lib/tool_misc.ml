@@ -704,6 +704,8 @@ let handle_tool_help _ctx args =
 let handle_keeper_tool_catalog _ctx args =
   let include_hidden = get_bool args "include_hidden" false in
   let include_deprecated = get_bool args "include_deprecated" false in
+  let limit = max 1 (min 500 (get_int args "limit" 50)) in
+  let offset = max 0 (get_int args "offset" 0) in
   let tier_filter =
     match get_string_opt args "tier" |> Option.map String.lowercase_ascii with
     | None -> None
@@ -742,11 +744,18 @@ let handle_keeper_tool_catalog _ctx args =
     |> List.map (fun schema -> schema.Types.name)
     |> List.filter (fun name -> not (List.mem name wrapped_server_names))
   in
+  let total_count = List.length server_tools in
+  let paged_server_tools =
+    server_tools
+    |> List.filteri (fun i _ -> i >= offset && i < offset + limit)
+  in
   let json =
     `Assoc
       [
-        ("count", `Int (List.length server_tools));
-        ("server_tools", `List (List.map tool_json server_tools));
+        ("count", `Int total_count);
+        ("limit", `Int limit);
+        ("offset", `Int offset);
+        ("server_tools", `List (List.map tool_json paged_server_tools));
         ("wrapped_internal_tools",
           `List (List.map (fun name -> `String name) wrapped_internal_tools));
         ("wrapped_server_tools",

@@ -395,11 +395,11 @@ let orchestrate
         in
         match lowered with
         | "stub" | "mock" -> Ok (Printf.sprintf "[stub]%s" prompt)
-        | "codex" | "gpt-5.2" ->
-            exec_with_retry "codex" (("model", `String "gpt-5.2") :: args)
+        | "codex" ->
+            exec_with_retry "codex" args
         | m when starts_with ~prefix:"gpt-" m ->
             exec_with_retry "codex" (("model", `String model) :: args)
-        | "claude" | "claude-cli" | "opus" | "sonnet" | "haiku" | "haiku-4.5" ->
+        | "claude" | "claude-cli" | "opus" | "sonnet" | "haiku" ->
             exec_with_retry "claude" (("model", `String model) :: args)
         | "ollama" ->
             Error (Provider_adapter.bare_ollama_migration_message ())
@@ -410,7 +410,7 @@ let orchestrate
         | m when is_gemini_model m ->
             exec_with_retry "gemini" (("model", `String model) :: args)
         | _ ->
-            exec_with_retry "gemini" (("model", `String "gemini-3.1-pro-preview") :: args)
+            exec_with_retry "gemini" args
       in
 
       (* Create tool execution wrapper *)

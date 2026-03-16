@@ -239,14 +239,12 @@ let model_runner_of_string raw =
     | Error msg -> Error msg
   in
   match lower with
-  | "" | "gemini" | "gemini-3.1-pro-preview" | "gemini-3-pro-preview"
-  | "gemini-2.5-pro" ->
-      direct "gemini:pro"
+  | "" | "gemini" -> direct "gemini:pro"
   | "pro" -> direct "gemini:pro"
-  | "flash" | "flash-lite" | "3-flash" -> direct "gemini:flash"
-  | "claude" | "claude-cli" | "opus" | "opus-4" -> direct "claude:opus"
+  | "flash" | "flash-lite" -> direct "gemini:flash"
+  | "claude" | "claude-cli" | "opus" -> direct "claude:opus"
   | "sonnet" -> direct "claude:sonnet"
-  | "haiku" | "haiku-4.5" -> direct "claude:haiku"
+  | "haiku" -> direct "claude:haiku"
   | "ollama" -> Error (Provider_adapter.bare_ollama_migration_message ())
   | "llama" -> (
       match Provider_adapter.explicit_llama_model_label_result () with
@@ -255,7 +253,7 @@ let model_runner_of_string raw =
   | "glm" ->
       direct "glm:auto"
   | "stub" | "mock" -> Ok Stub
-  | "codex" | "gpt-5.2" -> Ok (Spawn "codex")
+  | "codex" -> Ok (Spawn "codex")
   | value when starts_with ~prefix:"codex:" value -> Ok (Spawn "codex")
   | value -> (
       match Llm_client.model_spec_of_string model with
@@ -264,9 +262,15 @@ let model_runner_of_string raw =
       | Error _ when starts_with ~prefix:"gemini:" value -> direct model
       | Error _ when starts_with ~prefix:"claude:" value -> direct model
       | Error _ when starts_with ~prefix:"glm:" value -> direct model
-      (* Bare GLM model names (e.g. "glm-4.7") → route to GLM provider *)
+      (* Bare provider model names → route to provider *)
       | Error _ when starts_with ~prefix:"glm-" value ->
           direct (Printf.sprintf "glm:%s" value)
+      | Error _ when starts_with ~prefix:"gemini-" value ->
+          direct (Printf.sprintf "gemini:%s" value)
+      | Error _ when starts_with ~prefix:"claude-" value ->
+          direct (Printf.sprintf "claude:%s" value)
+      | Error _ when starts_with ~prefix:"gpt-" value ->
+          Ok (Spawn "codex")
       | Error msg -> Error msg)
 
 let call_spawn_model (runtime : runtime) ~agent_name ~prompt ~timeout_sec =

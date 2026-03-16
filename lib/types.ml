@@ -743,6 +743,7 @@ type masc_error =
   | NotInitialized
   | AlreadyInitialized
   | AgentNotFound of string
+  | AgentNotJoined of string
   | AgentAlreadyJoined of string
   | TaskNotFound of string
   | TaskAlreadyClaimed of { task_id: string; by: string }
@@ -789,6 +790,7 @@ let rec masc_error_to_string = function
   | NotInitialized -> "❌ MASC not initialized. Use masc_init first."
   | AlreadyInitialized -> "MASC already initialized."
   | AgentNotFound name -> Printf.sprintf "❌ Agent not found: %s" name
+  | AgentNotJoined name -> Printf.sprintf "❌ Agent not joined: %s. Use masc_join first." name
   | AgentAlreadyJoined name -> Printf.sprintf "⚠ %s is already in the room" name
   | TaskNotFound id -> Printf.sprintf "❌ Task not found: %s" id
   | TaskAlreadyClaimed { task_id; by } ->

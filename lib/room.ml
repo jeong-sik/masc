@@ -1107,11 +1107,12 @@ let () = Room_gc.force_release_task_fn :=
   (fun config ~agent_name ~task_id () ->
     force_release_task_r config ~agent_name ~task_id ())
 
-(** Get all agents with their status *)
+(** Get all agents with their status.
+    Uses room-scoped path for consistency with get_agents_raw. *)
 let get_agents_status config =
   ensure_initialized config;
 
-  let agents_path = agents_dir config in
+  let agents_path = agents_dir_in_room config (current_room_id config) in
   if not (Sys.file_exists agents_path) then
     `Assoc [("agents", `List []); ("count", `Int 0)]
   else begin

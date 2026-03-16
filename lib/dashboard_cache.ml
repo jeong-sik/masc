@@ -1,4 +1,10 @@
-(** Dashboard response cache — time-bounded memoization for heavy JSON computations.
+(** Dashboard response cache — time-bounded memoization with stale-while-revalidate.
+
+    Two time thresholds per entry:
+    - [expires_at]: fresh data deadline.  Before this, return immediately.
+    - [stale_until]: grace period after expiry.  Return stale data instantly
+      while a background fiber recomputes.  After [stale_until], block on
+      recomputation.
 
     Per-key locking prevents deadlock from nested [get_or_compute] calls while
     still guarding against stampede (multiple fibers computing the same key).
@@ -10,46 +16,102 @@
 type entry = {
   value : Yojson.Safe.t;
   expires_at : float;
+  stale_until : float;
 }
 
 type slot =
   | Ready of entry
-  | Computing of Eio.Condition.t
+  | Computing of { cond : Eio.Condition.t; stale : Yojson.Safe.t option }
 
 let table : (string, slot) Hashtbl.t = Hashtbl.create 16
 let mu = Eio.Mutex.create ()
 let eio_available = ref false
 
+(** Background revalidation switch — must be set via [set_sw] before
+    stale-while-revalidate can fork background fibers. *)
+let _bg_sw : Eio.Switch.t option ref = ref None
+
 let enable_eio () = eio_available := true
+
+let set_sw sw = _bg_sw := Some sw
 
 let now () = Time_compat.now ()
 
-(** Eio path: per-key locking with stampede protection.
-    [mu] is held only during [Hashtbl] lookups/updates, never during [compute]. *)
+(** Default stale grace multiplier: stale data is served for [ttl * stale_factor]
+    seconds after expiry while recomputation runs in the background. *)
+let stale_factor = 3.0
+
+(** Eio path: per-key locking with stampede protection + stale-while-revalidate.
+
+    Three cases on cache lookup:
+    1. Fresh ([now < expires_at]) — return immediately.
+    2. Stale ([expires_at <= now < stale_until]) — return stale value, kick off
+       background recompute if not already running.
+    3. Expired ([now >= stale_until]) or absent — block on compute. *)
 let get_or_compute_eio key ~ttl compute =
+  let stale_grace = ttl *. stale_factor in
   let rec try_get () =
     let action =
       Eio.Mutex.use_rw ~protect:true mu (fun () ->
         match Hashtbl.find_opt table key with
         | Some (Ready entry) when entry.expires_at > now () ->
+          (* Case 1: fresh *)
           `Hit entry.value
-        | Some (Computing cond) ->
+        | Some (Ready entry) when entry.stale_until > now () ->
+          (* Case 2: stale but within grace — serve stale, trigger bg recompute *)
+          let cond = Eio.Condition.create () in
+          Hashtbl.replace table key (Computing { cond; stale = Some entry.value });
+          `Stale (entry.value, cond)
+        | Some (Computing { stale = Some stale_value; _ }) ->
+          (* Another fiber is already recomputing; return stale *)
+          `Hit stale_value
+        | Some (Computing { cond; stale = None }) ->
+          (* Computing with no stale data — wait *)
           Eio.Condition.await cond mu;
           `Retry
         | _ ->
+          (* Case 3: expired or absent — must block *)
           let cond = Eio.Condition.create () in
-          Hashtbl.replace table key (Computing cond);
+          Hashtbl.replace table key (Computing { cond; stale = None });
           `Compute cond)
     in
     match action with
     | `Hit v -> v
     | `Retry -> try_get ()
+    | `Stale (stale_value, cond) ->
+      let do_bg_compute () =
+        match compute () with
+        | value ->
+          let ts = now () in
+          Eio.Mutex.use_rw ~protect:true mu (fun () ->
+            Hashtbl.replace table key
+              (Ready { value; expires_at = ts +. ttl;
+                       stale_until = ts +. ttl +. stale_grace }));
+          Eio.Condition.broadcast cond
+        | exception exn ->
+          Printf.eprintf "[WARN] Dashboard cache bg-revalidate failed (%s): %s\n%!"
+            key (Printexc.to_string exn);
+          (* Restore stale entry so next request can still serve it *)
+          let ts = now () in
+          Eio.Mutex.use_rw ~protect:true mu (fun () ->
+            Hashtbl.replace table key
+              (Ready { value = stale_value;
+                       expires_at = ts;
+                       stale_until = ts +. stale_grace }));
+          Eio.Condition.broadcast cond
+      in
+      (match !_bg_sw with
+       | Some sw -> Eio.Fiber.fork ~sw do_bg_compute
+       | None -> do_bg_compute ());
+      stale_value
     | `Compute cond ->
       (match compute () with
        | value ->
+         let ts = now () in
          Eio.Mutex.use_rw ~protect:true mu (fun () ->
            Hashtbl.replace table key
-             (Ready { value; expires_at = now () +. ttl }));
+             (Ready { value; expires_at = ts +. ttl;
+                      stale_until = ts +. ttl +. stale_grace }));
          Eio.Condition.broadcast cond;
          value
        | exception exn ->
@@ -63,11 +125,23 @@ let get_or_compute_eio key ~ttl compute =
 
 (** Non-Eio fallback: no mutex, no concurrency. *)
 let get_or_compute_simple key ~ttl compute =
+  let stale_grace = ttl *. stale_factor in
   match Hashtbl.find_opt table key with
   | Some (Ready entry) when entry.expires_at > now () -> entry.value
+  | Some (Ready entry) when entry.stale_until > now () ->
+    (* Stale but usable — recompute inline (no fibers available) *)
+    let value = try compute () with _ -> entry.value in
+    let ts = now () in
+    Hashtbl.replace table key
+      (Ready { value; expires_at = ts +. ttl;
+               stale_until = ts +. ttl +. stale_grace });
+    value
   | _ ->
     let value = compute () in
-    Hashtbl.replace table key (Ready { value; expires_at = now () +. ttl });
+    let ts = now () in
+    Hashtbl.replace table key
+      (Ready { value; expires_at = ts +. ttl;
+               stale_until = ts +. ttl +. stale_grace });
     value
 
 let timeout_error_json key timeout_sec =
@@ -83,10 +157,9 @@ let get_or_compute key ~ttl compute =
 
 exception Compute_timeout of string
 
-(** Compute with Eio timeout. On timeout, raises [Compute_timeout] inside the
-    compute closure so [get_or_compute_eio] removes the [Computing] slot and
-    broadcasts waiters. The outer [try] catches [Compute_timeout] and returns
-    a timeout-error JSON without caching it. *)
+(** Compute with Eio timeout.  Stale-while-revalidate applies here too:
+    if a stale value exists and the recompute times out, the stale value
+    was already returned to the caller by [get_or_compute_eio]. *)
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   try
     get_or_compute key ~ttl (fun () ->
@@ -107,7 +180,7 @@ let invalidate key =
       Eio.Mutex.use_rw ~protect:true mu (fun () ->
         let c =
           match Hashtbl.find_opt table key with
-          | Some (Computing cond) -> Some cond
+          | Some (Computing { cond; _ }) -> Some cond
           | _ -> None
         in
         Hashtbl.remove table key;
@@ -123,7 +196,7 @@ let invalidate_all () =
         let cs =
           Hashtbl.fold
             (fun _key slot acc ->
-              match slot with Computing cond -> cond :: acc | _ -> acc)
+              match slot with Computing { cond; _ } -> cond :: acc | _ -> acc)
             table []
         in
         Hashtbl.clear table;
@@ -136,11 +209,20 @@ let stats () =
   let compute () =
     let now_ts = now () in
     let total = Hashtbl.length table in
-    let active =
+    let fresh =
       Hashtbl.fold
         (fun _key slot count ->
           match slot with
           | Ready entry when entry.expires_at > now_ts -> count + 1
+          | _ -> count)
+        table 0
+    in
+    let stale =
+      Hashtbl.fold
+        (fun _key slot count ->
+          match slot with
+          | Ready entry when entry.expires_at <= now_ts && entry.stale_until > now_ts ->
+            count + 1
           | _ -> count)
         table 0
     in
@@ -153,9 +235,10 @@ let stats () =
     `Assoc
       [
         ("entries", `Int total);
-        ("active", `Int active);
+        ("fresh", `Int fresh);
+        ("stale", `Int stale);
         ("computing", `Int computing);
-        ("expired", `Int (total - active - computing));
+        ("expired", `Int (total - fresh - stale - computing));
       ]
   in
   if !eio_available then Eio.Mutex.use_rw ~protect:true mu compute

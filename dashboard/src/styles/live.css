@@ -380,3 +380,53 @@
     grid-template-columns: 1fr;
   }
 }
+/* ══════════════════════════════════════════════════════════
+   Live Monitor Tab
+   ══════════════════════════════════════════════════════════ */
+
+.live-monitor {
+  display: grid;
+  gap: 16px;
+}
+
+.live-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.live-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.live-header-stats {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.5);
+}
+
+.live-stat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.live-stat-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.live-stat-dot.connected {
+  background: #4ade80;
+  box-shadow: 0 0 4px rgba(74,222,128,0.6);
+}
+
+.live-stat-dot.disconnected {
+  background: #ef4444;
+}

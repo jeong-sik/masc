@@ -1,0 +1,373 @@
+import type { Agent, BoardPost } from './core'
+import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
+import type { CommandPlaneSurface } from './command-plane'
+import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, PendingConfirmation, PendingConfirmSummary, LodgeRuntimeStatus, SocialRuntimeStatus, GardenerRuntimeStatus, GuardianRuntimeStatus, SentinelRuntimeStatus } from './governance'
+
+// --- Dashboard projection responses ---
+
+export interface DashboardShellResponse {
+  generated_at?: string
+  status: ServerStatus
+  counts?: {
+    agents?: number
+    tasks?: number
+    keepers?: number
+  }
+}
+
+export interface DashboardRoomTruthAttentionSummary {
+  count: number
+  bad_count: number
+  warn_count: number
+  provenance?: string | null
+  top_item?: OperatorAttentionItem | null
+}
+
+export interface DashboardRoomTruthRecommendationSummary {
+  count: number
+  provenance?: string | null
+  top_action?: OperatorRecommendedAction | null
+}
+
+export interface DashboardRoomTruthFocus {
+  label: string
+  reason: string
+  source: string
+  provenance: string
+  target_kind?: string | null
+  target_id?: string | null
+  suggested_tab?: 'command' | 'intervene' | string | null
+  suggested_surface?: CommandPlaneSurface | string | null
+  suggested_params?: Record<string, string>
+}
+
+export interface DashboardRoomTruthResponse {
+  generated_at?: string
+  room: {
+    status?: ServerStatus | null
+    counts?: DashboardShellResponse['counts']
+    provenance?: string | null
+  }
+  execution?: {
+    summary?: DashboardExecutionSummary | null
+    top_queue?: DashboardExecutionQueueItem | null
+    provenance?: string | null
+  }
+  command?: {
+    active_operations?: number
+    active_detachments?: number
+    pending_approvals?: number
+    bad_alerts?: number
+    warn_alerts?: number
+    moving_lanes?: number
+    active_lanes?: number
+    provenance?: string | null
+  }
+  operator?: {
+    health?: string | null
+    attention_summary?: DashboardRoomTruthAttentionSummary | null
+    recommendation_summary?: DashboardRoomTruthRecommendationSummary | null
+    pending_confirm_summary?: PendingConfirmSummary | null
+    provenance?: string | null
+  }
+  focus?: DashboardRoomTruthFocus | null
+}
+
+export interface ServerBuildIdentity {
+  release_version: string
+  commit?: string | null
+  started_at: string
+  uptime_seconds: number
+}
+
+export type DashboardExecutionTone = 'ok' | 'warn' | 'bad'
+export type DashboardExecutionWorkerState = 'working' | 'watching' | 'quiet' | 'offline'
+export type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
+export type DashboardExecutionQueueKind = 'session' | 'operation'
+
+export interface DashboardExecutionSummary {
+  active_sessions?: number
+  blocked_sessions?: number
+  active_operations?: number
+  blocked_operations?: number
+  runtime_pressure?: number
+  worker_alerts?: number
+  continuity_alerts?: number
+  priority_items?: number
+  todo_tasks?: number
+  claimed_tasks?: number
+  running_tasks?: number
+  done_tasks?: number
+  cancelled_tasks?: number
+  keepers?: number
+}
+
+export interface DashboardExecutionHandoff {
+  surface: 'intervene' | 'command'
+  label: string
+  target_type: string
+  target_id: string
+  focus_kind: string
+  operation_id?: string | null
+  command_surface?: string | null
+}
+
+export interface DashboardExecutionQueueItem {
+  id: string
+  kind: DashboardExecutionQueueKind
+  severity: DashboardExecutionTone
+  status?: string
+  summary: string
+  target_type: string
+  target_id: string
+  linked_session_id?: string | null
+  linked_operation_id?: string | null
+  last_seen_at?: string | null
+  top_handoff?: DashboardExecutionHandoff | null
+  intervene_handoff?: DashboardExecutionHandoff | null
+  command_handoff?: DashboardExecutionHandoff | null
+}
+
+export interface DashboardExecutionSessionBrief {
+  session_id: string
+  goal: string
+  room?: string | null
+  status?: string
+  health?: string
+  member_names: string[]
+  linked_operation_id?: string | null
+  linked_detachment_id?: string | null
+  runtime_blocker?: string | null
+  worker_gap_summary?: string | null
+  last_activity_at?: string | null
+  last_activity_summary?: string | null
+  communication_summary?: string | null
+  active_count?: number
+  seen_count?: number
+  planned_count?: number
+  required_count?: number
+  counts_basis?: string | null
+  top_handoff?: DashboardExecutionHandoff | null
+  intervene_handoff?: DashboardExecutionHandoff | null
+  command_handoff?: DashboardExecutionHandoff | null
+}
+
+export interface DashboardExecutionOperationBrief {
+  operation_id: string
+  objective: string
+  status?: string
+  stage?: string | null
+  assigned_unit_id?: string | null
+  assigned_unit_label?: string | null
+  linked_session_id?: string | null
+  linked_detachment_id?: string | null
+  blocker_summary?: string | null
+  search_status?: string | null
+  next_tool?: string | null
+  updated_at?: string | null
+  top_handoff?: DashboardExecutionHandoff | null
+  command_handoff?: DashboardExecutionHandoff | null
+}
+
+export interface DashboardExecutionWorkerSupportBrief {
+  name: string
+  agent_name?: string
+  status?: Agent['status'] | string
+  tone: DashboardExecutionTone
+  state: DashboardExecutionWorkerState
+  note: string
+  focus: string
+  last_signal_at?: string | null
+  last_signal_age_sec?: number | null
+  signal_truth?: 'live' | 'stale' | 'absent'
+  evidence_source?: 'message' | 'presence' | 'none'
+  active_task_count?: number
+  related_session_id?: string | null
+  related_operation_id?: string | null
+  emoji?: string
+  korean_name?: string | null
+  model?: string | null
+  recent_output_preview?: string | null
+  recent_event?: string | null
+}
+
+export interface DashboardExecutionLodgeTick {
+  checked?: number
+  acted?: number
+  passed?: number
+  skipped?: number
+  failed?: number
+  last_tick_at?: string | null
+  last_skip_reason?: string | null
+  last_pass_reason?: string | null
+  last_system_skip_reason?: string | null
+  strategy?: string | null
+  queue_depth?: number | null
+  activity_report?: string | null
+}
+
+export interface DashboardExecutionLodgeCheckin {
+  agent_name: string
+  trigger?: string | null
+  outcome: 'acted' | 'passed' | 'skipped' | 'failed' | string
+  summary?: string | null
+  reason?: string | null
+  allowed_tool_names: string[]
+  used_tool_names: string[]
+  used_tool_call_count?: number | null
+  action_kind?: 'post' | 'comment' | 'vote' | 'none' | string
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
+  checked_at?: string | null
+  decision_reason?: string | null
+  worker_name?: string | null
+  failure_reason?: string | null
+}
+
+export interface DashboardExecutionContinuityBrief {
+  name: string
+  agent_name?: string | null
+  status?: string
+  tone: DashboardExecutionTone
+  state: DashboardExecutionContinuityState
+  note: string
+  focus: string
+  last_signal_at?: string | null
+  last_autonomous_action_at?: string | null
+  generation?: number
+  turn_count?: number
+  context_ratio?: number | null
+  continuity?: string | null
+  lifecycle?: string | null
+  related_session_id?: string | null
+  model?: string | null
+  emoji?: string
+  korean_name?: string | null
+  skill_reason?: string | null
+  recent_input_preview?: string | null
+  recent_output_preview?: string | null
+  recent_tool_names?: string[]
+  allowed_tool_names?: string[]
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
+  last_proactive_preview?: string | null
+  continuity_summary?: string | null
+  skill_route_summary?: string | null
+}
+
+export interface DashboardExecutionResponse {
+  generated_at?: string
+  status?: ServerStatus
+  summary?: DashboardExecutionSummary
+  social_tick?: DashboardExecutionLodgeTick | null
+  social_checkins?: unknown[]
+  lodge_tick?: DashboardExecutionLodgeTick | null
+  lodge_checkins?: unknown[]
+  execution_queue?: unknown[]
+  session_briefs?: unknown[]
+  operation_briefs?: unknown[]
+  worker_support_briefs?: unknown[]
+  priority_queue?: unknown[]
+  worker_briefs?: unknown[]
+  continuity_briefs?: unknown[]
+  offline_worker_briefs?: unknown[]
+  agents?: unknown[]
+  tasks?: unknown[]
+  messages?: unknown[]
+  keepers?: unknown[]
+}
+
+export interface DashboardMemoryResponse {
+  generated_at?: string
+  summary?: {
+    visible_posts?: number
+    sort_by?: string
+    exclude_system?: boolean
+  }
+  posts?: BoardPost[]
+  count?: number
+  limit?: number
+  offset?: number
+  sort_by?: string
+}
+
+export interface DashboardGovernanceResponse {
+  generated_at?: string
+  summary?: {
+    cases_open?: number
+    pending_ruling?: number
+    ready_auto_execute?: number
+    needs_human_gate?: number
+    executed?: number
+    blocked?: number
+    ready_to_execute?: number
+    oldest_open_case_age_s?: number | null
+    last_activity_age_s?: number | null
+    judge_online?: boolean
+    judge_last_seen_at?: string | null
+  }
+  items?: GovernanceDecisionItem[]
+  activity?: GovernanceTimelineEvent[]
+  judge?: GovernanceJudgeSummary
+  pending_actions?: PendingConfirmation[]
+}
+
+export interface DashboardPlanningResponse {
+  generated_at?: string
+  goals?: unknown[]
+  rollup?: Record<string, unknown>
+  mdal?: {
+    loops?: unknown[]
+    error?: string
+  }
+  task_backlog?: {
+    todo?: number
+    claimed?: number
+    in_progress?: number
+    done?: number
+    cancelled?: number
+  }
+}
+
+
+export interface ServerStatus {
+  room?: string
+  room_base_path?: string
+  cluster?: string
+  project?: string
+  paused?: boolean
+  version?: string
+  generated_at?: string
+  build?: ServerBuildIdentity
+  uptime_seconds?: number
+  tempo_interval_s?: number
+  tempo?: string
+  tool_call_health?: {
+    timeouts: number
+    p95_duration_ms: number | null
+    window_hours: number
+  }
+  alert_thresholds?: {
+    proactive_fallback_warn: number
+    proactive_fallback_bad: number
+    proactive_similarity_warn: number
+    proactive_similarity_bad: number
+    toast_cooldown_sec: number
+  }
+  monitoring?: {
+    board?: BoardMonitoring
+    governance?: GovernanceMonitoring
+  }
+  lodge?: LodgeRuntimeStatus
+  social_runtime?: SocialRuntimeStatus
+  gardener?: GardenerRuntimeStatus
+  guardian?: GuardianRuntimeStatus
+  sentinel?: SentinelRuntimeStatus
+  data_quality?: {
+    board_contract_ok?: boolean
+    governance_feed_ok?: boolean
+    last_sync_at?: string
+  }
+}

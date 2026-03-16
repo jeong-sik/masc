@@ -1,0 +1,623 @@
+import type { CommandPlaneSwarmStatus, CommandPlaneSnapshot } from './command-plane'
+import type { KeeperDiagnostic, Message } from './core'
+import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './governance'
+
+export interface DashboardMissionSummary {
+  room_health?: string
+  cluster?: string
+  project?: string
+  current_room?: string | null
+  paused?: boolean
+  tempo_interval_s?: number
+  active_agents?: number
+  keeper_pressure?: number
+  active_operations?: number
+  pending_approvals?: number
+  incident_count?: number
+  recommended_action_count?: number
+  top_attention?: OperatorAttentionItem | null
+  top_action?: OperatorRecommendedAction | null
+}
+
+export interface DashboardMissionCommandFocus {
+  health?: string
+  active_operations?: number
+  pending_approvals?: number
+  swarm_overview?: CommandPlaneSwarmStatus['overview']
+  top_attention?: OperatorAttentionItem | null
+  top_action?: OperatorRecommendedAction | null
+  session_cards: OperatorSessionCard[]
+}
+
+export interface DashboardMissionTargets {
+  sessions: OperatorSessionSnapshot[]
+  keepers: OperatorKeeperSnapshot[]
+  pending_confirms: PendingConfirmation[]
+  available_actions: OperatorActionDescriptor[]
+}
+
+export interface DashboardMissionAttentionQueueItem {
+  id: string
+  kind: string
+  severity: string
+  summary: string
+  target_type: string
+  target_id?: string | null
+  top_action?: OperatorRecommendedAction | null
+  related_session_ids: string[]
+  related_agent_names: string[]
+  evidence_preview: string[]
+  last_seen_at?: string | null
+}
+
+export interface DashboardMissionSessionBrief {
+  session_id: string
+  goal: string
+  room?: string | null
+  status?: string
+  health?: string
+  member_names: string[]
+  started_at?: string | null
+  elapsed_sec?: number | null
+  operation_id?: string | null
+  blocker_summary?: string | null
+  last_event_at?: string | null
+  last_event_summary?: string | null
+  communication_summary?: string | null
+  active_count?: number
+  seen_count?: number
+  planned_count?: number
+  required_count?: number
+  counts_basis?: string | null
+  related_attention_count: number
+  top_attention?: OperatorAttentionItem | null
+  top_recommendation?: OperatorRecommendedAction | null
+}
+
+export interface DashboardMissionParticipantPreview {
+  agent_name: string
+  display_name?: string | null
+  is_live?: boolean
+  status?: string
+  current_work?: string | null
+  recent_input_preview?: string | null
+  recent_output_preview?: string | null
+  recent_tool_names: string[]
+  last_activity_at?: string | null
+}
+
+export interface DashboardMissionOperationBadge {
+  operation_id: string
+  status?: string
+  stage?: string | null
+  detachment_status?: string | null
+  objective?: string | null
+  updated_at?: string | null
+}
+
+export interface DashboardMissionKeeperRef {
+  name: string
+  agent_name?: string | null
+  status?: string
+  generation?: number
+  context_ratio?: number | null
+  last_turn_ago_s?: number | null
+  current_work?: string | null
+}
+
+export interface DashboardMissionSessionCard extends DashboardMissionSessionBrief {
+  member_previews: DashboardMissionParticipantPreview[]
+  operation_badges: DashboardMissionOperationBadge[]
+  keeper_refs: DashboardMissionKeeperRef[]
+}
+
+export interface DashboardMissionAgentBrief {
+  agent_name: string
+  display_name?: string | null
+  is_live?: boolean
+  archived_reason?: string | null
+  status?: string
+  where?: string | null
+  with_whom: string[]
+  current_work?: string | null
+  related_session_id?: string | null
+  related_attention_count: number
+  last_activity_at?: string | null
+  last_activity_age_sec?: number | null
+  signal_truth?: 'live' | 'stale' | 'archived' | 'unknown'
+  evidence_source?: 'message' | 'presence' | 'session' | 'none'
+  recent_output_preview?: string | null
+  recent_input_preview?: string | null
+  recent_event?: string | null
+  recent_tool_names: string[]
+  allowed_tool_names?: string[]
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
+}
+
+export interface DashboardMissionKeeperBrief {
+  name: string
+  agent_name?: string | null
+  status?: string
+  generation?: number
+  context_ratio?: number | null
+  last_turn_ago_s?: number | null
+  current_work?: string | null
+  last_autonomous_action_at?: string | null
+  allowed_tool_names?: string[]
+  latest_tool_names?: string[]
+  latest_tool_call_count?: number | null
+  tool_audit_source?: string | null
+  tool_audit_at?: string | null
+}
+
+export interface DashboardMissionInternalSignal {
+  id: string
+  signal_type: 'attention' | 'action'
+  severity: string
+  summary: string
+  target_type: string
+  target_id?: string | null
+  attention?: OperatorAttentionItem | null
+  action?: OperatorRecommendedAction | null
+}
+
+export interface DashboardMissionResponse {
+  generated_at?: string
+  summary: DashboardMissionSummary
+  incidents: OperatorAttentionItem[]
+  recommended_actions: OperatorRecommendedAction[]
+  command_focus: DashboardMissionCommandFocus
+  operator_targets: DashboardMissionTargets
+  attention_queue: DashboardMissionAttentionQueueItem[]
+  sessions: DashboardMissionSessionCard[]
+  session_briefs: DashboardMissionSessionBrief[]
+  agent_briefs: DashboardMissionAgentBrief[]
+  keeper_briefs: DashboardMissionKeeperBrief[]
+  internal_signals: DashboardMissionInternalSignal[]
+}
+
+export interface DashboardMissionTimelineItem {
+  id: string
+  timestamp?: string | null
+  event_type?: string
+  actor?: string | null
+  summary: string
+}
+
+export interface DashboardMissionSessionDetailResponse {
+  generated_at?: string
+  session_id: string
+  session?: DashboardMissionSessionCard | null
+  timeline: DashboardMissionTimelineItem[]
+  participants: DashboardMissionParticipantPreview[]
+  operations: DashboardMissionOperationBadge[]
+  keepers: DashboardMissionKeeperRef[]
+  error?: string | null
+}
+
+export interface DashboardMissionBriefingSection {
+  id: string
+  label: string
+  status: 'ok' | 'healthy' | 'aligned' | 'watch' | 'risk' | 'unclear'
+  summary: string
+  evidence: string[]
+  signal_class?: 'operational_risk' | 'metadata_gap' | 'mixed'
+  evidence_quality?: 'strong' | 'partial' | 'missing'
+}
+
+export interface DashboardMissionBriefingMetadataGap {
+  kind: string
+  summary: string
+  scope_type: 'session' | 'keeper' | 'agent'
+  scope_id?: string | null
+  severity: 'info' | 'watch'
+}
+
+export interface DashboardMissionBriefingResponse {
+  generated_at?: string
+  cached?: boolean
+  stale?: boolean
+  refreshing?: boolean
+  status?: 'ok' | 'pending' | 'unavailable' | 'error'
+  summary?: string | null
+  model?: string | null
+  ttl_sec?: number
+  criteria: string[]
+  basis?: {
+    current_room?: string | null
+    crew_count?: number
+    agent_count?: number
+    keeper_count?: number
+  }
+  metadata_gap_count?: number
+  metadata_gaps: DashboardMissionBriefingMetadataGap[]
+  sections: DashboardMissionBriefingSection[]
+  error?: string | null
+  last_error?: string | null
+}
+
+export type DashboardProofVerdict = 'proven' | 'partial' | 'insufficient' | string
+
+export interface DashboardProofSummary {
+  headline?: string
+  detail?: string
+  session_id?: string
+  goal?: string
+  verdict?: DashboardProofVerdict
+  live_verdict?: DashboardProofVerdict
+  historical_verdict?: DashboardProofVerdict | null
+  verdict_basis?: 'live' | 'live_and_historical' | 'historical_only' | string
+  actors_count?: number
+  planned_actor_count?: number
+  mentioned_actor_count?: number
+  unanswered_actor_count?: number
+  interaction_count?: number
+  evidence_count?: number
+  cp_trace_count?: number
+}
+
+export interface DashboardProofSelection {
+  mode?: 'explicit' | 'latest_auto_selected' | 'requested_not_found' | 'none' | string
+  reason?: string
+  requested_session_id?: string | null
+  requested_operation_id?: string | null
+  selected_session_id?: string | null
+  selected_goal?: string | null
+  selected_created_by?: string | null
+  selected_operation_id?: string | null
+  available_session_count?: number
+}
+
+export interface DashboardProofTimelineItem {
+  id: string
+  seq?: number
+  source?: string
+  session_id?: string | null
+  operation_id?: string | null
+  event_type?: string
+  timestamp?: string
+  actor?: string | null
+  summary?: string
+  detail?: Record<string, unknown>
+}
+
+export interface DashboardProofActorContribution {
+  actor: string
+  role?: string | null
+  activity_state?: 'acted' | 'mentioned_only' | 'planned_only' | string
+  activity_detail?: string | null
+  observed_event_count?: number
+  turn_count?: number
+  spawn_count?: number
+  tool_evidence_count?: number
+  interaction_count?: number
+  mention_count?: number
+  recent_input_preview?: string | null
+  recent_output_preview?: string | null
+  recent_event_summary?: string | null
+  requested_by?: string | null
+  recent_request_preview?: string | null
+  recent_request_at?: string | null
+  recent_tool_names?: string[]
+  last_active_at?: string | null
+}
+
+export interface DashboardProofToolEvidence {
+  actor?: string | null
+  event_type?: string | null
+  tool_names?: string[]
+  summary?: string | null
+  timestamp?: string | null
+}
+
+export interface DashboardProofArtifactRef {
+  kind: string
+  path: string
+  exists: boolean
+}
+
+export interface DashboardProofBackingEvidence {
+  operation_id?: string
+  detachment_id?: string
+  traces?: Record<string, unknown>
+  detachments?: Record<string, unknown>
+  summary?: Record<string, unknown>
+  swarm_proof?: Record<string, unknown> | null
+}
+
+export interface DashboardProofResponse {
+  schema_version?: string
+  generated_at?: string
+  room?: Record<string, unknown>
+  selection?: DashboardProofSelection
+  session_id?: string | null
+  operation_id?: string | null
+  proof_verdict?: DashboardProofVerdict
+  summary?: DashboardProofSummary
+  timeline?: DashboardProofTimelineItem[]
+  actor_contributions?: DashboardProofActorContribution[]
+  goal_binding?: Record<string, unknown>
+  tool_evidence?: DashboardProofToolEvidence[]
+  cp_backing_evidence?: DashboardProofBackingEvidence | null
+  artifacts?: DashboardProofArtifactRef[]
+  raw_proof?: Record<string, unknown> | null
+}
+
+export interface OperatorRoomSnapshot {
+  room_id?: string
+  current_room?: string
+  project?: string
+  cluster?: string
+  paused?: boolean
+  pause_reason?: string | null
+  paused_by?: string | null
+  paused_at?: string | null
+}
+
+export interface OperatorLinkedAutoresearch {
+  loop_id?: string | null
+  session_id?: string | null
+  status?: string | null
+  current_cycle?: number
+  best_score?: number | null
+  last_decision?: string | null
+  target_file?: string | null
+  workdir?: string | null
+  source_workdir?: string | null
+  program_note?: string | null
+  operation_id?: string | null
+  queued_hypothesis?: string | null
+  warnings?: string[]
+  error?: string | null
+}
+
+export interface OperatorSessionSnapshot {
+  session_id: string
+  command_plane_operation_id?: string
+  command_plane_detachment_id?: string
+  status?: string
+  progress_pct?: number
+  elapsed_sec?: number
+  remaining_sec?: number
+  done_delta_total?: number
+  summary?: Record<string, unknown>
+  team_health?: Record<string, unknown>
+  communication_metrics?: Record<string, unknown>
+  orchestration_state?: Record<string, unknown>
+  cascade_metrics?: Record<string, unknown>
+  report_paths?: Record<string, string>
+  linked_autoresearch?: OperatorLinkedAutoresearch | null
+  session?: Record<string, unknown>
+  recent_events?: Record<string, unknown>[]
+}
+
+export interface OperatorKeeperSnapshot {
+  name: string
+  runtime_class?: 'resident_keeper' | 'persistent_agent'
+  desired?: boolean
+  resident_registered?: boolean
+  agent_name?: string
+  status?: string
+  autonomy_level?: string
+  context_ratio?: number
+  generation?: number
+  active_goal_ids?: string[]
+  last_autonomous_action_at?: string | null
+  last_turn_ago_s?: number
+  model?: string
+}
+
+
+
+export interface OperatorAttentionItem {
+  kind: string
+  severity: string
+  summary: string
+  target_type: string
+  target_id?: string | null
+  actor?: string | null
+  evidence?: unknown
+}
+
+export interface OperatorRecommendedAction {
+  action_type: string
+  target_type: string
+  target_id?: string | null
+  severity: string
+  reason: string
+  confirm_required?: boolean
+  suggested_payload?: unknown
+  preview?: unknown
+}
+
+export interface OperatorWorkerCard {
+  actor?: string | null
+  spawn_agent?: string | null
+  spawn_role?: string | null
+  spawn_model?: string | null
+  worker_class?: string | null
+  parent_actor?: string | null
+  capsule_mode?: string | null
+  runtime_pool?: string | null
+  lane_id?: string | null
+  controller_level?: string | null
+  control_domain?: string | null
+  supervisor_actor?: string | null
+  model_tier?: string | null
+  task_profile?: string | null
+  risk_level?: string | null
+  routing_confidence?: number | null
+  routing_reason?: string | null
+  status: string
+  turn_count: number
+  empty_note_turn_count: number
+  has_turn: boolean
+  last_turn_ts_iso?: string | null
+}
+
+export interface OperatorSessionCard {
+  session_id: string
+  goal?: string
+  status?: string
+  health?: string
+  scale_profile?: string
+  control_profile?: string
+  planned_worker_count?: number
+  active_agent_count?: number
+  last_turn_age_sec?: number | null
+  attention_count?: number
+  recommended_action_count?: number
+  top_attention?: OperatorAttentionItem | null
+  top_recommendation?: OperatorRecommendedAction | null
+}
+
+export interface OperatorResidentJudgeRuntime {
+  enabled?: boolean
+  judge_online?: boolean
+  refreshing?: boolean
+  generated_at?: string | null
+  expires_at?: string | null
+  model_used?: string | null
+  keeper_name?: string | null
+  last_error?: string | null
+}
+
+export interface OperatorGuidanceSummary {
+  summary?: string | null
+  confidence?: number | null
+  provenance?: string | null
+  authoritative?: boolean
+  surface?: string | null
+  fresh_until?: string | null
+  keeper_name?: string | null
+  fallback_used?: boolean
+  disagreement_with_truth?: boolean
+}
+
+export interface OperatorJudgment {
+  judgment_id?: string
+  surface?: string | null
+  target_type?: string | null
+  target_id?: string | null
+  status?: string | null
+  summary?: string | null
+  confidence?: number | null
+  generated_at?: string | null
+  fresh_until?: string | null
+  keeper_name?: string | null
+  model_name?: string | null
+  runtime_name?: string | null
+  evidence_refs: string[]
+  recommended_action?: OperatorRecommendedAction | null
+  supersedes: string[]
+  fallback_used?: boolean
+  disagreement_with_truth?: boolean
+  provenance?: string | null
+}
+
+export interface OperatorDigest {
+  trace_id?: string
+  target_type: 'room' | 'team_session' | string
+  target_id?: string | null
+  health?: string
+  judgment_owner?: string | null
+  authoritative_judgment_available?: boolean
+  resident_judge_runtime?: OperatorResidentJudgeRuntime | null
+  judgment?: OperatorJudgment | null
+  active_guidance_layer?: string | null
+  active_summary?: OperatorGuidanceSummary | null
+  active_recommended_actions?: OperatorRecommendedAction[]
+  active_recommendation_source?: string | null
+  active_recommendation_summary?: OperatorGuidanceSummary | null
+  fallback_recommended_actions?: OperatorRecommendedAction[]
+  recommendation_summary?: OperatorGuidanceSummary | null
+  swarm_status?: CommandPlaneSwarmStatus
+  attention_items: OperatorAttentionItem[]
+  recommended_actions: OperatorRecommendedAction[]
+  session_cards: OperatorSessionCard[]
+  worker_cards: OperatorWorkerCard[]
+}
+
+export interface KeeperProbeResult {
+  status?: unknown
+  diagnostic?: KeeperDiagnostic | null
+}
+
+export interface KeeperRecoverResult {
+  recovered: boolean
+  skipped_reason?: string | null
+  before?: KeeperDiagnostic | null
+  after?: KeeperDiagnostic | null
+  down?: unknown
+  up?: unknown
+}
+
+export interface OperatorSnapshot {
+  room: OperatorRoomSnapshot
+  sessions: OperatorSessionSnapshot[]
+  keepers: OperatorKeeperSnapshot[]
+  resident_judge_runtime?: OperatorResidentJudgeRuntime | null
+  persistent_agents?: OperatorKeeperSnapshot[]
+  command_plane?: CommandPlaneSnapshot
+  swarm_status?: CommandPlaneSwarmStatus
+  recent_messages: Message[]
+  pending_confirms: PendingConfirmation[]
+  pending_confirm_envelope?: PendingConfirmEnvelope | null
+  pending_confirm_summary?: PendingConfirmSummary
+  available_actions: OperatorActionDescriptor[]
+}
+
+export type OperatorActionType =
+  | 'broadcast'
+  | 'room_pause'
+  | 'room_resume'
+  | 'social_sweep'
+  | 'lodge_tick'
+  | 'task_inject'
+  | 'team_note'
+  | 'team_broadcast'
+  | 'team_task_inject'
+  | 'team_worker_spawn_batch'
+  | 'team_stop'
+  | 'keeper_message'
+  | 'keeper_probe'
+  | 'keeper_recover'
+  | 'swarm_run_continue'
+  | 'swarm_run_rerun'
+  | 'swarm_run_abandon'
+
+export type OperatorTargetType = 'room' | 'team_session' | 'keeper' | 'swarm_run'
+
+export interface OperatorActionRequest {
+  actor: string
+  action_type: OperatorActionType
+  target_type: OperatorTargetType
+  target_id?: string
+  payload: Record<string, unknown>
+}
+
+export interface OperatorActionResult {
+  status: string
+  confirm_required?: boolean
+  confirm_token?: string
+  preview?: unknown
+  delegated_tool?: string
+  result?: unknown
+  executed_action?: unknown
+  delegated_tool_result?: unknown
+}
+
+export interface OperatorActionLogEntry {
+  id: number
+  at: string
+  actor: string
+  action_type: string
+  target_label: string
+  outcome: 'preview' | 'executed' | 'confirmed' | 'error'
+  message: string
+  delegated_tool?: string
+}
+

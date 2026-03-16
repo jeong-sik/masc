@@ -240,6 +240,7 @@
    room_git
    room_portal
    room_state
+   room_task
    room_utils
    room_vote
    room_utils_backend_setup

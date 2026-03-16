@@ -162,6 +162,7 @@
    lodge_atmosphere
    lodge_decision
    lodge_worker
+   lodge_agent_profile
    lodge_ecosystem
    lodge_heartbeat
    lodge_rate_limit

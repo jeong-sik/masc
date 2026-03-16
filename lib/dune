@@ -208,6 +208,8 @@
    mode
    nickname
    noosphere_eio
+   operator_pending_confirm
+   operator_digest
    operator_control
    operator_judgment
    notify

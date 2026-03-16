@@ -1,11 +1,5 @@
-type 'a context = {
-  config : Room.config;
-  agent_name : string;
-  sw : Eio.Switch.t;
-  clock : 'a Eio.Time.clock;
-  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
-  mcp_session_id : string option;
-}
+include module type of Operator_pending_confirm
+include module type of Operator_digest
 
 val snapshot_json :
   ?actor:string ->
@@ -16,19 +10,7 @@ val snapshot_json :
   'a context ->
   Yojson.Safe.t
 
-val pending_confirms_json : ?actor:string -> Room.config -> Yojson.Safe.t
-val pending_confirm_envelope_json : ?actor:string -> Room.config -> Yojson.Safe.t
-val pending_confirm_summary_json : ?actor:string -> Room.config -> Yojson.Safe.t
-
 val recent_actions_json : Room.config -> Yojson.Safe.t
-
-val digest_json :
-  ?actor:string ->
-  ?target_type:string ->
-  ?target_id:string ->
-  ?include_workers:bool ->
-  'a context ->
-  (Yojson.Safe.t, string) result
 
 val action_json :
   ?actor_hint:string ->

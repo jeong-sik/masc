@@ -1032,6 +1032,7 @@ Call masc_listen again to continue listening.
       let initial_content = arg_get_string "initial_content" "" in
       let max_turns = arg_get_int "max_turns" 50 in
       let source_post_id = arg_get_string_opt "post_id" in
+      let mentions = arg_get_string_list "mentions" in
       let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if topic = "" then Some (false, "topic required")
       else begin
@@ -1040,7 +1041,7 @@ Call masc_listen again to continue listening.
           room = current_room;
         } in
         match Council.Conversation.start ~config:convo_config ~topic ~initiator
-                ~max_turns ~initial_content ?source_post_id () with
+                ~max_turns ~initial_content ~mentions ?source_post_id () with
         | Ok thread ->
             let link_warning = match source_post_id with
               | Some pid ->

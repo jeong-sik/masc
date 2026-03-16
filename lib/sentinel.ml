@@ -525,10 +525,10 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
         let base_path = config.Room_utils.base_path in
         let now_f = Time_compat.now () in
         let petitions_created = ref 0 in
-        let submit ~title ~subject_type ~risk_class =
+        let submit ~title ~subject_type ~risk_class ?(source_refs=[]) () =
           match Council.Governance_v2.submit_petition base_path
             ~title ~origin:"sentinel" ~subject_type ~risk_class
-            ~requested_action:None ~source_refs:[] ~created_by:agent_name with
+            ~requested_action:None ~source_refs ~created_by:agent_name with
           | Ok result ->
               incr petitions_created;
               (* Auto-submit brief for new cases to unblock ruling pipeline *)
@@ -566,6 +566,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
                 submit
                   ~title:(sprintf "Stuck task: %s (claimed by %s)" t.title assignee)
                   ~subject_type:"task" ~risk_class:Council.Governance_v2.Low
+                  ~source_refs:["task-" ^ t.id] ()
               end
           | Types.InProgress { assignee; started_at } ->
               let age = now_f -. (parse_iso_or_epoch started_at) in
@@ -575,6 +576,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
                 submit
                   ~title:(sprintf "Stuck task: %s (in_progress by %s)" t.title assignee)
                   ~subject_type:"task" ~risk_class:Council.Governance_v2.Low
+                  ~source_refs:["task-" ^ t.id] ()
               end
           | _ -> ()
         ) backlog.tasks;
@@ -602,6 +604,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
                     ~title:(sprintf "Keeper %s failing (%d consecutive failures)"
                       keeper_name consecutive_failures)
                     ~subject_type:"keeper" ~risk_class:Council.Governance_v2.High
+                    ~source_refs:["keeper-" ^ keeper_name] ()
                 end
               with
               | Yojson.Json_error _ | Sys_error _ -> ()
@@ -621,6 +624,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
               ~title:(sprintf "Flagged post by %s (down=%d, up=%d)"
                 (Board.Agent_id.to_string p.author) p.votes_down p.votes_up)
               ~subject_type:"board_post" ~risk_class:Council.Governance_v2.Low
+              ~source_refs:["post-" ^ Board.Post_id.to_string p.id] ()
         ) board_posts;
 
         if !petitions_created > 0 then

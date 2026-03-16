@@ -55,7 +55,18 @@ curl -s http://127.0.0.1:8935/api/v1/command-plane/help | jq '.golden_paths[].id
 curl -s http://127.0.0.1:8935/api/v1/command-plane | jq '.operations.summary'
 ```
 
-## 5. 주의
+## 5. 모드 확인
+
+기본 모드는 `Full` (모든 도구 사용 가능). 제한이 필요하면 `Standard`나 `Coding`으로 전환한다.
+
+```
+masc_get_config                       # 현재 모드 확인
+masc_switch_mode(mode="standard")     # 도구 수 제한 시
+```
+
+기존 `.masc/config.json`에 `"mode":"coding"`이 남아 있으면 도구가 차단될 수 있다. 삭제 후 서버 재시작하면 Full 모드로 초기화된다.
+
+## 6. 주의
 
 - `masc_set_room`은 repo-root room semantics를 따른다.
 - `masc_claim`만으로는 session `current_task`가 잡히지 않는다.

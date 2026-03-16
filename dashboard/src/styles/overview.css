@@ -313,8 +313,53 @@
   }
 }
 
+/* Navigation strip for Home (no SideRail on Home) */
+.overview-nav-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-sm, 8px);
+  margin-top: var(--space-sm, 8px);
+}
+
+.overview-nav-btn {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm, 10px);
+  background: var(--card);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.overview-nav-btn:hover {
+  border-color: rgba(71, 184, 255, 0.4);
+  background: rgba(71, 184, 255, 0.05);
+}
+
+.overview-nav-icon {
+  font-size: 18px;
+}
+
+.overview-nav-label {
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.overview-nav-desc {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 @media (max-width: 700px) {
   .overview-stats {
     grid-template-columns: 1fr;
+  }
+
+  .overview-nav-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

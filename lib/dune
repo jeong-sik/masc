@@ -131,6 +131,8 @@
    level4_config
    local_runtime_pool
    agent_swarm_contract
+   worker_container
+   worker_mcp_transport
    local_agent_eio
    agent_swarm_client
    agent_swarm_dev_tools

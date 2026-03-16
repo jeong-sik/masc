@@ -120,7 +120,7 @@ let test_lodge_heartbeat_no_heuristic_fallback_policy () =
     (file_contains_pattern "lib/lodge_heartbeat_agents.ml" "| Scheduled | ManualTrigger -> true");
   check bool "content alerts cannot request post tool"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "| ContentAlert _ | Mentioned _ -> false");
+    (file_contains_pattern "lib/lodge_heartbeat_agents.ml" "| ContentAlert _ | Mentioned _ -> false");
   check bool "selection failures are explicit"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml"

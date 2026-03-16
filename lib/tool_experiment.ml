@@ -154,7 +154,7 @@ let write_json path json =
   let closed = ref false in
   Fun.protect
     ~finally:(fun () ->
-      if not !closed then (try close_out oc with exn -> let _ = exn in ());
+      if not !closed then (try close_out oc with exn -> Log.Misc.warn "tool_experiment: close_out failed: %s" (Printexc.to_string exn));
       if Sys.file_exists tmp then (try Sys.remove tmp with Sys_error _ -> ()))
     (fun () ->
       output_string oc content;
@@ -171,7 +171,9 @@ let read_json path =
         really_input_string ic (in_channel_length ic))
     in
     Some (Yojson.Safe.from_string content)
-  with exn -> let _ = exn in None
+  with exn ->
+    Log.Misc.warn "tool_experiment: read_json failed for %s: %s" path (Printexc.to_string exn);
+    None
 
 let save_experiment config (exp : experiment) =
   ensure_dir (experiments_dir config);

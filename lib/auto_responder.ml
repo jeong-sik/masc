@@ -210,7 +210,7 @@ let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
             in
             Ok txt
           with exn ->
-            ignore exn;
+            Log.Misc.warn "auto_responder: MCP response parse failed: %s" (Printexc.to_string exn);
             Ok body_str
       with exn ->
         Error (Printexc.to_string exn)

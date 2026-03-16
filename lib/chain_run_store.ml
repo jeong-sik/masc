@@ -374,7 +374,7 @@ let read_persisted_run_json ~(run_id : string) : Yojson.Safe.t option =
                | `String value when String.equal value run_id -> Some json
                | _ -> None
              with exn ->
-               ignore exn;
+               Log.Chain.warn "chain_run_store: run entry parse failed: %s" (Printexc.to_string exn);
                None)
 
 let list_runs_json () : Yojson.Safe.t =

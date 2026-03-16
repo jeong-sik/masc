@@ -286,7 +286,9 @@ let parse_yyyy_mm_dd s =
         in
         let ts, _ = Unix.mktime tm in
         Some ts)
-  with exn -> ignore exn; None
+  with exn ->
+    Log.Misc.warn "goal_store: parse_yyyy_mm_dd failed: %s" (Printexc.to_string exn);
+    None
 
 let days_until due_date =
   match due_date with

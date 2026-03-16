@@ -271,7 +271,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   bootstrap_server_state state;
   bootstrap_keepers ~sw ~clock state;
   init_task_backend ();
-  start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
+  (* HTTP server starts FIRST — resident loops (GraphQL, Lodge, Sentinel)
+     run in a background fiber to avoid blocking /health during startup. *)
   let config = make_http_config ~host ~port in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
   let request_handler = make_request_handler routes in
@@ -284,4 +285,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     start_background_maintenance ~sw ~clock state
   in
   print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
+  Eio.Fiber.fork ~sw (fun () ->
+    start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state);
   serve ~sw ~clock ~socket ~request_handler

@@ -2093,7 +2093,7 @@ let handle_keeper_msg ctx args : tool_result =
       Safe_ops.json_float_opt "timeout_sec" args
       |> Option.map (fun v ->
              let sec = int_of_float (Float.ceil v) in
-             max 5 (min 300 sec))
+             max 5 (min (Keeper_config.keeper_msg_timeout_max_sec ()) sec))
     in
     match inline_soul_profile_res, new_soul_profile_res with
     | Error e, _ | _, Error e -> (false, "❌ " ^ e)

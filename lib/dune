@@ -307,6 +307,7 @@
    tool_goals
    tool_operator
    tool_team_session
+   tool_team_session_step
    tool_team_session_schemas
    tool_heartbeat
    tool_encryption

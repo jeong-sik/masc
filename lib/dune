@@ -208,8 +208,15 @@
    mcp_prompt_surface
    mcp_server
    mcp_server_eio
+   mcp_server_eio_types
    mcp_server_eio_governance
    mcp_server_eio_helpers
+   mcp_server_eio_resource
+   mcp_server_eio_execute
+   mcp_server_eio_call_tool
+   mcp_server_eio_tool_profile
+   mcp_server_eio_dispatch
+   mcp_server_eio_protocol
    mcp_session
    metrics_store_eio
    generational_metrics

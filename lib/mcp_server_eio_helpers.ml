@@ -4,6 +4,15 @@
     without circular dependencies.
 *)
 
+(** Log an MCP server error with [UNEXPECTED] tag for unrecognized exceptions. *)
+let log_mcp_exn ~label exn =
+  let tag = match exn with
+    | Sys_error _ | Failure _ | Not_found | End_of_file
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
+    | _ -> "[UNEXPECTED] "
+  in
+  Printf.eprintf "[mcp_server] %s%s: %s\n%!" tag label (Printexc.to_string exn)
+
 (** Unregister agent synchronously - adapter for Session.registry.
     Directly removes from hashtable without extra mutex layer.
     Safe in Eio single-fiber context. *)
@@ -11,3 +20,34 @@ let unregister_sync (registry : Session.registry) ~agent_name =
   Hashtbl.remove registry.Session.sessions agent_name;
   Log.Session.info "Session unregistered (sync): %s (total: %d)"
     agent_name (Hashtbl.length registry.sessions)
+
+(** Wait for message using Eio sleep - adapter for Session.registry *)
+let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeout =
+  let start_time = Time_compat.now () in
+  let check_interval = 2.0 in
+  (match Hashtbl.find_opt registry.Session.sessions agent_name with
+   | Some _ -> ()
+   | None ->
+       (try ignore (Session.register registry ~agent_name)
+        with exn -> log_mcp_exn ~label:"session register (SSE) failed" exn));
+  Session.update_activity registry ~agent_name ~is_listening:(Some true) ();
+  let rec wait_loop () =
+    let elapsed = Time_compat.now () -. start_time in
+    if elapsed >= timeout then begin
+      Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
+      None
+    end else begin
+      match Session.pop_message registry ~agent_name with
+      | Some msg ->
+          Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
+          Some msg
+      | None ->
+          Eio.Time.sleep clock check_interval;
+          wait_loop ()
+    end
+  in
+  try wait_loop ()
+  with exn ->
+    log_mcp_exn ~label:"listen wait_loop interrupted" exn;
+    Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
+    None

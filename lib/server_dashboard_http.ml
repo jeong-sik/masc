@@ -342,7 +342,8 @@ let dashboard_messages_safe config ~since_seq ~limit =
   Room.get_messages_raw_in_room config ~room_id:(dashboard_current_room_id config) ~since_seq ~limit
 
 let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
-  let agents = dashboard_agents_safe config in
+  Dashboard_cache.get_or_compute "shell" ~ttl:2.0 (fun () ->
+    let agents = dashboard_agents_safe config in
   let tasks = dashboard_tasks_safe config in
   let keepers_json = keepers_dashboard_json ~compact:true config in
   let keepers_total = json_int_field "total" keepers_json ~default:0 in
@@ -357,7 +358,7 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
             ("tasks", `Int (List.length tasks));
             ("keepers", `Int keepers_total);
           ] );
-    ]
+      ])
 
 let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
   let ctx : Tool_misc.context =
@@ -550,10 +551,7 @@ let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_j
 
 let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let config = state.Mcp_server.room_config in
-  let shell_json =
-    Dashboard_cache.get_or_compute "shell" ~ttl:3.0 (fun () ->
-      dashboard_shell_http_json config)
-  in
+  let shell_json = dashboard_shell_http_json config in
   let execution_json = dashboard_execution_http_json ~state ~sw ~clock request in
   let command_summary_json =
     if Room.is_initialized config then

@@ -1879,12 +1879,15 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
           mcp_session_id = None;
         }
       in
+      (* Yield between heavy phases so SSE / health-check fibers can progress *)
+      Eio.Fiber.yield ();
       (* Load sessions once; pass to snapshot_json to avoid repeated filesystem scans *)
       let sessions =
         if Room.is_initialized config then
           Team_session_store.list_sessions config
         else []
       in
+      Eio.Fiber.yield ();
       let snapshot_json =
         Dashboard_cache.get_or_compute
           (Printf.sprintf "snapshot:%s" effective_actor)
@@ -1899,6 +1902,7 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
               ~sessions
               ctx)
       in
+      Eio.Fiber.yield ();
       let digest_json =
         Dashboard_cache.get_or_compute
           (Printf.sprintf "digest:%s" effective_actor)

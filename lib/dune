@@ -58,6 +58,10 @@
    server_auth
    server_tts_proxy
    server_trpg_rest
+   dashboard_http_helpers
+   dashboard_http_monitoring
+   dashboard_http_keeper
+   dashboard_http_mdal
    server_dashboard_http
    server_routes_http
    server_routes_http_common
@@ -496,6 +500,10 @@
    mcts_tree
    speculative_engine)
 (private_modules
+ dashboard_http_helpers
+ dashboard_http_monitoring
+ dashboard_http_keeper
+ dashboard_http_mdal
  room_utils_backend_setup
  room_utils_paths_backend
  room_utils_ops

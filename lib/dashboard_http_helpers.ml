@@ -1,0 +1,131 @@
+(** Dashboard HTTP helpers — shared env-parsing and JSON utility functions.
+
+    Extracted from server_dashboard_http.ml for sub-module reuse. *)
+
+[@@@warning "-32-33-69"]
+
+let bool_of_env name =
+  match Sys.getenv_opt name with
+  | None -> false
+  | Some v ->
+      let v = v |> String.trim |> String.lowercase_ascii in
+      v = "1" || v = "true" || v = "yes" || v = "y"
+
+let bool_default_true_of_env name =
+  match Sys.getenv_opt name with
+  | None -> true
+  | Some v ->
+      let v = v |> String.trim |> String.lowercase_ascii in
+      not (v = "0" || v = "false" || v = "no" || v = "n")
+
+let int_of_env_default name ~default ~min_v ~max_v =
+  let v =
+    match Sys.getenv_opt name with
+    | None -> default
+    | Some s ->
+        (try int_of_string (String.trim s) with _ -> default)
+  in
+  max min_v (min max_v v)
+
+let float_of_env_default name ~default ~min_v ~max_v =
+  let v =
+    match Sys.getenv_opt name with
+    | None -> default
+    | Some s ->
+        (try float_of_string (String.trim s) with _ -> default)
+  in
+  max min_v (min max_v v)
+
+let bool_of_tag_value (raw : string) : bool =
+  let v = String.trim raw |> String.lowercase_ascii in
+  v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
+
+let parse_tool_call_detail (detail_opt : string option)
+  : string * bool * int option =
+  match detail_opt with
+  | None -> ("unknown", false, None)
+  | Some raw ->
+      let parts = String.split_on_char '|' raw |> List.map String.trim in
+      let tool_name =
+        match parts with
+        | head :: _ when head <> "" -> head
+        | _ -> "unknown"
+      in
+      let timeout = ref false in
+      let duration_ms = ref None in
+      let parse_kv token =
+        match String.split_on_char '=' token with
+        | [k; v] -> Some (String.trim k, String.trim v)
+        | _ -> None
+      in
+      let tags =
+        match parts with
+        | _ :: tl -> tl
+        | [] -> []
+      in
+      List.iter
+        (fun token ->
+          match parse_kv token with
+          | Some ("timeout", v) ->
+              timeout := bool_of_tag_value v
+          | Some ("duration_ms", v) ->
+              (try duration_ms := Some (max 0 (int_of_string v)) with _ -> ())
+          | _ -> ())
+        tags;
+      (tool_name, !timeout, !duration_ms)
+
+let percentile_int (values : int list) ~(pct : float) : int option =
+  match List.sort compare values with
+  | [] -> None
+  | sorted ->
+      let n = List.length sorted in
+      let idx =
+        int_of_float (ceil (pct *. float_of_int n) -. 1.0)
+        |> max 0
+        |> min (n - 1)
+      in
+      Some (List.nth sorted idx)
+
+let json_int_opt = function
+  | Some v -> `Int v
+  | None -> `Null
+
+let safe_age_seconds_opt ~(now_ts : float) ~(event_ts : float) : int option =
+  let delta = now_ts -. event_ts in
+  if Float.is_nan delta || Float.is_infinite delta then None
+  else
+    let bounded = max 0.0 (min delta (float_of_int max_int)) in
+    Some (int_of_float bounded)
+
+let json_list_field key json =
+  match Yojson.Safe.Util.member key json with
+  | `List items -> items
+  | _ -> []
+
+let json_int_field key json ~default =
+  match Yojson.Safe.Util.member key json with
+  | `Int value -> value
+  | `Intlit raw -> (try int_of_string raw with Failure _ -> default)
+  | _ -> default
+
+let json_string_field_opt key json =
+  match Yojson.Safe.Util.member key json with
+  | `String value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let json_assoc_field key json =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc _ as value -> value
+  | _ -> `Assoc []
+
+let json_record_field key json =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc _ as value -> Some value
+  | _ -> None
+
+let count_where items predicate =
+  List.fold_left
+    (fun acc item -> if predicate item then acc + 1 else acc)
+    0 items

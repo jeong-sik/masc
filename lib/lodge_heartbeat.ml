@@ -1103,197 +1103,29 @@ let record_to_neo4j ~agent_name ~action_type ~content ~target_id =
         Eio.traceln "   ⚠️ [Lodge] GraphQL activity log may have failed for %s" agent_name
 
 (** Agent profile loaded from Neo4j *)
-type agent_profile = {
-  name: string;
-  role: string option;
-  description: string option;
-  traits: string list;
-  interests: string list;
-  preferred_hours: int list;
-  peak_hour: int option;
-  activity_level: float;
-  karma: int;
-  agent_prompt: string option;  (* "agentPrompt" GraphQL field *)
-  personality_hint: string option;
-}
+(** Agent profile type and loading — delegated to Lodge_agent_profile module.
+    @since 2.93.0 — Extracted for responsibility separation. *)
+type agent_profile = Lodge_agent_profile.t
 
-(** Profile cache refreshed from the same GraphQL path used by heartbeat. *)
-let profile_cache : (string, agent_profile) Hashtbl.t = Hashtbl.create 16
-let profile_cache_ttl = 300.0  (* 5 minutes *)
-let profile_cache_time = ref 0.0
+let agent_summaries_of_agents () : Lodge_agent_profile.agent_summary list =
+  get_agents () |> List.map (fun (a : agent) ->
+    Lodge_agent_profile.{
+      name = a.name; traits = a.traits; interests = a.interests;
+      preferred_hours = a.preferred_hours; peak_hour = a.peak_hour;
+      activity_level = a.activity_level; personality_hint = a.personality_hint;
+    })
 
-let default_agent_profile ~agent_name =
-  { name = agent_name; role = None; description = None; traits = [];
-    interests = []; preferred_hours = []; peak_hour = None; activity_level = 0.5;
-    karma = 0; agent_prompt = None; personality_hint = None }
-
-let profile_of_agent_summary (agent : agent) : agent_profile =
-  {
-    name = agent.name;
-    role = None;
-    description = None;
-    traits = agent.traits;
-    interests = agent.interests;
-    preferred_hours = agent.preferred_hours;
-    peak_hour = agent.peak_hour;
-    activity_level = agent.activity_level;
-    karma = 0;
-    agent_prompt = None;
-    personality_hint = agent.personality_hint;
-  }
-
-let load_agent_profiles_from_graphql () : agent_profile list =
-  let gql_query =
-    "{\"query\": \"{ agents(first: 25) { edges { node { name role description preferredHours traits peakHour activityLevel personalityHint interests } } } }\"}"
-  in
-  match graphql_request ~timeout_sec:5.0 gql_query with
-  | Error _ -> []
-  | Ok json_str ->
-      try
-        let json = Yojson.Safe.from_string json_str in
-        match graphql_agents_edges json with
-        | Error _ -> []
-        | Ok edges ->
-            let open Yojson.Safe.Util in
-            List.filter_map
-              (fun edge ->
-                try
-                  let node = member "node" edge in
-                  let get_string_opt key =
-                    match member key node with
-                    | `Null -> None
-                    | `String s -> Some s
-                    | _ -> None
-                  in
-                  let get_int_opt key =
-                    match member key node with
-                    | `Null -> None
-                    | `Int i -> Some i
-                    | _ -> None
-                  in
-                  Some
-                    {
-                      name =
-                        node |> member "name" |> to_string_option
-                        |> Option.value ~default:"";
-                      role = get_string_opt "role";
-                      description = get_string_opt "description";
-                      traits =
-                        (try member "traits" node |> to_list |> List.map to_string
-                         with Type_error _ -> []);
-                      interests =
-                        (try member "interests" node |> to_list |> List.map to_string
-                         with Type_error _ -> []);
-                      preferred_hours =
-                        (try member "preferredHours" node |> to_list |> List.map to_int
-                         with Type_error _ -> []);
-                      peak_hour = get_int_opt "peakHour";
-                      activity_level =
-                        (match member "activityLevel" node with
-                         | `Float f -> f
-                         | `Int i -> float_of_int i
-                         | _ -> 0.5);
-                      karma = 0;
-                      agent_prompt = None;
-                      personality_hint = get_string_opt "personalityHint";
-                    }
-                with Type_error _ | Failure _ -> None)
-              edges
-      with Yojson.Json_error _ -> []
-
-let refresh_profile_cache () =
-  let now = Time_compat.now () in
-  if now -. !profile_cache_time >= profile_cache_ttl then begin
-    Hashtbl.clear profile_cache;
-    let profiles = load_agent_profiles_from_graphql () in
-    let profiles =
-      if profiles <> [] then profiles
-      else List.map profile_of_agent_summary (get_agents ())
-    in
-    List.iter
-      (fun profile ->
-        if profile.name <> "" then Hashtbl.replace profile_cache profile.name profile)
-      profiles;
-    profile_cache_time := now
-  end
-
-(** Load full agent profile from Neo4j via GraphQL - cached (5 min TTL) *)
 let load_agent_profile ~agent_name : agent_profile =
-  refresh_profile_cache ();
-  match Hashtbl.find_opt profile_cache agent_name with
-  | Some profile -> profile
-  | None ->
-      let fallback =
-        match List.find_opt (fun (agent : agent) -> agent.name = agent_name) (get_agents ()) with
-        | Some agent -> profile_of_agent_summary agent
-        | None -> default_agent_profile ~agent_name
-      in
-      Hashtbl.replace profile_cache agent_name fallback;
-      fallback
+  Lodge_agent_profile.load ~agent_name ~fallback_summaries:(agent_summaries_of_agents ()) ()
 
-(** Lodge context — delegated to Lodge_ecosystem module.
-    @since 4.1.0 *)
 let build_lodge_context = Lodge_ecosystem.build_lodge_context
 
-(** Build dynamic prompt from agent profile *)
 let build_agent_prompt ~(profile : agent_profile) ~memories ~thread_history ~current_hour ~action_context =
-  let identity = Printf.sprintf "너는 %s야." profile.name in
+  Lodge_agent_profile.build_prompt ~profile ~memories ~thread_history
+    ~current_hour ~action_context ~lodge_context:(build_lodge_context ())
 
-  let role_str = match profile.description with
-    | Some d -> Printf.sprintf "\n역할: %s" d
-    | None -> ""
-  in
-
-  let traits_str = match profile.traits with
-    | [] -> ""
-    | ts -> Printf.sprintf "\n성격: %s" (String.concat ", " ts)
-  in
-
-  let time_str =
-    let is_preferred = List.mem current_hour profile.preferred_hours in
-    let is_peak = profile.peak_hour = Some current_hour in
-    if is_peak then "\n⚡ 지금 피크타임이야! 활발하게 활동해."
-    else if is_preferred then "\n🌙 네 활동 시간대야."
-    else ""
-  in
-
-  let karma_str =
-    if profile.karma > 0 then Printf.sprintf "\n평판: karma %d점" profile.karma
-    else ""
-  in
-
-  (* Thread history - accumulated agent activity *)
-  let history_str = match thread_history with
-    | Some h -> Printf.sprintf "\n\n[내 최근 활동]\n%s" h
-    | None -> ""
-  in
-
-  let memory_str = match memories with
-    | Some m -> Printf.sprintf "\n\n[관련 기억]\n%s" m
-    | None -> ""
-  in
-
-  let agent_prompt_str = match profile.agent_prompt with
-    | Some p -> Printf.sprintf "\n\n[특별 지시]\n%s" p
-    | None -> ""
-  in
-
-  let action_str = Printf.sprintf "\n\n[현재 상황]\n%s" action_context in
-
-  Printf.sprintf "%s\n%s%s%s%s%s%s%s%s%s\n\n한국어로 짧게 (1-2문장) 답변하세요. 이모지 하나로 시작하세요."
-    (build_lodge_context ()) identity role_str traits_str time_str karma_str history_str memory_str agent_prompt_str action_str
-
-(** Legacy: Load agent identity (for backward compat) *)
 let load_agent_identity ~agent_name =
-  let profile = load_agent_profile ~agent_name in
-  let signature = Lodge_reaction.get_or_compute_signature ~agent_name in
-  let static_traits = profile.traits @ profile.interests in
-  if signature.total_reactions > 0 || static_traits <> [] then
-    Lodge_reaction.generate_identity_prompt signature ~static_traits
-  else
-    match profile.description with
-    | Some d -> d
-    | None -> Printf.sprintf "당신은 %s 에이전트입니다." agent_name
+  Lodge_agent_profile.load_identity ~agent_name ~fallback_summaries:(agent_summaries_of_agents ()) ()
 
 (** Generate content using LLM based on agent personality from Neo4j *)
 let generate_agent_content ~agent_name ~context:_ ~action_type =

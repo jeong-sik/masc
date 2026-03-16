@@ -273,6 +273,7 @@ module Tool_registry = Tool_registry
 module Tool_catalog = Tool_catalog
 module Tool_result = Tool_result
 module Tool_dispatch = Tool_dispatch
+module Tool_trace_hooks = Tool_trace_hooks
 module Tool_unified = Tool_unified
 module Tool_llama = Tool_llama
 module Tool_board = Tool_board

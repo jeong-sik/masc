@@ -946,6 +946,18 @@
  (modules test_tool_result)
  (libraries masc_mcp alcotest yojson))
 
+; Tool Hooks — pre/post dispatch hooks (Harness Sprint 2)
+(test
+ (name test_tool_hooks)
+ (modules test_tool_hooks)
+ (libraries masc_mcp alcotest yojson))
+
+; Tool Trace Hooks — trace span correlation (Harness Sprint 2)
+(test
+ (name test_tool_trace_hooks)
+ (modules test_tool_trace_hooks)
+ (libraries masc_mcp alcotest yojson))
+
 ; Tool Unified — unified query interface across catalog, registry, dispatch (P4 Phase 4.4)
 (test
  (name test_tool_unified)

@@ -192,6 +192,8 @@
    mcp_prompt_surface
    mcp_server
    mcp_server_eio
+   mcp_server_eio_governance
+   mcp_server_eio_helpers
    mcp_session
    metrics_store_eio
    generational_metrics
@@ -349,6 +351,7 @@
    tool_library
    tool_catalog
    tool_dispatch
+   tool_inline_dispatch
    tool_unified
    tool_help_registry
    tool_registry

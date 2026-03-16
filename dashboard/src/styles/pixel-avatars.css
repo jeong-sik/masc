@@ -1,0 +1,100 @@
+/* MASC Dashboard — CSS Pixel Art Avatar System
+ * 8x8 CSS Grid avatars with state-based animations.
+ * Each agent gets a deterministic palette from their name hash.
+ */
+
+.pixel-avatar {
+  display: grid;
+  grid-template: repeat(8, 1fr) / repeat(8, 1fr);
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  image-rendering: pixelated;
+}
+
+.pixel-avatar--sm {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+}
+
+.pixel-avatar--lg {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+}
+
+.pixel-avatar__cell {
+  /* Each cell's color is set via inline style */
+}
+
+/* State animations applied to the avatar container */
+.pixel-avatar[data-status="active"],
+.pixel-avatar[data-status="working"] {
+  animation: avatar-bounce 1.2s ease-in-out infinite;
+}
+
+.pixel-avatar[data-status="busy"] {
+  animation: avatar-vibrate 0.4s linear infinite;
+}
+
+.pixel-avatar[data-status="idle"] {
+  animation: avatar-breathe 3s ease-in-out infinite;
+}
+
+.pixel-avatar[data-status="listening"] {
+  animation: avatar-pulse-glow 2s ease-in-out infinite;
+}
+
+.pixel-avatar[data-status="offline"],
+.pixel-avatar[data-status="inactive"] {
+  filter: grayscale(0.85) brightness(0.6);
+  opacity: 0.55;
+}
+
+/* Avatar name label */
+.pixel-avatar-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-xs, 4px);
+}
+
+.pixel-avatar-name {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pixel-avatar-name--active {
+  color: var(--text-strong);
+}
+
+/* Particle effect for working agents */
+.pixel-avatar-particle {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--warm-amber, #f5c542);
+  animation: avatar-particle 1.5s ease-out infinite;
+  pointer-events: none;
+}
+
+.pixel-avatar-particle:nth-child(2) { animation-delay: 0.5s; }
+.pixel-avatar-particle:nth-child(3) { animation-delay: 1.0s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pixel-avatar[data-status] {
+    animation: none;
+  }
+  .pixel-avatar-particle {
+    display: none;
+  }
+}

@@ -63,11 +63,12 @@ export function App() {
   }, [route.value.tab])
 
   const currentTab = route.value.tab
+  const isHome = currentTab === 'home'
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
 
   return html`
     <div class="app-shell">
-      <header class="dashboard-header">
+      <header class="dashboard-header ${isHome ? 'dashboard-header--slim' : ''}">
         <div class="header-title-wrap">
           <h1>
             MASC 대시보드
@@ -80,8 +81,8 @@ export function App() {
         </div>
       </header>
 
-      <div class="dashboard-layout">
-        <${SideRail} />
+      <div class="dashboard-layout ${isHome ? 'dashboard-layout--home' : ''}">
+        ${isHome ? null : html`<${SideRail} />`}
         <main class="dashboard-main">
           <${DashboardMain} />
         </main>

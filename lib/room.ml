@@ -110,9 +110,11 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     nickname nickname agent_type session_id
   end
 
+(** @deprecated Use [join (with_scope config (Named room_id))] instead. *)
 let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
-  ensure_room_bootstrap config room_id;
+  let scoped = with_scope config (Named room_id) in
+  ensure_room_bootstrap scoped room_id;
 
   let agent_type = match agent_type_override with
     | Some t -> t
@@ -127,14 +129,14 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
     else Nickname.generate agent_type
   in
   let agent_file_dedup =
-    Filename.concat (agents_dir_in_room config room_id) (safe_filename nickname ^ ".json")
+    Filename.concat (agents_dir scoped) (safe_filename nickname ^ ".json")
   in
   if Sys.file_exists agent_file_dedup then begin
-    let existing_json = read_json config agent_file_dedup in
+    let existing_json = read_json scoped agent_file_dedup in
     (match agent_of_yojson existing_json with
      | Ok existing_agent ->
          let updated = { existing_agent with last_seen = now_iso () } in
-         write_json config agent_file_dedup (agent_to_yojson updated)
+         write_json scoped agent_file_dedup (agent_to_yojson updated)
      | Error _ -> ());
     Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname room_id
   end else begin
@@ -149,7 +151,7 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
       parent_task;
     } in
     let agent_file =
-      Filename.concat (agents_dir_in_room config room_id) (safe_filename nickname ^ ".json")
+      Filename.concat (agents_dir scoped) (safe_filename nickname ^ ".json")
     in
     let agent = {
       name = nickname;
@@ -161,16 +163,16 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
       last_seen = now_iso ();
       meta = Some meta;
     } in
-    write_json config agent_file (agent_to_yojson agent);
-    let _ = update_state_in_room config room_id (fun s ->
+    write_json scoped agent_file (agent_to_yojson agent);
+    let _ = update_state scoped (fun s ->
       let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
       { s with active_agents = agents }
     ) in
     let _ =
-      broadcast_in_room config ~room_id ~from_agent:nickname
+      broadcast scoped ~from_agent:nickname
         ~content:(Printf.sprintf "👋 %s joined the room" nickname)
     in
-    log_event config (Printf.sprintf
+    log_event scoped (Printf.sprintf
       "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
       room_id
       nickname
@@ -850,16 +852,18 @@ let room_enter config ~room_id ?(agent_name="") ~agent_type () : Yojson.Safe.t =
             with e -> Printf.eprintf "[WARN] room: auto-leave from %s failed: %s\n%!" prev (Printexc.to_string e))
        | _ -> ());
 
-      (* Update current room *)
+      (* Update current room file (for external tools) and create scoped config *)
       write_current_room config room_id;
+      let target_scope = if room_id = "default" then Default else Named room_id in
+      let scoped = with_scope config target_scope in
 
       (* Initialize the room on first entry (no auto-join). *)
-      if not (is_initialized config) then
-        (try ignore (init config ~agent_name:None)
+      if not (is_initialized scoped) then
+        (try ignore (init scoped ~agent_name:None)
          with e -> Printf.eprintf "[WARN] room: init failed for %s: %s\n%!" room_id (Printexc.to_string e));
 
-      (* Join the new room *)
-      let join_result = join config ~agent_name:effective_agent_name ~capabilities:[] () in
+      (* Join the new room using scoped config *)
+      let join_result = join scoped ~agent_name:effective_agent_name ~capabilities:[] () in
 
       (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
       let nickname =

@@ -4,7 +4,6 @@
     linked team session.  Extracted from keeper_turn.ml. *)
 
 open Keeper_types
-open Keeper_memory
 
 type tool_result = Keeper_types.tool_result
 

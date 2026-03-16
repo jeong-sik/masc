@@ -340,6 +340,7 @@
    debate
    mention_inbox
    agent_reputation
+   reputation_evolution
    activity_feed
    social
    tool_social

@@ -558,3 +558,62 @@ let load_and_format_for_welcome ~fs:_ (config : config) : string =
     | exn ->
         Printf.eprintf "[WARN] Unexpected institution load error: %s\n%!" (Printexc.to_string exn); ""
   else ""
+
+(** {1 Lightweight JSONL Episode Recording (No Eio Required)}
+
+    Append-only episode log for contexts that don't have Eio fs.
+    Used by Lodge heartbeat, keeper decisions, etc.
+    Storage: .masc/institution_episodes.jsonl *)
+
+let episodes_jsonl_path () =
+  let me_root = Env_config.me_root () in
+  Filename.concat me_root ".masc/institution_episodes.jsonl"
+
+(** Record an episode to JSONL without Eio context.
+    This is the primary entry point for Lodge/Keeper integration. *)
+let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings =
+  let episode : episode = {
+    id = Printf.sprintf "ep-%d-%06d"
+      (int_of_float (Time_compat.now ())) (Level4_config.random_int 999999);
+    timestamp = Time_compat.now ();
+    participants;
+    event_type;
+    summary;
+    outcome;
+    learnings;
+    context = [];
+  } in
+  let path = episodes_jsonl_path () in
+  (try
+    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
+    output_string oc (Yojson.Safe.to_string (episode_to_json episode));
+    output_char oc '\n';
+    close_out oc
+  with exn ->
+    Printf.eprintf "[institution] JSONL episode write failed: %s\n%!"
+      (Printexc.to_string exn));
+  episode
+
+(** Load recent episodes from JSONL (last N entries). *)
+let load_recent_episodes_jsonl ~limit : episode list =
+  let path = episodes_jsonl_path () in
+  if not (Sys.file_exists path) then []
+  else begin
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let eps = ref [] in
+      (try while true do
+        let line = input_line ic in
+        if String.length line > 0 then
+          (try eps := episode_of_json (Yojson.Safe.from_string line) :: !eps
+           with _ -> ())
+      done with End_of_file -> ());
+      let all = List.rev !eps in
+      let total = List.length all in
+      if total <= limit then all
+      else
+        let rec drop n = function
+          | [] -> [] | _ when n <= 0 -> all | _ :: rest -> drop (n-1) rest
+        in
+        drop (total - limit) all)
+  end

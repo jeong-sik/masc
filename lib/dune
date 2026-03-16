@@ -40,6 +40,9 @@
    cp_unit
    cp_snapshot
    cp_lifecycle
+   cp_lifecycle_swarm_live
+   cp_lifecycle_search
+   cp_lifecycle_intents
    cp_lifecycle_policy
    compression_dict
    config
@@ -518,6 +521,9 @@
    mcts_tree
    speculative_engine)
 (private_modules
+ cp_lifecycle_swarm_live
+ cp_lifecycle_search
+ cp_lifecycle_intents
  dashboard_http_helpers
  dashboard_http_monitoring
  dashboard_http_keeper

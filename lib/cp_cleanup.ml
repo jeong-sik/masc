@@ -7,6 +7,14 @@
 
 include Cp_io
 
+(** Build a hash set from a string list for O(1) membership checks *)
+let string_set_of_list xs =
+  let tbl = Hashtbl.create (List.length xs) in
+  List.iter (fun x -> Hashtbl.replace tbl x ()) xs;
+  tbl
+
+let mem_set tbl key = Hashtbl.mem tbl key
+
 type cleanup_result = {
   dead_units_removed : int;
   orphaned_units_removed : int;
@@ -54,14 +62,14 @@ let find_dead_units ~days units =
 
 (** Find orphaned units: parent_unit_id references a non-existent unit *)
 let find_orphaned_units units =
-  let unit_ids =
-    List.map (fun (unit : unit_record) -> unit.unit_id) units
+  let id_set =
+    string_set_of_list (List.map (fun (u : unit_record) -> u.unit_id) units)
   in
   List.filter
     (fun (unit : unit_record) ->
       match unit.parent_unit_id with
       | None -> false
-      | Some parent_id -> not (List.mem parent_id unit_ids))
+      | Some parent_id -> not (mem_set id_set parent_id))
     units
 
 (** Check if an operation status is terminal *)
@@ -79,9 +87,10 @@ let find_terminal_operations ~days operations =
 
 (** Find orphaned detachments: operation_id references no existing operation *)
 let find_orphaned_detachments ~operation_ids detachments =
+  let op_set = string_set_of_list operation_ids in
   List.filter
     (fun (det : detachment_record) ->
-      not (List.mem det.operation_id operation_ids))
+      not (mem_set op_set det.operation_id))
     detachments
 
 (** Find dropped intents older than threshold *)
@@ -129,14 +138,11 @@ let cleanup_dead_units config ~days units =
   let dead = find_dead_units ~days units in
   if dead = [] then (units, 0)
   else begin
-    let dead_ids =
-      List.map (fun (unit : unit_record) -> unit.unit_id) dead
+    let dead_set =
+      string_set_of_list (List.map (fun (u : unit_record) -> u.unit_id) dead)
     in
     let kept =
-      List.filter
-        (fun (unit : unit_record) ->
-          not (List.mem unit.unit_id dead_ids))
-        units
+      List.filter (fun (u : unit_record) -> not (mem_set dead_set u.unit_id)) units
     in
     write_units config kept;
     (kept, List.length dead)
@@ -147,14 +153,11 @@ let cleanup_orphaned_units config units =
   let orphaned = find_orphaned_units units in
   if orphaned = [] then (units, 0)
   else begin
-    let orphaned_ids =
-      List.map (fun (unit : unit_record) -> unit.unit_id) orphaned
+    let orphan_set =
+      string_set_of_list (List.map (fun (u : unit_record) -> u.unit_id) orphaned)
     in
     let kept =
-      List.filter
-        (fun (unit : unit_record) ->
-          not (List.mem unit.unit_id orphaned_ids))
-        units
+      List.filter (fun (u : unit_record) -> not (mem_set orphan_set u.unit_id)) units
     in
     write_units config kept;
     (kept, List.length orphaned)
@@ -166,14 +169,11 @@ let archive_terminal_operations config ~days operations =
   if terminal = [] then (operations, 0)
   else begin
     archive_operations config terminal;
-    let terminal_ids =
-      List.map (fun (op : operation_record) -> op.operation_id) terminal
+    let terminal_set =
+      string_set_of_list (List.map (fun (op : operation_record) -> op.operation_id) terminal)
     in
     let kept =
-      List.filter
-        (fun (op : operation_record) ->
-          not (List.mem op.operation_id terminal_ids))
-        operations
+      List.filter (fun (op : operation_record) -> not (mem_set terminal_set op.operation_id)) operations
     in
     write_operations config kept;
     (kept, List.length terminal)
@@ -184,14 +184,11 @@ let cleanup_orphaned_detachments config ~operation_ids detachments =
   let orphaned = find_orphaned_detachments ~operation_ids detachments in
   if orphaned = [] then (detachments, 0)
   else begin
-    let orphaned_ids =
-      List.map (fun (det : detachment_record) -> det.detachment_id) orphaned
+    let orphan_set =
+      string_set_of_list (List.map (fun (det : detachment_record) -> det.detachment_id) orphaned)
     in
     let kept =
-      List.filter
-        (fun (det : detachment_record) ->
-          not (List.mem det.detachment_id orphaned_ids))
-        detachments
+      List.filter (fun (det : detachment_record) -> not (mem_set orphan_set det.detachment_id)) detachments
     in
     write_detachments config kept;
     (kept, List.length orphaned)
@@ -202,14 +199,11 @@ let cleanup_dropped_intents config ~days intents =
   let dropped = find_dropped_intents ~days intents in
   if dropped = [] then (intents, 0)
   else begin
-    let dropped_ids =
-      List.map (fun (intent : intent_record) -> intent.intent_id) dropped
+    let drop_set =
+      string_set_of_list (List.map (fun (i : intent_record) -> i.intent_id) dropped)
     in
     let kept =
-      List.filter
-        (fun (intent : intent_record) ->
-          not (List.mem intent.intent_id dropped_ids))
-        intents
+      List.filter (fun (i : intent_record) -> not (mem_set drop_set i.intent_id)) intents
     in
     write_intents config kept;
     (kept, List.length dropped)

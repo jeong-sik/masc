@@ -16,6 +16,7 @@ include Cp_lifecycle_policy
    Room_gc cannot directly reference Cp_cleanup (which depends on Room via
    Cp_io -> Cp_paths -> Room), so we use a ref-based callback. *)
 let () =
+  Room_gc.cp_cleanup_connected := true;
   Room_gc.cp_cleanup_fn :=
     (fun config ->
       let r = Cp_cleanup.cleanup_cp config in

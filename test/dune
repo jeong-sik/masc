@@ -958,6 +958,18 @@
  (modules test_tool_trace_hooks)
  (libraries masc_mcp alcotest yojson))
 
+; Tool Permissions — capability-based access control (Harness Sprint 3)
+(test
+ (name test_tool_permissions)
+ (modules test_tool_permissions)
+ (libraries masc_mcp alcotest yojson))
+
+; SSE Room Filter — room-based event isolation (Harness Sprint 3)
+(test
+ (name test_sse_room_filter)
+ (modules test_sse_room_filter)
+ (libraries masc_mcp alcotest yojson))
+
 ; Tool Unified — unified query interface across catalog, registry, dispatch (P4 Phase 4.4)
 (test
  (name test_tool_unified)

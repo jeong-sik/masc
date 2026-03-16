@@ -368,6 +368,8 @@
    tool_result
    tool_dispatch
    tool_trace_hooks
+   tool_permissions
+   sse_room_filter
    tool_inline_dispatch
    tool_unified
    tool_help_registry

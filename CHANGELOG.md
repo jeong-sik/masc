@@ -1,6 +1,22 @@
 # Changelog
 
 
+## [2.101.0] - 2026-03-17
+
+### Fixed
+- **PG connection exhaustion** — pool max_size 10→3, `MASC_PG_POOL_SIZE` env config (#1274)
+- **Init fiber crash isolation** — Eio.Time.with_timeout_exn for lock cleanup, Eio.Fiber.fork per subsystem (#1257)
+- **Governance case dedup** — deduplicate by source_refs (#1276)
+- **claim_next re-claim** — auto-release previous claim (#1278)
+- **Goal title validation** — require title for new goal (#1280)
+- **28 silent exception patterns** surfaced with proper logging (#1252)
+- **8 silent failures** surfaced with error logging (#1248)
+- **Dashboard stale-while-revalidate** — prevent server hang (#1251)
+
+### Changed
+- **OAS agent_sdk** — upgrade to v0.40.0 (#1277)
+- **LLM model names** — remove hardcoded, use provider-level defaults (#1250)
+
 ## [2.100.0] - 2026-03-16
 
 ### Fixed

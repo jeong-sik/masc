@@ -62,12 +62,42 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     let existing_json = read_json config agent_file_dedup in
     (match agent_of_yojson existing_json with
      | Ok existing_agent ->
-       let updated = { existing_agent with last_seen = now_iso () } in
+       let is_inactive = existing_agent.status = Inactive in
+       let new_session_id = if is_inactive then generate_session_id () else
+         match existing_agent.meta with Some m -> m.session_id | None -> generate_session_id ()
+       in
+       let new_meta : agent_meta = {
+         session_id = new_session_id;
+         agent_type;
+         pid;
+         hostname = (match hostname with Some h -> Some h | None -> get_hostname ());
+         tty = (match tty with Some t -> Some t | None -> get_tty ());
+         worktree;
+         parent_task;
+       } in
+       let updated = { existing_agent with
+         status = Active;
+         last_seen = now_iso ();
+         capabilities;
+         meta = Some new_meta;
+       } in
        write_json config agent_file_dedup (agent_to_yojson updated);
        if is_pg_backend config then begin
          let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
          let _ = backend_set config ~key:agent_key
                    ~value:(Yojson.Safe.to_string (agent_to_yojson updated)) in ()
+       end;
+       if is_inactive then begin
+         (* Restore to active_agents on rejoin *)
+         let _ = update_state config (fun s ->
+           let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
+           { s with active_agents = agents }
+         ) in
+         let _ = broadcast config ~from_agent:nickname
+                   ~content:(Printf.sprintf "👋 %s rejoined the room" nickname) in
+         log_event config (Printf.sprintf
+           "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
+           nickname agent_type new_session_id (now_iso ()))
        end
      | Error _ -> ());
     Printf.sprintf "✅ %s already in room (last_seen updated)" nickname
@@ -157,8 +187,22 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
     let existing_json = read_json scoped agent_file_dedup in
     (match agent_of_yojson existing_json with
      | Ok existing_agent ->
-         let updated = { existing_agent with last_seen = now_iso () } in
-         write_json scoped agent_file_dedup (agent_to_yojson updated)
+         let is_inactive = existing_agent.status = Inactive in
+         let updated = { existing_agent with
+           status = Active;
+           last_seen = now_iso ();
+           capabilities;
+         } in
+         write_json scoped agent_file_dedup (agent_to_yojson updated);
+         if is_inactive then begin
+           let _ = update_state scoped (fun s ->
+             let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
+             { s with active_agents = agents }
+           ) in
+           let _ = broadcast scoped ~from_agent:nickname
+                     ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname room_id) in
+           ()
+         end
      | Error _ -> ());
     Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname room_id
   end else begin
@@ -226,13 +270,24 @@ let leave config ~agent_name =
       false
   in
   if in_fs || in_backend then begin
-    (* Remove from filesystem if exists *)
-    if in_fs then Sys.remove agent_file;
-    (* Remove from PostgreSQL backend if applicable *)
+    (* Mark agent as Inactive instead of deleting, so re-join can restore identity.
+       This prevents orphan state when the same agent_type re-joins later. *)
+    (if in_fs then
+      let existing_json = read_json config agent_file in
+      match agent_of_yojson existing_json with
+      | Ok existing_agent ->
+        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
+        write_json config agent_file (agent_to_yojson updated)
+      | Error _ -> ());
     if is_pg_backend config then begin
       let agent_key = Printf.sprintf "agents:%s" (safe_filename actual_name) in
-      let _ = backend_delete config ~key:agent_key in
-      ()
+      (* Update backend entry to Inactive as well *)
+      (if in_fs then
+        let updated_json = read_json config agent_file in
+        let _ = backend_set config ~key:agent_key
+                  ~value:(Yojson.Safe.to_string updated_json) in ()
+      else
+        let _ = backend_delete config ~key:agent_key in ())
     end;
 
     let _ = update_state config (fun s ->

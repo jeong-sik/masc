@@ -17,6 +17,7 @@ type tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Role_filtered of Mode.mode
 
 (** {1 Network Context for LLM Chain Calls} *)
 
@@ -3186,7 +3187,7 @@ let handle_call_tool_eio ~sw ~clock ?(profile = Full) ?mcp_session_id ?auth_toke
             raise
               (Invalid_argument
                  ("managed agent tool translation failed: " ^ msg)))
-    | Full | Operator_remote ->
+    | Full | Operator_remote | Role_filtered _ ->
         (params |> U.member "name" |> U.to_string, params |> U.member "arguments")
   in
   let is_read_only = Tool_dispatch.is_read_only name in
@@ -3433,6 +3434,9 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
       dedupe_tool_schemas_by_name
         (Agent_swarm_contract.sdk_tool_schemas @ passthrough)
   | Operator_remote -> Tool_operator.remote_schemas
+  | Role_filtered mode ->
+      let categories = Mode.categories_for_mode mode in
+      Config.enabled_tool_schemas ~include_hidden ~include_deprecated categories
 
 let tool_allowed_in_profile state profile tool_name =
   match profile with
@@ -3442,6 +3446,8 @@ let tool_allowed_in_profile state profile tool_name =
       |> List.exists (fun (schema : Types.tool_schema) ->
              String.equal schema.name tool_name)
   | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
+  | Role_filtered mode ->
+      Mode.is_tool_enabled (Mode.categories_for_mode mode) tool_name
 
 let is_destructive_tool_name name =
   let lowered = String.lowercase_ascii name in
@@ -3839,7 +3845,7 @@ let handle_initialize_eio ?(profile = Full) id params =
              ( "instructions",
                `String
                  (match profile with
-                 | Full -> default_instructions
+                 | Full | Role_filtered _ -> default_instructions
                  | Managed_agent -> managed_agent_instructions
                  | Operator_remote -> operator_remote_instructions) );
            ]))

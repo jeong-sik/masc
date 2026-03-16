@@ -33,6 +33,7 @@ let profile_label = function
   | Mcp_eio.Full -> "/mcp"
   | Mcp_eio.Managed_agent -> "/mcp/managed"
   | Mcp_eio.Operator_remote -> "/mcp/operator"
+  | Mcp_eio.Role_filtered mode -> Printf.sprintf "/mcp/role/%s" (Mode.mode_to_string mode)
 
 let validate_mcp_session_profile ~profile session_id =
   match Hashtbl.find_opt mcp_profile_by_session session_id with
@@ -56,7 +57,7 @@ let validate_mcp_session_delete_profile ~profile session_id =
           Error
             (Printf.sprintf "Session %s is not registered on %s." session_id
                (profile_label profile)))
-  | Mcp_eio.Full | Mcp_eio.Managed_agent ->
+  | Mcp_eio.Full | Mcp_eio.Managed_agent | Mcp_eio.Role_filtered _ ->
       validate_mcp_session_profile ~profile session_id
 
 let protocol_version_from_body body_str =

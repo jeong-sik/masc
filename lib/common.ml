@@ -31,3 +31,13 @@ let protect ~module_name ~finally_label ~finally f =
            handle_finalizer_error ~module_name ~label:finally_label
              ~during_exception:true ~backtrace:bt2 ex2);
       Printexc.raise_with_backtrace ex bt
+
+(** BUG-016: Truncate large tool responses to prevent MCP transport overload.
+    Default max: 64KB. Appends truncation metadata when trimmed. *)
+let truncate_response ?(max_bytes=65536) ~total_count response =
+  let len = String.length response in
+  if len <= max_bytes then response
+  else
+    let truncated = String.sub response 0 max_bytes in
+    Printf.sprintf "%s\n\n... [truncated: %d/%d bytes shown, total_count=%d]"
+      truncated max_bytes len total_count

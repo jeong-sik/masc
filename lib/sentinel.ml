@@ -531,7 +531,22 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
             ~requested_action:None ~source_refs:[] ~created_by:agent_name with
           | Ok result ->
               incr petitions_created;
-              let merged_label = if result.merged then " (merged)" else "" in
+              (* Auto-submit brief for new cases to unblock ruling pipeline *)
+              if not result.merged then begin
+                match Council.Governance_v2.submit_brief base_path
+                  ~case_id:result.case_.id
+                  ~author:agent_name
+                  ~stance:Council.Governance_v2.Support
+                  ~summary:"Automated: threshold exceeded, conditions confirmed by sentinel sweep"
+                  ~evidence_refs:["sentinel_threshold_check"] with
+                | Ok _case ->
+                    log_info (sprintf "governance auto-brief submitted for case %s"
+                      result.case_.id)
+                | Error msg ->
+                    log_warn (sprintf "governance auto-brief failed for case %s: %s"
+                      result.case_.id msg)
+              end;
+              let merged_label = if result.merged then " (merged)" else " (new + auto-brief)" in
               log_info (sprintf "governance petition: %s -> case %s%s"
                 title result.case_.id merged_label)
           | Error msg ->
@@ -545,18 +560,22 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
           match t.task_status with
           | Types.Claimed { assignee; claimed_at } ->
               let age = now_f -. (parse_iso_or_epoch claimed_at) in
-              if age > stuck_threshold then
+              if age > stuck_threshold then begin
+                log_debug (sprintf "stuck task %s: claimed by %s, %.0fh ago"
+                  t.id assignee (age /. 3600.0));
                 submit
-                  ~title:(sprintf "Stuck task: %s (claimed by %s, %.0fh ago)"
-                    t.title assignee (age /. 3600.0))
+                  ~title:(sprintf "Stuck task: %s (claimed by %s)" t.title assignee)
                   ~subject_type:"task" ~risk_class:Council.Governance_v2.Low
+              end
           | Types.InProgress { assignee; started_at } ->
               let age = now_f -. (parse_iso_or_epoch started_at) in
-              if age > stuck_threshold then
+              if age > stuck_threshold then begin
+                log_debug (sprintf "stuck task %s: in_progress by %s, %.0fh ago"
+                  t.id assignee (age /. 3600.0));
                 submit
-                  ~title:(sprintf "Stuck task: %s (in_progress by %s, %.0fh ago)"
-                    t.title assignee (age /. 3600.0))
+                  ~title:(sprintf "Stuck task: %s (in_progress by %s)" t.title assignee)
                   ~subject_type:"task" ~risk_class:Council.Governance_v2.Low
+              end
           | _ -> ()
         ) backlog.tasks;
 

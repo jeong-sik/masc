@@ -129,7 +129,8 @@ let test_categories_standard () =
   check bool "has health" true (List.mem Mode.Health cats);
   check bool "has plan" true (List.mem Mode.Plan cats);
   check bool "has board" true (List.mem Mode.Board cats);
-  check int "count" 6 (List.length cats)
+  check bool "has consensus" true (List.mem Mode.Consensus cats);
+  check int "count" 7 (List.length cats)
 
 let test_categories_parallel () =
   let cats = Mode.categories_for_mode Mode.Parallel in

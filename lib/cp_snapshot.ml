@@ -6,6 +6,7 @@ type snapshot_state = {
   managed_units : unit_record list;
   units : unit_record list;
   source : string;
+  sessions : Team_session_types.session list;
   intents : intent_record list;
   operations : operation_record list;
   detachments : detachment_record list;
@@ -16,11 +17,16 @@ type snapshot_state = {
   unit_lookup : (string * unit_record) list;
 }
 
-let build_snapshot_state config =
+let build_snapshot_state ?sessions config =
   let agents, managed_units, units, source = topology_units config in
+  let sessions =
+    match sessions with
+    | Some s -> s
+    | None -> Team_session_store.list_sessions config
+  in
   let intents = read_intents config in
-  let operations = all_operations config units in
-  let detachments = all_detachments config units operations in
+  let operations = all_operations ~sessions config units in
+  let detachments = all_detachments ~sessions config units operations in
   let decisions = all_policy_decisions config in
   let live_agents = live_agent_names agents in
   let status_map = agent_status_map agents in
@@ -32,6 +38,7 @@ let build_snapshot_state config =
     managed_units;
     units;
     source;
+    sessions;
     intents;
     operations;
     detachments;
@@ -950,8 +957,8 @@ let intents_summary_json_from_state (state : snapshot_state) =
       ("intents", `List (List.map intent_to_json state.intents));
     ]
 
-let summary_json config =
-  let state = build_snapshot_state config in
+let summary_json ?sessions config =
+  let state = build_snapshot_state ?sessions config in
   let alerts =
     list_alerts_json_from_state config state
     |> U.member "summary"

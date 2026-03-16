@@ -31,19 +31,19 @@ let agent_card : Agent_card.agent_card = {
   skills = [
     { id = "heartbeat"; name = "Heartbeat";
       description = Some "Keep sentinel visible in the room";
-      tags = ["governance"]; tool_count = 0;
+      tags = ["monitoring"]; tool_count = 0;
       input_modes = []; output_modes = ["application/json"] };
     { id = "board-patrol"; name = "Board Patrol";
       description = Some "LLM-driven stale post detection";
-      tags = ["governance"]; tool_count = 0;
+      tags = ["monitoring"]; tool_count = 0;
       input_modes = []; output_modes = ["application/json"] };
     { id = "task-hygiene"; name = "Task Hygiene";
       description = Some "LLM-driven orphaned/stuck task detection";
-      tags = ["governance"]; tool_count = 0;
+      tags = ["monitoring"]; tool_count = 0;
       input_modes = []; output_modes = ["application/json"] };
     { id = "keeper-health"; name = "Keeper Health";
       description = Some "LLM-driven stale keeper monitoring";
-      tags = ["governance"]; tool_count = 0;
+      tags = ["monitoring"]; tool_count = 0;
       input_modes = []; output_modes = ["application/json"] };
   ];
   supported_interfaces = [];
@@ -504,10 +504,9 @@ let make_keeper_health_consumer _config : (module Pulse.Consumer) =
         Error msg
   end)
 
-(** Governance sweep consumer: collects candidate issues (stuck tasks,
-    keeper failures, flagged posts), asks LLM to assess each, then
-    auto-generates governance petitions for confirmed issues.
-    Falls back to threshold-based submission when LLM is unavailable. *)
+(** Governance sweep consumer: detects stuck tasks and keeper failures,
+    then auto-generates governance petitions via Governance_v2.
+    No LLM dependency — purely data-driven threshold checks. *)
 let make_governance_sweep_consumer config : (module Pulse.Consumer) =
   (module struct
     let name = "sentinel-governance-sweep"
@@ -530,9 +529,6 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
               log_warn (sprintf "governance petition failed: %s -- %s" title msg)
         in
 
-        (* Collect all candidates *)
-        let candidates = ref [] in
-
         (* 1. Tasks stuck > threshold (default 24h) *)
         let stuck_threshold = Env_config.Sentinel.governance_task_stuck_sec in
         let backlog = Room.read_backlog config in
@@ -541,19 +537,17 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
           | Types.Claimed { assignee; claimed_at } ->
               let age = now_f -. (parse_iso_or_epoch claimed_at) in
               if age > stuck_threshold then
-                candidates := (sprintf "- task:%s status=claimed assignee=%s age=%.0fh title=%s"
-                  t.id assignee (age /. 3600.0) t.title,
-                  t.title, "task", Council.Governance_v2.Low,
-                  sprintf "Stuck task: %s (claimed by %s, %.0fh ago)" t.title assignee (age /. 3600.0)
-                ) :: !candidates
+                submit
+                  ~title:(sprintf "Stuck task: %s (claimed by %s, %.0fh ago)"
+                    t.title assignee (age /. 3600.0))
+                  ~subject_type:"task" ~risk_class:Council.Governance_v2.Low
           | Types.InProgress { assignee; started_at } ->
               let age = now_f -. (parse_iso_or_epoch started_at) in
               if age > stuck_threshold then
-                candidates := (sprintf "- task:%s status=in_progress assignee=%s age=%.0fh title=%s"
-                  t.id assignee (age /. 3600.0) t.title,
-                  t.title, "task", Council.Governance_v2.Low,
-                  sprintf "Stuck task: %s (in_progress by %s, %.0fh ago)" t.title assignee (age /. 3600.0)
-                ) :: !candidates
+                submit
+                  ~title:(sprintf "Stuck task: %s (in_progress by %s, %.0fh ago)"
+                    t.title assignee (age /. 3600.0))
+                  ~subject_type:"task" ~risk_class:Council.Governance_v2.Low
           | _ -> ()
         ) backlog.tasks;
 
@@ -576,11 +570,10 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
                 in
                 if consecutive_failures >= 3 then begin
                   let keeper_name = Filename.chop_suffix fname ".json" in
-                  candidates := (sprintf "- keeper:%s consecutive_failures=%d"
-                    keeper_name consecutive_failures,
-                    keeper_name, "keeper", Council.Governance_v2.High,
-                    sprintf "Keeper %s failing (%d consecutive failures)" keeper_name consecutive_failures
-                  ) :: !candidates
+                  submit
+                    ~title:(sprintf "Keeper %s failing (%d consecutive failures)"
+                      keeper_name consecutive_failures)
+                    ~subject_type:"keeper" ~risk_class:Council.Governance_v2.High
                 end
               with _ -> ()
             end
@@ -590,71 +583,12 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
         let board_posts = (try Board_dispatch.list_posts ~limit:50 ()
                            with _ -> []) in
         List.iter (fun (p : Board.post) ->
-          if p.votes_down >= 3 && p.votes_down > p.votes_up then begin
-            let author_str = Board.Agent_id.to_string p.author in
-            candidates := (sprintf "- post:%s author=%s votes_down=%d votes_up=%d"
-              (Board.Post_id.to_string p.id) author_str p.votes_down p.votes_up,
-              author_str, "board_post", Council.Governance_v2.Low,
-              sprintf "Flagged post by %s (down=%d, up=%d)" author_str p.votes_down p.votes_up
-            ) :: !candidates
-          end
+          if p.votes_down >= 3 && p.votes_down > p.votes_up then
+            submit
+              ~title:(sprintf "Flagged post by %s (down=%d, up=%d)"
+                (Board.Agent_id.to_string p.author) p.votes_down p.votes_up)
+              ~subject_type:"board_post" ~risk_class:Council.Governance_v2.Low
         ) board_posts;
-
-        if !candidates <> [] then begin
-          let candidate_lines = List.map (fun (line, _, _, _, _) -> line) !candidates in
-          let candidate_list_str = String.concat "\n" candidate_lines in
-
-          (* LLM-first: ask LLM to assess each candidate *)
-          let llm_result = call_sentinel_llm
-            ~cascade_name:"sentinel_governance"
-            ~prompt_id:"sentinel-governance-sweep"
-            ~vars:[("candidate_list", candidate_list_str)] () in
-
-          match llm_result with
-          | Some (`List items) ->
-              log_debug (sprintf "governance sweep LLM assessed %d candidates" (List.length items));
-              List.iter (fun item ->
-                let open Yojson.Safe.Util in
-                let action = item |> member "action" |> to_string_option
-                             |> Option.value ~default:"ignore" in
-                let id = item |> member "id" |> to_string_option
-                         |> Option.value ~default:"?" in
-                let title_override = item |> member "title" |> to_string_option in
-                let risk = item |> member "risk" |> to_string_option
-                           |> Option.value ~default:"low" in
-                if action = "petition" || action = "submit" then begin
-                  (* Find matching candidate for subject_type and risk_class *)
-                  let matching = List.find_opt (fun (line, _, _, _, _) ->
-                    let has_id = try String.sub line 0 (String.length line)
-                                 |> fun s -> String.length s > 0 && (
-                                   try ignore (Str.search_forward (Str.regexp_string id) s 0); true
-                                   with Not_found -> false)
-                    with _ -> false in
-                    has_id
-                  ) !candidates in
-                  match matching with
-                  | Some (_, _, subject_type, default_risk, default_title) ->
-                      let risk_class = match risk with
-                        | "high" -> Council.Governance_v2.High
-                        | _ -> default_risk
-                      in
-                      let title = match title_override with
-                        | Some t when String.length (String.trim t) > 5 -> t
-                        | _ -> default_title
-                      in
-                      submit ~title ~subject_type ~risk_class
-                  | None ->
-                      log_debug (sprintf "governance LLM referenced unknown candidate: %s" id)
-                end
-              ) items
-          | _ ->
-              (* Fallback: LLM unavailable, submit all candidates directly *)
-              log_debug (sprintf "governance sweep: LLM unavailable, threshold fallback for %d candidates"
-                (List.length !candidates));
-              List.iter (fun (_, _, subject_type, risk_class, title) ->
-                submit ~title ~subject_type ~risk_class
-              ) !candidates
-        end;
 
         if !petitions_created > 0 then
           log_info (sprintf "governance sweep: %d petition(s) created" !petitions_created)

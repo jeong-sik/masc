@@ -158,8 +158,8 @@ let handle_request
     ~handle_call_tool_eio:(fun ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params ->
        Mcp_server_eio_call_tool.handle_call_tool_eio
          ~execute_tool_eio
-         ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-         ~broadcast_tools_list_changed:(fun () -> ())
+         ~maybe_emit_resource_notifications:Mcp_server_eio_protocol.maybe_emit_resource_notifications
+         ~broadcast_tools_list_changed:Mcp_server_eio_protocol.broadcast_tools_list_changed
          ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params)
     ~handle_read_resource_eio:Mcp_server_eio_resource.handle_read_resource_eio
     ~clock ~sw

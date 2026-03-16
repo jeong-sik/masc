@@ -36,7 +36,11 @@ MASC는 OAS 위에 멀티에이전트 협업 기능을 확장한다:
 | `oas_compat.ml` | OAS v0.23+ 구조화된 `tool_result` 타입으로 MASC 결과 변환 |
 | `oas_events.ml` | MASC 조율 이벤트를 OAS Event_bus `Custom("masc:*")` 포맷으로 발행 |
 
-### 1.3 Keeper란 무엇인가
+### 1.3 Persona와 Agent의 관계
+
+과거에는 Persona와 Agent가 별도 엔티티였으나, 현재는 Agent로 통합되었다. Persona는 Agent의 프로필 설정 메커니즘(`profile.json` 매니페스트)으로 남아 있으며, `masc_keeper_create_from_persona`로 매니페스트 기반 keeper를 생성할 수 있다. 코드에서 `keeper_persona.ml`이 이 기능을 담당한다.
+
+### 1.4 Keeper란 무엇인가
 
 Keeper는 OAS의 Persistent Agent를 MASC Room 위에서 운용하는 단위다.
 
@@ -46,7 +50,7 @@ Keeper는 OAS의 Persistent Agent를 MASC Room 위에서 운용하는 단위다.
 - **컨텍스트 관리**: 3-tier 임계값 기반으로 compaction → handoff 자동 수행
 - **세대 교체**: context 한도 도달 시 DNA 추출 → successor 에이전트로 handoff
 
-### 1.4 Agent vs Keeper
+### 1.5 Agent vs Keeper
 
 | 항목 | Agent | Keeper |
 |------|-------|--------|
@@ -57,13 +61,13 @@ Keeper는 OAS의 Persistent Agent를 MASC Room 위에서 운용하는 단위다.
 | Proactive 행동 | 없음 | 지원 (idle 감지, drift, deliberation) |
 | DNA/Handoff | 없음 | 자동 (generation 증가) |
 
-### 1.5 Generation (세대)
+### 1.6 Generation (세대)
 
 Generation은 keeper의 context handoff 횟수를 나타내는 정수다. keeper가 처음 생성되면 generation=1이며, context가 handoff threshold(기본 85%)를 초과하여 successor에게 전달될 때마다 1씩 증가한다.
 
 같은 keeper 이름이라도 generation이 다르면 다른 "세대"의 실행이다. trace_id로 각 세대를 고유하게 식별하며, trace_history에 이전 세대의 trace_id가 누적된다.
 
-### 1.6 핵심 용어
+### 1.7 핵심 용어
 
 자세한 정의는 [GLOSSARY.md](./GLOSSARY.md) 참조. 코드와 이 매뉴얼에서 사용하는 주요 용어:
 
@@ -175,7 +179,7 @@ Keepalive는 Eio fiber로 구현되어 주기적으로 실행된다.
 
 | 파라미터 | 기본값 | 설명 |
 |----------|--------|------|
-| `presence_keepalive_sec` | 30초 | heartbeat 주기 (최소 30, 최대 300) |
+| `presence_keepalive_sec` | 30초 | heartbeat 주기 (권장 범위: 30~300초, 코드 강제는 아님) |
 | jitter | base * 20% | 주기에 추가되는 랜덤 지연 |
 | snapshot_interval_sec | 60초 | JSONL 메트릭 스냅샷 간격 (환경변수 `MASC_KEEPER_SNAPSHOT_SEC`) |
 

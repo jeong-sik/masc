@@ -92,7 +92,7 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 Keeper/Agent 시스템의 사용자 가이드는 [KEEPER-USER-MANUAL.md](./docs/KEEPER-USER-MANUAL.md)를 참조한다.
 
 - 대시보드 필드 레퍼런스 (출처별 분류, `-` 값 진단)
-- 페르소나 매니페스트 작성법 ([예시](./docs/examples/persona-example.json))
+- Agent 프로필 매니페스트 작성법 ([예시](./docs/examples/persona-example.json))
 - 모델 cascade, 라이프사이클, 트러블슈팅
 
 ## Architecture Map

@@ -445,6 +445,9 @@
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
+   llm_types
+   llm_transport
+   llm_orchestration
    llm_client
    llm_response_cache
    context_manager

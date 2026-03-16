@@ -16,9 +16,11 @@ let agent_card : Agent_card.agent_card = {
   skills = [
     { id = "zombie-cleanup"; name = "Zombie Cleanup";
       description = Some "Remove stale room entries";
+      tags = ["housekeeping"]; tool_count = 0;
       input_modes = []; output_modes = ["application/json"] };
     { id = "garbage-collection"; name = "Garbage Collection";
       description = Some "Purge old records beyond retention window";
+      tags = ["housekeeping"]; tool_count = 0;
       input_modes = []; output_modes = ["application/json"] };
   ];
   supported_interfaces = [];

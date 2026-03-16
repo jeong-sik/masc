@@ -1,6 +1,47 @@
 # Changelog
 
 
+## [2.96.0] - 2026-03-16
+
+### Added
+- **Role_filtered tool_profile** — mode-based tool filtering for agent profiles (#1163)
+- **A2A dynamic skill registry** — tool discoverability metadata for agent-to-agent (#1115)
+- **OAS Guardian/Sentinel/Gardener integration** — Agent Card + Event_bus (#1112)
+- **OAS type adapters** — Context_reducer integration (#1111)
+- **.mli interfaces** — chain_executor_eio, keeper_execution, keeper_turn (#1160)
+
+### Changed (God File Refactoring Campaign)
+- **cp_lifecycle** — extract policy and dispatch to `cp_lifecycle_policy.ml` (#1167)
+- **tool_team_session** — extract handle_step (#1164), schemas (#1121), routing and spawn (#1169)
+- **mcp_server** — extract governance, helpers, and inline dispatch (#1168)
+- **chain_executor** — extract helper functions to dedicated module (#1132)
+- **room** — split `room.ml` into Room_state + Room_vote + Room_gc (#1124)
+- **dashboard** — split 1000+ line files into domain modules (#1117)
+- **operator** — extract pending_confirm and digest to dedicated modules (#1135)
+- **sentinel** — LLM-first governance sweep with threshold fallback (#1123)
+- **team_session** — replace manual JSON converters with OAS SDK yojson (#1166)
+- **OAS** — bump to v0.24.0, remove oas_compat, extract magic numbers (#1116)
+- **OAS** — fix responsibility boundary violations at OAS interface (#1136)
+
+### Performance
+- **A2A Agent Card cache** — generation-based invalidation (#1158)
+- **operator snapshot** — eliminate N+1 queries (#1133), eliminate redundant DB queries (#1120)
+- **dashboard** — eliminate triple session scan in execution pipeline (#1129)
+
+### Fixed
+- **OAS** — tag collision safety and tool_call_id preservation (#1119)
+- **OAS** — add missing disable_parallel_tool_use field to Checkpoint record (#1118)
+- **A2A** — resolve empty skills and JSON backward compat (#1127)
+- **build** — add missing skill record fields and remove duplicate checkpoint field (#1128)
+- **build** — make default target include dashboard build (#1110)
+- **dashboard** — use shell counts for fast initial render on Home (#1122)
+- **deploy** — Railway healthcheck timeout adjustments (#1161, #1165)
+- **deploy** — add MASC_WORKSPACE_ROOT env (#1113)
+- **CI** — smoke healthcheck non-fatal and --network host (#1131), timeout increase (#1130)
+- **config** — add MASC_GUARDIAN_ENABLED=true to lodge.env (#1134)
+- **test** — align spawn tests with removed tool surface entries (#1170)
+- **test** — update source_guard assertion for gitignored dashboard assets (#1114)
+
 ## [2.93.0] - 2026-03-16
 
 ### Changed

@@ -31,15 +31,19 @@ let agent_card : Agent_card.agent_card = {
   skills = [
     { id = "heartbeat"; name = "Heartbeat";
       description = Some "Keep sentinel visible in the room";
+      tags = ["governance"]; tool_count = 0;
       input_modes = []; output_modes = ["application/json"] };
     { id = "board-patrol"; name = "Board Patrol";
       description = Some "LLM-driven stale post detection";
+      tags = ["governance"]; tool_count = 0;
       input_modes = []; output_modes = ["application/json"] };
     { id = "task-hygiene"; name = "Task Hygiene";
       description = Some "LLM-driven orphaned/stuck task detection";
+      tags = ["governance"]; tool_count = 0;
       input_modes = []; output_modes = ["application/json"] };
     { id = "keeper-health"; name = "Keeper Health";
       description = Some "LLM-driven stale keeper monitoring";
+      tags = ["governance"]; tool_count = 0;
       input_modes = []; output_modes = ["application/json"] };
   ];
   supported_interfaces = [];

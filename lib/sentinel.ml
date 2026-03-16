@@ -278,39 +278,78 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
             ~prompt_id:"sentinel-task-hygiene"
             ~vars:[("task_list", task_list_str)] () in
 
-          let warnings = match llm_result with
-            | Some (`List items) ->
-                log_debug (sprintf "task hygiene LLM assessed %d tasks" (List.length items));
-                List.filter_map (fun item ->
-                  let open Yojson.Safe.Util in
-                  let action = item |> member "action" |> to_string_option
-                               |> Option.value ~default:"ignore" in
-                  if action = "ignore" then None
-                  else
-                    let task_id = item |> member "task_id" |> to_string_option
-                                  |> Option.value ~default:"?" in
-                    let reason = item |> member "reason" |> to_string_option
-                                 |> Option.value ~default:"" in
-                    let priority = item |> member "priority" |> to_string_option
-                                   |> Option.value ~default:"medium" in
-                    Some (sprintf "task %s: %s [%s] %s" task_id action priority reason)
-                ) items
-            | _ ->
-                log_debug (sprintf "%d candidate stuck tasks, LLM unavailable — skipping"
-                  (List.length !candidates));
-                []
-          in
-
-          if warnings <> [] then begin
-            Log.Sentinel.warn "%d task warning(s)" (List.length warnings);
-            List.iter (fun w -> Log.Sentinel.warn "  %s" w) warnings;
-            Sse.broadcast (`Assoc [
-              ("type", `String "sentinel_warning");
-              ("source", `String agent_name);
-              ("warnings", `List (List.map (fun w -> `String w) warnings));
-              ("ts", `String (Types.now_iso ()));
-            ])
-          end
+          (match llm_result with
+           | Some (`List items) ->
+               log_debug
+                 (sprintf "task hygiene LLM assessed %d tasks" (List.length items));
+               let warnings = ref [] in
+               List.iter
+                 (fun item ->
+                   let open Yojson.Safe.Util in
+                   let action =
+                     item |> member "action" |> to_string_option
+                     |> Option.value ~default:"ignore"
+                   in
+                   let task_id =
+                     item |> member "task_id" |> to_string_option
+                     |> Option.value ~default:"?"
+                   in
+                   let reason =
+                     item |> member "reason" |> to_string_option
+                     |> Option.value ~default:""
+                   in
+                   let priority =
+                     item |> member "priority" |> to_string_option
+                     |> Option.value ~default:"medium"
+                   in
+                   match action with
+                   | "ignore" -> ()
+                   | "reassign" -> (
+                       match
+                         Room.force_release_task_r config ~agent_name ~task_id ()
+                       with
+                       | Ok _msg ->
+                           Log.Sentinel.info "auto-released %s → todo (%s)" task_id
+                             reason;
+                           Sse.broadcast
+                             (`Assoc
+                               [
+                                 ("type", `String "sentinel_auto_reassign");
+                                 ("source", `String agent_name);
+                                 ("task_id", `String task_id);
+                                 ("reason", `String reason);
+                                 ("priority", `String priority);
+                                 ("ts", `String (Types.now_iso ()));
+                               ])
+                       | Error e ->
+                           log_debug
+                             (sprintf "auto-release %s skipped: %s" task_id
+                                (Types.masc_error_to_string e)))
+                   | _ ->
+                       warnings :=
+                         sprintf "task %s: %s [%s] %s" task_id action priority
+                           reason
+                         :: !warnings)
+                 items;
+               let all_warnings = List.rev !warnings in
+               if all_warnings <> [] then begin
+                 Log.Sentinel.warn "%d task warning(s)"
+                   (List.length all_warnings);
+                 List.iter (fun w -> Log.Sentinel.warn "  %s" w) all_warnings;
+                 Sse.broadcast
+                   (`Assoc
+                     [
+                       ("type", `String "sentinel_warning");
+                       ("source", `String agent_name);
+                       ( "warnings",
+                         `List (List.map (fun w -> `String w) all_warnings) );
+                       ("ts", `String (Types.now_iso ()));
+                     ])
+               end
+           | _ ->
+               log_debug
+                 (sprintf "%d candidate stuck tasks, LLM unavailable — skipping"
+                    (List.length !candidates)))
         end;
         Ok ()
       with exn ->

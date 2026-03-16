@@ -824,6 +824,10 @@ let rec build_tree_json ~child_map ~unit_lookup ~agent_statuses ~live_agents ~op
         else if !reasons <> [] then "warn"
         else "ok"
       in
+      let cleanup_days = Env_config_runtime.Cp.cleanup_days in
+      let stale_cutoff = Cp_cleanup.cutoff_iso ~days:cleanup_days in
+      let is_stale = unit.updated_at < stale_cutoff in
+      if is_stale then reasons := "stale" :: !reasons;
       Some
         (`Assoc
           [
@@ -831,7 +835,15 @@ let rec build_tree_json ~child_map ~unit_lookup ~agent_statuses ~live_agents ~op
             ("leader_status", `String leader_status);
             ("roster_total", `Int (List.length unit.roster));
             ("roster_live", `Int live_roster);
+            ("roster_health",
+             `Assoc
+               [
+                 ("total", `Int (List.length unit.roster));
+                 ("live", `Int live_roster);
+                 ("offline", `Int (List.length unit.roster - live_roster));
+               ]);
             ("active_operation_count", `Int descendant_op_count);
+            ("is_stale", `Bool is_stale);
             ("health", `String health);
             ("reasons", json_list_of_strings (List.rev !reasons));
             ("children", `List children);

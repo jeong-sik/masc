@@ -17,6 +17,63 @@ type snapshot_state = {
   unit_lookup : (string * unit_record) list;
 }
 
+let count_operation_statuses operations =
+  List.fold_left
+    (fun (acc : operation_status_counts) (op : operation_record) ->
+      match op.status with
+      | Planned -> { acc with planned_count = acc.planned_count + 1 }
+      | Active -> { acc with active_count = acc.active_count + 1 }
+      | Paused -> { acc with paused_count = acc.paused_count + 1 }
+      | Completed -> { acc with completed_count = acc.completed_count + 1 }
+      | Failed -> { acc with failed_count = acc.failed_count + 1 }
+      | Cancelled -> { acc with cancelled_count = acc.cancelled_count + 1 })
+    { planned_count = 0; active_count = 0; paused_count = 0;
+      completed_count = 0; failed_count = 0; cancelled_count = 0 }
+    operations
+
+let build_topology_summary ~units ~managed_units ~agents ~operations =
+  let stale_cutoff = Cp_cleanup.cutoff_iso ~days:Env_config_runtime.Cp.cleanup_days in
+  let op_counts = count_operation_statuses operations in
+  {
+    total_units = List.length units;
+    company_count = List.length (List.filter (fun (u : unit_record) -> u.kind = Company) units);
+    platoon_count = List.length (List.filter (fun (u : unit_record) -> u.kind = Platoon) units);
+    squad_count = List.length (List.filter (fun (u : unit_record) -> u.kind = Squad) units);
+    leaf_agent_unit_count = List.length (List.filter (fun (u : unit_record) -> u.kind = Agent_unit) units);
+    live_agent_count = List.length (live_agent_names agents);
+    managed_unit_count = List.length managed_units;
+    active_operation_count = op_counts.planned_count + op_counts.active_count + op_counts.paused_count;
+    stale_unit_count =
+      List.length (List.filter (fun (u : unit_record) -> u.updated_at < stale_cutoff) units);
+    operation_status_counts = op_counts;
+  }
+
+let operation_status_counts_to_json (c : operation_status_counts) =
+  `Assoc
+    [
+      ("planned", `Int c.planned_count);
+      ("active", `Int c.active_count);
+      ("paused", `Int c.paused_count);
+      ("completed", `Int c.completed_count);
+      ("failed", `Int c.failed_count);
+      ("cancelled", `Int c.cancelled_count);
+    ]
+
+let topology_summary_to_json (s : topology_summary) =
+  `Assoc
+    [
+      ("total_units", `Int s.total_units);
+      ("company_count", `Int s.company_count);
+      ("platoon_count", `Int s.platoon_count);
+      ("squad_count", `Int s.squad_count);
+      ("leaf_agent_unit_count", `Int s.leaf_agent_unit_count);
+      ("live_agent_count", `Int s.live_agent_count);
+      ("managed_unit_count", `Int s.managed_unit_count);
+      ("active_operation_count", `Int s.active_operation_count);
+      ("stale_unit_count", `Int s.stale_unit_count);
+      ("operation_status_counts", operation_status_counts_to_json s.operation_status_counts);
+    ]
+
 let build_snapshot_state ?sessions config =
   let agents, managed_units, units, source = topology_units config in
   let sessions =
@@ -73,38 +130,13 @@ let topology_json_from_state (state : snapshot_state) =
              ~agent_statuses:(agent_status_map agents)
              ~live_agents:(live_agent_names agents) ~operations unit.unit_id)
   in
-  let summary =
-    {
-      total_units = List.length units;
-      company_count = List.length (List.filter (fun (unit : unit_record) -> unit.kind = Company) units);
-      platoon_count = List.length (List.filter (fun (unit : unit_record) -> unit.kind = Platoon) units);
-      squad_count = List.length (List.filter (fun (unit : unit_record) -> unit.kind = Squad) units);
-      leaf_agent_unit_count = List.length (List.filter (fun (unit : unit_record) -> unit.kind = Agent_unit) units);
-      live_agent_count = List.length (live_agent_names agents);
-      managed_unit_count = List.length managed_units;
-      active_operation_count =
-        operations
-        |> List.filter (fun (operation : operation_record) -> active_operation_status operation.status)
-        |> List.length;
-    }
-  in
+  let summary = build_topology_summary ~units ~managed_units ~agents ~operations in
   `Assoc
     [
       ("version", `String "cp-v2");
       ("generated_at", `String (Types.now_iso ()));
       ("source", `String source);
-      ( "summary",
-        `Assoc
-          [
-            ("total_units", `Int summary.total_units);
-            ("company_count", `Int summary.company_count);
-            ("platoon_count", `Int summary.platoon_count);
-            ("squad_count", `Int summary.squad_count);
-            ("leaf_agent_unit_count", `Int summary.leaf_agent_unit_count);
-            ("live_agent_count", `Int summary.live_agent_count);
-            ("managed_unit_count", `Int summary.managed_unit_count);
-            ("active_operation_count", `Int summary.active_operation_count);
-          ] );
+      ("summary", topology_summary_to_json summary);
       ("units", `List trees);
     ]
 
@@ -764,54 +796,15 @@ let swarm_proof_json config =
 
 let topology_summary_json_from_state (state : snapshot_state) =
   let summary =
-    {
-      total_units = List.length state.units;
-      company_count =
-        List.length
-          (List.filter
-             (fun (unit : unit_record) -> unit.kind = Company)
-             state.units);
-      platoon_count =
-        List.length
-          (List.filter
-             (fun (unit : unit_record) -> unit.kind = Platoon)
-             state.units);
-      squad_count =
-        List.length
-          (List.filter
-             (fun (unit : unit_record) -> unit.kind = Squad)
-             state.units);
-      leaf_agent_unit_count =
-        List.length
-          (List.filter
-             (fun (unit : unit_record) -> unit.kind = Agent_unit)
-             state.units);
-      live_agent_count = List.length state.live_agents;
-      managed_unit_count = List.length state.managed_units;
-      active_operation_count =
-        state.operations
-        |> List.filter (fun (operation : operation_record) ->
-               active_operation_status operation.status)
-        |> List.length;
-    }
+    build_topology_summary ~units:state.units ~managed_units:state.managed_units
+      ~agents:state.agents ~operations:state.operations
   in
   `Assoc
     [
       ("version", `String "cp-v2");
       ("generated_at", `String (Types.now_iso ()));
       ("source", `String state.source);
-      ( "summary",
-        `Assoc
-          [
-            ("total_units", `Int summary.total_units);
-            ("company_count", `Int summary.company_count);
-            ("platoon_count", `Int summary.platoon_count);
-            ("squad_count", `Int summary.squad_count);
-            ("leaf_agent_unit_count", `Int summary.leaf_agent_unit_count);
-            ("live_agent_count", `Int summary.live_agent_count);
-            ("managed_unit_count", `Int summary.managed_unit_count);
-            ("active_operation_count", `Int summary.active_operation_count);
-          ] );
+      ("summary", topology_summary_to_json summary);
     ]
 
 let operations_summary_json_from_state (state : snapshot_state) =
@@ -896,17 +889,22 @@ let operations_summary_json_from_state (state : snapshot_state) =
          (fun (operation : operation_record) -> operation.source = "managed")
          state.operations)
   in
-  let active_count =
-    List.length
-      (List.filter
-         (fun (operation : operation_record) -> operation.status = Active)
-         state.operations)
-  in
-  let paused_count =
-    List.length
-      (List.filter
-         (fun (operation : operation_record) -> operation.status = Paused)
-         state.operations)
+  let op_counts = count_operation_statuses state.operations in
+  let recent_active =
+    state.operations
+    |> List.filter (fun (op : operation_record) -> active_operation_status op.status)
+    |> List.sort (fun (a : operation_record) (b : operation_record) ->
+           compare b.updated_at a.updated_at)
+    |> (fun ops -> if List.length ops > 10 then List.filteri (fun i _ -> i < 10) ops else ops)
+    |> List.map (fun (op : operation_record) ->
+           `Assoc
+             [
+               ("operation_id", `String op.operation_id);
+               ("objective", `String op.objective);
+               ("status", `String (string_of_operation_status op.status));
+               ("assigned_unit_id", `String op.assigned_unit_id);
+               ("updated_at", `String op.updated_at);
+             ])
   in
   let microarch = Cp_microarch_summary.summary_json ~search_rows in
   `Assoc
@@ -917,11 +915,16 @@ let operations_summary_json_from_state (state : snapshot_state) =
         `Assoc
           [
             ("total", `Int (List.length state.operations));
-            ("active", `Int active_count);
-            ("paused", `Int paused_count);
+            ("active", `Int op_counts.active_count);
+            ("planned", `Int op_counts.planned_count);
+            ("paused", `Int op_counts.paused_count);
+            ("completed", `Int op_counts.completed_count);
+            ("failed", `Int op_counts.failed_count);
+            ("cancelled", `Int op_counts.cancelled_count);
             ("managed", `Int managed_count);
             ("projected", `Int (List.length state.operations - managed_count));
           ] );
+      ("recent_active", `List recent_active);
       ("microarch", microarch);
     ]
 

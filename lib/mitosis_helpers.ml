@@ -119,7 +119,7 @@ let queue_episode ~base_path ~session_id ~agent_name ~generation
     Printf.printf "[EPISODE/QUEUE] Queued episode %s (gen %d) → %s\n%!" ep_id generation file;
     Some ep_id
   with exn ->
-    Printf.eprintf "[EPISODE/ERROR] Failed to queue episode: %s\n%!" (Printexc.to_string exn);
+    Log.Misc.error "episode queue failed: %s" (Printexc.to_string exn);
     None
 
 (** Saga status tracking for async handoff *)
@@ -151,7 +151,7 @@ let write_saga_state ~base_path ~saga_id ~status ~payload : string option =
       (fun () -> output_string oc (Yojson.Safe.pretty_to_string json));
     Some file
   with exn ->
-    Printf.eprintf "[MITOSIS/SAGA] Failed writing %s: %s\n%!" file (Printexc.to_string exn);
+    Log.Misc.error "mitosis saga write failed %s: %s" file (Printexc.to_string exn);
     None
 
 (** Get current session ID from environment or generate *)

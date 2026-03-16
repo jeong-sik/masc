@@ -218,7 +218,8 @@ let serve ~sw ~clock ~socket ~request_handler =
       Eio.Fiber.fork ~sw (fun () ->
           Eio.Switch.run (fun conn_sw ->
               Eio.Switch.on_release conn_sw (fun () ->
-                  try Eio.Flow.close flow with _ -> ());
+                  try Eio.Flow.close flow
+                  with exn -> Log.Misc.warn "flow close: %s" (Printexc.to_string exn));
               try
                 let conn_handler =
                   Httpun_eio.Server.create_connection_handler ~sw:conn_sw
@@ -251,7 +252,8 @@ let serve ~sw ~clock ~socket ~request_handler =
       if is_cancelled exn then ()
       else begin
         Log.Misc.error "Accept error: %s" (Printexc.to_string exn);
-        (try Eio.Time.sleep clock backoff_s with _ -> ());
+        (try Eio.Time.sleep clock backoff_s
+         with exn -> Log.Misc.warn "backoff sleep: %s" (Printexc.to_string exn));
         accept_loop (Float.min 2.0 (backoff_s *. 1.5))
       end
   in

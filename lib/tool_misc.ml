@@ -793,7 +793,8 @@ let handle_purge_test_data ctx args =
     if Sys.file_exists agents_path then
       Sys.readdir agents_path |> Array.iter (fun name ->
         if String.length name > 5 && String.sub name 0 5 = "test-" then begin
-          (try Sys.remove (Filename.concat agents_path name) with _ -> ());
+          (try Sys.remove (Filename.concat agents_path name)
+           with Sys_error msg -> Log.Misc.warn "purge remove %s: %s" name msg);
           incr removed
         end);
     (* Remove test-* messages *)
@@ -801,7 +802,8 @@ let handle_purge_test_data ctx args =
     if Sys.file_exists messages_path then
       Sys.readdir messages_path |> Array.iter (fun name ->
         if String.length name > 5 && String.sub name 0 5 = "test-" then begin
-          (try Sys.remove (Filename.concat messages_path name) with _ -> ());
+          (try Sys.remove (Filename.concat messages_path name)
+           with Sys_error msg -> Log.Misc.warn "purge remove %s: %s" name msg);
           incr removed
         end);
     (true, Printf.sprintf "Purged %d test-* files" !removed)

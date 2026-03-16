@@ -190,7 +190,7 @@ let post_activity_report ~(result : heartbeat_result) =
          ("content", `String content);
        ])
        with exn ->
-         Printf.eprintf "[warn] %s: %s\n" __FUNCTION__ (Printexc.to_string exn))
+         Log.Misc.warn "%s: %s" __FUNCTION__ (Printexc.to_string exn))
     end
 
 (** {1 Daemon Loop} *)

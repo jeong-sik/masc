@@ -320,6 +320,8 @@
    tool_relay
    tool_goals
    tool_operator
+   tool_team_session_support
+   tool_team_session_handlers
    tool_team_session
    tool_team_session_routing
    tool_team_session_step

@@ -951,6 +951,54 @@
  (modules test_tool_dispatch)
  (libraries masc_mcp alcotest yojson))
 
+; Tool Result — structured tool result type (Harness Sprint 1)
+(test
+ (name test_tool_result)
+ (modules test_tool_result)
+ (libraries masc_mcp alcotest yojson))
+
+; Tool Hooks — pre/post dispatch hooks (Harness Sprint 2)
+(test
+ (name test_tool_hooks)
+ (modules test_tool_hooks)
+ (libraries masc_mcp alcotest yojson))
+
+; Tool Trace Hooks — trace span correlation (Harness Sprint 2)
+(test
+ (name test_tool_trace_hooks)
+ (modules test_tool_trace_hooks)
+ (libraries masc_mcp alcotest yojson))
+
+; Tool Permissions — capability-based access control (Harness Sprint 3)
+(test
+ (name test_tool_permissions)
+ (modules test_tool_permissions)
+ (libraries masc_mcp alcotest yojson))
+
+; SSE Room Filter — room-based event isolation (Harness Sprint 3)
+(test
+ (name test_sse_room_filter)
+ (modules test_sse_room_filter)
+ (libraries masc_mcp alcotest yojson))
+
+; Room Checkpoint — snapshot and restore (Harness Sprint 4)
+(test
+ (name test_room_checkpoint)
+ (modules test_room_checkpoint)
+ (libraries masc_mcp alcotest yojson))
+
+; Tool Metrics — per-tool timing percentiles (Harness Sprint 5)
+(test
+ (name test_tool_metrics)
+ (modules test_tool_metrics)
+ (libraries masc_mcp alcotest yojson))
+
+; Harness Health — subsystem health check (Harness Sprint 6)
+(test
+ (name test_harness_health)
+ (modules test_harness_health)
+ (libraries masc_mcp alcotest yojson))
+
 ; Tool Unified — unified query interface across catalog, registry, dispatch (P4 Phase 4.4)
 (test
  (name test_tool_unified)

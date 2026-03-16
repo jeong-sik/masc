@@ -45,6 +45,72 @@ let dispatch ~name ~args : (bool * string) option =
               (Printexc.to_string exn) ))
   | None -> None
 
+(** {2 Dispatch Hooks}
+
+    Pre-hooks run before the handler; post-hooks run after.
+    Multiple hooks are supported — they execute in registration order.
+
+    - Pre-hook returning [Some result] short-circuits (handler is skipped).
+      Use case: permission checks (Sprint 3), request logging.
+    - Post-hook transforms the result.  Identity function when observing only.
+      Use case: tracing spans (Sprint 2), metrics collection. *)
+
+(** Pre-hook: receives tool name and args before handler runs.
+    Return [None] to proceed, [Some result] to short-circuit. *)
+type pre_hook = name:string -> args:Yojson.Safe.t -> Tool_result.t option
+
+(** Post-hook: receives result after handler completes.
+    Return the (possibly transformed) result. *)
+type post_hook = Tool_result.t -> Tool_result.t
+
+let pre_hooks : pre_hook list ref = ref []
+let post_hooks : post_hook list ref = ref []
+
+let register_pre_hook (hook : pre_hook) =
+  pre_hooks := !pre_hooks @ [hook]
+
+let register_post_hook (hook : post_hook) =
+  post_hooks := !post_hooks @ [hook]
+
+let clear_hooks () =
+  pre_hooks := [];
+  post_hooks := []
+
+(** Run pre-hooks in order.  First [Some] wins (short-circuit). *)
+let run_pre_hooks ~name ~args =
+  let rec go = function
+    | [] -> None
+    | hook :: rest ->
+      (match hook ~name ~args with
+       | Some _ as result -> result
+       | None -> go rest)
+  in
+  go !pre_hooks
+
+(** Run post-hooks in order, threading the result through. *)
+let run_post_hooks result =
+  List.fold_left (fun r hook -> hook r) result !post_hooks
+
+(** Structured dispatch with hook support.
+
+    Execution order: pre-hooks → handler → post-hooks.
+
+    If a pre-hook short-circuits, the handler and post-hooks are skipped
+    and the pre-hook's result is returned directly.
+
+    Returns [None] when the tool is unknown to the registry. *)
+let dispatch_structured ~name ~args : Tool_result.t option =
+  (* Pre-hooks: may short-circuit *)
+  match run_pre_hooks ~name ~args with
+  | Some _ as blocked -> blocked
+  | None ->
+    let start_time = Time_compat.now () in
+    (match dispatch ~name ~args with
+     | Some (success, message) ->
+       let result = Tool_result.wrap ~tool_name:name ~start_time (success, message) in
+       Some (run_post_hooks result)
+     | None -> None)
+
 (** Feature flag: use the new dispatch path. *)
 let v2_enabled =
   match Sys.getenv_opt "MASC_DISPATCH_V2" with

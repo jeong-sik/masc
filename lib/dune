@@ -423,6 +423,11 @@
    keeper_feedback_tool
    keeper_keepalive
    keeper_runtime
+   keeper_turn_session
+   keeper_turn_response
+   keeper_turn_setup
+   keeper_turn_up
+   keeper_turn_lifecycle
    keeper_turn
    keeper_status
    keeper_policy
@@ -579,7 +584,12 @@
  env_config_keeper
   keeper_exec_tools
   keeper_exec_status
-  keeper_exec_persona)
+  keeper_exec_persona
+  keeper_turn_session
+  keeper_turn_response
+  keeper_turn_setup
+  keeper_turn_up
+  keeper_turn_lifecycle)
  (libraries
    yojson
    base64

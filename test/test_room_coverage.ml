@@ -181,11 +181,14 @@ let test_claim_next_auto_releases_previous () =
     Alcotest.(check bool) "mentions released task" true (str_contains r2 "task-001");
     Alcotest.(check bool) "claims new task" true (str_contains r2 "task-002");
 
-    (* Verify task-001 is back to Todo (not orphaned) *)
-    let status = Room.status config in
-    Alcotest.(check bool) "task-001 released to todo" true
-      (str_contains status "task-001" &&
-       (str_contains status "todo" || str_contains status "Todo"))
+    (* Verify task-001 is back to Todo (not orphaned) via raw task data *)
+    let tasks = Room.get_tasks_raw config in
+    let task_001 = List.find_opt (fun (t : Types.task) -> t.id = "task-001") tasks in
+    (match task_001 with
+     | Some t ->
+         Alcotest.(check string) "task-001 released to todo"
+           "todo" (Types.task_status_to_string t.task_status)
+     | None -> Alcotest.fail "task-001 not found in backlog")
   )
 
 (** BUG-004: After auto-release, the released task is claimable by others. *)

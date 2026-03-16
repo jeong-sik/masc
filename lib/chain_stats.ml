@@ -349,16 +349,27 @@ let is_enabled () =
 
 (** {1 Model Statistics} *)
 
-(** Cost per 1K tokens by model (approximate) *)
-let cost_per_1k_tokens = function
-  | "gpt-4" | "gpt-4-turbo" -> 0.03
-  | "gpt-3.5-turbo" -> 0.002
-  | "claude-3-opus" | "claude-opus-4" -> 0.015
-  | "claude-3-sonnet" | "claude-sonnet-4" -> 0.003
-  | "claude-3-haiku" | "claude-haiku-4" -> 0.00025
-  | "gemini-pro" | "gemini-2.0-flash" -> 0.00025
-  | "codex" | "gpt-5.2-codex" -> 0.01
-  | _ -> 0.001  (* Default estimate *)
+let starts_with_prefix ~prefix s =
+  String.length s >= String.length prefix
+  && String.sub s 0 (String.length prefix) = prefix
+
+(** Cost per 1K tokens by provider prefix (approximate).
+    Uses prefix matching so concrete model versions don't need updating. *)
+let cost_per_1k_tokens model =
+  if starts_with_prefix ~prefix:"gpt-4" model then 0.03
+  else if starts_with_prefix ~prefix:"gpt-3" model then 0.002
+  else if starts_with_prefix ~prefix:"gpt-5" model then 0.01
+  else if starts_with_prefix ~prefix:"claude" model then (
+    if starts_with_prefix ~prefix:"claude-haiku" model
+       || starts_with_prefix ~prefix:"claude-3-haiku" model then 0.00025
+    else if starts_with_prefix ~prefix:"claude-opus" model
+       || starts_with_prefix ~prefix:"claude-3-opus" model then 0.015
+    else 0.003  (* sonnet-class default *)
+  )
+  else if starts_with_prefix ~prefix:"gemini" model then 0.00025
+  else if starts_with_prefix ~prefix:"glm" model then 0.001
+  else if starts_with_prefix ~prefix:"codex" model then 0.01
+  else 0.001  (* default estimate *)
 
 (** Calculate model-specific statistics *)
 let model_statistics () : model_stats list =

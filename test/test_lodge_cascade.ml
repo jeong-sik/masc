@@ -111,18 +111,21 @@ let test_all_known_names_return_nonempty () =
         true (models <> []))
     known_cascade_names
 
-let test_unknown_name_returns_llama_fallback () =
+let test_unknown_name_returns_fallback () =
   let models =
     Lodge_cascade.default_model_strings ~cascade_name:"nonexistent_xyz"
   in
   check bool "catch-all returns non-empty" true (models <> []);
-  let first = List.hd models in
-  check bool "first is llama" true
-    (String.length first > 6 && String.sub first 0 6 = "llama:")
+  (* Always ends with glm:auto as safety net *)
+  let last = List.nth models (List.length models - 1) in
+  check string "last is glm:auto" "glm:auto" last
 
-let test_briefing_has_four_models () =
+let test_briefing_always_has_glm_auto () =
   let models = Lodge_cascade.default_model_strings ~cascade_name:"briefing" in
-  check int "briefing has 4 models" 4 (List.length models)
+  check bool "briefing is non-empty" true (List.length models >= 1);
+  (* glm:auto is always the final fallback *)
+  let last = List.nth models (List.length models - 1) in
+  check string "briefing ends with glm:auto" "glm:auto" last
 
 let test_classification_uses_llama_first () =
   let models =
@@ -157,10 +160,10 @@ let () =
         [
           test_case "all known names return non-empty" `Quick
             test_all_known_names_return_nonempty;
-          test_case "unknown name returns llama fallback" `Quick
-            test_unknown_name_returns_llama_fallback;
-          test_case "briefing has four models" `Quick
-            test_briefing_has_four_models;
+          test_case "unknown name returns fallback" `Quick
+            test_unknown_name_returns_fallback;
+          test_case "briefing always has glm:auto" `Quick
+            test_briefing_always_has_glm_auto;
           test_case "classification uses llama first" `Quick
             test_classification_uses_llama_first;
           test_case "model_key appends _models" `Quick

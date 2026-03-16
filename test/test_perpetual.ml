@@ -729,9 +729,11 @@ let test_integration () = group "Integration" (fun () ->
 
   (* 3f. Llm_client message/usage roundtrip *)
   let test_msg = Llm_client.user_msg "test" in
-  let oas_m = Llm_client.to_oas_message test_msg in
-  let back_m = Llm_client.of_oas_message oas_m in
-  assert_true "oas_adapter:msg_roundtrip" (back_m.content = "test");
+  (match Llm_client.to_oas_message test_msg with
+   | None -> assert_true "oas_adapter:msg_roundtrip" false
+   | Some oas_m ->
+     let back_m = Llm_client.of_oas_message oas_m in
+     assert_true "oas_adapter:msg_roundtrip" (back_m.content = "test"));
 
   let test_usage : Llm_client.token_usage =
     { input_tokens = 100; output_tokens = 50; total_tokens = 150;

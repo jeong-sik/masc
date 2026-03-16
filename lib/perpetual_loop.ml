@@ -629,7 +629,7 @@ let run_turn ~config ~state =
                 total_cost = state.total_cost;
                 trace_id = state.trace_id;
               }
-            ~ctx:state.context ~goal:config.initial_goal in
+            ~ctx:state.context ~goal:config.initial_goal () in
           let checkpoint_path =
             Filename.concat config.session_base_dir (state.trace_id ^ ".json")
           in

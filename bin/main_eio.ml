@@ -296,6 +296,7 @@ let run_cmd host port base_path =
     (try
       Eio.Switch.run @@ fun sw ->
       switch_ref := Some sw;
+      Masc_mcp.Dashboard_cache.set_sw sw;
       run_server ~sw ~env ~host ~port ~base_path
     with
     | Shutdown ->

@@ -3,7 +3,12 @@
     OAS v0.23 changed tool_result from [(string, string) result]
     to [(tool_output, tool_error) result] with structured error types.
     This module bridges MASC's existing [(string, string) result] pattern
-    to the new OAS types without rewriting every tool closure. *)
+    to the new OAS types without rewriting every tool closure.
+
+    Note: This module remains necessary as long as masc-mcp tool closures
+    return [(string, string) result]. For message/provider conversions,
+    prefer [Llm_client.to_oas_message] and [Llm_client.to_oas_provider]
+    which are now the canonical adapters. *)
 
 (** Wrap a success string into [Ok { content }]. *)
 let tool_ok (content : string) : Agent_sdk.Types.tool_result =

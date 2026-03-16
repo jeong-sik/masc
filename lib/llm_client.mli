@@ -200,3 +200,22 @@ val model_spec_of_string : string -> (model_spec, string) result
 
 (** String representation of provider. *)
 val string_of_provider : provider -> string
+
+(** {1 OAS Type Adapters} *)
+
+(** Map a masc-mcp model_spec to an OAS Provider.config.
+    Returns None for Custom providers. *)
+val to_oas_provider : model_spec -> Agent_sdk.Provider.config option
+
+(** Convert a masc message to an OAS Types.message.
+    System and Tool roles map to User. *)
+val to_oas_message : message -> Agent_sdk.Types.message
+
+(** Convert an OAS Types.message back to a masc message. *)
+val of_oas_message : Agent_sdk.Types.message -> message
+
+(** Convert OAS api_usage to masc token_usage. *)
+val of_oas_usage : Agent_sdk.Types.api_usage -> token_usage
+
+(** Convert masc token_usage to OAS api_usage. *)
+val to_oas_usage : token_usage -> Agent_sdk.Types.api_usage

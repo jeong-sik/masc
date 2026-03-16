@@ -546,7 +546,9 @@ let load_scenario_world_presets ~base_dir : world_preset list =
             let path = Filename.concat scenarios_dir file_name in
             try
               Yojson.Safe.from_file path |> parse_scenario_world_preset
-            with exn -> let _ = exn in None)
+            with exn ->
+              Log.Trpg.warn "trpg_preset_store: scenario preset parse failed for %s: %s" path (Printexc.to_string exn);
+              None)
      with exn ->
        Log.Trpg.error "failed to load scenario presets from %s: %s"
          scenarios_dir (Printexc.to_string exn);

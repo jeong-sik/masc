@@ -207,7 +207,9 @@ let make_zero_zombie_consumer ~room_config
             try
               String.sub status_trimmed 0 (min 4 (String.length status_trimmed)) = "\xf0\x9f\xa7\x9f" ||
               String.length status_trimmed >= 7 && String.sub status_trimmed 0 7 = "Cleaned"
-            with exn -> let _ = exn in false
+            with exn ->
+              Log.Orchestrator.warn "zombie indicator check failed: %s" (Printexc.to_string exn);
+              false
           in
           if has_zombie_indicator then
             Log.Orchestrator.info "[zombie] %s" status_trimmed

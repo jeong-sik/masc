@@ -251,12 +251,16 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
                             backlog.tasks)
                      in
                      (unclaimed, failed)
-                   with _exn -> (0, 0))
+                   with exn ->
+                     Log.Keeper.warn "keepalive: task count query failed: %s" (Printexc.to_string exn);
+                     (0, 0))
                 in
                 let current_agent_count =
                   (try
                      List.length (Room.get_agents_raw ctx.config)
-                   with _exn -> 0)
+                   with exn ->
+                     Log.Keeper.warn "keepalive: agent count query failed: %s" (Printexc.to_string exn);
+                     0)
                 in
                 let agent_count_changed =
                   let last_count =

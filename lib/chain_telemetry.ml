@@ -240,7 +240,7 @@ let emit event =
   (* Call handlers outside of lock to avoid deadlocks *)
   List.iter (fun handler ->
     try handler event
-    with exn -> ignore exn (* Ignore handler errors *)
+    with exn -> Log.Chain.warn "chain_telemetry: event handler failed: %s" (Printexc.to_string exn)
   ) handlers
 
 (** {1 Subscription API} *)

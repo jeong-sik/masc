@@ -111,7 +111,9 @@ let load_plan ~agent_name ~date : daily_plan option =
         let buf = Bytes.create n in
         really_input ic buf 0 n;
         Yojson.Safe.from_string (Bytes.to_string buf) |> plan_of_json)
-    with exn -> let _ = exn in None
+    with exn ->
+      Log.Misc.warn "agent_planner: plan load failed: %s" (Printexc.to_string exn);
+      None
   end
 
 let save_plan (plan : daily_plan) =

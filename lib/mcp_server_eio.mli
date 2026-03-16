@@ -29,6 +29,7 @@ type tool_profile =
   | Full
   | Managed_agent
   | Operator_remote
+  | Role_filtered of Mode.mode
 
 (** {1 JSON-RPC Helpers (re-exported)} *)
 

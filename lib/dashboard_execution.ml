@@ -120,37 +120,32 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
         else []
       in
       Eio.Fiber.yield ();
+      (* Compute directly without Dashboard_cache to avoid nested
+         get_or_compute deadlock — the caller (dashboard_execution_http_json)
+         already wraps this entire function in a cache entry. *)
       let snapshot_json =
-        Dashboard_cache.get_or_compute
-          (Printf.sprintf "snapshot:%s" effective_actor)
-          ~ttl:3.0
-          (fun () ->
-            Operator_control.snapshot_json
-              ~actor:effective_actor
-              ~view:"summary"
-              ~include_messages:false
-              ~include_sessions:true
-              ~include_keepers:true
-              ~sessions
-              ctx)
+        Operator_control.snapshot_json
+          ~actor:effective_actor
+          ~view:"summary"
+          ~include_messages:false
+          ~include_sessions:true
+          ~include_keepers:true
+          ~sessions
+          ctx
       in
       Eio.Fiber.yield ();
       let digest_json =
-        Dashboard_cache.get_or_compute
-          (Printf.sprintf "digest:%s" effective_actor)
-          ~ttl:5.0
-          (fun () ->
-            match Operator_control.digest_json ~actor:effective_actor ctx with
-            | Ok json -> json
-            | Error message ->
-                `Assoc
-                  [
-                    ("health", `String "warn");
-                    ("attention_items", `List []);
-                    ("recommended_actions", `List []);
-                    ("session_cards", `List []);
-                    ("error", `String message);
-                  ])
+        match Operator_control.digest_json ~actor:effective_actor ctx with
+        | Ok json -> json
+        | Error message ->
+            `Assoc
+              [
+                ("health", `String "warn");
+                ("attention_items", `List []);
+                ("recommended_actions", `List []);
+                ("session_cards", `List []);
+                ("error", `String message);
+              ]
       in
       let session_cards = list_field "session_cards" digest_json in
       let session_seeds =

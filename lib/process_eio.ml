@@ -124,16 +124,27 @@ let with_unix_capture ?env ?stdin_content (argv : string list)
              in
              let (_pid, status) = Unix.waitpid [] pid in
              on_success status output)
-       with _exn ->
-         Option.iter close_quietly !stdin_r_ref;
-         stdin_r_ref := None;
-         Option.iter close_quietly !stdin_w_ref;
-         stdin_w_ref := None;
-         Option.iter close_quietly !stdout_r_ref;
-         stdout_r_ref := None;
-         Option.iter close_quietly !stdout_w_ref;
-         stdout_w_ref := None;
-         on_error ())
+       with
+       | Eio.Cancel.Cancelled _ as exn ->
+           Option.iter close_quietly !stdin_r_ref;
+           stdin_r_ref := None;
+           Option.iter close_quietly !stdin_w_ref;
+           stdin_w_ref := None;
+           Option.iter close_quietly !stdout_r_ref;
+           stdout_r_ref := None;
+           Option.iter close_quietly !stdout_w_ref;
+           stdout_w_ref := None;
+           raise exn
+       | _exn ->
+           Option.iter close_quietly !stdin_r_ref;
+           stdin_r_ref := None;
+           Option.iter close_quietly !stdin_w_ref;
+           stdin_w_ref := None;
+           Option.iter close_quietly !stdout_r_ref;
+           stdout_r_ref := None;
+           Option.iter close_quietly !stdout_w_ref;
+           stdout_w_ref := None;
+           on_error ())
 
 let run_unix_argv_fallback ?env (argv : string list) : string =
   with_unix_capture ?env argv ~on_error:(fun () -> "")
@@ -178,6 +189,7 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
             Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec
               label;
             ""
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
               Eio.traceln
@@ -211,6 +223,7 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
             Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec
               label;
             ""
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
               Eio.traceln
@@ -257,6 +270,7 @@ let run_argv_with_stdin_and_status
             Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec
               label;
             (Unix.WSIGNALED Sys.sigterm, Buffer.contents buf)
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
               Eio.traceln
@@ -298,6 +312,7 @@ let run_argv_with_status ?(timeout_sec = 60.0) ?env (argv : string list) : Unix.
             Eio.traceln "[Process_eio] Timeout after %.0fs: %s" timeout_sec
               label;
             (Unix.WSIGNALED Sys.sigterm, Buffer.contents buf)
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             if should_retry_unix_fallback exn then (
               Eio.traceln

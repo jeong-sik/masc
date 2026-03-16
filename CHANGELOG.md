@@ -1,6 +1,28 @@
 # Changelog
 
 
+## [2.99.0] - 2026-03-16
+
+### Fixed
+- **Social system recovery** — sentinel auto-brief for governance deadlock, social eligibility relaxation, Standard+Consensus mode (#1179)
+- **QA AS1 critical+high bugs** — zombie detection, agent count, LLM permit, governance race condition, decision TTL, claim guard (#1196)
+- **Cloudflare Rocket Loader** — `data-cfasync="false"` on dashboard script tags
+- **Exhaustive match** — `Provider.Custom_registered` in agent_swarm_runner
+
+### Changed (God File Refactoring Campaign)
+- **keeper_turn** — split into 6 focused sub-modules: init, settings, handoff, context, metrics, response (#1199)
+- **keeper_execution** — split 2823 lines into keeper_exec_status, keeper_exec_tools, keeper_exec_llm, keeper_exec_social (#1200)
+- **handle_keeper_msg** — extract internals to module-level functions (#1178)
+- **env_config** — extract 11 hardcoded values into env-configurable functions (#1197)
+- **catch-all handlers** — narrow with log_keeper_exn (#1173, #1174) and log_mcp_exn (#1177)
+
+### Performance
+- **operator snapshot** — TTL cache for snapshot_json (#1176)
+
+### Infrastructure
+- **OAS** — update Raw_trace API for v0.29.0 (#1198)
+- **startup** — run resident loops in background fiber for fast HTTP readiness (#1175)
+
 ## [2.96.0] - 2026-03-16
 
 ### Added

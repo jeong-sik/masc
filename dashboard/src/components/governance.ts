@@ -535,6 +535,20 @@ function ActivityRail() {
   `
 }
 
+function GovernanceFreshnessStrip() {
+  const data = governanceData.value
+  if (!data) return null
+  const itemCount = data.items?.length ?? 0
+  const activityCount = data.activity?.length ?? 0
+  return html`
+    <div class="monitor-meta" style="margin-top:4px;margin-bottom:8px">
+      <span>데이터 범위: 진행 중 ${itemCount}건</span>
+      <span>최근 활동: ${activityCount}건</span>
+      ${data.generated_at ? html`<span>생성 시각: ${data.generated_at}</span>` : null}
+    </div>
+  `
+}
+
 export function Governance() {
   useEffect(() => {
     void refreshGovernance()
@@ -542,6 +556,7 @@ export function Governance() {
 
   return html`
     <div class="section-grid">
+      <${GovernanceFreshnessStrip} />
       <${GovernanceSummaryStrip} />
       <${GovernanceToolbar} />
       <div class="governance-layout">

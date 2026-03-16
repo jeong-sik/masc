@@ -352,6 +352,12 @@ export function Tools() {
           : null}
         <${ToolMetrics} />
       <//>
+      ${data?.generated_at
+        ? html`<div class="monitor-meta" style="margin-top:8px">
+            <span>생성 시각: ${data.generated_at}</span>
+            <span>metrics 기준: 최근 1시간</span>
+          </div>`
+        : null}
     </div>
   `
 }

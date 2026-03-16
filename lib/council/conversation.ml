@@ -300,8 +300,9 @@ let save_thread config (th : thread) : unit =
   write_json path (thread_to_yojson th)
 
 let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "")
-    ?(_mentions = []) ?source_post_id ()
+    ?(mentions : string list = []) ?source_post_id ()
     : (thread, string) result =
+  ignore mentions;
   ensure_dirs config;
   let id = generate_thread_id () in
   let now = Time_compat.now () in

@@ -1,5 +1,4 @@
 // MASC Dashboard — Home Overview Surface
-// Combines all overview sub-components into the Home landing view.
 
 import { html } from 'htm/preact'
 import { agents, keepers, tasks, shellCounts } from '../../store'
@@ -7,10 +6,12 @@ import { missionSnapshot } from '../../mission-store'
 import { journal } from '../../sse'
 import { navigate } from '../../router'
 import { QuickStats } from './quick-stats'
+import type { TaskBreakdown } from './quick-stats'
 import { EcosystemRing } from './ecosystem-ring'
 import { SessionStrip } from './session-strip'
 import { HealthBeacon } from './health-beacon'
 import { ActivityTicker } from './activity-ticker'
+import { KeeperSummaryCard } from './keeper-summary-card'
 import { DASHBOARD_SURFACES } from '../../config/navigation'
 
 export function Overview() {
@@ -20,27 +21,29 @@ export function Overview() {
   const taskList = tasks.value
   const counts = shellCounts.value
 
-  const activeAgents = agentList.filter(a =>
+  const activeAgents = agentList.filter((a: { status: string }) =>
     a.status === 'active' || a.status === 'busy' || a.status === 'listening'
   )
-  const activeTasks = taskList.filter(t =>
+  const activeTasks = taskList.filter((t: { status: string }) =>
     t.status === 'in_progress' || t.status === 'claimed'
   )
 
-  // Use shell counts as fallback when execution data hasn't loaded yet
   const agentCount = activeAgents.length > 0 ? activeAgents.length : (counts?.agents ?? 0)
   const taskCount = activeTasks.length > 0 ? activeTasks.length : (counts?.tasks ?? 0)
   const keeperCount = keeperList.length > 0 ? keeperList.length : (counts?.keepers ?? 0)
+
+  const taskBreakdown: TaskBreakdown = {
+    todo: taskList.filter((t: { status: string }) => t.status === 'todo').length,
+    claimed: taskList.filter((t: { status: string }) => t.status === 'claimed').length,
+    inProgress: taskList.filter((t: { status: string }) => t.status === 'in_progress').length,
+    done: taskList.filter((t: { status: string }) => t.status === 'done').length,
+  }
 
   const roomHealth = snap?.summary?.room_health ?? null
   const roomName = snap?.summary?.current_room ?? null
   const attentionCount = snap?.attention_queue?.length ?? snap?.summary?.pending_approvals ?? 0
   const sessions = snap?.sessions ?? snap?.session_briefs ?? []
 
-  // Keeper mini-cards for the health sidebar
-  const keeperBriefs = snap?.keeper_briefs ?? []
-
-  // Navigation surfaces (excluding home itself)
   const navSurfaces = DASHBOARD_SURFACES.filter(s => s.id !== 'home')
 
   return html`
@@ -50,6 +53,7 @@ export function Overview() {
         activeTaskCount=${taskCount}
         keeperCount=${keeperCount}
         attentionCount=${attentionCount}
+        taskBreakdown=${taskBreakdown}
       />
 
       <div class="overview-main">
@@ -75,23 +79,15 @@ export function Overview() {
           <div class="overview-section-label">시스템 상태</div>
           <${HealthBeacon} health=${roomHealth} />
 
-          ${keeperBriefs.length > 0 ? html`
+          ${keeperList.length > 0 ? html`
             <div class="overview-section-label" style="margin-top: var(--space-sm, 8px)">키퍼</div>
-            ${keeperBriefs.map(k => html`
-              <div class="keeper-mini-card" key=${k.name}>
-                <span class="keeper-mini-card__name">${k.name}</span>
-                <span class="keeper-mini-card__meta">
-                  ${k.status ?? ''}
-                  ${k.context_ratio != null ? ` / ctx ${Math.round(k.context_ratio * 100)}%` : ''}
-                  ${k.generation != null ? ` / gen ${k.generation}` : ''}
-                </span>
-              </div>
+            ${keeperList.map(k => html`
+              <${KeeperSummaryCard} key=${k.name} keeper=${k} />
             `)}
           ` : null}
         </div>
       </div>
 
-      <!-- Navigation to other surfaces (Home has no SideRail) -->
       <nav class="overview-nav-strip">
         ${navSurfaces.map(surface => html`
           <button

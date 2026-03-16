@@ -42,6 +42,12 @@ let log_event = function
     eprintf "[terminated] %s\n%!" reason
   | Perpetual_loop.CodingSpawn { agent; exit_code; elapsed_ms } ->
     eprintf "[coding] agent=%s exit=%d elapsed=%dms\n%!" agent exit_code elapsed_ms
+  | Perpetual_loop.TaskClaimed { task_id; title; priority } ->
+    eprintf "[auto-claim] Claimed [P%d] %s: %s\n%!" priority task_id title
+  | Perpetual_loop.TaskCompleted { task_id } ->
+    eprintf "[auto-claim] Completed: %s\n%!" task_id
+  | Perpetual_loop.ClaimSkipped reason ->
+    eprintf "[auto-claim] Skipped: %s\n%!" reason
 
 (* ================================================================ *)
 (* CLI Argument Parsing (simple, no cmdliner dependency)            *)

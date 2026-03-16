@@ -127,6 +127,7 @@ type context = {
   start_loop : (Perpetual_loop.loop_state -> Perpetual_loop.loop_config -> unit) option;
   sw : Eio.Switch.t option;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
+  room_config : Room_utils_backend_setup.config option;
 }
 
 (* ================================================================ *)
@@ -169,6 +170,8 @@ let handle_start ctx args =
       coding_timeout_s = coding_timeout;
       coding_sw = ctx.sw;
       coding_proc_mgr = ctx.proc_mgr;
+      room_config = ctx.room_config;
+      agent_name = ctx.agent_name;
       on_event = (fun ev ->
         match ev with
         | Perpetual_loop.TurnStart n ->
@@ -176,6 +179,10 @@ let handle_start ctx args =
         | Perpetual_loop.CodingSpawn { agent; exit_code; elapsed_ms } ->
           Log.Perpetual.info "agent=%s exit=%d elapsed=%dms"
             agent exit_code elapsed_ms
+        | Perpetual_loop.TaskClaimed { task_id; title; priority } ->
+          Log.Perpetual.info "Auto-claimed [P%d] %s: %s" priority task_id title
+        | Perpetual_loop.TaskCompleted { task_id } ->
+          Log.Perpetual.info "Task completed: %s" task_id
         | Perpetual_loop.Error e ->
           Log.Perpetual.error "%s" e
         | Perpetual_loop.Terminated reason ->

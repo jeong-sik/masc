@@ -1,7 +1,4 @@
-module U = Yojson.Safe.Util
 open Operator_pending_confirm
-
-let ( let* ) = Result.bind
 
 include Operator_digest_types
 include Operator_digest_session

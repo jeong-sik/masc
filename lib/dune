@@ -90,6 +90,9 @@
    server_routes_http_routes_command_plane_write
    server_routes_http_routes_social
    server_h2_gateway
+   server_h2_gateway_helpers
+   server_h2_gateway_cp_write
+   server_h2_gateway_routes_extra
    server_runtime_bootstrap
    server_command_plane_http
    server_command_plane_http_support
@@ -251,7 +254,11 @@
    noosphere_eio
    operator_pending_confirm
    operator_digest
+   operator_digest_types
+   operator_digest_session
    operator_control
+   operator_control_snapshot
+   operator_control_action
    operator_judgment
    notify
    orchestrator

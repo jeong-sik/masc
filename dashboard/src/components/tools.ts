@@ -140,6 +140,8 @@ function InventoryRow({ item }: { item: DashboardToolInventoryItem }) {
 
 const showBackToTop = signal(false)
 
+export { loadTools as refreshTools }
+
 export function Tools() {
   const data = toolsData.value
   const loading = toolsLoading.value

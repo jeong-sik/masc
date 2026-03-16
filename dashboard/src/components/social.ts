@@ -187,6 +187,8 @@ function KindBreakdown({ nodes }: { nodes: SocialGraphNode[] }) {
   `
 }
 
+export { loadGraph as refreshSocial }
+
 export function Social() {
   useEffect(() => { loadGraph() }, [])
 

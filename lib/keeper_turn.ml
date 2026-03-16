@@ -1143,6 +1143,918 @@ let maybe_handle_auto_team_session (ctx : _ context) (meta : keeper_meta)
             in
             Ok (Some (true, Yojson.Safe.pretty_to_string json), updated_meta))
 
+(* ── Shared types and helpers for handle_keeper_msg decomposition ───── *)
+
+(** Captures all turn-level values needed by the response builder. *)
+type turn_env = {
+  meta_turn : keeper_meta;
+  safe_reply : string;
+  final_usage : Llm_client.token_usage;
+  final_model_used : string;
+  final_latency_ms : int;
+  total_cost_usd_turn : float;
+  ctx_ratio : float;
+  ctx_work : Context_manager.working_context;
+  compacted : bool;
+  before_compact_tokens : int;
+  after_compact_tokens : int;
+  compaction_trigger : string option;
+  compaction_decision : string;
+  work_kind : string;
+  tool_call_count : int;
+  tools_used : string list;
+  effective_skill_route : keeper_skill_route;
+  skill_route_resolution : keeper_skill_route_resolution;
+  memory_check_json : Yojson.Safe.t;
+  auto_rules : keeper_auto_rule_eval;
+  drift_applied : bool;
+  drift_reason : string option;
+  repetition_risk : float;
+  goal_alignment : float;
+  response_alignment : float;
+  memory_notes_added : int;
+  memory_note_kinds : string list;
+  memory_top_kind : string option;
+  memory_compaction : memory_bank_compaction;
+  interesting_alert : interesting_alert_result;
+}
+
+(** Build the common JSON fields shared between normal-turn and handoff metrics/response. *)
+let build_turn_metrics_fields (env : turn_env) : (string * Yojson.Safe.t) list =
+  let meta = env.meta_turn in
+  [
+    ("model_used", `String env.final_model_used);
+    ("usage", `Assoc [
+      ("input_tokens", `Int env.final_usage.input_tokens);
+      ("output_tokens", `Int env.final_usage.output_tokens);
+      ("total_tokens", `Int env.final_usage.total_tokens);
+    ]);
+    ("latency_ms", `Int env.final_latency_ms);
+    ("cost_usd", `Float env.total_cost_usd_turn);
+    ("context_ratio", `Float env.ctx_ratio);
+    ("context_tokens", `Int env.ctx_work.token_count);
+    ("context_max", `Int env.ctx_work.max_tokens);
+    ("message_count", `Int (List.length env.ctx_work.messages));
+    ("compacted", `Bool env.compacted);
+    ("compaction_before_tokens", `Int env.before_compact_tokens);
+    ("compaction_after_tokens", `Int env.after_compact_tokens);
+    ( "compaction_trigger",
+      match env.compaction_trigger with
+      | Some reason -> `String reason
+      | None -> `Null );
+    ("compaction_decision", `String env.compaction_decision);
+    ("work_kind", `String env.work_kind);
+    ("tool_call_count", `Int env.tool_call_count);
+    ("tools_used", `List (List.map (fun s -> `String s) env.tools_used));
+    ("skill_primary", `String env.effective_skill_route.primary_skill);
+    ("skill_secondary",
+      `List (List.map (fun s -> `String s) env.effective_skill_route.secondary_skills));
+    ("skill_reason", `String env.effective_skill_route.reason);
+    ("skill_selection_mode",
+      `String env.skill_route_resolution.selection_mode);
+    ("skill_provenance",
+      `String env.skill_route_resolution.provenance);
+    ("memory_check", env.memory_check_json);
+    ("auto_rules", keeper_auto_rule_eval_to_json env.auto_rules);
+    ("reflection", keeper_reflection_payload_of_auto_rules env.auto_rules);
+    ("auto_reflect", `Bool env.auto_rules.reflect);
+    ("auto_plan", `Bool env.auto_rules.plan);
+    ("auto_compact", `Bool env.auto_rules.compact);
+    ("auto_handoff", `Bool env.auto_rules.handoff);
+    ("guardrail_stop", `Bool env.auto_rules.guardrail_stop);
+    ("guardrail_stop_reason",
+      match env.auto_rules.guardrail_reason with
+      | Some reason -> `String reason
+      | None -> `Null);
+    ("repetition_risk", `Float env.repetition_risk);
+    ("goal_alignment", `Float env.goal_alignment);
+    ("response_alignment", `Float env.response_alignment);
+    ("goal_drift", `Float env.auto_rules.goal_drift);
+    ("drift", `Assoc [
+      ("enabled", `Bool meta.drift_enabled);
+      ("applied", `Bool env.drift_applied);
+      ("reason",
+        match env.drift_reason with
+        | Some reason -> `String reason
+        | None -> `Null);
+      ("min_turn_gap", `Int meta.drift_min_turn_gap);
+      ("count_total", `Int meta.drift_count_total);
+      ("last_turn", `Int meta.last_drift_turn);
+      ("last_reason",
+        if String.trim meta.last_drift_reason = ""
+        then `Null
+        else `String meta.last_drift_reason);
+    ]);
+    ("memory_notes_added", `Int env.memory_notes_added);
+    ("memory_note_kinds",
+      `List (List.map (fun s -> `String s) env.memory_note_kinds));
+    ("memory_top_kind",
+      match env.memory_top_kind with
+      | Some kind -> `String kind
+      | None -> `Null);
+    ("memory_compaction_performed", `Bool env.memory_compaction.performed);
+    ("memory_compaction_reason",
+      match env.memory_compaction.reason with
+      | Some reason -> `String reason
+      | None -> `Null);
+    ("memory_compaction_target_notes", `Int env.memory_compaction.target_notes);
+    ("memory_compaction_before_notes", `Int env.memory_compaction.before_notes);
+    ("memory_compaction_after_notes", `Int env.memory_compaction.after_notes);
+    ("memory_compaction_dropped_notes", `Int env.memory_compaction.dropped_notes);
+    ("memory_compaction_dedup_dropped", `Int env.memory_compaction.dedup_dropped);
+    ("memory_compaction_invalid_dropped", `Int env.memory_compaction.invalid_dropped);
+  ]
+
+(** Build the metrics JSONL for a normal turn (no handoff). *)
+let build_normal_turn_metrics_json ~now_ts (env : turn_env) : Yojson.Safe.t =
+  let meta = env.meta_turn in
+  `Assoc ([
+    ("ts", `String (now_iso ()));
+    ("ts_unix", `Float now_ts);
+    ("channel", `String "turn");
+    ("name", `String meta.name);
+    ("agent_name", `String meta.agent_name);
+    ("trace_id", `String meta.trace_id);
+    ("generation", `Int meta.generation);
+  ] @ build_turn_metrics_fields env @ [
+    ("interesting_alert_triggered", `Bool env.interesting_alert.triggered);
+    ("interesting_alert_score", `Float env.interesting_alert.score);
+    ("interesting_alert", interesting_alert_result_to_json env.interesting_alert);
+    ("handoff", `Assoc [("performed", `Bool false)]);
+  ])
+
+(** Build the response JSON for a normal turn (no handoff). *)
+let build_normal_turn_response_json (env : turn_env) : Yojson.Safe.t =
+  let meta = env.meta_turn in
+  `Assoc ([
+    ("name", `String meta.name);
+    ("trace_id", `String meta.trace_id);
+    ("generation", `Int meta.generation);
+    ("soul_profile", `String meta.soul_profile);
+    ("will", if String.trim meta.will = "" then `Null else `String meta.will);
+    ("needs", if String.trim meta.needs = "" then `Null else `String meta.needs);
+    ("desires", if String.trim meta.desires = "" then `Null else `String meta.desires);
+    ("model_used", `String env.final_model_used);
+    ("usage", `Assoc [
+      ("input_tokens", `Int env.final_usage.input_tokens);
+      ("output_tokens", `Int env.final_usage.output_tokens);
+      ("total_tokens", `Int env.final_usage.total_tokens);
+    ]);
+    ("latency_ms", `Int env.final_latency_ms);
+    ("cost_usd", `Float env.total_cost_usd_turn);
+    ("reply", `String env.safe_reply);
+    ("context_ratio", `Float env.ctx_ratio);
+    ("compacted", `Bool env.compacted);
+    ( "compaction_trigger",
+      match env.compaction_trigger with
+      | Some reason -> `String reason
+      | None -> `Null );
+    ("work_kind", `String env.work_kind);
+    ("tool_call_count", `Int env.tool_call_count);
+    ("tools_used", `List (List.map (fun s -> `String s) env.tools_used));
+    ("skill_primary", `String env.effective_skill_route.primary_skill);
+    ("skill_secondary",
+      `List (List.map (fun s -> `String s) env.effective_skill_route.secondary_skills));
+    ("skill_reason", `String env.effective_skill_route.reason);
+    ("skill_selection_mode",
+      `String env.skill_route_resolution.selection_mode);
+    ("skill_provenance",
+      `String env.skill_route_resolution.provenance);
+    ("memory_check", env.memory_check_json);
+    ("auto_rules", keeper_auto_rule_eval_to_json env.auto_rules);
+    ("reflection", keeper_reflection_payload_of_auto_rules env.auto_rules);
+    ("auto_reflect", `Bool env.auto_rules.reflect);
+    ("auto_plan", `Bool env.auto_rules.plan);
+    ("auto_compact", `Bool env.auto_rules.compact);
+    ("auto_handoff", `Bool env.auto_rules.handoff);
+    ("guardrail_stop", `Bool env.auto_rules.guardrail_stop);
+    ("guardrail_stop_reason",
+      match env.auto_rules.guardrail_reason with
+      | Some reason -> `String reason
+      | None -> `Null);
+    ("repetition_risk", `Float env.repetition_risk);
+    ("goal_alignment", `Float env.goal_alignment);
+    ("response_alignment", `Float env.response_alignment);
+    ("goal_drift", `Float env.auto_rules.goal_drift);
+    ("drift", `Assoc [
+      ("enabled", `Bool meta.drift_enabled);
+      ("applied", `Bool env.drift_applied);
+      ("reason",
+        match env.drift_reason with
+        | Some reason -> `String reason
+        | None -> `Null);
+      ("min_turn_gap", `Int meta.drift_min_turn_gap);
+      ("count_total", `Int meta.drift_count_total);
+      ("last_turn", `Int meta.last_drift_turn);
+      ("last_reason",
+        if String.trim meta.last_drift_reason = ""
+        then `Null
+        else `String meta.last_drift_reason);
+    ]);
+    ("memory_notes_added", `Int env.memory_notes_added);
+    ("memory_note_kinds",
+      `List (List.map (fun s -> `String s) env.memory_note_kinds));
+    ("memory_top_kind",
+      match env.memory_top_kind with
+      | Some kind -> `String kind
+      | None -> `Null);
+    ("memory_compaction_performed", `Bool env.memory_compaction.performed);
+    ("memory_compaction_reason",
+      match env.memory_compaction.reason with
+      | Some reason -> `String reason
+      | None -> `Null);
+    ("memory_compaction_target_notes", `Int env.memory_compaction.target_notes);
+    ("memory_compaction_before_notes", `Int env.memory_compaction.before_notes);
+    ("memory_compaction_after_notes", `Int env.memory_compaction.after_notes);
+    ("memory_compaction_dropped_notes", `Int env.memory_compaction.dropped_notes);
+    ("memory_compaction_dedup_dropped", `Int env.memory_compaction.dedup_dropped);
+    ("memory_compaction_invalid_dropped", `Int env.memory_compaction.invalid_dropped);
+    ("interesting_alert", interesting_alert_result_to_json env.interesting_alert);
+  ])
+
+(** Build the handoff metrics JSONL entry. *)
+let build_handoff_metrics_json ~now_ts ~prev_trace_id ~next_model_id ~new_generation
+    (env : turn_env) : Yojson.Safe.t =
+  let meta = env.meta_turn in
+  `Assoc ([
+    ("ts", `String (now_iso ()));
+    ("ts_unix", `Float now_ts);
+    ("channel", `String "turn");
+    ("name", `String meta.name);
+    ("agent_name", `String meta.agent_name);
+    ("trace_id", `String prev_trace_id);
+    ("generation", `Int meta.generation);
+  ] @ build_turn_metrics_fields env @ [
+    ("interesting_alert_triggered", `Bool env.interesting_alert.triggered);
+    ("interesting_alert_score", `Float env.interesting_alert.score);
+    ("interesting_alert", interesting_alert_result_to_json env.interesting_alert);
+    ("handoff", `Assoc [
+      ("performed", `Bool true);
+      ("prev_trace_id", `String prev_trace_id);
+      ("new_trace_id", `String env.meta_turn.trace_id);
+      ("to_model", `String next_model_id);
+      ("new_generation", `Int new_generation);
+    ]);
+  ])
+
+(** Build the handoff response JSON. *)
+let build_handoff_response_json ~prev_trace_id ~next_model_id ~new_generation
+    (env : turn_env) : Yojson.Safe.t =
+  let meta = env.meta_turn in
+  `Assoc [
+    ("name", `String meta.name);
+    ("soul_profile", `String meta.soul_profile);
+    ("will", if String.trim meta.will = "" then `Null else `String meta.will);
+    ("needs", if String.trim meta.needs = "" then `Null else `String meta.needs);
+    ("desires", if String.trim meta.desires = "" then `Null else `String meta.desires);
+    ("reply", `String env.safe_reply);
+    ("model_used", `String env.final_model_used);
+    ("latency_ms", `Int env.final_latency_ms);
+    ("cost_usd", `Float env.total_cost_usd_turn);
+    ("context_ratio", `Float env.ctx_ratio);
+    ("compacted", `Bool env.compacted);
+    ( "compaction_trigger",
+      match env.compaction_trigger with
+      | Some reason -> `String reason
+      | None -> `Null );
+    ("work_kind", `String env.work_kind);
+    ("tool_call_count", `Int env.tool_call_count);
+    ("tools_used", `List (List.map (fun s -> `String s) env.tools_used));
+    ("skill_primary", `String env.effective_skill_route.primary_skill);
+    ("skill_secondary",
+      `List (List.map (fun s -> `String s) env.effective_skill_route.secondary_skills));
+    ("skill_reason", `String env.effective_skill_route.reason);
+    ("skill_selection_mode",
+      `String env.skill_route_resolution.selection_mode);
+    ("skill_provenance",
+      `String env.skill_route_resolution.provenance);
+    ("memory_check", env.memory_check_json);
+    ("auto_rules", keeper_auto_rule_eval_to_json env.auto_rules);
+    ("reflection", keeper_reflection_payload_of_auto_rules env.auto_rules);
+    ("auto_reflect", `Bool env.auto_rules.reflect);
+    ("auto_plan", `Bool env.auto_rules.plan);
+    ("auto_compact", `Bool env.auto_rules.compact);
+    ("auto_handoff", `Bool env.auto_rules.handoff);
+    ("guardrail_stop", `Bool env.auto_rules.guardrail_stop);
+    ("guardrail_stop_reason",
+      match env.auto_rules.guardrail_reason with
+      | Some reason -> `String reason
+      | None -> `Null);
+    ("repetition_risk", `Float env.repetition_risk);
+    ("goal_alignment", `Float env.goal_alignment);
+    ("response_alignment", `Float env.response_alignment);
+    ("goal_drift", `Float env.auto_rules.goal_drift);
+    ("drift", `Assoc [
+      ("enabled", `Bool meta.drift_enabled);
+      ("applied", `Bool env.drift_applied);
+      ("reason",
+        match env.drift_reason with
+        | Some reason -> `String reason
+        | None -> `Null);
+      ("min_turn_gap", `Int meta.drift_min_turn_gap);
+      ("count_total", `Int meta.drift_count_total);
+      ("last_turn", `Int meta.last_drift_turn);
+      ("last_reason",
+        if String.trim meta.last_drift_reason = ""
+        then `Null
+        else `String meta.last_drift_reason);
+    ]);
+    ("memory_notes_added", `Int env.memory_notes_added);
+    ("memory_note_kinds",
+      `List (List.map (fun s -> `String s) env.memory_note_kinds));
+    ("memory_top_kind",
+      match env.memory_top_kind with
+      | Some kind -> `String kind
+      | None -> `Null);
+    ("memory_compaction_performed", `Bool env.memory_compaction.performed);
+    ("memory_compaction_reason",
+      match env.memory_compaction.reason with
+      | Some reason -> `String reason
+      | None -> `Null);
+    ("memory_compaction_target_notes", `Int env.memory_compaction.target_notes);
+    ("memory_compaction_before_notes", `Int env.memory_compaction.before_notes);
+    ("memory_compaction_after_notes", `Int env.memory_compaction.after_notes);
+    ("memory_compaction_dropped_notes", `Int env.memory_compaction.dropped_notes);
+    ("memory_compaction_dedup_dropped", `Int env.memory_compaction.dedup_dropped);
+    ("memory_compaction_invalid_dropped", `Int env.memory_compaction.invalid_dropped);
+    ("interesting_alert", interesting_alert_result_to_json env.interesting_alert);
+    ("handoff", `Assoc [
+      ("performed", `Bool true);
+      ("prev_trace_id", `String prev_trace_id);
+      ("new_trace_id", `String env.meta_turn.trace_id);
+      ("to_model", `String next_model_id);
+      ("new_generation", `Int new_generation);
+    ]);
+  ]
+
+(** Emit SSE events + write metrics + finalize trajectory for a normal turn. *)
+let finalize_normal_turn ctx ~session ~now_ts ~trajectory_acc ~gate_config (env : turn_env) : tool_result =
+  let meta_turn = env.meta_turn in
+  (match write_meta ctx.config meta_turn with
+   | Ok () -> ()
+   | Error e -> Printf.eprintf "[keeper:%s] failed to write meta: %s\n%!" meta_turn.name e);
+  let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
+  (try
+     let metrics_json = build_normal_turn_metrics_json ~now_ts env in
+     append_jsonl_line metrics_path metrics_json
+   with exn ->
+     log_keeper_exn ~label:"turn metrics JSONL write failed" exn);
+  (* Harness: finalize trajectory with outcome *)
+  (let traj_outcome =
+    if trajectory_acc.Trajectory.total_cost >= gate_config.Eval_gate.max_cost_usd then
+      Trajectory.CostExceeded
+    else
+      Trajectory.Completed
+  in
+  let _traj = Trajectory.finalize trajectory_acc traj_outcome in
+  Printf.eprintf "[HARNESS] Trajectory finalized: %s turns=%d calls=%d cost=$%.4f outcome=%s\n%!"
+    meta_turn.trace_id
+    _traj.Trajectory.total_turns
+    _traj.Trajectory.total_tool_calls
+    _traj.Trajectory.total_cost_usd
+    (Trajectory.outcome_to_string traj_outcome));
+  (* SSE: keeper_compaction — emitted only when compaction occurred *)
+  (if env.compacted then
+    (try Sse.broadcast (`Assoc [
+      ("type", `String "keeper_compaction");
+      ("name", `String meta_turn.name);
+      ("saved_tokens", `Int (env.before_compact_tokens - env.after_compact_tokens));
+      ("trigger", match env.compaction_trigger with
+        | Some r -> `String r | None -> `Null);
+    ]) with exn ->
+      log_keeper_exn ~label:"SSE keeper_compaction broadcast failed" exn));
+  (* SSE: keeper_turn_complete — emitted on every normal turn finish *)
+  (try Sse.broadcast (`Assoc [
+    ("type", `String "keeper_turn_complete");
+    ("name", `String meta_turn.name);
+    ("trace_id", `String meta_turn.trace_id);
+    ("generation", `Int meta_turn.generation);
+    ("tool_calls", `Int trajectory_acc.Trajectory.total_calls);
+    ("compacted", `Bool env.compacted);
+    ("context_ratio", `Float env.ctx_ratio);
+    ("model_used", `String env.final_model_used);
+  ]) with exn ->
+    log_keeper_exn ~label:"SSE keeper_turn_complete broadcast failed" exn);
+  ignore session;
+  let json = build_normal_turn_response_json env in
+  (true, Yojson.Safe.pretty_to_string json)
+
+(** Execute handoff: hydrate successor context, rotate trace, emit metrics/SSE. *)
+let finalize_handoff_turn ctx ~session ~now_ts ~specs ~primary ~base_dir
+    ~trajectory_acc ~gate_config (env : turn_env) : tool_result =
+  let meta_turn = env.meta_turn in
+  let next_model =
+    match specs with
+    | _m0 :: m1 :: _ -> m1
+    | m0 :: _ -> m0
+    | [] -> primary
+  in
+  let metrics = Succession.{
+    total_turns = meta_turn.total_turns;
+    total_tokens_used = meta_turn.total_tokens;
+    total_cost_usd = meta_turn.total_cost_usd;
+    tasks_completed = 0;
+    errors_encountered = 0;
+    elapsed_seconds = 0.0;
+  } in
+  let successor_trace = generate_trace_id () in
+  let next_generation = meta_turn.generation + 1 in
+  let dna = Succession.extract_dna
+    ~working_ctx:env.ctx_work
+    ~session_ctx:session
+    ~goal:meta_turn.goal
+    ~generation:next_generation
+    ~trace_id:successor_trace
+    ~metrics
+  in
+  let spec = Succession.{
+    model = next_model;
+    inherit_tools = false;
+    context_budget = meta_turn.context_budget;
+  } in
+  let successor_ctx = Succession.hydrate dna spec in
+  let successor_session = Context_manager.create_session
+    ~session_id:successor_trace ~base_dir in
+  (try ignore (save_checkpoint successor_session successor_ctx ~generation:next_generation)
+   with exn -> log_keeper_exn ~label:"save_checkpoint (succession) failed" exn);
+
+  let prev_trace_id = meta_turn.trace_id in
+  let trace_history = take 20 (prev_trace_id :: meta_turn.trace_history) in
+  let meta' = { meta_turn with
+    trace_id = successor_trace;
+    trace_history;
+    generation = next_generation;
+    last_handoff_ts = now_ts;
+    updated_at = now_iso ();
+  } in
+  (try ignore (write_meta ctx.config meta')
+   with exn -> log_keeper_exn ~label:"write_meta (succession) failed" exn);
+
+  let metrics_path = keeper_metrics_path ctx.config meta'.name in
+  let env_for_handoff = { env with meta_turn = meta' } in
+  (try
+     let metrics_json = build_handoff_metrics_json
+       ~now_ts ~prev_trace_id ~next_model_id:next_model.model_id
+       ~new_generation:next_generation env_for_handoff in
+     append_jsonl_line metrics_path metrics_json
+   with exn ->
+     log_keeper_exn ~label:"handoff metrics JSONL write failed" exn);
+  (* Harness: finalize trajectory *)
+  (let traj_outcome =
+    if trajectory_acc.Trajectory.total_cost >= gate_config.Eval_gate.max_cost_usd then
+      Trajectory.CostExceeded
+    else
+      Trajectory.Completed
+  in
+  ignore (Trajectory.finalize trajectory_acc traj_outcome));
+  (* SSE: keeper_handoff — generation succession event *)
+  (try Sse.broadcast (`Assoc [
+    ("type", `String "keeper_handoff");
+    ("name", `String meta_turn.name);
+    ("from_generation", `Int meta_turn.generation);
+    ("to_generation", `Int next_generation);
+    ("to_model", `String next_model.model_id);
+  ]) with exn ->
+    log_keeper_exn ~label:"SSE keeper_handoff broadcast failed" exn);
+
+  let json = build_handoff_response_json
+    ~prev_trace_id ~next_model_id:next_model.model_id
+    ~new_generation:next_generation env_for_handoff in
+  (true, Yojson.Safe.pretty_to_string json)
+
+(** Build the complete keeper response: emit side-effects + return JSON. *)
+let build_keeper_response ctx ~session ~now_ts ~specs ~primary ~base_dir
+    ~trajectory_acc ~gate_config ~do_handoff (env : turn_env) : tool_result =
+  if not do_handoff then
+    finalize_normal_turn ctx ~session ~now_ts ~trajectory_acc ~gate_config env
+  else
+    finalize_handoff_turn ctx ~session ~now_ts ~specs ~primary ~base_dir
+      ~trajectory_acc ~gate_config env
+
+(* ── ensure_keeper_exists: module-level function ────────────────────── *)
+
+(** Create or load a keeper, returning its meta. Extracted from handle_keeper_msg. *)
+let ensure_keeper_exists
+    ~(ctx : _ context)
+    ~name
+    ~require_existing
+    ~(profile_defaults : keeper_profile_defaults)
+    ~inline_goal
+    ~inline_short_goal
+    ~inline_mid_goal
+    ~inline_long_goal
+    ~inline_instructions
+    ~inline_will
+    ~inline_needs
+    ~inline_desires
+    ~inline_drift_enabled_opt
+    ~inline_drift_min_turn_gap_opt
+    ~inline_soul_profile
+    ~inline_models
+  : (keeper_meta, string) result =
+  match read_meta ctx.config name with
+  | Error e -> Error e
+  | Ok (Some m) -> Ok m
+  | Ok None ->
+    if require_existing then
+      Error (Printf.sprintf "keeper not found: %s" name)
+    else
+    let goal =
+      match inline_goal with
+      | Some goal -> normalize_goal_horizon_text goal
+      | None ->
+          profile_defaults.goal |> Option.value ~default:""
+          |> normalize_goal_horizon_text
+    in
+    let inline_models =
+      if inline_models <> [] then inline_models
+      else if profile_defaults.models <> [] then profile_defaults.models
+      else profile_defaults.allowed_models
+    in
+    if goal = "" then Error "keeper not found and goal not provided"
+    else if inline_models = [] then Error "keeper not found and models not provided"
+    else
+    let now_ts = Time_compat.now () in
+    let trace_id = generate_trace_id () in
+    let soul_profile =
+      Option.value
+        ~default:(Option.value ~default:default_soul_profile profile_defaults.soul_profile)
+        inline_soul_profile
+    in
+    let will =
+      Option.value
+        ~default:(Option.value ~default:default_keeper_will profile_defaults.will)
+        inline_will
+    in
+    let needs =
+      Option.value
+        ~default:(Option.value ~default:default_keeper_needs profile_defaults.needs)
+        inline_needs
+    in
+    let desires =
+      Option.value
+        ~default:(Option.value ~default:default_keeper_desires profile_defaults.desires)
+        inline_desires
+    in
+    let drift_enabled =
+      Option.value ~default:default_drift_enabled inline_drift_enabled_opt
+    in
+    let drift_min_turn_gap =
+      Option.value ~default:default_drift_min_turn_gap inline_drift_min_turn_gap_opt
+      |> normalize_drift_min_turn_gap
+    in
+    let (env_ratio_gate, env_message_gate, env_token_gate) =
+      keeper_compaction_policy_from_env ()
+    in
+    let continuity_compaction_cooldown_sec =
+      keeper_continuity_compaction_cooldown_sec ()
+      |> normalize_continuity_compaction_cooldown_sec
+    in
+    let (short_goal, mid_goal, long_goal) =
+      resolve_goal_horizons
+        ~goal
+        ~short_goal_opt:(first_some inline_short_goal profile_defaults.short_goal)
+        ~mid_goal_opt:(first_some inline_mid_goal profile_defaults.mid_goal)
+        ~long_goal_opt:(first_some inline_long_goal profile_defaults.long_goal)
+    in
+    let instructions =
+      Option.value ~default:(Option.value ~default:"" profile_defaults.instructions)
+        inline_instructions
+    in
+    let allowed_models =
+      resolve_allowed_models
+        ~explicit_allowed_models:[]
+        ~seed_allowed_models:profile_defaults.allowed_models
+        ~models:inline_models
+    in
+    let active_model =
+      profile_defaults.active_model
+      |> Option.value
+           ~default:
+             (match inline_models with
+              | model :: _ -> model
+              | [] -> "")
+    in
+    let policy_mode =
+      (if default_voice_enabled_for name then None else profile_defaults.policy_mode)
+      |> Option.value
+           ~default:
+             (if default_voice_enabled_for name then "explicit_event_v1"
+              else "heuristic")
+      |> canonical_policy_mode
+    in
+    let use_profile_policy_defaults = not (default_voice_enabled_for name) in
+    let policy_action_budget =
+      (if use_profile_policy_defaults then profile_defaults.policy_action_budget else None)
+      |> Option.value ~default:"conversation"
+      |> canonical_policy_action_budget
+    in
+    let policy_reward_model_path =
+      (if use_profile_policy_defaults then profile_defaults.policy_reward_model_path else None)
+      |> Option.value ~default:""
+    in
+    let policy_voice_enabled =
+      (if use_profile_policy_defaults then profile_defaults.policy_voice_enabled else None)
+      |> Option.value ~default:false
+    in
+    let policy_shell_mode =
+      (if use_profile_policy_defaults then profile_defaults.policy_shell_mode else None)
+      |> Option.value ~default:"disabled"
+      |> canonical_policy_shell_mode
+    in
+    let initiative_enabled =
+      (if use_profile_policy_defaults then profile_defaults.initiative_enabled else None)
+      |> Option.value ~default:false
+    in
+    let initiative_scope =
+      (if use_profile_policy_defaults then profile_defaults.initiative_scope else None)
+      |> Option.value ~default:"board_only"
+      |> canonical_initiative_scope
+    in
+    let initiative_idle_sec =
+      (if use_profile_policy_defaults then profile_defaults.initiative_idle_sec else None)
+      |> Option.value ~default:3600
+      |> normalize_initiative_idle_sec
+    in
+    let initiative_cooldown_sec =
+      (if use_profile_policy_defaults then profile_defaults.initiative_cooldown_sec else None)
+      |> Option.value ~default:3600
+      |> normalize_initiative_cooldown_sec
+    in
+    let initiative_context_mode =
+      (if use_profile_policy_defaults then profile_defaults.initiative_context_mode else None)
+      |> Option.value ~default:"board_snapshot"
+      |> canonical_initiative_context_mode
+    in
+    let initiative_post_ttl_hours =
+      (if use_profile_policy_defaults then profile_defaults.initiative_post_ttl_hours else None)
+      |> Option.value ~default:24
+      |> normalize_initiative_post_ttl_hours
+    in
+    let room_scope =
+      profile_defaults.room_scope |> Option.value ~default:"current"
+      |> canonical_room_scope
+    in
+    let scope_kind =
+      profile_defaults.scope_kind
+      |> Option.value ~default:(if room_scope = "all" then "global" else "local")
+      |> canonical_scope_kind
+    in
+    let trigger_mode =
+      profile_defaults.trigger_mode |> Option.value ~default:"legacy"
+      |> canonical_trigger_mode
+    in
+    let mention_targets =
+      let raw =
+        if profile_defaults.mention_targets <> [] then profile_defaults.mention_targets
+        else [ name ]
+      in
+      raw |> dedupe_keep_order
+    in
+    let meta = {
+      name;
+      agent_name = keeper_agent_name name;
+      persona_profile_path = Option.value ~default:"" profile_defaults.manifest_path;
+      trace_id;
+      trace_history = [];
+      goal;
+      short_goal;
+      mid_goal;
+      long_goal;
+      soul_profile;
+      will;
+      needs;
+      desires;
+      instructions;
+      models = inline_models;
+      allowed_models;
+      active_model;
+      policy_mode;
+      policy_action_budget;
+      policy_reward_model_path;
+      policy_voice_enabled;
+      policy_shell_mode;
+      initiative_enabled;
+      initiative_scope;
+      initiative_idle_sec;
+      initiative_cooldown_sec;
+      initiative_context_mode;
+      initiative_post_ttl_hours;
+      scope_kind;
+      room_scope;
+      trigger_mode;
+      voice_enabled = default_voice_enabled_for name;
+      voice_channel = default_voice_channel_for name;
+      voice_agent_id = default_voice_agent_id_for name;
+      mention_targets;
+      joined_room_ids = [];
+      last_seen_seq_by_room = [];
+      generation = 0;
+      verify = false;
+      presence_keepalive = true;
+      presence_keepalive_sec = 30;
+      proactive_enabled =
+        Option.value
+          ~default:
+            (if
+               trigger_mode
+               |> Keeper_contract.trigger_mode_of_string
+               |> Keeper_contract.trigger_mode_is_explicit_only
+             then false
+             else default_proactive_enabled)
+          profile_defaults.proactive_enabled;
+      proactive_idle_sec = default_proactive_idle_sec;
+      proactive_cooldown_sec = default_proactive_cooldown_sec;
+      drift_enabled;
+      drift_min_turn_gap;
+      drift_count_total = 0;
+      last_drift_turn = 0;
+      last_drift_reason = "";
+      compaction_profile = default_compaction_profile;
+      compaction_ratio_gate = env_ratio_gate;
+      compaction_message_gate = env_message_gate;
+      compaction_token_gate = env_token_gate;
+      continuity_compaction_cooldown_sec;
+      auto_handoff = true;
+      handoff_threshold = 0.85;
+      handoff_cooldown_sec = 300;
+      context_budget = 0.6;
+      last_handoff_ts = 0.0;
+      created_at = now_iso ();
+      updated_at = now_iso ();
+      total_turns = 0;
+      total_input_tokens = 0;
+      total_output_tokens = 0;
+      total_tokens = 0;
+      total_cost_usd = 0.0;
+      last_turn_ts = 0.0;
+      last_model_used = "";
+      last_input_tokens = 0;
+      last_output_tokens = 0;
+      last_total_tokens = 0;
+      last_latency_ms = 0;
+      compaction_count = 0;
+      last_compaction_ts = 0.0;
+      last_compaction_before_tokens = 0;
+      last_compaction_after_tokens = 0;
+      last_compaction_check_ts = now_ts;
+      last_compaction_decision = "initialized";
+      proactive_count_total = 0;
+      last_proactive_ts = 0.0;
+      last_proactive_reason = "";
+      last_proactive_preview = "";
+      last_continuity_update_ts = now_ts;
+      continuity_summary = "";
+      autonomy_level =
+        Keeper_contract.autonomy_level_to_storage_string Keeper_autonomy.L1_Reactive;
+      active_goal_ids = [];
+      last_autonomous_action_at = "";
+      autonomous_action_count = 0;
+      deliberation_count = 0;
+      deliberation_cost_total_usd = 0.0;
+      last_deliberation_ts = 0.0;
+      last_triage_triggers = "";
+      auto_team_session_enabled = false;
+      active_team_session_id = None;
+      last_team_session_started_at = "";
+      team_session_start_count_total = 0;
+    } in
+    let base_dir = session_base_dir ctx.config in
+    mkdir_p base_dir;
+    (match model_specs_of_strings meta.models with
+     | Error e -> Error e
+     | Ok specs ->
+       (match ensure_api_keys specs with
+        | Error e -> Error e
+        | Ok () ->
+          let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.default_local_model_spec () in
+          let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
+          let system_prompt =
+            build_keeper_system_prompt
+              ~goal
+              ~short_goal
+              ~mid_goal
+              ~long_goal
+              ~soul_profile
+              ~will
+              ~needs
+              ~desires
+              ~instructions
+          in
+          let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
+          (try ignore (save_checkpoint session ctx0 ~generation:0)
+           with exn -> log_keeper_exn ~label:"save_checkpoint (ensure) failed" exn);
+          match write_meta ctx.config meta with
+          | Error e -> Error e
+          | Ok () -> Ok meta))
+
+(** Apply inline settings update to keeper meta. Extracted from handle_keeper_msg. *)
+let apply_settings_update
+    ~(args : Yojson.Safe.t)
+    ~(meta0 : keeper_meta)
+    ~new_short_goal
+    ~new_mid_goal
+    ~new_long_goal
+    ~new_soul_profile
+    ~new_will
+    ~new_needs
+    ~new_desires
+    ~new_drift_enabled_opt
+    ~new_drift_min_turn_gap_opt
+    ~(config : Room.config)
+  : keeper_meta =
+  let new_goal_opt = normalize_goal_horizon_opt (get_string_opt args "new_goal") in
+  let goal =
+    match new_goal_opt with
+    | None -> meta0.goal
+    | Some ng -> ng
+  in
+  let goal_provided = Option.is_some new_goal_opt in
+  let short_goal_default = if goal_provided then goal else meta0.short_goal in
+  let mid_goal_default = if goal_provided then goal else meta0.mid_goal in
+  let long_goal_default = if goal_provided then goal else meta0.long_goal in
+  let short_goal =
+    Option.value ~default:short_goal_default new_short_goal
+    |> normalize_goal_horizon_text
+  in
+  let mid_goal =
+    Option.value ~default:mid_goal_default new_mid_goal
+    |> normalize_goal_horizon_text
+  in
+  let long_goal =
+    Option.value ~default:long_goal_default new_long_goal
+    |> normalize_goal_horizon_text
+  in
+  let soul_profile =
+    match new_soul_profile with
+    | None -> meta0.soul_profile
+    | Some sp -> sp
+  in
+  let instructions =
+    match get_string_opt args "new_instructions" with
+    | None -> meta0.instructions
+    | Some ni -> ni
+  in
+  let will =
+    match new_will with
+    | None -> meta0.will
+    | Some w -> w
+  in
+  let needs =
+    match new_needs with
+    | None -> meta0.needs
+    | Some n -> n
+  in
+  let desires =
+    match new_desires with
+    | None -> meta0.desires
+    | Some d -> d
+  in
+  let drift_enabled =
+    match new_drift_enabled_opt with
+    | None -> meta0.drift_enabled
+    | Some v -> v
+  in
+  let drift_min_turn_gap =
+    match new_drift_min_turn_gap_opt with
+    | None -> meta0.drift_min_turn_gap
+    | Some v -> normalize_drift_min_turn_gap v
+  in
+  if goal = meta0.goal
+     && short_goal = meta0.short_goal
+     && mid_goal = meta0.mid_goal
+     && long_goal = meta0.long_goal
+     && soul_profile = meta0.soul_profile
+     && will = meta0.will
+     && needs = meta0.needs
+     && desires = meta0.desires
+     && instructions = meta0.instructions
+     && drift_enabled = meta0.drift_enabled
+     && drift_min_turn_gap = meta0.drift_min_turn_gap
+  then
+    meta0
+  else
+    let updated = {
+      meta0 with
+      goal;
+      short_goal;
+      mid_goal;
+      long_goal;
+      soul_profile;
+      will;
+      needs;
+      desires;
+      instructions;
+      drift_enabled;
+      drift_min_turn_gap;
+      updated_at = now_iso ();
+    } in
+    (try ignore (write_meta config updated)
+     with exn -> log_keeper_exn ~label:"write_meta (settings) failed" exn);
+    updated
+
+(* ── handle_keeper_msg: orchestrator ─────────────────────────────────── *)
+
 let handle_keeper_msg ctx args : tool_result =
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
@@ -1186,398 +2098,21 @@ let handle_keeper_msg ctx args : tool_result =
     match inline_soul_profile_res, new_soul_profile_res with
     | Error e, _ | _, Error e -> (false, "❌ " ^ e)
     | Ok inline_soul_profile, Ok new_soul_profile ->
-    (* Ensure keeper exists (create inline if missing) *)
-    let ensure_keeper () : (keeper_meta, string) result =
-      match read_meta ctx.config name with
-      | Error e -> Error e
-      | Ok (Some m) -> Ok m
-      | Ok None ->
-          if require_existing then
-            Error (Printf.sprintf "keeper not found: %s" name)
-          else
-          let goal =
-            match inline_goal with
-            | Some goal -> normalize_goal_horizon_text goal
-            | None ->
-                profile_defaults.goal |> Option.value ~default:""
-                |> normalize_goal_horizon_text
-          in
-          let inline_models =
-            if inline_models <> [] then inline_models
-            else if profile_defaults.models <> [] then profile_defaults.models
-            else profile_defaults.allowed_models
-          in
-          if goal = "" then Error "keeper not found and goal not provided"
-          else if inline_models = [] then Error "keeper not found and models not provided"
-          else
-          let now_ts = Time_compat.now () in
-          let trace_id = generate_trace_id () in
-          let soul_profile =
-            Option.value
-              ~default:(Option.value ~default:default_soul_profile profile_defaults.soul_profile)
-              inline_soul_profile
-          in
-          let will =
-            Option.value
-              ~default:(Option.value ~default:default_keeper_will profile_defaults.will)
-              inline_will
-          in
-          let needs =
-            Option.value
-              ~default:(Option.value ~default:default_keeper_needs profile_defaults.needs)
-              inline_needs
-          in
-          let desires =
-            Option.value
-              ~default:(Option.value ~default:default_keeper_desires profile_defaults.desires)
-              inline_desires
-          in
-          let drift_enabled =
-            Option.value ~default:default_drift_enabled inline_drift_enabled_opt
-          in
-          let drift_min_turn_gap =
-            Option.value ~default:default_drift_min_turn_gap inline_drift_min_turn_gap_opt
-            |> normalize_drift_min_turn_gap
-          in
-          let (env_ratio_gate, env_message_gate, env_token_gate) =
-            keeper_compaction_policy_from_env ()
-          in
-          let continuity_compaction_cooldown_sec =
-            keeper_continuity_compaction_cooldown_sec ()
-            |> normalize_continuity_compaction_cooldown_sec
-          in
-          let (short_goal, mid_goal, long_goal) =
-            resolve_goal_horizons
-              ~goal
-              ~short_goal_opt:(first_some inline_short_goal profile_defaults.short_goal)
-              ~mid_goal_opt:(first_some inline_mid_goal profile_defaults.mid_goal)
-              ~long_goal_opt:(first_some inline_long_goal profile_defaults.long_goal)
-          in
-          let instructions =
-            Option.value ~default:(Option.value ~default:"" profile_defaults.instructions)
-              inline_instructions
-          in
-          let allowed_models =
-            resolve_allowed_models
-              ~explicit_allowed_models:[]
-              ~seed_allowed_models:profile_defaults.allowed_models
-              ~models:inline_models
-          in
-          let active_model =
-            profile_defaults.active_model
-            |> Option.value
-                 ~default:
-                   (match inline_models with
-                    | model :: _ -> model
-                    | [] -> "")
-          in
-          let policy_mode =
-            (if default_voice_enabled_for name then None else profile_defaults.policy_mode)
-            |> Option.value
-                 ~default:
-                   (if default_voice_enabled_for name then "explicit_event_v1"
-                    else "heuristic")
-            |> canonical_policy_mode
-          in
-          let use_profile_policy_defaults = not (default_voice_enabled_for name) in
-          let policy_action_budget =
-            (if use_profile_policy_defaults then profile_defaults.policy_action_budget else None)
-            |> Option.value ~default:"conversation"
-            |> canonical_policy_action_budget
-          in
-          let policy_reward_model_path =
-            (if use_profile_policy_defaults then profile_defaults.policy_reward_model_path else None)
-            |> Option.value ~default:""
-          in
-          let policy_voice_enabled =
-            (if use_profile_policy_defaults then profile_defaults.policy_voice_enabled else None)
-            |> Option.value ~default:false
-          in
-          let policy_shell_mode =
-            (if use_profile_policy_defaults then profile_defaults.policy_shell_mode else None)
-            |> Option.value ~default:"disabled"
-            |> canonical_policy_shell_mode
-          in
-          let initiative_enabled =
-            (if use_profile_policy_defaults then profile_defaults.initiative_enabled else None)
-            |> Option.value ~default:false
-          in
-          let initiative_scope =
-            (if use_profile_policy_defaults then profile_defaults.initiative_scope else None)
-            |> Option.value ~default:"board_only"
-            |> canonical_initiative_scope
-          in
-          let initiative_idle_sec =
-            (if use_profile_policy_defaults then profile_defaults.initiative_idle_sec else None)
-            |> Option.value ~default:3600
-            |> normalize_initiative_idle_sec
-          in
-          let initiative_cooldown_sec =
-            (if use_profile_policy_defaults then profile_defaults.initiative_cooldown_sec else None)
-            |> Option.value ~default:3600
-            |> normalize_initiative_cooldown_sec
-          in
-          let initiative_context_mode =
-            (if use_profile_policy_defaults then profile_defaults.initiative_context_mode else None)
-            |> Option.value ~default:"board_snapshot"
-            |> canonical_initiative_context_mode
-          in
-          let initiative_post_ttl_hours =
-            (if use_profile_policy_defaults then profile_defaults.initiative_post_ttl_hours else None)
-            |> Option.value ~default:24
-            |> normalize_initiative_post_ttl_hours
-          in
-          let room_scope =
-            profile_defaults.room_scope |> Option.value ~default:"current"
-            |> canonical_room_scope
-          in
-          let scope_kind =
-            profile_defaults.scope_kind
-            |> Option.value ~default:(if room_scope = "all" then "global" else "local")
-            |> canonical_scope_kind
-          in
-          let trigger_mode =
-            profile_defaults.trigger_mode |> Option.value ~default:"legacy"
-            |> canonical_trigger_mode
-          in
-          let mention_targets =
-            let raw =
-              if profile_defaults.mention_targets <> [] then profile_defaults.mention_targets
-              else [ name ]
-            in
-            raw |> dedupe_keep_order
-          in
-          let meta = {
-            name;
-            agent_name = keeper_agent_name name;
-            persona_profile_path = Option.value ~default:"" profile_defaults.manifest_path;
-            trace_id;
-            trace_history = [];
-            goal;
-            short_goal;
-            mid_goal;
-            long_goal;
-            soul_profile;
-            will;
-            needs;
-            desires;
-            instructions;
-            models = inline_models;
-            allowed_models;
-            active_model;
-            policy_mode;
-            policy_action_budget;
-            policy_reward_model_path;
-            policy_voice_enabled;
-            policy_shell_mode;
-            initiative_enabled;
-            initiative_scope;
-            initiative_idle_sec;
-            initiative_cooldown_sec;
-            initiative_context_mode;
-            initiative_post_ttl_hours;
-            scope_kind;
-            room_scope;
-            trigger_mode;
-            voice_enabled = default_voice_enabled_for name;
-            voice_channel = default_voice_channel_for name;
-            voice_agent_id = default_voice_agent_id_for name;
-            mention_targets;
-            joined_room_ids = [];
-            last_seen_seq_by_room = [];
-            generation = 0;
-            verify = false;
-            presence_keepalive = true;
-            presence_keepalive_sec = 30;
-            proactive_enabled =
-              Option.value
-                ~default:
-                  (if
-                     trigger_mode
-                     |> Keeper_contract.trigger_mode_of_string
-                     |> Keeper_contract.trigger_mode_is_explicit_only
-                   then false
-                   else default_proactive_enabled)
-                profile_defaults.proactive_enabled;
-            proactive_idle_sec = default_proactive_idle_sec;
-            proactive_cooldown_sec = default_proactive_cooldown_sec;
-            drift_enabled;
-            drift_min_turn_gap;
-            drift_count_total = 0;
-            last_drift_turn = 0;
-            last_drift_reason = "";
-            compaction_profile = default_compaction_profile;
-            compaction_ratio_gate = env_ratio_gate;
-            compaction_message_gate = env_message_gate;
-            compaction_token_gate = env_token_gate;
-            continuity_compaction_cooldown_sec;
-            auto_handoff = true;
-            handoff_threshold = 0.85;
-            handoff_cooldown_sec = 300;
-            context_budget = 0.6;
-            last_handoff_ts = 0.0;
-            created_at = now_iso ();
-            updated_at = now_iso ();
-            total_turns = 0;
-            total_input_tokens = 0;
-            total_output_tokens = 0;
-            total_tokens = 0;
-            total_cost_usd = 0.0;
-            last_turn_ts = 0.0;
-            last_model_used = "";
-            last_input_tokens = 0;
-            last_output_tokens = 0;
-            last_total_tokens = 0;
-            last_latency_ms = 0;
-            compaction_count = 0;
-            last_compaction_ts = 0.0;
-            last_compaction_before_tokens = 0;
-            last_compaction_after_tokens = 0;
-            last_compaction_check_ts = now_ts;
-            last_compaction_decision = "initialized";
-            proactive_count_total = 0;
-            last_proactive_ts = 0.0;
-            last_proactive_reason = "";
-            last_proactive_preview = "";
-            last_continuity_update_ts = now_ts;
-            continuity_summary = "";
-            autonomy_level =
-              Keeper_contract.autonomy_level_to_storage_string Keeper_autonomy.L1_Reactive;
-            active_goal_ids = [];
-            last_autonomous_action_at = "";
-            autonomous_action_count = 0;
-            deliberation_count = 0;
-            deliberation_cost_total_usd = 0.0;
-            last_deliberation_ts = 0.0;
-            last_triage_triggers = "";
-            auto_team_session_enabled = false;
-            active_team_session_id = None;
-            last_team_session_started_at = "";
-            team_session_start_count_total = 0;
-          } in
-          let base_dir = session_base_dir ctx.config in
-          mkdir_p base_dir;
-          (match model_specs_of_strings meta.models with
-           | Error e -> Error e
-           | Ok specs ->
-             (match ensure_api_keys specs with
-              | Error e -> Error e
-              | Ok () ->
-                let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.default_local_model_spec () in
-                let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
-                let system_prompt =
-                  build_keeper_system_prompt
-                    ~goal
-                    ~short_goal
-                    ~mid_goal
-                    ~long_goal
-                    ~soul_profile
-                    ~will
-                    ~needs
-                    ~desires
-                    ~instructions
-                in
-                let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
-                (try ignore (save_checkpoint session ctx0 ~generation:0)
-                 with exn -> log_keeper_exn ~label:"save_checkpoint (ensure) failed" exn);
-                match write_meta ctx.config meta with
-                | Error e -> Error e
-                | Ok () -> Ok meta))
-    in
-    match ensure_keeper () with
+    match ensure_keeper_exists
+      ~ctx ~name ~require_existing ~profile_defaults
+      ~inline_goal ~inline_short_goal ~inline_mid_goal ~inline_long_goal
+      ~inline_instructions ~inline_will ~inline_needs ~inline_desires
+      ~inline_drift_enabled_opt ~inline_drift_min_turn_gap_opt
+      ~inline_soul_profile ~inline_models
+    with
     | Error e -> (false, "❌ " ^ e)
     | Ok meta0 ->
-      (* Update keeper settings inline if requested. *)
       let meta =
-        let new_goal_opt = normalize_goal_horizon_opt (get_string_opt args "new_goal") in
-        let goal =
-          match new_goal_opt with
-          | None -> meta0.goal
-          | Some ng -> ng
-        in
-        let goal_provided = Option.is_some new_goal_opt in
-        let short_goal_default = if goal_provided then goal else meta0.short_goal in
-        let mid_goal_default = if goal_provided then goal else meta0.mid_goal in
-        let long_goal_default = if goal_provided then goal else meta0.long_goal in
-        let short_goal =
-          Option.value ~default:short_goal_default new_short_goal
-          |> normalize_goal_horizon_text
-        in
-        let mid_goal =
-          Option.value ~default:mid_goal_default new_mid_goal
-          |> normalize_goal_horizon_text
-        in
-        let long_goal =
-          Option.value ~default:long_goal_default new_long_goal
-          |> normalize_goal_horizon_text
-        in
-        let soul_profile =
-          match new_soul_profile with
-          | None -> meta0.soul_profile
-          | Some sp -> sp
-        in
-        let instructions =
-          match get_string_opt args "new_instructions" with
-          | None -> meta0.instructions
-          | Some ni -> ni
-        in
-        let will =
-          match new_will with
-          | None -> meta0.will
-          | Some w -> w
-        in
-        let needs =
-          match new_needs with
-          | None -> meta0.needs
-          | Some n -> n
-        in
-        let desires =
-          match new_desires with
-          | None -> meta0.desires
-          | Some d -> d
-        in
-        let drift_enabled =
-          match new_drift_enabled_opt with
-          | None -> meta0.drift_enabled
-          | Some v -> v
-        in
-        let drift_min_turn_gap =
-          match new_drift_min_turn_gap_opt with
-          | None -> meta0.drift_min_turn_gap
-          | Some v -> normalize_drift_min_turn_gap v
-        in
-        if goal = meta0.goal
-           && short_goal = meta0.short_goal
-           && mid_goal = meta0.mid_goal
-           && long_goal = meta0.long_goal
-           && soul_profile = meta0.soul_profile
-           && will = meta0.will
-           && needs = meta0.needs
-           && desires = meta0.desires
-           && instructions = meta0.instructions
-           && drift_enabled = meta0.drift_enabled
-           && drift_min_turn_gap = meta0.drift_min_turn_gap
-        then
-          meta0
-        else
-          let updated = {
-            meta0 with
-            goal;
-            short_goal;
-            mid_goal;
-            long_goal;
-            soul_profile;
-            will;
-            needs;
-            desires;
-            instructions;
-            drift_enabled;
-            drift_min_turn_gap;
-            updated_at = now_iso ();
-          } in
-          (try ignore (write_meta ctx.config updated)
-           with exn -> log_keeper_exn ~label:"write_meta (settings) failed" exn);
-          updated
+        apply_settings_update
+          ~args ~meta0 ~new_short_goal ~new_mid_goal ~new_long_goal
+          ~new_soul_profile ~new_will ~new_needs ~new_desires
+          ~new_drift_enabled_opt ~new_drift_min_turn_gap_opt
+          ~config:ctx.config
       in
       start_keepalive ctx meta;
       match maybe_handle_auto_team_session ctx meta message with
@@ -2298,7 +2833,6 @@ let handle_keeper_msg ctx args : tool_result =
 	              in
 	              let (do_handoff, auto_rules) = handoff_eval in
 
-	              let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
               let interesting_alert =
                 if policy_mode_learned then
                   {
@@ -2339,479 +2873,40 @@ let handle_keeper_msg ctx args : tool_result =
                     }
               in
 
-              if not do_handoff then begin
-                (match write_meta ctx.config meta_turn with
-                 | Ok () -> ()
-                 | Error e -> Printf.eprintf "[keeper:%s] failed to write meta: %s\n%!" meta_turn.name e);
-
-                (try
-                   let metrics_json = `Assoc [
-                     ("ts", `String (now_iso ()));
-                     ("ts_unix", `Float now_ts);
-                     ("channel", `String "turn");
-                     ("name", `String meta_turn.name);
-                     ("agent_name", `String meta_turn.agent_name);
-                     ("trace_id", `String meta_turn.trace_id);
-                     ("generation", `Int meta_turn.generation);
-                     ("model_used", `String final_model_used);
-                     ("usage", `Assoc [
-                       ("input_tokens", `Int final_usage.input_tokens);
-                       ("output_tokens", `Int final_usage.output_tokens);
-                       ("total_tokens", `Int final_usage.total_tokens);
-                     ]);
-                     ("latency_ms", `Int final_latency_ms);
-                     ("cost_usd", `Float total_cost_usd_turn);
-                     ("context_ratio", `Float ctx_ratio);
-                     ("context_tokens", `Int ctx_work.token_count);
-                     ("context_max", `Int ctx_work.max_tokens);
-                     ("message_count", `Int (List.length ctx_work.messages));
-                     ("compacted", `Bool compacted);
-                     ("compaction_before_tokens", `Int before_compact_tokens);
-                     ("compaction_after_tokens", `Int after_compact_tokens);
-                     ( "compaction_trigger",
-                       match compaction_trigger with
-                       | Some reason -> `String reason
-                       | None -> `Null );
-                     ("compaction_decision", `String compaction_decision);
-	                     ("work_kind", `String work_kind);
-	                     ("tool_call_count", `Int tool_call_count);
-	                     ("tools_used", `List (List.map (fun s -> `String s) tools_used));
-		                     ("skill_primary", `String effective_skill_route.primary_skill);
-		                     ("skill_secondary",
-		                       `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
-			                     ("skill_reason", `String effective_skill_route.reason);
-                             ("skill_selection_mode",
-                               `String skill_route_resolution.selection_mode);
-                             ("skill_provenance",
-                               `String skill_route_resolution.provenance);
-		                     ("memory_check", memory_check_json);
-                     ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
-                     ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
-                     ("auto_reflect", `Bool auto_rules.reflect);
-                     ("auto_plan", `Bool auto_rules.plan);
-                     ("auto_compact", `Bool auto_rules.compact);
-                     ("auto_handoff", `Bool auto_rules.handoff);
-                     ("guardrail_stop", `Bool auto_rules.guardrail_stop);
-                     ("guardrail_stop_reason",
-                       match auto_rules.guardrail_reason with
-                       | Some reason -> `String reason
-                       | None -> `Null);
-	                     ("repetition_risk", `Float repetition_risk);
-	                     ("goal_alignment", `Float goal_alignment);
-                     ("response_alignment", `Float response_alignment);
-                     ("goal_drift", `Float auto_rules.goal_drift);
-		                     ("drift", `Assoc [
-	                       ("enabled", `Bool meta_turn.drift_enabled);
-                       ("applied", `Bool drift_applied);
-                       ("reason",
-                         match drift_reason with
-                         | Some reason -> `String reason
-                         | None -> `Null);
-                       ("min_turn_gap", `Int meta_turn.drift_min_turn_gap);
-                       ("count_total", `Int meta_turn.drift_count_total);
-                       ("last_turn", `Int meta_turn.last_drift_turn);
-                       ("last_reason",
-                         if String.trim meta_turn.last_drift_reason = ""
-                         then `Null
-                         else `String meta_turn.last_drift_reason);
-                     ]);
-                     ("memory_notes_added", `Int memory_notes_added);
-                     ("memory_note_kinds",
-                       `List (List.map (fun s -> `String s) memory_note_kinds));
-                     ("memory_top_kind",
-                       match memory_top_kind with
-                       | Some kind -> `String kind
-                       | None -> `Null);
-                     ("memory_compaction_performed", `Bool memory_compaction.performed);
-                     ("memory_compaction_reason",
-                       match memory_compaction.reason with
-                       | Some reason -> `String reason
-                       | None -> `Null);
-                     ("memory_compaction_target_notes", `Int memory_compaction.target_notes);
-                     ("memory_compaction_before_notes", `Int memory_compaction.before_notes);
-                     ("memory_compaction_after_notes", `Int memory_compaction.after_notes);
-                     ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
-                     ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
-                     ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
-                     ("interesting_alert_triggered", `Bool interesting_alert.triggered);
-                     ("interesting_alert_score", `Float interesting_alert.score);
-                     ("interesting_alert", interesting_alert_result_to_json interesting_alert);
-                     ("handoff", `Assoc [("performed", `Bool false)]);
-                   ] in
-                   append_jsonl_line metrics_path metrics_json
-                 with exn ->
-                   log_keeper_exn ~label:"turn metrics JSONL write failed" exn);
-                (* Harness: finalize trajectory with outcome *)
-                (let traj_outcome =
-                  if trajectory_acc.Trajectory.total_cost >= gate_config.Eval_gate.max_cost_usd then
-                    Trajectory.CostExceeded
-                  else
-                    Trajectory.Completed
-                in
-                let _traj = Trajectory.finalize trajectory_acc traj_outcome in
-                Printf.eprintf "[HARNESS] Trajectory finalized: %s turns=%d calls=%d cost=$%.4f outcome=%s\n%!"
-                  meta_turn.trace_id
-                  _traj.Trajectory.total_turns
-                  _traj.Trajectory.total_tool_calls
-                  _traj.Trajectory.total_cost_usd
-                  (Trajectory.outcome_to_string traj_outcome));
-                (* SSE: keeper_compaction — emitted only when compaction occurred *)
-                (if compacted then
-                  (try Sse.broadcast (`Assoc [
-                    ("type", `String "keeper_compaction");
-                    ("name", `String meta_turn.name);
-                    ("saved_tokens", `Int (before_compact_tokens - after_compact_tokens));
-                    ("trigger", match compaction_trigger with
-                      | Some r -> `String r | None -> `Null);
-                  ]) with exn ->
-                    log_keeper_exn ~label:"SSE keeper_compaction broadcast failed" exn));
-                (* SSE: keeper_turn_complete — emitted on every normal turn finish *)
-                (try Sse.broadcast (`Assoc [
-                  ("type", `String "keeper_turn_complete");
-                  ("name", `String meta_turn.name);
-                  ("trace_id", `String meta_turn.trace_id);
-                  ("generation", `Int meta_turn.generation);
-                  ("tool_calls", `Int trajectory_acc.Trajectory.total_calls);
-                  ("compacted", `Bool compacted);
-                  ("context_ratio", `Float ctx_ratio);
-                  ("model_used", `String final_model_used);
-                ]) with exn ->
-                  log_keeper_exn ~label:"SSE keeper_turn_complete broadcast failed" exn);
-
-                let json = `Assoc [
-                  ("name", `String meta_turn.name);
-                  ("trace_id", `String meta_turn.trace_id);
-                  ("generation", `Int meta_turn.generation);
-                  ("soul_profile", `String meta_turn.soul_profile);
-                  ("will", if String.trim meta_turn.will = "" then `Null else `String meta_turn.will);
-                  ("needs", if String.trim meta_turn.needs = "" then `Null else `String meta_turn.needs);
-                  ("desires", if String.trim meta_turn.desires = "" then `Null else `String meta_turn.desires);
-                  ("model_used", `String final_model_used);
-                  ("usage", `Assoc [
-                    ("input_tokens", `Int final_usage.input_tokens);
-                    ("output_tokens", `Int final_usage.output_tokens);
-                    ("total_tokens", `Int final_usage.total_tokens);
-                  ]);
-                  ("latency_ms", `Int final_latency_ms);
-                  ("cost_usd", `Float total_cost_usd_turn);
-                  ("reply", `String safe_reply);
-                  ("context_ratio", `Float ctx_ratio);
-                  ("compacted", `Bool compacted);
-                  ( "compaction_trigger",
-                    match compaction_trigger with
-                    | Some reason -> `String reason
-                    | None -> `Null );
-	                  ("work_kind", `String work_kind);
-	                  ("tool_call_count", `Int tool_call_count);
-	                  ("tools_used", `List (List.map (fun s -> `String s) tools_used));
-		                  ("skill_primary", `String effective_skill_route.primary_skill);
-		                  ("skill_secondary",
-		                    `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
-			                  ("skill_reason", `String effective_skill_route.reason);
-                          ("skill_selection_mode",
-                            `String skill_route_resolution.selection_mode);
-                          ("skill_provenance",
-                            `String skill_route_resolution.provenance);
-			                  ("memory_check", memory_check_json);
-                  ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
-                  ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
-                  ("auto_reflect", `Bool auto_rules.reflect);
-                  ("auto_plan", `Bool auto_rules.plan);
-                  ("auto_compact", `Bool auto_rules.compact);
-                  ("auto_handoff", `Bool auto_rules.handoff);
-                  ("guardrail_stop", `Bool auto_rules.guardrail_stop);
-                  ("guardrail_stop_reason",
-                    match auto_rules.guardrail_reason with
-                    | Some reason -> `String reason
-                    | None -> `Null);
-	                  ("repetition_risk", `Float repetition_risk);
-	                  ("goal_alignment", `Float goal_alignment);
-                  ("response_alignment", `Float response_alignment);
-                  ("goal_drift", `Float auto_rules.goal_drift);
-		                  ("drift", `Assoc [
-	                    ("enabled", `Bool meta_turn.drift_enabled);
-                    ("applied", `Bool drift_applied);
-                    ("reason",
-                      match drift_reason with
-                      | Some reason -> `String reason
-                      | None -> `Null);
-                    ("min_turn_gap", `Int meta_turn.drift_min_turn_gap);
-                    ("count_total", `Int meta_turn.drift_count_total);
-                    ("last_turn", `Int meta_turn.last_drift_turn);
-                    ("last_reason",
-                      if String.trim meta_turn.last_drift_reason = ""
-                      then `Null
-                      else `String meta_turn.last_drift_reason);
-                  ]);
-                  ("memory_notes_added", `Int memory_notes_added);
-                  ("memory_note_kinds",
-                    `List (List.map (fun s -> `String s) memory_note_kinds));
-                  ("memory_top_kind",
-                    match memory_top_kind with
-                    | Some kind -> `String kind
-                    | None -> `Null);
-                  ("memory_compaction_performed", `Bool memory_compaction.performed);
-                  ("memory_compaction_reason",
-                    match memory_compaction.reason with
-                    | Some reason -> `String reason
-                    | None -> `Null);
-                  ("memory_compaction_target_notes", `Int memory_compaction.target_notes);
-                  ("memory_compaction_before_notes", `Int memory_compaction.before_notes);
-                  ("memory_compaction_after_notes", `Int memory_compaction.after_notes);
-                  ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
-                  ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
-                  ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
-                  ("interesting_alert", interesting_alert_result_to_json interesting_alert);
-                ] in
-                (true, Yojson.Safe.pretty_to_string json)
-              end else begin
-                (* Auto-handoff: hydrate successor context + rotate trace_id. *)
-                let next_model =
-                  match specs with
-                  | _m0 :: m1 :: _ -> m1
-                  | m0 :: _ -> m0
-                  | [] -> primary
-                in
-                let metrics = Succession.{
-                  total_turns = meta_turn.total_turns;
-                  total_tokens_used = meta_turn.total_tokens;
-                  total_cost_usd = meta_turn.total_cost_usd;
-                  tasks_completed = 0;
-                  errors_encountered = 0;
-                  elapsed_seconds = 0.0;
-                } in
-                let successor_trace = generate_trace_id () in
-                let next_generation = meta_turn.generation + 1 in
-                let dna = Succession.extract_dna
-                  ~working_ctx:ctx_work
-                  ~session_ctx:session
-                  ~goal:meta_turn.goal
-                  ~generation:next_generation
-                  ~trace_id:successor_trace
-                  ~metrics
-                in
-                let spec = Succession.{
-                  model = next_model;
-                  inherit_tools = false;
-                  context_budget = meta_turn.context_budget;
-                } in
-                let successor_ctx = Succession.hydrate dna spec in
-                let successor_session = Context_manager.create_session
-                  ~session_id:successor_trace ~base_dir in
-                (try ignore (save_checkpoint successor_session successor_ctx ~generation:next_generation)
-                 with exn -> log_keeper_exn ~label:"save_checkpoint (succession) failed" exn);
-
-                let prev_trace_id = meta_turn.trace_id in
-                let trace_history = take 20 (prev_trace_id :: meta_turn.trace_history) in
-                let meta' = { meta_turn with
-                  trace_id = successor_trace;
-                  trace_history;
-                  generation = next_generation;
-                  last_handoff_ts = now_ts;
-                  updated_at = now_iso ();
-                } in
-                (try ignore (write_meta ctx.config meta')
-                 with exn -> log_keeper_exn ~label:"write_meta (succession) failed" exn);
-
-                (try
-                   let metrics_json = `Assoc [
-                     ("ts", `String (now_iso ()));
-                     ("ts_unix", `Float now_ts);
-                     ("channel", `String "turn");
-                     ("name", `String meta'.name);
-                     ("agent_name", `String meta'.agent_name);
-                     ("trace_id", `String prev_trace_id);
-                     ("generation", `Int meta_turn.generation);
-                     ("model_used", `String final_model_used);
-                     ("usage", `Assoc [
-                       ("input_tokens", `Int final_usage.input_tokens);
-                       ("output_tokens", `Int final_usage.output_tokens);
-                       ("total_tokens", `Int final_usage.total_tokens);
-                     ]);
-                     ("latency_ms", `Int final_latency_ms);
-                     ("cost_usd", `Float total_cost_usd_turn);
-                     ("context_ratio", `Float ctx_ratio);
-                     ("context_tokens", `Int ctx_work.token_count);
-                     ("context_max", `Int ctx_work.max_tokens);
-                     ("message_count", `Int (List.length ctx_work.messages));
-                     ("compacted", `Bool compacted);
-                     ("compaction_before_tokens", `Int before_compact_tokens);
-                     ("compaction_after_tokens", `Int after_compact_tokens);
-                     ( "compaction_trigger",
-                       match compaction_trigger with
-                       | Some reason -> `String reason
-                       | None -> `Null );
-	                     ("work_kind", `String work_kind);
-	                     ("tool_call_count", `Int tool_call_count);
-	                     ("tools_used", `List (List.map (fun s -> `String s) tools_used));
-		                     ("skill_primary", `String effective_skill_route.primary_skill);
-		                     ("skill_secondary",
-		                       `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
-			                     ("skill_reason", `String effective_skill_route.reason);
-                             ("skill_selection_mode",
-                               `String skill_route_resolution.selection_mode);
-                             ("skill_provenance",
-                               `String skill_route_resolution.provenance);
-			                     ("memory_check", memory_check_json);
-                     ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
-                     ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
-                     ("auto_reflect", `Bool auto_rules.reflect);
-                     ("auto_plan", `Bool auto_rules.plan);
-                     ("auto_compact", `Bool auto_rules.compact);
-                     ("auto_handoff", `Bool auto_rules.handoff);
-                     ("guardrail_stop", `Bool auto_rules.guardrail_stop);
-                     ("guardrail_stop_reason",
-                       match auto_rules.guardrail_reason with
-                       | Some reason -> `String reason
-                       | None -> `Null);
-	                     ("repetition_risk", `Float repetition_risk);
-	                     ("goal_alignment", `Float goal_alignment);
-                     ("response_alignment", `Float response_alignment);
-                     ("goal_drift", `Float auto_rules.goal_drift);
-		                     ("drift", `Assoc [
-	                       ("enabled", `Bool meta_turn.drift_enabled);
-                       ("applied", `Bool drift_applied);
-                       ("reason",
-                         match drift_reason with
-                         | Some reason -> `String reason
-                         | None -> `Null);
-                       ("min_turn_gap", `Int meta_turn.drift_min_turn_gap);
-                       ("count_total", `Int meta_turn.drift_count_total);
-                       ("last_turn", `Int meta_turn.last_drift_turn);
-                       ("last_reason",
-                         if String.trim meta_turn.last_drift_reason = ""
-                         then `Null
-                         else `String meta_turn.last_drift_reason);
-                     ]);
-                     ("memory_notes_added", `Int memory_notes_added);
-                     ("memory_note_kinds",
-                       `List (List.map (fun s -> `String s) memory_note_kinds));
-                     ("memory_top_kind",
-                       match memory_top_kind with
-                       | Some kind -> `String kind
-                       | None -> `Null);
-                     ("memory_compaction_performed", `Bool memory_compaction.performed);
-                     ("memory_compaction_reason",
-                       match memory_compaction.reason with
-                       | Some reason -> `String reason
-                       | None -> `Null);
-                     ("memory_compaction_target_notes", `Int memory_compaction.target_notes);
-                     ("memory_compaction_before_notes", `Int memory_compaction.before_notes);
-                     ("memory_compaction_after_notes", `Int memory_compaction.after_notes);
-                     ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
-                     ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
-                     ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
-                     ("interesting_alert_triggered", `Bool interesting_alert.triggered);
-                     ("interesting_alert_score", `Float interesting_alert.score);
-                     ("interesting_alert", interesting_alert_result_to_json interesting_alert);
-                     ("handoff", `Assoc [
-                       ("performed", `Bool true);
-                       ("prev_trace_id", `String prev_trace_id);
-                       ("new_trace_id", `String meta'.trace_id);
-                       ("to_model", `String next_model.model_id);
-                       ("new_generation", `Int meta'.generation);
-                     ]);
-                   ] in
-                   append_jsonl_line metrics_path metrics_json
-                 with exn ->
-                   log_keeper_exn ~label:"handoff metrics JSONL write failed" exn);
-                (* SSE: keeper_handoff — generation succession event *)
-                (try Sse.broadcast (`Assoc [
-                  ("type", `String "keeper_handoff");
-                  ("name", `String meta_turn.name);
-                  ("from_generation", `Int meta_turn.generation);
-                  ("to_generation", `Int next_generation);
-                  ("to_model", `String next_model.model_id);
-                ]) with exn ->
-               log_keeper_exn ~label:"SSE keeper_handoff broadcast failed" exn);
-
-                let json = `Assoc [
-                  ("name", `String meta'.name);
-                  ("soul_profile", `String meta'.soul_profile);
-                  ("will", if String.trim meta'.will = "" then `Null else `String meta'.will);
-                  ("needs", if String.trim meta'.needs = "" then `Null else `String meta'.needs);
-                  ("desires", if String.trim meta'.desires = "" then `Null else `String meta'.desires);
-                  ("reply", `String safe_reply);
-                  ("model_used", `String final_model_used);
-                  ("latency_ms", `Int final_latency_ms);
-                  ("cost_usd", `Float total_cost_usd_turn);
-                  ("context_ratio", `Float ctx_ratio);
-                  ("compacted", `Bool compacted);
-                  ( "compaction_trigger",
-                    match compaction_trigger with
-                    | Some reason -> `String reason
-                    | None -> `Null );
-	                  ("work_kind", `String work_kind);
-	                  ("tool_call_count", `Int tool_call_count);
-	                  ("tools_used", `List (List.map (fun s -> `String s) tools_used));
-		                  ("skill_primary", `String effective_skill_route.primary_skill);
-		                  ("skill_secondary",
-		                    `List (List.map (fun s -> `String s) effective_skill_route.secondary_skills));
-			                  ("skill_reason", `String effective_skill_route.reason);
-                          ("skill_selection_mode",
-                            `String skill_route_resolution.selection_mode);
-                          ("skill_provenance",
-                            `String skill_route_resolution.provenance);
-			                  ("memory_check", memory_check_json);
-                  ("auto_rules", keeper_auto_rule_eval_to_json auto_rules);
-                  ("reflection", keeper_reflection_payload_of_auto_rules auto_rules);
-                  ("auto_reflect", `Bool auto_rules.reflect);
-                  ("auto_plan", `Bool auto_rules.plan);
-                  ("auto_compact", `Bool auto_rules.compact);
-                  ("auto_handoff", `Bool auto_rules.handoff);
-                  ("guardrail_stop", `Bool auto_rules.guardrail_stop);
-                  ("guardrail_stop_reason",
-                    match auto_rules.guardrail_reason with
-                    | Some reason -> `String reason
-                    | None -> `Null);
-	                  ("repetition_risk", `Float repetition_risk);
-	                  ("goal_alignment", `Float goal_alignment);
-                  ("response_alignment", `Float response_alignment);
-                  ("goal_drift", `Float auto_rules.goal_drift);
-		                  ("drift", `Assoc [
-	                    ("enabled", `Bool meta_turn.drift_enabled);
-                    ("applied", `Bool drift_applied);
-                    ("reason",
-                      match drift_reason with
-                      | Some reason -> `String reason
-                      | None -> `Null);
-                    ("min_turn_gap", `Int meta_turn.drift_min_turn_gap);
-                    ("count_total", `Int meta_turn.drift_count_total);
-                    ("last_turn", `Int meta_turn.last_drift_turn);
-                    ("last_reason",
-                      if String.trim meta_turn.last_drift_reason = ""
-                      then `Null
-                      else `String meta_turn.last_drift_reason);
-                  ]);
-                  ("memory_notes_added", `Int memory_notes_added);
-                  ("memory_note_kinds",
-                    `List (List.map (fun s -> `String s) memory_note_kinds));
-                  ("memory_top_kind",
-                    match memory_top_kind with
-                    | Some kind -> `String kind
-                    | None -> `Null);
-                  ("memory_compaction_performed", `Bool memory_compaction.performed);
-                  ("memory_compaction_reason",
-                    match memory_compaction.reason with
-                    | Some reason -> `String reason
-                    | None -> `Null);
-                  ("memory_compaction_target_notes", `Int memory_compaction.target_notes);
-                  ("memory_compaction_before_notes", `Int memory_compaction.before_notes);
-                  ("memory_compaction_after_notes", `Int memory_compaction.after_notes);
-                  ("memory_compaction_dropped_notes", `Int memory_compaction.dropped_notes);
-                  ("memory_compaction_dedup_dropped", `Int memory_compaction.dedup_dropped);
-                  ("memory_compaction_invalid_dropped", `Int memory_compaction.invalid_dropped);
-                  ("interesting_alert", interesting_alert_result_to_json interesting_alert);
-                  ("handoff", `Assoc [
-                    ("performed", `Bool true);
-                    ("prev_trace_id", `String prev_trace_id);
-                    ("new_trace_id", `String meta'.trace_id);
-                    ("to_model", `String next_model.model_id);
-                    ("new_generation", `Int meta'.generation);
-                  ]);
-                ] in
-                (true, Yojson.Safe.pretty_to_string json)
-              end))
+              let turn_env : turn_env = {
+                meta_turn;
+                safe_reply;
+                final_usage;
+                final_model_used;
+                final_latency_ms;
+                total_cost_usd_turn;
+                ctx_ratio;
+                ctx_work;
+                compacted;
+                before_compact_tokens;
+                after_compact_tokens;
+                compaction_trigger;
+                compaction_decision;
+                work_kind;
+                tool_call_count;
+                tools_used;
+                effective_skill_route;
+                skill_route_resolution;
+                memory_check_json;
+                auto_rules;
+                drift_applied;
+                drift_reason;
+                repetition_risk;
+                goal_alignment;
+                response_alignment;
+                memory_notes_added;
+                memory_note_kinds;
+                memory_top_kind;
+                memory_compaction;
+                interesting_alert;
+              } in
+              build_keeper_response ctx ~session ~now_ts ~specs ~primary ~base_dir
+                ~trajectory_acc ~gate_config ~do_handoff turn_env))
 
 let handle_keeper_model_set ctx args : tool_result =
   let name = get_string args "name" "" in
@@ -2923,7 +3018,8 @@ let handle_keeper_down ctx args : tool_result =
         if validate_name m.trace_id then (
           let dir = Filename.concat (session_base_dir ctx.config) m.trace_id in
           try rm_rf dir with exn ->
-            log_keeper_exn ~label:"session dir cleanup failed" exn));
+            Printf.eprintf "[keeper] session dir cleanup failed: %s\n%!"
+              (Printexc.to_string exn)));
       let json = `Assoc [
         ("name", `String name);
         ("stopped", `Bool true);

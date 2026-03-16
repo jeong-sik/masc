@@ -10,6 +10,7 @@ import {
   keeperRecovering,
   keeperSending,
   keeperStatusDetails,
+  keeperStreamStartedAt,
   keeperThreads,
   probeKeeperRuntime,
   recoverKeeperRuntime,
@@ -183,6 +184,7 @@ export function KeeperConversationPanel({
         placeholder=${placeholder}
         disabled=${!keeperName}
         streaming=${sending}
+        streamStartedAt=${keeperStreamStartedAt.value[keeperName] ?? null}
         onDraftChange=${setDraft}
         onSend=${() => { void submit() }}
         onAbort=${() => { abortKeeperThreadMessage(keeperName) }}

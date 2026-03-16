@@ -63,6 +63,8 @@ type cli_args = {
   max_context : int option;
   compact_at : float;
   handoff_at : float;
+  room_path : string option;
+  agent_name : string;
 }
 
 let default_args = {
@@ -75,6 +77,8 @@ let default_args = {
   max_context = None;
   compact_at = 0.5;
   handoff_at = 0.85;
+  room_path = None;
+  agent_name = "perpetual-cli";
 }
 
 let rec parse_args args acc =
@@ -98,6 +102,10 @@ let rec parse_args args acc =
     parse_args rest { acc with compact_at = float_of_string f }
   | "--handoff-at" :: f :: rest ->
     parse_args rest { acc with handoff_at = float_of_string f }
+  | "--room-path" :: p :: rest ->
+    parse_args rest { acc with room_path = Some p }
+  | "--agent-name" :: n :: rest ->
+    parse_args rest { acc with agent_name = n }
   | "--help" :: _ ->
     eprintf "Usage: perpetual_cli --goal GOAL --models MODEL1,MODEL2 [OPTIONS]\n\n\
 Options:\n\
@@ -164,6 +172,11 @@ let () =
     | None -> None
   in
 
+  let room_config = match args.room_path with
+    | Some path -> Some (Room.default_config path)
+    | None -> None
+  in
+
   let config = Perpetual_loop.default_config ~goal:args.goal ~models
     ?verifier () in
   let config = { config with
@@ -173,6 +186,8 @@ let () =
     compact_threshold = args.compact_at;
     handoff_threshold = args.handoff_at;
     on_event = log_event;
+    room_config;
+    agent_name = args.agent_name;
   } in
 
   eprintf "Perpetual Agent CLI\n%!";

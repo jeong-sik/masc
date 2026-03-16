@@ -207,14 +207,18 @@ let run_process_with_timeout ~clock_opt ~timeout_sec ~prog ~argv ~env =
   | `Exited (Unix.WSIGNALED code) -> finalize (128 + code)
   | `Exited (Unix.WSTOPPED code) -> finalize (256 + code)
   | `Timeout ->
-      (try Unix.kill pid Sys.sigterm with _ -> ());
+      (try Unix.kill pid Sys.sigterm with
+       | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+       | exn -> Log.CmdPlane.warn "sigterm pid %d: %s" pid (Printexc.to_string exn));
       (match clock_opt with
       | Some clock -> Eio.Time.sleep clock 1.0
       | None -> Unix.sleepf 1.0);
       let exit_code =
         match Unix.waitpid [ Unix.WNOHANG ] pid with
         | 0, _ ->
-            (try Unix.kill pid Sys.sigkill with _ -> ());
+            (try Unix.kill pid Sys.sigkill with
+             | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+             | exn -> Log.CmdPlane.warn "sigkill pid %d: %s" pid (Printexc.to_string exn));
             let _, status = Unix.waitpid [] pid in
             (match status with
             | Unix.WEXITED code -> code

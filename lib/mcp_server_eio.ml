@@ -1022,7 +1022,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         (match state.Mcp_server.fs with
          | Some fs ->
              (try Telemetry_eio.track_agent_joined ~fs config ~agent_id:nickname ()
-              with _ -> ())
+              with exn ->
+                Log.Telemetry.debug "track_agent_joined (auto): %s" (Printexc.to_string exn))
          | None -> ());
         nickname
       end
@@ -1820,7 +1821,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (match state.Mcp_server.fs with
        | Some fs ->
            (try Telemetry_eio.track_agent_joined ~fs config ~agent_id:nickname ()
-            with _ -> ())
+            with exn ->
+              Log.Telemetry.debug "track_agent_joined (join): %s" (Printexc.to_string exn))
        | None -> ());
       (true, final_result)
 
@@ -1850,7 +1852,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       (match state.Mcp_server.fs with
        | Some fs ->
            (try Telemetry_eio.track_agent_left ~fs config ~agent_id:agent_name ~reason:"leave"
-            with _ -> ())
+            with exn ->
+              Log.Telemetry.debug "track_agent_left: %s" (Printexc.to_string exn))
        | None -> ());
       (true, result)
 

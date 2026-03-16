@@ -231,11 +231,11 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
   let cache_key =
     Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
   in
-  with_dashboard_timeout ~clock (fun () ->
-    Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
-      Dashboard_mission.json ?actor
-        ~config:state.Mcp_server.room_config ~sw ~clock
-        ~proc_mgr:state.Mcp_server.proc_mgr ()))
+  Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:3.0
+    ~clock ~timeout_sec:15.0 (fun () ->
+    Dashboard_mission.json ?actor
+      ~config:state.Mcp_server.room_config ~sw ~clock
+      ~proc_mgr:state.Mcp_server.proc_mgr ())
 
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
@@ -258,11 +258,20 @@ let dashboard_session_http_json ~state ~sw ~clock request =
         ]
 
 let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
-  with_dashboard_timeout ~clock (fun () ->
-    Dashboard_mission_briefing.json ?actor:(operator_actor_hint request)
-      ~force:(bool_query_param request "force" ~default:false)
+  let actor = operator_actor_hint request in
+  let force = bool_query_param request "force" ~default:false in
+  let compute () =
+    Dashboard_mission_briefing.json ?actor ~force
       ~config:state.Mcp_server.room_config ~sw ~clock
-      ~proc_mgr:state.Mcp_server.proc_mgr ())
+      ~proc_mgr:state.Mcp_server.proc_mgr ()
+  in
+  if force then with_dashboard_timeout ~clock compute
+  else
+    let cache_key =
+      Printf.sprintf "mission_briefing:%s" (Option.value ~default:"" actor)
+    in
+    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:5.0
+      ~clock ~timeout_sec:15.0 compute
 
 let dashboard_proof_http_json ~state request =
   let session_id = query_param request "session_id" in
@@ -397,11 +406,11 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       (Option.value ~default:"" actor)
       (Option.value ~default:"" fixture)
   in
-  with_dashboard_timeout ~clock (fun () ->
-    Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
-      Dashboard_execution.json ?actor ?fixture
-        ~config:state.Mcp_server.room_config ~sw ~clock
-        ~proc_mgr:state.Mcp_server.proc_mgr ()))
+  Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:3.0
+    ~clock ~timeout_sec:15.0 (fun () ->
+    Dashboard_execution.json ?actor ?fixture
+      ~config:state.Mcp_server.room_config ~sw ~clock
+      ~proc_mgr:state.Mcp_server.proc_mgr ())
 
 let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =

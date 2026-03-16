@@ -970,6 +970,12 @@
  (modules test_sse_room_filter)
  (libraries masc_mcp alcotest yojson))
 
+; Room Checkpoint — snapshot and restore (Harness Sprint 4)
+(test
+ (name test_room_checkpoint)
+ (modules test_room_checkpoint)
+ (libraries masc_mcp alcotest yojson))
+
 ; Tool Unified — unified query interface across catalog, registry, dispatch (P4 Phase 4.4)
 (test
  (name test_tool_unified)

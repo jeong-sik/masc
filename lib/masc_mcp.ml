@@ -276,6 +276,7 @@ module Tool_dispatch = Tool_dispatch
 module Tool_trace_hooks = Tool_trace_hooks
 module Tool_permissions = Tool_permissions
 module Sse_room_filter = Sse_room_filter
+module Room_checkpoint = Room_checkpoint
 module Tool_unified = Tool_unified
 module Tool_llama = Tool_llama
 module Tool_board = Tool_board

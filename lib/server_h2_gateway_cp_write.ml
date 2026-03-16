@@ -63,7 +63,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~sw ~clock path =
   | "/api/v1/command-plane/operations" ->
       cp_post ~tool_name:"masc_operation_create"
         ~handler:(fun ~state ~httpun_request ~args ->
-          command_plane_operation_create_http_json ~state httpun_request ~args)
+          command_plane_operation_start_http_json ~state httpun_request ~args)
   | "/api/v1/command-plane/operations/checkpoint" ->
       cp_post ~tool_name:"masc_operation_checkpoint"
         ~handler:(fun ~state ~httpun_request ~args ->

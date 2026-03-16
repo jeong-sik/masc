@@ -136,6 +136,9 @@
    local_runtime_pool
    agent_swarm_contract
    local_agent_eio
+   local_agent_eio_types
+   local_agent_eio_container
+   local_agent_eio_runners
    agent_swarm_client
    agent_swarm_dev_tools
    agent_swarm_external_agent
@@ -288,6 +291,9 @@
    team_session_types
    team_session_store
    team_session_report
+   team_session_report_core
+   team_session_report_proof_helpers
+   team_session_report_proof
    team_session_engine_helpers
    team_session_engine_status
    team_session_engine_policy
@@ -444,6 +450,9 @@
    keeper_deliberation
    keeper_types
    keeper_memory
+   keeper_memory_policy
+   keeper_memory_bank
+   keeper_memory_recall
    keeper_alerting
    keeper_exec_tools
    keeper_exec_status
@@ -508,6 +517,9 @@
    trpg_round_prompt
    trpg_round
    trpg_handlers
+   trpg_handlers_core
+   trpg_handlers_actors
+   trpg_handlers_session
    tool_trpg
    trpg_store
    trpg_preset_store
@@ -653,7 +665,23 @@
   ;; trpg_round sub-modules
   trpg_round_fallback
   trpg_round_keeper_parse
-  trpg_round_prompt)
+  trpg_round_prompt
+  ;; trpg_handlers sub-modules
+  trpg_handlers_core
+  trpg_handlers_actors
+  trpg_handlers_session
+  ;; local_agent_eio sub-modules
+  local_agent_eio_types
+  local_agent_eio_container
+  local_agent_eio_runners
+  ;; keeper_memory sub-modules
+  keeper_memory_policy
+  keeper_memory_bank
+  keeper_memory_recall
+  ;; team_session_report sub-modules
+  team_session_report_core
+  team_session_report_proof_helpers
+  team_session_report_proof)
  (libraries
    yojson
    base64

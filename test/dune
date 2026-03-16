@@ -154,6 +154,12 @@
  (modules test_oas_integration)
  (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
 
+; Subsystem OAS integration tests (Agent Cards, Event_bus, Pulse migration)
+(test
+ (name test_subsystem_events)
+ (modules test_subsystem_events)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
+
 (test
  (name test_agent_swarm_unit)
  (modules test_agent_swarm_unit)

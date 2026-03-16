@@ -1,4 +1,4 @@
-(** Gardener — Self-Organizing Agent Ecosystem Manager
+(** Gardener — Self-Organizing Agent Ecosystem Manager (OAS-integrated).
 
     Implements autonomous management of the agent ecosystem:
     - Health monitoring with homeostatic balance
@@ -10,11 +10,57 @@
     - {b Inverse-U Reward}: Both over- and under-population are penalized
     - {b Safety First}: Hard limits, budgets, cooldowns, circuit breaker
     - {b LLM-Assisted}: Complex decisions can use LLM for nuanced judgment
-*)
+
+    OAS integration: exports Agent Card, publishes events via Event_bus,
+    uses Pulse for tick scheduling (replaces raw Eio.Time.sleep loop). *)
 
 [@@@warning "-32-69"]
 
 open Gardener_types
+
+(* ââ OAS Agent Card âââââââââââââââââââââââââââââââââââââââââ *)
+
+let agent_card : Agent_card.agent_card = {
+  name = "gardener";
+  version = "2.91.0";
+  description = Some "Self-organizing agent ecosystem manager: spawn, retire, homeostatic balance";
+  provider = Some { organization = "MASC"; url = None };
+  protocol_versions = ["0.3"];
+  capabilities = { streaming = false; push_notifications = false; extended_agent_card = false };
+  skills = [
+    { id = "health-monitor"; name = "Health Monitor";
+      description = Some "Calculate ecosystem health metrics and homeostatic score";
+      input_modes = []; output_modes = ["application/json"] };
+    { id = "spawn-decision"; name = "Spawn Decision";
+      description = Some "Evaluate and execute agent spawn proposals";
+      input_modes = ["application/json"]; output_modes = ["application/json"] };
+    { id = "retire-decision"; name = "Retire Decision";
+      description = Some "Evaluate and execute agent retirement proposals";
+      input_modes = ["application/json"]; output_modes = ["application/json"] };
+  ];
+  supported_interfaces = [];
+  security_schemes = [];
+  default_input_modes = ["application/json"];
+  default_output_modes = ["application/json"];
+  extensions = [];
+  signatures = [];
+  icon_url = None;
+  documentation_url = None;
+  created_at = "2026-03-16T00:00:00Z";
+  updated_at = "2026-03-16T00:00:00Z";
+}
+
+(* ââ Event_bus + Pulse refs ââââââââââââââââââââââââââââââââââââââ *)
+
+let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
+let gardener_pulse_ref : Pulse.t option ref = ref None
+
+let publish_event name payload =
+  match !bus_ref with
+  | Some bus ->
+      Agent_sdk.Event_bus.publish bus
+        (Agent_sdk.Event_bus.Custom (name, payload))
+  | None -> ()
 
 (** {1 Configuration Loading} *)
 
@@ -1481,23 +1527,87 @@ let tick ~sw ~clock ~config ~room_config : unit =
     record_tick_complete ()
   end
 
-(** Run the gardener background loop (no switch needed — loop is self-contained) *)
-let rec run_loop ~sw ~clock ~config ~room_config () =
-  tick ~sw ~clock ~config ~room_config;
-  Eio.Time.sleep clock config.check_interval_sec;
-  run_loop ~sw ~clock ~config ~room_config ()
+(** Pulse consumer wrapping the existing [tick] function.
+    The loop mechanism changes; tick logic stays identical. *)
+let make_gardener_consumer ~sw ~clock ~config ~room_config : (module Pulse.Consumer) =
+  (module struct
+    let name = "gardener-tick"
+    let should_act _beat = not (is_circuit_open ())
+    let on_beat _beat =
+      (try
+        tick ~sw ~clock ~config ~room_config;
+        publish_event "masc:gardener:tick"
+          (`Assoc [
+            ("agent_name", `String "gardener");
+            ("circuit_open", `Bool false);
+            ("timestamp", `Float (Time_compat.now ()));
+          ]);
+        Ok ()
+      with exn ->
+        let msg = Printf.sprintf "gardener tick failed: %s" (Printexc.to_string exn) in
+        Eio.traceln "[Gardener] %s" msg;
+        Error msg)
+  end)
 
-(** Start the gardener (called from main server init) *)
-let start ~sw ~clock ~room_config =
+(** Sentinel event reactor: subscribes to sentinel task_hygiene events
+    and nudges Pulse for immediate reaction. *)
+let setup_sentinel_reactor ~(sub : Agent_sdk.Event_bus.subscription) =
+  match !gardener_pulse_ref with
+  | Some pulse ->
+      let events = Agent_sdk.Event_bus.drain sub in
+      List.iter (fun ev ->
+        match ev with
+        | Agent_sdk.Event_bus.Custom ("masc:sentinel:task_hygiene", _payload) ->
+            Pulse.nudge pulse ~reason:"sentinel task_hygiene event"
+        | _ -> ()
+      ) events
+  | None -> ()
+
+(** Background fiber: periodically drains sentinel events and nudges Gardener pulse. *)
+let start_sentinel_reactor_fiber ~sw ~clock ~sub =
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 10.0;
+      setup_sentinel_reactor ~sub;
+      loop ()
+    in
+    loop ())
+
+(** Start the gardener (called from main server init).
+    Uses Pulse for tick scheduling (replaces raw Eio.Time.sleep loop).
+    Optionally subscribes to Sentinel events via Event_bus. *)
+let start ?bus ~sw ~clock ~room_config () =
   let config = load_config () in
   room_config_ref := Some room_config;
+  bus_ref := bus;
   if config.enabled then begin
     gardener_lock := Some (Eio.Mutex.create ());
     Eio.traceln
       "[Gardener] Starting with config: min=%d target=%d max=%d interval=%.0fs"
       config.min_agents config.target_agents config.max_agents
       config.check_interval_sec;
-    Eio.Fiber.fork ~sw (fun () -> run_loop ~sw ~clock ~config ~room_config ())
+    let pulse = Pulse.create
+      ~clock
+      ~rhythm:{ Pulse.base_s = config.check_interval_sec;
+                min_s = 60.0;
+                max_s = config.check_interval_sec *. 2.0;
+                quiet = (3, 7) }
+      ~lifecycle:Perpetual
+      ~consumers:[make_gardener_consumer ~sw ~clock ~config ~room_config]
+    in
+    gardener_pulse_ref := Some pulse;
+    (match bus with
+     | Some b ->
+         let sub = Agent_sdk.Event_bus.subscribe b
+           ~filter:(function
+             | Agent_sdk.Event_bus.Custom (name, _) ->
+                 String.length name >= 14 &&
+                 String.sub name 0 14 = "masc:sentinel:"
+             | _ -> false)
+         in
+         start_sentinel_reactor_fiber ~sw ~clock ~sub
+     | None -> ());
+    Pulse.run ~sw pulse
   end else
     Eio.traceln "[Gardener] Disabled (set MASC_GARDENER_ENABLED=true to enable)"
 

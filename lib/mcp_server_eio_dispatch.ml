@@ -5,7 +5,7 @@
 *)
 
 (** All pre-built tool contexts needed for the dispatch chain. *)
-type dispatch_contexts = {
+type ('clock, 'net) dispatch_contexts = {
   config : Room.config;
   agent_name : string;
   arguments : Yojson.Safe.t;
@@ -18,9 +18,9 @@ type dispatch_contexts = {
   registry : Session.registry;
   ctx_plan : Tool_plan.context;
   ctx_run : Tool_run.context;
-  ctx_team_session : float Tool_team_session.context;
-  ctx_operator : Tool_operator.context;
-  ctx_command_plane : (Eio.Net.Sockaddr.stream, Eio.Net.connection_handler) Tool_command_plane.context;
+  ctx_team_session : float Eio.Time.clock_ty Tool_team_session.context;
+  ctx_operator : float Eio.Time.clock_ty Tool_operator.context;
+  ctx_command_plane : ('clock, 'net) Tool_command_plane.context;
   ctx_cache : Tool_cache.context;
   ctx_tempo : Tool_tempo.context;
   ctx_mitosis : Tool_mitosis.context;
@@ -35,14 +35,14 @@ type dispatch_contexts = {
   ctx_handover : Tool_handover.context;
   ctx_relay : Tool_relay.context;
   ctx_goals : Tool_goals.context;
-  ctx_heartbeat : Tool_heartbeat.context;
+  ctx_heartbeat : float Eio.Time.clock_ty Tool_heartbeat.context;
   ctx_encryption : Tool_encryption.context;
   ctx_auth : Tool_auth.context;
   ctx_hat : Tool_hat.context;
   ctx_audit : Tool_audit.context;
   ctx_rate_limit : Tool_rate_limit.context;
   ctx_cost : Tool_cost.context;
-  ctx_walph : (float Tool_walph.context, string) result;
+  ctx_walph : (('net, float Eio.Time.clock_ty) Tool_walph.context, string) result;
   ctx_agent : Tool_agent.context;
   ctx_task : Tool_task.context;
   ctx_room : Tool_room.context;
@@ -50,19 +50,19 @@ type dispatch_contexts = {
   ctx_misc : Tool_misc.context;
   ctx_agent_timeline : Tool_agent_timeline.context;
   ctx_llama : Tool_llama.context;
-  ctx_voice : float Tool_voice.context;
+  ctx_voice : float Eio.Time.clock_ty Tool_voice.context;
   ctx_suspend : Tool_suspend.context;
   ctx_library : Tool_library.context;
   ctx_mdal : Tool_mdal.context;
   ctx_autoresearch : Tool_autoresearch.context;
   ctx_perpetual : Tool_perpetual.context;
-  ctx_keeper : float Tool_keeper.context;
+  ctx_keeper : float Eio.Time.clock_ty Tool_keeper.context;
   ctx_trpg : Tool_trpg.context;
   ctx_protocol : Tool_protocol_game_view.context;
   build_inline_ctx : unit -> Tool_inline_dispatch.context;
 }
 
-let dispatch (c : dispatch_contexts) : bool * string =
+let dispatch (c : (_, _) dispatch_contexts) : bool * string =
   let name = c.name in
   let arguments = c.arguments in
 

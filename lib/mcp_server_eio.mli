@@ -177,13 +177,7 @@ val make_response : id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
 val make_error : ?data:Yojson.Safe.t -> id:Yojson.Safe.t -> int -> string -> Yojson.Safe.t
 
 (** {1 Protocol Detection} *)
-
-(** Transport mode for stdio transport *)
 type transport_mode = Framed | LineDelimited
-
-(** Detect transport mode from first line of input.
-    If line starts with "Content-Length" (case-insensitive), returns Framed.
-    Otherwise returns LineDelimited. *)
 val detect_mode : string -> transport_mode
 
 (** {1 Governance} *)

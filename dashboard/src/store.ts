@@ -49,6 +49,16 @@ import {
 import { buildAgentMotion, type AgentMotionSnapshot } from './components/common/agent-motion'
 import { isRecord, asString, asNumber, asStringArray, toIsoTimestamp } from './components/common/normalize'
 
+// --- Shell counts (lightweight fallback from /dashboard/shell) ---
+
+export interface ShellCounts {
+  agents: number
+  tasks: number
+  keepers: number
+}
+
+export const shellCounts = signal<ShellCounts | null>(null)
+
 // --- Core state signals ---
 
 export const agents = signal<Agent[]>([])
@@ -932,6 +942,14 @@ export async function refreshShell(): Promise<void> {
     const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
     if (normalizedStatus) {
       serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
+    }
+    // Extract lightweight counts for fast initial render (before execution loads)
+    if (data.counts) {
+      shellCounts.value = {
+        agents: data.counts.agents ?? 0,
+        tasks: data.counts.tasks ?? 0,
+        keepers: data.counts.keepers ?? 0,
+      }
     }
   } catch (err) {
     console.error('Dashboard shell fetch error:', err)

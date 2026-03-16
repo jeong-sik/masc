@@ -2,7 +2,7 @@
 // Combines all overview sub-components into the Home landing view.
 
 import { html } from 'htm/preact'
-import { agents, keepers, tasks } from '../../store'
+import { agents, keepers, tasks, shellCounts } from '../../store'
 import { missionSnapshot } from '../../mission-store'
 import { journal } from '../../sse'
 import { navigate } from '../../router'
@@ -11,12 +11,14 @@ import { EcosystemRing } from './ecosystem-ring'
 import { SessionStrip } from './session-strip'
 import { HealthBeacon } from './health-beacon'
 import { ActivityTicker } from './activity-ticker'
+import { DASHBOARD_SURFACES } from '../../config/navigation'
 
 export function Overview() {
   const snap = missionSnapshot.value
   const agentList = agents.value
   const keeperList = keepers.value
   const taskList = tasks.value
+  const counts = shellCounts.value
 
   const activeAgents = agentList.filter(a =>
     a.status === 'active' || a.status === 'busy' || a.status === 'listening'
@@ -24,6 +26,11 @@ export function Overview() {
   const activeTasks = taskList.filter(t =>
     t.status === 'in_progress' || t.status === 'claimed'
   )
+
+  // Use shell counts as fallback when execution data hasn't loaded yet
+  const agentCount = activeAgents.length > 0 ? activeAgents.length : (counts?.agents ?? 0)
+  const taskCount = activeTasks.length > 0 ? activeTasks.length : (counts?.tasks ?? 0)
+  const keeperCount = keeperList.length > 0 ? keeperList.length : (counts?.keepers ?? 0)
 
   const roomHealth = snap?.summary?.room_health ?? null
   const roomName = snap?.summary?.current_room ?? null
@@ -33,12 +40,15 @@ export function Overview() {
   // Keeper mini-cards for the health sidebar
   const keeperBriefs = snap?.keeper_briefs ?? []
 
+  // Navigation surfaces (excluding home itself)
+  const navSurfaces = DASHBOARD_SURFACES.filter(s => s.id !== 'home')
+
   return html`
     <div class="overview-surface">
       <${QuickStats}
-        agentCount=${activeAgents.length}
-        activeTaskCount=${activeTasks.length}
-        keeperCount=${keeperList.length}
+        agentCount=${agentCount}
+        activeTaskCount=${taskCount}
+        keeperCount=${keeperCount}
         attentionCount=${attentionCount}
       />
 
@@ -80,6 +90,21 @@ export function Overview() {
           ` : null}
         </div>
       </div>
+
+      <!-- Navigation to other surfaces (Home has no SideRail) -->
+      <nav class="overview-nav-strip">
+        ${navSurfaces.map(surface => html`
+          <button
+            class="overview-nav-btn"
+            key=${surface.id}
+            onClick=${() => navigate(surface.defaultTab)}
+          >
+            <span class="overview-nav-icon">${surface.icon}</span>
+            <span class="overview-nav-label">${surface.label}</span>
+            <span class="overview-nav-desc">${surface.description}</span>
+          </button>
+        `)}
+      </nav>
     </div>
   `
 }

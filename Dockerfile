@@ -26,6 +26,9 @@ RUN chmod +x /app/masc-mcp
 # Create data directory for JSONL fallback
 RUN mkdir -p /app/.masc
 
+# LLM cascade config (GLM-only for Railway, no local llama-server)
+COPY config/llm_cascade.json /app/config/llm_cascade.json
+
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app
 ENV MASC_WORKSPACE_ROOT=/app

@@ -168,6 +168,12 @@ let claim_task_r config ~agent_name ~task_id
   | Error e, _ -> Error e
   | _, Error e -> Error e
   | Ok _, Ok _ ->
+    (* BUG-005: Verify agent has joined before allowing claim *)
+    let actual_name = resolve_agent_name config agent_name in
+    let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
+    if not (path_exists config agent_file) then
+      Error (Types.AgentNotFound actual_name)
+    else
     let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
     with_file_lock config backlog_path (fun () ->
       try

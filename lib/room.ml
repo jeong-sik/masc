@@ -389,7 +389,7 @@ let status config =
           let json = read_json config path in
           match agent_of_yojson json with
           | Ok agent ->
-              let is_zombie = is_zombie_agent agent.last_seen in
+              let is_zombie = is_zombie_agent ~agent_name:agent.name agent.last_seen in
               let icon =
                 if is_zombie then "💀"
                 else
@@ -473,6 +473,7 @@ let status config =
 
 (* Task lifecycle: add, claim, transition, complete, cancel, claim_next *)
 include Room_task
+
 
 (* ======== Walph Control System ======== *)
 
@@ -1121,7 +1122,7 @@ let get_agents_status config =
         let json = read_json config path in
         match agent_of_yojson json with
         | Ok agent ->
-            let is_zombie = is_zombie_agent agent.last_seen in
+            let is_zombie = is_zombie_agent ~agent_name:agent.name agent.last_seen in
             let status = if is_zombie then "zombie" else agent_status_to_string agent.status in
             agents := `Assoc [
               ("name", `String agent.name);
@@ -1259,7 +1260,7 @@ let find_agents_by_capability config ~capability =
         let path = Filename.concat agents_path name in
         let json = read_json config path in
         match agent_of_yojson json with
-        | Ok agent when List.mem capability agent.capabilities && not (is_zombie_agent agent.last_seen) ->
+        | Ok agent when List.mem capability agent.capabilities && not (is_zombie_agent ~agent_name:agent.name agent.last_seen) ->
             matching := `Assoc [
               ("name", `String agent.name);
               ("status", `String (agent_status_to_string agent.status));

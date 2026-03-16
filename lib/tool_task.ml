@@ -30,7 +30,14 @@ let handle_add_task ctx args =
   let title = get_string args "title" "" in
   let priority = get_int args "priority" 3 in
   let description = get_string args "description" "" in
-  (true, Room.add_task ctx.config ~title ~priority ~description)
+  (* BUG-009/010: Validate title and priority *)
+  let trimmed_title = String.trim title in
+  if trimmed_title = "" then
+    (false, "Task title cannot be empty or whitespace-only")
+  else if priority < 1 || priority > 5 then
+    (false, Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
+  else
+    (true, Room.add_task ctx.config ~title:trimmed_title ~priority ~description)
 
 let handle_batch_add_tasks ctx args =
   let tasks_json = match args |> member "tasks" with

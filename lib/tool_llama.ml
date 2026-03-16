@@ -705,8 +705,9 @@ let runtime_status_json ?(include_models = true) () =
       ("model_count", `Int (List.length models));
       ("configured_max_concurrent_llm", `Int Llm_client.max_concurrent_llm);
       ("available_llm_permits", `Int (Llm_client.llm_semaphore_available ()));
-      ("target_parallelism", `Int 64);
-      ("managed_gap_to_target", `Int (max 0 (64 - configured_capacity)));
+      ("llm_permits_in_use", `Int (Llm_client.llm_permits_in_use  ()));
+      ("target_parallelism", `Int configured_capacity);
+      ("managed_gap_to_target", `Int 0);
       ("runtime_count", `Int (List.length runtime_snapshots));
       ("healthy_runtime_count", `Int healthy_runtime_count);
       ("configured_capacity", `Int configured_capacity);

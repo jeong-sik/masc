@@ -746,66 +746,86 @@ let is_terminal_case_status = function
 let submit_petition base_path ~title ~origin ~subject_type ~risk_class
     ~requested_action ~source_refs ~created_by =
   ensure_dirs base_path;
-  let normalized_key = normalize_key title requested_action in
-  let existing_case =
-    list_cases ~include_test:true base_path
-    |> List.find_opt (fun case_ ->
-           String.equal case_.normalized_key normalized_key
-           && not (is_terminal_case_status case_.status))
-  in
-  let now = now_unix () in
-  let case_, merged =
-    match existing_case with
-    | Some case_ -> (case_, true)
-    | None ->
-        ( {
-            id = generate_id "case";
-            petition_ids = [];
-            title;
-            normalized_key;
-            origin;
-            subject_type;
-            risk_class;
-            status = Pending_ruling;
-            created_at = now;
-            updated_at = now;
-            requested_action;
-            source_refs;
-            briefs = [];
-          },
-          false )
-  in
-  let petition =
-    {
-      id = generate_id "petition";
-      case_id = case_.id;
-      title;
-      normalized_key;
-      origin;
-      subject_type;
-      risk_class;
-      requested_action;
-      source_refs;
-      created_by;
-      created_at = now;
-    }
-  in
-  let updated_case =
-    {
-      case_ with
-      petition_ids = case_.petition_ids @ [ petition.id ];
-      title = if String.trim case_.title = "" then title else case_.title;
-      requested_action =
-        (match case_.requested_action with Some _ -> case_.requested_action | None -> requested_action);
-      source_refs =
-        List.sort_uniq String.compare (case_.source_refs @ source_refs);
-      updated_at = now;
-      origin = if merged then case_.origin else origin;
-    }
-  in
-  write_petition base_path petition;
-  write_case base_path updated_case;
-  Ok { petition; case_ = updated_case; merged }
+  (* File lock to prevent race condition between list_cases and write *)
+  let lock_path = Filename.concat (cases_dir base_path) "_submit.lock" in
+  let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
+  Fun.protect ~finally:(fun () ->
+    (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
+    Unix.close fd
+  ) (fun () ->
+    Unix.lockf fd Unix.F_LOCK 0;
+    (* Include task_id from source_refs in dedup key for stronger matching *)
+    let task_id_suffix =
+      List.find_opt (fun s ->
+        String.length s > 5 && String.sub s 0 5 = "task-"
+      ) source_refs
+      |> Option.value ~default:""
+    in
+    let base_key = normalize_key title requested_action in
+    let normalized_key =
+      if task_id_suffix = "" then base_key
+      else base_key ^ "::" ^ task_id_suffix
+    in
+    let existing_case =
+      list_cases ~include_test:true base_path
+      |> List.find_opt (fun case_ ->
+             String.equal case_.normalized_key normalized_key
+             && not (is_terminal_case_status case_.status))
+    in
+    let now = now_unix () in
+    let case_, merged =
+      match existing_case with
+      | Some case_ -> (case_, true)
+      | None ->
+          ( {
+              id = generate_id "case";
+              petition_ids = [];
+              title;
+              normalized_key;
+              origin;
+              subject_type;
+              risk_class;
+              status = Pending_ruling;
+              created_at = now;
+              updated_at = now;
+              requested_action;
+              source_refs;
+              briefs = [];
+            },
+            false )
+    in
+    let petition =
+      {
+        id = generate_id "petition";
+        case_id = case_.id;
+        title;
+        normalized_key;
+        origin;
+        subject_type;
+        risk_class;
+        requested_action;
+        source_refs;
+        created_by;
+        created_at = now;
+      }
+    in
+    let updated_case =
+      {
+        case_ with
+        petition_ids = case_.petition_ids @ [ petition.id ];
+        title = if String.trim case_.title = "" then title else case_.title;
+        requested_action =
+          (match case_.requested_action with Some _ -> case_.requested_action | None -> requested_action);
+        source_refs =
+          List.sort_uniq String.compare (case_.source_refs @ source_refs);
+        updated_at = now;
+        origin = if merged then case_.origin else origin;
+      }
+    in
+    write_petition base_path petition;
+    write_case base_path updated_case;
+    Ok { petition; case_ = updated_case; merged }
+  )
 
 let submit_brief base_path ~case_id ~author ~stance ~summary ~evidence_refs =
   let* case_ = get_case base_path case_id in

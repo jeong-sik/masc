@@ -449,9 +449,10 @@ let parse_iso_time iso_str =
   | Some t -> t
   | None -> Resilience.Time.now ()
 
-(** Check if agent is zombie (no heartbeat for timeout period) *)
-let is_zombie_agent last_seen_iso =
-  Resilience.Zombie.is_zombie last_seen_iso
+(** Check if agent is zombie (no heartbeat for timeout period).
+    Uses keeper threshold for keeper agents, default threshold otherwise. *)
+let is_zombie_agent ~agent_name last_seen_iso =
+  Resilience.Zombie.is_zombie_for_agent ~agent_name last_seen_iso
 
 let take n xs =
   if n <= 0 then []

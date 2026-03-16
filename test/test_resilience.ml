@@ -143,6 +143,69 @@ let test_is_benign_error_short_msg () =
     (Resilience.ZeroZombie.is_benign_error exn)
 
 (* ================================================================
+   Zombie.is_keeper_name
+   ================================================================ *)
+
+let test_keeper_name_valid () =
+  check bool "keeper-abc-agent is keeper" true
+    (Resilience.Zombie.is_keeper_name "keeper-abc-agent")
+
+let test_keeper_name_case_insensitive () =
+  check bool "Keeper-ABC-Agent is keeper" true
+    (Resilience.Zombie.is_keeper_name "Keeper-ABC-Agent")
+
+let test_keeper_name_with_spaces () =
+  check bool "trimmed keeper name" true
+    (Resilience.Zombie.is_keeper_name "  keeper-test-agent  ")
+
+let test_keeper_name_regular_agent () =
+  check bool "claude is not keeper" false
+    (Resilience.Zombie.is_keeper_name "claude")
+
+let test_keeper_name_partial_match () =
+  check bool "keeper-only prefix not keeper" false
+    (Resilience.Zombie.is_keeper_name "keeper-")
+
+let test_keeper_name_empty () =
+  check bool "empty not keeper" false
+    (Resilience.Zombie.is_keeper_name "")
+
+(* ================================================================
+   Zombie.is_zombie_for_agent
+   ================================================================ *)
+
+let make_iso_seconds_ago n =
+  let t = Unix.gettimeofday () -. n in
+  let tm = Unix.gmtime t in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let test_zombie_for_agent_regular_600s () =
+  (* 600s old regular agent: should be zombie (default threshold 300s) *)
+  let ts = make_iso_seconds_ago 600.0 in
+  check bool "600s old regular agent is zombie" true
+    (Resilience.Zombie.is_zombie_for_agent ~agent_name:"claude" ts)
+
+let test_zombie_for_agent_keeper_600s () =
+  (* 600s old keeper agent: should NOT be zombie (keeper threshold 3600s) *)
+  let ts = make_iso_seconds_ago 600.0 in
+  check bool "600s old keeper agent is not zombie" false
+    (Resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
+
+let test_zombie_for_agent_keeper_4000s () =
+  (* 4000s old keeper agent: should be zombie (exceeds keeper threshold 3600s) *)
+  let ts = make_iso_seconds_ago 4000.0 in
+  check bool "4000s old keeper agent is zombie" true
+    (Resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
+
+let test_zombie_for_agent_keeper_recent () =
+  (* Recent keeper agent: not zombie *)
+  let ts = make_iso_seconds_ago 10.0 in
+  check bool "recent keeper agent not zombie" false
+    (Resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
+
+(* ================================================================
    Runner
    ================================================================ *)
 
@@ -170,6 +233,20 @@ let () =
       test_case "invalid" `Quick test_zombie_invalid;
       test_case "recent" `Quick test_zombie_recent;
       test_case "custom threshold" `Quick test_zombie_custom_threshold;
+    ];
+    "Zombie.is_keeper_name", [
+      test_case "valid keeper" `Quick test_keeper_name_valid;
+      test_case "case insensitive" `Quick test_keeper_name_case_insensitive;
+      test_case "with spaces" `Quick test_keeper_name_with_spaces;
+      test_case "regular agent" `Quick test_keeper_name_regular_agent;
+      test_case "partial match" `Quick test_keeper_name_partial_match;
+      test_case "empty" `Quick test_keeper_name_empty;
+    ];
+    "Zombie.is_zombie_for_agent", [
+      test_case "regular 600s" `Quick test_zombie_for_agent_regular_600s;
+      test_case "keeper 600s" `Quick test_zombie_for_agent_keeper_600s;
+      test_case "keeper 4000s" `Quick test_zombie_for_agent_keeper_4000s;
+      test_case "keeper recent" `Quick test_zombie_for_agent_keeper_recent;
     ];
     "ZeroZombie.cleanup", [
       test_case "with results" `Quick test_zero_zombie_cleanup_with_results;

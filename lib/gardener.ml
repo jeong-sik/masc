@@ -504,12 +504,18 @@ let collect_task_signals ~(room_config : Room_utils.config) : task_backlog_summa
 
 (** Calculate comprehensive ecosystem health *)
 let calculate_health ~config ~room_config : ecosystem_health =
-  let agents = Lodge_heartbeat.get_agents () in
+  (* BUG-002 fix: count agents from Room filesystem (same source as masc_agents)
+     to ensure consistency across endpoints *)
+  let total_agents = match room_config with
+    | Some rc ->
+        let room_id = Room.current_room_id rc in
+        List.length (Room.get_agents_raw_in_room rc room_id)
+    | None ->
+        (* Fallback to Lodge when no room_config available *)
+        List.length (Lodge_heartbeat.get_agents ())
+  in
   let all_stats = Lodge_selection.get_all_stats () in
   let now = Time_compat.now () in
-
-  (* Agent counts *)
-  let total_agents = List.length agents in
   let idle_threshold_sec = config.idle_threshold_hours *. 3600.0 in
 
   let active_agents, idle_agents = List.fold_left (fun (active, idle) (s : Lodge_selection.agent_stats) ->
@@ -1213,6 +1219,13 @@ let status_json () : Yojson.Safe.t =
                 ("orphan_count", `Int state.last_orphan_count);
                 ("homeostatic_score", `Float state.last_homeostatic_score);
                 ("needs_workers", `Bool state.last_needs_workers);
+                ("data_source", `String "room_filesystem");
+                ("staleness_warning", `String
+                  (if state.last_health_check > 0.0 then
+                    let age = Time_compat.now () -. state.last_health_check in
+                    if age > 600.0 then Printf.sprintf "stale (%.0fs ago)" age
+                    else "fresh"
+                   else "no_data"));
               ] );
         ])
 

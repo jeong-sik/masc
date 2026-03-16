@@ -665,7 +665,17 @@ let handle_verify_handoff _ctx args =
 
 let handle_gc ctx args =
   let days = get_int args "days" 7 in
-  (true, Room.gc ctx.config ~days ())
+  let gc_result = Room.gc ctx.config ~days () in
+  (* Also expire pending decisions past TTL *)
+  let expired =
+    try Cp_lifecycle.check_expired_decisions ctx.config
+    with _ -> 0
+  in
+  let decision_note =
+    if expired > 0 then Printf.sprintf "\n⏰ Expired %d pending decision(s) past TTL" expired
+    else ""
+  in
+  (true, gc_result ^ decision_note)
 
 let handle_cleanup_zombies ctx _args =
   (true, Room.cleanup_zombies ctx.config)

@@ -181,6 +181,55 @@ let test_legacy_surfaces_return_removed_error () =
   check bool "mentions removed" true
     (contains_substring ~needle:"removed in governance v2" body)
 
+let test_duplicate_petition_merges_by_source_ref () =
+  with_base_path @@ fun base_path ->
+  let module GV2 = Council.Governance_v2 in
+  (* First petition: stuck task claimed by agent-a *)
+  let result1 =
+    GV2.submit_petition base_path
+      ~title:"Stuck task: QA-TEST-01 (claimed by agent-a)"
+      ~origin:"sentinel" ~subject_type:"task" ~risk_class:GV2.Low
+      ~requested_action:(Some { action_type = "release_task";
+                                target_type = Some "task";
+                                target_id = None; payload = None })
+      ~source_refs:["task-QA-TEST-01"] ~created_by:"sentinel"
+  in
+  let result1 = Result.get_ok result1 in
+  check bool "first petition not merged" false result1.merged;
+  let case_id_1 = result1.case_.id in
+  (* Second petition: same task, different title (assignee changed) *)
+  let result2 =
+    GV2.submit_petition base_path
+      ~title:"Stuck task: QA-TEST-01 (in_progress by agent-b)"
+      ~origin:"sentinel" ~subject_type:"task" ~risk_class:GV2.Low
+      ~requested_action:(Some { action_type = "release_task";
+                                target_type = Some "task";
+                                target_id = None; payload = None })
+      ~source_refs:["task-QA-TEST-01"] ~created_by:"sentinel"
+  in
+  let result2 = Result.get_ok result2 in
+  check bool "second petition merged (source_ref dedup)" true result2.merged;
+  check string "merged into same case" case_id_1 result2.case_.id;
+  (* Third petition: identical to first (repeated sweep) *)
+  let result3 =
+    GV2.submit_petition base_path
+      ~title:"Stuck task: QA-TEST-01 (claimed by agent-a)"
+      ~origin:"sentinel" ~subject_type:"task" ~risk_class:GV2.Low
+      ~requested_action:(Some { action_type = "release_task";
+                                target_type = Some "task";
+                                target_id = None; payload = None })
+      ~source_refs:["task-QA-TEST-01"] ~created_by:"sentinel"
+  in
+  let result3 = Result.get_ok result3 in
+  check bool "third petition merged" true result3.merged;
+  check string "third merged into same case" case_id_1 result3.case_.id;
+  (* Verify only 1 active case exists *)
+  let cases = GV2.list_cases ~include_test:true base_path in
+  check int "exactly 1 case" 1 (List.length cases);
+  (* The case should have 3 petitions *)
+  let the_case = List.hd cases in
+  check int "case has 3 petitions" 3 (List.length the_case.petition_ids)
+
 let test_petition_rejects_unsupported_action_type () =
   with_base_path @@ fun base_path ->
   let ctx = make_ctx ~base_path ~agent_name:"alice" in
@@ -216,5 +265,7 @@ let () =
             test_legacy_surfaces_return_removed_error;
           test_case "unsupported action type rejected" `Quick
             test_petition_rejects_unsupported_action_type;
+          test_case "duplicate petitions merge by source_ref" `Quick
+            test_duplicate_petition_merges_by_source_ref;
         ] );
     ]

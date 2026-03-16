@@ -766,11 +766,29 @@ let submit_petition base_path ~title ~origin ~subject_type ~risk_class
       if task_id_suffix = "" then base_key
       else base_key ^ "::" ^ task_id_suffix
     in
-    let existing_case =
+    let all_active_cases =
       list_cases ~include_test:true base_path
-      |> List.find_opt (fun case_ ->
-             String.equal case_.normalized_key normalized_key
-             && not (is_terminal_case_status case_.status))
+      |> List.filter (fun (case_ : case_record) -> not (is_terminal_case_status case_.status))
+    in
+    (* Primary dedup: exact normalized_key match *)
+    let existing_case =
+      List.find_opt (fun case_ ->
+             String.equal case_.normalized_key normalized_key)
+        all_active_cases
+    in
+    (* Secondary dedup: match by shared source_refs for same subject_type.
+       This catches duplicates when title changes (e.g. assignee or status
+       changes) but the underlying subject (task/keeper) is the same. *)
+    let existing_case =
+      match existing_case with
+      | Some _ -> existing_case
+      | None when source_refs <> [] ->
+          List.find_opt (fun (case_ : case_record) ->
+            String.equal case_.subject_type subject_type
+            && List.exists (fun ref_ ->
+                 List.mem ref_ case_.source_refs) source_refs)
+            all_active_cases
+      | None -> None
     in
     let now = now_unix () in
     let case_, merged =

@@ -350,6 +350,42 @@ let normalize_proactive_cooldown_sec (v : int) : int =
 let normalize_drift_min_turn_gap (v : int) : int =
   clamp_int v ~min_v:1 ~max_v:500
 
+(* ================================================================ *)
+(* Proactive turn parameters                                        *)
+(* ================================================================ *)
+
+let keeper_proactive_temperature_low () : float =
+  float_of_env_default
+    "MASC_KEEPER_PROACTIVE_TEMP_LOW"
+    ~default:0.55
+    ~min_v:0.0
+    ~max_v:2.0
+
+let keeper_proactive_temperature_mid () : float =
+  float_of_env_default
+    "MASC_KEEPER_PROACTIVE_TEMP_MID"
+    ~default:0.75
+    ~min_v:0.0
+    ~max_v:2.0
+
+let keeper_proactive_temperature_high () : float =
+  float_of_env_default
+    "MASC_KEEPER_PROACTIVE_TEMP_HIGH"
+    ~default:0.9
+    ~min_v:0.0
+    ~max_v:2.0
+
+let keeper_proactive_similarity_threshold () : float =
+  float_of_env_default
+    "MASC_KEEPER_PROACTIVE_SIMILARITY"
+    ~default:0.72
+    ~min_v:0.0
+    ~max_v:1.0
+
+(* ================================================================ *)
+(* Rule engine thresholds                                           *)
+(* ================================================================ *)
+
 let keeper_rule_reflect_repetition_threshold () : float =
   float_of_env_default
     "MASC_KEEPER_RULE_REFLECT_REPETITION"

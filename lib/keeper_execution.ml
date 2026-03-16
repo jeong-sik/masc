@@ -474,9 +474,9 @@ let proactive_retry_instruction attempt ~(reason : string) =
       reason
 
 let proactive_temperature attempt =
-  if attempt <= 1 then 0.55
-  else if attempt = 2 then 0.75
-  else 0.9
+  if attempt <= 1 then Keeper_config.keeper_proactive_temperature_low ()
+  else if attempt = 2 then Keeper_config.keeper_proactive_temperature_mid ()
+  else Keeper_config.keeper_proactive_temperature_high ()
 
 let strip_state_blocks_text (s : string) : string =
   let start_marker = "[STATE]" in
@@ -673,7 +673,7 @@ let run_proactive_generation
   in
   let max_attempts = 3 in
   let previous_preview = String.trim meta.last_proactive_preview in
-  let similarity_threshold = 0.72 in
+  let similarity_threshold = Keeper_config.keeper_proactive_similarity_threshold () in
   let fallback_skill_route =
     route_keeper_skill ~soul_profile:meta.soul_profile ~message:"proactive idle automation checkin"
   in

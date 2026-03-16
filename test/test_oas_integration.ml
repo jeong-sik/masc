@@ -1,45 +1,7 @@
-(** Tests for OAS integration modules: oas_compat, oas_events, oas_checkpoint_bridge. *)
+(** Tests for OAS integration modules: oas_events, oas_checkpoint_bridge. *)
 
 open Agent_sdk
 open Masc_mcp
-
-(* ================================================================ *)
-(* Oas_compat tests                                                  *)
-(* ================================================================ *)
-
-let test_tool_ok () =
-  let result = Oas_compat.tool_ok "hello" in
-  match result with
-  | Ok out ->
-    Alcotest.(check string) "content" "hello" out.Agent_sdk.Types.content
-  | Error _ -> Alcotest.fail "expected Ok"
-
-let test_tool_error_default_recoverable () =
-  let result = Oas_compat.tool_error "fail" in
-  match result with
-  | Error err ->
-    Alcotest.(check string) "message" "fail" err.Agent_sdk.Types.message;
-    Alcotest.(check bool) "recoverable default true" true err.Agent_sdk.Types.recoverable
-  | Ok _ -> Alcotest.fail "expected Error"
-
-let test_tool_error_non_recoverable () =
-  let result = Oas_compat.tool_error ~recoverable:false "fatal" in
-  match result with
-  | Error err ->
-    Alcotest.(check bool) "recoverable false" false err.Agent_sdk.Types.recoverable
-  | Ok _ -> Alcotest.fail "expected Error"
-
-let test_adapt_result_ok () =
-  let result = Oas_compat.adapt_result (Ok "content") in
-  match result with
-  | Ok out -> Alcotest.(check string) "adapted ok" "content" out.Agent_sdk.Types.content
-  | Error _ -> Alcotest.fail "expected Ok"
-
-let test_adapt_result_error () =
-  let result = Oas_compat.adapt_result (Error "err msg") in
-  match result with
-  | Error err -> Alcotest.(check string) "adapted error" "err msg" err.Agent_sdk.Types.message
-  | Ok _ -> Alcotest.fail "expected Error"
 
 (* ================================================================ *)
 (* Oas_events tests                                                  *)
@@ -163,15 +125,6 @@ let test_compact_syncs_oas_context () =
 
 let () =
   Alcotest.run "OAS Integration" [
-    "oas_compat", [
-      Alcotest.test_case "tool_ok wraps content" `Quick test_tool_ok;
-      Alcotest.test_case "tool_error default recoverable" `Quick
-        test_tool_error_default_recoverable;
-      Alcotest.test_case "tool_error non-recoverable" `Quick
-        test_tool_error_non_recoverable;
-      Alcotest.test_case "adapt_result Ok" `Quick test_adapt_result_ok;
-      Alcotest.test_case "adapt_result Error" `Quick test_adapt_result_error;
-    ];
     "oas_events", [
       Alcotest.test_case "broadcast event" `Quick test_event_bus_broadcast;
       Alcotest.test_case "heartbeat event" `Quick test_event_bus_heartbeat;

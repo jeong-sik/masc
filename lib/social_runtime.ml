@@ -265,7 +265,7 @@ let process_event ~sw ~clock ~config (event : board_event) =
                    (match write_meta config updated_meta with
                     | Ok () -> ()
                     | Error msg ->
-                        Printf.eprintf "[social-runtime] write_meta failed for %s: %s\n%!"
+                        Log.Social.error "write_meta failed for %s: %s"
                           updated_meta.name msg);
                    let outcome =
                      match result.outcome with

@@ -140,9 +140,9 @@ let init ?persist_dir () =
                   in
                   Hashtbl.replace version_index entry.id versions
               | Error msg ->
-                Printf.eprintf "[prompt_registry] Failed to parse %s: %s\n%!" file msg
+                Log.Misc.error "Failed to parse %s: %s" file msg
             with exn ->
-              Printf.eprintf "[prompt_registry] Failed to parse %s: %s\n%!" file (Printexc.to_string exn)
+              Log.Misc.error "Failed to parse %s: %s" file (Printexc.to_string exn)
           end
         ) files
       end

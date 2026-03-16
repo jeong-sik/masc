@@ -245,7 +245,7 @@ let keeper_metrics_24h_json
             end
           end
         end
-      with exn -> Printf.eprintf "[main] keeper log parse: %s\n%!" (Printexc.to_string exn))
+      with exn -> Log.Server.info "keeper log parse: %s" (Printexc.to_string exn))
     lines;
   let rows =
     buckets

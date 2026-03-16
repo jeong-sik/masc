@@ -771,8 +771,7 @@ let write_meta config (m : keeper_meta) : (unit, string) result =
 let read_meta config name : (keeper_meta option, string) result =
   let path = keeper_meta_path config name in
   if keeper_debug then
-    Printf.eprintf
-      "[KEEPER-DEBUG] read_meta name=%s path=%s exists=%b\n%!"
+    Log.Keeper.debug "read_meta name=%s path=%s exists=%b"
       name path (Sys.file_exists path);
   if not (Sys.file_exists path) then Ok None
   else

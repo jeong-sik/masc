@@ -56,7 +56,7 @@ let event_to_sse_json message_str =
       ("params", json)
     ])
   with Yojson.Json_error _ ->
-    Printf.eprintf "[Board_listener] Failed to parse event: %s\n%!" message_str;
+    Log.BoardListener.error "Failed to parse event: %s" message_str;
     None
 
 (** Poll for new messages and broadcast via SSE *)
@@ -72,32 +72,32 @@ let poll_and_broadcast t =
           match event_to_sse_json message with
           | Some json ->
               Sse.broadcast json;
-              Printf.eprintf "[Board_listener] Broadcast event id=%d\n%!" id
+              Log.BoardListener.info "Broadcast event id=%d" id
           | None -> ()
         end
       ) messages;
       List.length messages
   | Error err ->
-      Printf.eprintf "[Board_listener] Poll error: %s\n%!" (Caqti_error.show err);
+      Log.BoardListener.error "Poll error: %s" (Caqti_error.show err);
       0
 
 (** Start the listener loop (call from Eio fiber) *)
 let start t =
   t.running <- true;
-  Printf.eprintf "[Board_listener] Started (poll_interval=%.1fs, channel=%s)\n%!"
+  Log.BoardListener.info "Started (poll_interval=%.1fs, channel=%s)"
     poll_interval_s channel;
   while t.running do
     let count = poll_and_broadcast t in
     if count > 0 then
-      Printf.eprintf "[Board_listener] Processed %d events\n%!" count;
+      Log.BoardListener.info "Processed %d events" count;
     (* Sleep between polls *)
     Eio_unix.sleep poll_interval_s
   done;
-  Printf.eprintf "[Board_listener] Stopped\n%!"
+  Log.BoardListener.info "Stopped"
 
 (** Stop the listener *)
 let stop t =
-  Printf.eprintf "[Board_listener] Stopping...\n%!";
+  Log.BoardListener.info "Stopping...";
   t.running <- false
 
 (** Check if listener is running *)

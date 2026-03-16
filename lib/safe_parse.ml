@@ -21,7 +21,7 @@ let warn_enabled () =
 (** Log a parse warning if enabled. *)
 let warn ~context ~input ~fallback =
   if warn_enabled () then
-    Printf.eprintf "[Parse] %s: failed to parse '%s', using default '%s'\n%!"
+    Log.Misc.error "%s: failed to parse '%s', using default '%s'"
       context
       (String.sub input 0 (min 50 (String.length input)))
       fallback
@@ -147,7 +147,7 @@ let json_of_string ~context ~default s =
   with Yojson.Json_error msg ->
     warn ~context ~input:s ~fallback:"(default json)";
     if warn_enabled () then
-      Printf.eprintf "[Parse] JSON error: %s\n%!" msg;
+      Log.Misc.error "JSON error: %s" msg;
     default
 
 (** {1 Exception-Safe Execution} *)
@@ -158,7 +158,7 @@ let try_or ~context ~fallback f =
   try f ()
   with exn ->
     if warn_enabled () then
-      Printf.eprintf "[Safe] %s failed: %s, using fallback\n%!" context (Printexc.to_string exn);
+      Log.Misc.error "%s failed: %s, using fallback" context (Printexc.to_string exn);
     fallback ()
 
 (** Try operation, return None on any exception. Logs when warn enabled. *)
@@ -166,5 +166,5 @@ let try_opt ~context f =
   try Some (f ())
   with exn ->
     if warn_enabled () then
-      Printf.eprintf "[Safe] %s failed: %s\n%!" context (Printexc.to_string exn);
+      Log.Misc.error "%s failed: %s" context (Printexc.to_string exn);
     None

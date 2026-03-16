@@ -1050,7 +1050,7 @@ let session_of_yojson json =
         updated_at_iso = json |> member "updated_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());
       }
   with exn ->
-    Printf.eprintf "[team_session] session_of_yojson parse failed: %s\n%!"
+    Log.Session.error "session_of_yojson parse failed: %s"
       (Printexc.to_string exn);
     None
 

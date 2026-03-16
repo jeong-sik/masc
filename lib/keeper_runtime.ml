@@ -126,8 +126,7 @@ let start_existing_keepalives ctx =
     try
       let stats = bootstrap_existing_keepers ctx in
       if keeper_debug then
-        Printf.eprintf
-          "[KEEPER-DEBUG] bootstrap_existing_keepers enabled=%b scanned=%d started=%d stale=%d recovering=%d\n%!"
+        Log.Keeper.debug "bootstrap_existing_keepers enabled=%b scanned=%d started=%d stale=%d recovering=%d"
           stats.enabled stats.scanned stats.started stats.stale
           stats.recovering
     with exn ->

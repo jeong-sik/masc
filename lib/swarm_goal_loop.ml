@@ -316,7 +316,7 @@ let run ~clock ?(cancel_token = { cancelled = false }) config ~room_config ~agen
     (* Checkpoint after each iteration *)
     (match Swarm_checkpoint.save room_config with
      | Ok _ -> ()
-     | Error e -> Printf.eprintf "[swarm-goal-loop] checkpoint error: %s\n%!" e);
+     | Error e -> Log.Swarm.error "checkpoint error: %s" e);
     if keep_running () then
       Eio.Time.sleep clock (Float.of_int config.check_interval_sec)
   done;

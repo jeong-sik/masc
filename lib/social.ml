@@ -396,11 +396,11 @@ let vote config ~voter ~target_type ~target_id ~direction : (int, string) result
          (match get_post config ~post_id:target_id with
           | Ok post ->
               save_post config { post with votes = new_score }
-          | Error msg -> Printf.eprintf "[social] vote update (post get): %s\n%!" msg)
+          | Error msg -> Log.Social.info "vote update (post get): %s" msg)
      | `Comment ->
          let dir = comments_dir config in
          (match Safe_ops.list_dir_safe dir with
-          | Error msg -> Printf.eprintf "[social] vote update (comment list): %s\n%!" msg
+          | Error msg -> Log.Social.info "vote update (comment list): %s" msg
           | Ok files ->
               List.iter (fun f ->
                 let path = Filename.concat dir f in

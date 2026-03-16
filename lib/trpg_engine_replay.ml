@@ -4,8 +4,7 @@ let replay_events ~rule ~initial_state ~events =
     (fun state (event : Trpg_engine_event.t) ->
       try R.apply_event ~state ~event
       with exn ->
-        Printf.eprintf
-          "[trpg_engine_replay] skipping event seq=%d room=%s type=%s: %s\n%!"
+        Log.Trpg.info "skipping event seq=%d room=%s type=%s: %s"
           event.seq event.room_id
           (Trpg_engine_event.string_of_event_type event.event_type)
           (Printexc.to_string exn);

@@ -495,7 +495,7 @@ let maybe_emit_interesting_alert
         ]
       in
       (try append_jsonl_line (keeper_alerts_path ctx.config) alert_json with exn ->
-      Printf.eprintf "[keeper] alert JSONL write failed: %s\n%!" (Printexc.to_string exn));
+      Log.Keeper.error "alert JSONL write failed: %s" (Printexc.to_string exn));
       let board_result =
         run_alert_channel_with_retry ctx
           ~channel:"board"
@@ -567,7 +567,7 @@ let maybe_emit_interesting_alert
                   `List (List.map alert_channel_result_to_json attempted_failures));
               ])
          with exn ->
-           Printf.eprintf "[keeper] failed-channels JSONL write failed: %s\n%!" (Printexc.to_string exn));
+           Log.Keeper.error "failed-channels JSONL write failed: %s" (Printexc.to_string exn));
       if deadlettered then
         (try
            append_jsonl_line
@@ -581,7 +581,7 @@ let maybe_emit_interesting_alert
                   `List (List.map alert_channel_result_to_json channels));
               ])
          with exn ->
-           Printf.eprintf "[keeper] deadletter JSONL write failed: %s\n%!" (Printexc.to_string exn));
+           Log.Keeper.error "deadletter JSONL write failed: %s" (Printexc.to_string exn));
       {
         enabled = true;
         triggered = true;

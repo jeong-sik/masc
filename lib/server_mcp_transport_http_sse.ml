@@ -111,7 +111,7 @@ let close_sse_conn info =
     info.stop := true;
     (try Httpun.Body.Writer.close info.writer
      with exn ->
-       Printf.eprintf "[DEBUG] close_sse_conn: %s\n%!"
+       Log.Misc.debug "close_sse_conn: %s"
          (Printexc.to_string exn));
     Sse.unregister_if_current info.session_id info.client_id)
 
@@ -125,7 +125,7 @@ let stop_sse_session session_id =
 let close_all_sse_connections () =
   let sessions = Hashtbl.fold (fun k _ acc -> k :: acc) sse_conn_by_session [] in
   List.iter stop_sse_session sessions;
-  Printf.eprintf "🚀 MASC MCP: Closed %d SSE connections\n%!"
+  Log.Server.info "🚀 MASC MCP: Closed %d SSE connections"
     (List.length sessions)
 
 let send_raw info data =

@@ -63,7 +63,7 @@ let trpg_keeper_models_for_round () : string list =
   | Ok _ -> chosen
   | Error e ->
       if chosen <> [] then
-        Printf.eprintf "[trpg] invalid keeper model override ignored: %s\n%!" e;
+        Log.Trpg.info "invalid keeper model override ignored: %s" e;
       []
 
 let trim_trailing_slashes (raw : string) : string =

@@ -155,7 +155,7 @@ let handle_post_create args =
        | Some cb -> (
            try cb.on_post_created post
            with exn ->
-             Printf.eprintf "[board] on_post_created callback failed: %s\n%!"
+             Log.BoardLog.error "on_post_created callback failed: %s"
                (Printexc.to_string exn))
        | None -> ());
       (true, Printf.sprintf "✅ Post created:\n%s" (Yojson.Safe.pretty_to_string json))
@@ -284,7 +284,7 @@ let handle_comment_add args =
        | Some cb -> (
            try cb.on_comment_created comment
            with exn ->
-             Printf.eprintf "[board] on_comment_created callback failed: %s\n%!"
+             Log.BoardLog.error "on_comment_created callback failed: %s"
                (Printexc.to_string exn))
        | None -> ());
       (true, Printf.sprintf "✅ Comment added:\n%s" (Yojson.Safe.pretty_to_string json))

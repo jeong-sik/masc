@@ -28,26 +28,26 @@ let is_initialized () =
 (** Initialize PostgreSQL backend if URL is available *)
 let init_pg pool =
   if is_initialized () then begin
-    Printf.eprintf "[Task_dispatch] WARNING: already initialized, ignoring init_pg\n%!";
+    Log.Task.warn "WARNING: already initialized, ignoring init_pg";
     Ok ()
   end else
   match Task_pg.create pool with
   | Ok t ->
       backend_state := Active (Postgres t);
-      Printf.eprintf "[Task_dispatch] PostgreSQL backend initialized.\n%!";
+      Log.Task.info "PostgreSQL backend initialized.";
       Ok ()
   | Error e ->
-      Printf.eprintf "[Task_dispatch] PG init failed, falling back to JSONL: %s\n%!"
+      Log.Task.error "PG init failed, falling back to JSONL: %s"
         (show_masc_error e);
       Error e
 
 (** Initialize JSONL backend. Default fallback. *)
 let init_jsonl () =
   if is_initialized () then
-    Printf.eprintf "[Task_dispatch] WARNING: already initialized, ignoring init_jsonl\n%!"
+    Log.Task.warn "WARNING: already initialized, ignoring init_jsonl"
   else begin
     backend_state := Active Jsonl;
-    Printf.eprintf "[Task_dispatch] JSONL backend initialized (using Room.* functions).\n%!"
+    Log.Task.info "JSONL backend initialized (using Room.* functions)."
   end
 
 (** Reset for testing *)

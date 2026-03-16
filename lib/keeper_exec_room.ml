@@ -603,22 +603,20 @@ let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : ke
                   if keeper_policy_mode_is_learned current_meta then
                     (match run_learned_policy_room_event ctx ~meta:current_meta ~room_id msg with
                      | Error err ->
-                         Printf.eprintf
-                           "[keeper] learned policy room action failed for %s in %s: %s\n%!"
+                         Log.Keeper.error "learned policy room action failed for %s in %s: %s"
                            current_meta.name room_id err;
                          current_meta
                      | Ok updated_meta ->
                          (match write_meta ctx.config updated_meta with
                           | Ok () -> ()
                           | Error err ->
-                              Printf.eprintf
-                                "[keeper] write_meta after learned policy room action failed: %s\n%!"
+                              Log.Keeper.error "write_meta after learned policy room action failed: %s"
                                 err);
                          updated_meta)
                   else
                     match generate_explicit_room_reply ctx ~meta:current_meta ~room_id msg with
                     | Error err ->
-                        Printf.eprintf "[keeper] explicit room reply failed for %s in %s: %s\n%!"
+                        Log.Keeper.error "explicit room reply failed for %s in %s: %s"
                           current_meta.name room_id err;
                         current_meta
                     | Ok (updated_meta, reply) ->
@@ -631,7 +629,7 @@ let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : ke
                         (match write_meta ctx.config updated_meta with
                          | Ok () -> ()
                          | Error err ->
-                             Printf.eprintf "[keeper] write_meta after explicit room reply failed: %s\n%!"
+                             Log.Keeper.error "write_meta after explicit room reply failed: %s"
                                err);
                         updated_meta)
               meta_acc
@@ -644,7 +642,7 @@ let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : ke
           (match write_meta ctx.config updated_meta with
            | Ok () -> ()
            | Error err ->
-               Printf.eprintf "[keeper] write_meta after room cursor update failed: %s\n%!" err);
+               Log.Keeper.error "write_meta after room cursor update failed: %s" err);
           updated_meta)
         meta
         meta.joined_room_ids

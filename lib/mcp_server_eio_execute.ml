@@ -53,7 +53,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
             ~finally:(fun () -> close_out_noerr oc)
             (fun () -> output_string oc agent_name)
         with Sys_error msg ->
-          Printf.eprintf "[WARN] write_mcp_session_agent: %s\n%!" msg
+          Log.Misc.warn "write_mcp_session_agent: %s" msg
   in
 
   (* Helper to get values from JSON arguments - delegates to Safe_ops *)
@@ -249,7 +249,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
               ~finally:(fun () -> close_out_noerr oc)
               (fun () -> output_string oc nickname)
           with e ->
-            Printf.eprintf "[WARN] Failed to write agent file %s: %s\n%!"
+            Log.Misc.error "Failed to write agent file %s: %s"
               file (Printexc.to_string e))
   in
 
@@ -355,7 +355,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         ignore (Room.heartbeat config ~agent_name)
       with
       | exn ->
-          Printf.eprintf "[WARN] heartbeat update skipped for %s on %s: %s\n%!"
+          Log.Misc.warn "heartbeat update skipped for %s on %s: %s"
             agent_name name (Printexc.to_string exn)
   end;
 
@@ -372,8 +372,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   (* Debug: log join check *)
-  Printf.eprintf
-    "[DEBUG] tool=%s agent_name=%s join_required=%b room_initialized=%b is_joined=%b\n%!"
+  Log.Misc.debug "tool=%s agent_name=%s join_required=%b room_initialized=%b is_joined=%b"
     name agent_name join_required room_initialized is_joined;
 
   if join_required && not room_initialized then

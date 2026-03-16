@@ -214,7 +214,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
       in
       let _ = Session.register registry ~agent_name:nickname in
       ctx.write_mcp_session_agent nickname;
-      Printf.eprintf "[DEBUG] masc_join: saved nickname=%s to MCP session (original=%s)\n%!" nickname agent_name;
+      Log.Misc.debug "masc_join: saved nickname=%s to MCP session (original=%s)" nickname agent_name;
       if Option.is_none mcp_session_id then begin
         let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
         let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
@@ -224,7 +224,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
             ~finally:(fun () -> close_out_noerr oc)
             (fun () -> output_string oc nickname)
         with e ->
-          Printf.eprintf "[WARN] Failed to write agent file %s: %s\n%!" agent_file (Printexc.to_string e))
+          Log.Misc.error "Failed to write agent file %s: %s" agent_file (Printexc.to_string e))
       end;
       (* Cultural Inheritance: append institution welcome to join response *)
       let institution_welcome = match state.Mcp_server.fs with
@@ -753,9 +753,9 @@ Call masc_listen again to continue listening.
                 | Ok () ->
                   Printf.printf "[EPISODE/SAVED] Episode %s saved to PostgreSQL + Neo4j\n%!" ep_id
                 | Error e ->
-                  Printf.eprintf "[EPISODE/WARN] DB save failed (file kept): %s\n%!" e)
+                  Log.Misc.error "DB save failed (file kept): %s" e)
              | None ->
-               Printf.eprintf "[EPISODE/WARN] No env available, skipping DB save\n%!"
+               Log.Misc.warn "No env available, skipping DB save"
             );
 
             let processed_dir = Filename.concat base_path ".masc/processed_episodes" in
@@ -765,7 +765,7 @@ Call masc_listen again to continue listening.
             Printf.printf "[EPISODE/FLUSH] Processed episode %s -> %s\n%!" ep_id new_path;
             incr flushed
           with exn ->
-            Printf.eprintf "[EPISODE/ERROR] Failed to flush %s: %s\n%!" file (Printexc.to_string exn);
+            Log.Misc.error "Failed to flush %s: %s" file (Printexc.to_string exn);
             incr failed
         ) pending_files;
 
@@ -866,7 +866,7 @@ Call masc_listen again to continue listening.
              | Ok episodes -> (List.length episodes, List.nth_opt episodes 0)
              | Error _ -> (0, None))
           with exn ->
-            Printf.eprintf "[warn] %s: %s\n" __FUNCTION__ (Printexc.to_string exn);
+            Log.Inline.warn "%s: %s" __FUNCTION__ (Printexc.to_string exn);
             (0, None))
         | None -> (0, None)
       in

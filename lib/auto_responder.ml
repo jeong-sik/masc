@@ -164,10 +164,10 @@ let call_llm_direct_sync ~agent_type ~prompt =
              agent_type);
         if String.trim result.response = "" then "no response" else result.response
     | Error err ->
-        Printf.eprintf "[auto_responder] LLM cascade failed: %s\n%!" err;
+        Log.AutoResponder.error "LLM cascade failed: %s" err;
         "no response"
   with exn ->
-    Printf.eprintf "[auto_responder] LLM call failed: %s\n%!" (Printexc.to_string exn);
+    Log.AutoResponder.error "LLM call failed: %s" (Printexc.to_string exn);
     "no response"
 
 let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
@@ -238,7 +238,7 @@ let call_llm_and_broadcast ~sw ~agent_type ~prompt ~mention =
   debug_log (Printf.sprintf "LLM_RESPONSE: %s"
     (if String.length response > 100 then String.sub response 0 100 ^ "..." else response));
   if response = "" || response = "no response" then
-    Printf.eprintf "[Auto-Responder/LLM] LLM returned empty response\n%!"
+    Log.AutoResponder.info "LLM returned empty response"
   else begin
     let join_args =
       `Assoc [
@@ -249,24 +249,24 @@ let call_llm_and_broadcast ~sw ~agent_type ~prompt ~mention =
     match masc_call ~sw ~tool_name:"masc_join" ~args:join_args with
     | Error e ->
         debug_log (Printf.sprintf "MASC_JOIN_FAILED: %s" e);
-        Printf.eprintf "[Auto-Responder/LLM] Failed to join MASC (%s)\n%!" e
+        Log.AutoResponder.error "Failed to join MASC (%s)" e
     | Ok join_resp -> (
         debug_log (Printf.sprintf "MASC_JOIN: %s"
           (if String.length join_resp > 200 then String.sub join_resp 0 200 ^ "..." else join_resp));
         match extract_nickname join_resp with
         | None ->
             debug_log "MASC_JOIN_FAILED: Could not extract nickname";
-            Printf.eprintf "[Auto-Responder/LLM] Failed to join MASC (no nickname)\n%!"
+            Log.AutoResponder.error "Failed to join MASC (no nickname)"
         | Some nickname ->
             let msg = Printf.sprintf "@%s %s" mention response in
             let broadcast_args = `Assoc [("agent_name", `String nickname); ("message", `String msg)] in
             (try ignore (masc_call ~sw ~tool_name:"masc_broadcast" ~args:broadcast_args)
-             with exn -> Printf.eprintf "[auto-responder] broadcast failed: %s\n%!" (Printexc.to_string exn));
+             with exn -> Log.AutoResponder.error "broadcast failed: %s" (Printexc.to_string exn));
             let leave_args = `Assoc [("agent_name", `String nickname)] in
             (try ignore (masc_call ~sw ~tool_name:"masc_leave" ~args:leave_args)
-             with exn -> Printf.eprintf "[auto-responder] leave failed: %s\n%!" (Printexc.to_string exn));
+             with exn -> Log.AutoResponder.error "leave failed: %s" (Printexc.to_string exn));
             let short_resp = if String.length response > 50 then String.sub response 0 50 ^ "..." else response in
-            Printf.eprintf "[Auto-Responder/LLM] %s: %s\n%!" nickname short_resp
+            Log.AutoResponder.info "%s: %s" nickname short_resp
       )
   end
 
@@ -284,7 +284,7 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
   | Some _ when not (is_enabled ()) ->
       let env_val = match Sys.getenv_opt "MASC_AUTO_RESPOND" with Some v -> v | None -> "not set" in
       debug_log (Printf.sprintf "EXIT: Disabled (env=%s)" env_val);
-      Printf.eprintf "[Auto-Responder] Disabled (MASC_AUTO_RESPOND=%s)\n%!" env_val;
+      Log.AutoResponder.info "Disabled (MASC_AUTO_RESPOND=%s)" env_val;
       None
   | Some m ->
       let from_base = agent_type_of_mention from_agent in
@@ -292,18 +292,18 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
       debug_log (Printf.sprintf "CHECK: from_base=%s mention_base=%s spawnable=%b" from_base mention_base (is_spawnable m));
       if from_base = mention_base then (
         debug_log "EXIT: Self-mention";
-        Printf.eprintf "[Auto-Responder] Skip self-mention @%s from %s\n%!" m from_agent;
+        Log.AutoResponder.info "Skip self-mention @%s from %s" m from_agent;
         None
       ) else if not (is_spawnable m) then (
         debug_log "EXIT: Not spawnable";
         activity_log ~mode ~from_agent ~mention:m ~status:"SKIP" ~detail:"Not spawnable agent type";
-        Printf.eprintf "[Auto-Responder] @%s not spawnable\n%!" m;
+        Log.AutoResponder.info "@%s not spawnable" m;
         None
       ) else if should_throttle ~agent_type:mention_base then (
         debug_log "EXIT: Throttled";
         activity_log ~mode ~from_agent ~mention:m ~status:"THROTTLE"
           ~detail:(Printf.sprintf "Max %d responses per %.0fs" chain_limit chain_window);
-        Printf.eprintf "[Auto-Responder] Throttled @%s (chain limit)\n%!" m;
+        Log.AutoResponder.info "Throttled @%s (chain limit)" m;
         None
       ) else (
         let task_id =
@@ -319,16 +319,16 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
             match mode with
             | Disabled -> ()
             | Llm ->
-                Printf.eprintf "[Auto-Responder/LLM] Calling %s for @%s\n%!" mention_base m;
+                Log.AutoResponder.info "Calling %s for @%s" mention_base m;
                 call_llm_and_broadcast ~sw ~agent_type:mention_base ~prompt:content ~mention:from_agent
             | Spawn ->
                 if mention_base = "glm" then (
                   (* No CLI for glm; use LLM mode path. *)
-                  Printf.eprintf "[Auto-Responder/LLM-GLM] Calling glm for @%s\n%!" m;
+                  Log.AutoResponder.info "Calling glm for @%s" m;
                   call_llm_and_broadcast ~sw ~agent_type:"glm" ~prompt:content ~mention:from_agent
                 ) else (
                   let prompt = build_response_prompt ~from_agent ~content ~mention:m in
-                  Printf.eprintf "[Auto-Responder/Spawn] Spawning %s for @%s from %s\n%!" mention_base m from_agent;
+                  Log.AutoResponder.info "Spawning %s for @%s from %s" mention_base m from_agent;
                   run_cli_agent ~agent_type:mention_base ~prompt
                 )
           with exn ->

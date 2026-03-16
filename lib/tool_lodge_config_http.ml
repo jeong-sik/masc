@@ -240,8 +240,7 @@ let graphql_request_curl body : (string, string) Stdlib.result =
               match ensure_graphql_json_response output with
               | Ok _ as success -> success
               | Error "❌ GraphQL: empty response" ->
-                  Printf.eprintf
-                    "[GraphQL] Process_eio curl failed (empty response), trying Unix curl fallback...\n%!";
+                  Log.Lodge.error "Process_eio curl failed (empty response), trying Unix curl fallback...";
                   (match run_argv_unix argv with
                    | Ok unix_output -> ensure_graphql_json_response unix_output
                    | Error unix_err ->
@@ -250,8 +249,7 @@ let graphql_request_curl body : (string, string) Stdlib.result =
                             unix_err))
               | Error msg -> Error msg)
           | Error process_err ->
-              Printf.eprintf
-                "[GraphQL] Process_eio curl failed (%s), trying Unix curl fallback...\n%!"
+              Log.Lodge.error "Process_eio curl failed (%s), trying Unix curl fallback..."
                 process_err;
               (match run_argv_unix argv with
                | Ok output -> ensure_graphql_json_response output
@@ -314,5 +312,5 @@ let graphql_request ?(timeout_sec=5.0) body : (string, string) Stdlib.result =
   match cohttp_result with
   | Ok _ as success -> success
   | Error cohttp_err ->
-      Printf.eprintf "[GraphQL] Cohttp failed (%s), trying curl fallback...\n%!" cohttp_err;
+      Log.Lodge.error "Cohttp failed (%s), trying curl fallback..." cohttp_err;
       graphql_request_curl body

@@ -864,7 +864,7 @@ let execute_spawn ~(decision : spawn_decision) : (string, string) result =
           (String.concat ", " (List.map string_of_int proposed_hours))
         in
         (try ignore (Board.create_post store ~author:"gardener" ~content:announcement ~ttl_hours:168 ())
-         with exn -> Printf.eprintf "[gardener] Board.create_post(announcement) failed: %s\n%!" (Printexc.to_string exn));
+         with exn -> Log.Spawn.error "Board.create_post(announcement) failed: %s" (Printexc.to_string exn));
         Ok topic
       end else begin
         let config = load_config () in
@@ -891,7 +891,7 @@ let execute_retire ~(decision : retirement_decision) : (string, string) result =
         agent_name reason grace_period_sec
       in
       (try ignore (Board.create_post store ~author:"gardener" ~content:warning ~ttl_hours:24 ())
-       with exn -> Printf.eprintf "[gardener] Board.create_post(warning) failed: %s\n%!" (Printexc.to_string exn));
+       with exn -> Log.Spawn.error "Board.create_post(warning) failed: %s" (Printexc.to_string exn));
       record_retirement ();
       reset_circuit ();
       Ok agent_name

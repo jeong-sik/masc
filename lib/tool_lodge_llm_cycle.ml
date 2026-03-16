@@ -55,28 +55,28 @@ let llm_generate ~net:_ ?(prefer_fast = true) ~system prompt =
     let cli = next_cli_provider () in
     match cli_generate cli ~system prompt with
     | Ok response ->
-        Printf.eprintf "[LLM] Used %s\n%!" (string_of_provider cli);
+        Log.Llm.info "Used %s" (string_of_provider cli);
         Ok response
     | Error e1 ->
-        Printf.eprintf "[LLM] %s failed (%s), no secondary local CLI fallback\n%!" (string_of_provider cli) e1;
+        Log.Llm.error "%s failed (%s), no secondary local CLI fallback" (string_of_provider cli) e1;
         Error e1
   end else begin
     (* prefer_fast=false: try CLI rotation with second attempt before giving up *)
-    Printf.eprintf "[LLM] prefer_fast=false: trying CLI providers with retry\n%!";
+    Log.Llm.info "prefer_fast=false: trying CLI providers with retry";
     let cli = next_cli_provider () in
     match cli_generate cli ~system prompt with
     | Ok response ->
-        Printf.eprintf "[LLM] Used %s\n%!" (string_of_provider cli);
+        Log.Llm.info "Used %s" (string_of_provider cli);
         Ok response
     | Error e1 ->
-        Printf.eprintf "[LLM] %s failed (%s), trying next CLI provider\n%!" (string_of_provider cli) e1;
+        Log.Llm.error "%s failed (%s), trying next CLI provider" (string_of_provider cli) e1;
         let cli2 = next_cli_provider () in
         (match cli_generate cli2 ~system prompt with
         | Ok response ->
-            Printf.eprintf "[LLM] Used %s (second attempt)\n%!" (string_of_provider cli2);
+            Log.Llm.info "Used %s (second attempt)" (string_of_provider cli2);
             Ok response
         | Error e2 ->
-            Printf.eprintf "[LLM] %s also failed (%s)\n%!" (string_of_provider cli2) e2;
+            Log.Llm.error "%s also failed (%s)" (string_of_provider cli2) e2;
             Error (Printf.sprintf "all CLI providers failed: %s=%s, %s=%s"
               (string_of_provider cli) e1 (string_of_provider cli2) e2))
   end
@@ -152,24 +152,24 @@ let _local_llama_generate ~net:_ ?model ?(temperature = 0.7) ?(num_predict = 500
 let smart_generate ~net ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
   (* 1. Try CLI first (rotation: gemini → claude → codex) *)
   let cli = next_cli_provider () in
-  Printf.eprintf "[LLM] Trying %s...\n%!" (string_of_provider cli);
+  Log.Llm.info "Trying %s..." (string_of_provider cli);
   match cli_generate cli ~system prompt with
   | Ok response ->
-      Printf.eprintf "[LLM] %s succeeded\n%!" (string_of_provider cli);
+      Log.Llm.info "%s succeeded" (string_of_provider cli);
       Ok response
   | Error e1 ->
-      Printf.eprintf "[LLM] [fail] %s: %s\n%!" (string_of_provider cli) e1;
+      Log.Llm.error "[fail] %s: %s" (string_of_provider cli) e1;
       (* 2. Try another CLI *)
       let cli2 = next_cli_provider () in
-      Printf.eprintf "[LLM] Trying %s...\n%!" (string_of_provider cli2);
+      Log.Llm.info "Trying %s..." (string_of_provider cli2);
       match cli_generate cli2 ~system prompt with
       | Ok response ->
-          Printf.eprintf "[LLM] %s succeeded\n%!" (string_of_provider cli2);
+          Log.Llm.info "%s succeeded" (string_of_provider cli2);
           Ok response
       | Error e2 ->
-          Printf.eprintf "[LLM] [fail] %s: %s\n%!" (string_of_provider cli2) e2;
+          Log.Llm.error "[fail] %s: %s" (string_of_provider cli2) e2;
           (* 3. Fallback to cloud GLM via Z.ai API — 200K context, no VRAM *)
-          Printf.eprintf "[LLM] Falling back to cloud GLM (Z.ai)...\n%!";
+          Log.Llm.info "Falling back to cloud GLM (Z.ai)...";
           glm_direct ~net ~temperature ~max_tokens:num_predict ~system prompt
 
 (** {1 READ: Content Fetching} *)

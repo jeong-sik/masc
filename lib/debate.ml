@@ -147,7 +147,7 @@ let write_json path json =
   let closed = ref false in
   Common.protect ~module_name:"debate" ~finally_label:"finalizer" ~finally:(fun () ->
     if not !closed then (try close_out oc with exn ->
-      Printf.eprintf "[WARN] [debate] close_out failed: %s\n%!" (Printexc.to_string exn));
+      Log.Misc.error "[debate] close_out failed: %s" (Printexc.to_string exn));
     if Sys.file_exists tmp_path then
       Safe_ops.remove_file_logged ~context:"debate" tmp_path
   ) (fun () ->
@@ -313,7 +313,7 @@ let close_with_resolution config ~debate_id ~create_task :
         let updated = { debate with status = Closed } in
         (try save_debate config updated
          with e ->
-           Printf.eprintf "[debate] save failed: %s\n%!" (Printexc.to_string e));
+           Log.Council.error "save failed: %s" (Printexc.to_string e));
         let task_id =
           if create_task && resolution.winning_position = Support then
             (try
@@ -330,7 +330,7 @@ let close_with_resolution config ~debate_id ~create_task :
                in
                Some (Printf.sprintf "task created: %s" task_title)
              with e ->
-               Printf.eprintf "[debate] task creation failed: %s\n%!"
+               Log.Council.error "task creation failed: %s"
                  (Printexc.to_string e);
                None)
           else None

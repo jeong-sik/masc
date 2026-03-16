@@ -13,7 +13,7 @@ let write_meta_logged config (meta : keeper_meta) =
   match write_meta config meta with
   | Ok () -> ()
   | Error msg ->
-      Printf.eprintf "[keeper] write_meta failed: %s\n%!" msg
+      Log.Keeper.error "write_meta failed: %s" msg
 
 let _keeper_team_session_model (meta : keeper_meta) =
   let active_model = String.trim meta.active_model in

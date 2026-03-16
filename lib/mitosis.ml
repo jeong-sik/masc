@@ -885,7 +885,7 @@ let write_status ~base_path ~cell ~config =
       Common.protect ~module_name:"mitosis" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
         output_string oc (Yojson.Safe.pretty_to_string json ^ "\n"))
     with exn ->
-      Printf.eprintf "[MITOSIS/ERROR] Failed to write status: %s\n%!" (Printexc.to_string exn)
+      Log.Mitosis_log.error "Failed to write status: %s" (Printexc.to_string exn)
   end
 
 (** Write mitosis status to both local file AND backend (for cross-machine collaboration).
@@ -932,7 +932,7 @@ let write_status_with_backend ~room_config ~cell ~config =
         output_string oc (Yojson.Safe.pretty_to_string json ^ "\n")
       )
     with exn ->
-      Printf.eprintf "[MITOSIS/ERROR] Failed to write status file: %s\n%!"
+      Log.Mitosis_log.error "Failed to write status file: %s"
         (Printexc.to_string exn)
   end;
 
@@ -940,7 +940,7 @@ let write_status_with_backend ~room_config ~cell ~config =
   let key = Printf.sprintf "mitosis:%s" node_id in
   (match backend_set room_config ~key ~value:json_str with
    | Ok () -> ()
-   | Error e -> Printf.eprintf "[WARN] mitosis: backend_set failed for %s: %s\n%!" node_id (Backend.show_error e))
+   | Error e -> Log.Misc.error "mitosis: backend_set failed for %s: %s" node_id (Backend.show_error e))
 
 (** Get all mitosis statuses from backend (for monitoring other agents) *)
 let get_all_statuses ~room_config =

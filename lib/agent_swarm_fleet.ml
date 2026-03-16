@@ -1,7 +1,9 @@
 (** Fleet orchestrator: coordinates SDK agents and external CLI agents
     through MASC for heterogeneous agent fleet execution. *)
 
+module Masc_log = Log
 open Agent_sdk
+module Log = Masc_log
 
 type fleet_member =
   | Sdk_agent of Agent_swarm_swarm.agent_spec
@@ -96,16 +98,16 @@ let run ~sw ~net ~clock ~proc_mgr config ~goal =
   Fun.protect ~finally:(fun () ->
     (try match Agent_swarm_client.leave ~sw leader with
       | Ok _ -> ()
-      | Error msg -> Printf.eprintf "[WARN] [swarm] leader leave failed: %s\n%!" msg
+      | Error msg -> Log.Misc.error "[swarm] leader leave failed: %s" msg
     with
      | Eio.Cancel.Cancelled _ as ex -> raise ex
-     | exn -> Printf.eprintf "[WARN] [swarm] leader leave error: %s\n%!" (Printexc.to_string exn))
+     | exn -> Log.Misc.error "[swarm] leader leave error: %s" (Printexc.to_string exn))
   ) (fun () ->
     let names = List.map (fun (m, _) -> member_name m) config.members in
     (match Agent_swarm_client.broadcast ~sw leader
       ~message:(Printf.sprintf "Fleet starting: %s (members: %s)"
         goal (String.concat ", " names)) with
-     | Ok _ -> () | Error msg -> Printf.eprintf "[WARN] [swarm] broadcast failed: %s\n%!" msg);
+     | Ok _ -> () | Error msg -> Log.Misc.error "[swarm] broadcast failed: %s" msg);
     let n = List.length config.members in
     let results = Array.make n
       { member_name = ""; capability = General; result = Error "pending" } in
@@ -124,7 +126,7 @@ let run ~sw ~net ~clock ~proc_mgr config ~goal =
     ) |> String.concat "\n" in
     (match Agent_swarm_client.broadcast ~sw leader
       ~message:(Printf.sprintf "Fleet done:\n%s" summary) with
-     | Ok _ -> () | Error msg -> Printf.eprintf "[WARN] [swarm] broadcast failed: %s\n%!" msg);
+     | Ok _ -> () | Error msg -> Log.Misc.error "[swarm] broadcast failed: %s" msg);
     results_list
   )
 
@@ -140,13 +142,13 @@ let run_full ~sw ~net ~clock ~proc_mgr ~masc_url ~provider
     ~finally:(fun () ->
       (try match Agent_swarm_client.leave ~sw coordinator with
         | Ok _ -> ()
-        | Error msg -> Printf.eprintf "[WARN] [swarm] coordinator leave failed: %s\n%!" msg
-      with exn -> Printf.eprintf "[WARN] [swarm] coordinator leave error: %s\n%!" (Printexc.to_string exn)))
+        | Error msg -> Log.Misc.error "[swarm] coordinator leave failed: %s" msg
+      with exn -> Log.Misc.error "[swarm] coordinator leave error: %s" (Printexc.to_string exn)))
     (fun () ->
       (match Agent_swarm_client.broadcast ~sw coordinator
           ~message:
             (Printf.sprintf "Fleet run_full: %s (members: %d)" goal num_members) with
-       | Ok _ -> () | Error msg -> Printf.eprintf "[WARN] [swarm] broadcast failed: %s\n%!" msg);
+       | Ok _ -> () | Error msg -> Log.Misc.error "[swarm] broadcast failed: %s" msg);
       let workdir = match workdir with Some path -> path | None -> Sys.getcwd () in
       let plan =
         build_run_full_plan ~provider ~goal ~num_members ~workdir ~max_turns

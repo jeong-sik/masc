@@ -413,16 +413,16 @@ let ensure_federation_dir (config : config) : (unit, string) result =
 let log_event (config : config) (event : federation_event) : unit =
   match ensure_federation_dir config with
   | Error e ->
-    Printf.eprintf "[WARN] federation: ensure_dir failed: %s\n%!" e
+    Log.Misc.error "federation: ensure_dir failed: %s" e
   | Ok () ->
     state.event_log <- event :: state.event_log;
     match events_file config with
     | Error e ->
-      Printf.eprintf "[WARN] federation: events_file path error: %s\n%!" e
+      Log.Misc.error "federation: events_file path error: %s" e
     | Ok path ->
       (match safe_append_file path (Yojson.Safe.to_string (federation_event_to_yojson event) ^ "\n") with
        | Ok () -> ()
-       | Error e -> Printf.eprintf "[WARN] federation: event write failed: %s\n%!" e)
+       | Error e -> Log.Misc.error "federation: event write failed: %s" e)
 
 (** Helper: Save config to disk - thread-safe *)
 let save_config (config : config) (fed_config : federation_config) : (unit, string) result =

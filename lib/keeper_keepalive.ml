@@ -38,13 +38,13 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
        if not (Room_utils.is_initialized ctx.config) then
          ignore (Room.init ctx.config ~agent_name:None)
      with exn ->
-       Printf.eprintf "[keeper] room init failed: %s\n%!"
+       Log.Keeper.error "room init failed: %s"
          (Printexc.to_string exn));
     (try
        let synced = ensure_keeper_room_presence ctx.config m in
        ignore (write_meta ctx.config synced)
      with exn ->
-       Printf.eprintf "[keeper] room presence bootstrap failed: %s\n%!"
+       Log.Keeper.error "room presence bootstrap failed: %s"
          (Printexc.to_string exn));
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->
         let keepalive_started_ts = Time_compat.now () in
@@ -69,7 +69,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
                let synced = ensure_keeper_room_presence ctx.config meta_current in
                ignore (write_meta ctx.config synced)
              with exn ->
-               Printf.eprintf "[keeper] room heartbeat failed: %s\n%!"
+               Log.Keeper.error "room heartbeat failed: %s"
                  (Printexc.to_string exn));
             let meta_current =
               match read_meta ctx.config m.name with
@@ -214,12 +214,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
                               ("ts_unix", `Float now_ts);
                             ])
                       with exn ->
-                        Printf.eprintf
-                          "[keeper] heartbeat SSE broadcast failed: %s\n%!"
+                        Log.Keeper.error "heartbeat SSE broadcast failed: %s"
                           (Printexc.to_string exn)))
                with exn ->
-                 Printf.eprintf
-                   "[keeper] heartbeat snapshot write failed: %s\n%!"
+                 Log.Keeper.error "heartbeat snapshot write failed: %s"
                    (Printexc.to_string exn));
               last_snapshot_ts := now_ts);
             (* Deliberation triage: run for llm_deliberation mode keepers *)
@@ -301,7 +299,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
                            triggers)
                 in
                 if Keeper_types.keeper_debug then
-                  Printf.eprintf "[keeper-deliberation] %s triage: %s\n%!"
+                  Log.KeeperExec.info "%s triage: %s"
                     meta_current.name triggers_str;
                 { meta_current with last_triage_triggers = triggers_str })
               else meta_current
@@ -321,8 +319,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
                    then maybe_emit_explicit_room_replies ctx meta_after_triage
                    else maybe_emit_proactive ctx meta_after_triage
                  with exn ->
-                   Printf.eprintf
-                     "[keeper] proactive emission failed: %s\n%!"
+                   Log.Keeper.error "proactive emission failed: %s"
                      (Printexc.to_string exn);
                    meta_after_triage)
               else meta_after_triage

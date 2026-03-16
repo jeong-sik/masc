@@ -105,7 +105,7 @@ module Compression = struct
   let decompress ~(orig_size : int) ~(used_dict : bool) (compressed : string) : string option =
     try Some (Compression_dict.decompress ~orig_size ~used_dict compressed)
     with e ->
-      Printf.eprintf "[WARN] decompress failed: %s\n%!" (Printexc.to_string e);
+      Log.Misc.error "decompress failed: %s" (Printexc.to_string e);
       None
 
   (** Auto-decompress if ZSTD/ZSTDD header present *)
@@ -394,7 +394,7 @@ module FileSystem = struct
           Some { owner; acquired_at; expires_at }
       | _ -> None
     with e ->
-      Printf.eprintf "[WARN] parse_lock_info failed: %s\n%!" (Printexc.to_string e);
+      Log.Misc.error "parse_lock_info failed: %s" (Printexc.to_string e);
       None
 
   let acquire_lock t ~key ~owner ~ttl_seconds =

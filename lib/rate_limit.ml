@@ -120,7 +120,7 @@ let start_cleanup_loop ~sw ~clock ?(interval=Env_config.RateLimit.cleanup_interv
       let older_than_seconds = int_of_float Env_config.RateLimit.entry_max_age_seconds in
       let removed = cleanup limiter ~older_than_seconds in
       if removed > 0 then
-        Printf.eprintf "[RateLimit] Cleaned up %d stale buckets\n%!" removed;
+        Log.Misc.info "Cleaned up %d stale buckets" removed;
       loop ()
     in
     loop ()

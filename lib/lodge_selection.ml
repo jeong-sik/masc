@@ -268,7 +268,7 @@ let load_stats () =
               | Some s ->
                   Hashtbl.replace stats_table s.name s
               | None ->
-                  Printf.eprintf "[lodge_selection] Failed to parse stats line\n%!"
+                  Log.Lodge.error "Failed to parse stats line"
             end
           done
         with End_of_file -> ()
@@ -276,7 +276,7 @@ let load_stats () =
       Printf.printf "[lodge_selection] Loaded stats for %d agents\n%!"
         (Hashtbl.length stats_table)
     with e ->
-      Printf.eprintf "[lodge_selection] Error loading stats: %s\n%!"
+      Log.Lodge.error "Error loading stats: %s"
         (Printexc.to_string e)
   end
 
@@ -293,7 +293,7 @@ let save_stats () =
     Printf.printf "[lodge_selection] Saved stats for %d agents\n%!"
       (Hashtbl.length stats_table)
   with e ->
-    Printf.eprintf "[lodge_selection] Error saving stats: %s\n%!"
+    Log.Lodge.error "Error saving stats: %s"
       (Printexc.to_string e)
 
 (** {1 Feedback Updates} *)

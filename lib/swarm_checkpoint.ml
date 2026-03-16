@@ -187,7 +187,7 @@ let periodic_save_daemon ~sw ~clock config ~interval_sec =
            Log.Room.info "Swarm checkpoint saved: %d agents, %d/%d tasks done"
              snap.active_agents snap.done_tasks snap.total_tasks
        | Error e ->
-           Printf.eprintf "[swarm-checkpoint] save error: %s\n%!" e);
+           Log.Swarm.error "save error: %s" e);
       loop ()
     in
     (try loop ()

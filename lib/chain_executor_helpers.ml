@@ -143,7 +143,7 @@ let save_checkpoint ctx ~chain_id ~node_id =
       in
       (match Checkpoint_store.save_eio ~fs store cp with
        | Ok () -> ()
-       | Error msg -> Printf.eprintf "[checkpoint] Save failed: %s\n%!" msg)
+       | Error msg -> Log.Chain.error "Save failed: %s" msg)
   | Some store, None when ctx.checkpoint.checkpoint_enabled ->
       (* Fallback to non-Eio save *)
       let outputs = Hashtbl.fold (fun k v acc -> (k, v) :: acc) ctx.outputs [] in
@@ -159,7 +159,7 @@ let save_checkpoint ctx ~chain_id ~node_id =
       in
       (match Checkpoint_store.save store cp with
        | Ok () -> ()
-       | Error msg -> Printf.eprintf "[checkpoint] Save failed: %s\n%!" msg)
+       | Error msg -> Log.Chain.error "Save failed: %s" msg)
   | _ -> ()
 
 (** Load checkpoint and restore outputs to context *)
@@ -192,8 +192,7 @@ let store_node_output ctx (node : node) (output : string) =
         (match Hashtbl.find_opt ctx.outputs key with
          | Some existing ->
              if existing <> output then
-               Printf.eprintf
-                 "Warning: output_key '%s' for node '%s' ignored (already set)\n%!"
+               Log.Misc.warn "Warning: output_key '%s' for node '%s' ignored (already set)"
                  key
                  node.id
          | None ->
@@ -457,8 +456,7 @@ let substitute_json ctx (json : Yojson.Safe.t) : Yojson.Safe.t =
     let re = Str.regexp "{{[^}]+}}" in
     try
       ignore (Str.search_forward re s 0);
-      Printf.eprintf
-        "[chain] unresolved placeholder stripped in tool args: %s\n%!"
+      Log.Misc.info "unresolved placeholder stripped in tool args: %s"
         (truncate_with_ellipsis s);
       Str.global_replace re "" s
     with

@@ -14,7 +14,7 @@
 let try_with_log context f =
   try Some (f ())
   with e ->
-    Printf.eprintf "[WARN] %s failed: %s\n%!" context (Printexc.to_string e);
+    Log.Misc.error "%s failed: %s" context (Printexc.to_string e);
     None
 
 (** Execute with default value on failure *)
@@ -86,13 +86,13 @@ let list_dir_safe path : (string list, string) result =
 let remove_file_logged ?(context = "cleanup") path =
   try Sys.remove path
   with e ->
-    Printf.eprintf "[WARN] [%s] Failed to remove %s: %s\n%!" context path (Printexc.to_string e)
+    Log.Misc.error "[%s] Failed to remove %s: %s" context path (Printexc.to_string e)
 
 (** Close channel with logging on failure *)
 let close_in_logged ic =
   try close_in ic
   with e ->
-    Printf.eprintf "[WARN] Failed to close input channel: %s\n%!" (Printexc.to_string e)
+    Log.Misc.error "Failed to close input channel: %s" (Printexc.to_string e)
 
 (** Get environment variable with logging when invalid *)
 let get_env_int_logged name ~default =
@@ -102,7 +102,7 @@ let get_env_int_logged name ~default =
     match int_of_string_safe v with
     | Some n -> n
     | None ->
-      Printf.eprintf "[WARN] Invalid int for %s=%s, using default %d\n%!" name v default;
+      Log.Misc.warn "Invalid int for %s=%s, using default %d" name v default;
       default
 
 let get_env_float_logged name ~default =
@@ -112,7 +112,7 @@ let get_env_float_logged name ~default =
     match float_of_string_safe v with
     | Some n -> n
     | None ->
-      Printf.eprintf "[WARN] Invalid float for %s=%s, using default %f\n%!" name v default;
+      Log.Misc.warn "Invalid float for %s=%s, using default %f" name v default;
       default
 
 (** {2 JSON Value Extraction Helpers}

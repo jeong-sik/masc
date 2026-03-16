@@ -270,7 +270,7 @@ module Request = struct
       if not !stopped then begin
         stopped := true;
         (try Httpun.Body.Reader.close body with exn ->
-          Printf.eprintf "[WARN] [http] body close failed: %s\n%!" (Printexc.to_string exn))
+          Log.Misc.error "[http] body close failed: %s" (Printexc.to_string exn))
       end
     in
     (match content_length with
@@ -609,11 +609,11 @@ let run ~sw ~net ~clock config routes =
                client_addr
                flow
            with exn ->
-             Printf.eprintf "Connection error: %s\n%!" (Printexc.to_string exn))
+             Log.Http.error "Connection error: %s" (Printexc.to_string exn))
        with exn ->
          if is_cancelled exn then raise exn;
          let delay = !backoff_s in
-         Printf.eprintf "Accept error: %s (backoff %.2fs)\n%!"
+         Log.Http.error "Accept error: %s (backoff %.2fs)"
            (Printexc.to_string exn) delay;
          Eio.Time.sleep clock delay;
          bump_backoff ());
@@ -622,7 +622,7 @@ let run ~sw ~net ~clock config routes =
       if is_cancelled exn then ()
       else
         let delay = !backoff_s in
-        Printf.eprintf "Accept loop error: %s (backoff %.2fs)\n%!"
+        Log.Http.error "Accept loop error: %s (backoff %.2fs)"
           (Printexc.to_string exn) delay;
         Eio.Time.sleep clock delay;
         bump_backoff ();
@@ -645,7 +645,7 @@ let start ?(config = default_config) ?(routes = default_routes) () =
   let initiate_shutdown signal_name =
     if not !shutdown_initiated then begin
       shutdown_initiated := true;
-      Printf.eprintf "\n🚀 MASC MCP: Received %s, shutting down gracefully...\n%!" signal_name;
+      Log.Http.info "MASC MCP: Received %s, shutting down gracefully..." signal_name;
       match !switch_ref with
       | Some sw -> Eio.Switch.fail sw Shutdown
       | None -> ()
@@ -660,6 +660,6 @@ let start ?(config = default_config) ?(routes = default_routes) () =
     run ~sw ~net ~clock config routes
   with
   | Shutdown ->
-      Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"
+      Log.Http.info "MASC MCP: Shutdown complete."
   | Eio.Cancel.Cancelled _ ->
-      Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!")
+      Log.Http.info "MASC MCP: Shutdown complete.")

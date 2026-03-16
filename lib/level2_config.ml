@@ -75,9 +75,9 @@ let to_json () : Yojson.Safe.t =
 
 (** Print config to stderr for debugging *)
 let print_config () =
-  Printf.eprintf "[level2_config] Configuration:\n";
-  Printf.eprintf "  MASC_METRICS_CACHE_TTL=%.0f\n" (Metrics_cache.ttl_seconds ());
-  Printf.eprintf "  MASC_TOKEN_CACHE_SIZE=%d\n" (Token_cache.max_size ());
-  Printf.eprintf "  MASC_DRIFT_THRESHOLD=%.2f\n" (Drift_guard.default_threshold ());
-  Printf.eprintf "  MASC_LOCK_WARN_MS=%.0f\n" (Lock.warn_threshold_ms ());
-  Printf.eprintf "  MASC_HEBBIAN_RATE=%.3f\n" (Hebbian.learning_rate ())
+  Log.Level2.info "Configuration:";
+  Log.Level2.info "  MASC_METRICS_CACHE_TTL=%.0f" (Metrics_cache.ttl_seconds ());
+  Log.Level2.info "  MASC_TOKEN_CACHE_SIZE=%d" (Token_cache.max_size ());
+  Log.Level2.info "  MASC_DRIFT_THRESHOLD=%.2f" (Drift_guard.default_threshold ());
+  Log.Level2.info "  MASC_LOCK_WARN_MS=%.0f" (Lock.warn_threshold_ms ());
+  Log.Level2.info "  MASC_HEBBIAN_RATE=%.3f" (Hebbian.learning_rate ())

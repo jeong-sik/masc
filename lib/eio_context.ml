@@ -67,7 +67,7 @@ let https_connector :
    [> Eio.Flow.two_way_ty ] Eio.Resource.t) lazy_t =
   lazy (
     let fail_closed msg =
-      Printf.eprintf "[TLS] %s\n%!" msg;
+      Log.Misc.info "%s" msg;
       (fun _uri _raw -> failwith msg)
     in
     match Ca_certs.authenticator () with

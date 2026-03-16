@@ -16,7 +16,7 @@ let make_error_handler () =
       | `Bad_request -> "Bad request"
       | `Internal_server_error -> "Internal server error"
     in
-    Printf.eprintf "[H2] Error: %s\n%!" message;
+    Log.Http.error "Error: %s" message;
     let headers = H2.Headers.of_list [("content-type", "text/plain")] in
     let body = respond headers in
     H2.Body.Writer.write_string body message;
@@ -1644,7 +1644,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
                        try loop () with exn ->
                          if is_cancelled exn then raise exn
                          else
-                           Printf.eprintf "[TRPG-SSE/H2] poll error for room %s: %s\n%!"
+                           Log.Trpg.error "poll error for room %s: %s"
                              room_id_trimmed (Printexc.to_string exn))
                  | _ ->
                      ignore (send "event: error\ndata: {\"error\":\"server not ready\"}\n\n");
@@ -1879,7 +1879,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
         dispatch_h2_route ()
     with exn ->
       let msg = Printexc.to_string exn in
-      Printf.eprintf "[H2] Handler error: %s\n%!" msg;
+      Log.Http.error "Handler error: %s" msg;
       h2_respond_text h2_reqd ("500 Internal Server Error: " ^ msg) ~status:`Internal_server_error ~extra_headers:cors
   in
   (* H2 error handler *)

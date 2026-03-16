@@ -171,8 +171,7 @@ let execute_keeper_tool_call
           ])
   | "keeper_board_post" ->
       let author = meta.name in
-      Printf.eprintf
-        "[TRPG-TRACE] keeper_board_post called by %s, raw args: %s\n%!"
+      Log.Trpg.info "keeper_board_post called by %s, raw args: %s"
         author (Yojson.Safe.to_string args);
       let board_args =
         match args with
@@ -185,12 +184,10 @@ let execute_keeper_tool_call
         ensure_keeper_board_post_args
           ~author ~source:"keeper_board_post" board_args
       in
-      Printf.eprintf
-        "[TRPG-TRACE] board_args: %s\n%!"
+      Log.Trpg.info "board_args: %s"
         (Yojson.Safe.to_string board_args);
       let ok, msg = Tool_board.handle_tool "masc_board_post" board_args in
-      Printf.eprintf
-        "[TRPG-TRACE] handle_tool result: ok=%b msg=%s\n%!" ok
+      Log.Trpg.info "handle_tool result: ok=%b msg=%s" ok
         (if String.length msg > 200 then String.sub msg 0 200 ^ "..." else msg);
       if ok then msg
       else Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])

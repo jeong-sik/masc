@@ -871,7 +871,7 @@ let room_enter config ~room_id ?(agent_name="") ~agent_type () : Yojson.Safe.t =
       (match previous_room with
        | Some prev when prev <> room_id && should_auto_leave ->
            (try ignore (leave config ~agent_name:effective_agent_name)
-            with e -> Printf.eprintf "[WARN] room: auto-leave from %s failed: %s\n%!" prev (Printexc.to_string e))
+            with e -> Log.Misc.error "room: auto-leave from %s failed: %s" prev (Printexc.to_string e))
        | _ -> ());
 
       (* Update current room file (for external tools) and create scoped config *)
@@ -882,7 +882,7 @@ let room_enter config ~room_id ?(agent_name="") ~agent_type () : Yojson.Safe.t =
       (* Initialize the room on first entry (no auto-join). *)
       if not (is_initialized scoped) then
         (try ignore (init scoped ~agent_name:None)
-         with e -> Printf.eprintf "[WARN] room: init failed for %s: %s\n%!" room_id (Printexc.to_string e));
+         with e -> Log.Misc.error "room: init failed for %s: %s" room_id (Printexc.to_string e));
 
       (* Join the new room using scoped config *)
       let join_result = join scoped ~agent_name:effective_agent_name ~capabilities:[] () in

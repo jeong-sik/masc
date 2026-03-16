@@ -108,7 +108,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
              ~tool_name:"masc_keeper_msg" ~success ~duration_ms ()
          with exn ->
-           Printf.eprintf "[WARN] telemetry tracking failed: %s\n%!"
+           Log.Misc.error "telemetry tracking failed: %s"
              (Printexc.to_string exn))
     | None -> ()
   );

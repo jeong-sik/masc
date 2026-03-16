@@ -52,7 +52,7 @@ let state_of_json (json : Yojson.Safe.t) : tempo_state option =
     let reason = json |> U.member "reason" |> U.to_string in
     Some { current_interval_s; last_adjusted; reason }
   with U.Type_error (msg, _) ->
-    Printf.eprintf "[WARN] state_of_json: %s\n%!" msg;
+    Log.Misc.warn "state_of_json: %s" msg;
     None
 
 (** Load current tempo state *)

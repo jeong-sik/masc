@@ -152,7 +152,7 @@ let session_registry_ref : (Yojson.Safe.t -> int) option ref = ref None
 
 let set_session_push_fn (fn : Yojson.Safe.t -> int) =
   (match !session_registry_ref with
-   | Some _ -> Printf.eprintf "[subscriptions] WARNING: session push fn already set, overwriting\n%!"
+   | Some _ -> Log.Sub.warn "WARNING: session push fn already set, overwriting"
    | None -> ());
   session_registry_ref := Some fn
 
@@ -162,9 +162,9 @@ let push_event_to_sessions (event : Yojson.Safe.t) : unit =
   match !session_registry_ref with
   | Some push_fn ->
       (try ignore (push_fn event)
-       with exn -> Printf.eprintf "[subscriptions] push_event failed: %s\n%!" (Printexc.to_string exn))
+       with exn -> Log.Sub.error "push_event failed: %s" (Printexc.to_string exn))
   | None ->
-      Printf.eprintf "[subscriptions] push_event_to_sessions: registry not wired\n%!"
+      Log.Sub.info "push_event_to_sessions: registry not wired"
 
 (** Notify all subscribers of a resource change *)
 let notify_change ~(resource : resource_type) ~(change : change_type)
@@ -194,7 +194,7 @@ let notify_change ~(resource : resource_type) ~(change : change_type)
          ("timestamp", `Float now);
        ] in
        (try ignore (push_fn event)
-        with exn -> Printf.eprintf "[subscriptions] push_sub_event failed: %s\n%!" (Printexc.to_string exn))
+        with exn -> Log.Sub.error "push_sub_event failed: %s" (Printexc.to_string exn))
    | None -> ());
   List.length subs
 

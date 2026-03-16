@@ -338,7 +338,7 @@ let handle_experiment_start ctx args : result =
                ("window_seconds", `Float window_seconds);
              ])
          ();
-       Printf.eprintf "[Experiment] Created %s: %s\n%!" id hypothesis;
+       Log.Misc.info "Created %s: %s" id hypothesis;
        ( true,
          Yojson.Safe.to_string
            (`Assoc
@@ -385,7 +385,7 @@ let handle_experiment_assign ctx args : result =
                          ("timestamp", `Float now);
                        ])
                    ();
-                 Printf.eprintf "[Experiment] Assigned %s to %s (%s)\n%!"
+                 Log.Misc.info "Assigned %s to %s (%s)"
                    subject_id experiment_id (group_to_string group);
                  ( true,
                    Printf.sprintf "Assigned %s to %s group" subject_id
@@ -559,7 +559,7 @@ let handle_experiment_conclude ctx args : result =
              in
              broadcast_experiment_event ~event_type:"experiment_concluded"
                ~agent:ctx.agent_name ~data ();
-             Printf.eprintf "[Experiment] Concluded %s: %s (d=%.3f, p=%.3f)\n%!"
+             Log.Misc.info "Concluded %s: %s (d=%.3f, p=%.3f)"
                experiment_id result_str effect_size p_value;
              (true, Yojson.Safe.to_string data)
            with e ->

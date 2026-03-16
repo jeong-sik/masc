@@ -119,7 +119,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
          in
          let result = match decision, result_opt with
            | Trajectory.Reject reason, _ ->
-               Printf.eprintf "[keeper-autonomy] GATE BLOCKED %s: %s\n%!"
+               Log.KeeperExec.info "GATE BLOCKED %s: %s"
                  tc.call_name reason;
                Yojson.Safe.to_string (`Assoc [("gate_blocked", `String tc.call_name); ("reason", `String reason)])
            | _, Some r -> r
@@ -262,7 +262,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~config ~goal_ids:meta.active_goal_ids ~keeper_name:meta.name in
             (match next with
              | Propose pa ->
-                 Printf.eprintf "[keeper-autonomy] %s L2 suggest: %s (risk=%s, cost=$%.2f)\n%!"
+                 Log.KeeperExec.info "%s L2 suggest: %s (risk=%s, cost=$%.2f)"
                    meta.name pa.action_description
                    (Keeper_autonomy.risk_level_to_string pa.risk_level)
                    pa.estimated_cost_usd;
@@ -287,14 +287,14 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                  in
                  let (ok, _msg) = Tool_board.handle_tool "masc_board_post" board_args in
                  if not ok then
-                   Printf.eprintf "[keeper-autonomy] %s L2 board post failed\n%!" meta.name;
+                   Log.KeeperExec.error "%s L2 board post failed" meta.name;
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
                    autonomous_action_count = meta.autonomous_action_count + 1;
                    updated_at = now_iso ();
                  }
              | StartPerpetualAgent req ->
-                 Printf.eprintf "[keeper-autonomy] %s L2 perpetual suggest: %s\n%!"
+                 Log.KeeperExec.info "%s L2 perpetual suggest: %s"
                    meta.name req.goal_title;
                  let board_args = `Assoc [
                    ("author", `String meta.name);
@@ -318,7 +318,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                  (match Tool_board.handle_tool "masc_board_post" board_args with
                   | (true, _) -> ()
                   | (false, err) ->
-                      Printf.eprintf "[keeper-autonomy] %s L2 perpetual board post failed: %s\n%!" meta.name err
+                      Log.KeeperExec.error "%s L2 perpetual board post failed: %s" meta.name err
                   | exception exn ->
                       log_keeper_exn ~label:(Printf.sprintf "autonomy %s L2 board post error" meta.name) exn);
                  Some { meta with
@@ -340,17 +340,17 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
             in
             (match result with
              | NothingToDo reason ->
-                 Printf.eprintf "[keeper-autonomy] %s: nothing to do (%s)\n%!" meta.name reason;
+                 Log.KeeperExec.info "%s: nothing to do (%s)" meta.name reason;
                  None
              | PerpetualRequested req ->
-                 Printf.eprintf "[keeper-autonomy] %s PERPETUAL: starting for %s\n%!"
+                 Log.KeeperExec.info "%s PERPETUAL: starting for %s"
                    meta.name req.goal_title;
                  (* Keeper runs in heartbeat timer context without Eio.Switch.t,
                     so coding_mode (= Claude Code spawn) is structurally unavailable.
                     Force LLM-only mode to prevent guaranteed failure. *)
                  let effective_coding_mode = false in
                  (if req.coding_mode then
-                    Printf.eprintf "[keeper-autonomy] %s: coding_mode requested but unavailable (no Eio.Switch in heartbeat context), falling back to LLM-only\n%!" meta.name);
+                    Log.KeeperExec.info "%s: coding_mode requested but unavailable (no Eio.Switch in heartbeat context), falling back to LLM-only" meta.name);
                  let perp_args = `Assoc [
                    ("goal", `String req.goal_title);
                    ("models", `List (List.map (fun m -> `String m) req.models));
@@ -365,7 +365,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                  } in
                  (match Tool_perpetual.dispatch perp_ctx ~name:"masc_perpetual_start" ~args:perp_args with
                   | Some (true, result_json) ->
-                      Printf.eprintf "[keeper-autonomy] %s perpetual started: %s\n%!"
+                      Log.KeeperExec.info "%s perpetual started: %s"
                         meta.name result_json;
                       (* Update goal with perpetual agent info *)
                       (try ignore (Goal_store.review_goal config
@@ -395,7 +395,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                       (match Tool_board.handle_tool "masc_board_post" board_args with
                        | (true, _) -> ()
                        | (false, err) ->
-                           Printf.eprintf "[keeper-autonomy] %s: board post failed: %s\n%!" meta.name err
+                           Log.KeeperExec.error "%s: board post failed: %s" meta.name err
                        | exception exn ->
                            log_keeper_exn ~label:(Printf.sprintf "autonomy %s board post error" meta.name) exn);
                       Some { meta with
@@ -404,14 +404,14 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                         updated_at = now_iso ();
                       }
                   | Some (false, err) ->
-                      Printf.eprintf "[keeper-autonomy] %s perpetual start failed: %s\n%!"
+                      Log.KeeperExec.error "%s perpetual start failed: %s"
                         meta.name err;
                       None
                   | None ->
-                      Printf.eprintf "[keeper-autonomy] %s perpetual dispatch returned None\n%!" meta.name;
+                      Log.KeeperExec.info "%s perpetual dispatch returned None" meta.name;
                       None)
              | Approved (pa, plan) ->
-                 Printf.eprintf "[keeper-autonomy] %s APPROVED: %s\n%!"
+                 Log.KeeperExec.info "%s APPROVED: %s"
                    meta.name pa.action_description;
                  (* 5-3: Create trajectory accumulator for this autonomous turn *)
                  let masc_root = Filename.concat config.base_path ".masc" in
@@ -486,7 +486,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    updated_at = now_iso ();
                  }
              | Cautioned (pa, plan, warning) ->
-                 Printf.eprintf "[keeper-autonomy] %s CAUTIONED: %s (warning: %s)\n%!"
+                 Log.KeeperExec.warn "%s CAUTIONED: %s (warning: %s)"
                    meta.name pa.action_description warning;
                  (* 5-3: Trajectory with warning recorded *)
                  let masc_root = Filename.concat config.base_path ".masc" in
@@ -577,6 +577,6 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    updated_at = now_iso ();
                  }
              | Rejected (pa, reason) ->
-                 Printf.eprintf "[keeper-autonomy] %s REJECTED: %s (%s)\n%!"
+                 Log.KeeperExec.info "%s REJECTED: %s (%s)"
                    meta.name pa.action_description reason;
                  None)

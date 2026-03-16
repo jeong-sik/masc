@@ -90,9 +90,9 @@ let init ?persist_dir () =
                      description = chain.description;
                    }
                | Error msg ->
-                   Printf.eprintf "[chain_registry] Failed to parse %s: %s\n%!" path msg)
+                   Log.Chain.error "Failed to parse %s: %s" path msg)
             with exn ->
-              Printf.eprintf "[chain_registry] Exception loading %s: %s\n%!" path (Printexc.to_string exn)
+              Log.Chain.info "Exception loading %s: %s" path (Printexc.to_string exn)
           end
         ) files
       end
@@ -314,7 +314,7 @@ let of_json (json : Yojson.Safe.t) : (int, string) result =
             };
             incr count
         | Error msg ->
-            Printf.eprintf "[chain_registry] Failed to load entry: %s\n%!" msg
+            Log.Chain.error "Failed to load entry: %s" msg
       ) entries;
       Ok !count
     with e ->

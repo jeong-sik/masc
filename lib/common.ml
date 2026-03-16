@@ -9,7 +9,7 @@ let strict_finalizers () = env_true "MASC_MCP_STRICT_FINALIZERS"
 
 let handle_finalizer_error ~module_name ~label ~during_exception ~backtrace ex =
   let suffix = if during_exception then " (during exception)" else "" in
-  Printf.eprintf "[%s] %s failed in finalizer%s: %s\n%!"
+  Log.Misc.error "%s %s failed in finalizer%s: %s"
     module_name label suffix (Printexc.to_string ex);
   if (not during_exception) && strict_finalizers () then
     Printexc.raise_with_backtrace ex backtrace

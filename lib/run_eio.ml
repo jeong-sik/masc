@@ -47,7 +47,7 @@ let run_record_of_json (json : Yojson.Safe.t) : run_record option =
     let updated_at = json |> member "updated_at" |> to_string in
     Some { task_id; agent_name; plan; deliverable; created_at; updated_at }
   with Yojson.Safe.Util.Type_error (msg, _) ->
-    Printf.eprintf "[WARN] run_of_json type error: %s\n%!" msg;
+    Log.Misc.error "run_of_json type error: %s" msg;
     None
 
 let log_entry_to_json (e : log_entry) : Yojson.Safe.t =
@@ -63,7 +63,7 @@ let log_entry_of_json (json : Yojson.Safe.t) : log_entry option =
     let note = json |> member "note" |> to_string in
     Some { timestamp; note }
   with Yojson.Safe.Util.Type_error (msg, _) ->
-    Printf.eprintf "[WARN] log_entry_of_json type error: %s\n%!" msg;
+    Log.Misc.error "log_entry_of_json type error: %s" msg;
     None
 
 let runs_dir (config : config) =

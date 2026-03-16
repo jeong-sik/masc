@@ -303,7 +303,7 @@ let rotate_if_needed (config : Room.config) ~max_size_bytes =
       if Sys.file_exists backup_path then
         Sys.remove backup_path;
       Sys.rename path backup_path;
-      Printf.eprintf "[audit_log] Rotated %s (%.1f MB)\n" path
+      Log.Misc.info "Rotated %s (%.1f MB)" path
         (float_of_int stats.Unix.st_size /. 1_000_000.0)
     end
   end

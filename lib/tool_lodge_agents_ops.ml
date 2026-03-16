@@ -27,7 +27,7 @@ let get_all_agents () =
   try
     match graphql_request ~timeout_sec:5.0 query with
     | Error err ->
-        Printf.eprintf "[Lodge] GraphQL request failed: %s\n%!" err;
+        Log.Lodge.error "GraphQL request failed: %s" err;
         let cached = get_cached_agents_tuple () in
         if cached = [] then [] else cached
     | Ok output ->
@@ -35,7 +35,7 @@ let get_all_agents () =
           let json = Yojson.Safe.from_string output in
           (match graphql_agents_edges json with
            | Error err ->
-               Printf.eprintf "[Lodge] GraphQL agent parse failed: %s\n%!" err;
+               Log.Lodge.error "GraphQL agent parse failed: %s" err;
                []
            | Ok edges ->
                List.filter_map (fun edge ->
@@ -93,12 +93,12 @@ let neo4j_http_cypher cypher =
 	       "-H"; "Authorization: Basic " ^ auth;
 	       "-d"; "@-"]
 	    in
-	    Printf.eprintf "[neo4j_http] POST %s (body=%d chars)\n%!" url (String.length body);
+	    Log.Lodge.info "POST %s (body=%d chars)" url (String.length body);
 	    try
 	      let output =
 	        Process_eio.run_argv_with_stdin ~timeout_sec:30.0 ~stdin_content:body argv
 	      in
-	      Printf.eprintf "[neo4j_http] response: %s\n%!" (if String.length output < 200 then output else String.sub output 0 200 ^ "...");
+	      Log.Lodge.info "response: %s" (if String.length output < 200 then output else String.sub output 0 200 ^ "...");
 	      if String.length output > 0 then Ok output
 	      else Error "empty response"
 	    with exn -> Error (Printexc.to_string exn)
@@ -138,7 +138,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
 	        Env_config.Llm.default_model
 	      in
 	      let body = Yojson.Safe.to_string (`Assoc [("query", `String gql)]) in
-	      Printf.eprintf "[spawn_agent] GraphQL mutation: createAgent(name=%s, role=%s)\n%!" agent_name child_role;
+	      Log.Spawn.info "GraphQL mutation: createAgent(name=%s, role=%s)" agent_name child_role;
 	      try
 	        let argv =
 	          ["curl"; "-s"; graphql_url;
@@ -149,7 +149,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
 	        let output =
 	          Process_eio.run_argv_with_stdin ~timeout_sec:30.0 ~stdin_content:body argv
 	        in
-	        Printf.eprintf "[spawn_agent] GraphQL response: %s\n%!" (if String.length output < 300 then output else String.sub output 0 300 ^ "...");
+	        Log.Spawn.info "GraphQL response: %s" (if String.length output < 300 then output else String.sub output 0 300 ^ "...");
 	        (* Parse response *)
 	        let json = Yojson.Safe.from_string output in
         let data = json |> member "data" in
@@ -164,7 +164,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
           let result = data |> member "createAgent" in
           let success = result |> member "success" |> to_bool in
           if success then begin
-            Printf.eprintf "[spawn_agent] GraphQL success\n%!";
+            Log.Spawn.info "GraphQL success";
             (* Success - agent created *)
             let announcement = Printf.sprintf
               "🐣 새 에이전트 탄생!\n이름: %s\n성격: %s\n부모: %s\n\n\"%s\""

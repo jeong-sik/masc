@@ -286,7 +286,7 @@ let push_notification_to_active_agents registry ~(event : Yojson.Safe.t) =
           | n, _ :: rest -> drop_n (n - 1) rest
         in
         session.message_queue <- drop_n drop queue;
-        Printf.eprintf "[session] notification queue capped for %s: dropped %d oldest events\n%!" name drop
+        Log.Session.info "notification queue capped for %s: dropped %d oldest events" name drop
       end else
         session.message_queue <- queue;
       incr count
@@ -336,7 +336,7 @@ let wait_for_message registry ~agent_name ~timeout =
   let result =
     try wait_loop ()
     with exn ->
-      Printf.eprintf "[WARN] session listen interrupted: %s\n%!" (Printexc.to_string exn);
+      Log.Misc.warn "session listen interrupted: %s" (Printexc.to_string exn);
       None
   in
   update_activity registry ~agent_name ~is_listening:(Some false) ();
@@ -524,7 +524,7 @@ let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_
       Eio.Time.sleep clock interval;
       let removed = McpSessionStore.cleanup_stale () in
       if removed > 0 then
-        Printf.eprintf "[Session] Cleaned up %d stale MCP sessions\n%!" removed;
+        Log.Session.info "Cleaned up %d stale MCP sessions" removed;
       loop ()
     in
     loop ()

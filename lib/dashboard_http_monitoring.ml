@@ -170,7 +170,7 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       ("bad_age_s", `Int bad_age_s);
     ], true)
   with exn ->
-    Printf.eprintf "[dashboard] board_monitoring_json failed: %s\n%!"
+    Log.Dashboard.error "board_monitoring_json failed: %s"
       (Printexc.to_string exn);
     (`Assoc [
       ("alert_level", `String "bad");
@@ -301,7 +301,7 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
       ("bad_age_s", `Int bad_age_s);
     ], true)
   with exn ->
-    Printf.eprintf "[dashboard] governance_monitoring_json failed: %s\n%!"
+    Log.Dashboard.error "governance_monitoring_json failed: %s"
       (Printexc.to_string exn);
     (`Assoc [
       ("alert_level", `String "bad");

@@ -82,7 +82,7 @@ let gc_agent_memories ~agent_name : int * int =
   let removed_count = List.length removed in
   if removed_count > 0 then begin
     Memory_stream.rewrite_entries ~agent_name kept;
-    Printf.eprintf "[memory_gc] %s: kept=%d removed=%d (volatile=%d developing=%d)\n%!"
+    Log.Misc.info "%s: kept=%d removed=%d (volatile=%d developing=%d)"
       agent_name (List.length kept) removed_count
       (List.length (List.filter (fun e -> classify e = Volatile) removed))
       (List.length (List.filter (fun e -> classify e = Developing) removed))

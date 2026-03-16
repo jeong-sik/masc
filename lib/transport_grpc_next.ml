@@ -605,7 +605,7 @@ let start_server ~sw ~env config room_config : server =
     try
       Grpc_eio.Server.serve ~sw ~env grpc_server
     with exn ->
-      Printf.eprintf "[gRPC] serve crashed: %s\n%!" (Printexc.to_string exn)
+      Log.Transport.info "serve crashed: %s" (Printexc.to_string exn)
   );
 
   { grpc_server; config; running = true }

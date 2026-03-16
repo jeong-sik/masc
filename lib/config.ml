@@ -54,7 +54,7 @@ let of_json json =
     in
     { mode; enabled_categories }
   with e ->
-    Printf.eprintf "[WARN] config of_json failed: %s\n%!" (Printexc.to_string e);
+    Log.Misc.error "config of_json failed: %s" (Printexc.to_string e);
     default
 
 (** Load config from file *)
@@ -180,7 +180,7 @@ let validate_schemas (schemas : Types.tool_schema list) =
   match !errors with
   | [] -> ()
   | errs ->
-      List.iter (fun e -> Printf.eprintf "[SCHEMA WARN] %s\n%!" e) errs
+      List.iter (fun e -> Log.Config.warn "%s" e) errs
 
 let all_tool_schemas : Types.tool_schema list =
   let schemas =

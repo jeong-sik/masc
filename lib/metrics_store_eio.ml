@@ -86,9 +86,9 @@ let record config (metric : task_metric) : unit =
   (* Security: 0o600 - only owner can read/write metrics data *)
   (* FD leak fix: ensure fd is always closed with Fun.protect *)
   let fd = Unix.openfile file [Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CREAT] 0o600 in
-  Fun.protect ~finally:(fun () -> try Unix.close fd with exn -> (try Printf.eprintf "[metrics] fd close failed: %s\n%!" (Printexc.to_string exn) with exn2 -> ignore (Printexc.to_string exn2))) (fun () ->
+  Fun.protect ~finally:(fun () -> try Unix.close fd with exn -> (try Log.Misc.error "fd close failed: %s" (Printexc.to_string exn) with exn2 -> ignore (Printexc.to_string exn2))) (fun () ->
     Unix.lockf fd Unix.F_LOCK 0;
-    Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with exn -> (try Printf.eprintf "[metrics] fd unlock failed: %s\n%!" (Printexc.to_string exn) with exn2 -> ignore (Printexc.to_string exn2))) (fun () ->
+    Fun.protect ~finally:(fun () -> try Unix.lockf fd Unix.F_ULOCK 0 with exn -> (try Log.Misc.error "fd unlock failed: %s" (Printexc.to_string exn) with exn2 -> ignore (Printexc.to_string exn2))) (fun () ->
       let _ = Unix.write_substring fd line 0 (String.length line) in
       ()
     )
@@ -135,11 +135,11 @@ let read_metrics_file file : task_metric list =
         | Ok m -> Some m
         | Error e ->
           let preview = if String.length line > 50 then String.sub line 0 50 ^ "..." else line in
-          Printf.eprintf "[metrics_store_eio] Failed to parse metric: %s (line: %s)\n" e preview;
+          Log.Metrics.error "Failed to parse metric: %s (line: %s)" e preview;
           None
       with exn ->
         let preview = if String.length line > 50 then String.sub line 0 50 ^ "..." else line in
-        Printf.eprintf "[metrics_store_eio] JSON parse error: %s (line: %s)\n"
+        Log.Metrics.error "JSON parse error: %s (line: %s)"
           (Printexc.to_string exn) preview;
         None
     ) lines

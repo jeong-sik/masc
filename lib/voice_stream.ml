@@ -119,7 +119,7 @@ let safe_close_client t ic =
   (try
      if not (Ws.Wsd.is_closed ic.wsd) then
        Ws.Wsd.close ic.wsd
-   with exn -> Printf.eprintf "[WARN] ws close: %s\n%!" (Printexc.to_string exn));
+   with exn -> Log.Misc.warn "ws close: %s" (Printexc.to_string exn));
   remove_client t ic.client.id
 
 let mark_client_error t ic message =
@@ -280,7 +280,7 @@ let start ~sw ~net ~clock t =
           else begin
             Log.error ~ctx:"voice_stream" "Accept error: %s" (Printexc.to_string exn);
             (try Eio.Time.sleep clock backoff_s
-             with exn -> Printf.eprintf "[WARN] sleep interrupted: %s\n%!" (Printexc.to_string exn));
+             with exn -> Log.Misc.warn "sleep interrupted: %s" (Printexc.to_string exn));
             let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
             accept_loop next_backoff
           end

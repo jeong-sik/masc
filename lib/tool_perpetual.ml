@@ -154,7 +154,7 @@ let handle_start ctx args =
   let models = List.filter_map (fun s ->
     match Llm_client.model_spec_of_string s with
     | Ok m -> Some m
-    | Error e -> Printf.eprintf "[perpetual] Bad model spec %s: %s\n%!" s e; None
+    | Error e -> Log.Perpetual.info "Bad model spec %s: %s" s e; None
   ) model_strs in
   if models = [] then
     `Assoc [("error", `String "No valid models provided")]
@@ -172,14 +172,14 @@ let handle_start ctx args =
       on_event = (fun ev ->
         match ev with
         | Perpetual_loop.TurnStart n ->
-          Printf.eprintf "[perpetual:%s] Turn %d\n%!" config.initial_goal n
+          Log.Perpetual.info "%s: Turn %d" config.initial_goal n
         | Perpetual_loop.CodingSpawn { agent; exit_code; elapsed_ms } ->
-          Printf.eprintf "[perpetual:coding] agent=%s exit=%d elapsed=%dms\n%!"
+          Log.Perpetual.info "agent=%s exit=%d elapsed=%dms"
             agent exit_code elapsed_ms
         | Perpetual_loop.Error e ->
-          Printf.eprintf "[perpetual:error] %s\n%!" e
+          Log.Perpetual.error "%s" e
         | Perpetual_loop.Terminated reason ->
-          Printf.eprintf "[perpetual:done] %s\n%!" reason
+          Log.Perpetual.info "%s" reason
         | _ -> ()
       );
     } in

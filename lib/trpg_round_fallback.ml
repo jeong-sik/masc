@@ -1,6 +1,7 @@
 (** Trpg_round_fallback — deterministic fallback replies and NPC counterattack logic *)
 
 include Trpg_action
+open Trpg_bestiary
 open Yojson.Safe.Util
 
 let default_placeholder_reply = "상황을 살피며 다음 행동을 준비합니다."

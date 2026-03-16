@@ -258,6 +258,12 @@
  (modules test_lodge_topic)
  (libraries masc_mcp alcotest str yojson unix))
 
+; Lodge_personality module tests (mood → temperature mapping + OAS Context)
+(test
+ (name test_lodge_personality)
+ (modules test_lodge_personality)
+ (libraries masc_mcp agent_sdk alcotest str yojson unix))
+
 ; Lodge_reaction module tests (Emergent Identity System)
 (test
  (name test_lodge_reaction)

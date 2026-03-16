@@ -198,6 +198,23 @@ module LodgeV2 = struct
   let min_checkin_gap_seconds =
     get_float ~default:1800.0 "MASC_LODGE_MIN_CHECKIN_GAP"
 
+  (** Min gap between posts by the same agent (seconds).
+      Default 600s (10 min). Lower than per-tick limit for finer control. *)
+  let min_post_gap_seconds =
+    get_float ~default:600.0 "MASC_LODGE_MIN_POST_GAP"
+
+  (** Min gap between comments by the same agent (seconds). *)
+  let min_comment_gap_seconds =
+    get_float ~default:8.0 "MASC_LODGE_MIN_COMMENT_GAP"
+
+  (** Max posts per agent per day. *)
+  let max_posts_per_day =
+    get_int ~default:8 "MASC_LODGE_MAX_POSTS_PER_DAY"
+
+  (** Max comments per agent per day. *)
+  let max_comments_per_day =
+    get_int ~default:40 "MASC_LODGE_MAX_COMMENTS_PER_DAY"
+
   (** Delegate LLM calls to external Workers (Soul + Body pattern).
       When true, MASC emits heartbeat_task events instead of calling LLM directly.
       Workers subscribe to events and invoke the local llama runtime. *)

@@ -864,7 +864,7 @@ let write_meta_logged config (meta : keeper_meta) =
   | Error msg ->
       Printf.eprintf "[keeper] write_meta failed: %s\n%!" msg
 
-let keeper_team_session_model (meta : keeper_meta) =
+let _keeper_team_session_model (meta : keeper_meta) =
   let active_model = String.trim meta.active_model in
   if active_model <> "" && not (String.equal active_model "default") then
     active_model
@@ -956,7 +956,7 @@ let session_id_of_result_json json =
   try Some Yojson.Safe.Util.(json |> member "session_id" |> to_string)
   with Yojson.Safe.Util.Type_error _ -> None
 
-let bool_option_to_json = function
+let _bool_option_to_json = function
   | Some value -> `Bool value
   | None -> `Null
 

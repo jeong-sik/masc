@@ -23,7 +23,7 @@ let agent_name = "sentinel"
 
 let agent_card : Agent_card.agent_card = {
   name = "sentinel";
-  version = "2.99.0";
+  version = "2.101.0";
   description = Some "Default resident agent: heartbeat, board patrol, task hygiene, keeper health";
   provider = Some { organization = "MASC"; url = None };
   protocol_versions = ["0.3"];

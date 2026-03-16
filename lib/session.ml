@@ -78,6 +78,13 @@ let unregister registry ~agent_name =
       agent_name (Hashtbl.length registry.sessions)
   )
 
+(** Unregister agent synchronously — direct hashtable removal without
+    the extra mutex layer.  Safe in Eio single-fiber context. *)
+let unregister_sync (registry : registry) ~agent_name =
+  Hashtbl.remove registry.sessions agent_name;
+  Log.Session.info "Session unregistered (sync): %s (total: %d)"
+    agent_name (Hashtbl.length registry.sessions)
+
 (** Update activity timestamp *)
 let update_activity registry ~agent_name ?(is_listening = None) () =
   with_lock registry (fun () ->

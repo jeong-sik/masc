@@ -3424,9 +3424,10 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
       Config.enabled_tool_schemas ~include_hidden ~include_deprecated categories
   | Managed_agent ->
       let passthrough =
-        Config.visible_tool_schemas ~include_hidden ~include_deprecated ()
+        Config.visible_tool_schemas ~include_hidden:false ~include_deprecated:false ()
         |> List.filter (fun (schema : Types.tool_schema) ->
-               List.mem schema.name managed_agent_passthrough_tool_names)
+               List.mem schema.name managed_agent_passthrough_tool_names
+               && Tool_catalog.is_visible schema.name)
       in
       dedupe_tool_schemas_by_name
         (Agent_swarm_contract.sdk_tool_schemas @ passthrough)
@@ -3465,19 +3466,26 @@ let is_idempotent_tool_name name =
     [ "masc_status"; "masc_get_"; "masc_list"; "masc_tool_"; "masc_keeper_tool_catalog" ]
 
 let tool_annotations_for_profile _profile tool_name =
-  let read_only = Tool_dispatch.is_read_only tool_name in
+  let meta = Tool_catalog.metadata tool_name in
+  let read_only =
+    match meta.readonly with
+    | Some v -> v
+    | None -> Tool_dispatch.is_read_only tool_name
+  in
+  let destructive =
+    match meta.destructive with
+    | Some v -> v
+    | None -> is_destructive_tool_name tool_name
+  in
+  let idempotent =
+    match meta.idempotent with
+    | Some v -> v
+    | None -> is_idempotent_tool_name tool_name || read_only
+  in
   let fields =
     [ ("readOnlyHint", `Bool read_only) ]
-    @
-    if is_destructive_tool_name tool_name then
-      [ ("destructiveHint", `Bool true) ]
-    else
-      []
-    @
-    if is_idempotent_tool_name tool_name || read_only then
-      [ ("idempotentHint", `Bool true) ]
-    else
-      []
+    @ (if destructive then [ ("destructiveHint", `Bool true) ] else [])
+    @ (if idempotent then [ ("idempotentHint", `Bool true) ] else [])
   in
   if fields = [] then None else Some (`Assoc fields)
 

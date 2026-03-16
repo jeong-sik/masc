@@ -430,6 +430,8 @@
    keeper_exec_autonomy
    keeper_exec_proactive
    keeper_exec_room
+   keeper_prompt
+   keeper_coordination
    keeper_execution
    keeper_learning
    keeper_feedback_tool

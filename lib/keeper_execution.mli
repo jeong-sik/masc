@@ -31,6 +31,13 @@ type social_turn_outcome = {
   failure_reason : string option;
 }
 
+(** {1 Error Logging} *)
+
+(** Log a keeper error with [UNEXPECTED] tag for unrecognized exceptions.
+    Known IO/parse exceptions get a plain log; anything else is tagged for triage.
+    No re-raise — side-effect-only, does not change control flow. *)
+val log_keeper_exn : label:string -> exn -> unit
+
 (** {1 Context and Checkpoint} *)
 
 (** Load keeper context from checkpoint for resumption. *)

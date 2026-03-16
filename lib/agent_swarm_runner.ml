@@ -90,7 +90,11 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
     | Provider.Local { base_url } -> base_url
     | Provider.Anthropic -> Api.default_base_url
     | Provider.Ollama { base_url; _ } -> base_url
-    | Provider.OpenAICompat { base_url; _ } -> base_url in
+    | Provider.OpenAICompat { base_url; _ } -> base_url
+    | Provider.Custom_registered _ ->
+        (match Provider.resolve provider_cfg with
+         | Ok (base_url, _, _) -> base_url
+         | Error _ -> "http://127.0.0.1:8085") in
   let dev_tools =
     Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir:config.workdir ()
   in

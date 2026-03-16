@@ -28,7 +28,9 @@ module Time = struct
           let utc_time, _ = Unix.mktime utc_tm in
           let offset = local_time -. utc_time in
           Some (local_time +. offset))
-    with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
+    with Scanf.Scan_failure _ | Failure _ | End_of_file ->
+      Printf.eprintf "[Resilience] parse_iso8601_opt failed for: %S\n%!" s;
+      None
 
   (** Check if a timestamp is older than threshold *)
   let is_stale ?(threshold=default_zombie_threshold) timestamp_str =
@@ -39,9 +41,30 @@ end
 
 (** Zombie detection logic *)
 module Zombie = struct
+  (** Check if agent name matches keeper pattern: "keeper-*-agent" (case-insensitive) *)
+  let is_keeper_name (name : string) =
+    let normalized = String.lowercase_ascii (String.trim name) in
+    let prefix = "keeper-" in
+    let suffix = "-agent" in
+    let nlen = String.length normalized in
+    let plen = String.length prefix in
+    let slen = String.length suffix in
+    nlen > plen + slen
+    && String.sub normalized 0 plen = prefix
+    && String.sub normalized (nlen - slen) slen = suffix
+
   (** Check if an agent is a zombie based on last_seen timestamp *)
   let is_zombie ?(threshold=default_zombie_threshold) last_seen_iso =
     Time.is_stale ~threshold last_seen_iso
+
+  (** Check if an agent is a zombie, using keeper threshold for keeper agents *)
+  let is_zombie_for_agent ~agent_name last_seen_iso =
+    let threshold =
+      if is_keeper_name agent_name
+      then Env_config.Zombie.keeper_threshold_seconds
+      else default_zombie_threshold
+    in
+    is_zombie ~threshold last_seen_iso
 end
 
 (** {1 Zero-Zombie Protocol} *)

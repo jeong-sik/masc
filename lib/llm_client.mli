@@ -125,6 +125,9 @@ val max_concurrent_llm : int
 (** Number of permits currently available (0 = all slots busy). *)
 val llm_semaphore_available : unit -> int
 
+(** Number of permits currently in use. *)
+val llm_permits_in_use : unit -> int
+
 (** {1 Helpers} *)
 
 (** Built-in model specs for common configurations. *)

@@ -288,21 +288,28 @@ let list_alerts_json_from_state config (state : snapshot_state) =
   let operations = state.operations in
   let live_agents = state.live_agents in
   let status_map = state.status_map in
+  (* BUG-007: Dedup alerts by (kind, scope_type, scope_id) *)
+  let seen : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
   let alerts = ref [] in
   let push_alert ~severity ~kind ~scope_type ~scope_id ~title ~detail =
-    alerts :=
-      `Assoc
-        [
-          ("alert_id", `String (next_event_id "alert"));
-          ("severity", `String severity);
-          ("kind", `String kind);
-          ("scope_type", `String scope_type);
-          ("scope_id", `String scope_id);
-          ("title", `String title);
-          ("detail", `String detail);
-          ("timestamp", `String (Types.now_iso ()));
-        ]
-      :: !alerts
+    let key = kind ^ "::" ^ scope_type ^ "::" ^ scope_id in
+    match Hashtbl.find_opt seen key with
+    | Some count -> incr count
+    | None ->
+        Hashtbl.replace seen key (ref 1);
+        alerts :=
+          (key, `Assoc
+            [
+              ("alert_id", `String (next_event_id "alert"));
+              ("severity", `String severity);
+              ("kind", `String kind);
+              ("scope_type", `String scope_type);
+              ("scope_id", `String scope_id);
+              ("title", `String title);
+              ("detail", `String detail);
+              ("timestamp", `String (Types.now_iso ()));
+            ])
+          :: !alerts
   in
   List.iter
     (fun (unit : unit_record) ->
@@ -388,8 +395,19 @@ let list_alerts_json_from_state config (state : snapshot_state) =
                (match decision.reason with
                | Some reason -> reason
                | None -> "Pending policy gate approval"));
+  (* Add occurrences count to deduped alerts *)
+  let enriched = List.rev !alerts |> List.map (fun (key, json) ->
+    let occurrences = match Hashtbl.find_opt seen key with
+      | Some count -> !count
+      | None -> 1
+    in
+    match json with
+    | `Assoc fields ->
+        `Assoc (fields @ [("occurrences", `Int occurrences)])
+    | other -> other
+  ) in
   let ordered =
-    List.rev !alerts
+    enriched
     |> List.sort (fun a b ->
            let severity_rank json =
              match get_string_default json "severity" "warn" with

@@ -54,6 +54,26 @@ module Tempo = struct
     get_float ~default:300.0 "MASC_TEMPO_DEFAULT_INTERVAL_SEC"
 end
 
+(** {1 Decision Configuration} *)
+
+module Decision = struct
+  (** Default TTL for pending decisions (seconds, default 1 hour) *)
+  let ttl_seconds =
+    get_float ~default:3600.0 "MASC_DECISION_TTL_SEC"
+end
+
+(** {1 Cache Configuration} *)
+
+module Cache = struct
+  (** Maximum size of a single cache entry value in bytes (default 100KB) *)
+  let max_entry_size =
+    get_int ~default:102400 "MASC_CACHE_MAX_ENTRY_SIZE"
+
+  (** Maximum total number of cache entries (default 1000) *)
+  let max_entries =
+    get_int ~default:1000 "MASC_CACHE_MAX_ENTRIES"
+end
+
 (** {1 Orchestrator Configuration} *)
 
 module Orchestrator = struct

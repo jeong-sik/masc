@@ -2387,7 +2387,13 @@ let create_policy_decision config ~(actor : string) ~requested_action ~scope_typ
       detail;
       created_at = Types.now_iso ();
       decided_at = None;
-      expires_at = None;
+      expires_at =
+        (let ttl = Env_config.Decision.ttl_seconds in
+         let t = Unix.gettimeofday () +. ttl in
+         let tm = Unix.gmtime t in
+         Some (Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+           (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+           tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec));
     }
   in
   let decisions = read_policy_decisions config in
@@ -2402,6 +2408,46 @@ let create_policy_decision config ~(actor : string) ~requested_action ~scope_typ
         ("scope_id", `String scope_id);
       ]);
   decision
+
+(** Expire pending decisions that have passed their TTL.
+    Returns count of expired decisions. *)
+let check_expired_decisions config =
+  let now = Types.now_iso () in
+  let decisions = read_policy_decisions config in
+  let expired_count = ref 0 in
+  let updated = List.map (fun (d : policy_decision_record) ->
+    match d.status, d.expires_at with
+    | "pending", Some exp when exp < now ->
+        incr expired_count;
+        { d with status = "expired"; decided_at = Some now }
+    | _ -> d
+  ) decisions in
+  if !expired_count > 0 then
+    write_policy_decisions config updated;
+  !expired_count
+
+(** BUG-019: Auto-fail blocked intents past timeout (default 3600s).
+    Returns count of failed intents. *)
+let check_blocked_intents config =
+  let timeout_sec = Env_config.Decision.ttl_seconds in
+  let now = Types.now_iso () in
+  let now_unix = Unix.gettimeofday () in
+  let intents = read_intents config in
+  let failed_count = ref 0 in
+  let updated = List.map (fun (intent : intent_record) ->
+    match intent.state with
+    | Blocked_intent ->
+        let created_unix = Types.parse_iso8601 intent.created_at in
+        if now_unix -. created_unix > timeout_sec then begin
+          incr failed_count;
+          { intent with state = Dropped_intent; updated_at = now }
+        end else
+          intent
+    | _ -> intent
+  ) intents in
+  if !failed_count > 0 then
+    write_intents config updated;
+  !failed_count
 
 let apply_operation_assignment config ~(actor : string) (operation : operation_record)
     ~target_unit_id ~note ~event_type =

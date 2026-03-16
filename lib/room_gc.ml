@@ -15,6 +15,7 @@ let force_release_task_fn
   = ref (fun _config ~agent_name:_ ~task_id:_ () ->
       Error (Types.TaskInvalidState "Room_gc: force_release_task_fn not connected"))
 
+
 (** Update agent heartbeat - must be called periodically *)
 let heartbeat_in_room config ~room_id ~agent_name =
   ensure_room_bootstrap config room_id;
@@ -47,16 +48,7 @@ let heartbeat config ~agent_name =
   heartbeat_in_room config ~room_id:(current_room_id config) ~agent_name
 
 (** Cleanup zombie agents - removes stale agents *)
-let is_keeper_runtime_agent_name (name : string) =
-  let normalized = String.lowercase_ascii (String.trim name) in
-  let prefix = "keeper-" in
-  let suffix = "-agent" in
-  let nlen = String.length normalized in
-  let plen = String.length prefix in
-  let slen = String.length suffix in
-  nlen > plen + slen
-  && String.sub normalized 0 plen = prefix
-  && String.sub normalized (nlen - slen) slen = suffix
+let is_keeper_runtime_agent_name = Resilience.Zombie.is_keeper_name
 
 let cleanup_zombies config =
   ensure_initialized config;

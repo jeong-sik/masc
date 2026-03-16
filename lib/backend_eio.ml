@@ -770,7 +770,11 @@ module Postgres = struct
 
   let create ~sw ~env ~url config =
     let uri = Uri.of_string url in
-    let pool_config = Caqti_pool_config.create ~max_size:10 () in
+    let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
+      | Some s -> (try int_of_string s with _ -> 3)
+      | None -> 3
+    in
+    let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
     match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
     | Error err -> Error (caqti_error_to_masc err)
     | Ok pool ->

@@ -16,6 +16,7 @@ module Validation = Validation
 module Command_plane_v2 = Command_plane_v2
 module Command_plane_orchestra = Command_plane_orchestra
 module Cp_search_fabric = Cp_search_fabric
+module Cp_cleanup = Cp_cleanup
 module Config = Config
 module Env_config = Env_config
 module Resilience = Resilience

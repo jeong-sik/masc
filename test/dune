@@ -409,6 +409,11 @@
  (libraries masc_mcp alcotest yojson unix))
 
 (test
+ (name test_cp_cleanup)
+ (modules test_cp_cleanup)
+ (libraries masc_mcp alcotest yojson unix))
+
+(test
  (name test_cp_search_fabric)
  (modules test_cp_search_fabric)
  (libraries masc_mcp alcotest yojson unix))

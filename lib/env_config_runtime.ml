@@ -268,4 +268,12 @@ module Llm_defaults = struct
     get_int ~default:1500 "MASC_LOG_TRUNCATION_LEN"
 end
 
+(** {1 Control Plane Cleanup Configuration} *)
+
+module Cp = struct
+  (** Number of days before dead/stale CP data is eligible for cleanup (default 14) *)
+  let cleanup_days =
+    get_int ~default:14 "MASC_CP_CLEANUP_DAYS"
+end
+
 (** {1 Internal Guardian Configuration} *)

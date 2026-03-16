@@ -172,6 +172,15 @@ type policy_decision_record = {
   expires_at : string option;
 }
 
+type operation_status_counts = {
+  planned_count : int;
+  active_count : int;
+  paused_count : int;
+  completed_count : int;
+  failed_count : int;
+  cancelled_count : int;
+}
+
 type topology_summary = {
   total_units : int;
   company_count : int;
@@ -181,4 +190,6 @@ type topology_summary = {
   live_agent_count : int;
   managed_unit_count : int;
   active_operation_count : int;
+  stale_unit_count : int;
+  operation_status_counts : operation_status_counts;
 }

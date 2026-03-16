@@ -39,6 +39,7 @@
    cp_io
    cp_unit
    cp_snapshot
+   cp_cleanup
    cp_lifecycle
    cp_lifecycle_swarm_live
    cp_lifecycle_search

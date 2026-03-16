@@ -11,6 +11,9 @@ import {
   refreshCommandPlaneOrchestra,
   refreshCommandPlaneSwarm,
 } from './command-store'
+import { refreshGovernance } from './components/governance'
+import { refreshTools } from './components/tools'
+import { refreshSocial } from './components/social'
 
 export function refreshForTab(tab: string) {
   if (tab === 'command') {
@@ -56,4 +59,8 @@ export function refreshForTab(tab: string) {
   if (tab === 'memory') refreshBoard()
   if (tab === 'planning') refreshGoals()
   if (tab === 'lab') refreshTrpg()
+  if (tab === 'governance') refreshGovernance()
+  if (tab === 'live') refreshExecution()
+  if (tab === 'tools') refreshTools()
+  if (tab === 'social') refreshSocial()
 }

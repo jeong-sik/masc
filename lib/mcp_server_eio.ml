@@ -11,6 +11,15 @@
 [@@@warning "-32"]  (* Suppress unused values - kept for potential future use *)
 
 (** Re-export types from Mcp_server for compatibility *)
+(** Log an MCP server error with [UNEXPECTED] tag for unrecognized exceptions. *)
+let log_mcp_exn ~label exn =
+  let tag = match exn with
+    | Sys_error _ | Failure _ | Not_found | End_of_file
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
+    | _ -> "[UNEXPECTED] "
+  in
+  Printf.eprintf "[mcp_server] %s%s: %s\n%!" tag label (Printexc.to_string exn)
+
 type server_state = Mcp_server.server_state
 type jsonrpc_request = Mcp_server.jsonrpc_request
 type tool_profile =
@@ -44,7 +53,7 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
   (* Recover any previously running team sessions after server restart. *)
   (try Team_session_engine_eio.recover_running_sessions ~sw ~clock ~config:state.Mcp_server.room_config
    with exn ->
-     Printf.eprintf "[team_session] recovery skipped: %s\n%!" (Printexc.to_string exn));
+     log_mcp_exn ~label:"team_session recovery skipped" exn);
   state
 
 let is_jsonrpc_v2 = Mcp_server.is_jsonrpc_v2
@@ -90,7 +99,7 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
    | Some _ -> ()
    | None ->
        (try ignore (Session.register registry ~agent_name)
-        with exn -> Printf.eprintf "[mcp_server] session register (SSE) failed: %s\n%!" (Printexc.to_string exn)));
+        with exn -> log_mcp_exn ~label:"session register (SSE) failed" exn));
 
   Session.update_activity registry ~agent_name ~is_listening:(Some true) ();
 
@@ -112,7 +121,7 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
 
   try wait_loop ()
   with exn ->
-    Printf.eprintf "[WARN] listen wait_loop interrupted: %s\n%!" (Printexc.to_string exn);
+    log_mcp_exn ~label:"listen wait_loop interrupted" exn;
     Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
     None
 
@@ -783,7 +792,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           else
             agent_name
         with exn ->
-          Printf.eprintf "[warn] %s: %s\n" __FUNCTION__ (Printexc.to_string exn);
+          log_mcp_exn ~label:__FUNCTION__ exn;
           agent_name
       else
         agent_name
@@ -903,7 +912,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         write_mcp_session_agent nickname;
         write_term_session_agent nickname;
         (try ignore (Session.register registry ~agent_name:nickname)
-         with exn -> Printf.eprintf "[mcp_server] session register (nickname) failed: %s\n%!" (Printexc.to_string exn));
+         with exn -> log_mcp_exn ~label:"session register (nickname) failed" exn);
         (* Prometheus + Telemetry: track auto-join *)
         Prometheus.inc_gauge "masc_active_agents" ();
         (match state.Mcp_server.fs with
@@ -920,7 +929,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   (* Auto-register session for non-read-only tools *)
   if agent_name <> "unknown" && not is_read_only then
     (try ignore (Session.register registry ~agent_name)
-     with exn -> Printf.eprintf "[mcp_server] session register (tool) failed: %s\n%!" (Printexc.to_string exn));
+     with exn -> log_mcp_exn ~label:"session register (tool) failed" exn);
 
   (* Log tool call *)
   Log.Mcp.debug "[%s] %s" agent_name name;
@@ -1238,8 +1247,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         try
           Perpetual_loop.run ~config:loop_config ~state:loop_state
         with exn ->
-          Printf.eprintf "[perpetual:error] loop crashed for %s: %s\n%!"
-            loop_state.Perpetual_loop.trace_id (Printexc.to_string exn)));
+          log_mcp_exn ~label:(Printf.sprintf "perpetual loop crashed for %s" loop_state.Perpetual_loop.trace_id) exn));
     sw = Some sw;
     proc_mgr = state.Mcp_server.proc_mgr;
   } in
@@ -1964,7 +1972,7 @@ in
          (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
                 ~tool_name:name ~success ~duration_ms ()
           with exn ->
-            Printf.eprintf "[WARN] telemetry tracking failed: %s\n%!" (Printexc.to_string exn))
+            log_mcp_exn ~label:"telemetry tracking failed" exn)
      | None -> ());
 
   (* Prometheus: record errors for failed tool calls *)

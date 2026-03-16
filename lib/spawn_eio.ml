@@ -361,7 +361,7 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
 let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
     ?room_config ?runtime_agent_name ?runtime_model ?runtime_role
     ?runtime_session_id ?runtime_selection_note ?worker_run_id ?worker_class ?worker_size
-    ?execution_scope ?thinking_enabled ?max_turns () : spawn_result =
+    ?execution_scope ?thinking_enabled ?max_turns ?model_override () : spawn_result =
   let start_time = Time_compat.now () in
   let normalized_agent = String.lowercase_ascii (String.trim agent_name) in
   if Provider_adapter.is_bare_ollama_label normalized_agent then
@@ -537,8 +537,12 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
   else
     (* Build command arguments outside the chdir critical section *)
     let base_args = parse_command config.command |> add_default_model_arg agent_name in
+    let model_args = match model_override with
+      | Some m -> ["-m"; m]
+      | None -> []
+    in
     let prompt_args = build_prompt_args agent_name augmented_prompt in
-    let cmd_args = base_args @ mcp_args @ prompt_args in
+    let cmd_args = base_args @ model_args @ mcp_args @ prompt_args in
     let full_args = ["timeout"; string_of_int timeout] @ cmd_args in
     let stdin_content = if agent_name = "gemini" then "" else augmented_prompt in
 

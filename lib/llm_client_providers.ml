@@ -377,7 +377,8 @@ let rec model_spec_of_string s =
         | Some adapter when adapter.canonical_name = "gemini-api" ->
           if model_id = "pro" then Ok gemini_pro
           else if model_id = "flash" then
-            Ok { gemini_pro with model_id = "gemini-3-flash-preview" }
+            let flash = Env_config.Gemini.flash_model in
+            Ok { gemini_pro with model_id = (if flash = "" then "flash" else flash) }
           else
             Ok { gemini_pro with model_id }
         | Some adapter when adapter.canonical_name = "claude-api" ->

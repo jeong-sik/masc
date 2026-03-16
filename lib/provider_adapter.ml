@@ -576,6 +576,10 @@ let configured_verifier_model_label_result () =
   | Some label -> Ok label
   | None -> configured_default_model_label_result ()
 
+let provider_model_label provider model =
+  if model = "" then None
+  else Some (Printf.sprintf "%s:%s" provider model)
+
 let preferred_execution_model_labels () =
   dedupe_keep_order
     (List.filter_map
@@ -587,18 +591,23 @@ let preferred_execution_model_labels () =
          (match explicit_llama_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
-         if env_present "ZAI_API_KEY" then
-           Some (Printf.sprintf "glm:%s" Env_config.Llm.default_model)
-         else None;
-         if gemini_direct_available () then
-           Some (Printf.sprintf "gemini:%s" Env_config.Gemini.default_model)
-         else None;
-         if env_present "ANTHROPIC_API_KEY" then
-           Some (Printf.sprintf "claude:%s" Env_config.Claude.default_model)
-         else None;
-         if env_present "OPENAI_API_KEY" then
-           Some (Printf.sprintf "openai:%s" Env_config.OpenAI.default_model)
-         else None;
+         (* GLM: even with empty model config, include as "glm:" — Glm_pool
+            selects the model at runtime. *)
+         (if env_present "ZAI_API_KEY" then
+           let m = Env_config.Llm.default_model in
+           Some (Printf.sprintf "glm:%s" (if m = "" then "auto" else m))
+         else None);
+         (* Non-GLM providers: only include when model is explicitly configured.
+            APIs require a model field, so empty model = skip. *)
+         (if gemini_direct_available () then
+           provider_model_label "gemini" Env_config.Gemini.default_model
+         else None);
+         (if env_present "ANTHROPIC_API_KEY" then
+           provider_model_label "claude" Env_config.Claude.default_model
+         else None);
+         (if env_present "OPENAI_API_KEY" then
+           provider_model_label "openai" Env_config.OpenAI.default_model
+         else None);
        ])
 
 let preferred_verifier_model_labels () =
@@ -612,18 +621,19 @@ let preferred_verifier_model_labels () =
          (match explicit_llama_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
-         if env_present "ZAI_API_KEY" then
-           Some (Printf.sprintf "glm:%s" Env_config.Llm.default_model)
-         else None;
-         if gemini_direct_available () then
-           Some (Printf.sprintf "gemini:%s" Env_config.Gemini.flash_model)
-         else None;
-         if env_present "ANTHROPIC_API_KEY" then
-           Some (Printf.sprintf "claude:%s" Env_config.Claude.default_model)
-         else None;
-         if env_present "OPENAI_API_KEY" then
-           Some (Printf.sprintf "openai:%s" Env_config.OpenAI.default_model)
-         else None;
+         (if env_present "ZAI_API_KEY" then
+           let m = Env_config.Llm.default_model in
+           Some (Printf.sprintf "glm:%s" (if m = "" then "auto" else m))
+         else None);
+         (if gemini_direct_available () then
+           provider_model_label "gemini" Env_config.Gemini.flash_model
+         else None);
+         (if env_present "ANTHROPIC_API_KEY" then
+           provider_model_label "claude" Env_config.Claude.default_model
+         else None);
+         (if env_present "OPENAI_API_KEY" then
+           provider_model_label "openai" Env_config.OpenAI.default_model
+         else None);
        ])
 
 let default_model_labels_result () =

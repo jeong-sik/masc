@@ -42,23 +42,92 @@ let cache_ttl_seconds = 3600
 
 (** {1 Heuristic Extraction} *)
 
-(** Common tech/domain keywords — moved from lodge_reaction.ml *)
-let keywords = [
-  "ocaml"; "eio"; "graphql"; "neo4j"; "rust"; "typescript"; "react";
-  "agent"; "mcp"; "llm"; "ai"; "ml"; "api"; "webrtc"; "grpc";
-  "postgresql"; "sqlite"; "redis"; "vector";
-  "test"; "debug"; "deploy"; "ci"; "docker"; "kubernetes";
-  "architecture"; "design"; "pattern"; "refactor";
-  "performance"; "memory"; "concurrency"; "async";
+(** Compound keywords — multi-word phrases checked before single words
+    to avoid partial matches (e.g. "ai" inside "ai-agent"). *)
+let compound_keywords = [
+  "functional-programming"; "type-system"; "error-handling";
+  "web-framework"; "machine-learning"; "deep-learning";
+  "natural-language"; "prompt-engineering"; "code-generation";
+  "knowledge-graph"; "graph-database"; "message-queue";
+  "load-balancing"; "rate-limiting"; "access-control";
+  "continuous-integration"; "continuous-deployment";
 ]
+
+(** Single-word tech/domain keywords — expanded from original 33 *)
+let single_keywords = [
+  "ocaml"; "eio"; "graphql"; "neo4j"; "rust"; "typescript"; "react";
+  "python"; "golang"; "elixir"; "haskell"; "lua"; "zig";
+  "agent"; "mcp"; "llm"; "ai"; "ml"; "api"; "webrtc"; "grpc";
+  "postgresql"; "sqlite"; "redis"; "vector"; "supabase"; "mongodb";
+  "test"; "debug"; "deploy"; "ci"; "docker"; "kubernetes"; "terraform";
+  "architecture"; "design"; "pattern"; "refactor"; "migration";
+  "performance"; "memory"; "concurrency"; "async"; "streaming";
+  "security"; "authentication"; "encryption"; "webhook"; "embedding";
+]
+
+(** Count how many times [kw] appears in [text] (non-overlapping). *)
+let count_occurrences (text : string) (kw : string) : int =
+  let kw_len = String.length kw in
+  let text_len = String.length text in
+  if kw_len = 0 || kw_len > text_len then 0
+  else
+    let count = ref 0 in
+    let pos = ref 0 in
+    let pattern = Str.regexp_string kw in
+    (try
+      while !pos <= text_len - kw_len do
+        let found = Str.search_forward pattern text !pos in
+        incr count;
+        pos := found + kw_len
+      done
+    with Not_found -> ());
+    !count
+
+(** Check if a compound phrase matches in text.
+    Matches both "kebab-case" and "space separated" forms. *)
+let match_compound (lower_text : string) (phrase : string) : bool =
+  let space_form = String.concat " " (String.split_on_char '-' phrase) in
+  let pat_kebab = Str.regexp_string phrase in
+  let pat_space = Str.regexp_string space_form in
+  (try ignore (Str.search_forward pat_kebab lower_text 0); true
+   with Not_found -> false)
+  ||
+  (try ignore (Str.search_forward pat_space lower_text 0); true
+   with Not_found -> false)
 
 let extract_topics_heuristic (content : string) : string list =
   let lower = String.lowercase_ascii content in
-  List.filter (fun kw ->
-    let pattern = Str.regexp_string kw in
-    try ignore (Str.search_forward pattern lower 0); true
-    with Not_found -> false
-  ) keywords
+  (* Phase 1: compound phrases first *)
+  let compound_hits =
+    List.filter (fun kw -> match_compound lower kw) compound_keywords
+  in
+  (* Phase 2: single keywords, scored by frequency *)
+  let single_scored =
+    List.filter_map (fun kw ->
+      let n = count_occurrences lower kw in
+      if n > 0 then Some (kw, n) else None
+    ) single_keywords
+  in
+  (* Sort singles by frequency descending *)
+  let sorted_singles =
+    List.sort (fun (_, a) (_, b) -> compare b a) single_scored
+    |> List.map fst
+  in
+  (* Merge: compounds first, then singles, deduplicated *)
+  let seen = Hashtbl.create 16 in
+  let add_unique acc topic =
+    if Hashtbl.mem seen topic then acc
+    else begin Hashtbl.replace seen topic (); topic :: acc end
+  in
+  let merged =
+    List.fold_left add_unique [] compound_hits
+    |> Fun.flip (List.fold_left add_unique) sorted_singles
+    |> List.rev
+  in
+  if List.length merged > max_topics then
+    List.filteri (fun i _ -> i < max_topics) merged
+  else
+    merged
 
 (** {1 LLM Prompt} *)
 
@@ -184,6 +253,26 @@ let extract_topics_llm (content : string) : (string list, string) result =
         Error (sprintf "topic_extraction cascade failed: %s" msg)
       end
 
+(** {1 Merge Logic} *)
+
+(** Merge two topic lists: [primary] topics kept first, then unique
+    topics from [secondary]. Deduplicates and caps at [max_topics]. *)
+let merge_topics ~(primary : string list) ~(secondary : string list) : string list =
+  let seen = Hashtbl.create 16 in
+  let add_unique acc t =
+    if Hashtbl.mem seen t then acc
+    else begin Hashtbl.replace seen t (); t :: acc end
+  in
+  let merged =
+    List.fold_left add_unique [] primary
+    |> Fun.flip (List.fold_left add_unique) secondary
+    |> List.rev
+  in
+  if List.length merged > max_topics then
+    List.filteri (fun i _ -> i < max_topics) merged
+  else
+    merged
+
 (** {1 Main Dispatch} *)
 
 let extract_topics (content : string) : string list =
@@ -193,10 +282,21 @@ let extract_topics (content : string) : string list =
   | Llm ->
     begin match extract_topics_llm content with
     | Ok topics when topics <> [] -> topics
-    | _ -> []
+    | Ok _ -> []
+    | Error msg ->
+      eprintf "[lodge_topic] LLM-only mode failed: %s\n%!" msg;
+      []
     end
   | Hybrid ->
+    let heuristic_topics = extract_topics_heuristic content in
     begin match extract_topics_llm content with
-    | Ok topics when topics <> [] -> topics
-    | _ -> extract_topics_heuristic content
+    | Ok llm_topics when llm_topics <> [] ->
+      (* Smart merge: LLM topics are primary, heuristic fills gaps *)
+      merge_topics ~primary:llm_topics ~secondary:heuristic_topics
+    | Ok _ ->
+      (* LLM returned empty — use heuristic alone *)
+      heuristic_topics
+    | Error msg ->
+      eprintf "[lodge_topic] LLM failed, using heuristic: %s\n%!" msg;
+      heuristic_topics
     end

@@ -95,6 +95,91 @@ let test_heuristic_case_insensitive () =
   check bool "contains docker" true (List.mem "docker" topics)
 
 (* ============================================
+   Compound keyword tests
+   ============================================ *)
+
+let test_compound_kebab_case () =
+  let topics = Lodge_topic.extract_topics_heuristic
+    "We use functional-programming with a strong type-system" in
+  check bool "compound: functional-programming" true
+    (List.mem "functional-programming" topics);
+  check bool "compound: type-system" true
+    (List.mem "type-system" topics)
+
+let test_compound_space_separated () =
+  (* Should also match "functional programming" (space form) *)
+  let topics = Lodge_topic.extract_topics_heuristic
+    "Functional programming is great for error handling" in
+  check bool "compound: functional-programming" true
+    (List.mem "functional-programming" topics);
+  check bool "compound: error-handling" true
+    (List.mem "error-handling" topics)
+
+let test_compound_before_singles () =
+  (* Compounds should appear before single-word matches *)
+  let topics = Lodge_topic.extract_topics_heuristic
+    "machine-learning with python and tensorflow" in
+  check bool "first topic is compound" true
+    (List.hd topics = "machine-learning")
+
+(* ============================================
+   Frequency scoring tests
+   ============================================ *)
+
+let test_frequency_ordering () =
+  (* "ocaml" appears 3x, "rust" 1x — ocaml should rank higher *)
+  let topics = Lodge_topic.extract_topics_heuristic
+    "OCaml is great. I wrote OCaml today. OCaml and Rust are both fast." in
+  let ocaml_idx = List.filteri (fun _ t -> t = "ocaml") topics |> List.length in
+  let rust_idx = List.filteri (fun _ t -> t = "rust") topics |> List.length in
+  check bool "ocaml found" true (ocaml_idx > 0);
+  check bool "rust found" true (rust_idx > 0);
+  (* Verify ocaml appears before rust in the list *)
+  let rec find_index lst target i = match lst with
+    | [] -> -1
+    | x :: _ when x = target -> i
+    | _ :: rest -> find_index rest target (i + 1)
+  in
+  let o_i = find_index topics "ocaml" 0 in
+  let r_i = find_index topics "rust" 0 in
+  check bool "ocaml before rust (more frequent)" true (o_i < r_i)
+
+let test_count_occurrences () =
+  check int "3 occurrences" 3
+    (Lodge_topic.count_occurrences "ocaml ocaml ocaml" "ocaml");
+  check int "0 occurrences" 0
+    (Lodge_topic.count_occurrences "python is great" "ocaml");
+  check int "1 occurrence" 1
+    (Lodge_topic.count_occurrences "a" "a")
+
+(* ============================================
+   Merge tests
+   ============================================ *)
+
+let test_merge_deduplication () =
+  let merged = Lodge_topic.merge_topics
+    ~primary:["ocaml"; "eio"; "rust"]
+    ~secondary:["rust"; "react"; "ocaml"]
+  in
+  (* ocaml, eio, rust, react = 4 unique *)
+  check int "4 unique after merge" 4 (List.length merged);
+  check bool "primary order preserved" true (List.hd merged = "ocaml");
+  (* rust from secondary is deduplicated *)
+  check bool "no duplicates" true
+    (List.length merged = List.length (List.sort_uniq String.compare merged))
+
+let test_merge_caps_at_max () =
+  let primary = ["a"; "b"; "c"; "d"; "e"; "f"; "g"; "h"] in
+  let secondary = ["i"; "j"; "k"] in
+  let merged = Lodge_topic.merge_topics ~primary ~secondary in
+  check int "capped at 8" 8 (List.length merged)
+
+let test_merge_empty_primary () =
+  let merged = Lodge_topic.merge_topics
+    ~primary:[] ~secondary:["rust"; "react"] in
+  check int "2 from secondary" 2 (List.length merged)
+
+(* ============================================
    Mode dispatch tests
    ============================================ *)
 
@@ -169,6 +254,20 @@ let () =
       test_case "empty" `Quick test_heuristic_empty;
       test_case "multiple keywords" `Quick test_heuristic_multiple;
       test_case "case insensitive" `Quick test_heuristic_case_insensitive;
+    ];
+    "compound", [
+      test_case "kebab-case match" `Quick test_compound_kebab_case;
+      test_case "space separated match" `Quick test_compound_space_separated;
+      test_case "compounds before singles" `Quick test_compound_before_singles;
+    ];
+    "frequency", [
+      test_case "frequency ordering" `Quick test_frequency_ordering;
+      test_case "count_occurrences" `Quick test_count_occurrences;
+    ];
+    "merge", [
+      test_case "deduplication" `Quick test_merge_deduplication;
+      test_case "caps at max" `Quick test_merge_caps_at_max;
+      test_case "empty primary" `Quick test_merge_empty_primary;
     ];
     "mode", [
       test_case "dispatch heuristic" `Quick test_mode_dispatch_heuristic;

@@ -30,11 +30,28 @@ val extract_topics : string -> string list
 (** Main entry point. Dispatches to heuristic, LLM, or hybrid based on mode. *)
 
 val extract_topics_heuristic : string -> string list
-(** Keyword-based extraction. Matches against a fixed set of tech keywords.
-    Moved from Lodge_reaction.extract_topics. *)
+(** Keyword-based extraction with compound phrases and frequency scoring.
+    Compound phrases (e.g. "functional-programming") are checked first,
+    then single keywords sorted by occurrence count. *)
 
 val extract_topics_llm : string -> (string list, string) result
 (** LLM-based extraction with caching. Returns Error on LLM failure. *)
+
+(** {1 Merge} *)
+
+val merge_topics : primary:string list -> secondary:string list -> string list
+(** Merge two topic lists: [primary] first, then unique [secondary] entries.
+    Deduplicates and caps at 8. Used by hybrid mode to combine LLM + heuristic. *)
+
+(** {1 Heuristic Internals} *)
+
+val count_occurrences : string -> string -> int
+(** [count_occurrences text keyword] counts non-overlapping matches of
+    [keyword] in [text]. Exposed for testing. *)
+
+val match_compound : string -> string -> bool
+(** [match_compound lower_text phrase] checks if a kebab-case [phrase]
+    matches in [lower_text] (both "kebab-case" and "space separated" forms). *)
 
 (** {1 Parsing} *)
 

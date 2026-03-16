@@ -1,0 +1,110 @@
+(** Mcp_server_eio_governance — Governance configuration and MCP session helpers
+
+    Extracted from mcp_server_eio.ml to reduce file size and enable reuse
+    from Tool_inline_dispatch without circular dependencies.
+*)
+
+(** {1 Governance} *)
+
+type governance_config = {
+  level: string;
+  audit_enabled: bool;
+  anomaly_detection: bool;
+}
+
+let governance_defaults level =
+  let level_lc = String.lowercase_ascii level in
+  let audit_enabled =
+    match level_lc with
+    | "production" | "enterprise" | "paranoid" -> true
+    | _ -> false
+  in
+  let anomaly_detection =
+    match level_lc with
+    | "enterprise" | "paranoid" -> true
+    | _ -> false
+  in
+  { level = level_lc; audit_enabled; anomaly_detection }
+
+let governance_path (config : Room.config) =
+  Filename.concat (Room_utils.masc_dir config) "governance.json"
+
+let ensure_masc_dir (config : Room.config) =
+  let dir = Room_utils.masc_dir config in
+  if not (Sys.file_exists dir) then
+    Room_utils.mkdir_p dir
+
+let load_governance (config : Room.config) : governance_config =
+  let path = governance_path config in
+  if Room_utils.path_exists config path then
+    let json = Room_utils.read_json config path in
+    let module U = Yojson.Safe.Util in
+    let level = Json_util.get_string json "level" |> Option.value ~default:"development" in
+    let defaults = governance_defaults level in
+    let audit_enabled =
+      match json |> U.member "audit_enabled" with
+      | `Bool b -> b
+      | _ -> defaults.audit_enabled
+    in
+    let anomaly_detection =
+      match json |> U.member "anomaly_detection" with
+      | `Bool b -> b
+      | _ -> defaults.anomaly_detection
+    in
+    { level = String.lowercase_ascii level; audit_enabled; anomaly_detection }
+  else
+    governance_defaults "development"
+
+let save_governance (config : Room.config) (g : governance_config) =
+  ensure_masc_dir config;
+  let json = `Assoc [
+    ("level", `String g.level);
+    ("audit_enabled", `Bool g.audit_enabled);
+    ("anomaly_detection", `Bool g.anomaly_detection);
+    ("updated_at", `String (Types.now_iso ()));
+  ] in
+  Room_utils.write_json config (governance_path config) json
+
+(** {1 MCP Sessions} *)
+
+type mcp_session_record = {
+  id: string;
+  agent_name: string option;
+  created_at: float;
+  last_seen: float;
+}
+
+let mcp_sessions_path (config : Room.config) =
+  Filename.concat (Room_utils.masc_dir config) "mcp-sessions.json"
+
+let mcp_session_to_json (s : mcp_session_record) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String s.id);
+    ("agent_name", match s.agent_name with Some a -> `String a | None -> `Null);
+    ("created_at", `Float s.created_at);
+    ("last_seen", `Float s.last_seen);
+  ]
+
+let mcp_session_of_json (json : Yojson.Safe.t) : mcp_session_record option =
+  try
+    let id = match Json_util.get_string json "id" with Some v -> v | None -> raise Not_found in
+    let agent_name = Json_util.get_string json "agent_name" in
+    let created_at = match Json_util.get_float json "created_at" with Some v -> v | None -> raise Not_found in
+    let last_seen = match Json_util.get_float json "last_seen" with Some v -> v | None -> raise Not_found in
+    Some { id; agent_name; created_at; last_seen }
+  with Not_found | Yojson.Safe.Util.Type_error _ -> None
+
+let load_mcp_sessions (config : Room.config) : mcp_session_record list =
+  let path = mcp_sessions_path config in
+  if Room_utils.path_exists config path then
+    let json = Room_utils.read_json config path in
+    match json with
+    | `List items -> List.filter_map mcp_session_of_json items
+    | _ -> []
+  else
+    []
+
+let save_mcp_sessions (config : Room.config) (sessions : mcp_session_record list) =
+  ensure_masc_dir config;
+  let json = `List (List.map mcp_session_to_json sessions) in
+  Room_utils.write_json config (mcp_sessions_path config) json

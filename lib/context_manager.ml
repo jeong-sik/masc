@@ -320,10 +320,15 @@ let compact ctx strategies =
 (* OAS Context_reducer Integration                                  *)
 (* ================================================================ *)
 
+(** Role tag sentinel: uses \x00 prefix to prevent collision with user content.
+    No valid UTF-8 user text starts with a null byte. *)
+let system_role_tag = "\x00__MASC_ROLE:system__\x00"
+let tool_role_tag = "\x00__MASC_ROLE:tool__\x00"
+
 let masc_msg_to_oas_tagged (m : Llm_client.message) : Agent_sdk.Types.message =
   let role, tag = match m.role with
-    | Llm_client.System -> Agent_sdk.Types.User, Some "[__MASC_ROLE:system__]"
-    | Llm_client.Tool -> Agent_sdk.Types.User, Some "[__MASC_ROLE:tool__]"
+    | Llm_client.System -> Agent_sdk.Types.User, Some system_role_tag
+    | Llm_client.Tool -> Agent_sdk.Types.User, Some tool_role_tag
     | Llm_client.User -> Agent_sdk.Types.User, None
     | Llm_client.Assistant -> Agent_sdk.Types.Assistant, None
   in
@@ -340,33 +345,39 @@ let masc_msg_to_oas_tagged (m : Llm_client.message) : Agent_sdk.Types.message =
   { Agent_sdk.Types.role; content }
 
 let oas_msg_to_masc_tagged (m : Agent_sdk.Types.message) : Llm_client.message =
-  let text =
-    m.content
-    |> List.filter_map (fun (block : Agent_sdk.Types.content_block) ->
-         match block with
-         | Agent_sdk.Types.Text s -> Some s
-         | Agent_sdk.Types.ToolResult { content; _ } -> Some content
-         | _ -> None)
-    |> String.concat "\n"
+  (* Extract text and tool_use_id from content blocks *)
+  let text, tool_id =
+    let parts = List.filter_map (fun (block : Agent_sdk.Types.content_block) ->
+      match block with
+      | Agent_sdk.Types.Text s -> Some (s, None)
+      | Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ->
+        Some (content, Some tool_use_id)
+      | _ -> None
+    ) m.content in
+    let texts = List.map fst parts in
+    let ids = List.filter_map snd parts in
+    (String.concat "\n" texts, List.nth_opt ids 0)
   in
-  let system_tag = "[__MASC_ROLE:system__]" in
-  let tool_tag = "[__MASC_ROLE:tool__]" in
   let role, content =
-    if starts_with ~prefix:system_tag text then
+    if starts_with ~prefix:system_role_tag text then
       Llm_client.System,
-      String.sub text (String.length system_tag)
-        (String.length text - String.length system_tag)
-    else if starts_with ~prefix:tool_tag text then
+      String.sub text (String.length system_role_tag)
+        (String.length text - String.length system_role_tag)
+    else if starts_with ~prefix:tool_role_tag text then
       Llm_client.Tool,
-      String.sub text (String.length tool_tag)
-        (String.length text - String.length tool_tag)
+      String.sub text (String.length tool_role_tag)
+        (String.length text - String.length tool_role_tag)
     else
       (match m.role with
        | Agent_sdk.Types.User -> Llm_client.User
        | Agent_sdk.Types.Assistant -> Llm_client.Assistant),
       text
   in
-  { Llm_client.role; content; name = None; tool_call_id = None }
+  let tool_call_id = match role with
+    | Llm_client.Tool -> tool_id
+    | _ -> None
+  in
+  { Llm_client.role; content; name = None; tool_call_id }
 
 let oas_strategy_of_compaction (s : compaction_strategy) : Agent_sdk.Context_reducer.strategy =
   match s with

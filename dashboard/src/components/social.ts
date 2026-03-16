@@ -4,7 +4,6 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
-import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { TimeAgo } from './common/time-ago'
 import { GraphView } from './social/graph-view'
 import { fetchSocialGraph } from '../api'
@@ -203,7 +202,6 @@ export function Social() {
   if (error && !data) {
     return html`
       <div class="agents-monitor">
-        <${SurfaceSemanticIntro} surfaceId="social" />
         <${Card} title="오류" class="section" testId="social.error">
           <div class="empty-state">소셜 그래프를 불러올 수 없습니다: ${error}</div>
           <button class="control-btn ghost" onClick=${loadGraph}>다시 시도</button>
@@ -218,7 +216,6 @@ export function Social() {
 
   return html`
     <div class="agents-monitor">
-      <${SurfaceSemanticIntro} surfaceId="social" />
 
       <${Card} title="소셜 그래프" class="section" semanticId="social.graph" testId="social.graph">
         <div class="monitor-section-head">

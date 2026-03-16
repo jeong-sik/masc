@@ -6,7 +6,6 @@ import { Card } from './common/card'
 import { KeeperCard, type CanonicalKeeperCardModel } from './common/keeper-card'
 import { RoomTruthStrip } from './common/room-truth-strip'
 import { keeperRuntimeLabel } from './common/keeper-identity'
-import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { openKeeperDetail } from './keeper-detail'
@@ -555,7 +554,6 @@ export function Execution() {
 
   return html`
     <div class="agents-monitor">
-      <${SurfaceSemanticIntro} surfaceId="execution" />
       <${RoomTruthStrip} />
       <${Card}
         title="실행 대기열"

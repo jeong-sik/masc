@@ -3,7 +3,6 @@
 import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
 import { Card } from './common/card'
-import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import {
@@ -397,7 +396,6 @@ export function Planning() {
 
   return html`
     <div>
-      <${SurfaceSemanticIntro} surfaceId="planning" />
 
       <!-- Step 1: Task-based stats grid -->
       <div class="stats-grid">

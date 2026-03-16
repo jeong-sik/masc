@@ -2,13 +2,10 @@ import { html } from 'htm/preact'
 import type {
   DashboardSemanticMetric,
   DashboardSemanticPanel,
-  DashboardSemanticSurfaceId,
 } from '../../types'
 import {
-  dashboardSemanticsError,
   dashboardSemanticsLoading,
   findDashboardSemanticPanel,
-  findDashboardSemanticSurface,
 } from '../../store'
 
 function SemanticMetricRow({ metric }: { metric: DashboardSemanticMetric }) {
@@ -80,41 +77,3 @@ export function PanelSemanticDetails({
   `
 }
 
-export function SurfaceSemanticIntro({
-  surfaceId,
-  compact = false,
-}: {
-  surfaceId: DashboardSemanticSurfaceId
-  compact?: boolean
-}) {
-  const surface = findDashboardSemanticSurface(surfaceId)
-  if (!surface) {
-    if (dashboardSemanticsLoading.value) {
-      return html`<div class="semantic-surface-card ${compact ? 'compact' : ''}">의미 계층 불러오는 중…</div>`
-    }
-    if (dashboardSemanticsError.value) {
-      return html`<div class="semantic-surface-card ${compact ? 'compact' : ''}">${dashboardSemanticsError.value}</div>`
-    }
-    return null
-  }
-  return html`
-    <section class="semantic-surface-card ${compact ? 'compact' : ''}">
-      <div class="semantic-surface-head">
-        <strong>${surface.label}</strong>
-        <span class="semantic-code">${surface.id}</span>
-      </div>
-      <p class="semantic-lead">${surface.purpose}</p>
-      <div class="semantic-grid">
-        <span>무엇을 푸나</span><span>${surface.problem_solved}</span>
-        <span>언제 보나</span><span>${surface.when_active}</span>
-        <span>에이전트 역할</span><span>${surface.agent_role}</span>
-        <span>생태계 기능</span><span>${surface.ecosystem_function}</span>
-      </div>
-      ${surface.panels.length > 0
-        ? html`<div class="semantic-tag-row">
-            ${surface.panels.map(panel => html`<span class="semantic-tag">${panel.title}</span>`)}
-          </div>`
-        : null}
-    </section>
-  `
-}

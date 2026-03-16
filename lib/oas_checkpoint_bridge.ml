@@ -8,15 +8,19 @@
     - Version-tracked serialization
     - Session-based file layout
 
+    Boundary contract:
+    - System messages are excluded from checkpoint messages
+      (they live in [Checkpoint.system_prompt] to avoid duplication).
+    - Checkpoint parameters are configurable via [checkpoint_config].
+
     @since 2.90.0 *)
 
-(** Convert a MASC Llm_client.message to an OAS Types.message.
-    Delegates to [Llm_client.to_oas_message] — the canonical conversion. *)
-let masc_msg_to_oas (m : Llm_client.message) : Agent_sdk.Types.message =
+(** Convert a MASC Llm_client.message to an OAS Types.message option.
+    System messages return None (belong in system_prompt, not messages). *)
+let masc_msg_to_oas (m : Llm_client.message) : Agent_sdk.Types.message option =
   Llm_client.to_oas_message m
 
-(** Convert an OAS Types.message back to MASC Llm_client.message.
-    Delegates to [Llm_client.of_oas_message]. *)
+(** Convert an OAS Types.message back to MASC Llm_client.message. *)
 let oas_msg_to_masc (m : Agent_sdk.Types.message) : Llm_client.message =
   Llm_client.of_oas_message m
 
@@ -30,13 +34,32 @@ type checkpoint_state = {
   trace_id : string;
 }
 
+(** Configuration for OAS checkpoint serialization.
+    Avoids hard-coding parameters that depend on the agent's runtime context. *)
+type checkpoint_config = {
+  thinking_budget : int option;
+  response_format_json : bool;
+  cache_system_prompt : bool;
+  disable_parallel_tool_use : bool;
+}
+
+let default_checkpoint_config = {
+  thinking_budget = None;
+  response_format_json = false;
+  cache_system_prompt = false;
+  disable_parallel_tool_use = false;
+}
+
 (** Build an OAS Checkpoint from perpetual loop state and working context.
     Stores MASC-specific metadata (generation, goal, turn_count) in the
-    checkpoint's context via scoped keys. *)
+    checkpoint's context via scoped keys.
+    @param config Checkpoint serialization config (default: all disabled). *)
 let to_oas_checkpoint
     ~(state : checkpoint_state)
     ~(ctx : Context_manager.working_context)
     ~(goal : string)
+    ?(config = default_checkpoint_config)
+    ()
   : Agent_sdk.Checkpoint.t =
   let oas_ctx = Agent_sdk.Context.copy ctx.oas_context in
   (* Store MASC metadata in Session scope *)
@@ -50,7 +73,7 @@ let to_oas_checkpoint
     "trace_id" (`String state.trace_id);
   Agent_sdk.Context.set_scoped oas_ctx Agent_sdk.Context.App
     "masc_version" (`String Version.version);
-  let messages = List.map masc_msg_to_oas ctx.messages in
+  let messages = List.filter_map masc_msg_to_oas ctx.messages in
   {
     Agent_sdk.Checkpoint.version = 3;
     session_id = state.session_id;
@@ -75,12 +98,12 @@ let to_oas_checkpoint
     top_k = None;
     min_p = None;
     enable_thinking = None;
-    response_format_json = false;
-    thinking_budget = None;
-    cache_system_prompt = false;
+    response_format_json = config.response_format_json;
+    thinking_budget = config.thinking_budget;
+    cache_system_prompt = config.cache_system_prompt;
     max_input_tokens = Some ctx.max_tokens;
     max_total_tokens = None;
-    disable_parallel_tool_use = false;
+    disable_parallel_tool_use = config.disable_parallel_tool_use;
     context = oas_ctx;
     mcp_sessions = [];
   }

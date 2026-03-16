@@ -208,8 +208,9 @@ val string_of_provider : provider -> string
 val to_oas_provider : model_spec -> Agent_sdk.Provider.config option
 
 (** Convert a masc message to an OAS Types.message.
-    System and Tool roles map to User. *)
-val to_oas_message : message -> Agent_sdk.Types.message
+    System messages return None (they belong in system_prompt).
+    Tool messages map to User with ToolResult content. *)
+val to_oas_message : message -> Agent_sdk.Types.message option
 
 (** Convert an OAS Types.message back to a masc message. *)
 val of_oas_message : Agent_sdk.Types.message -> message

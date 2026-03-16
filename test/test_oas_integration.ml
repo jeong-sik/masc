@@ -59,14 +59,17 @@ let test_message_roundtrip () =
     tool_call_id = None;
   } in
   let oas_msg = Oas_checkpoint_bridge.masc_msg_to_oas masc_msg in
-  let roundtrip = Oas_checkpoint_bridge.oas_msg_to_masc oas_msg in
-  Alcotest.(check string) "role preserved"
-    "assistant"
-    (match roundtrip.role with Llm_client.Assistant -> "assistant" | _ -> "other");
-  Alcotest.(check string) "content preserved"
-    "test content" roundtrip.content
+  (match oas_msg with
+   | None -> Alcotest.fail "Assistant message should not be dropped"
+   | Some msg ->
+     let roundtrip = Oas_checkpoint_bridge.oas_msg_to_masc msg in
+     Alcotest.(check string) "role preserved"
+       "assistant"
+       (match roundtrip.role with Llm_client.Assistant -> "assistant" | _ -> "other");
+     Alcotest.(check string) "content preserved"
+       "test content" roundtrip.content)
 
-let test_system_role_maps_to_user () =
+let test_system_role_dropped () =
   let masc_msg : Llm_client.message = {
     role = Llm_client.System;
     content = "system prompt";
@@ -74,11 +77,8 @@ let test_system_role_maps_to_user () =
     tool_call_id = None;
   } in
   let oas_msg = Oas_checkpoint_bridge.masc_msg_to_oas masc_msg in
-  Alcotest.(check string) "system maps to user"
-    "user"
-    (match oas_msg.Agent_sdk.Types.role with
-     | Agent_sdk.Types.User -> "user"
-     | Agent_sdk.Types.Assistant -> "assistant")
+  Alcotest.(check bool) "system message dropped (belongs in system_prompt)"
+    true (Option.is_none oas_msg)
 
 let test_restore_messages () =
   let oas_msgs : Agent_sdk.Types.message list = [
@@ -133,8 +133,8 @@ let () =
     ];
     "oas_checkpoint_bridge", [
       Alcotest.test_case "message roundtrip" `Quick test_message_roundtrip;
-      Alcotest.test_case "system role maps to user" `Quick
-        test_system_role_maps_to_user;
+      Alcotest.test_case "system role dropped" `Quick
+        test_system_role_dropped;
       Alcotest.test_case "restore messages" `Quick test_restore_messages;
     ];
     "context_oas_sync", [

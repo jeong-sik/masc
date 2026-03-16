@@ -295,6 +295,7 @@
    tool_schemas_room
    tool_plan
    tool_run
+   tool_bridge
    tool_cache
    tool_tempo
    tool_mitosis

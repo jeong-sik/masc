@@ -1242,18 +1242,20 @@ let to_oas_provider (spec : model_spec) : Agent_sdk.Provider.config option =
     }
   | Custom _ -> None
 
-let to_oas_message (m : message) : Agent_sdk.Types.message =
-  let role = match m.role with
-    | System | Tool | User -> Agent_sdk.Types.User
-    | Assistant -> Agent_sdk.Types.Assistant
-  in
-  let content = match m.role with
-    | Tool ->
-      let tool_use_id = Option.value ~default:"masc-tool" m.tool_call_id in
-      [Agent_sdk.Types.ToolResult { tool_use_id; content = m.content; is_error = false }]
-    | _ -> [Agent_sdk.Types.Text m.content]
-  in
-  { Agent_sdk.Types.role; content }
+let to_oas_message (m : message) : Agent_sdk.Types.message option =
+  match m.role with
+  | System ->
+    (* System messages belong in Checkpoint.system_prompt, not in messages.
+       Dropping here prevents duplication at the OAS boundary. *)
+    None
+  | Tool ->
+    let tool_use_id = Option.value ~default:"masc-tool" m.tool_call_id in
+    Some { Agent_sdk.Types.role = User;
+           content = [ToolResult { tool_use_id; content = m.content; is_error = false }] }
+  | User ->
+    Some { Agent_sdk.Types.role = User; content = [Text m.content] }
+  | Assistant ->
+    Some { Agent_sdk.Types.role = Assistant; content = [Text m.content] }
 
 let of_oas_message (m : Agent_sdk.Types.message) : message =
   let role = match m.role with

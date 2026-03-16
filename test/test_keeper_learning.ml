@@ -52,6 +52,7 @@ let make_test_config () =
     lock_expiry_minutes = 30;
     backend_config;
     backend = Room_utils.Memory memory_backend;
+    scope = Default;
   } in
   (tmp, config)
 

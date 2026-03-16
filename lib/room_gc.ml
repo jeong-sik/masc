@@ -44,26 +44,21 @@ let cp_cleanup_fn
   = ref (fun _config -> empty_cp_result)
 
 
-(** Update agent heartbeat - must be called periodically *)
+(** Update agent heartbeat - must be called periodically.
+    Uses scoped config for room-specific heartbeat. *)
 let heartbeat_in_room config ~room_id ~agent_name =
-  ensure_room_bootstrap config room_id;
-  let actual_name = resolve_agent_name_in_room config ~room_id agent_name in
+  let scoped = with_scope config (Named room_id) in
+  ensure_room_bootstrap scoped room_id;
+  let actual_name = resolve_agent_name config agent_name in
   let filename = safe_filename actual_name ^ ".json" in
-  (* Check room-scoped path first, fallback to root agents_dir *)
-  let room_file = Filename.concat (agents_dir_in_room config room_id) filename in
-  let root_file = Filename.concat (agents_dir config) filename in
-  let agent_file =
-    if path_exists config room_file then room_file
-    else if path_exists config root_file then root_file
-    else room_file (* will fail gracefully below *)
-  in
-  if path_exists config agent_file then begin
-    with_file_lock config agent_file (fun () ->
-      let json = read_json config agent_file in
+  let agent_file = Filename.concat (agents_dir scoped) filename in
+  if path_exists scoped agent_file then begin
+    with_file_lock scoped agent_file (fun () ->
+      let json = read_json scoped agent_file in
       match agent_of_yojson json with
       | Ok agent ->
           let updated = { agent with last_seen = now_iso () } in
-          write_json config agent_file (agent_to_yojson updated);
+          write_json scoped agent_file (agent_to_yojson updated);
           Printf.sprintf "💓 %s heartbeat updated in %s" actual_name room_id
       | Error _ ->
           Printf.sprintf "⚠ Invalid agent file for %s in %s" actual_name room_id
@@ -73,7 +68,22 @@ let heartbeat_in_room config ~room_id ~agent_name =
 
 let heartbeat config ~agent_name =
   ensure_initialized config;
-  heartbeat_in_room config ~room_id:(current_room_id config) ~agent_name
+  let actual_name = resolve_agent_name config agent_name in
+  let filename = safe_filename actual_name ^ ".json" in
+  let agent_file = Filename.concat (agents_dir config) filename in
+  if path_exists config agent_file then begin
+    with_file_lock config agent_file (fun () ->
+      let json = read_json config agent_file in
+      match agent_of_yojson json with
+      | Ok agent ->
+          let updated = { agent with last_seen = now_iso () } in
+          write_json config agent_file (agent_to_yojson updated);
+          Printf.sprintf "💓 %s heartbeat updated" actual_name
+      | Error _ ->
+          Printf.sprintf "⚠ Invalid agent file for %s" actual_name
+    )
+  end else
+    Printf.sprintf "⚠ Agent %s not found" agent_name
 
 (** Cleanup zombie agents - removes stale agents *)
 let is_keeper_runtime_agent_name = Resilience.Zombie.is_keeper_name
@@ -81,15 +91,10 @@ let is_keeper_runtime_agent_name = Resilience.Zombie.is_keeper_name
 let cleanup_zombies config =
   ensure_initialized config;
 
-  (* Scan both root and room-scoped agent directories for consistency
-     with heartbeat_in_room, which may write to either path. *)
-  let root_agents_path = agents_dir config in
-  let room_agents_path =
-    agents_dir_in_room config (current_room_id config)
-  in
+  (* Single path: agents_dir derives from config.scope *)
+  let agents_path = agents_dir config in
   let scan_paths =
-    List.filter Sys.file_exists
-      (List.sort_uniq String.compare [ root_agents_path; room_agents_path ])
+    if Sys.file_exists agents_path then [ agents_path ] else []
   in
   if scan_paths = [] then
     "📋 No agents directory"

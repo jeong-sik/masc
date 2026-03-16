@@ -62,39 +62,18 @@ let update_state config f =
     new_state
   )
 
+(** @deprecated Use [read_state (with_scope config (Named room_id))] instead. *)
 let state_path_in_room config room_id =
-  Filename.concat (room_dir_for config room_id) "state.json"
+  state_path (with_scope config (Named room_id))
 
 let read_state_in_room config room_id =
-  let json = read_json config (state_path_in_room config room_id) in
-  match room_state_of_yojson json with
-  | Ok state -> state
-  | Error _ ->
-      {
-        protocol_version = "0.1.0";
-        project = Filename.basename config.base_path;
-        started_at = now_iso ();
-        message_seq = 0;
-        active_agents = [];
-        paused = false;
-        pause_reason = None;
-        paused_by = None;
-        paused_at = None;
-        search_strategy_default = Some "best_first_v1";
-        speculation_enabled = false;
-        speculation_budget = None;
-      }
+  read_state (with_scope config (Named room_id))
 
 let write_state_in_room config room_id state =
-  write_json config (state_path_in_room config room_id) (room_state_to_yojson state)
+  write_state (with_scope config (Named room_id)) state
 
 let update_state_in_room config room_id f =
-  with_file_lock config (state_path_in_room config room_id) (fun () ->
-    let state = read_state_in_room config room_id in
-    let new_state = f state in
-    write_state_in_room config room_id new_state;
-    new_state
-  )
+  update_state (with_scope config (Named room_id)) f
 
 (* ============================================ *)
 (* Sequence Numbers                             *)
@@ -106,10 +85,7 @@ let next_seq config =
   state.message_seq
 
 let next_seq_in_room config room_id =
-  let state =
-    update_state_in_room config room_id (fun s -> { s with message_seq = s.message_seq + 1 })
-  in
-  state.message_seq
+  next_seq (with_scope config (Named room_id))
 
 (* ============================================ *)
 (* Pause State                                  *)
@@ -146,23 +122,21 @@ let write_backlog config backlog =
 let current_room_id config =
   read_current_room config |> Option.value ~default:"default"
 
+(** @deprecated Use [agents_dir (with_scope config (Named room_id))] instead. *)
 let agents_dir_in_room config room_id =
-  Filename.concat (room_dir_for config room_id) "agents"
+  agents_dir (with_scope config (Named room_id))
 
 let tasks_dir_in_room config room_id =
-  Filename.concat (room_dir_for config room_id) "tasks"
+  tasks_dir (with_scope config (Named room_id))
 
 let messages_dir_in_room config room_id =
-  Filename.concat (room_dir_for config room_id) "messages"
+  messages_dir (with_scope config (Named room_id))
 
 let backlog_path_in_room config room_id =
-  Filename.concat (tasks_dir_in_room config room_id) "backlog.json"
+  backlog_path (with_scope config (Named room_id))
 
 let read_backlog_in_room config room_id =
-  let json = read_json config (backlog_path_in_room config room_id) in
-  match backlog_of_yojson json with
-  | Ok backlog -> backlog
-  | Error _ -> { tasks = []; last_updated = now_iso (); version = 1 }
+  read_backlog (with_scope config (Named room_id))
 
 (* ============================================ *)
 (* Task ID / Archive Management                 *)
@@ -290,122 +264,68 @@ let resolve_agent_name config agent_name =
       agent_name
   end
 
+(** @deprecated Use [resolve_agent_name (with_scope config (Named room_id))] instead. *)
 let resolve_agent_name_in_room config ~room_id agent_name =
-  let exact_file =
-    Filename.concat (agents_dir_in_room config room_id) (safe_filename agent_name ^ ".json")
-  in
-  if Sys.file_exists exact_file then
-    agent_name
-  else begin
-    let dir = agents_dir_in_room config room_id in
-    if Sys.file_exists dir then
-      let files = Sys.readdir dir in
-      let prefix = agent_name ^ "-" in
-      match Array.find_opt (fun f ->
-        String.length f > String.length prefix &&
-        String.sub f 0 (String.length prefix) = prefix
-      ) files with
-      | Some file -> String.sub file 0 (String.length file - 5)
-      | None ->
-          resolve_agent_name config agent_name
-    else
-      resolve_agent_name config agent_name
-  end
+  resolve_agent_name (with_scope config (Named room_id)) agent_name
 
 (* ============================================ *)
 (* Room Bootstrap                               *)
 (* ============================================ *)
 
+(** Default empty state for bootstrap. *)
+let default_room_state config = {
+  protocol_version = "0.1.0";
+  project = Filename.basename config.base_path;
+  started_at = now_iso ();
+  message_seq = 0;
+  active_agents = [];
+  paused = false;
+  pause_reason = None;
+  paused_by = None;
+  paused_at = None;
+  search_strategy_default = Some "best_first_v1";
+  speculation_enabled = false;
+  speculation_budget = None;
+}
+
 let ensure_room_bootstrap config room_id =
+  (* 1. Always ensure root infrastructure exists *)
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
   let root_tasks_dir = Filename.concat root_dir "tasks" in
   let root_messages_dir = Filename.concat root_dir "messages" in
   let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
   List.iter mkdir_p [ root_agents_dir; root_tasks_dir; root_messages_dir; rooms_root_dir config ];
-  if not (path_exists_root config (root_state_path config)) then begin
-    let root_state = {
-      protocol_version = "0.1.0";
-      project = Filename.basename config.base_path;
-      started_at = now_iso ();
-      message_seq = 0;
-      active_agents = [];
-      paused = false;
-      pause_reason = None;
-      paused_by = None;
-      paused_at = None;
-      search_strategy_default = Some "best_first_v1";
-      speculation_enabled = false;
-      speculation_budget = None;
-    } in
-    write_json_root config (root_state_path config) (room_state_to_yojson root_state)
-  end;
-  if not (path_exists_root config root_backlog_path) then begin
-    let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-    write_json_root config root_backlog_path (backlog_to_yojson root_backlog)
-  end;
-  if room_id = "default" then begin
-    List.iter mkdir_p [ agents_dir_in_room config room_id; tasks_dir_in_room config room_id; messages_dir_in_room config room_id ];
-    if not (path_exists config (state_path_in_room config room_id)) then begin
-      let state = {
-        protocol_version = "0.1.0";
-        project = Filename.basename config.base_path;
-        started_at = now_iso ();
-        message_seq = 0;
-        active_agents = [];
-        paused = false;
-        pause_reason = None;
-        paused_by = None;
-        paused_at = None;
-        search_strategy_default = Some "best_first_v1";
-        speculation_enabled = false;
-        speculation_budget = None;
-      } in
-      write_state_in_room config room_id state
-    end;
-    if not (path_exists config (backlog_path_in_room config room_id)) then begin
-      let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-      write_json config (backlog_path_in_room config room_id) (backlog_to_yojson backlog)
-    end
-  end
-  else begin
-    let room_path = room_dir_for config room_id in
-    let agents_path = agents_dir_in_room config room_id in
-    let tasks_path = tasks_dir_in_room config room_id in
-    let messages_path = messages_dir_in_room config room_id in
-    let state_path = state_path_in_room config room_id in
-    let backlog_path = backlog_path_in_room config room_id in
-    List.iter mkdir_p [ room_path; agents_path; tasks_path; messages_path ];
-    if not (path_exists config state_path) then begin
-      let state = {
-        protocol_version = "0.1.0";
-        project = Filename.basename config.base_path;
-        started_at = now_iso ();
-        message_seq = 0;
-        active_agents = [];
-        paused = false;
-        pause_reason = None;
-        paused_by = None;
-        paused_at = None;
-        search_strategy_default = Some "best_first_v1";
-        speculation_enabled = false;
-        speculation_budget = None;
-      } in
-      write_state_in_room config room_id state
-    end;
-    if not (path_exists config backlog_path) then begin
-      let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-      write_json config backlog_path (backlog_to_yojson backlog)
-    end
-  end
+  if not (path_exists_root config (root_state_path config)) then
+    write_json_root config (root_state_path config)
+      (room_state_to_yojson (default_room_state config));
+  if not (path_exists_root config root_backlog_path) then
+    write_json_root config root_backlog_path
+      (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 });
+
+  (* 2. Bootstrap the target room via scoped config — unified path *)
+  let scoped = with_scope config (Named room_id) in
+  let scoped_agents = agents_dir scoped in
+  let scoped_tasks = tasks_dir scoped in
+  let scoped_messages = messages_dir scoped in
+  let scoped_state = state_path scoped in
+  let scoped_backlog = backlog_path scoped in
+  List.iter mkdir_p [ masc_dir scoped; scoped_agents; scoped_tasks; scoped_messages ];
+  if not (path_exists scoped scoped_state) then
+    write_json scoped scoped_state (room_state_to_yojson (default_room_state config));
+  if not (path_exists scoped scoped_backlog) then
+    write_json scoped scoped_backlog
+      (backlog_to_yojson { tasks = []; last_updated = now_iso (); version = 1 })
 
 (* ============================================ *)
 (* Broadcast                                    *)
 (* ============================================ *)
 
+(** @deprecated Use [broadcast (with_scope config (Named room_id))] instead. *)
 let broadcast_in_room config ~room_id ~from_agent ~content =
-  ensure_room_bootstrap config room_id;
-  let seq = next_seq_in_room config room_id in
+  let scoped = with_scope config (Named room_id) in
+  ensure_room_bootstrap scoped room_id;
+  let seq = next_seq scoped in
 
   let mention = Mention.extract content in
   let safe_content = sanitize_message content in
@@ -419,19 +339,41 @@ let broadcast_in_room config ~room_id ~from_agent ~content =
     timestamp = now_iso ();
   } in
   let msg_file =
-    Filename.concat (messages_dir_in_room config room_id)
+    Filename.concat (messages_dir scoped)
       (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
   in
-  write_json config msg_file (message_to_yojson msg);
+  write_json scoped msg_file (message_to_yojson msg);
   let _ =
-    backend_publish config ~channel:(Printf.sprintf "broadcast:%s" room_id)
+    backend_publish scoped ~channel:(Printf.sprintf "broadcast:%s" room_id)
       ~message:(Yojson.Safe.to_string (message_to_yojson msg))
   in
   Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
 
 let broadcast config ~from_agent ~content =
   ensure_initialized config;
-  broadcast_in_room config ~room_id:(current_room_id config) ~from_agent ~content
+  let seq = next_seq config in
+  let mention = Mention.extract content in
+  let safe_content = sanitize_message content in
+  let safe_agent = sanitize_agent_name from_agent in
+  let msg = {
+    seq;
+    from_agent = safe_agent;
+    msg_type = "broadcast";
+    content = safe_content;
+    mention;
+    timestamp = now_iso ();
+  } in
+  let msg_file =
+    Filename.concat (messages_dir config)
+      (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
+  in
+  write_json config msg_file (message_to_yojson msg);
+  let room_id = match config.scope with Default -> "default" | Named id -> id in
+  let _ =
+    backend_publish config ~channel:(Printf.sprintf "broadcast:%s" room_id)
+      ~message:(Yojson.Safe.to_string (message_to_yojson msg))
+  in
+  Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
 
 (* ============================================ *)
 (* Zombie Detection Helpers                     *)

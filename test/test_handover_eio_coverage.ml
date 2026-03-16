@@ -210,6 +210,7 @@ let make_test_config ~base_path : Room_utils.config =
     lock_expiry_minutes = 5;
     backend_config;
     backend = Room_utils.Memory memory_backend;
+    scope = Default;
   }
 
 let with_eio_env f =

@@ -6,6 +6,12 @@ type storage_backend =
   | FileSystem of Backend.FileSystemBackend.t
   | PostgresNative of Backend.PostgresNative.t
 
+(** Room scope — determines which directory tree is active.
+    Resolved once at config creation time, never re-read from filesystem. *)
+type scope =
+  | Default          (** Root .masc/ directory *)
+  | Named of string  (** .masc/rooms/{id}/ directory *)
+
 (** Room configuration *)
 type config = {
   base_path: string;
@@ -13,7 +19,11 @@ type config = {
   lock_expiry_minutes: int;
   backend_config: Backend.config;
   backend: storage_backend;
+  scope: scope;
 }
+
+(** Create a config targeting a different scope. Cheap record copy. *)
+let with_scope config scope = { config with scope }
 
 (* ============================================ *)
 (* Git Root Detection (Worktree Support)        *)
@@ -264,6 +274,7 @@ let default_config base_path =
     lock_expiry_minutes = 2;
     backend_config;
     backend;
+    scope = Default;
   }
 
 (** Create config with Eio context - required for PostgresNative backend *)
@@ -309,6 +320,7 @@ let default_config_eio ~sw ~env base_path =
     lock_expiry_minutes = 2;
     backend_config;
     backend;
+    scope = Default;
   }
 
 (* ============================================ *)

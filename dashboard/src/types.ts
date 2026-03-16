@@ -1645,6 +1645,16 @@ export interface OperatorKeeperSnapshot {
   last_autonomous_action_at?: string | null
   last_turn_ago_s?: number
   model?: string
+  goal?: string
+  short_goal?: string
+  turn_count?: number
+  context_tokens?: number
+  keepalive_running?: boolean
+  autonomous_action_count?: number
+  last_model_used?: string
+  active_model?: string
+  diagnostic?: Record<string, unknown>
+  recent_activity?: Record<string, unknown>[]
 }
 
 export interface PendingConfirmation {
@@ -2820,6 +2830,10 @@ export type SSEEventType =
   | 'keeper_handoff'
   | 'keeper_compaction'
   | 'keeper_guardrail'
+  | 'keeper_turn_complete'
+  | 'client_input_approved'
+  | 'client_input_rejected'
+  | 'client_input_updated'
   | 'mdal_started'
   | 'mdal_iteration'
   | 'mdal_completed'

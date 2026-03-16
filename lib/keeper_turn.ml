@@ -2465,6 +2465,19 @@ let handle_keeper_msg ctx args : tool_result =
                       | Some r -> `String r | None -> `Null);
                   ]) with exn ->
                     Printf.eprintf "[keeper] SSE keeper_compaction broadcast failed: %s\n%!" (Printexc.to_string exn)));
+                (* SSE: keeper_turn_complete — emitted on every normal turn finish *)
+                (try Sse.broadcast (`Assoc [
+                  ("type", `String "keeper_turn_complete");
+                  ("name", `String meta_turn.name);
+                  ("trace_id", `String meta_turn.trace_id);
+                  ("generation", `Int meta_turn.generation);
+                  ("tool_calls", `Int trajectory_acc.Trajectory.total_calls);
+                  ("compacted", `Bool compacted);
+                  ("context_ratio", `Float ctx_ratio);
+                  ("model_used", `String final_model_used);
+                ]) with exn ->
+                  Printf.eprintf "[keeper] SSE keeper_turn_complete broadcast failed: %s\n%!"
+                    (Printexc.to_string exn));
 
                 let json = `Assoc [
                   ("name", `String meta_turn.name);

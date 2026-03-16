@@ -118,7 +118,7 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_portal_send" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains a2a_delegate" true
     (List.mem "mcp__masc__masc_a2a_delegate" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains vote_create" true
+  Alcotest.(check bool) "omits vote_create (hidden)" false
     (List.mem "mcp__masc__masc_vote_create" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains run_deliverable" true
     (List.mem "mcp__masc__masc_run_deliverable" Spawn.masc_mcp_tools);
@@ -132,11 +132,11 @@ let test_masc_mcp_tools () =
     (List.mem "mcp__masc__masc_tool_admin_snapshot" Spawn.masc_mcp_tools);
   Alcotest.(check bool) "contains keeper_tool_catalog" true
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains tool_list" true
+  Alcotest.(check bool) "omits tool_list (no schema)" false
     (List.mem "mcp__masc__masc_tool_list" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains tool_grant" true
+  Alcotest.(check bool) "omits tool_grant (no schema)" false
     (List.mem "mcp__masc__masc_tool_grant" Spawn.masc_mcp_tools);
-  Alcotest.(check bool) "contains tool_revoke" true
+  Alcotest.(check bool) "omits tool_revoke (no schema)" false
     (List.mem "mcp__masc__masc_tool_revoke" Spawn.masc_mcp_tools);
   ()
 

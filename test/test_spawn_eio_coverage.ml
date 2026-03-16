@@ -150,7 +150,7 @@ let test_masc_mcp_tools_contains_a2a_delegate () =
     (List.mem "mcp__masc__masc_a2a_delegate" Spawn_eio.masc_mcp_tools)
 
 let test_masc_mcp_tools_contains_vote_create () =
-  check bool "contains vote_create" true
+  check bool "omits vote_create (hidden)" false
     (List.mem "mcp__masc__masc_vote_create" Spawn_eio.masc_mcp_tools)
 
 let test_masc_mcp_tools_contains_run_deliverable () =
@@ -174,15 +174,15 @@ let test_masc_mcp_tools_contains_keeper_tool_catalog () =
     (List.mem "mcp__masc__masc_keeper_tool_catalog" Spawn_eio.masc_mcp_tools)
 
 let test_masc_mcp_tools_contains_tool_list () =
-  check bool "contains tool_list" true
+  check bool "omits tool_list (no schema)" false
     (List.mem "mcp__masc__masc_tool_list" Spawn_eio.masc_mcp_tools)
 
 let test_masc_mcp_tools_contains_tool_grant () =
-  check bool "contains tool_grant" true
+  check bool "omits tool_grant (no schema)" false
     (List.mem "mcp__masc__masc_tool_grant" Spawn_eio.masc_mcp_tools)
 
 let test_masc_mcp_tools_contains_tool_revoke () =
-  check bool "contains tool_revoke" true
+  check bool "omits tool_revoke (no schema)" false
     (List.mem "mcp__masc__masc_tool_revoke" Spawn_eio.masc_mcp_tools)
 
 let test_llama_mcp_tools_curated () =

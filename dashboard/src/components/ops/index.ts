@@ -4,7 +4,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { refreshRoomTruth } from '../../room-truth-store'
 import { RoomTruthStrip } from '../common/room-truth-strip'
-import { PanelSemanticDetails, SurfaceSemanticIntro } from '../common/semantic-layer'
+import { PanelSemanticDetails } from '../common/semantic-layer'
 import { route } from '../../router'
 import {
   operatorActionBusy,
@@ -156,7 +156,6 @@ export function Ops() {
 
   return html`
     <section class="ops-view">
-      <${SurfaceSemanticIntro} surfaceId="intervene" />
       <div class="ops-header card">
         <div>
           <div class="card-title-row">

@@ -19,7 +19,6 @@ import { refreshRoomTruth } from '../../room-truth-store'
 import { refreshOperatorSnapshot } from '../../operator-store'
 import { navigate, route } from '../../router'
 import { RoomTruthStrip } from '../common/room-truth-strip'
-import { SurfaceSemanticIntro } from '../common/semantic-layer'
 import {
   commandSurfaceForContext,
   workflowContextForRoute,
@@ -271,7 +270,6 @@ export function Command() {
       ${commandPlaneActionError.value
         ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
         : null}
-      ${wallboardMode ? null : html`<${SurfaceSemanticIntro} surfaceId="command" />`}
       ${wallboardMode ? null : html`<${RoomTruthStrip} />`}
       ${wallboardMode ? null : html`<${CommandWorkflowBanner} />`}
       ${wallboardMode || commandPlaneSurface.value === 'warroom' ? null : html`<${CommandEntryStrip} />`}

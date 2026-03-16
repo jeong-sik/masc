@@ -48,29 +48,6 @@
 .card-title-row .card-title {
   margin-bottom: 0;
 }
-.semantic-surface-card {
-  margin-bottom: 16px;
-  padding: 16px 18px;
-  background: rgba(74,222,128,0.08);
-  border: 1px solid rgba(74,222,128,0.16);
-  border-radius: 12px;
-}
-.semantic-surface-card.compact {
-  margin-bottom: 12px;
-  padding: 12px 14px;
-}
-.semantic-surface-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.semantic-lead {
-  margin: 0 0 12px 0;
-  color: #d9f6e3;
-  line-height: 1.55;
-}
 .semantic-inline {
   border: 1px solid rgba(74,222,128,0.18);
   border-radius: 10px;

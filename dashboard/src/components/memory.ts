@@ -1,7 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
-import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
@@ -408,13 +407,11 @@ export function Memory() {
   if (postId) {
     return post
       ? html`
-          <${SurfaceSemanticIntro} surfaceId="memory" />
           <${MemorySummary} />
           <${PostDetail} post=${post} />
         `
       : html`
           <div>
-            <${SurfaceSemanticIntro} surfaceId="memory" />
             <${MemorySummary} />
             <button class="back-btn" onClick=${() => navigate('memory')}>← 메모리로 돌아가기</button>
             ${detailLoading.value
@@ -426,7 +423,6 @@ export function Memory() {
 
   return html`
     <div>
-      <${SurfaceSemanticIntro} surfaceId="memory" />
       <${MemorySummary} />
       <${SortBar} />
       ${boardLoading.value

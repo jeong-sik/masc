@@ -1,7 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
-import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { navigate } from '../router'
 import {
   missionError,
@@ -106,7 +105,6 @@ export function Mission() {
 
   return html`
     <section class="dashboard-panel mission-view">
-      <${SurfaceSemanticIntro} surfaceId="mission" />
       <div class="panel-header">
         <div>
           <h2>상황판</h2>

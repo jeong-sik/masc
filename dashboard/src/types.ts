@@ -2901,7 +2901,6 @@ export interface RouteState {
   postId: string | null
 }
 
-export type DashboardSemanticSurfaceId = TabId | 'side_rail'
 
 export interface DashboardSemanticMetric {
   id: string
@@ -2930,7 +2929,7 @@ export interface DashboardSemanticPanel {
 }
 
 export interface DashboardSemanticSurface {
-  id: DashboardSemanticSurfaceId | string
+  id: string
   label: string
   purpose: string
   problem_solved: string

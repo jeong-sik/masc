@@ -1,7 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
-import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { route } from '../router'
 import { proofError, proofLoading, proofSnapshot, refreshProofSnapshot } from '../proof-store'
 import type {
@@ -485,7 +484,6 @@ export function Proof() {
 
   return html`
     <section class="dashboard-panel mission-view">
-      <${SurfaceSemanticIntro} surfaceId="proof" />
       <div class="panel-header">
         <div>
           <h2>근거</h2>

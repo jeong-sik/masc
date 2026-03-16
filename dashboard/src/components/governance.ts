@@ -2,7 +2,6 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
-import { SurfaceSemanticIntro } from './common/semantic-layer'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import {
@@ -543,7 +542,6 @@ export function Governance() {
 
   return html`
     <div class="section-grid">
-      <${SurfaceSemanticIntro} surfaceId="governance" />
       <${GovernanceSummaryStrip} />
       <${GovernanceToolbar} />
       <div class="governance-layout">

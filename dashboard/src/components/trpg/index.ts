@@ -2,7 +2,6 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
-import { SurfaceSemanticIntro } from '../common/semantic-layer'
 import { trpgState, trpgLoading, trpgRoom, refreshTrpg } from '../../store'
 import { realtimeNowMs, trpgScreen } from './helpers'
 import { SessionOutcome } from './sub-components'
@@ -44,7 +43,6 @@ export function Trpg() {
 
   return html`
     <div>
-      <${SurfaceSemanticIntro} surfaceId="lab" />
       <div style="display:flex; gap:8px; align-items:center; justify-content:space-between; margin-bottom:8px;">
         <div style="font-size:11px; color:#8ea9d6;">
           room: ${trpgRoom.value || state.session?.room || '-'} · phase: ${state.current_round?.phase ?? state.session?.status ?? '-'}

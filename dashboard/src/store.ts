@@ -18,9 +18,7 @@ import type {
   MdalLoop,
   MdalIterationRecord,
   DashboardSemanticsResponse,
-  DashboardSemanticSurface,
   DashboardSemanticPanel,
-  DashboardSemanticSurfaceId,
   DashboardExecutionHandoff,
   DashboardExecutionSummary,
   DashboardExecutionQueueItem,
@@ -866,11 +864,6 @@ export async function refreshDashboardSemantics(): Promise<void> {
   }
 }
 
-export function findDashboardSemanticSurface(
-  surfaceId: DashboardSemanticSurfaceId | string,
-): DashboardSemanticSurface | null {
-  return dashboardSemantics.value?.surfaces.find(surface => surface.id === surfaceId) ?? null
-}
 
 export function findDashboardSemanticPanel(panelId: string): DashboardSemanticPanel | null {
   const surfaces = dashboardSemantics.value?.surfaces ?? []

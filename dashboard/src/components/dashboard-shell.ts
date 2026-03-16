@@ -16,7 +16,7 @@ import { Social } from './social'
 import { Lab } from './lab'
 import { Live } from './live'
 import { TimeAgo } from './common/time-ago'
-import { PanelSemanticDetails, SurfaceSemanticIntro } from './common/semantic-layer'
+import { PanelSemanticDetails } from './common/semantic-layer'
 import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from '../config/navigation'
 import { InterveneRailCard, SnapshotCard } from './resident-runtime-rail'
 
@@ -97,7 +97,6 @@ export function SideRail() {
 
   return html`
     <aside class="dashboard-rail">
-      <${SurfaceSemanticIntro} surfaceId="side_rail" compact=${true} />
       <section class="rail-card">
         <div class="rail-card-head">
           <h3>탐색</h3>

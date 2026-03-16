@@ -11,10 +11,11 @@ type t = {
   enabled_categories : category list;
 }
 
-(** Default configuration *)
+(** Default configuration — Standard mode reduces initial tool count
+    for better agent experience (BUG-017). Use masc_get_config to switch. *)
 let default = {
-  mode = Full;
-  enabled_categories = categories_for_mode Full;
+  mode = Standard;
+  enabled_categories = categories_for_mode Standard;
 }
 
 (** Config file name *)

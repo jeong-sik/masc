@@ -9,7 +9,7 @@
     (Guardian needs [~net], Gardener needs [~room_config]) so they
     are NOT part of this shared contract.
 
-    @since 2.91.0 *)
+    @since 2.95.0 *)
 
 (** Minimal module type shared across Guardian, Sentinel, Gardener. *)
 module type S = sig

@@ -405,14 +405,22 @@ let trpg_state_from_derived derived_json =
     match Yojson.Safe.Util.member "state" derived_json with
     | `Null -> `Assoc []
     | v -> v
-  with _ -> `Assoc []
+  with
+  | Yojson.Safe.Util.Type_error _ -> `Assoc []
+  | exn ->
+      Log.Trpg.warn "trpg_state_from_derived: %s" (Printexc.to_string exn);
+      `Assoc []
 
 let trpg_extract_state_int derived_json field ~default =
   try
     match Yojson.Safe.Util.member field (trpg_state_from_derived derived_json) with
     | `Int i -> i
     | _ -> default
-  with _ -> default
+  with
+  | Yojson.Safe.Util.Type_error _ -> default
+  | exn ->
+      Log.Trpg.warn "trpg_extract_state_int %s: %s" field (Printexc.to_string exn);
+      default
 
 let trpg_read_state_int derived_json field =
   try
@@ -421,8 +429,12 @@ let trpg_read_state_int derived_json field =
     | _ ->
         Error
           (`Internal_server_error, Printf.sprintf "state.%s must be int" field)
-  with _ ->
-    Error (`Internal_server_error, Printf.sprintf "state.%s missing" field)
+  with
+  | Yojson.Safe.Util.Type_error _ ->
+      Error (`Internal_server_error, Printf.sprintf "state.%s missing" field)
+  | exn ->
+      Log.Trpg.warn "trpg_read_state_int %s: %s" field (Printexc.to_string exn);
+      Error (`Internal_server_error, Printf.sprintf "state.%s missing" field)
 
 (* ─── Actor state query helpers ─────────────────────────────── *)
 
@@ -1372,7 +1384,11 @@ let trpg_running_llama_cpp_urls () : string list =
         |> String.concat ","
         |> split_csv_nonempty
     | _ -> []
-  with _ -> []
+  with
+  | Unix.Unix_error _ | Sys_error _ -> []
+  | exn ->
+      Log.Trpg.warn "trpg_running_llama_cpp_urls: %s" (Printexc.to_string exn);
+      []
 
 let trpg_openai_compatible_urls () : string list =
   let env_urls =

@@ -387,8 +387,30 @@ let parse_snapshot_view = function
       | _ -> Full)
   | None -> Full
 
+(* Snapshot TTL cache: avoids redundant DB queries on repeated calls
+   (dashboard SSE polling, multiple MCP clients). *)
+let _snapshot_cache : (string * Yojson.Safe.t * float) option ref = ref None
+
+let _snapshot_ttl_s =
+  match Sys.getenv_opt "MASC_OPERATOR_CACHE_TTL" with
+  | Some s -> (try Float.of_string s with _ -> 5.0)
+  | None -> 5.0
+
+let invalidate_snapshot_cache () = _snapshot_cache := None
+
 let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
     ?(include_keepers = true) ?sessions (ctx : 'a context) : Yojson.Safe.t =
+  let cache_key =
+    Printf.sprintf "%s|%s|%b|%b|%b"
+      (Option.value ~default:"" actor)
+      (Option.value ~default:"" view)
+      include_messages include_sessions include_keepers
+  in
+  let now = Time_compat.now () in
+  (match !_snapshot_cache with
+   | Some (k, json, ts) when k = cache_key && now -. ts < _snapshot_ttl_s ->
+       json
+   | _ ->
   let config = ctx.config in
   let initialized = Room.is_initialized config in
   let tracked_sessions =
@@ -463,43 +485,47 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       Keeper_types.resident_keeper_names config
     else []
   in
-  `Assoc
-    ([
-       ("trace_id", `String trace_id);
-       ("server_profile", operator_server_profile_json);
-       ("resident_judge_runtime", resident_judge_runtime_json config);
-       ("judgment_owner", `String "fallback_read_model");
-       ("authoritative_judgment_available", `Bool false);
-       ("provenance_summary", operator_surface_contract_json);
-       ("room", room_json config);
-       ( "sessions",
-         if initialized && include_sessions then sessions_json config
-         else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
-       ( "keepers",
-         if initialized && include_keepers then keepers_json ~keeper_names config
-         else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
-       ( "persistent_agents",
-         if initialized && include_keepers then persistent_agents_json ~keeper_names config
-         else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
-       ("command_plane", command_plane_json);
-       ("swarm_status", swarm_status_json);
-       ("role_census", aggregate_worker_class_counts tracked_sessions);
-       ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
-       ("lane_census", aggregate_lane_counts tracked_sessions);
-       ("controller_census", aggregate_controller_counts tracked_sessions);
-       ("control_domains", aggregate_control_domain_counts tracked_sessions);
-       ("model_tiers", aggregate_tier_counts tracked_sessions);
-       ("task_profiles", aggregate_task_profile_counts tracked_sessions);
-       ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
-       ("local_runtime", aggregated_local_runtime_json tracked_sessions);
-       ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
-       ("pending_confirms", pending_confirms_json ?actor config);
-       ("pending_confirm_envelope", pending_confirm_envelope_json ?actor config);
-       ("pending_confirm_summary", pending_confirm_summary_json ?actor config);
-       ("available_actions", available_actions_json);
-       ("recent_actions", recent_actions_json config);
-     ]
-    @ summary_fields)
+  let result =
+    `Assoc
+      ([
+         ("trace_id", `String trace_id);
+         ("server_profile", operator_server_profile_json);
+         ("resident_judge_runtime", resident_judge_runtime_json config);
+         ("judgment_owner", `String "fallback_read_model");
+         ("authoritative_judgment_available", `Bool false);
+         ("provenance_summary", operator_surface_contract_json);
+         ("room", room_json config);
+         ( "sessions",
+           if initialized && include_sessions then sessions_json config
+           else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+         ( "keepers",
+           if initialized && include_keepers then keepers_json ~keeper_names config
+           else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+         ( "persistent_agents",
+           if initialized && include_keepers then persistent_agents_json ~keeper_names config
+           else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
+         ("command_plane", command_plane_json);
+         ("swarm_status", swarm_status_json);
+         ("role_census", aggregate_worker_class_counts tracked_sessions);
+         ("runtime_pools", aggregate_runtime_pool_counts tracked_sessions);
+         ("lane_census", aggregate_lane_counts tracked_sessions);
+         ("controller_census", aggregate_controller_counts tracked_sessions);
+         ("control_domains", aggregate_control_domain_counts tracked_sessions);
+         ("model_tiers", aggregate_tier_counts tracked_sessions);
+         ("task_profiles", aggregate_task_profile_counts tracked_sessions);
+         ("escalation_count", `Int (aggregate_escalation_count tracked_sessions));
+         ("local_runtime", aggregated_local_runtime_json tracked_sessions);
+         ("recent_messages", if initialized && include_messages then recent_messages_json config else `List []);
+         ("pending_confirms", pending_confirms_json ?actor config);
+         ("pending_confirm_envelope", pending_confirm_envelope_json ?actor config);
+         ("pending_confirm_summary", pending_confirm_summary_json ?actor config);
+         ("available_actions", available_actions_json);
+         ("recent_actions", recent_actions_json config);
+       ]
+      @ summary_fields)
+  in
+  _snapshot_cache := Some (cache_key, result, now);
+  result)
 
 
 let judgment_surface_enums =

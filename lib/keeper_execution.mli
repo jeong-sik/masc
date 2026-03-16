@@ -10,7 +10,7 @@ open Keeper_types
 
 (** {1 Error Logging} *)
 
-(** Log a keeper error with [UNEXPECTED] tag for unrecognized exceptions. *)
+(** Log a keeper exception with a descriptive label. *)
 val log_keeper_exn : label:string -> exn -> unit
 
 (** {1 Types} *)

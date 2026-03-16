@@ -66,9 +66,8 @@ let spawned_agent_public_tool_names : string list =
     "masc_tool_help";
     "masc_tool_admin_snapshot";
     "masc_keeper_tool_catalog";
-    "masc_tool_list";
-    "masc_tool_grant";
-    "masc_tool_revoke";
+    (* masc_tool_list, masc_tool_grant, masc_tool_revoke removed:
+       no matching schema found (dead entries) *)
     "masc_portal_open";
     "masc_portal_send";
     "masc_portal_status";
@@ -88,19 +87,17 @@ let spawned_agent_public_tool_names : string list =
     "masc_a2a_delegate";
     "masc_a2a_subscribe";
     "masc_poll_events";
-    "masc_vote_create";
-    "masc_vote_cast";
-    "masc_vote_status";
+    (* masc_vote_create, masc_vote_cast, masc_vote_status removed:
+       hidden in Tool_catalog (prefer decision/governance V2 tools) *)
     "masc_run_init";
     "masc_run_log";
     "masc_run_deliverable";
     "masc_run_get";
     "masc_spawn";
     "masc_heartbeat_list";
-    "masc_trpg_dice_roll";
-    "masc_trpg_turn_advance";
-    "masc_trpg_stream";
-    "masc_trpg_round_run";
+    (* masc_trpg_dice_roll, masc_trpg_turn_advance, masc_trpg_stream,
+       masc_trpg_round_run removed: legacy aliases deprecated in
+       Tool_protocol_game_view; use canonical trpg.* names instead *)
   ]
 
 let spawned_agent_prefixed_tools : string list =

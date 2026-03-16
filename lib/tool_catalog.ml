@@ -25,6 +25,9 @@ type metadata = {
   replacement : string option;
   reason : string option;
   allow_direct_call_when_hidden : bool;
+  readonly : bool option;
+  destructive : bool option;
+  idempotent : bool option;
 }
 
 let default_metadata =
@@ -36,6 +39,9 @@ let default_metadata =
     replacement = None;
     reason = None;
     allow_direct_call_when_hidden = false;
+    readonly = None;
+    destructive = None;
+    idempotent = None;
   }
 
 let placeholder_tools_enabled () =
@@ -53,6 +59,9 @@ let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = fa
     replacement;
     reason = Some reason;
     allow_direct_call_when_hidden;
+    readonly = None;
+    destructive = None;
+    idempotent = None;
   }
 
 let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
@@ -65,6 +74,9 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     replacement;
     reason = Some reason;
     allow_direct_call_when_hidden;
+    readonly = None;
+    destructive = None;
+    idempotent = None;
   }
 
 let explicit_metadata : (string * metadata) list =
@@ -105,6 +117,17 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_operator_judgment_latest",
       hidden_active
         "Internal resident-judge read path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
+    (* Annotation overrides: correct misclassifications from name-pattern heuristics *)
+    ( "masc_run_get",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "masc_operation_stop",
+      { default_metadata with destructive = Some true } );
+    ( "masc_operation_pause",
+      { default_metadata with destructive = Some false } );
+    ( "masc_chain_snapshot",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
+    ( "masc_chain_run_get",
+      { default_metadata with readonly = Some true; idempotent = Some true } );
   ]
 
 let implementation_status_to_string = function

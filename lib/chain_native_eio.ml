@@ -264,6 +264,9 @@ let model_runner_of_string raw =
       | Error _ when starts_with ~prefix:"gemini:" value -> direct model
       | Error _ when starts_with ~prefix:"claude:" value -> direct model
       | Error _ when starts_with ~prefix:"glm:" value -> direct model
+      (* Bare GLM model names (e.g. "glm-4.7") → route to GLM provider *)
+      | Error _ when starts_with ~prefix:"glm-" value ->
+          direct (Printf.sprintf "glm:%s" value)
       | Error msg -> Error msg)
 
 let call_spawn_model (runtime : runtime) ~agent_name ~prompt ~timeout_sec =

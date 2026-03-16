@@ -229,10 +229,13 @@
    response
    room
    room_eio
+   room_gc
    room_walph_eio
    room_git
    room_portal
+   room_state
    room_utils
+   room_vote
    room_utils_backend_setup
    room_utils_paths_backend
    room_utils_ops

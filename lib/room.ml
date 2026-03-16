@@ -5,445 +5,11 @@ open Types
 (* Include all utilities from Room_utils *)
 include Room_utils
 
-(** Read room state — checks PostgreSQL first for HTTP state persistence *)
-let read_state config =
-  (* Try PostgreSQL backend first for stateless HTTP environments *)
-  let pg_state =
-    if is_pg_backend config then
-      match backend_get config ~key:"room:state" with
-      | Ok (Some json_str) ->
-          (try Some (Yojson.Safe.from_string json_str) with Yojson.Json_error _ -> None)
-      | Ok None | Error _ -> None
-    else None
-  in
-  let json = match pg_state with
-    | Some j -> j
-    | None -> read_json config (state_path config)
-  in
-  match room_state_of_yojson json with
-  | Ok state -> state
-  | Error _ -> {
-      protocol_version = "0.1.0";
-      project = Filename.basename config.base_path;
-      started_at = now_iso ();
-      message_seq = 0;
-      active_agents = [];
-      paused = false;
-      pause_reason = None;
-      paused_by = None;
-      paused_at = None;
-      search_strategy_default = Some "best_first_v1";
-      speculation_enabled = false;
-      speculation_budget = None;
-    }
-
-(** Write room state — persists to both filesystem and PostgreSQL *)
-let write_state config state =
-  write_json config (state_path config) (room_state_to_yojson state);
-  (* Also persist to PostgreSQL for HTTP state persistence *)
-  if is_pg_backend config then begin
-    let json_str = Yojson.Safe.to_string (room_state_to_yojson state) in
-    let _ = backend_set config ~key:"room:state" ~value:json_str in
-    ()
-  end
-
-(** Update state with function - uses file lock for atomic read-modify-write *)
-let update_state config f =
-  with_file_lock config (state_path config) (fun () ->
-    let state = read_state config in
-    let new_state = f state in
-    write_state config new_state;
-    new_state
-  )
-
-let state_path_in_room config room_id =
-  Filename.concat (room_dir_for config room_id) "state.json"
-
-let read_state_in_room config room_id =
-  let json = read_json config (state_path_in_room config room_id) in
-  match room_state_of_yojson json with
-  | Ok state -> state
-  | Error _ ->
-      {
-        protocol_version = "0.1.0";
-        project = Filename.basename config.base_path;
-        started_at = now_iso ();
-        message_seq = 0;
-        active_agents = [];
-        paused = false;
-        pause_reason = None;
-        paused_by = None;
-        paused_at = None;
-        search_strategy_default = Some "best_first_v1";
-        speculation_enabled = false;
-        speculation_budget = None;
-      }
-
-let write_state_in_room config room_id state =
-  write_json config (state_path_in_room config room_id) (room_state_to_yojson state)
-
-let update_state_in_room config room_id f =
-  with_file_lock config (state_path_in_room config room_id) (fun () ->
-    let state = read_state_in_room config room_id in
-    let new_state = f state in
-    write_state_in_room config room_id new_state;
-    new_state
-  )
-
-(** Get next message sequence *)
-let next_seq config =
-  let state = update_state config (fun s -> { s with message_seq = s.message_seq + 1 }) in
-  state.message_seq
-
-let next_seq_in_room config room_id =
-  let state =
-    update_state_in_room config room_id (fun s -> { s with message_seq = s.message_seq + 1 })
-  in
-  state.message_seq
-
-(** Check if room is paused - placed before broadcast since it doesn't need broadcast *)
-let is_paused config =
-  let state = read_state config in
-  state.paused
-
-(** Get pause info *)
-let pause_info config =
-  let state = read_state config in
-  if state.paused then
-    Some (state.paused_by, state.pause_reason, state.paused_at)
-  else
-    None
-
-(** Read backlog *)
-let read_backlog config =
-  let json = read_json config (backlog_path config) in
-  match backlog_of_yojson json with
-  | Ok backlog -> backlog
-  | Error _ -> { tasks = []; last_updated = now_iso (); version = 1 }
-
-(** Write backlog *)
-let write_backlog config backlog =
-  write_json config (backlog_path config) (backlog_to_yojson backlog)
-
-let current_room_id config =
-  read_current_room config |> Option.value ~default:"default"
-
-let agents_dir_in_room config room_id =
-  Filename.concat (room_dir_for config room_id) "agents"
-
-let tasks_dir_in_room config room_id =
-  Filename.concat (room_dir_for config room_id) "tasks"
-
-let messages_dir_in_room config room_id =
-  Filename.concat (room_dir_for config room_id) "messages"
-
-let backlog_path_in_room config room_id =
-  Filename.concat (tasks_dir_in_room config room_id) "backlog.json"
-
-let read_backlog_in_room config room_id =
-  let json = read_json config (backlog_path_in_room config room_id) in
-  match backlog_of_yojson json with
-  | Ok backlog -> backlog
-  | Error _ -> { tasks = []; last_updated = now_iso (); version = 1 }
-
-(** Parse task id like "task-001" -> 1 *)
-let task_id_to_int id =
-  let prefix = "task-" in
-  let prefix_len = String.length prefix in
-  if String.length id <= prefix_len then None
-  else if String.sub id 0 prefix_len <> prefix then None
-  else int_of_string_opt (String.sub id prefix_len (String.length id - prefix_len))
-
-(** Read archived task ids for collision-free task numbering *)
-let read_archive_task_ids config =
-  if not (Sys.file_exists (archive_path config)) then []
-  else
-    let open Yojson.Safe.Util in
-    let json = read_json config (archive_path config) in
-    let tasks =
-      match json with
-      | `List tasks -> tasks
-      | `Assoc _ -> begin
-          match json |> member "tasks" with
-          | `List tasks -> tasks
-          | _ -> []
-        end
-      | _ -> []
-    in
-    List.filter_map (fun task ->
-      match task |> member "id" |> to_string_option with
-      | Some id -> task_id_to_int id
-      | None -> None
-    ) tasks
-
-(** Append tasks to archive file (tasks-archive.json) *)
-let append_archive_tasks config (tasks : task list) =
-  if tasks = [] then ()
-  else begin
-    let open Yojson.Safe.Util in
-    let path = archive_path config in
-    let existing = read_json config path in
-    let existing_tasks =
-      match existing with
-      | `List items -> items
-      | `Assoc _ -> begin
-          match existing |> member "tasks" with
-          | `List items -> items
-          | _ -> []
-        end
-      | _ -> []
-    in
-    let new_tasks = List.map task_to_yojson tasks in
-    (* Deduplicate by task id, preserving first occurrence *)
-    let seen = Hashtbl.create 64 in
-    let dedup = List.filter (fun json ->
-      match json |> member "id" |> to_string_option with
-      | Some id ->
-          if Hashtbl.mem seen id then false
-          else (Hashtbl.add seen id (); true)
-      | None -> false
-    ) (existing_tasks @ new_tasks)
-    in
-    let archive_json = `Assoc [
-      ("tasks", `List dedup);
-      ("last_updated", `String (now_iso ()));
-    ] in
-    write_json config path archive_json
-  end
-
-(** Calculate next task id using backlog + archive to avoid reuse *)
-let next_task_number config backlog =
-  let backlog_ids = List.filter_map (fun task -> task_id_to_int task.id) backlog.tasks in
-  let archive_ids = read_archive_task_ids config in
-  let max_id = List.fold_left max 0 (backlog_ids @ archive_ids) in
-  max_id + 1
-
-(** Generate short session ID *)
-let generate_session_id () =
-  Printf.sprintf "%04x%04x" (Random.int 0xFFFF) (Random.int 0xFFFF)
-
-(** Get hostname *)
-let get_hostname () =
-  try Some (Unix.gethostname ()) with Unix.Unix_error _ -> None
-
-(** Get current TTY - uses TTY environment variable or /dev/tty check *)
-let get_tty () =
-  try
-    match Sys.getenv_opt "TTY" with
-    | Some tty -> Some tty
-    | None ->
-        (* Try to read from tty command — argv-based (no shell) *)
-        try
-          if Unix.isatty Unix.stdin then
-            let output = Process_eio.run_argv ~timeout_sec:5.0 ["tty"] in
-            let trimmed = String.trim output in
-            if String.length trimmed > 0 then Some trimmed else None
-          else None
-        with Unix.Unix_error _ -> None
-  with e ->
-    Printf.eprintf "[WARN] get_tty failed: %s\n%!" (Printexc.to_string e);
-    None
-
-(** Resolve agent name - supports both exact nickname and agent_type prefix match.
-    Returns the actual agent name (nickname) if found, otherwise original name. *)
-let resolve_agent_name config agent_name =
-  let exact_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-  if Sys.file_exists exact_file then
-    agent_name
-  else begin
-    (* Try to find agent by type prefix (e.g., "gemini" matches "gemini-swift-fox") *)
-    let dir = agents_dir config in
-    if Sys.file_exists dir then
-      let files = Sys.readdir dir in
-      let prefix = agent_name ^ "-" in
-      match Array.find_opt (fun f ->
-        String.length f > String.length prefix &&
-        String.sub f 0 (String.length prefix) = prefix
-      ) files with
-      | Some file -> String.sub file 0 (String.length file - 5) (* remove .json *)
-      | None -> agent_name
-    else
-      agent_name
-  end
-
-let resolve_agent_name_in_room config ~room_id agent_name =
-  let exact_file =
-    Filename.concat (agents_dir_in_room config room_id) (safe_filename agent_name ^ ".json")
-  in
-  if Sys.file_exists exact_file then
-    agent_name
-  else begin
-    let dir = agents_dir_in_room config room_id in
-    if Sys.file_exists dir then
-      let files = Sys.readdir dir in
-      let prefix = agent_name ^ "-" in
-      match Array.find_opt (fun f ->
-        String.length f > String.length prefix &&
-        String.sub f 0 (String.length prefix) = prefix
-      ) files with
-      | Some file -> String.sub file 0 (String.length file - 5)
-      | None ->
-          (* Default joins still persist under the root agents dir. *)
-          resolve_agent_name config agent_name
-    else
-      resolve_agent_name config agent_name
-  end
-
-let ensure_room_bootstrap config room_id =
-  let root_dir = masc_root_dir config in
-  let root_agents_dir = Filename.concat root_dir "agents" in
-  let root_tasks_dir = Filename.concat root_dir "tasks" in
-  let root_messages_dir = Filename.concat root_dir "messages" in
-  let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
-  List.iter mkdir_p [ root_agents_dir; root_tasks_dir; root_messages_dir; rooms_root_dir config ];
-  if not (path_exists_root config (root_state_path config)) then begin
-    let root_state = {
-      protocol_version = "0.1.0";
-      project = Filename.basename config.base_path;
-      started_at = now_iso ();
-      message_seq = 0;
-      active_agents = [];
-      paused = false;
-      pause_reason = None;
-      paused_by = None;
-      paused_at = None;
-      search_strategy_default = Some "best_first_v1";
-      speculation_enabled = false;
-      speculation_budget = None;
-    } in
-    write_json_root config (root_state_path config) (room_state_to_yojson root_state)
-  end;
-  if not (path_exists_root config root_backlog_path) then begin
-    let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-    write_json_root config root_backlog_path (backlog_to_yojson root_backlog)
-  end;
-  if room_id = "default" then begin
-    List.iter mkdir_p [ agents_dir_in_room config room_id; tasks_dir_in_room config room_id; messages_dir_in_room config room_id ];
-    if not (path_exists config (state_path_in_room config room_id)) then begin
-      let state = {
-        protocol_version = "0.1.0";
-        project = Filename.basename config.base_path;
-        started_at = now_iso ();
-        message_seq = 0;
-        active_agents = [];
-        paused = false;
-        pause_reason = None;
-        paused_by = None;
-        paused_at = None;
-        search_strategy_default = Some "best_first_v1";
-        speculation_enabled = false;
-        speculation_budget = None;
-      } in
-      write_state_in_room config room_id state
-    end;
-    if not (path_exists config (backlog_path_in_room config room_id)) then begin
-      let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-      write_json config (backlog_path_in_room config room_id) (backlog_to_yojson backlog)
-    end
-  end
-  else begin
-    let room_path = room_dir_for config room_id in
-    let agents_path = agents_dir_in_room config room_id in
-    let tasks_path = tasks_dir_in_room config room_id in
-    let messages_path = messages_dir_in_room config room_id in
-    let state_path = state_path_in_room config room_id in
-    let backlog_path = backlog_path_in_room config room_id in
-    List.iter mkdir_p [ room_path; agents_path; tasks_path; messages_path ];
-    if not (path_exists config state_path) then begin
-      let state = {
-        protocol_version = "0.1.0";
-        project = Filename.basename config.base_path;
-        started_at = now_iso ();
-        message_seq = 0;
-        active_agents = [];
-        paused = false;
-        pause_reason = None;
-        paused_by = None;
-        paused_at = None;
-        search_strategy_default = Some "best_first_v1";
-        speculation_enabled = false;
-        speculation_budget = None;
-      } in
-      write_state_in_room config room_id state
-    end;
-    if not (path_exists config backlog_path) then begin
-      let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-      write_json config backlog_path (backlog_to_yojson backlog)
-    end
-  end
-
-(** Initialize MASC room *)
-let rec init config ~agent_name =
-  (* Ensure root .masc structure exists even when initializing a non-default room. *)
-  let root_dir = masc_root_dir config in
-  let root_agents_dir = Filename.concat root_dir "agents" in
-  let root_tasks_dir = Filename.concat root_dir "tasks" in
-  let root_messages_dir = Filename.concat root_dir "messages" in
-  let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
-  List.iter mkdir_p [root_agents_dir; root_tasks_dir; root_messages_dir; rooms_root_dir config];
-  if not (path_exists_root config (root_state_path config)) then begin
-    let root_state = {
-      protocol_version = "0.1.0";
-      project = Filename.basename config.base_path;
-      started_at = now_iso ();
-      message_seq = 0;
-      active_agents = [];
-      paused = false;
-      pause_reason = None;
-      paused_by = None;
-      paused_at = None;
-      search_strategy_default = Some "best_first_v1";
-      speculation_enabled = false;
-      speculation_budget = None;
-    } in
-    write_json_root config (root_state_path config) (room_state_to_yojson root_state)
-  end;
-  if not (path_exists_root config root_backlog_path) then begin
-    let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-    write_json_root config root_backlog_path (backlog_to_yojson root_backlog)
-  end;
-
-  if is_initialized config then
-    "MASC already initialized."
-  else begin
-    (* Create directories *)
-    List.iter mkdir_p [
-      agents_dir config;
-      tasks_dir config;
-      messages_dir config;
-    ];
-
-    (* Create initial state *)
-    let state = {
-      protocol_version = "0.1.0";
-      project = Filename.basename config.base_path;
-      started_at = now_iso ();
-      message_seq = 0;
-      active_agents = [];
-      paused = false;
-      pause_reason = None;
-      paused_by = None;
-      paused_at = None;
-      search_strategy_default = Some "best_first_v1";
-      speculation_enabled = false;
-      speculation_budget = None;
-    } in
-    write_state config state;
-
-    (* Create empty backlog *)
-    let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
-    write_backlog config backlog;
-
-    let result = "✅ MASC room created!" in
-
-    (* Auto-join if agent specified *)
-    match agent_name with
-    | Some name -> result ^ "\n" ^ (join config ~agent_name:name ~capabilities:[] ())
-    | None -> result
-  end
+(* Include state management, backlog, broadcast, resolve, bootstrap, zombie helpers *)
+include Room_state
 
 (** Join room - now with auto-generated nickname and metadata *)
-and join config ~agent_name ?(agent_type_override=None) ~capabilities
+let join config ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
   ensure_initialized config;
 
@@ -544,7 +110,7 @@ and join config ~agent_name ?(agent_type_override=None) ~capabilities
     nickname nickname agent_type session_id
   end
 
-and join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
+let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
   ensure_room_bootstrap config room_id;
 
@@ -616,7 +182,7 @@ and join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
   end
 
 (** Leave room *)
-and leave config ~agent_name =
+let leave config ~agent_name =
   ensure_initialized config;
 
   (* Support both exact nickname match and agent_type prefix match *)
@@ -660,36 +226,77 @@ and leave config ~agent_name =
   end else
     Printf.sprintf "⚠ %s was not in the room" actual_name
 
-(** Broadcast message *)
-and broadcast config ~from_agent ~content =
-  ensure_initialized config;
-  broadcast_in_room config ~room_id:(current_room_id config) ~from_agent ~content
+(* broadcast and broadcast_in_room are now in Room_state *)
 
-and broadcast_in_room config ~room_id ~from_agent ~content =
-  ensure_room_bootstrap config room_id;
-  let seq = next_seq_in_room config room_id in
+(** Initialize MASC room *)
+let init config ~agent_name =
+  (* Ensure root .masc structure exists even when initializing a non-default room. *)
+  let root_dir = masc_root_dir config in
+  let root_agents_dir = Filename.concat root_dir "agents" in
+  let root_tasks_dir = Filename.concat root_dir "tasks" in
+  let root_messages_dir = Filename.concat root_dir "messages" in
+  let root_backlog_path = Filename.concat root_tasks_dir "backlog.json" in
+  List.iter mkdir_p [root_agents_dir; root_tasks_dir; root_messages_dir; rooms_root_dir config];
+  if not (path_exists_root config (root_state_path config)) then begin
+    let root_state = {
+      protocol_version = "0.1.0";
+      project = Filename.basename config.base_path;
+      started_at = now_iso ();
+      message_seq = 0;
+      active_agents = [];
+      paused = false;
+      pause_reason = None;
+      paused_by = None;
+      paused_at = None;
+      search_strategy_default = Some "best_first_v1";
+      speculation_enabled = false;
+      speculation_budget = None;
+    } in
+    write_json_root config (root_state_path config) (room_state_to_yojson root_state)
+  end;
+  if not (path_exists_root config root_backlog_path) then begin
+    let root_backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
+    write_json_root config root_backlog_path (backlog_to_yojson root_backlog)
+  end;
 
-  let mention = Mention.extract content in
-  let safe_content = sanitize_message content in
-  let safe_agent = sanitize_agent_name from_agent in
-  let msg = {
-    seq;
-    from_agent = safe_agent;
-    msg_type = "broadcast";
-    content = safe_content;
-    mention;
-    timestamp = now_iso ();
-  } in
-  let msg_file =
-    Filename.concat (messages_dir_in_room config room_id)
-      (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
-  in
-  write_json config msg_file (message_to_yojson msg);
-  let _ =
-    backend_publish config ~channel:(Printf.sprintf "broadcast:%s" room_id)
-      ~message:(Yojson.Safe.to_string (message_to_yojson msg))
-  in
-  Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
+  if is_initialized config then
+    "MASC already initialized."
+  else begin
+    (* Create directories *)
+    List.iter mkdir_p [
+      agents_dir config;
+      tasks_dir config;
+      messages_dir config;
+    ];
+
+    (* Create initial state *)
+    let state = {
+      protocol_version = "0.1.0";
+      project = Filename.basename config.base_path;
+      started_at = now_iso ();
+      message_seq = 0;
+      active_agents = [];
+      paused = false;
+      pause_reason = None;
+      paused_by = None;
+      paused_at = None;
+      search_strategy_default = Some "best_first_v1";
+      speculation_enabled = false;
+      speculation_budget = None;
+    } in
+    write_state config state;
+
+    (* Create empty backlog *)
+    let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
+    write_backlog config backlog;
+
+    let result = "✅ MASC room created!" in
+
+    (* Auto-join if agent specified *)
+    match agent_name with
+    | Some name -> result ^ "\n" ^ (join config ~agent_name:name ~capabilities:[] ())
+    | None -> result
+  end
 
 (** Pause the room - stops orchestrator from spawning new agents *)
 let pause config ~by ~reason =
@@ -743,35 +350,8 @@ let reset config =
     Printf.sprintf "🗑️ MASC room reset! (.masc/ deleted at %s)" config.base_path
   end
 
-(* ============================================ *)
-(* Zombie Detection (moved up for status use)  *)
-(* ============================================ *)
-
-(** Default heartbeat timeout in seconds (5 minutes) - DEPRECATED: Use Resilience.default_zombie_threshold *)
-let heartbeat_timeout_seconds = Resilience.default_zombie_threshold
-
-(** Parse ISO timestamp to Unix time - returns None if parsing fails *)
-let parse_iso_time_opt = Resilience.Time.parse_iso8601_opt
-
-(** Parse ISO timestamp - returns current time if parsing fails (safe default) *)
-let parse_iso_time iso_str =
-  match parse_iso_time_opt iso_str with
-  | Some t -> t
-  | None -> Resilience.Time.now ()
-
-(** Check if agent is zombie (no heartbeat for timeout period) *)
-let is_zombie_agent last_seen_iso =
-  Resilience.Zombie.is_zombie last_seen_iso
-
-let take n xs =
-  if n <= 0 then []
-  else
-    let rec loop i acc = function
-      | [] -> List.rev acc
-      | _ when i <= 0 -> List.rev acc
-      | x :: rest -> loop (i - 1) (x :: acc) rest
-    in
-    loop n [] xs
+(* Zombie detection helpers (heartbeat_timeout_seconds, parse_iso_time,
+   is_zombie_agent, take) are now in Room_state *)
 
 (** Get room status *)
 let status config =
@@ -2152,312 +1732,13 @@ include Room_worktree
    See Room_portal and Room_worktree for implementations. *)
 
 (* ============================================ *)
-(* Heartbeat & Zombie Agent Cleanup             *)
+(* Heartbeat & GC - Extracted to Room_gc        *)
 (* ============================================ *)
-
-(* Note: heartbeat_timeout_seconds, parse_iso_time_opt, parse_iso_time,
-   and is_zombie_agent are defined earlier in the file for use in status *)
-
-(** Update agent heartbeat - must be called periodically *)
-let heartbeat_in_room config ~room_id ~agent_name =
-  ensure_room_bootstrap config room_id;
-  let actual_name = resolve_agent_name_in_room config ~room_id agent_name in
-  let filename = safe_filename actual_name ^ ".json" in
-  (* Check room-scoped path first, fallback to root agents_dir *)
-  let room_file = Filename.concat (agents_dir_in_room config room_id) filename in
-  let root_file = Filename.concat (agents_dir config) filename in
-  let agent_file =
-    if path_exists config room_file then room_file
-    else if path_exists config root_file then root_file
-    else room_file (* will fail gracefully below *)
-  in
-  if path_exists config agent_file then begin
-    with_file_lock config agent_file (fun () ->
-      let json = read_json config agent_file in
-      match agent_of_yojson json with
-      | Ok agent ->
-          let updated = { agent with last_seen = now_iso () } in
-          write_json config agent_file (agent_to_yojson updated);
-          Printf.sprintf "💓 %s heartbeat updated in %s" actual_name room_id
-      | Error _ ->
-          Printf.sprintf "⚠ Invalid agent file for %s in %s" actual_name room_id
-    )
-  end else
-    Printf.sprintf "⚠ Agent %s not found in %s" agent_name room_id
-
-let heartbeat config ~agent_name =
-  ensure_initialized config;
-  heartbeat_in_room config ~room_id:(current_room_id config) ~agent_name
-
-(** Cleanup zombie agents - removes stale agents *)
-let is_keeper_runtime_agent_name (name : string) =
-  let normalized = String.lowercase_ascii (String.trim name) in
-  let prefix = "keeper-" in
-  let suffix = "-agent" in
-  let nlen = String.length normalized in
-  let plen = String.length prefix in
-  let slen = String.length suffix in
-  nlen > plen + slen
-  && String.sub normalized 0 plen = prefix
-  && String.sub normalized (nlen - slen) slen = suffix
-
-let cleanup_zombies config =
-  ensure_initialized config;
-
-  let agents_path = agents_dir config in
-  if not (Sys.file_exists agents_path) then
-    "📋 No agents directory"
-  else begin
-    let zombies = ref [] in
-
-    (* Find zombie agents *)
-    Sys.readdir agents_path |> Array.iter (fun name ->
-      if Filename.check_suffix name ".json" then begin
-        let path = Filename.concat agents_path name in
-        let json = read_json config path in
-        match agent_of_yojson json with
-        | Ok agent
-          when (let threshold =
-                  if is_keeper_runtime_agent_name agent.name
-                  then Env_config.Zombie.keeper_threshold_seconds
-                  else Env_config.Zombie.threshold_seconds
-                in
-                Resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
-            zombies := agent.name :: !zombies;
-            (* Stop heartbeats owned by this zombie agent *)
-            let _stopped = Heartbeat.stop_by_agent ~agent_name:agent.name in
-            (* Remove agent file *)
-            Sys.remove path
-        | _ -> ()
-      end
-    );
-
-    (* Cascade: release tasks claimed by zombie agents *)
-    let released_tasks = ref [] in
-    if !zombies <> [] then begin
-      let backlog = read_backlog config in
-      List.iter (fun (task : task) ->
-        match task.task_status with
-        | Types.Claimed { assignee; _ }
-        | Types.InProgress { assignee; _ } when List.mem assignee !zombies ->
-            (match force_release_task_r config ~agent_name:"gardener" ~task_id:task.id () with
-             | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
-             | Error e ->
-                 log_event config (Printf.sprintf
-                   "{\"type\":\"zombie_cascade_error\",\"task_id\":\"%s\",\"error\":\"%s\",\"ts\":\"%s\"}"
-                   task.id (Types.masc_error_to_string e) (now_iso ())))
-        | _ -> ()
-      ) backlog.tasks
-    end;
-
-    (* Update state to remove zombie agents *)
-    if !zombies <> [] then begin
-      let _ = update_state config (fun s ->
-        { s with active_agents = List.filter (fun a -> not (List.mem a !zombies)) s.active_agents }
-      ) in
-
-      (* Log event *)
-      log_event config (Printf.sprintf
-        "{\"type\":\"zombie_cleanup\",\"agents\":%s,\"released_tasks\":%d,\"ts\":\"%s\"}"
-        (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) !zombies)))
-        (List.length !released_tasks)
-        (now_iso ()));
-
-      let task_note = if !released_tasks = [] then ""
-        else Printf.sprintf ", released %d orphan task(s)" (List.length !released_tasks)
-      in
-      Printf.sprintf "🧟 Cleaned up %d zombie agent(s): %s%s"
-        (List.length !zombies) (String.concat ", " !zombies) task_note
-    end else
-      "✅ No zombie agents found"
-  end
-
-(** Garbage collection - cleanup zombies, stale tasks, old messages *)
-let gc config ?(days=7) () =
-  ensure_initialized config;
-
-  let results = ref [] in
-
-  (* 1. Cleanup zombies *)
-  let zombie_result = cleanup_zombies config in
-  results := zombie_result :: !results;
-
-  (* 2. Archive stale tasks (older than N days, not completed) *)
-  let cutoff_time =
-    let now = Time_compat.now () in
-    now -. (float_of_int days *. 24. *. 60. *. 60.)
-  in
-  let cutoff_iso =
-    let tm = Unix.gmtime cutoff_time in
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-  in
-
-  let backlog = read_backlog config in
-  let stale_count = ref 0 in
-  let archived_tasks = ref [] in
-  let kept_tasks = List.filter (fun task ->
-    let is_done = match task.task_status with Done _ -> true | _ -> false in
-    let is_old = task.created_at < cutoff_iso in
-    if is_old && not is_done then begin
-      incr stale_count;
-      archived_tasks := task :: !archived_tasks;
-      false  (* Remove stale task *)
-    end else
-      true   (* Keep task *)
-  ) backlog.tasks in
-
-  if !stale_count > 0 then begin
-    append_archive_tasks config (List.rev !archived_tasks);
-    let new_backlog = {
-      tasks = kept_tasks;
-      last_updated = now_iso ();
-      version = backlog.version + 1;
-    } in
-    write_backlog config new_backlog;
-    results := Printf.sprintf "📦 Archived %d stale task(s) (older than %d days)" !stale_count days :: !results
-  end else
-    results := Printf.sprintf "✅ No stale tasks (threshold: %d days)" days :: !results;
-
-  (* 3. Cleanup old messages - but preserve messages referencing open tasks *)
-  let messages_path = messages_dir config in
-  let old_msg_count = ref 0 in
-  let preserved_count = ref 0 in
-
-  (* Get open task IDs (not Done or Cancelled) *)
-  let open_task_ids =
-    List.filter_map (fun task ->
-      match task.task_status with
-      | Done _ | Cancelled _ -> None
-      | _ -> Some task.id
-    ) backlog.tasks
-  in
-
-  (* Helper to check if content mentions an open task *)
-  let mentions_open_task content =
-    List.exists (fun task_id ->
-      try ignore (Str.search_forward (Str.regexp_string task_id) content 0); true
-      with Not_found -> false
-    ) open_task_ids
-  in
-
-  if Sys.file_exists messages_path then begin
-    Sys.readdir messages_path |> Array.iter (fun name ->
-      if Filename.check_suffix name ".json" then begin
-        let path = Filename.concat messages_path name in
-        let json = read_json config path in
-        let ts = Yojson.Safe.Util.(member "timestamp" json |> to_string_option) in
-        let content = Yojson.Safe.Util.(member "content" json |> to_string_option)
-                      |> Option.value ~default:"" in
-        match ts with
-        | Some ts when ts < cutoff_iso ->
-            (* Preserve if message references an open task *)
-            if mentions_open_task content then
-              incr preserved_count
-            else begin
-              Sys.remove path;
-              incr old_msg_count
-            end
-        | _ -> ()
-      end
-    )
-  end;
-
-  if !old_msg_count > 0 || !preserved_count > 0 then begin
-    if !old_msg_count > 0 then
-      results := Printf.sprintf "🗑️ Deleted %d old message(s) (older than %d days)" !old_msg_count days :: !results;
-    if !preserved_count > 0 then
-      results := Printf.sprintf "🔒 Preserved %d message(s) referencing open tasks" !preserved_count :: !results
-  end else
-    results := Printf.sprintf "✅ No old messages (threshold: %d days)" days :: !results;
-
-  (* 4. Cleanup backend pubsub - PostgreSQL specific, no-op for others *)
-  let pubsub_cleanup_count = ref 0 in
-  (match backend_cleanup_pubsub config ~days ~max_messages:10000 with
-   | Ok count when count > 0 ->
-       pubsub_cleanup_count := count;
-       results := Printf.sprintf "🗃️ Cleaned %d pubsub message(s) from backend" count :: !results
-   | Ok _ -> ()  (* No messages to clean *)
-   | Error e ->
-       results := Printf.sprintf "⚠️ Backend pubsub cleanup failed: %s" (Backend.show_error e) :: !results);
-
-  (* 5. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json) *)
-  let keeper_orphan_count = ref 0 in
-  let pk_dir = Filename.concat (Filename.concat config.base_path ".masc") "perpetual-keepers" in
-  if Sys.file_exists pk_dir then begin
-    let entries = Sys.readdir pk_dir |> Array.to_list in
-    (* Active keepers = those with a .json config file *)
-    let active_keepers = List.filter_map (fun name ->
-      if Filename.check_suffix name ".json" && String.length name > 0 && name.[0] <> '_' then
-        Some (Filename.chop_suffix name ".json")
-      else None
-    ) entries in
-    (* Find and remove orphan sidecar files *)
-    List.iter (fun name ->
-      (* Skip global files starting with _ (e.g. _alerts.jsonl) *)
-      if String.length name > 0 && name.[0] <> '_' then begin
-        let is_metrics = Filename.check_suffix name ".metrics.jsonl" in
-        let is_memory = Filename.check_suffix name ".memory.jsonl" in
-        if is_metrics || is_memory then begin
-          let suffix = if is_metrics then ".metrics.jsonl" else ".memory.jsonl" in
-          let base = String.sub name 0 (String.length name - String.length suffix) in
-          if not (List.mem base active_keepers) then begin
-            (try Sys.remove (Filename.concat pk_dir name)
-             with Sys_error _ -> ());
-            incr keeper_orphan_count
-          end
-        end
-      end
-    ) entries
-  end;
-  if !keeper_orphan_count > 0 then
-    results := Printf.sprintf "🧹 Removed %d orphan keeper sidecar file(s)" !keeper_orphan_count :: !results
-  else
-    results := "✅ No orphan keeper files" :: !results;
-
-  (* 6. Archive completed/interrupted team sessions older than N days *)
-  let session_archive_count = ref 0 in
-  let ts_root = Filename.concat (Filename.concat config.base_path ".masc") "team-sessions" in
-  if Sys.file_exists ts_root && Sys.is_directory ts_root then begin
-    let archive_ts_dir = Filename.concat
-      (Filename.concat (Filename.concat config.base_path ".masc") "archive") "team-sessions" in
-    Sys.readdir ts_root |> Array.iter (fun session_id ->
-      let sdir = Filename.concat ts_root session_id in
-      if Sys.is_directory sdir then begin
-        let sjson = Filename.concat sdir "session.json" in
-        if Sys.file_exists sjson then
-          try
-            let json = read_json config sjson in
-            let status =
-              Yojson.Safe.Util.(member "status" json |> to_string_option)
-              |> Option.value ~default:"" in
-            let updated =
-              Yojson.Safe.Util.(member "updated_at_iso" json |> to_string_option)
-              |> Option.value ~default:"" in
-            if (status = "completed" || status = "interrupted" || status = "cancelled") && updated <> "" && updated < cutoff_iso then begin
-              mkdir_p archive_ts_dir;
-              let dest = Filename.concat archive_ts_dir session_id in
-              (try Unix.rename sdir dest
-               with Unix.Unix_error _ ->
-                 Printf.eprintf "[gc] failed to archive session %s\n%!" session_id);
-              incr session_archive_count
-            end
-          with _ -> ()
-      end
-    )
-  end;
-  if !session_archive_count > 0 then
-    results := Printf.sprintf "📦 Archived %d completed/interrupted/cancelled team session(s)" !session_archive_count :: !results
-  else
-    results := "✅ No team sessions to archive" :: !results;
-
-  (* Log event *)
-  log_event config (Printf.sprintf
-    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"days\":%d,\"ts\":\"%s\"}"
-    !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count !keeper_orphan_count !session_archive_count days (now_iso ()));
-
-  String.concat "\n" (List.rev !results)
+include Room_gc
+(* Connect the force_release_task callback for zombie cleanup *)
+let () = Room_gc.force_release_task_fn :=
+  (fun config ~agent_name ~task_id () ->
+    force_release_task_r config ~agent_name ~task_id ())
 
 (** Get all agents with their status *)
 let get_agents_status config =
@@ -2629,181 +1910,9 @@ let find_agents_by_capability config ~capability =
   end
 
 (* ============================================ *)
-(* Consensus / Voting System                    *)
+(* Consensus / Voting - Extracted to Room_vote  *)
 (* ============================================ *)
-
-(** Voting directory *)
-let votes_dir config = Filename.concat (masc_dir config) "votes"
-
-(** Vote status type *)
-type vote_status = VotePending | VoteApproved | VoteRejected | VoteTied
-[@@deriving show { with_path = false }]
-
-let vote_status_to_string = function
-  | VotePending -> "pending"
-  | VoteApproved -> "approved"
-  | VoteRejected -> "rejected"
-  | VoteTied -> "tied"
-
-(** Create a vote proposal *)
-let vote_create config ~proposer ~topic ~options ~required_votes =
-  ensure_initialized config;
-
-  mkdir_p (votes_dir config);
-
-  let vote_id = Printf.sprintf "vote-%s-%d" (String.sub (now_iso ()) 0 10)
-    (Random.int 10000) in
-  let vote_path = Filename.concat (votes_dir config) (vote_id ^ ".json") in
-
-  let vote_json = `Assoc [
-    ("id", `String vote_id);
-    ("proposer", `String proposer);
-    ("topic", `String topic);
-    ("options", `List (List.map (fun s -> `String s) options));
-    ("votes", `Assoc []);  (* agent -> option *)
-    ("required_votes", `Int required_votes);
-    ("status", `String "pending");
-    ("created_at", `String (now_iso ()));
-    ("resolved_at", `Null);
-  ] in
-
-  write_json config vote_path vote_json;
-
-  (* Broadcast *)
-  let _ = broadcast config ~from_agent:proposer
-    ~content:(Printf.sprintf "🗳️ Vote started: %s (options: %s)" topic (String.concat ", " options)) in
-
-  (* Log event *)
-  log_event config (Printf.sprintf
-    "{\"type\":\"vote_created\",\"id\":\"%s\",\"proposer\":\"%s\",\"topic\":\"%s\",\"ts\":\"%s\"}"
-    vote_id proposer topic (now_iso ()));
-
-  Printf.sprintf "🗳️ Vote created: %s\n  Topic: %s\n  Options: %s\n  Required: %d votes"
-    vote_id topic (String.concat ", " options) required_votes
-
-(** Cast a vote *)
-let vote_cast config ~agent_name ~vote_id ~choice =
-  ensure_initialized config;
-
-  let vote_path = Filename.concat (votes_dir config) (vote_id ^ ".json") in
-  if not (Sys.file_exists vote_path) then
-    Printf.sprintf "❌ Vote %s not found" vote_id
-  else begin
-    with_file_lock config vote_path (fun () ->
-      let json = read_json config vote_path in
-      let open Yojson.Safe.Util in
-
-      let status = json |> member "status" |> to_string in
-      if status <> "pending" then
-        Printf.sprintf "⚠ Vote %s already resolved (%s)" vote_id status
-      else begin
-        let options = json |> member "options" |> to_list |> List.map to_string in
-        if not (List.mem choice options) then
-          Printf.sprintf "❌ Invalid choice: %s. Options: %s" choice (String.concat ", " options)
-        else begin
-          let votes = json |> member "votes" in
-          let current_votes = match votes with
-            | `Assoc kvs -> kvs
-            | _ -> []
-          in
-
-          (* Add/update vote *)
-          let new_votes = (agent_name, `String choice) ::
-            (List.filter (fun (k, _) -> k <> agent_name) current_votes) in
-
-          let required = json |> member "required_votes" |> to_int in
-          let vote_count = List.length new_votes in
-
-          (* Check if vote is resolved *)
-          let resolved, new_status, winner =
-            if vote_count >= required then begin
-              (* Count votes per option *)
-              let counts = List.fold_left (fun acc (_, v) ->
-                let opt = to_string v in
-                let curr = Option.value ~default:0 (List.assoc_opt opt acc) in
-                (opt, curr + 1) :: (List.remove_assoc opt acc)
-              ) [] new_votes in
-
-              let max_count = List.fold_left (fun acc (_, c) -> max acc c) 0 counts in
-              let winners = List.filter (fun (_, c) -> c = max_count) counts in
-
-              match winners with
-              | [(winner_choice, _)] -> (true, VoteApproved, Some winner_choice)
-              | _ :: _ :: _ -> (true, VoteTied, None)
-              | [] -> (true, VoteTied, None) (* no votes case *)
-            end else
-              (false, VotePending, None)
-          in
-
-          let updated_json = `Assoc [
-            ("id", json |> member "id");
-            ("proposer", json |> member "proposer");
-            ("topic", json |> member "topic");
-            ("options", json |> member "options");
-            ("votes", `Assoc new_votes);
-            ("required_votes", json |> member "required_votes");
-            ("status", `String (vote_status_to_string new_status));
-            ("created_at", json |> member "created_at");
-            ("resolved_at", if resolved then `String (now_iso ()) else `Null);
-            ("winner", match winner with Some w -> `String w | None -> `Null);
-          ] in
-
-          write_json config vote_path updated_json;
-
-          (* Log event *)
-          log_event config (Printf.sprintf
-            "{\"type\":\"vote_cast\",\"id\":\"%s\",\"agent\":\"%s\",\"choice\":\"%s\",\"ts\":\"%s\"}"
-            vote_id agent_name choice (now_iso ()));
-
-          if resolved then begin
-            let topic = json |> member "topic" |> to_string in
-            let result_msg = match new_status, winner with
-              | VoteApproved, Some w -> Printf.sprintf "Winner: %s" w
-              | VoteApproved, None -> "Winner: (unknown)" (* should not happen *)
-              | VoteTied, _ -> "Result: Tied!"
-              | _, _ -> "Resolved"
-            in
-            let _ = broadcast config ~from_agent:"system"
-              ~content:(Printf.sprintf "🗳️ Vote resolved: %s - %s" topic result_msg) in
-            Printf.sprintf "✅ Vote cast: %s for %s\n🎉 Vote resolved! %s" agent_name choice result_msg
-          end else
-            Printf.sprintf "✅ Vote cast: %s for %s (%d/%d votes)"
-              agent_name choice vote_count required
-        end
-      end
-    )
-  end
-
-(** Get vote status *)
-let vote_status config ~vote_id =
-  ensure_initialized config;
-
-  let vote_path = Filename.concat (votes_dir config) (vote_id ^ ".json") in
-  if not (Sys.file_exists vote_path) then
-    `Assoc [("error", `String (Printf.sprintf "Vote %s not found" vote_id))]
-  else
-    read_json config vote_path
-
-(** List active votes *)
-let list_votes config =
-  ensure_initialized config;
-
-  let votes_path = votes_dir config in
-  if not (Sys.file_exists votes_path) then
-    `Assoc [("votes", `List []); ("count", `Int 0)]
-  else begin
-    let votes = ref [] in
-    Sys.readdir votes_path |> Array.iter (fun name ->
-      if Filename.check_suffix name ".json" then begin
-        let path = Filename.concat votes_path name in
-        votes := read_json config path :: !votes
-      end
-    );
-    `Assoc [
-      ("votes", `List (List.rev !votes));
-      ("count", `Int (List.length !votes));
-    ]
-  end
+include Room_vote
 
 (* ============================================ *)
 (* Tempo Control (Cluster Pace Management)     *)

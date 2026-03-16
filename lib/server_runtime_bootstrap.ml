@@ -276,20 +276,23 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   let _h2_error_handler = make_h2_error_handler () in
   let socket = listen_socket ~sw ~net config in
 
-  (* 2. All init in background fiber (PG connect 3s + Lodge GraphQL 20-40s) *)
+  (* 2. All init in background fiber — protected so failures don't kill HTTP *)
   Eio.Fiber.fork ~sw (fun () ->
-    let state =
-      create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
-    in
-    bootstrap_server_state state;
-    bootstrap_keepers ~sw ~clock state;
-    init_task_backend ();
-    let resolved_base, masc_dir =
-      start_background_maintenance ~sw ~clock state
-    in
-    print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
-    start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
-  );
+    try
+      let state =
+        create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
+      in
+      bootstrap_server_state state;
+      bootstrap_keepers ~sw ~clock state;
+      init_task_backend ();
+      let resolved_base, masc_dir =
+        start_background_maintenance ~sw ~clock state
+      in
+      print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
+      start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
+    with exn ->
+      Printf.eprintf "[startup] Background init failed (HTTP still serving): %s\n%!"
+        (Printexc.to_string exn));
 
   (* 3. Start serving — /health responds before init completes *)
   serve ~sw ~clock ~socket ~request_handler

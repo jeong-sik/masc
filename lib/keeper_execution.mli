@@ -8,6 +8,11 @@
 
 open Keeper_types
 
+(** {1 Error Logging} *)
+
+(** Log a keeper error with [UNEXPECTED] tag for unrecognized exceptions. *)
+val log_keeper_exn : label:string -> exn -> unit
+
 (** {1 Types} *)
 
 (** Social board event for proactive room behavior. *)

@@ -7,7 +7,7 @@
 
     Module dependency chain:
       Cp_types -> Cp_paths -> Cp_serde -> Cp_io
-        -> Cp_unit -> Cp_snapshot -> Cp_lifecycle
+        -> Cp_unit -> Cp_snapshot -> Cp_lifecycle -> Cp_lifecycle_policy
 *)
 
-include Cp_lifecycle
+include Cp_lifecycle_policy

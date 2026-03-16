@@ -39,6 +39,7 @@
    cp_unit
    cp_snapshot
    cp_lifecycle
+   cp_lifecycle_policy
    compression_dict
    config
    context_router

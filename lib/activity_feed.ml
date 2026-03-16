@@ -42,12 +42,16 @@ let activity_item_of_json (json : Yojson.Safe.t) : activity_item option =
     let summary = Safe_ops.json_string ~default:"" "summary" json in
     let detail_json =
       try Yojson.Safe.Util.member "detail_json" json
-      with _ -> `Null
+      with Yojson.Safe.Util.Type_error _ -> `Null
     in
     let created_at = Safe_ops.json_float ~default:0.0 "created_at" json in
     if id = "" then None
     else Some { id; kind; agent_name; summary; detail_json; created_at }
-  with _ -> None
+  with
+  | Yojson.Safe.Util.Type_error _ -> None
+  | exn ->
+      Log.Feed.warn "activity_item_of_json: %s" (Printexc.to_string exn);
+      None
 
 (** {1 JSONL Helpers} *)
 
@@ -97,7 +101,11 @@ let task_activities (config : Room.config) : activity_item list =
                      tm_wday = 0; tm_yday = 0; tm_isdst = false;
                    } in
                    let (t, _) = Unix.mktime tm in t)
-            with _ -> 0.0
+            with
+            | Scanf.Scan_failure _ | Failure _ | End_of_file -> 0.0
+            | exn ->
+                Log.Feed.warn "task timestamp parse: %s" (Printexc.to_string exn);
+                0.0
           in
           let agent = if assignee <> "" then assignee else "system" in
           let summary = Printf.sprintf "Task %s: %s (%s)" id title status in
@@ -212,7 +220,11 @@ let debate_activities (config : Room.config) : activity_item list =
               |> List.filter_map (fun arg ->
                   let a = Safe_ops.json_string ~default:"" "agent" arg in
                   if a <> "" then Some a else None)
-            with _ -> []
+            with
+            | Yojson.Safe.Util.Type_error _ -> []
+            | exn ->
+                Log.Feed.warn "debate agents extract: %s" (Printexc.to_string exn);
+                []
           in
           if id = "" then None
           else

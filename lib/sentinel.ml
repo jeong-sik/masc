@@ -99,7 +99,11 @@ let parse_llm_json_safe s =
     let re = Str.regexp "```\\(json\\)?[\n\r]+\\([^`]+\\)```" in
     if Str.string_match re s 0 then
       (try Some (Yojson.Safe.from_string (Str.matched_group 2 s))
-       with _ -> None)
+       with
+       | Yojson.Json_error _ -> None
+       | exn ->
+           Log.Sentinel.warn "parse_llm_json_safe fenced block: %s" (Printexc.to_string exn);
+           None)
     else None
 
 (** Call sentinel LLM via cascade: render prompt from registry, run through
@@ -221,7 +225,9 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
                   (Printexc.to_string exn)));
           let agent_names = String.concat ", " state.active_agents in
           let board_posts = (try Board_dispatch.list_posts ~limit:50 ()
-                             with _ -> []) in
+                             with exn ->
+                               Log.Sentinel.warn "board patrol list_posts: %s" (Printexc.to_string exn);
+                               []) in
           let post_count = List.length board_posts in
           let stale_posts = List.filter (fun (p : Board.post) ->
             now_f -. p.created_at > 604800.0 (* 7 days *)
@@ -461,7 +467,10 @@ let make_keeper_health_consumer _config : (module Pulse.Consumer) =
                      if age > threshold then
                        stale := (Filename.chop_suffix name ".json", age) :: !stale
                  | _ -> ())
-              with _ -> ()
+              with
+              | Yojson.Json_error _ | Sys_error _ -> ()
+              | exn ->
+                  Log.Sentinel.warn "keeper stale check %s: %s" name (Printexc.to_string exn)
             end
           );
           if !stale <> [] then begin
@@ -575,13 +584,18 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
                       keeper_name consecutive_failures)
                     ~subject_type:"keeper" ~risk_class:Council.Governance_v2.High
                 end
-              with _ -> ()
+              with
+              | Yojson.Json_error _ | Sys_error _ -> ()
+              | exn ->
+                  Log.Sentinel.warn "keeper failure check %s: %s" fname (Printexc.to_string exn)
             end
           );
 
         (* 3. Board posts with high downvote ratio *)
         let board_posts = (try Board_dispatch.list_posts ~limit:50 ()
-                           with _ -> []) in
+                           with exn ->
+                             Log.Sentinel.warn "governance board list_posts: %s" (Printexc.to_string exn);
+                             []) in
         List.iter (fun (p : Board.post) ->
           if p.votes_down >= 3 && p.votes_down > p.votes_up then
             submit

@@ -443,13 +443,16 @@ let compute_social_atmosphere () : float =
           try
             let json = Yojson.Safe.from_string line in
             let open Yojson.Safe.Util in
-            let ts = (try json |> member "timestamp" |> to_float with _ -> 0.0) in
+            let ts = (try json |> member "timestamp" |> to_float with Yojson.Safe.Util.Type_error _ -> 0.0) in
             if ts >= recent_cutoff then begin
-              let typ = (try json |> member "type" |> to_string with _ -> "") in
+              let typ = (try json |> member "type" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
               if typ = "shared_belief" then incr beliefs;
               if typ = "emergent_goal" then incr goals
             end
-          with _ -> ()
+          with
+          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
+          | exn ->
+              Log.Noosphere.warn "atmosphere parse: %s" (Printexc.to_string exn)
         end
       done with End_of_file -> ()));
     (* Normalize: more recent beliefs/goals = higher atmosphere *)

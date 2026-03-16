@@ -13,6 +13,19 @@ include Dashboard_http_monitoring
 include Dashboard_http_keeper
 include Dashboard_http_mdal
 
+(** Wrap a dashboard computation with a 15-second timeout.
+    Returns a partial-response JSON on timeout instead of hanging. *)
+let with_dashboard_timeout ~clock compute =
+  match Eio.Time.with_timeout clock 15.0 (fun () -> Ok (compute ())) with
+  | Ok v -> v
+  | Error `Timeout ->
+      `Assoc [
+        ("error", `String "timeout");
+        ("partial", `Bool true);
+        ("message", `String "Dashboard computation timed out after 15s. Check LLM backend availability.");
+        ("generated_at", `String (Types.now_iso ()));
+      ]
+
 let dashboard_semantics_http_json () =
   Dashboard_semantics.json ()
 
@@ -218,10 +231,11 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
   let cache_key =
     Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
-    Dashboard_mission.json ?actor
-      ~config:state.Mcp_server.room_config ~sw ~clock
-      ~proc_mgr:state.Mcp_server.proc_mgr ())
+  with_dashboard_timeout ~clock (fun () ->
+    Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+      Dashboard_mission.json ?actor
+        ~config:state.Mcp_server.room_config ~sw ~clock
+        ~proc_mgr:state.Mcp_server.proc_mgr ()))
 
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
@@ -244,10 +258,11 @@ let dashboard_session_http_json ~state ~sw ~clock request =
         ]
 
 let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
-  Dashboard_mission_briefing.json ?actor:(operator_actor_hint request)
-    ~force:(bool_query_param request "force" ~default:false)
-    ~config:state.Mcp_server.room_config ~sw ~clock
-    ~proc_mgr:state.Mcp_server.proc_mgr ()
+  with_dashboard_timeout ~clock (fun () ->
+    Dashboard_mission_briefing.json ?actor:(operator_actor_hint request)
+      ~force:(bool_query_param request "force" ~default:false)
+      ~config:state.Mcp_server.room_config ~sw ~clock
+      ~proc_mgr:state.Mcp_server.proc_mgr ())
 
 let dashboard_proof_http_json ~state request =
   let session_id = query_param request "session_id" in
@@ -382,10 +397,11 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       (Option.value ~default:"" actor)
       (Option.value ~default:"" fixture)
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
-    Dashboard_execution.json ?actor ?fixture
-      ~config:state.Mcp_server.room_config ~sw ~clock
-      ~proc_mgr:state.Mcp_server.proc_mgr ())
+  with_dashboard_timeout ~clock (fun () ->
+    Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+      Dashboard_execution.json ?actor ?fixture
+        ~config:state.Mcp_server.room_config ~sw ~clock
+        ~proc_mgr:state.Mcp_server.proc_mgr ()))
 
 let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =

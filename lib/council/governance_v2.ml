@@ -862,6 +862,28 @@ let save_ruling base_path (ruling : ruling) =
   let updated_case = { case_ with status = next_status; updated_at = now_unix () } in
   write_case base_path updated_case;
   write_ruling base_path ruling;
+  (* Auto-create execution order when ruling triggers Ready_auto_execute
+     and no order exists yet. This closes the gap where sentinel-submitted
+     rulings set the case status but never create the order needed for
+     downstream execution. *)
+  (if next_status = Ready_auto_execute then
+     match load_execution_order base_path ruling.case_id with
+     | Some _ -> ()  (* Order already exists *)
+     | None ->
+         let now = now_unix () in
+         let order : execution_order = {
+           id = generate_id "order";
+           case_id = ruling.case_id;
+           status = Queued_auto;
+           risk_class = ruling.risk_class;
+           action_request = ruling.recommended_action;
+           created_at = now;
+           updated_at = now;
+           execution_ref = None;
+           result_summary = None;
+           actor = Some ruling.keeper_name;
+         } in
+         write_execution_order base_path order);
   Ok updated_case
 
 let save_execution_order base_path (order : execution_order) =

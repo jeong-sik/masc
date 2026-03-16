@@ -1444,6 +1444,11 @@ Use to: monitor cache health, decide when to clear, debug performance.";
           ("type", `String "string");
           ("description", `String "Board post ID to link this thread to (bidirectional: thread.source_post_id ↔ post.thread_id)");
         ]);
+        ("mentions", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Agents @mentioned in the opening message");
+        ]);
       ]);
       ("required", `List [`String "topic"; `String "initiator"]);
     ];

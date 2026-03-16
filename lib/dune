@@ -119,7 +119,6 @@
    local_agent_eio
    agent_swarm_client
    agent_swarm_dev_tools
-   oas_compat
    agent_swarm_external_agent
    agent_swarm_fleet
    agent_swarm_live_harness

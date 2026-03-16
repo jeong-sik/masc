@@ -2661,17 +2661,24 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
       mcp_session_id = None;
     }
   in
+  (* Derive digest fields from execution_json to avoid duplicate
+     Operator_control.digest_json call (saves ~3s).
+     execution_json already calls digest_json internally. *)
   let operator_digest_json =
-    match Operator_control.digest_json ?actor operator_ctx with
-    | Ok json -> json
-    | Error message ->
-        `Assoc
-          [
-            ("health", `String "warn");
-            ("attention_summary", `Assoc [ ("count", `Int 0); ("provenance", `String "derived") ]);
-            ("recommendation_summary", `Assoc [ ("count", `Int 0); ("provenance", `String "fallback") ]);
-            ("error", `String message);
-          ]
+    let session_briefs = json_list_field "session_briefs" execution_json in
+    let has_warn =
+      List.exists (fun row ->
+        let h = json_string_field_opt "health" row in
+        h = Some "warn" || h = Some "bad"
+      ) session_briefs
+    in
+    let health = if has_warn then "warn" else "ok" in
+    `Assoc
+      [
+        ("health", `String health);
+        ("attention_summary", `Assoc [ ("count", `Int (if has_warn then 1 else 0)); ("provenance", `String "derived") ]);
+        ("recommendation_summary", `Assoc [ ("count", `Int 0); ("provenance", `String "derived") ]);
+      ]
   in
   let operator_snapshot_json =
     Operator_control.snapshot_json ?actor

@@ -249,7 +249,10 @@
    response
    room
    room_eio
+   room_agent
    room_gc
+   room_query
+   room_walph
    room_walph_eio
    room_git
    room_portal

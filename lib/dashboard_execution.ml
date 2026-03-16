@@ -113,12 +113,27 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
       in
       (* Yield between heavy phases so SSE / health-check fibers can progress *)
       Eio.Fiber.yield ();
-      (* Load sessions once; pass to snapshot_json to avoid repeated filesystem scans *)
-      let sessions =
+      (* Load sessions once; pass to snapshot_json to avoid repeated filesystem scans.
+         Only include active (Running/Paused) sessions plus recently finished ones
+         (last 24h) to avoid loading all historical sessions on every poll. *)
+      let all_sessions =
         if Room.is_initialized config then
           Team_session_store.list_sessions config
         else []
       in
+      let cutoff_iso =
+        let t = Time_compat.now () -. 86400.0 in
+        let tm = Unix.gmtime t in
+        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+          (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+          tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+      in
+      let is_active_or_recent (s : Team_session_types.session) =
+        match s.status with
+        | Running | Paused -> true
+        | _ -> s.updated_at_iso >= cutoff_iso
+      in
+      let sessions = List.filter is_active_or_recent all_sessions in
       Eio.Fiber.yield ();
       (* Compute directly without Dashboard_cache to avoid nested
          get_or_compute deadlock — the caller (dashboard_execution_http_json)

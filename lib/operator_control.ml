@@ -702,6 +702,15 @@ let keepers_json config =
                   ("tool_audit_at", string_option_to_json tool_audit_at);
                   ("updated_at", `String meta.updated_at);
                   ("created_at", `String meta.created_at);
+                  ("recent_activity",
+                    let metrics_path = Keeper_types.keeper_metrics_path config name in
+                    let lines =
+                      Keeper_memory.read_file_tail_lines metrics_path
+                        ~max_bytes:8000 ~max_lines:5
+                    in
+                    `List (List.filter_map (fun line ->
+                      try Some (Yojson.Safe.from_string line)
+                      with Yojson.Json_error _ -> None) lines));
                 ]))
       names
   in

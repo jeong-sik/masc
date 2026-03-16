@@ -478,9 +478,6 @@ include Room_task
 include Room_walph
 
 
-(** Update task priority *)
-let update_priority config ~task_id ~priority =
-
 (* Task/agent/message query and listing *)
 include Room_query
 

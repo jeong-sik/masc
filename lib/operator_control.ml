@@ -2088,8 +2088,12 @@ let build_session_digest config (session : Team_session_types.session) ~now =
     worker_cards;
   }
 
-let build_room_attention_items config =
-  let command_plane_summary = Command_plane_v2.summary_json config in
+let build_room_attention_items ?command_plane_summary config =
+  let command_plane_summary =
+    match command_plane_summary with
+    | Some s -> s
+    | None -> Command_plane_v2.summary_json config
+  in
   let microarch_signals =
     command_plane_summary
     |> U.member "operations"
@@ -2207,8 +2211,12 @@ let build_room_attention_items config =
   in
   List.sort compare_attention (pending_items @ signal_items @ intent_items)
 
-let room_recommendations config =
-  let command_plane_summary = Command_plane_v2.summary_json config in
+let room_recommendations ?command_plane_summary config =
+  let command_plane_summary =
+    match command_plane_summary with
+    | Some s -> s
+    | None -> Command_plane_v2.summary_json config
+  in
   let microarch_signals =
     command_plane_summary
     |> U.member "operations"
@@ -2409,20 +2417,23 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     | Summary | Messages | Full -> true
     | Sessions | Keepers -> false
   in
+  let command_plane_summary =
+    if initialized then Some (Command_plane_v2.summary_json config) else None
+  in
   let summary_fields =
     if initialized && (match view with Summary | Full -> true | _ -> false) then
       let now = Time_compat.now () in
       let session_digests =
-        Team_session_store.list_sessions config
+        tracked_sessions
         |> List.map (fun session -> build_session_digest config session ~now)
       in
       let room_attention =
-        build_room_attention_items config
+        build_room_attention_items ?command_plane_summary config
         @ (session_digests |> List.concat_map (fun digest -> digest.attention_items))
         |> List.sort compare_attention
       in
       let room_recommendation_items =
-        room_recommendations config
+        room_recommendations ?command_plane_summary config
         @ (session_digests |> List.concat_map (fun digest -> digest.recommended_actions))
       in
       [

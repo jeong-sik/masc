@@ -6,7 +6,7 @@ import { signal, type ReadonlySignal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
 
-const DEFAULT_ROUTE: RouteState = { tab: 'mission', params: {}, postId: null }
+const DEFAULT_ROUTE: RouteState = { tab: 'home', params: {}, postId: null }
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
@@ -64,7 +64,7 @@ function parseSegments(
     ? tabFromPath
     : isTabId(tabFromQuery)
       ? tabFromQuery
-      : 'mission'
+      : 'home'
 
   return { tab, params, postId: null }
 }
@@ -176,6 +176,6 @@ export function initRouter(): void {
   }
 
   // Default route
-  window.location.hash = '#mission'
+  window.location.hash = '#home'
   route.value = parseHash(window.location.hash)
 }

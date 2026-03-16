@@ -15,9 +15,14 @@ import { Governance } from './governance'
 import { Social } from './social'
 import { Lab } from './lab'
 import { Live } from './live'
+import { Overview } from './overview/overview'
 import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
-import { DASHBOARD_NAV_ITEMS, DASHBOARD_NAV_SECTIONS } from '../config/navigation'
+import {
+  DASHBOARD_NAV_ITEMS,
+  DASHBOARD_SURFACES,
+  surfaceForTab,
+} from '../config/navigation'
 import { InterveneRailCard, SnapshotCard } from './resident-runtime-rail'
 
 const buildIdentityOpen = signal(false)
@@ -92,39 +97,67 @@ export function BuildIdentityBadge() {
 
 export function SideRail() {
   const current = route.value.tab
+  const currentSurface = surfaceForTab(current)
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === current)
-  const currentSection = DASHBOARD_NAV_SECTIONS.find(section => section.id === currentView?.group)
 
   return html`
     <aside class="dashboard-rail">
-      <section class="rail-card">
+      <section class="rail-card rail-card-compact">
         <div class="rail-card-head">
           <h3>탐색</h3>
           <${PanelSemanticDetails} panelId="side_rail.navigate" compact=${true} />
-          ${currentSection ? html`<span class="rail-section-chip">${currentSection.label}</span>` : null}
         </div>
-        ${DASHBOARD_NAV_SECTIONS.map(section => html`
-          <div class="rail-nav-group" key=${section.id}>
-            <div class="rail-group-label">${section.label}</div>
-            <div class="rail-group-copy">${section.description}</div>
-            <div class="rail-tab-list">
-              ${DASHBOARD_NAV_ITEMS
-                .filter(item => item.group === section.id)
-                .map(item => html`
+
+        <!-- Primary surfaces (5 items) -->
+        <div class="rail-tab-list">
+          ${DASHBOARD_SURFACES.map(surface => {
+            const isActive = surface.id === currentSurface
+            return html`
+              <button
+                class="rail-tab-btn ${isActive ? 'active' : ''}"
+                key=${surface.id}
+                onClick=${() => navigate(surface.defaultTab)}
+              >
+                <span class="rail-tab-icon">${surface.icon}</span>
+                <span class="rail-tab-copy">
+                  <strong>${surface.label}</strong>
+                  <span>${surface.description}</span>
+                </span>
+              </button>
+            `
+          })}
+        </div>
+
+        <!-- Sub-tabs within current surface -->
+        ${(() => {
+          const activeSurface = DASHBOARD_SURFACES.find(s => s.id === currentSurface)
+          if (!activeSurface || activeSurface.tabs.length <= 1) return null
+          const subItems = DASHBOARD_NAV_ITEMS.filter(item =>
+            activeSurface.tabs.includes(item.id) && item.id !== 'home'
+          )
+          if (subItems.length === 0) return null
+          return html`
+            <div class="rail-nav-group" style="margin-top: 12px;">
+              <div class="rail-group-label">${activeSurface.label} 하위</div>
+              <div class="rail-tab-list" style="margin-top: 6px;">
+                ${subItems.map(item => html`
                   <button
                     class="rail-tab-btn ${current === item.id ? 'active' : ''}"
+                    key=${item.id}
                     onClick=${() => navigate(item.id)}
+                    style="padding: 8px 10px;"
                   >
-                    <span class="rail-tab-icon">${item.icon}</span>
+                    <span class="rail-tab-icon" style="font-size: 14px;">${item.icon}</span>
                     <span class="rail-tab-copy">
-                      <strong>${item.label}</strong>
-                      <span>${item.description}</span>
+                      <strong style="font-size: 12px;">${item.label}</strong>
                     </span>
                   </button>
                 `)}
+              </div>
             </div>
-          </div>
-        `)}
+          `
+        })()}
+
         <div class="rail-view-note">
           <div class="rail-view-note-label">현재 화면</div>
           <strong>${currentView?.label ?? current}</strong>
@@ -142,6 +175,8 @@ export function TabContent() {
   const tab = route.value.tab
 
   switch (tab) {
+    case 'home':
+      return html`<${Overview} />`
     case 'mission':
       return html`<${Mission} />`
     case 'proof':
@@ -167,7 +202,7 @@ export function TabContent() {
     case 'lab':
       return html`<${Lab} />`
     default:
-      return html`<${Mission} />`
+      return html`<${Overview} />`
   }
 }
 

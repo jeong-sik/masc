@@ -2946,6 +2946,7 @@ export interface DashboardSemanticsResponse {
 }
 
 export type TabId =
+  | 'home'
   | 'mission'
   | 'proof'
   | 'execution'
@@ -2960,6 +2961,7 @@ export type TabId =
   | 'social'
 
 export const VALID_TABS: TabId[] = [
+  'home',
   'mission',
   'proof',
   'execution',

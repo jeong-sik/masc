@@ -19,6 +19,18 @@
   --radius-sm: 10px;
   --header-h: 94px;
 
+  /* Warm accent palette */
+  --warm-amber: #f5c542;
+  --warm-rose: #e8917a;
+  --warm-lavender: #b8a4d6;
+  --warm-sage: #8dbd97;
+
+  /* Agent status (soft tones) */
+  --agent-working: #7ae09a;
+  --agent-idle: #b8cae8;
+  --agent-offline: #5a6478;
+  --agent-busy: #f0c060;
+
   /* Stacking layers (low -> high) */
   --z-layout: 1;
   --z-tab-sticky: 30;

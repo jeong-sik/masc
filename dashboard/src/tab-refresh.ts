@@ -16,6 +16,12 @@ import { refreshTools } from './components/tools'
 import { refreshSocial } from './components/social'
 
 export function refreshForTab(tab: string) {
+  if (tab === 'home') {
+    refreshRoomTruth()
+    refreshExecution()
+    refreshMissionSnapshot()
+  }
+
   if (tab === 'command') {
     refreshRoomTruth()
     refreshCommandPlaneCurrentSurface()

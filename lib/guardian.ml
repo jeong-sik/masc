@@ -16,10 +16,12 @@ let agent_card : Agent_card.agent_card = {
   skills = [
     { id = "zombie-cleanup"; name = "Zombie Cleanup";
       description = Some "Remove stale room entries";
-      input_modes = []; output_modes = ["application/json"] };
+      tags = []; input_modes = []; output_modes = ["application/json"];
+      tool_count = 0 };
     { id = "garbage-collection"; name = "Garbage Collection";
       description = Some "Purge old records beyond retention window";
-      input_modes = []; output_modes = ["application/json"] };
+      tags = []; input_modes = []; output_modes = ["application/json"];
+      tool_count = 0 };
   ];
   supported_interfaces = [];
   security_schemes = [];

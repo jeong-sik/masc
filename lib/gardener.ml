@@ -30,13 +30,16 @@ let agent_card : Agent_card.agent_card = {
   skills = [
     { id = "health-monitor"; name = "Health Monitor";
       description = Some "Calculate ecosystem health metrics and homeostatic score";
-      input_modes = []; output_modes = ["application/json"] };
+      tags = []; input_modes = []; output_modes = ["application/json"];
+      tool_count = 0 };
     { id = "spawn-decision"; name = "Spawn Decision";
       description = Some "Evaluate and execute agent spawn proposals";
-      input_modes = ["application/json"]; output_modes = ["application/json"] };
+      tags = []; input_modes = ["application/json"]; output_modes = ["application/json"];
+      tool_count = 0 };
     { id = "retire-decision"; name = "Retire Decision";
       description = Some "Evaluate and execute agent retirement proposals";
-      input_modes = ["application/json"]; output_modes = ["application/json"] };
+      tags = []; input_modes = ["application/json"]; output_modes = ["application/json"];
+      tool_count = 0 };
   ];
   supported_interfaces = [];
   security_schemes = [];

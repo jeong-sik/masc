@@ -31,16 +31,20 @@ let agent_card : Agent_card.agent_card = {
   skills = [
     { id = "heartbeat"; name = "Heartbeat";
       description = Some "Keep sentinel visible in the room";
-      input_modes = []; output_modes = ["application/json"] };
+      tags = []; input_modes = []; output_modes = ["application/json"];
+      tool_count = 0 };
     { id = "board-patrol"; name = "Board Patrol";
       description = Some "LLM-driven stale post detection";
-      input_modes = []; output_modes = ["application/json"] };
+      tags = []; input_modes = []; output_modes = ["application/json"];
+      tool_count = 0 };
     { id = "task-hygiene"; name = "Task Hygiene";
       description = Some "LLM-driven orphaned/stuck task detection";
-      input_modes = []; output_modes = ["application/json"] };
+      tags = []; input_modes = []; output_modes = ["application/json"];
+      tool_count = 0 };
     { id = "keeper-health"; name = "Keeper Health";
       description = Some "LLM-driven stale keeper monitoring";
-      input_modes = []; output_modes = ["application/json"] };
+      tags = []; input_modes = []; output_modes = ["application/json"];
+      tool_count = 0 };
   ];
   supported_interfaces = [];
   security_schemes = [];

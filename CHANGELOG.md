@@ -1,6 +1,38 @@
 # Changelog
 
 
+## [2.100.0] - 2026-03-16
+
+### Fixed
+- **Dashboard deadlock** — eliminate nested Eio.Mutex deadlock in Dashboard_cache / room-truth path (#1212, #1238)
+- **13 bugs + 5 doc gaps** from buyer/researcher testing (#1228)
+- **6 buyer-test bugs** for better first-use experience (#1225)
+- **Build errors** — register split modules in dune, resolve type errors from mcp_server_eio split (#1229, #1239, #1243)
+- **CP cleanup** — O(n²) → Hashtbl, silent failure warning (#1218)
+- **Room syntax** — remove orphaned update_priority declaration (#1214)
+- **Deploy** — GLM-only LLM cascade config for Railway (#1232)
+
+### Changed (God File Refactoring Phase 7-8)
+- **mcp_server_eio** — split into 11 focused sub-modules (#1213)
+- **chain_mermaid_parser, trpg_round** — sub-module split (#1219)
+- **dashboard_execution, chain_parser** — sub-module split (#1220)
+- **team_session_engine, lodge_heartbeat** — sub-module split (#1221)
+- **operator_digest, operator_control, server_h2_gateway** — sub-module split (#1227)
+- **trpg_handlers, local_agent_eio, keeper_memory, team_session_report** — sub-module split (#1224)
+- **tool_schemas_core, tool_trpg, tool_mitosis** — sub-module split (#1226)
+- **4 god files under 900 lines** — phase8-batch6 (#1233)
+- **dashboard_mission, keeper_types, trpg_action** — sub-module split (#1237)
+- **gardener, tool_protocol_game_view, trpg_types, dashboard_http_keeper** — sub-module split (#1234)
+- **OAS/MASC responsibility-boundary** — module split Phase 1-4 (#1235, #1241)
+- **room scope** — scope-based config to eliminate dual-path fallbacks (#1223)
+- **OAS heartbeat** — migrate to Agent.periodic_callback (#1240)
+- **OAS** — use checkpoint cost and inline extract_text (#1216)
+
+### Added
+- **Harness engineering** — hooks, trace, permissions, metrics, checkpoint (#1230)
+- **CP data cleanup** — snapshot quality improvements (#1211)
+- **Structured logging** — migrate 523 Printf.eprintf to Log module (#1236)
+
 ## [2.99.0] - 2026-03-16
 
 ### Fixed

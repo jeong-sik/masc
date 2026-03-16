@@ -13,16 +13,16 @@ include Dashboard_http_monitoring
 include Dashboard_http_keeper
 include Dashboard_http_mdal
 
-(** Wrap a dashboard computation with a 15-second timeout.
+(** Wrap a dashboard computation with a 30-second timeout.
     Returns a partial-response JSON on timeout instead of hanging. *)
 let with_dashboard_timeout ~clock compute =
-  match Eio.Time.with_timeout clock 15.0 (fun () -> Ok (compute ())) with
+  match Eio.Time.with_timeout clock 30.0 (fun () -> Ok (compute ())) with
   | Ok v -> v
   | Error `Timeout ->
       `Assoc [
         ("error", `String "timeout");
         ("partial", `Bool true);
-        ("message", `String "Dashboard computation timed out after 15s. Check LLM backend availability.");
+        ("message", `String "Dashboard computation timed out after 30s. First request may be slow due to filesystem scan.");
         ("generated_at", `String (Types.now_iso ()));
       ]
 
@@ -232,7 +232,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
     Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
   in
   Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:3.0
-    ~clock ~timeout_sec:15.0 (fun () ->
+    ~clock ~timeout_sec:30.0 (fun () ->
     Dashboard_mission.json ?actor
       ~config:state.Mcp_server.room_config ~sw ~clock
       ~proc_mgr:state.Mcp_server.proc_mgr ())
@@ -271,7 +271,7 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
       Printf.sprintf "mission_briefing:%s" (Option.value ~default:"" actor)
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:5.0
-      ~clock ~timeout_sec:15.0 compute
+      ~clock ~timeout_sec:30.0 compute
 
 let dashboard_proof_http_json ~state request =
   let session_id = query_param request "session_id" in
@@ -407,7 +407,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       (Option.value ~default:"" fixture)
   in
   Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:3.0
-    ~clock ~timeout_sec:15.0 (fun () ->
+    ~clock ~timeout_sec:30.0 (fun () ->
     Dashboard_execution.json ?actor ?fixture
       ~config:state.Mcp_server.room_config ~sw ~clock
       ~proc_mgr:state.Mcp_server.proc_mgr ())

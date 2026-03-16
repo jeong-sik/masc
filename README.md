@@ -87,6 +87,14 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - 레거시 `/sse`, `/messages` endpoint는 deprecated 상태이며 `/mcp`로 전환이 권장됩니다.
 - 원격 감독관 표면은 `/mcp/operator`를 사용하세요. 운영 루프와 confirm 정책은 `docs/REMOTE-MCP-OPERATOR.md`, `docs/SUPERVISOR-MODE.md`에, swarm-driven 구현 표준은 `docs/SWARM-DELIVERY-RUNBOOK.md`에 정리돼 있습니다.
 
+## Keeper 사용자 매뉴얼
+
+Keeper/Agent 시스템의 사용자 가이드는 [KEEPER-USER-MANUAL.md](./docs/KEEPER-USER-MANUAL.md)를 참조한다.
+
+- 대시보드 필드 레퍼런스 (출처별 분류, `-` 값 진단)
+- 페르소나 매니페스트 작성법 ([예시](./docs/examples/persona-example.json))
+- 모델 cascade, 라이프사이클, 트러블슈팅
+
 ## Architecture Map
 
 merged 기준 아키텍처 한 장 요약은 [MERGED-ARCHITECTURE-SSOT.md](./docs/MERGED-ARCHITECTURE-SSOT.md)를 본다.

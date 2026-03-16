@@ -374,7 +374,7 @@ let handle_get_mcp ~(deps : deps) ?legacy_messages_endpoint
                                .sse_ping_interval_s
                            with exn ->
                              if is_cancelled exn then raise exn;
-                             Printf.eprintf "[SSE] ping sleep error: %s\n%!"
+                             Log.Server.error "ping sleep error: %s"
                                (Printexc.to_string exn));
                           (try
                              if info.closed then
@@ -386,7 +386,7 @@ let handle_get_mcp ~(deps : deps) ?legacy_messages_endpoint
                                     ": ping\n\n")
                            with exn ->
                              if is_cancelled exn then raise exn;
-                             Printf.eprintf "[SSE] ping send error: %s\n%!"
+                             Log.Server.error "ping send error: %s"
                                (Printexc.to_string exn);
                              Server_mcp_transport_http_sse.stop_sse_session
                                info.session_id);
@@ -395,10 +395,10 @@ let handle_get_mcp ~(deps : deps) ?legacy_messages_endpoint
                       try loop () with exn ->
                         if is_cancelled exn then ()
                         else
-                          Printf.eprintf "[SSE] ping loop error: %s\n%!"
+                          Log.Server.error "ping loop error: %s"
                             (Printexc.to_string exn))
               | _ -> ());
               let client_count = Sse.client_count () in
               if client_count > Sse.max_clients / 2 then
-                Printf.eprintf "📡 SSE connected: %s (active: %d/%d)\n%!"
+                Log.Server.info "📡 SSE connected: %s (active: %d/%d)"
                   session_id client_count Sse.max_clients))

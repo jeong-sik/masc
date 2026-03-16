@@ -304,14 +304,14 @@ let handle_request
                                     "Tool '%s' is not available on this MCP endpoint."
                                     name)
                              else (
-                               Printf.eprintf "[MCP] tools/call: %s (id=%s, session=%s)\n%!" name
+                               Log.Mcp.info "tools/call: %s (id=%s, session=%s)" name
                                  (match id with `Int i -> string_of_int i | `String s -> s | _ -> "?")
                                  (match mcp_session_id with Some s -> s | None -> "none");
                                let result =
                                  TC.handle_call_tool_eio ~execute_tool_eio
                                    ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params
                                in
-                               Printf.eprintf "[MCP] tools/call done: %s\n%!" name;
+                               Log.Mcp.info "tools/call done: %s" name;
                                result)
                            with Yojson.Safe.Util.Type_error (_, _) ->
                              make_error ~id (-32602) "Invalid params: name must be a string")

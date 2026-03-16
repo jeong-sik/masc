@@ -556,7 +556,7 @@ let load_and_format_for_welcome ~fs:_ (config : config) : string =
     with
     | Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
     | exn ->
-        Printf.eprintf "[WARN] Unexpected institution load error: %s\n%!" (Printexc.to_string exn); ""
+        Log.Misc.error "Unexpected institution load error: %s" (Printexc.to_string exn); ""
   else ""
 
 (** {1 Lightweight JSONL Episode Recording (No Eio Required)}
@@ -590,7 +590,7 @@ let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings 
     output_char oc '\n';
     close_out oc
   with exn ->
-    Printf.eprintf "[institution] JSONL episode write failed: %s\n%!"
+    Log.Institution.error "JSONL episode write failed: %s"
       (Printexc.to_string exn));
   episode
 

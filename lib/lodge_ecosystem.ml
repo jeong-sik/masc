@@ -147,7 +147,7 @@ let spawn_agent_from_gap ~topic ~(signals : gap_signal_t list) ~invalidate_cache
         let announcement = Printf.sprintf "🎉 새 에이전트 탄생: %s\n%s\n(제안: %s)"
           topic description (String.concat ", " proposers) in
         (try ignore (Board.create_post store ~author:"ecosystem" ~content:announcement ~ttl_hours:168 ())
-         with exn -> Printf.eprintf "[lodge] Board.create_post(ecosystem) failed: %s\n%!" (Printexc.to_string exn))
+         with exn -> Log.Lodge.error "Board.create_post(ecosystem) failed: %s" (Printexc.to_string exn))
       end;
       success
 
@@ -546,10 +546,10 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
     (opt_str "primaryValue" primary_value)
   in
   let gql_body = Yojson.Safe.to_string (`Assoc [("query", `String mutation)]) in
-  Printf.eprintf "[Admin] Creating agent '%s' via GraphQL...\n%!" name;
+  Log.Misc.info "Creating agent '%s' via GraphQL..." name;
   match graphql_request ~timeout_sec:10.0 gql_body with
   | Error err ->
-      Printf.eprintf "[Admin] GraphQL request failed: %s\n%!" err;
+      Log.Misc.error "GraphQL request failed: %s" err;
       Error err
   | Ok json_str ->
       try
@@ -559,18 +559,18 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
            let msg = try
              first_err |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string
            with Yojson.Safe.Util.Type_error (_, _) -> "unknown error" in
-           Printf.eprintf "[Admin] GraphQL error creating agent: %s\n%!" msg;
+           Log.Misc.error "GraphQL error creating agent: %s" msg;
            Error msg
          | _ ->
            let result = json |> Yojson.Safe.Util.member "data" |> Yojson.Safe.Util.member "createAgent" in
            let success = result |> Yojson.Safe.Util.member "success" |> Yojson.Safe.Util.to_bool in
            if not success then begin
              let msg = result |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string_option |> Option.value ~default:"unknown error" in
-             Printf.eprintf "[Admin] GraphQL mutation failed: %s\n%!" msg;
+             Log.Misc.error "GraphQL mutation failed: %s" msg;
              Error msg
            end else begin
              invalidate_cache ();
-             Printf.eprintf "[Admin] Agent '%s' created successfully\n%!" name;
+             Log.Misc.info "Agent '%s' created successfully" name;
              let agent = result |> Yojson.Safe.Util.member "agent" in
              match agent with
              | `Null -> Ok (`Assoc [("name", `String name); ("emoji", `String emoji)])
@@ -578,5 +578,5 @@ let create_agent_graphql ~name ~emoji ~korean_name ~traits ~interests
            end)
       with e ->
         let msg = Printexc.to_string e in
-        Printf.eprintf "[Admin] Failed to create agent: %s\n%!" msg;
+        Log.Misc.error "Failed to create agent: %s" msg;
         Error msg

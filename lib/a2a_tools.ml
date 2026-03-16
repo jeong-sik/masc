@@ -179,7 +179,7 @@ let subscription_of_json (json : Yojson.Safe.t) : subscription option =
     let created_at = json |> U.member "created_at" |> U.to_string in
     Some { id; agent_filter; event_types; created_at }
   with Yojson.Safe.Util.Type_error (msg, _) ->
-    Printf.eprintf "[WARN] subscription_of_json: %s\n%!" msg;
+    Log.Misc.warn "subscription_of_json: %s" msg;
     None
 
 (** Save subscriptions to file *)
@@ -194,14 +194,14 @@ let save_subscriptions () =
       Common.protect ~module_name:"a2a_tools" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
         output_string oc content)
     with e ->
-      Printf.eprintf "[WARN] save_subscriptions failed: %s\n%!" (Printexc.to_string e)
+      Log.Misc.error "save_subscriptions failed: %s" (Printexc.to_string e)
 
 (** Load subscriptions from file *)
 let load_subscriptions () =
   if !subscriptions_file = "" || not (Sys.file_exists !subscriptions_file) then ()
   else
     match Safe_ops.read_json_file_safe !subscriptions_file with
-    | Error msg -> Printf.eprintf "[WARN] load_subscriptions: %s\n%!" msg
+    | Error msg -> Log.Misc.warn "load_subscriptions: %s" msg
     | Ok json ->
       let module U = Yojson.Safe.Util in
       let subs = try json |> U.member "subscriptions" |> U.to_list
@@ -855,6 +855,6 @@ let submit_heartbeat_result
             | None -> `Null);
          ])
    | Error msg ->
-       Printf.eprintf "[a2a] heartbeat result rejected: %s\n%!" msg);
+       Log.Misc.info "heartbeat result rejected: %s" msg);
 
   result

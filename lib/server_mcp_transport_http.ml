@@ -492,7 +492,7 @@ let close_sse_conn info =
     info.stop := true;
     (try Httpun.Body.Writer.close info.writer
      with exn ->
-       Printf.eprintf "[DEBUG] close_sse_conn: %s\n%!"
+       Log.Misc.debug "close_sse_conn: %s"
          (Printexc.to_string exn));
     Sse.unregister_if_current info.session_id info.client_id)
 
@@ -506,7 +506,7 @@ let stop_sse_session session_id =
 let close_all_sse_connections () =
   let sessions = Hashtbl.fold (fun k _ acc -> k :: acc) sse_conn_by_session [] in
   List.iter stop_sse_session sessions;
-  Printf.eprintf "🚀 MASC MCP: Closed %d SSE connections\n%!"
+  Log.Server.info "MASC MCP: Closed %d SSE connections"
     (List.length sessions)
 
 let send_raw info data =
@@ -841,7 +841,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
                       (try Eio.Time.sleep clock sse_ping_interval_s
                        with exn ->
                          if is_cancelled exn then raise exn;
-                         Printf.eprintf "[SSE] ping sleep error: %s\n%!"
+                         Log.Server.error "ping sleep error: %s"
                            (Printexc.to_string exn));
                       (try
                          if info.closed then
@@ -850,7 +850,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
                            ignore (send_raw info ": ping\n\n")
                        with exn ->
                          if is_cancelled exn then raise exn;
-                         Printf.eprintf "[SSE] ping send error: %s\n%!"
+                         Log.Server.error "ping send error: %s"
                            (Printexc.to_string exn);
                          stop_sse_session info.session_id);
                       loop ())
@@ -858,12 +858,12 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
                   try loop () with exn ->
                     if is_cancelled exn then ()
                     else
-                      Printf.eprintf "[SSE] ping loop error: %s\n%!"
+                      Log.Server.error "ping loop error: %s"
                         (Printexc.to_string exn))
           | _ -> ());
           let client_count = Sse.client_count () in
           if client_count > Sse.max_clients / 2 then
-            Printf.eprintf "📡 SSE connected: %s (active: %d/%d)\n%!"
+            Log.Server.info "SSE connected: %s (active: %d/%d)"
               session_id client_count Sse.max_clients))
 
 let sse_simple_handler ~deps request reqd =

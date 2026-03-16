@@ -88,7 +88,7 @@ let handle_keeper_down ctx args : tool_result =
         with
         | Ok _ -> ()
         | Error err ->
-            Printf.eprintf "[keeper] linked team session stop failed: %s\n%!"
+            Log.Keeper.error "linked team session stop failed: %s"
               err
       in
       Option.iter stop_linked_session m.active_team_session_id;
@@ -120,7 +120,7 @@ let handle_keeper_down ctx args : tool_result =
         if validate_name m.trace_id then (
           let dir = Filename.concat (session_base_dir ctx.config) m.trace_id in
           try rm_rf dir with exn ->
-            Printf.eprintf "[keeper] session dir cleanup failed: %s\n%!"
+            Log.Keeper.error "session dir cleanup failed: %s"
               (Printexc.to_string exn)));
       let json = `Assoc [
         ("name", `String name);

@@ -202,14 +202,12 @@ let read_events_query ~base_dir ~room_id ~after_seq_opt =
                 (match parse_event_row ~seq ~room_id ~ts ~event_type_s ~actor_id ~payload_s with
                 | Ok ev -> loop (ev :: acc) skipped
                 | Error e ->
-                    Printf.eprintf
-                      "[trpg_engine_store_sqlite] skipping malformed event row: %s\n%!"
+                    Log.Trpg.info "skipping malformed event row: %s"
                       e;
                     loop acc (skipped + 1))
             | Sqlite3.Rc.DONE ->
                 if skipped > 0 then
-                  Printf.eprintf
-                    "[trpg_engine_store_sqlite] skipped %d malformed event row(s) for room %s\n%!"
+                  Log.Trpg.info "skipped %d malformed event row(s) for room %s"
                     skipped room_id;
                 Ok (List.rev acc)
             | rc ->

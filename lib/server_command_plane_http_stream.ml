@@ -18,7 +18,7 @@ let stream_native_chain_events_http ~deps ~request reqd =
   let closed = ref false in
   let sub_ref : Chain_telemetry.subscription option ref = ref None in
   let log_chain_sse message =
-    Printf.eprintf "[chain-sse] %s\n%!" message
+    Log.Misc.info "%s" message
   in
   let close_stream ?reason () =
     let sub_to_remove, should_close =
@@ -123,7 +123,7 @@ let stream_native_chain_events_h2 ~deps ~request h2_reqd =
   let closed = ref false in
   let sub_ref : Chain_telemetry.subscription option ref = ref None in
   let log_chain_sse message =
-    Printf.eprintf "[chain-sse/h2] %s\n%!" message
+    Log.Misc.info "%s" message
   in
   let close_stream ?reason () =
     let sub_to_remove, should_close =

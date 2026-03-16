@@ -192,7 +192,7 @@ let error_handler _client_addr ?request:_ error respond =
     | `Bad_request -> "Bad request"
     | `Internal_server_error -> "Internal server error"
   in
-  Printf.eprintf "[H2] Error: %s\n%!" message;
+  Log.Http.error "Error: %s" message;
   let headers = H2.Headers.of_list [("content-type", "text/plain")] in
   let body = respond headers in
   H2.Body.Writer.write_string body message;
@@ -284,7 +284,7 @@ let run ~sw ~net ~clock config request_handler =
           Eio.Switch.run (fun conn_sw ->
             Eio.Switch.on_release conn_sw (fun () ->
               try Eio.Flow.close flow with exn ->
-                Printf.eprintf "[WARN] [h2] flow close failed: %s\n%!" (Printexc.to_string exn)
+                Log.Misc.error "[h2] flow close failed: %s" (Printexc.to_string exn)
             );
             try
               H2_eio.Server.create_connection_handler
@@ -294,13 +294,13 @@ let run ~sw ~net ~clock config request_handler =
                 client_addr
                 flow
             with exn ->
-              Printf.eprintf "[H2] Connection error: %s\n%!" (Printexc.to_string exn)
+              Log.Http.error "Connection error: %s" (Printexc.to_string exn)
           )
         )
       with exn ->
         if is_cancelled exn then raise exn;
         let delay = !backoff_s in
-        Printf.eprintf "[H2] Accept error: %s (backoff %.2fs)\n%!"
+        Log.Http.error "Accept error: %s (backoff %.2fs)"
           (Printexc.to_string exn) delay;
         Eio.Time.sleep clock delay;
         bump_backoff ());
@@ -309,7 +309,7 @@ let run ~sw ~net ~clock config request_handler =
       if is_cancelled exn then ()
       else begin
         let delay = !backoff_s in
-        Printf.eprintf "[H2] Accept loop error: %s (backoff %.2fs)\n%!"
+        Log.Http.error "Accept loop error: %s (backoff %.2fs)"
           (Printexc.to_string exn) delay;
         Eio.Time.sleep clock delay;
         bump_backoff ();

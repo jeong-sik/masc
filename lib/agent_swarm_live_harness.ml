@@ -1,4 +1,6 @@
+module Masc_log = Log
 open Agent_sdk
+module Log = Masc_log
 
 type worker_role =
   | Discover
@@ -318,7 +320,7 @@ let seed_tasks ~sw ~net ~masc_url plans =
   in
   (match Agent_swarm_client.join ~sw coordinator with
    | Error e ->
-       Printf.eprintf "[swarm-coordinator] MASC join warning: %s\n%!" e
+       Log.Swarm.warn "MASC join warning: %s" e
    | Ok _ -> ());
   let tasks =
     List.map
@@ -327,9 +329,9 @@ let seed_tasks ~sw ~net ~masc_url plans =
   in
   (match Agent_swarm_client.batch_add_tasks ~sw coordinator ~tasks with
    | Error e ->
-       Printf.eprintf "[swarm-coordinator] batch_add_tasks warning: %s\n%!" e
+       Log.Swarm.warn "batch_add_tasks warning: %s" e
    | Ok _ ->
-       Printf.eprintf "[swarm-coordinator] seeded %d tasks\n%!"
+       Log.Swarm.info "seeded %d tasks"
          (List.length tasks));
   ignore (Agent_swarm_client.leave ~sw coordinator)
 

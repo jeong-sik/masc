@@ -288,7 +288,7 @@ let handle_keeper_msg ctx args : tool_result =
               let _trunc s n = if String.length s > n then String.sub s 0 n ^ "..." else s in
               let execute_tool_calls tcs =
                 List.map (fun (tc : Llm_client.tool_call) ->
-                  Printf.eprintf "[TRPG-TRACE] Executing tool: %s args: %s\n%!"
+                  Log.Trpg.info "Executing tool: %s args: %s"
                     tc.call_name (_trunc tc.call_arguments 200);
                   let (decision, result_opt, eval_opt, duration_ms) =
                     Eval_gate.guarded_execute
@@ -302,18 +302,18 @@ let handle_keeper_msg ctx args : tool_result =
                   in
                   let output = match decision with
                     | Trajectory.Reject reason ->
-                        Printf.eprintf "[HARNESS] Tool %s GATED: %s\n%!" tc.call_name reason;
+                        Log.Misc.info "Tool %s GATED: %s" tc.call_name reason;
                         Yojson.Safe.to_string (`Assoc [
                           ("error", `String (Printf.sprintf "gated: %s" reason));
                           ("tool", `String tc.call_name);
                         ])
                     | Trajectory.Pass ->
                         let r = Option.value ~default:"" result_opt in
-                        Printf.eprintf "[TRPG-TRACE] Tool %s OK: %s\n%!" tc.call_name (_trunc r 200);
+                        Log.Trpg.info "Tool %s OK: %s" tc.call_name (_trunc r 200);
                         (* Log post-eval warnings *)
                         (match eval_opt with
                          | Some eval when eval.Eval_gate.should_warn ->
-                             Printf.eprintf "[HARNESS] Warning for %s: %s\n%!" tc.call_name
+                             Log.Misc.warn "Warning for %s: %s" tc.call_name
                                (Option.value ~default:"" eval.Eval_gate.warning)
                          | _ -> ());
                         r
@@ -356,7 +356,7 @@ let handle_keeper_msg ctx args : tool_result =
                   ( content, acc_usage, last_resp.Llm_client.model_used,
                     acc_latency, acc_cost, acc_tools_used )
                 else begin
-                  Printf.eprintf "[TRPG-TRACE] Tool round %d/%d: %d tool calls\n%!"
+                  Log.Trpg.info "Tool round %d/%d: %d tool calls"
                     round max_tool_rounds
                     (List.length last_resp.Llm_client.tool_calls);
                   let round_tools =
@@ -412,7 +412,7 @@ let handle_keeper_msg ctx args : tool_result =
                       last_resp.Llm_client.model_used, acc_latency,
                       acc_cost, acc_tools_used @ round_tools )
                   | Ok resp_next ->
-                    Printf.eprintf "[TRPG-TRACE] Follow-up round %d resp: tool_calls=%d content_len=%d model=%s\n%!"
+                    Log.Trpg.info "Follow-up round %d resp: tool_calls=%d content_len=%d model=%s"
                       round
                       (List.length resp_next.Llm_client.tool_calls)
                       (String.length resp_next.Llm_client.content)

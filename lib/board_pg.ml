@@ -148,10 +148,10 @@ let create pool =
   ) pool in
   match init_result with
   | Error err ->
-      Printf.eprintf "[Board_pg] Schema init failed: %s\n%!" (Caqti_error.show err);
+      Log.BoardPg.error "Schema init failed: %s" (Caqti_error.show err);
       Error (Io_error (Caqti_error.show err))
   | Ok () ->
-      Printf.eprintf "[Board_pg] Schema initialized.\n%!";
+      Log.BoardPg.info "Schema initialized.";
       Ok { pool }
 
 (** {1 Row Types} *)
@@ -517,7 +517,7 @@ let notify_event t event =
   ) t.pool with
   | Ok () -> ()
   | Error err ->
-      Printf.eprintf "[Board_pg] notify_event error: %s\n%!" (Caqti_error.show err)
+      Log.BoardPg.error "notify_event error: %s" (Caqti_error.show err)
 
 (** {1 Operations} *)
 
@@ -625,7 +625,7 @@ let list_posts t ?(visibility_filter=None) ?hearth ?(sort_by=Hot) ?(limit=50) ()
   ) t.pool with
   | Ok rows -> List.filter_map post_of_row rows
   | Error err ->
-      Printf.eprintf "[Board_pg] list_posts error: %s\n%!" (Caqti_error.show err);
+      Log.BoardPg.error "list_posts error: %s" (Caqti_error.show err);
       []
 
 (** {1 Comment Operations} *)
@@ -711,7 +711,7 @@ let list_comments t ?(limit=1000) () =
   ) t.pool with
   | Ok rows -> List.filter_map comment_of_row rows
   | Error err ->
-      Printf.eprintf "[Board_pg] list_comments error: %s\n%!" (Caqti_error.show err);
+      Log.BoardPg.error "list_comments error: %s" (Caqti_error.show err);
       []
 
 (** {1 Vote Operations} *)
@@ -845,7 +845,7 @@ let stats t =
         ("backend", `String "postgresql");
       ]
   | Error err ->
-      Printf.eprintf "[Board_pg] stats error: %s\n%!" (Caqti_error.show err);
+      Log.BoardPg.error "stats error: %s" (Caqti_error.show err);
       `Assoc [("error", `String (Caqti_error.show err))]
 
 (** {1 Search} *)
@@ -857,7 +857,7 @@ let search t ~query ~limit =
   ) t.pool with
   | Ok rows -> List.filter_map post_of_row rows
   | Error err ->
-      Printf.eprintf "[Board_pg] search error: %s\n%!" (Caqti_error.show err);
+      Log.BoardPg.error "search error: %s" (Caqti_error.show err);
       []
 
 (** {1 Hearths} *)
@@ -869,7 +869,7 @@ let list_hearths t =
   ) t.pool with
   | Ok pairs -> pairs
   | Error err ->
-      Printf.eprintf "[Board_pg] list_hearths error: %s\n%!" (Caqti_error.show err);
+      Log.BoardPg.error "list_hearths error: %s" (Caqti_error.show err);
       []
 
 (** {1 Thread ID} *)
@@ -907,7 +907,7 @@ let get_all_karma t =
   ) t.pool with
   | Ok pairs -> pairs
   | Error err ->
-      Printf.eprintf "[Board_pg] get_all_karma error: %s\n%!" (Caqti_error.show err);
+      Log.BoardPg.error "get_all_karma error: %s" (Caqti_error.show err);
       []
 
 let get_agent_karma t ~agent_name =
@@ -927,7 +927,7 @@ let sweep t =
   ) t.pool with
   | Ok (p, c) -> (p, c)
   | Error err ->
-      Printf.eprintf "[Board_pg] sweep error: %s\n%!" (Caqti_error.show err);
+      Log.BoardPg.error "sweep error: %s" (Caqti_error.show err);
       (0, 0)
 
 (** {1 JSONL → PG Migration} *)
@@ -991,7 +991,7 @@ let migrate_from_store t (store : Board.store) =
     | Ok () -> incr posts_ok
     | Error err ->
         incr posts_skip;
-        Printf.eprintf "[Migrate] Post %s failed: %s\n%!"
+        Log.BoardPg.error "Post %s failed: %s"
           (Post_id.to_string p.id) (Caqti_error.show err)
   ) store.posts;
 
@@ -1010,7 +1010,7 @@ let migrate_from_store t (store : Board.store) =
     | Ok () -> incr comments_ok
     | Error err ->
         incr comments_skip;
-        Printf.eprintf "[Migrate] Comment %s failed: %s\n%!"
+        Log.BoardPg.error "Comment %s failed: %s"
           (Comment_id.to_string c.id) (Caqti_error.show err)
   ) store.comments;
 
@@ -1029,7 +1029,7 @@ let migrate_from_store t (store : Board.store) =
           C.exec upsert_vote_q (target_type, target_id, voter, (dir_str, now))
         ) t.pool with
         | Ok () -> incr votes_ok
-        | Error err -> Printf.eprintf "[board_pg] vote migration: %s\n%!" (Caqti_error.show err))
+        | Error err -> Log.BoardPg.info "vote migration: %s" (Caqti_error.show err))
     | _ -> ()  (* Skip malformed keys *)
   ) store.vote_log;
 

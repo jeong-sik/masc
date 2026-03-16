@@ -168,7 +168,7 @@ let maybe_sweep reg =
   let now = Time_compat.now () in
   if now -. reg.last_sweep > float_of_int Limits.sweeper_interval_sec then
     (try ignore (sweep reg)
-     with exn -> Printf.eprintf "[spawn_registry] sweep failed: %s\n%!" (Printexc.to_string exn))
+     with exn -> Log.Spawn.error "sweep failed: %s" (Printexc.to_string exn))
 
 (** {1 Cooldown Management} *)
 
@@ -195,7 +195,7 @@ let check_cooldown reg agent_name : (unit, spawn_error) result =
 let record_failure reg agent_name =
   match Agent_name.of_string agent_name with
   | Error err ->
-      Printf.eprintf "[spawn_registry] Agent_name parse failed: %s\n%!" (show_spawn_error err)
+      Log.Spawn.error "Agent_name parse failed: %s" (show_spawn_error err)
   | Ok agent ->
       with_lock reg (fun () ->
         let key = Agent_name.to_string agent in
@@ -220,7 +220,7 @@ let record_failure reg agent_name =
 let clear_failures reg agent_name =
   match Agent_name.of_string agent_name with
   | Error err ->
-      Printf.eprintf "[spawn_registry] Agent_name parse failed: %s\n%!" (show_spawn_error err)
+      Log.Spawn.error "Agent_name parse failed: %s" (show_spawn_error err)
   | Ok agent ->
       with_lock reg (fun () ->
         Hashtbl.remove reg.cooldowns (Agent_name.to_string agent)
@@ -322,7 +322,7 @@ let list_by_agent reg ~agent_name : spawn_entry list =
   maybe_sweep reg;
   match Agent_name.of_string agent_name with
   | Error err ->
-      Printf.eprintf "[spawn_registry] Agent_name parse failed: %s\n%!" (show_spawn_error err);
+      Log.Spawn.error "Agent_name parse failed: %s" (show_spawn_error err);
       []
   | Ok agent ->
       with_lock reg (fun () ->

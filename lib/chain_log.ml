@@ -105,7 +105,7 @@ let output_text level module_name ctx msg =
         let kv = List.map (fun (k, v) -> Printf.sprintf "%s=%s" k v) pairs in
         " {" ^ String.concat ", " kv ^ "}"
   in
-  Printf.eprintf "%s%s %s%s%s\n%!" ts (level_emoji level) mod_str msg ctx_str
+  Log.Misc.info "%s%s %s%s%s" ts (level_emoji level) mod_str msg ctx_str
 
 let output_json level module_name ctx msg =
   let ctx_json =
@@ -115,7 +115,7 @@ let output_json level module_name ctx msg =
         let kv = List.map (fun (k, v) -> Printf.sprintf "\"%s\":\"%s\"" k (String.escaped v)) pairs in
         "," ^ String.concat "," kv
   in
-  Printf.eprintf "{\"ts\":\"%s\",\"level\":\"%s\",\"module\":\"%s\",\"msg\":\"%s\"%s}\n%!"
+  Log.Misc.info "{\"ts\":\"%s\",\"level\":\"%s\",\"module\":\"%s\",\"msg\":\"%s\"%s}"
     (timestamp ()) (level_to_string level) module_name (String.escaped msg) ctx_json
 
 let log level module_name ?(ctx=[]) fmt =

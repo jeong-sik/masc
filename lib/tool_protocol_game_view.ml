@@ -384,7 +384,7 @@ let capabilities_for_agent config ~agent_name =
         |> Option.value ~default:[]
     | _ -> []
   with exn ->
-    Printf.eprintf "[TRPG] capabilities_for_agent failed: %s\n%!" (Printexc.to_string exn);
+    Log.Trpg.error "capabilities_for_agent failed: %s" (Printexc.to_string exn);
     []
 
 let default_world_skills =
@@ -554,7 +554,7 @@ let handle_experiment_canonical (ctx : context) ~canonical_tool ~legacy_name
            ~details:(`Assoc [ ("legacy_tool", `String legacy_name) ])
            ())
   | None ->
-      Printf.eprintf "[dispatch] NOT_IMPLEMENTED: experiment %s (canonical: %s)\n%!"
+      Log.Dispatch.info "NOT_IMPLEMENTED: experiment %s (canonical: %s)"
         legacy_name canonical_tool;
       Error
         (err_json ~canonical_tool ~code:"NOT_IMPLEMENTED"
@@ -759,7 +759,7 @@ let handle_trpg_canonical (ctx : context) ~canonical_tool ~legacy_name args :
         ~details:(`Assoc [ ("legacy_tool", `String legacy_name) ])
         ()
   | None ->
-      Printf.eprintf "[dispatch] NOT_IMPLEMENTED: trpg %s (canonical: %s)\n%!"
+      Log.Dispatch.info "NOT_IMPLEMENTED: trpg %s (canonical: %s)"
         legacy_name canonical_tool;
       err_json ~canonical_tool ~code:"NOT_IMPLEMENTED"
         ~message:(Printf.sprintf "legacy dispatcher unavailable: %s. Use canonical tool names from dispatch table." legacy_name)
@@ -902,7 +902,7 @@ let handle_client_input_transition (ctx : context) ~canonical_tool ~status
             broadcast_masc_event ~event_type ~agent:ctx.agent_name
               ~data:(client_input_payload item) ()
           with exn ->
-            Printf.eprintf "[client_input] SSE %s broadcast failed: %s\n%!"
+            Log.Protocol.error "SSE %s broadcast failed: %s"
               event_type (Printexc.to_string exn));
           Ok (ok_json ~canonical_tool (client_input_payload item))
       | Error msg ->
@@ -1082,7 +1082,7 @@ let handle_legacy_alias (ctx : context) ~legacy_name ~canonical_tool args :
       | None ->
           (false, Printf.sprintf "legacy trpg dispatcher unavailable for %s" name))
   | _ ->
-      Printf.eprintf "[dispatch] NOT_IMPLEMENTED: legacy alias %s -> %s\n%!"
+      Log.Dispatch.info "NOT_IMPLEMENTED: legacy alias %s -> %s"
         legacy_name canonical_tool;
       err_json ~canonical_tool ~legacy_alias:legacy_name ~code:"NOT_IMPLEMENTED"
         ~message:

@@ -240,7 +240,7 @@ let get_tty () =
           else None
         with Unix.Unix_error _ -> None
   with e ->
-    Printf.eprintf "[WARN] get_tty failed: %s\n%!" (Printexc.to_string e);
+    Log.Misc.error "get_tty failed: %s" (Printexc.to_string e);
     None
 
 (** Resolve agent name - supports both exact nickname and agent_type prefix match.

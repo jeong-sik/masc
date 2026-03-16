@@ -204,10 +204,10 @@ let load_latest_checkpoint config session_id : Team_session_types.checkpoint opt
         match Team_session_types.checkpoint_of_yojson json with
         | Ok cp -> Some cp
         | Error e ->
-            Printf.eprintf "[team_session] checkpoint parse error (%s): %s\n%!" latest e;
+            Log.Session.error "checkpoint parse error (%s): %s" latest e;
             None
       with exn ->
-        Printf.eprintf "[team_session] checkpoint load error (%s): %s\n%!" latest
+        Log.Session.error "checkpoint load error (%s): %s" latest
           (Printexc.to_string exn);
         None)
 
@@ -222,7 +222,7 @@ let read_recent_events config session_id ~max_count :
         | Error _ -> None)
       raw
   with exn ->
-    Printf.eprintf "[team_session] read_recent_events error (%s): %s\n%!"
+    Log.Session.error "read_recent_events error (%s): %s"
       session_id (Printexc.to_string exn);
     []
 

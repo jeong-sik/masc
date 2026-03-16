@@ -72,7 +72,7 @@ let force_leave config ~agent_id ~reason =
   (* Broadcast the forced leave *)
   let message = Printf.sprintf "[SYSTEM] Agent '%s' forcibly removed: %s" agent_id reason in
   (try ignore (Room.broadcast config ~from_agent:"system" ~content:message)
-   with exn -> Printf.eprintf "[suspend] broadcast (force leave) failed: %s\n%!" (Printexc.to_string exn))
+   with exn -> Log.Misc.error "broadcast (force leave) failed: %s" (Printexc.to_string exn))
 
 (** {1 Tool Handlers} *)
 

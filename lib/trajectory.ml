@@ -224,7 +224,7 @@ let record_entry (acc : accumulator) (entry : tool_call_entry) : unit =
   (* Persist immediately for crash recovery *)
   (try append_entry ~masc_root:acc.masc_root ~keeper_name:acc.keeper_name
        ~trace_id:acc.trace_id entry
-   with exn -> Printf.eprintf "[TRAJECTORY] Failed to persist entry for %s: %s\n%!" acc.trace_id (Printexc.to_string exn))
+   with exn -> Log.Keeper.error "Failed to persist entry for %s: %s" acc.trace_id (Printexc.to_string exn))
 
 let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
   let traj = {
@@ -242,7 +242,7 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
   } in
   (try append_summary ~masc_root:acc.masc_root ~keeper_name:acc.keeper_name
        ~trace_id:acc.trace_id traj
-   with exn -> Printf.eprintf "[TRAJECTORY] Failed to persist summary for %s: %s\n%!" acc.trace_id (Printexc.to_string exn));
+   with exn -> Log.Keeper.error "Failed to persist summary for %s: %s" acc.trace_id (Printexc.to_string exn));
   traj
 
 (* ================================================================ *)

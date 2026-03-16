@@ -83,7 +83,7 @@ module Tracker = struct
 
   let notify_ref : (task_id:string -> progress:float -> ?message:string -> ?estimated_remaining:float -> unit -> unit) ref =
     ref (fun ~task_id ~progress ?message:_ ?estimated_remaining:_ () ->
-      Printf.eprintf "[Progress] BUG: notify_ref not wired up! task=%s progress=%.2f\n%!" task_id progress
+      Log.Misc.info "BUG: notify_ref not wired up! task=%s progress=%.2f" task_id progress
     )
 
   (** Assert that notify_ref has been wired up.
@@ -119,7 +119,7 @@ module Tracker = struct
   let step t ?message () =
     t.completed_steps <- t.completed_steps + 1;
     if t.completed_steps > t.total_steps then
-      Printf.eprintf "[Progress] WARNING: step called %d times but total_steps is %d (task=%s)\n%!"
+      Log.Misc.warn "WARNING: step called %d times but total_steps is %d (task=%s)"
         t.completed_steps t.total_steps t.task_id;
     let progress = Float.of_int t.completed_steps /. Float.of_int t.total_steps in
     update t ~progress ?message ()
@@ -177,7 +177,7 @@ let notify ~task_id ~progress ?message ?estimated_remaining () =
   let callback = State.with_lock (fun () -> State.global.sse_broadcast) in
   try callback json
   with e ->
-    Printf.eprintf "[Progress] SSE broadcast failed: %s\n%!" (Printexc.to_string e)
+    Log.Misc.error "SSE broadcast failed: %s" (Printexc.to_string e)
 
 (** Wire up the forward reference
     INVARIANT: This assignment MUST happen exactly once, after notify is defined.

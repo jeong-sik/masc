@@ -159,14 +159,14 @@ let save_agents_to_file_cache () =
       Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
         output_string oc (Yojson.Safe.pretty_to_string cache_json))
     with e ->
-      Printf.eprintf "[Lodge] Failed to save agent cache: %s\n%!" (Printexc.to_string e)
+      Log.Lodge.error "Failed to save agent cache: %s" (Printexc.to_string e)
   end
 
 (** Load agents from file cache (returns true if loaded, false otherwise) *)
 let load_agents_from_file_cache () : bool =
   let path = agent_file_cache_path () in
   if not (Sys.file_exists path) then begin
-    Printf.eprintf "[Lodge] No file cache at %s\n%!" path;
+    Log.Lodge.info "No file cache at %s" path;
     false
   end else begin
     try
@@ -179,7 +179,7 @@ let load_agents_from_file_cache () : bool =
       let age_hours = (Time_compat.now () -. updated_at) /. 3600.0 in
       let ttl = agent_cache_ttl_hours () in
       if age_hours > ttl then begin
-        Printf.eprintf "[Lodge] Cache expired (%.1f hours old, TTL=%.0f)\n%!" age_hours ttl;
+        Log.Lodge.info "Cache expired (%.1f hours old, TTL=%.0f)" age_hours ttl;
         false
       end else begin
         let agents_json = json |> member "agents" |> to_list in
@@ -187,11 +187,11 @@ let load_agents_from_file_cache () : bool =
         Mutex.lock agent_cache_mu;
         List.iter (fun a -> Hashtbl.replace agent_cache a.name a) loaded;
         Mutex.unlock agent_cache_mu;
-        Printf.eprintf "[Lodge] Loaded %d agents from file cache (%.1f hours old)\n%!" (List.length loaded) age_hours;
+        Log.Lodge.info "Loaded %d agents from file cache (%.1f hours old)" (List.length loaded) age_hours;
         true
       end
     with e ->
-      Printf.eprintf "[Lodge] Failed to load file cache: %s\n%!" (Printexc.to_string e);
+      Log.Lodge.error "Failed to load file cache: %s" (Printexc.to_string e);
       false
   end
 
@@ -219,9 +219,9 @@ let load_agents_config () =
   if not Env_config.LodgeV2.enabled then begin
     if not (has_cached_agents_in_memory ()) then prime_builtin_core_agents ()
   end else if load_agents_from_cache_if_available () then begin
-    Printf.eprintf "[Lodge] Using cached agents (skipping GraphQL bootstrap)\n%!";
+    Log.Lodge.info "Using cached agents (skipping GraphQL bootstrap)";
   end else begin
-    Printf.eprintf "[Lodge] Loading agents from GraphQL...\n%!";
+    Log.Lodge.info "Loading agents from GraphQL...";
     (* Query all Lodge identity fields for dynamic agent system *)
     (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)
     let query = "{\"query\": \"{ agents(first: 15) { edges { node { name primaryValue status emoji koreanName model interests } } } }\"}" in
@@ -229,14 +229,14 @@ let load_agents_config () =
     begin try
       match graphql_request ~timeout_sec:5.0 query with
       | Error err ->
-          Printf.eprintf "[Lodge] GraphQL request failed: %s\n%!" err
+          Log.Lodge.error "GraphQL request failed: %s" err
       | Ok json_str ->
-          Printf.eprintf "[Lodge] GraphQL response: %d bytes\n%!" (String.length json_str);
+          Log.Lodge.info "GraphQL response: %d bytes" (String.length json_str);
           (* Parse JSON response *)
           let json = Yojson.Safe.from_string json_str in
           (match graphql_agents_edges json with
            | Error msg ->
-               Printf.eprintf "[Lodge] GraphQL agent parse failed: %s\n%!" msg
+               Log.Lodge.error "GraphQL agent parse failed: %s" msg
            | Ok edges ->
                List.iter (fun edge ->
                  try
@@ -269,21 +269,21 @@ let load_agents_config () =
                Mutex.unlock agent_cache_mu;
                if n > 0 then begin
                  graphql_success := true;
-                 Printf.eprintf "[Lodge] ✅ Loaded %d SOUL agents from Neo4j\n%!" n;
+                 Log.Lodge.info "✅ Loaded %d SOUL agents from Neo4j" n;
                  save_agents_to_file_cache ()
                end)
     with e ->
-      Printf.eprintf "[Lodge] ❌ GraphQL failed: %s\n%!" (Printexc.to_string e)
+      Log.Lodge.error "❌ GraphQL failed: %s" (Printexc.to_string e)
     end;
     (* Fallback to file cache if GraphQL failed *)
     if not !graphql_success then begin
-      Printf.eprintf "[Lodge] Trying file cache fallback...\n%!";
+      Log.Lodge.info "Trying file cache fallback...";
       if not (load_agents_from_file_cache ()) then begin
-        Printf.eprintf "[Lodge] Falling back to builtin core identities\n%!";
+        Log.Lodge.info "Falling back to builtin core identities";
         prime_builtin_core_agents ();
       end;
       if not (has_cached_agents_in_memory ()) then
-        Printf.eprintf "[Lodge] ⚠ No agents available (GraphQL failed, no valid cache)\n%!"
+        Log.Lodge.error "⚠ No agents available (GraphQL failed, no valid cache)"
     end
   end
 
@@ -343,7 +343,7 @@ let serialize_value_weights weights =
 let evolve_agent ~name ~dimension ~outcome =
   match get_cached_agent name with
   | None ->
-    Printf.eprintf "[Evolution] Agent %s not found in cache\n%!" name;
+    Log.Evolution.info "Agent %s not found in cache" name;
     false
   | Some config ->
     let weights = match config.value_weights with
@@ -351,7 +351,7 @@ let evolve_agent ~name ~dimension ~outcome =
       | None -> []
     in
     if weights = [] then begin
-      Printf.eprintf "[Evolution] No value_weights for %s\n%!" name;
+      Log.Evolution.info "No value_weights for %s" name;
       false
     end else begin
       (* Calculate delta based on outcome *)
@@ -400,12 +400,12 @@ let evolve_agent ~name ~dimension ~outcome =
           generation = new_gen;
         };
         Mutex.unlock agent_cache_mu;
-        Printf.eprintf "[Evolution] %s evolved: %s %s%.2f -> gen %d\n%!"
+        Log.Evolution.info "%s evolved: %s %s%.2f -> gen %d"
           name dimension
           (if delta >= 0.0 then "+" else "") delta new_gen;
         true
       with e ->
-        Printf.eprintf "[Evolution] Failed to update %s: %s\n%!" name (Printexc.to_string e);
+        Log.Evolution.error "Failed to update %s: %s" name (Printexc.to_string e);
         false
     end
 

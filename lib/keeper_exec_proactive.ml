@@ -9,13 +9,13 @@ open Keeper_exec_autonomy
 
 let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
   let log_proactive_failure reason =
-    Printf.eprintf "[keeper] proactive emission failed: %s\n%!" reason
+    Log.Keeper.error "proactive emission failed: %s" reason
   in
   if not meta.proactive_enabled then meta
   else if Agent_economy.economic_pressure
             ~base_path:ctx.config.base_path ~agent_name:meta.name
           = Agent_economy.Hustle then begin
-    Printf.eprintf "[keeper] economy hustle mode: suppressing proactive for %s\n%!" meta.name;
+    Log.Keeper.info "economy hustle mode: suppressing proactive for %s" meta.name;
     meta  (* Skip proactive entirely in Hustle mode *)
   end
   else
@@ -64,8 +64,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                   ~daily_budget_usd:daily_budget
                   ~cost_today_usd:meta.deliberation_cost_total_usd)
         then (
-          Printf.eprintf
-            "[keeper-deliberation] %s budget exhausted (%.4f >= %.4f)\n%!"
+          Log.KeeperExec.info "%s budget exhausted (%.4f >= %.4f)"
             meta.name meta.deliberation_cost_total_usd daily_budget;
           meta)
         else
@@ -119,8 +118,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                       trigger_strs
                   in
                   if triggers = [] then (
-                    Printf.eprintf
-                      "[keeper-deliberation] %s no parseable triggers from: %s\n%!"
+                    Log.KeeperExec.info "%s no parseable triggers from: %s"
                       meta.name meta.last_triage_triggers;
                     meta)
                   else
@@ -191,8 +189,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                     in
                     match result with
                     | Error msg ->
-                        Printf.eprintf
-                          "[keeper-deliberation] %s LLM call failed: %s\n%!"
+                        Log.KeeperExec.error "%s LLM call failed: %s"
                           meta.name msg;
                         meta
                     | Ok response ->
@@ -216,8 +213,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                              response.content
                          with
                          | Error msg ->
-                             Printf.eprintf
-                               "[keeper-deliberation] %s parse failed: %s (raw: %s)\n%!"
+                             Log.KeeperExec.error "%s parse failed: %s (raw: %s)"
                                meta.name msg
                                (Keeper_types.short_preview response.content);
                              (* Update meta with cost even on parse failure *)
@@ -235,13 +231,11 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                              (match write_meta ctx.config updated with
                               | Ok () -> ()
                               | Error msg ->
-                                  Printf.eprintf
-                                    "[keeper-deliberation] write_meta failed: %s\n%!"
+                                  Log.KeeperExec.error "write_meta failed: %s"
                                     msg);
                              updated
                          | Ok (action, reasoning, confidence) ->
-                             Printf.eprintf
-                               "[keeper-deliberation] %s decided: %s (confidence=%.2f, reason=%s)\n%!"
+                             Log.KeeperExec.info "%s decided: %s (confidence=%.2f, reason=%s)"
                                meta.name
                                (Keeper_deliberation.deliberation_action_to_string action)
                                confidence
@@ -278,8 +272,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                          ~agent_name:meta.agent_name
                                          ~task_id
                                      in
-                                     Printf.eprintf
-                                       "[keeper-deliberation] task_claim result: %s\n%!"
+                                     Log.KeeperExec.info "task_claim result: %s"
                                        result
                                    with exn ->
                                      log_keeper_exn ~label:"deliberation task_claim failed" exn)
@@ -349,8 +342,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                       if !stop then ()
                                       else (
                                         incr step_count;
-                                        Printf.eprintf
-                                          "[keeper-deliberation] %s multi_step %d/%d: %s\n%!"
+                                        Log.KeeperExec.info "%s multi_step %d/%d: %s"
                                           meta.name !step_count (List.length steps_to_run)
                                           (Keeper_deliberation.deliberation_action_to_string
                                              step_action);
@@ -414,8 +406,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                                     ~from_agent:meta.agent_name
                                                     ~content:msg)
                                            | Keeper_deliberation.MultiStep _ ->
-                                               Printf.eprintf
-                                                 "[keeper-deliberation] %s nested multi_step skipped\n%!"
+                                               Log.KeeperExec.info "%s nested multi_step skipped"
                                                  meta.name
                                          with exn ->
                                            log_keeper_exn ~label:(Printf.sprintf "deliberation %s multi_step %d failed" meta.name !step_count) exn;
@@ -465,8 +456,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                              (match write_meta ctx.config updated with
                               | Ok () -> ()
                               | Error msg ->
-                                  Printf.eprintf
-                                    "[keeper-deliberation] write_meta failed: %s\n%!"
+                                  Log.KeeperExec.error "write_meta failed: %s"
                                     msg);
                              updated)))
       else
@@ -486,7 +476,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                     (match write_meta ctx.config updated_meta with
                      | Ok () -> ()
                      | Error msg ->
-                         Printf.eprintf "[keeper] write_meta failed after goal turn: %s\n%!" msg);
+                         Log.Keeper.error "write_meta failed after goal turn: %s" msg);
                     updated_meta
                 | None ->
                let primary =
@@ -624,7 +614,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                        (match write_meta ctx.config updated with
                         | Ok () -> ()
                         | Error msg ->
-                            Printf.eprintf "[keeper] write_meta failed after proactive turn: %s\n%!" msg);
+                            Log.Keeper.error "write_meta failed after proactive turn: %s" msg);
                        (try
                           let metrics_path = keeper_metrics_path ctx.config updated.name in
                           let metrics_json =

@@ -15,7 +15,7 @@ type result = bool * string
 let log_non_cancelled prefix = function
   | Eio.Cancel.Cancelled _ as ex -> raise ex
   | exn ->
-      Printf.eprintf "%s: %s\n%!" prefix (Printexc.to_string exn)
+      Log.Keeper.info "%s: %s" prefix (Printexc.to_string exn)
 
 let handle_heartbeat ctx _args =
   (true, Room.heartbeat ctx.config ~agent_name:ctx.agent_name)

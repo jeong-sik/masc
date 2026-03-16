@@ -133,7 +133,7 @@ let handle_done ctx args =
          ("timestamp", `Float (Time_compat.now ()));
        ])
    | Error err ->
-       Printf.eprintf "[task] done transition failed: %s\n%!" (Types.masc_error_to_string err));
+       Log.Task.error "done transition failed: %s" (Types.masc_error_to_string err));
   (* Record metrics on successful completion *)
   (match result with
    | Ok _ ->
@@ -150,7 +150,7 @@ let handle_done ctx args =
          handoff_to = None;
        } in
        (try ignore (Metrics_store_eio.record ctx.config metric)
-        with exn -> Printf.eprintf "[task] Metrics_store_eio.record(done) failed: %s\n%!" (Printexc.to_string exn));
+        with exn -> Log.Task.error "Metrics_store_eio.record(done) failed: %s" (Printexc.to_string exn));
        (* Feed success into Thompson Sampling quality signal *)
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
        (* Prometheus: record task completion *)
@@ -160,7 +160,7 @@ let handle_done ctx args =
          ~room_id:(Filename.basename ctx.config.base_path)
          ~task_id ()
    | Error err ->
-       Printf.eprintf "[task] metrics record failed: %s\n%!" (Types.masc_error_to_string err));
+       Log.Task.error "metrics record failed: %s" (Types.masc_error_to_string err));
   result_to_response result
 
 let handle_cancel_task ctx args =
@@ -194,7 +194,7 @@ let handle_cancel_task ctx args =
          handoff_to = None;
        } in
        (try ignore (Metrics_store_eio.record ctx.config metric)
-        with exn -> Printf.eprintf "[task] Metrics_store_eio.record(cancel) failed: %s\n%!" (Printexc.to_string exn));
+        with exn -> Log.Task.error "Metrics_store_eio.record(cancel) failed: %s" (Printexc.to_string exn));
        (* Feed failure into Thompson Sampling quality signal *)
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        (* Prometheus: record task failure *)
@@ -212,7 +212,7 @@ let handle_cancel_task ctx args =
          ~room_id:(Filename.basename ctx.config.base_path)
          ~task_id ~reason ()
    | Error err ->
-       Printf.eprintf "[task] metrics record failed: %s\n%!" (Types.masc_error_to_string err));
+       Log.Task.error "metrics record failed: %s" (Types.masc_error_to_string err));
   result_to_response result
 
 let handle_transition ctx args =
@@ -255,7 +255,7 @@ let handle_transition ctx args =
     let r = Room.transition_task_r ctx.config ~agent_name:ctx.agent_name
               ~task_id ~action ?expected_version:ev ~notes ~reason () in
     if is_version_mismatch r && attempt < max_cas_retries then begin
-      Printf.eprintf "[task] CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms\n%!"
+      Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
         task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
       Unix.sleepf cas_retry_delay_s;
       try_transition (attempt + 1)
@@ -294,7 +294,7 @@ let handle_transition ctx args =
               ~reason:(if reason = "" then "cancelled" else reason) ()
         | _ -> ())
    | Error err ->
-       Printf.eprintf "[task] task transition failed: %s\n%!" (Types.masc_error_to_string err));
+       Log.Task.error "task transition failed: %s" (Types.masc_error_to_string err));
   (* Record metrics *)
   (match result, action_lc with
    | Ok _, "done" ->
@@ -311,7 +311,7 @@ let handle_transition ctx args =
          handoff_to = None;
        } in
        (try ignore (Metrics_store_eio.record ctx.config metric)
-        with exn -> Printf.eprintf "[task] Metrics_store_eio.record(transition-done) failed: %s\n%!" (Printexc.to_string exn));
+        with exn -> Log.Task.error "Metrics_store_eio.record(transition-done) failed: %s" (Printexc.to_string exn));
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
        Prometheus.record_task_completed ()
    | Ok _, "cancel" ->
@@ -328,7 +328,7 @@ let handle_transition ctx args =
          handoff_to = None;
        } in
        (try ignore (Metrics_store_eio.record ctx.config metric)
-        with exn -> Printf.eprintf "[task] Metrics_store_eio.record(transition-cancel) failed: %s\n%!" (Printexc.to_string exn));
+        with exn -> Log.Task.error "Metrics_store_eio.record(transition-cancel) failed: %s" (Printexc.to_string exn));
        Lodge_selection.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        Prometheus.record_task_failed ()
    | _ -> ());

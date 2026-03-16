@@ -99,7 +99,7 @@ let with_graph_lock config f =
   (* Log if wait was significant *)
   let warn_threshold = Level2_config.Lock.warn_threshold_ms () in
   if wait_ms > warn_threshold then
-    Printf.eprintf "[hebbian_eio] WARN: Lock contention detected: %.1fms wait (threshold: %.0fms)\n" wait_ms warn_threshold;
+    Log.Misc.warn "Lock contention detected: %.1fms wait (threshold: %.0fms)" wait_ms warn_threshold;
   Common.protect ~module_name:"hebbian_eio" ~finally_label:"finalizer"
     ~finally:(fun () ->
       Unix.lockf fd Unix.F_ULOCK 0;
@@ -132,7 +132,7 @@ let synapse_of_json json : synapse option =
       created_at = json |> member "created_at" |> to_float;
     }
   with exn ->
-    Printf.eprintf "[hebbian_eio] Failed to parse synapse: %s\n" (Printexc.to_string exn);
+    Log.Misc.error "Failed to parse synapse: %s" (Printexc.to_string exn);
     None
 
 (** Graph to JSON *)
@@ -151,7 +151,7 @@ let graph_of_json json : synapse_graph =
     let last_consolidation = json |> member "last_consolidation" |> to_float in
     { synapses; last_consolidation }
   with exn ->
-    Printf.eprintf "[hebbian_eio] Failed to parse graph: %s\n" (Printexc.to_string exn);
+    Log.Misc.error "Failed to parse graph: %s" (Printexc.to_string exn);
     { synapses = []; last_consolidation = 0.0 }
 
 (** Load synapse graph - synchronous *)
@@ -167,7 +167,7 @@ let load_graph config : synapse_graph =
       let json = Yojson.Safe.from_string content in
       graph_of_json json
     with exn ->
-      Printf.eprintf "[hebbian_eio] Failed to load graph from %s: %s\n" file (Printexc.to_string exn);
+      Log.Misc.error "Failed to load graph from %s: %s" file (Printexc.to_string exn);
       { synapses = []; last_consolidation = 0.0 }
 
 (** Save synapse graph - synchronous *)

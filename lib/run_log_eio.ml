@@ -166,9 +166,9 @@ let record_event
          | None -> append_jsonl_sys json;
          if stream_enabled () then
            (try Sse.broadcast json with exn ->
-             Printf.eprintf "[RunLog] SSE broadcast failed: %s\n%!" (Printexc.to_string exn)))
+             Log.Misc.error "SSE broadcast failed: %s" (Printexc.to_string exn)))
      with exn ->
-       Printf.eprintf "[run_log_eio] Write failed: %s\n%!" (Printexc.to_string exn))
+       Log.Misc.error "Write failed: %s" (Printexc.to_string exn))
 
 (** Record a tool execution to the run log *)
 let record ~fs ~(tool : string) ~(streamed : bool) ~(prompt_chars : int) ~(duration_ms : int)

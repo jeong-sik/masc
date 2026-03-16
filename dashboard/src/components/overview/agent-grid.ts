@@ -3,8 +3,7 @@
 // Sorts agents by attention count, signal truth, then name.
 
 import { html } from 'htm/preact'
-import type { Agent } from '../../types'
-import type { DashboardMissionAgentBrief } from '../../types'
+import type { Agent, DashboardMissionAgentBrief } from '../../types'
 import { AgentAvatar } from './agent-avatar'
 
 interface AgentGridProps {

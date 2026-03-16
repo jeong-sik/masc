@@ -66,8 +66,6 @@ function buildNarrative(entry: JournalEntry): NarrativeEvent {
 
 function timeGroupLabel(deltaSec: number): string {
   if (deltaSec < 120) return '지금'
-  if (deltaSec < 600) return `${Math.round(deltaSec / 60)}분 전`
-  if (deltaSec < 1800) return `${Math.round(deltaSec / 60)}분 전`
   if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 전`
   return `${Math.round(deltaSec / 3600)}시간 전`
 }

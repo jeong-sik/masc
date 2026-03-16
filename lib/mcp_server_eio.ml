@@ -155,9 +155,23 @@ let handle_request
     state
     request_str =
   Mcp_server_eio_protocol.handle_request
-    ~clock ~sw ~execute_tool_eio ~log_mcp_exn
+    ~handle_call_tool_eio:(fun ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params ->
+       Mcp_server_eio_call_tool.handle_call_tool_eio
+         ~execute_tool_eio
+         ~maybe_emit_resource_notifications:Mcp_server_eio_protocol.maybe_emit_resource_notifications
+         ~broadcast_tools_list_changed:Mcp_server_eio_protocol.broadcast_tools_list_changed
+         ~sw ~clock ~profile ?mcp_session_id ?auth_token state id params)
+    ~handle_read_resource_eio:Mcp_server_eio_resource.handle_read_resource_eio
+    ~clock ~sw
     ~profile:(profile : tool_profile :> Mcp_server_eio_types.tool_profile)
     ?mcp_session_id ?auth_token state request_str
 
+(** Re-export transport mode from protocol for backward compatibility *)
+type transport_mode = Mcp_server_eio_protocol.transport_mode = Framed | LineDelimited
+let detect_mode = Mcp_server_eio_protocol.detect_mode
+
 let run_stdio ~sw ~env state =
-  Mcp_server_eio_protocol.run_stdio ~sw ~env ~execute_tool_eio ~log_mcp_exn state
+  let handle_request ~clock ~sw ~mcp_session_id state request_str =
+    handle_request ~clock ~sw ~mcp_session_id state request_str
+  in
+  Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env state

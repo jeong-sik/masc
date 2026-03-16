@@ -2426,6 +2426,29 @@ let check_expired_decisions config =
     write_policy_decisions config updated;
   !expired_count
 
+(** BUG-019: Auto-fail blocked intents past timeout (default 3600s).
+    Returns count of failed intents. *)
+let check_blocked_intents config =
+  let timeout_sec = Env_config.Decision.ttl_seconds in
+  let now = Types.now_iso () in
+  let now_unix = Unix.gettimeofday () in
+  let intents = read_intents config in
+  let failed_count = ref 0 in
+  let updated = List.map (fun (intent : intent_record) ->
+    match intent.state with
+    | Blocked_intent ->
+        let created_unix = Types.parse_iso8601 intent.created_at in
+        if now_unix -. created_unix > timeout_sec then begin
+          incr failed_count;
+          { intent with state = Dropped_intent; updated_at = now }
+        end else
+          intent
+    | _ -> intent
+  ) intents in
+  if !failed_count > 0 then
+    write_intents config updated;
+  !failed_count
+
 let apply_operation_assignment config ~(actor : string) (operation : operation_record)
     ~target_unit_id ~note ~event_type =
   match unit_guard_json config target_unit_id with

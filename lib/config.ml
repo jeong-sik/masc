@@ -254,6 +254,7 @@ let get_config_summary room_path =
   let tool_count = List.length enabled in
   let hidden_placeholder_tools = Tool_catalog.hidden_placeholder_tools () in
   `Assoc [
+    ("server_version", `String Version.version);
     ("mode", `String (mode_to_string config.mode));
     ("mode_description", `String (mode_description config.mode));
     ("enabled_categories", `List (List.map (fun s -> `String s) enabled_names));

@@ -456,6 +456,10 @@ let list_all ~config : thread list =
           let thread_id = Filename.chop_suffix f ".json" in
           get ~config ~thread_id)
 
+(** BUG-018: 7-day TTL for conversations — threads older than 7 days are excluded *)
 let list_active ~config : thread list =
+  let now = Time_compat.now () in
+  let ttl_7d = 7.0 *. 24.0 *. 3600.0 in
   list_all ~config
-  |> List.filter (fun th -> th.status = Active)
+  |> List.filter (fun th ->
+    th.status = Active && (now -. th.started_at) < ttl_7d)

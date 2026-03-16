@@ -232,6 +232,7 @@ export function ChatComposer({
   placeholder,
   disabled,
   streaming,
+  streamStartedAt,
   onDraftChange,
   onSend,
   onAbort,
@@ -240,10 +241,29 @@ export function ChatComposer({
   placeholder: string
   disabled: boolean
   streaming: boolean
+  streamStartedAt?: number | null
   onDraftChange: (value: string) => void
   onSend: () => void
   onAbort?: () => void
 }) {
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    if (!streaming || !streamStartedAt) {
+      setElapsed(0)
+      return
+    }
+    const tick = () => setElapsed(Math.round((Date.now() - streamStartedAt) / 1000))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [streaming, streamStartedAt])
+
+  const streamLabel = streaming
+    ? `Streaming${elapsed > 0 ? ` ${elapsed}s` : '...'}`
+    : 'Send'
+  const warnClass = streaming && elapsed > 60 ? ' chat-stream-warning' : ''
+
   return html`
     <div class="chat-composer">
       <textarea
@@ -256,11 +276,11 @@ export function ChatComposer({
       <div class="chat-composer-actions">
         <button
           type="button"
-          class="control-btn"
+          class="control-btn${warnClass}"
           onClick=${onSend}
           disabled=${disabled || streaming || draft.trim() === ''}
         >
-          ${streaming ? 'Streaming…' : 'Send'}
+          ${streamLabel}
         </button>
         ${streaming && onAbort
           ? html`

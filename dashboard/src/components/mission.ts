@@ -171,6 +171,13 @@ export function Mission() {
         />
       </div>
 
+      <nav class="mission-jump-strip">
+        <a class="mission-jump-link" href="#mission-sessions">세션 ${sessionRows.length}</a>
+        <a class="mission-jump-link" href="#mission-keepers">키퍼 ${keeperRows.length}</a>
+        <a class="mission-jump-link" href="#mission-output">활동</a>
+        <a class="mission-jump-link" href="#mission-attention">우선순위 ${attentionQueue.length}</a>
+      </nav>
+
       ${activeSessionId
         ? html`
             <div class="mission-selection-bar">
@@ -180,7 +187,7 @@ export function Mission() {
           `
         : null}
 
-      <${Card} title="진행중인 세션" class="mission-list-card" semanticId="mission.session_briefs">
+      <${Card} title="진행중인 세션" class="mission-list-card" semanticId="mission.session_briefs" id="mission-sessions">
         <div class="mission-section-head">
           <h3>지금 진행중인 일</h3>
           <p>세션을 기준으로 목표, 최근 흐름, 막힘, 연결된 작전을 먼저 읽고 사회의 현재 상태를 파악합니다.</p>
@@ -199,63 +206,72 @@ export function Mission() {
         error=${missionSessionDetailError.value}
       />
 
-      <${Card} title="키퍼 연속성" class="mission-list-card" semanticId="mission.keeper_activity">
-        <div class="mission-section-head">
-          <h3>세션 밖에서 움직이는 행위자</h3>
-          <p>키퍼는 세션과 별개로 보고, 사회의 연속성과 장기 행위자 상태를 먼저 읽습니다.</p>
-          <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
-        </div>
-        <div class="mission-activity-list">
-          ${keeperRows.length > 0
-            ? keeperRows.map(row => html`<${KeeperBriefCard} key=${row.brief.name} row=${row} />`)
-            : html`<div class="empty-state">지금 보이는 키퍼가 없습니다.</div>`}
-        </div>
-        <div class="mission-card-actions">
-          <button class="control-btn ghost" onClick=${() => navigate('execution')}>실행 관찰면 보기</button>
-          <button class="control-btn ghost" onClick=${() => navigate('command')}>지휘 진단면 보기</button>
-        </div>
-      <//>
+      <details open id="mission-keepers" class="mission-collapsible-section">
+        <summary class="mission-collapsible-summary">키퍼 연속성 <span class="monitor-pill">${keeperRows.length}</span>${keeperStatusWarnings > 0 ? html` <span class="monitor-pill warn">${keeperStatusWarnings} 주의</span>` : null}</summary>
+        <${Card} title="키퍼 연속성" class="mission-list-card" semanticId="mission.keeper_activity">
+          <div class="mission-section-head">
+            <h3>세션 밖에서 움직이는 행위자</h3>
+            <p>키퍼는 세션과 별개로 보고, 사회의 연속성과 장기 행위자 상태를 먼저 읽습니다.</p>
+            <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
+          </div>
+          <div class="mission-activity-list">
+            ${keeperRows.length > 0
+              ? keeperRows.map(row => html`<${KeeperBriefCard} key=${row.brief.name} row=${row} />`)
+              : html`<div class="empty-state">지금 보이는 키퍼가 없습니다.</div>`}
+          </div>
+          <div class="mission-card-actions">
+            <button class="control-btn ghost" onClick=${() => navigate('execution')}>실행 관찰면 보기</button>
+            <button class="control-btn ghost" onClick=${() => navigate('command')}>지휘 진단면 보기</button>
+          </div>
+        <//>
+      </details>
 
-      <${Card} title="최근 사회 활동" class="mission-list-card" semanticId="mission.session_activity">
-        <div class="mission-section-head">
-          <h3>누가 방금 무엇을 했나</h3>
-          <p>선택된 세션과 연결된 행위자의 최근 출력만 모아 읽고, 해석은 뒤로 미룹니다.</p>
-          <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
-        </div>
-        <div class="mission-list-stack">
-          ${focusSessionOutputs.length > 0
-            ? focusSessionOutputs.slice(0, 4).map(row => html`
-                <div class="mission-inline-note">
-                  <strong>${row.agent_name ?? 'unknown actor'}</strong>
-                  ${row.role ? html` · ${row.role}` : null}
-                  ${row.status ? html` · ${statusLabel(row.status)}` : null}
-                  <div>${row.recent_output_preview}</div>
-                </div>
-              `)
-            : html`<div class="empty-state">선택된 세션에서 바로 읽을 최근 출력이 없습니다.</div>`}
-          ${keeperOutputRows.length > 0
-            ? keeperOutputRows.map(row => html`
-                <div class="mission-inline-note">
-                  <strong>${row.brief.name}</strong>
-                  <div>${row.recentOutput}</div>
-                </div>
-              `)
-            : null}
-        </div>
-      <//>
+      <details open id="mission-output" class="mission-collapsible-section">
+        <summary class="mission-collapsible-summary">최근 사회 활동 <span class="monitor-pill">${focusSessionOutputs.length + keeperOutputRows.length}</span></summary>
+        <${Card} title="최근 사회 활동" class="mission-list-card" semanticId="mission.session_activity">
+          <div class="mission-section-head">
+            <h3>누가 방금 무엇을 했나</h3>
+            <p>선택된 세션과 연결된 행위자의 최근 출력만 모아 읽고, 해석은 뒤로 미룹니다.</p>
+            <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
+          </div>
+          <div class="mission-list-stack">
+            ${focusSessionOutputs.length > 0
+              ? focusSessionOutputs.slice(0, 4).map(row => html`
+                  <div class="mission-inline-note">
+                    <strong>${row.agent_name ?? 'unknown actor'}</strong>
+                    ${row.role ? html` · ${row.role}` : null}
+                    ${row.status ? html` · ${statusLabel(row.status)}` : null}
+                    <div>${row.recent_output_preview}</div>
+                  </div>
+                `)
+              : html`<div class="empty-state">선택된 세션에서 바로 읽을 최근 출력이 없습니다.</div>`}
+            ${keeperOutputRows.length > 0
+              ? keeperOutputRows.map(row => html`
+                  <div class="mission-inline-note">
+                    <strong>${row.brief.name}</strong>
+                    <div>${row.recentOutput}</div>
+                  </div>
+                `)
+              : null}
+          </div>
+        <//>
+      </details>
 
-      <${Card} title="세션 우선순위" class="mission-list-card" semanticId="mission.attention_queue">
-        <div class="mission-section-head">
-          <h3>어느 세션을 먼저 봐야 하나</h3>
-          <p>주의 신호는 truth를 훑은 다음에만 읽고, 세션 집중 순서를 정하는 용도로만 씁니다.</p>
-          <${ProvenanceStrip} items=${[{ kind: 'derived' }]} />
-        </div>
-        <div class="mission-lane-stack">
-          ${attentionQueue.length > 0
-            ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${selectedAttentionId.value === item.id} sessionLookup=${sessionLookup} />`)
-            : html`<div class="empty-state">지금 세션 단위 주의 대기열은 비어 있습니다.</div>`}
-        </div>
-      <//>
+      <details open id="mission-attention" class="mission-collapsible-section">
+        <summary class="mission-collapsible-summary">세션 우선순위 <span class="monitor-pill${attentionQueue.length > 0 ? ' warn' : ''}">${attentionQueue.length}</span></summary>
+        <${Card} title="세션 우선순위" class="mission-list-card" semanticId="mission.attention_queue">
+          <div class="mission-section-head">
+            <h3>어느 세션을 먼저 봐야 하나</h3>
+            <p>주의 신호는 truth를 훑은 다음에만 읽고, 세션 집중 순서를 정하는 용도로만 씁니다.</p>
+            <${ProvenanceStrip} items=${[{ kind: 'derived' }]} />
+          </div>
+          <div class="mission-lane-stack">
+            ${attentionQueue.length > 0
+              ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${selectedAttentionId.value === item.id} sessionLookup=${sessionLookup} />`)
+              : html`<div class="empty-state">지금 세션 단위 주의 대기열은 비어 있습니다.</div>`}
+          </div>
+        <//>
+      </details>
 
       <div class="mission-human-grid">
         <${MissionBriefingCard} />

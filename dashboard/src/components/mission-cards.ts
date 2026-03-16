@@ -39,6 +39,7 @@ import {
   openActionCommand,
   openSession,
   attentionAsIncident,
+  liveStateClass,
 } from './mission-utils'
 
 export function MissionContextBar({
@@ -331,11 +332,14 @@ export function SessionBriefCard({
   const plannedCount = brief.planned_count ?? brief.member_names.length
 
   return html`
-    <article class="mission-crew-card ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)} ${selected ? 'is-selected' : ''}">
+    <article class="mission-crew-card ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)} ${liveStateClass(brief.status, brief.health)} ${selected ? 'is-selected' : ''}">
       <button class="mission-card-select" onClick=${() => toggleSession(brief.session_id)}>
         <div class="mission-card-head">
           <div>
-            <strong>${brief.goal}</strong>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="mission-status-dot ${liveStateClass(brief.status, brief.health)}"></div>
+              <strong>${brief.goal}</strong>
+            </div>
             <div class="mission-card-target">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           </div>
           <span class="command-chip ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
@@ -615,10 +619,11 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
       : toolAuditStateLabel(linkedRecentToolsEmptyState(row.keeper))
 
   return html`
-    <article class="mission-activity-card ${toneClass(row.brief.status ?? row.keeper?.status)}">
+    <article class="mission-activity-card ${toneClass(row.brief.status ?? row.keeper?.status)} ${liveStateClass(row.brief.status, row.keeper?.status)}">
       <button class="mission-card-select" onClick=${() => { if (row.keeper) openKeeperDetail(row.keeper) }}>
         <div class="mission-activity-head">
           <div class="mission-activity-title">
+            <div class="mission-status-dot ${liveStateClass(row.brief.status, row.keeper?.status)}"></div>
             <span class="agent-emoji">${row.keeper?.emoji ?? ''}</span>
             <div>
               <strong>${row.brief.name}</strong>

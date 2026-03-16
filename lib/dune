@@ -142,6 +142,8 @@
    level4_config
    local_runtime_pool
    agent_swarm_contract
+   worker_container
+   worker_mcp_transport
    local_agent_eio
    local_agent_eio_types
    local_agent_eio_container
@@ -486,6 +488,8 @@
    keeper_exec_autonomy
    keeper_exec_proactive
    keeper_exec_room
+   keeper_prompt
+   keeper_coordination
    keeper_execution
    keeper_learning
    keeper_feedback_tool
@@ -503,6 +507,9 @@
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
+   llm_types
+   llm_transport
+   llm_orchestration
    llm_client
    llm_client_core
    llm_client_providers

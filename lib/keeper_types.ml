@@ -1332,7 +1332,29 @@ let keeper_alert_retry_path config =
 let keeper_alert_deadletter_path config =
   Filename.concat (keeper_dir config) "_alerts.deadletter.jsonl"
 
+(** Rotate [path] if it exceeds the configured size threshold.
+    Keeps at most [max_rotated] numbered backups (.1, .2, ...). *)
+let maybe_rotate_file path =
+  let max_bytes = Env_config.KeeperMetrics.max_file_bytes in
+  let max_rotated = Env_config.KeeperMetrics.max_rotated_files in
+  if max_bytes <= 0 then ()
+  else
+    match (try Some (Unix.stat path) with Unix.Unix_error _ -> None) with
+    | None -> ()
+    | Some st ->
+        if st.Unix.st_size >= max_bytes then begin
+          (* Shift existing rotated files: .2 <- .1, .1 <- current *)
+          for i = max_rotated downto 2 do
+            let src = Printf.sprintf "%s.%d" path (i - 1) in
+            let dst = Printf.sprintf "%s.%d" path i in
+            (try Sys.rename src dst with Sys_error _ -> ())
+          done;
+          let rotated = Printf.sprintf "%s.1" path in
+          (try Sys.rename path rotated with Sys_error _ -> ())
+        end
+
 let append_jsonl_line path (json : Yojson.Safe.t) =
+  maybe_rotate_file path;
   let line = utf8_repair_string (Yojson.Safe.to_string json) ^ "\n" in
   let fd =
     Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644

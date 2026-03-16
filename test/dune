@@ -26,6 +26,7 @@
         test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
         test_keeper_memory
         test_keeper_deliberation
+        test_metrics_rotation
         test_tool_tier)
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
@@ -39,6 +40,7 @@
           test_swarm_checkpoint test_swarm_goal_loop test_mdal_swarm
           test_keeper_memory
           test_keeper_deliberation
+          test_metrics_rotation
           test_tool_tier)
  (libraries masc_mcp alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))

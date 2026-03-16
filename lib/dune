@@ -192,6 +192,8 @@
    lodge_worker
    lodge_agent_profile
    lodge_ecosystem
+   lodge_heartbeat_state
+   lodge_heartbeat_agents
    lodge_heartbeat
    lodge_rate_limit
    lodge_trace
@@ -286,6 +288,9 @@
    team_session_types
    team_session_store
    team_session_report
+   team_session_engine_helpers
+   team_session_engine_status
+   team_session_engine_policy
    team_session_engine_eio
    ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
    safe_ops
@@ -636,6 +641,11 @@
   keeper_turn_setup
   keeper_turn_up
   keeper_turn_lifecycle
+  team_session_engine_helpers
+  team_session_engine_status
+  team_session_engine_policy
+  lodge_heartbeat_state
+  lodge_heartbeat_agents
   ;; chain_mermaid_parser sub-modules
   chain_mermaid_parse
   chain_mermaid_node_content

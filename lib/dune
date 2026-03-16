@@ -56,6 +56,9 @@
    dashboard_semantics
    dashboard_utils
    dashboard_execution
+   dashboard_execution_helpers
+   dashboard_execution_fixture
+   dashboard_execution_builders
    dashboard_mission
    dashboard_proof
    dashboard_mission_briefing
@@ -155,6 +158,10 @@
    chain_composer
    chain_evaluator
    chain_parser
+   chain_parser_helpers
+   chain_parser_parse
+   chain_parser_validate
+   chain_parser_serialize
    chain_mermaid_parse
    chain_mermaid_node_content
    chain_mermaid_graph
@@ -538,6 +545,13 @@
    mcts_tree
    speculative_engine)
 (private_modules
+ dashboard_execution_helpers
+ dashboard_execution_fixture
+ dashboard_execution_builders
+ chain_parser_helpers
+ chain_parser_parse
+ chain_parser_validate
+ chain_parser_serialize
  cp_lifecycle_swarm_live
  cp_lifecycle_search
  cp_lifecycle_intents

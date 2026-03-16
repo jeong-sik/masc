@@ -1,0 +1,653 @@
+include Dashboard_execution_helpers
+
+let execution_smoke_fixture_json () =
+  let generated_at = Types.now_iso () in
+  let intervene_handoff =
+    handoff_json
+      ~surface:"intervene"
+      ~label:"세션 개입 열기"
+      ~target_type:"team_session"
+      ~target_id:"ts-execution-fixture-001"
+      ~focus_kind:"team_session"
+      ()
+  in
+  let command_handoff =
+    handoff_json
+      ~surface:"command"
+      ~command_surface:"operations"
+      ~operation_id:"op-runtime-001"
+      ~label:"작전 원인 보기"
+      ~target_type:"team_session"
+      ~target_id:"ts-execution-fixture-001"
+      ~focus_kind:"operation"
+      ()
+  in
+  let operation_handoff =
+    handoff_json
+      ~surface:"command"
+      ~command_surface:"operations"
+      ~operation_id:"op-runtime-002"
+      ~label:"작전 원인 보기"
+      ~target_type:"operation"
+      ~target_id:"op-runtime-002"
+      ~focus_kind:"operation"
+      ()
+  in
+  `Assoc
+    [
+      ("generated_at", `String generated_at);
+      ( "status",
+        `Assoc
+          [
+            ("room", `String "default");
+            ("room_base_path", `String "/tmp/masc-execution-fixture");
+            ("cluster", `String "fixture");
+            ("project", `String "execution-smoke");
+            ("tempo_interval_s", `Float 300.0);
+            ("paused", `Bool false);
+            ("lodge", `Assoc []);
+            ( "social_runtime",
+              `Assoc
+                [
+                  ("enabled", `Bool true);
+                  ("strategy", `String "event_driven");
+                  ("queue_depth", `Int 0);
+                  ("active_keepers", `Int 2);
+                  ("last_pass_reason", `String "stayed read-only after evaluating the board");
+                  ("last_system_skip_reason", `String "rate-limited after a recent board action");
+                ] );
+            ("version", `String Version.version);
+          ] );
+      ( "social_tick",
+        `Assoc
+          [
+            ("checked", `Int 3);
+            ("acted", `Int 1);
+            ("passed", `Int 1);
+            ("skipped", `Int 1);
+            ("failed", `Int 0);
+            ("last_tick_at", `String generated_at);
+            ("last_pass_reason", `String "stayed read-only after evaluating the board");
+            ("last_system_skip_reason", `String "rate-limited after a recent board action");
+            ("strategy", `String "event_driven");
+            ("queue_depth", `Int 0);
+            ("activity_report", `String "alpha acted, beta passed, gamma skipped");
+          ] );
+      ( "social_checkins",
+        `List
+          [
+            `Assoc
+              [
+                ("agent_name", `String "dreamer");
+                ("trigger", `String "scheduled");
+                ("outcome", `String "acted");
+                ("summary", `String "posted a runtime note to the board");
+                ("reason", `String "runtime pressure on the board justified a post");
+                ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_list"; `String "masc_board_post"; `String "lodge_search" ]);
+                ("used_tool_names", `List [ `String "masc_board_post" ]);
+                ("used_tool_call_count", `Int 1);
+                ("action_kind", `String "post");
+                ("tool_audit_source", `String "heartbeat_result");
+                ("tool_audit_at", `String generated_at);
+                ("checked_at", `String generated_at);
+                ("decision_reason", `String "critical board state required intervention");
+                ("worker_name", `String "llama-local-dreamer");
+                ("failure_reason", `Null);
+              ];
+            `Assoc
+              [
+                ("agent_name", `String "historian");
+                ("trigger", `String "scheduled");
+                ("outcome", `String "passed");
+                ("summary", `Null);
+                ("reason", `String "stayed read-only after evaluating the board");
+                ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_list"; `String "lodge_profile"; `String "lodge_research" ]);
+                ("used_tool_names", `List []);
+                ("used_tool_call_count", `Null);
+                ("action_kind", `String "none");
+                ("tool_audit_source", `String "heartbeat_task");
+                ("tool_audit_at", `String generated_at);
+                ("checked_at", `String generated_at);
+                ("decision_reason", `String "not enough evidence to post");
+                ("worker_name", `Null);
+                ("failure_reason", `Null);
+              ];
+            `Assoc
+              [
+                ("agent_name", `String "connector");
+                ("trigger", `String "scheduled");
+                ("outcome", `String "skipped");
+                ("summary", `Null);
+                ("reason", `String "rate-limited after a recent board action");
+                ("allowed_tool_names", `List []);
+                ("used_tool_names", `List []);
+                ("used_tool_call_count", `Null);
+                ("action_kind", `String "none");
+                ("tool_audit_source", `Null);
+                ("tool_audit_at", `Null);
+                ("checked_at", `String generated_at);
+                ("decision_reason", `Null);
+                ("worker_name", `Null);
+                ("failure_reason", `Null);
+              ];
+          ] );
+      ( "lodge_tick",
+        `Assoc
+          [
+            ("checked", `Int 3);
+            ("acted", `Int 1);
+            ("passed", `Int 1);
+            ("skipped", `Int 1);
+            ("failed", `Int 0);
+            ("last_tick_at", `String generated_at);
+            ("last_skip_reason", `String "rate-limited after a recent board action");
+            ("last_pass_reason", `String "stayed read-only after evaluating the board");
+            ("last_system_skip_reason", `String "rate-limited after a recent board action");
+            ("strategy", `String "event_driven");
+            ("queue_depth", `Int 0);
+            ("activity_report", `String "alpha acted, beta passed, gamma skipped");
+          ] );
+      ( "lodge_checkins",
+        `List
+          [
+            `Assoc
+              [
+                ("agent_name", `String "dreamer");
+                ("trigger", `String "scheduled");
+                ("outcome", `String "acted");
+                ("summary", `String "posted a runtime note to the board");
+                ("reason", `String "runtime pressure on the board justified a post");
+                ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_list"; `String "masc_board_post"; `String "lodge_search" ]);
+                ("used_tool_names", `List [ `String "masc_board_post" ]);
+                ("used_tool_call_count", `Int 1);
+                ("action_kind", `String "post");
+                ("tool_audit_source", `String "heartbeat_result");
+                ("tool_audit_at", `String generated_at);
+                ("checked_at", `String generated_at);
+                ("decision_reason", `String "critical board state required intervention");
+                ("worker_name", `String "llama-local-dreamer");
+                ("failure_reason", `Null);
+              ];
+            `Assoc
+              [
+                ("agent_name", `String "historian");
+                ("trigger", `String "scheduled");
+                ("outcome", `String "passed");
+                ("summary", `Null);
+                ("reason", `String "stayed read-only after evaluating the board");
+                ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_list"; `String "lodge_profile"; `String "lodge_research" ]);
+                ("used_tool_names", `List []);
+                ("used_tool_call_count", `Null);
+                ("action_kind", `String "none");
+                ("tool_audit_source", `String "heartbeat_task");
+                ("tool_audit_at", `String generated_at);
+                ("checked_at", `String generated_at);
+                ("decision_reason", `String "not enough evidence to post");
+                ("worker_name", `Null);
+                ("failure_reason", `Null);
+              ];
+            `Assoc
+              [
+                ("agent_name", `String "connector");
+                ("trigger", `String "scheduled");
+                ("outcome", `String "skipped");
+                ("summary", `Null);
+                ("reason", `String "rate-limited after a recent board action");
+                ("allowed_tool_names", `List []);
+                ("used_tool_names", `List []);
+                ("used_tool_call_count", `Null);
+                ("action_kind", `String "none");
+                ("tool_audit_source", `Null);
+                ("tool_audit_at", `Null);
+                ("checked_at", `String generated_at);
+                ("decision_reason", `Null);
+                ("worker_name", `Null);
+                ("failure_reason", `Null);
+              ];
+          ] );
+      ( "execution_queue",
+        `List
+          [
+            `Assoc
+              [
+                ("id", `String "session-ts-execution-fixture-001");
+                ("kind", `String "session");
+                ("severity", `String "bad");
+                ("status", `String "interrupted");
+                ("summary", `String "session has 2 failed spawn event(s)");
+                ("target_type", `String "team_session");
+                ("target_id", `String "ts-execution-fixture-001");
+                ("linked_session_id", `String "ts-execution-fixture-001");
+                ("linked_operation_id", `String "op-runtime-001");
+                ("last_seen_at", `String generated_at);
+                ("top_handoff", intervene_handoff);
+                ("intervene_handoff", intervene_handoff);
+                ("command_handoff", command_handoff);
+              ];
+            `Assoc
+              [
+                ("id", `String "operation-op-runtime-002");
+                ("kind", `String "operation");
+                ("severity", `String "warn");
+                ("status", `String "active");
+                ("summary", `String "Waiting on upstream checkpoint before verify stage");
+                ("target_type", `String "operation");
+                ("target_id", `String "op-runtime-002");
+                ("linked_session_id", `Null);
+                ("linked_operation_id", `String "op-runtime-002");
+                ("last_seen_at", `String generated_at);
+                ("top_handoff", operation_handoff);
+                ("intervene_handoff", `Null);
+                ("command_handoff", operation_handoff);
+              ];
+          ] );
+      ( "priority_queue",
+        `List
+          [
+            `Assoc
+              [
+                ("id", `String "session-ts-execution-fixture-001");
+                ("kind", `String "session");
+                ("tone", `String "bad");
+                ("title", `String "ts-execution-fixture-001");
+                ("subtitle", `String "session has 2 failed spawn event(s)");
+                ("timestamp", `String generated_at);
+                ("target_type", `String "team_session");
+                ("target_id", `String "ts-execution-fixture-001");
+              ];
+            `Assoc
+              [
+                ("id", `String "operation-op-runtime-002");
+                ("kind", `String "operation");
+                ("tone", `String "warn");
+                ("title", `String "op-runtime-002");
+                ("subtitle", `String "Waiting on upstream checkpoint before verify stage");
+                ("timestamp", `String generated_at);
+                ("target_type", `String "operation");
+                ("target_id", `String "op-runtime-002");
+              ];
+          ] );
+      ( "session_briefs",
+        `List
+          [
+            `Assoc
+              [
+                ("session_id", `String "ts-execution-fixture-001");
+                ("goal", `String "Validate local64 swarm role coverage, runtime visibility, and operator census");
+                ("room", `String "default");
+                ("status", `String "interrupted");
+                ("health", `String "bad");
+                ("member_names", `List [ `String "llama-local-alpha"; `String "llama-local-beta"; `String "llama-local-delta" ]);
+                ("linked_operation_id", `String "op-runtime-001");
+                ("linked_detachment_id", `String "det-runtime-001");
+                ("runtime_blocker", `String "session has 2 failed spawn event(s)");
+                ("worker_gap_summary", `String "Recover failed worker coverage");
+                ("last_activity_at", `String generated_at);
+                ("last_activity_summary", `String "local64 smoke cleanup");
+                ("communication_summary", `String "hybrid · broadcast 0 · portal 0");
+                ("active_count", `Int 3);
+                ("seen_count", `Int 3);
+                ("planned_count", `Int 4);
+                ("required_count", `Int 1);
+                ("counts_basis", `String "live=recent_turns · planned=roster");
+                ("top_handoff", intervene_handoff);
+                ("intervene_handoff", intervene_handoff);
+                ("command_handoff", command_handoff);
+              ];
+            `Assoc
+              [
+                ("session_id", `String "ts-execution-fixture-002");
+                ("goal", `String "Monitor runtime pressure without intervention");
+                ("room", `String "default");
+                ("status", `String "running");
+                ("health", `String "ok");
+                ("member_names", `List [ `String "llama-local-gamma" ]);
+                ("linked_operation_id", `String "op-runtime-003");
+                ("linked_detachment_id", `String "det-runtime-003");
+                ("runtime_blocker", `Null);
+                ("worker_gap_summary", `Null);
+                ("last_activity_at", `String generated_at);
+                ("last_activity_summary", `String "healthy runtime census");
+                ("communication_summary", `String "hybrid · broadcast 1 · portal 0");
+                ("active_count", `Int 1);
+                ("seen_count", `Int 1);
+                ("planned_count", `Int 1);
+                ("required_count", `Int 1);
+                ("counts_basis", `String "live=recent_turns · planned=roster");
+                ("top_handoff", command_handoff);
+                ("intervene_handoff", intervene_handoff);
+                ("command_handoff", command_handoff);
+              ];
+          ] );
+      ( "operation_briefs",
+        `List
+          [
+            `Assoc
+              [
+                ("operation_id", `String "op-runtime-001");
+                ("objective", `String "Validate local64 swarm role coverage");
+                ("status", `String "active");
+                ("stage", `String "verify");
+                ("assigned_unit_id", `String "squad-runtime");
+                ("assigned_unit_label", `String "Runtime Squad");
+                ("linked_session_id", `String "ts-execution-fixture-001");
+                ("linked_detachment_id", `String "det-runtime-001");
+                ("blocker_summary", `String "session has 2 failed spawn event(s)");
+                ("search_status", `String "blocked");
+                ("next_tool", `String "masc_team_session_events");
+                ("updated_at", `String generated_at);
+                ("top_handoff", command_handoff);
+                ("command_handoff", command_handoff);
+              ];
+            `Assoc
+              [
+                ("operation_id", `String "op-runtime-002");
+                ("objective", `String "Audit dependency blockers before verify stage");
+                ("status", `String "active");
+                ("stage", `String "verify");
+                ("assigned_unit_id", `String "squad-review");
+                ("assigned_unit_label", `String "Review Squad");
+                ("linked_session_id", `Null);
+                ("linked_detachment_id", `Null);
+                ("blocker_summary", `String "Waiting on upstream checkpoint before verify stage");
+                ("search_status", `String "blocked");
+                ("next_tool", `String "masc_operation_status");
+                ("updated_at", `String generated_at);
+                ("top_handoff", operation_handoff);
+                ("command_handoff", operation_handoff);
+              ];
+          ] );
+      ( "worker_support_briefs",
+        `List
+          [
+            `Assoc
+              [
+                ("name", `String "llama-local-alpha");
+                ("agent_name", `String "llama-local-alpha");
+                ("status", `String "busy");
+                ("tone", `String "ok");
+                ("state", `String "working");
+                ("note", `String "Task and live signal aligned");
+                ("focus", `String "Validate local64 swarm role coverage");
+                ("last_signal_at", `String generated_at);
+                ("last_signal_age_sec", `Int 18);
+                ("signal_truth", `String "live");
+                ("evidence_source", `String "message");
+                ("active_task_count", `Int 1);
+                ("related_session_id", `String "ts-execution-fixture-001");
+                ("related_operation_id", `String "op-runtime-001");
+                ("emoji", `String "🤖");
+                ("korean_name", `String "llama-local-alpha");
+                ("model", `String Env_config.Llama.default_model);
+                ("recent_output_preview", `String "manager synthesized runtime visibility and handed next checks to beta");
+                ("recent_event", `String "manager handoff");
+              ];
+            `Assoc
+              [
+                ("name", `String "llama-local-beta");
+                ("agent_name", `String "llama-local-beta");
+                ("status", `String "active");
+                ("tone", `String "warn");
+                ("state", `String "quiet");
+                ("note", `String "Execution looks quiet for too long");
+                ("focus", `String "Inspect secondary runtime health");
+                ("last_signal_at", `String "2026-03-11T09:15:00Z");
+                ("last_signal_age_sec", `Int 780);
+                ("signal_truth", `String "stale");
+                ("evidence_source", `String "message");
+                ("active_task_count", `Int 1);
+                ("related_session_id", `String "ts-execution-fixture-001");
+                ("related_operation_id", `String "op-runtime-001");
+                ("emoji", `String "🤖");
+                ("korean_name", `String "llama-local-beta");
+                ("model", `String "qwen27-balanced");
+                ("recent_output_preview", `String "secondary runtime is quiet; watching queue depth before escalation");
+                ("recent_event", `String "secondary runtime probe");
+              ];
+            `Assoc
+              [
+                ("name", `String "llama-local-gamma");
+                ("agent_name", `String "llama-local-gamma");
+                ("status", `String "idle");
+                ("tone", `String "ok");
+                ("state", `String "watching");
+                ("note", `String "Standing by for the next task");
+                ("focus", `String "Idle / waiting for assignment");
+                ("last_signal_at", `String generated_at);
+                ("last_signal_age_sec", `Int 12);
+                ("signal_truth", `String "live");
+                ("evidence_source", `String "presence");
+                ("active_task_count", `Int 0);
+                ("related_session_id", `String "ts-execution-fixture-002");
+                ("related_operation_id", `String "op-runtime-003");
+                ("emoji", `String "🤖");
+                ("korean_name", `String "llama-local-gamma");
+                ("model", `String "qwen9-swarm");
+                ("recent_output_preview", `Null);
+                ("recent_event", `String "idle");
+              ];
+          ] );
+      ( "worker_briefs",
+        `List
+          [
+            `Assoc
+              [
+                ("name", `String "llama-local-alpha");
+                ("agent_name", `String "llama-local-alpha");
+                ("status", `String "busy");
+                ("tone", `String "ok");
+                ("state", `String "working");
+                ("note", `String "Task and live signal aligned");
+                ("focus", `String "Validate local64 swarm role coverage");
+                ("last_signal_at", `String generated_at);
+                ("last_signal_age_sec", `Int 18);
+                ("signal_truth", `String "live");
+                ("evidence_source", `String "message");
+                ("active_task_count", `Int 1);
+              ];
+            `Assoc
+              [
+                ("name", `String "llama-local-beta");
+                ("agent_name", `String "llama-local-beta");
+                ("status", `String "active");
+                ("tone", `String "warn");
+                ("state", `String "quiet");
+                ("note", `String "Execution looks quiet for too long");
+                ("focus", `String "Inspect secondary runtime health");
+                ("last_signal_at", `String "2026-03-11T09:15:00Z");
+                ("last_signal_age_sec", `Int 780);
+                ("signal_truth", `String "stale");
+                ("evidence_source", `String "message");
+                ("active_task_count", `Int 1);
+              ];
+          ] );
+      ( "continuity_briefs",
+        `List
+          [
+            `Assoc
+              [
+                ("name", `String "dm-keeper");
+                ("agent_name", `String "dm-keeper");
+                ("status", `String "active");
+                ("tone", `String "bad");
+                ("state", `String "critical");
+                ("note", `String "핸드오프 임박");
+                ("focus", `String "masc-keeper-autonomy");
+                ("last_signal_at", `String generated_at);
+                ("last_autonomous_action_at", `String generated_at);
+                ("generation", `Int 2);
+                ("turn_count", `Int 84);
+                ("context_ratio", `Float 0.91);
+                ("continuity", `String "Gen 2 · Turns 84 · Goals 2");
+                ("lifecycle", `String "handoff-imminent");
+                ("related_session_id", `Null);
+                ("model", `String "qwen27-balanced");
+                ("emoji", `String "🤖");
+                ("korean_name", `String "dm-keeper");
+                ("recent_input_preview", `String "Player asked to continue the next scene without breaking continuity");
+                ("recent_output_preview", `String "Prepared the next scene transition and handoff summary");
+                ("recent_tool_names", `List [ `String "masc_keeper_status"; `String "masc_board_post" ]);
+                ("allowed_tool_names", `List [ `String "masc_board_get"; `String "masc_board_post"; `String "masc_keeper_status" ]);
+                ("latest_tool_names", `List [ `String "masc_board_post" ]);
+                ("latest_tool_call_count", `Int 1);
+                ("tool_audit_source", `String "heartbeat_result");
+                ("tool_audit_at", `String generated_at);
+                ("last_proactive_preview", `String "Summarized the next scene handoff");
+                ("continuity_summary", `String "Continuity pressure is high; handoff prep is underway");
+                ("skill_route_summary", `String "scene-director · +1 · judgment");
+              ];
+          ] );
+      ( "offline_worker_briefs",
+        `List
+          [
+            `Assoc
+              [
+                ("name", `String "llama-local-delta");
+                ("agent_name", `String "llama-local-delta");
+                ("status", `String "inactive");
+                ("tone", `String "bad");
+                ("state", `String "offline");
+                ("note", `String "Offline or inactive");
+                ("focus", `String "Recover worker before reassigning");
+                ("last_signal_at", `String "2026-03-11T08:55:00Z");
+                ("last_signal_age_sec", `Int 1200);
+                ("signal_truth", `String "absent");
+                ("evidence_source", `String "none");
+                ("active_task_count", `Int 0);
+                ("related_session_id", `String "ts-execution-fixture-001");
+                ("related_operation_id", `String "op-runtime-001");
+                ("emoji", `String "🤖");
+                ("korean_name", `String "llama-local-delta");
+                ("model", `String "qwen9-swarm");
+                ("recent_output_preview", `Null);
+                ("recent_event", `String "missing heartbeat");
+              ];
+          ] );
+      ( "agents",
+        `List
+          [
+            `Assoc
+              [
+                ("name", `String "llama-local-alpha");
+                ("agent_type", `String "llama");
+                ("status", `String "busy");
+                ("current_task", `String "Validate local64 swarm role coverage");
+                ("joined_at", `String generated_at);
+                ("last_seen", `String generated_at);
+                ("capabilities", `List [ `String "manager"; `String "local64" ]);
+                ("emoji", `String "🤖");
+                ("koreanName", `String "llama-local-alpha");
+              ];
+            `Assoc
+              [
+                ("name", `String "llama-local-beta");
+                ("agent_type", `String "llama");
+                ("status", `String "active");
+                ("current_task", `String "Inspect secondary runtime health");
+                ("joined_at", `String generated_at);
+                ("last_seen", `String "2026-03-11T09:15:00Z");
+                ("capabilities", `List [ `String "metacog"; `String "local64" ]);
+                ("emoji", `String "🤖");
+                ("koreanName", `String "llama-local-beta");
+              ];
+            `Assoc
+              [
+                ("name", `String "llama-local-gamma");
+                ("agent_type", `String "llama");
+                ("status", `String "idle");
+                ("current_task", `Null);
+                ("joined_at", `String generated_at);
+                ("last_seen", `String generated_at);
+                ("capabilities", `List [ `String "executor"; `String "local64" ]);
+                ("emoji", `String "🤖");
+                ("koreanName", `String "llama-local-gamma");
+              ];
+            `Assoc
+              [
+                ("name", `String "llama-local-delta");
+                ("agent_type", `String "llama");
+                ("status", `String "inactive");
+                ("current_task", `Null);
+                ("joined_at", `String generated_at);
+                ("last_seen", `String "2026-03-11T08:55:00Z");
+                ("capabilities", `List [ `String "observer"; `String "local64" ]);
+                ("emoji", `String "🤖");
+                ("koreanName", `String "llama-local-delta");
+              ];
+          ] );
+      ( "tasks",
+        `List
+          [
+            `Assoc
+              [
+                ("id", `String "task-local64-001");
+                ("title", `String "Validate local64 swarm role coverage");
+                ("description", `String "manager census and runtime visibility");
+                ("status", `String "in_progress");
+                ("priority", `Int 1);
+                ("assignee", `String "llama-local-alpha");
+                ("created_at", `String generated_at);
+              ];
+            `Assoc
+              [
+                ("id", `String "task-local64-002");
+                ("title", `String "Inspect secondary runtime health");
+                ("description", `String "probe quiet worker path");
+                ("status", `String "claimed");
+                ("priority", `Int 2);
+                ("assignee", `String "llama-local-beta");
+                ("created_at", `String generated_at);
+              ];
+            `Assoc
+              [
+                ("id", `String "task-local64-003");
+                ("title", `String "Recover worker before reassigning");
+                ("description", `String "pending observer replacement");
+                ("status", `String "todo");
+                ("priority", `Int 2);
+                ("assignee", `Null);
+                ("created_at", `String generated_at);
+              ];
+          ] );
+      ( "messages",
+        `List
+          [
+            `Assoc
+              [
+                ("from", `String "llama-local-alpha");
+                ("content", `String "manager synthesized runtime visibility and handed next checks to beta");
+                ("timestamp", `String generated_at);
+                ("seq", `Int 1);
+              ];
+            `Assoc
+              [
+                ("from", `String "llama-local-beta");
+                ("content", `String "secondary runtime is quiet; watching queue depth before escalation");
+                ("timestamp", `String "2026-03-11T09:15:00Z");
+                ("seq", `Int 2);
+              ];
+          ] );
+      ( "keepers",
+        `List
+          [
+            `Assoc
+              [
+                ("name", `String "dm-keeper");
+                ("agent_name", `String "dm-keeper");
+                ("status", `String "active");
+                ("generation", `Int 2);
+                ("turn_count", `Int 84);
+                ("context_ratio", `Float 0.91);
+                ("context_tokens", `Int 245000);
+                ("last_autonomous_action_at", `String generated_at);
+                ("autonomous_action_count", `Int 11);
+                ("active_goal_ids", `List [ `String "goal-runtime"; `String "goal-story" ]);
+                ("model", `String "qwen27-balanced");
+                ("active_model", `String "qwen27-balanced");
+                ("goal", `String "masc-keeper-autonomy");
+                ("short_goal", `String "masc-keeper-autonomy");
+                ("updated_at", `String generated_at);
+                ("created_at", `String generated_at);
+              ];
+          ] );
+    ]

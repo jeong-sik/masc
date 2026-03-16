@@ -12,6 +12,12 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
     Printf.eprintf "[keeper] proactive emission failed: %s\n%!" reason
   in
   if not meta.proactive_enabled then meta
+  else if Agent_economy.economic_pressure
+            ~base_path:ctx.config.base_path ~agent_name:meta.name
+          = Agent_economy.Hustle then begin
+    Printf.eprintf "[keeper] economy hustle mode: suppressing proactive for %s\n%!" meta.name;
+    meta  (* Skip proactive entirely in Hustle mode *)
+  end
   else
     let now_ts = Time_compat.now () in
     let created_ts =
@@ -25,7 +31,14 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
       if activity_ts <= 0.0 then 0 else int_of_float (max 0.0 (now_ts -. activity_ts))
     in
     let idle_gate = normalize_proactive_idle_sec meta.proactive_idle_sec in
-    let cooldown_gate = normalize_proactive_cooldown_sec meta.proactive_cooldown_sec in
+    (* Agent Economy: Frugal mode doubles cooldown *)
+    let frugal_cooldown_multiplier =
+      if Agent_economy.economic_pressure
+           ~base_path:ctx.config.base_path ~agent_name:meta.name
+         = Agent_economy.Frugal then 2 else 1
+    in
+    let cooldown_gate =
+      frugal_cooldown_multiplier * normalize_proactive_cooldown_sec meta.proactive_cooldown_sec in
     let cooldown_elapsed =
       if meta.last_proactive_ts <= 0.0 then max_int
       else int_of_float (max 0.0 (now_ts -. meta.last_proactive_ts))

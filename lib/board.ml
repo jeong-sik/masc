@@ -633,7 +633,8 @@ let create_post store ~author ~content ?title ?body ?post_kind ?meta_json
       (match Agent_economy.earn
          ~base_path:(board_base_path ()) ~agent_name:author
          ~kind:Earn_board_post ~reason:"board post" () with
-       | Ok _ | Error _ -> ());
+       | Ok _ -> ()
+       | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
       Ok post
     end
   )

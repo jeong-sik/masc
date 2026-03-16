@@ -80,6 +80,7 @@ let to_oas_checkpoint
     cache_system_prompt = false;
     max_input_tokens = Some ctx.max_tokens;
     max_total_tokens = None;
+    disable_parallel_tool_use = false;
     context = oas_ctx;
     mcp_sessions = [];
     disable_parallel_tool_use = false;

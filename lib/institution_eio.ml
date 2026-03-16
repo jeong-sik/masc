@@ -606,7 +606,9 @@ let load_recent_episodes_jsonl ~limit : episode list =
         let line = input_line ic in
         if String.length line > 0 then
           (try eps := episode_of_json (Yojson.Safe.from_string line) :: !eps
-           with _ -> ())
+           with
+           | Yojson.Json_error _ -> ()
+           | exn -> Log.Institution.warn "episode parse failed: %s" (Printexc.to_string exn))
       done with End_of_file -> ());
       let all = List.rev !eps in
       let total = List.length all in

@@ -235,7 +235,11 @@ let trace_run_locator_of_json json =
             worker_run_id = trace_json |> member "worker_run_id" |> to_string;
             session_id = trace_json |> member "session_id" |> to_string_option;
           }
-      with _ -> None)
+      with
+      | Yojson.Safe.Util.Type_error _ -> None
+      | exn ->
+          Log.Session.warn "trace_ref parse unexpected: %s" (Printexc.to_string exn);
+          None)
   | _ -> None
 
 let evidence_session_id_of_json json =

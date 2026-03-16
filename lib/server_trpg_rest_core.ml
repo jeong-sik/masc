@@ -405,14 +405,26 @@ let trpg_state_from_derived derived_json =
     match Yojson.Safe.Util.member "state" derived_json with
     | `Null -> `Assoc []
     | v -> v
-  with _ -> `Assoc []
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+      Log.Trpg.warn "trpg_state_from_derived type error: %s" msg;
+      `Assoc []
+  | exn ->
+      Log.Trpg.warn "trpg_state_from_derived unexpected: %s" (Printexc.to_string exn);
+      `Assoc []
 
 let trpg_extract_state_int derived_json field ~default =
   try
     match Yojson.Safe.Util.member field (trpg_state_from_derived derived_json) with
     | `Int i -> i
     | _ -> default
-  with _ -> default
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+      Log.Trpg.warn "trpg_extract_state_int %s type error: %s" field msg;
+      default
+  | exn ->
+      Log.Trpg.warn "trpg_extract_state_int %s unexpected: %s" field (Printexc.to_string exn);
+      default
 
 let trpg_read_state_int derived_json field =
   try
@@ -421,6 +433,11 @@ let trpg_read_state_int derived_json field =
     | _ ->
         Error
           (`Internal_server_error, Printf.sprintf "state.%s must be int" field)
-  with _ ->
-    Error (`Internal_server_error, Printf.sprintf "state.%s missing" field)
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) ->
+      Log.Trpg.warn "trpg_read_state_int %s type error: %s" field msg;
+      Error (`Internal_server_error, Printf.sprintf "state.%s missing" field)
+  | exn ->
+      Log.Trpg.warn "trpg_read_state_int %s unexpected: %s" field (Printexc.to_string exn);
+      Error (`Internal_server_error, Printf.sprintf "state.%s missing" field)
 

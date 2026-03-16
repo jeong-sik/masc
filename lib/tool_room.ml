@@ -177,7 +177,11 @@ let inspect_state ctx =
       let wt_dir = Filename.concat ctx.config.base_path ".worktrees" in
       (try Sys.file_exists wt_dir && Sys.is_directory wt_dir &&
            Array.length (Sys.readdir wt_dir) > 0
-       with _ -> false)
+       with
+       | Sys_error _ -> false
+       | exn ->
+           Log.Room.warn "worktree_active check failed: %s" (Printexc.to_string exn);
+           false)
     else false
   in
   { room_set; joined; task_claimed; current_task_set; worktree_active }

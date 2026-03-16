@@ -249,7 +249,13 @@ let dashboard_etag () =
       Digest.string (string_of_float st.Unix.st_mtime) |> Digest.to_hex
     in
     String.sub hash 0 12
-  with _ -> "none"
+  with
+  | Unix.Unix_error (err, _, _) ->
+      Log.Pages.warn "dashboard_etag stat failed: %s" (Unix.error_message err);
+      "none"
+  | exn ->
+      Log.Pages.warn "dashboard_etag unexpected: %s" (Printexc.to_string exn);
+      "none"
 
 let dashboard_index_cache_control = "no-store, max-age=0, must-revalidate"
 

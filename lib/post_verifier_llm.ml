@@ -86,7 +86,11 @@ let parse_geval_response (text : string) :
          let s = json |> member "safety" |> to_int in
          let reasoning =
            try json |> member "reasoning" |> to_string
-           with _ -> ""
+           with
+           | Yojson.Safe.Util.Type_error _ -> ""
+           | exn ->
+               Log.BoardLog.warn "post_verifier reasoning parse: %s" (Printexc.to_string exn);
+               ""
          in
          if r >= 1 && r <= 5 && q >= 1 && q <= 5 && s >= 1 && s <= 5 then
            Ok (r, q, s, reasoning)

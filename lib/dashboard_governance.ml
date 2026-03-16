@@ -272,12 +272,12 @@ let activity_of_bundle (bundle : GV2.case_bundle) =
 let compare_activity left right =
   let left_ts =
     left |> member "created_at" |> to_string_option |> function
-    | Some iso -> (try Types.parse_iso8601 iso with _ -> 0.0)
+    | Some iso -> (try Types.parse_iso8601 iso with Failure _ -> 0.0)
     | None -> 0.0
   in
   let right_ts =
     right |> member "created_at" |> to_string_option |> function
-    | Some iso -> (try Types.parse_iso8601 iso with _ -> 0.0)
+    | Some iso -> (try Types.parse_iso8601 iso with Failure _ -> 0.0)
     | None -> 0.0
   in
   Float.compare right_ts left_ts

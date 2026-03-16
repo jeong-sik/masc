@@ -217,7 +217,8 @@ let keeper_stream_send_raw writer mutex closed data =
           Httpun.Body.Writer.write_string writer data;
           Httpun.Body.Writer.flush writer (fun _ -> ()));
       true
-    with _ ->
+    with exn ->
+      Log.Keeper.warn "keeper_stream_send_raw write failed: %s" (Printexc.to_string exn);
       closed := true;
       false
 

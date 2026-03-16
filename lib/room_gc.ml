@@ -304,7 +304,8 @@ let gc config ?(days=7) () =
                  Printf.eprintf "[gc] failed to archive session %s\n%!" session_id);
               incr session_archive_count
             end
-          with _ -> ()
+          with exn ->
+            Log.Gc.warn "session archive %s failed: %s" session_id (Printexc.to_string exn)
       end
     )
   end;

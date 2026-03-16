@@ -86,23 +86,86 @@ let is_expired entry =
   | None -> false
   | Some exp -> Time_compat.now () > exp
 
+(** Evict all expired cache entries. Returns count of evicted entries. *)
+let evict_expired config =
+  let dir = cache_dir config in
+  if not (Sys.file_exists dir) then 0
+  else
+    let entries = Sys.readdir dir |> Array.to_list in
+    List.fold_left (fun count filename ->
+      if Filename.check_suffix filename ".json" then
+        let path = Filename.concat dir filename in
+        match Safe_ops.read_file_safe path with
+        | Error _ -> count
+        | Ok content ->
+          match Safe_ops.parse_json_safe ~context:"cache_evict" content with
+          | Error _ -> count
+          | Ok json ->
+            match entry_of_json json with
+            | Some entry when is_expired entry ->
+                Safe_ops.remove_file_logged ~context:"cache_evict" path;
+                count + 1
+            | _ -> count
+      else count
+    ) 0 entries
+
+(** Count current number of cache entries *)
+let count_entries config =
+  let dir = cache_dir config in
+  if not (Sys.file_exists dir) then 0
+  else
+    Sys.readdir dir |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".json")
+    |> List.length
+
 (** Set cache entry - synchronous *)
 let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []) ()
     : (cache_entry, string) result =
-  ensure_cache_dir config;
-  let now = Time_compat.now () in
-  let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
-  let entry = { key; value; created_at = now; expires_at; tags } in
-  let path = cache_file config key in
-  let json = entry_to_json entry in
-  let content = Yojson.Safe.pretty_to_string json in
-  try
-    let oc = open_out path in
-    Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc content);
-    Ok entry
-  with e ->
-    Error (Printexc.to_string e)
+  (* BUG-013: Per-entry size limit *)
+  let max_size = Env_config.Cache.max_entry_size in
+  if String.length value > max_size then
+    Error (Printf.sprintf "Value exceeds max entry size (%d > %d bytes)" (String.length value) max_size)
+  else begin
+    ensure_cache_dir config;
+    (* BUG-012: Max entries cap — evict expired first, then reject if still full *)
+    let max_entries = Env_config.Cache.max_entries in
+    let current = count_entries config in
+    if current >= max_entries then begin
+      let _evicted = evict_expired config in
+      let after_evict = count_entries config in
+      if after_evict >= max_entries then
+        Error (Printf.sprintf "Cache full (%d entries, max %d)" after_evict max_entries)
+      else begin
+        let now = Time_compat.now () in
+        let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
+        let entry = { key; value; created_at = now; expires_at; tags } in
+        let path = cache_file config key in
+        let json = entry_to_json entry in
+        let content = Yojson.Safe.pretty_to_string json in
+        try
+          let oc = open_out path in
+          Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
+            output_string oc content);
+          Ok entry
+        with e ->
+          Error (Printexc.to_string e)
+      end
+    end else begin
+      let now = Time_compat.now () in
+      let expires_at = Option.map (fun ttl -> now +. float_of_int ttl) ttl_seconds in
+      let entry = { key; value; created_at = now; expires_at; tags } in
+      let path = cache_file config key in
+      let json = entry_to_json entry in
+      let content = Yojson.Safe.pretty_to_string json in
+      try
+        let oc = open_out path in
+        Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
+          output_string oc content);
+        Ok entry
+      with e ->
+        Error (Printexc.to_string e)
+    end
+  end
 
 (** Get cache entry - synchronous *)
 let get config ~key : (cache_entry option, string) result =

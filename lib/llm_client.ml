@@ -35,9 +35,20 @@ let llm_semaphore = Eio.Semaphore.make max_concurrent_llm
 
 let llm_semaphore_available () = Eio.Semaphore.get_value llm_semaphore
 
+(** Eio-safe permit acquisition: explicit try/with ensures release on any
+    exception including Eio.Cancel.Cancelled. *)
 let with_llm_permit f =
   Eio.Semaphore.acquire llm_semaphore;
-  Fun.protect ~finally:(fun () -> Eio.Semaphore.release llm_semaphore) f
+  match f () with
+  | result ->
+      Eio.Semaphore.release llm_semaphore;
+      result
+  | exception exn ->
+      Eio.Semaphore.release llm_semaphore;
+      raise exn
+
+let llm_permits_in_use () =
+  max_concurrent_llm - Eio.Semaphore.get_value llm_semaphore
 
 (* ================================================================ *)
 (* Types                                                            *)

@@ -50,11 +50,14 @@ let handle_health _ctx _args : result =
         ("max_daily_spawns", `Int config.max_daily_spawns);
         ("max_daily_retirements", `Int config.max_daily_retirements);
       ]);
+      ("gardener_disabled", `Bool (not config.enabled));
       ("recommendations", `List (
-        (if health.needs_spawn then [`String "Consider spawning new agents"] else []) @
-        (if health.needs_retirement then [`String "Consider retiring idle agents"] else []) @
-        (if health.needs_workers then [`String (Printf.sprintf "Task pressure: %d unclaimed tasks, workers needed" health.task_backlog.todo_count)] else []) @
-        (if health.homeostatic_score < 0.5 then [`String "Ecosystem imbalanced, intervention recommended"] else [])
+        if not config.enabled then []
+        else
+          (if health.needs_spawn then [`String "Consider spawning new agents"] else []) @
+          (if health.needs_retirement then [`String "Consider retiring idle agents"] else []) @
+          (if health.needs_workers then [`String (Printf.sprintf "Task pressure: %d unclaimed tasks, workers needed" health.task_backlog.todo_count)] else []) @
+          (if health.homeostatic_score < 0.5 then [`String "Ecosystem imbalanced, intervention recommended"] else [])
       ));
     ] in
     (true, Yojson.Safe.to_string json)
@@ -87,6 +90,10 @@ let handle_status _ctx _args : result =
     - urgency: low/medium/high/critical (default: medium) *)
 let handle_propose_spawn _ctx args : result =
   try
+    let config = Gardener.get_config () in
+    if not config.enabled then
+      (false, "Gardener is disabled. Enable with MASC_GARDENER_ENABLED=true")
+    else
     let topic = get_string args "topic" "" in
     if topic = "" then
       (false, "Missing required parameter: topic")
@@ -124,6 +131,10 @@ let handle_propose_spawn _ctx args : result =
     - agent_name: Name of the agent to consider (required) *)
 let handle_retire_agent _ctx args : result =
   try
+    let config = Gardener.get_config () in
+    if not config.enabled then
+      (false, "Gardener is disabled. Enable with MASC_GARDENER_ENABLED=true")
+    else
     let agent_name = get_string args "agent_name" "" in
     if agent_name = "" then
       (false, "Missing required parameter: agent_name")

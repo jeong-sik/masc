@@ -1,5 +1,6 @@
-// MASC Dashboard — CSS Pixel Art Avatar Component
+// MASC Dashboard — CSS Pixel Art Avatar Component (Phase 2 enhanced)
 // Renders an 8x8 grid avatar with deterministic colors from agent name.
+// Now includes operational overlays: activity dot, speech bubble, blocker ring.
 
 import { html } from 'htm/preact'
 import {
@@ -18,6 +19,12 @@ interface AgentAvatarProps {
   size?: AvatarSize
   showName?: boolean
   onClick?: () => void
+  // Phase 2: operational info overlays
+  currentWork?: string | null
+  activityAge?: number | null
+  hasBlocker?: boolean
+  signalTruth?: 'live' | 'stale' | 'archived' | 'unknown'
+  alwaysShowBubble?: boolean
 }
 
 function colorForCell(value: number, palette: AvatarPalette): string | null {
@@ -30,12 +37,48 @@ function colorForCell(value: number, palette: AvatarPalette): string | null {
   }
 }
 
-export function AgentAvatar({ name, status, traits, size, showName, onClick }: AgentAvatarProps) {
+function activityDotClass(ageSec: number | null): string {
+  if (ageSec == null) return 'activity-dot--unknown'
+  if (ageSec < 60) return 'activity-dot--live-pulse'
+  if (ageSec < 300) return 'activity-dot--live'
+  if (ageSec < 1800) return 'activity-dot--stale'
+  return 'activity-dot--inactive'
+}
+
+function signalRingClass(truth?: string): string {
+  if (truth === 'live') return 'signal-ring--live'
+  if (truth === 'stale') return 'signal-ring--stale'
+  if (truth === 'archived') return 'signal-ring--archived'
+  return ''
+}
+
+function truncateWork(text: string | null | undefined, max = 20): string | null {
+  if (!text) return null
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (!clean) return null
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean
+}
+
+export function AgentAvatar({
+  name,
+  status,
+  traits,
+  size,
+  showName,
+  onClick,
+  currentWork,
+  activityAge,
+  hasBlocker,
+  signalTruth,
+  alwaysShowBubble,
+}: AgentAvatarProps) {
   const palette = paletteForAgent(name)
   const template = templateForAgent(name, traits)
   const grid = PIXEL_TEMPLATES[template]
   const sizeClass = size === 'sm' ? 'pixel-avatar--sm' : size === 'lg' ? 'pixel-avatar--lg' : ''
   const statusAttr = status ?? 'idle'
+  const blockerClass = hasBlocker ? 'pixel-avatar--has-blocker' : ''
+  const ringClass = signalRingClass(signalTruth)
 
   const cells = []
   for (let i = 0; i < 64; i++) {
@@ -48,9 +91,12 @@ export function AgentAvatar({ name, status, traits, size, showName, onClick }: A
     )
   }
 
+  const dotClass = activityDotClass(activityAge ?? null)
+  const bubbleText = truncateWork(currentWork)
+
   const avatar = html`
     <div
-      class="pixel-avatar ${sizeClass}"
+      class="pixel-avatar ${sizeClass} ${blockerClass} ${ringClass}"
       data-status=${statusAttr}
       title=${name}
       onClick=${onClick}
@@ -58,6 +104,12 @@ export function AgentAvatar({ name, status, traits, size, showName, onClick }: A
       tabindex=${onClick ? '0' : undefined}
     >
       ${cells}
+      <span class="pixel-avatar__activity-dot ${dotClass}" />
+      ${bubbleText ? html`
+        <span class="pixel-avatar__speech-bubble ${alwaysShowBubble ? 'always-visible' : ''}">
+          ${bubbleText}
+        </span>
+      ` : null}
     </div>
   `
 

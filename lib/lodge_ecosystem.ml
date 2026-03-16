@@ -79,9 +79,11 @@ let generate_agent_traits ~topic ~reason =
 }|}
     topic reason
   in
+  let trait_mood = Lodge_atmosphere.compute_mood_default () in
+  let trait_temp = Lodge_personality.compute_temperature ~mood:trait_mood ~curiosity:0.5 in
   let response =
     match Lodge_cascade.call ~cascade_name:"lodge_trait_gen"
-        ~prompt ~temperature:0.5 ~timeout_sec:15 ~max_tokens:200 () with
+        ~prompt ~temperature:trait_temp ~timeout_sec:15 ~max_tokens:200 () with
     | Ok r -> r.response
     | Error _ -> ""
   in

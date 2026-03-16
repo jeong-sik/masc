@@ -129,25 +129,54 @@ let analyze_broadcast_relevance_llm ~content ~available_agents =
     |> List.filter (fun name -> List.mem_assoc name (get_agent_specialties ()))
   end
 
+(** {1 Routing Mode} *)
+
+type routing_mode = Heuristic | Llm | Hybrid
+
+let get_routing_mode () =
+  match Sys.getenv_opt "MASC_LODGE_ROUTING_MODE" with
+  | Some "heuristic" -> Heuristic
+  | Some "llm" -> Llm
+  | Some "hybrid" -> Hybrid
+  | _ -> Llm  (* default: LLM-first *)
+
 (** {1 Agent Routing} *)
 
-(** Find relevant agents for a broadcast message *)
+(** Find relevant agents for a broadcast message.
+    Routing mode controls the strategy:
+    - [Llm]: LLM first, keyword fallback (default, higher quality)
+    - [Heuristic]: keyword only (fast, no LLM cost)
+    - [Hybrid]: LLM first, merge with keyword matches *)
 let find_relevant_agents ~content ~threshold =
   let available_agents = List.map fst (get_agent_specialties ()) in
-  let keyword_scores = available_agents |> List.map (fun name ->
-    (name, keyword_match_score ~agent_name:name ~content)
-  ) in
-  let high_keyword_matches = keyword_scores
+  let keyword_matches () =
+    available_agents
+    |> List.map (fun name -> (name, keyword_match_score ~agent_name:name ~content))
     |> List.filter (fun (_, score) -> score >= threshold)
     |> List.map fst
   in
-  if List.length high_keyword_matches > 0 then begin
-    Eio.traceln "   🔍 Keyword match found: [%s]" (String.concat ", " high_keyword_matches);
-    high_keyword_matches
-  end else begin
-    Eio.traceln "   🧠 No keyword match, trying LLM analysis...";
-    analyze_broadcast_relevance_llm ~content ~available_agents
-  end
+  match get_routing_mode () with
+  | Heuristic ->
+      let matches = keyword_matches () in
+      if matches <> [] then
+        Eio.traceln "   🔍 Keyword match: [%s]" (String.concat ", " matches);
+      matches
+  | Llm ->
+      let llm_matches = analyze_broadcast_relevance_llm ~content ~available_agents in
+      if llm_matches <> [] then begin
+        Eio.traceln "   🧠 LLM match: [%s]" (String.concat ", " llm_matches);
+        llm_matches
+      end else begin
+        Eio.traceln "   🔍 LLM returned none, falling back to keyword...";
+        keyword_matches ()
+      end
+  | Hybrid ->
+      let llm_matches = analyze_broadcast_relevance_llm ~content ~available_agents in
+      let kw_matches = keyword_matches () in
+      let merged = List.sort_uniq String.compare (llm_matches @ kw_matches) in
+      if merged <> [] then
+        Eio.traceln "   🔀 Hybrid match: [%s]" (String.concat ", " merged);
+      merged
 
 (** {1 Broadcast Handling} *)
 

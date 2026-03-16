@@ -21,8 +21,11 @@ val keyword_match_score : agent_name:string -> content:string -> float
 (** {1 Agent Routing} *)
 
 val find_relevant_agents : content:string -> threshold:float -> string list
-(** Find agents relevant to the given content. Uses keyword matching first,
-    falls back to LLM analysis if no keyword matches exceed threshold. *)
+(** Find agents relevant to the given content.
+    Routing mode controlled by MASC_LODGE_ROUTING_MODE env var:
+    - llm (default): LLM analysis first, keyword fallback
+    - heuristic: keyword matching only
+    - hybrid: LLM + keyword merged *)
 
 (** {1 Broadcast Handling} *)
 

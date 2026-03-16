@@ -279,8 +279,12 @@ module Tool_notifications = Tool_notifications
 module Tool_voice = Tool_voice
 
 (* Lodge subsystem *)
+module Lodge_atmosphere = Lodge_atmosphere
+module Lodge_broadcast = Lodge_broadcast
+module Lodge_daemon = Lodge_daemon
 module Lodge_heartbeat = Lodge_heartbeat
 module Lodge_memory = Lodge_memory
+module Lodge_personality = Lodge_personality
 module Lodge_selection = Lodge_selection
 module Lodge_reaction = Lodge_reaction
 module Lodge_topic = Lodge_topic

@@ -69,13 +69,23 @@ let run_worker_oas ~sw ~base_path ~worker_name
         let* () =
           save_worker_meta ~base_path ~team_session_id ~worker_name meta
         in
-        let stop_heartbeat =
-          start_worker_heartbeat ~sw ~auth_token ~session_id:mcp_session_id
-            ~worker_name
+        let heartbeat_cbs =
+          let interval = local_worker_heartbeat_interval_sec () in
+          if interval > 0 then
+            [ { Oas.Agent.interval_sec = float_of_int interval;
+                callback = (fun () ->
+                  match
+                    call_masc_tool ~sw ~auth_token ~session_id:mcp_session_id
+                      ~tool_name:"masc_heartbeat" ~args:(`Assoc [])
+                  with
+                  | Ok _ -> ()
+                  | Error e ->
+                      eprintf "[local-worker] heartbeat error for %s: %s\n%!"
+                        worker_name e) } ]
+          else []
         in
         Fun.protect
           ~finally:(fun () ->
-            stop_heartbeat ();
             ignore
               (leave_worker ~sw ~auth_token ~session_id:mcp_session_id
                  ~worker_name))
@@ -147,6 +157,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
           let config, options =
             build_oas_agent ~worker_name ~model ~system_prompt ~tools
               ~max_turns ~thinking_enabled ~hooks ~raw_trace
+              ~periodic_callbacks:heartbeat_cbs ()
           in
           let agent = Oas.Agent.create ~net ~config ~tools ~options () in
           let result =
@@ -255,13 +266,24 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
             | Some net -> Ok net
             | None -> Error "Eio net not initialized"
           in
-          let stop_heartbeat =
-            start_worker_heartbeat ~sw ~auth_token ~session_id:meta.mcp_session_id
-              ~worker_name
+          let heartbeat_cbs =
+            let interval = local_worker_heartbeat_interval_sec () in
+            if interval > 0 then
+              [ { Oas.Agent.interval_sec = float_of_int interval;
+                  callback = (fun () ->
+                    match
+                      call_masc_tool ~sw ~auth_token
+                        ~session_id:meta.mcp_session_id
+                        ~tool_name:"masc_heartbeat" ~args:(`Assoc [])
+                    with
+                    | Ok _ -> ()
+                    | Error e ->
+                        eprintf "[local-worker] heartbeat error for %s: %s\n%!"
+                          worker_name e) } ]
+            else []
           in
           Fun.protect
             ~finally:(fun () ->
-              stop_heartbeat ();
               ignore
                 (leave_worker ~sw ~auth_token
                    ~session_id:meta.mcp_session_id ~worker_name))
@@ -383,6 +405,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                        ?session_id:meta.team_session_id ?role:meta.role
                        ?selection_note:meta.selection_note ())
                   ~tools ~max_turns ~thinking_enabled ~hooks ~raw_trace
+                  ~periodic_callbacks:heartbeat_cbs ()
               in
               let agent =
                 Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config ()

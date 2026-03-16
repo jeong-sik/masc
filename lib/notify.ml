@@ -27,7 +27,7 @@ let run_argv_line argv =
 
 let run_argv_ignore argv =
   (try ignore (Process_eio.run_argv_with_status ~timeout_sec:60.0 argv)
-   with exn -> Printf.eprintf "[notify] run_argv_ignore failed: %s\n%!" (Printexc.to_string exn))
+   with exn -> Log.Misc.error "run_argv_ignore failed: %s" (Printexc.to_string exn))
 
 (** Get non-empty environment variable *)
 let getenv_nonempty name =
@@ -190,7 +190,7 @@ let send_notification ?(sound=false) ?focus_cmd ~title ~subtitle ~message () =
   else begin
     send_via_osascript ~title ~subtitle ~message;
     (try ignore (focus_on_osascript ())
-     with exn -> Printf.eprintf "[notify] focus_on_osascript failed: %s\n%!" (Printexc.to_string exn));
+     with exn -> Log.Misc.error "focus_on_osascript failed: %s" (Printexc.to_string exn));
     (* NOTE: For osascript fallback, we intentionally do not execute focus_cmd.
        focus_cmd can contain arbitrary shell snippets (user-configured) and would
        require `sh -c` execution. terminal-notifier handles click actions. *)

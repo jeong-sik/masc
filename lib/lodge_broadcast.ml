@@ -248,6 +248,6 @@ let poll_and_handle_broadcasts ~generate_content ~since_timestamp =
   broadcasts |> List.iter (fun (post : Board.post) ->
     let sender = Board.Agent_id.to_string post.author in
     (try ignore (handle_broadcast ~generate_content ~sender ~content:post.content)
-     with exn -> Printf.eprintf "[lodge] handle_broadcast(%s) failed: %s\n%!" sender (Printexc.to_string exn))
+     with exn -> Log.Lodge.error "handle_broadcast(%s) failed: %s" sender (Printexc.to_string exn))
   );
   Time_compat.now ()

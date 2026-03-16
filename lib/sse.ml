@@ -113,7 +113,7 @@ let register session_id ~push ~last_event_id =
         ) clients None in
         match oldest with
         | Some (sid, _) ->
-            Printf.eprintf "[SSE] Evicting oldest client %s (at cap %d)\n%!" sid max_clients;
+            Log.Server.info "Evicting oldest client %s (at cap %d)" sid max_clients;
             Hashtbl.remove clients sid;
             Atomic.decr client_count_atomic;
             Some sid
@@ -188,7 +188,7 @@ let broadcast json =
       match client.push event with
       | () -> update_last_event_id session_id current_event_id
       | exception e ->
-        Printf.eprintf "[SSE] Push failed for session %s: %s\n%!" session_id (Printexc.to_string e);
+        Log.Server.error "Push failed for session %s: %s" session_id (Printexc.to_string e);
         failed := session_id :: !failed
     end
   ) clients_snapshot;
@@ -211,7 +211,7 @@ let send_to session_id json =
       (match client.push event with
        | () -> update_last_event_id session_id current_event_id
        | exception e ->
-         Printf.eprintf "[SSE] Push to %s failed: %s\n%!" session_id (Printexc.to_string e))
+         Log.Server.error "Push to %s failed: %s" session_id (Printexc.to_string e))
 
 (** Get client count.
     Uses [Atomic.get] so it is safe to call from signal handlers. *)
@@ -244,7 +244,7 @@ let cleanup_stale ?(max_age_s=1800.0) () =
   in
   (* Remove under lock, one by one *)
   List.iter (fun (sid, last_seen) ->
-    Printf.eprintf "[SSE] idle evict: %s (idle %.0fs)\n%!" sid (now -. last_seen);
+    Log.Server.info "idle evict: %s (idle %.0fs)" sid (now -. last_seen);
     unregister sid
   ) stale;
   List.map fst stale

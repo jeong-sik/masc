@@ -334,7 +334,7 @@ let gc config ?(days=7) () =
               let dest = Filename.concat archive_ts_dir session_id in
               (try Unix.rename sdir dest
                with Unix.Unix_error _ ->
-                 Printf.eprintf "[gc] failed to archive session %s\n%!" session_id);
+                 Log.Misc.error "failed to archive session %s" session_id);
               incr session_archive_count
             end
           with exn ->

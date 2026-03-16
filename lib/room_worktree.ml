@@ -119,7 +119,7 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
                   let oc = open_out agent_file in
                   output_string oc (Yojson.Safe.pretty_to_string (agent_to_yojson updated_agent));
                   close_out oc
-              | Error msg -> Printf.eprintf "[worktree] agent state read: %s\n%!" msg
+              | Error msg -> Log.Misc.info "agent state read: %s" msg
             end
           in
 

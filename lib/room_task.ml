@@ -147,7 +147,7 @@ let claim_task config ~agent_name ~task_id =
                   let updated = { agent with status = Busy; current_task = Some task_id } in
                   write_json config agent_file (agent_to_yojson updated)
               | Error msg ->
-                  Printf.eprintf "[room] agent state write failed: %s\n%!" msg
+                  Log.Misc.error "agent state write failed: %s" msg
             end;
             let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
             log_event config (Printf.sprintf
@@ -223,7 +223,7 @@ let claim_task_r config ~agent_name ~task_id
                         let updated = { agent with status = Busy; current_task = Some task_id } in
                         write_json config agent_file (agent_to_yojson updated)
                     | Error msg ->
-                        Printf.eprintf "[room] agent state write failed: %s\n%!" msg
+                        Log.Misc.error "agent state write failed: %s" msg
                   end;
                   let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
                   log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_claim"); ("agent", `String agent_name); ("task", `String task_id); ("ts", `String (now_iso ()))]));
@@ -326,7 +326,7 @@ let transition_task_r config ~agent_name ~task_id ~action
                                 in
                                 write_json config agent_file (agent_to_yojson updated)
                             | Error msg ->
-                                Printf.eprintf "[room] agent state write failed: %s\n%!" msg
+                                Log.Misc.error "agent state write failed: %s" msg
                           end;
                           log_event config (Printf.sprintf
                             "{\"type\":\"task_transition\",\"agent\":\"%s\",\"task\":\"%s\",\"action\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"ts\":\"%s\"}"
@@ -396,7 +396,7 @@ let complete_task config ~agent_name ~task_id ~notes =
                   let updated = { agent with status = Active; current_task = None } in
                   write_json config agent_file (agent_to_yojson updated)
               | Error msg ->
-                  Printf.eprintf "[room] agent state write failed: %s\n%!" msg
+                  Log.Misc.error "agent state write failed: %s" msg
             end;
             let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id
                       else Printf.sprintf "✅ Completed %s - %s" task_id notes in
@@ -465,7 +465,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                 match agent_of_yojson json with
                 | Ok agent -> let updated = { agent with status = Active; current_task = None } in write_json config agent_file (agent_to_yojson updated)
                 | Error msg ->
-                    Printf.eprintf "[room] agent state write failed: %s\n%!" msg
+                    Log.Misc.error "agent state write failed: %s" msg
               end;
               let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
@@ -476,7 +476,7 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                  ~kind:Earn_task_done ~reason:(Printf.sprintf "completed %s" task_id) () with
                | Ok _bal -> ()
                | Error msg ->
-                 Printf.eprintf "[economy] task earn failed: %s\n%!" msg);
+                 Log.Misc.error "task earn failed: %s" msg);
               Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
             end
       with e -> Error (Types.IoError (Printexc.to_string e))
@@ -629,7 +629,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) () =
                 let updated = { agent with status = Busy; current_task = Some task.id } in
                 write_json config agent_file (agent_to_yojson updated)
             | Error msg ->
-                Printf.eprintf "[room] agent state write failed: %s\n%!" msg
+                Log.Misc.error "agent state write failed: %s" msg
           end;
 
           let _ = broadcast config ~from_agent:agent_name

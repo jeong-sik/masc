@@ -160,7 +160,7 @@ let delete_path_root config path =
   | Some key ->
     (match backend_delete config ~key with
      | Ok _ -> ()
-     | Error e -> Printf.eprintf "[WARN] delete_path_root: backend_delete failed for %s: %s\n%!" key (Backend.show_error e))
+     | Error e -> Log.Misc.error "delete_path_root: backend_delete failed for %s: %s" key (Backend.show_error e))
   | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists_root config path =
@@ -196,7 +196,7 @@ let delete_path config path =
   | Some key ->
     (match backend_delete config ~key with
      | Ok _ -> ()
-     | Error e -> Printf.eprintf "[WARN] delete_path: backend_delete failed for %s: %s\n%!" key (Backend.show_error e))
+     | Error e -> Log.Misc.error "delete_path: backend_delete failed for %s: %s" key (Backend.show_error e))
   | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists config path =
@@ -235,7 +235,7 @@ let with_file_lock config path f =
         ~finally:(fun () ->
           (try Unix.lockf fd Unix.F_ULOCK 0
            with Unix.Unix_error (err, _, _) ->
-             Printf.eprintf "[WARN] Failed to release flock: %s\n%!" (Unix.error_message err));
+             Log.Misc.error "Failed to release flock: %s" (Unix.error_message err));
           Unix.close fd)
         (fun () ->
           Unix.lockf fd Unix.F_LOCK 0;
@@ -269,7 +269,7 @@ let with_file_lock_r config path f : ('a, masc_error) result =
         ~finally:(fun () ->
           (try Unix.lockf fd Unix.F_ULOCK 0
            with Unix.Unix_error (err, _, _) ->
-             Printf.eprintf "[WARN] Failed to release flock: %s\n%!" (Unix.error_message err));
+             Log.Misc.error "Failed to release flock: %s" (Unix.error_message err));
           Unix.close fd)
         (fun () ->
           Unix.lockf fd Unix.F_LOCK 0;

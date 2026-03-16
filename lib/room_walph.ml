@@ -238,7 +238,7 @@ let walph_loop config ~agent_name ?(preset="drain") ?(max_iterations=10) ?target
 	              match release_result with
 	              | Ok _ -> "ok"
 	              | Error e ->
-	                  Printf.eprintf "[room] walph release failed: %s\n%!"
+	                  Log.Misc.error "walph release failed: %s"
 	                    (Types.masc_error_to_string e);
 	                  "error"
 	            in

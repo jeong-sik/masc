@@ -394,7 +394,7 @@ let record_shared_belief_jsonl ~content ~supporters =
     output_char oc '\n';
     close_out oc
   with exn ->
-    Printf.eprintf "[noosphere] JSONL write failed: %s\n%!" (Printexc.to_string exn));
+    Log.Misc.error "JSONL write failed: %s" (Printexc.to_string exn));
   belief
 
 (** Record an emergent goal from keeper decision patterns. *)
@@ -420,7 +420,7 @@ let record_emergent_goal_jsonl ~description ~contributing_minds =
     output_char oc '\n';
     close_out oc
   with exn ->
-    Printf.eprintf "[noosphere] JSONL write failed: %s\n%!" (Printexc.to_string exn));
+    Log.Misc.error "JSONL write failed: %s" (Printexc.to_string exn));
   goal
 
 (** Compute collective atmosphere from real social signals.

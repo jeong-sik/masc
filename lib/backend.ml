@@ -165,7 +165,7 @@ let acquire_flock fd =
 let release_flock fd =
   try Unix.lockf fd Unix.F_ULOCK 0
   with Unix.Unix_error (err, _, _) ->
-    Printf.eprintf "[WARN] Failed to release flock: %s\n%!" (Unix.error_message err)
+    Log.Misc.error "Failed to release flock: %s" (Unix.error_message err)
 
 (* ============================================ *)
 (* Memory Backend (In-Process)                  *)
@@ -407,7 +407,7 @@ module FileSystemBackend : BACKEND = struct
       if not (Sys.file_exists path) then
         Unix.mkdir path 0o755
     with Unix.Unix_error (err, _, _) ->
-      Printf.eprintf "[WARN] Failed to mkdir %s: %s\n%!" path (Unix.error_message err));
+      Log.Misc.error "Failed to mkdir %s: %s" path (Unix.error_message err));
     Ok { base_path = path; mutex = Mutex.create () }
 
   let close _t = ()
@@ -600,7 +600,7 @@ module FileSystemBackend : BACKEND = struct
                 | Some _ -> Ok false  (* Different owner *)
                 | None -> Ok false    (* No valid lock *)
               with e ->
-                Printf.eprintf "[WARN] Lock operation failed: %s\n%!" (Printexc.to_string e);
+                Log.Misc.error "Lock operation failed: %s" (Printexc.to_string e);
                 Ok false
             in
             release_flock fd;
@@ -654,7 +654,7 @@ module FileSystemBackend : BACKEND = struct
                 end else
                   Ok false
               with e ->
-                Printf.eprintf "[WARN] Lock operation failed: %s\n%!" (Printexc.to_string e);
+                Log.Misc.error "Lock operation failed: %s" (Printexc.to_string e);
                 Ok false
             in
             release_flock fd;
@@ -682,7 +682,7 @@ module FileSystemBackend : BACKEND = struct
       Sys.remove test_path;
       Ok true
     with e ->
-      Printf.eprintf "[WARN] Health check failed: %s\n%!" (Printexc.to_string e);
+      Log.Misc.error "Health check failed: %s" (Printexc.to_string e);
       Ok false
 end
 
@@ -1028,7 +1028,7 @@ end = struct
     ) t.pool with
     | Ok () -> ()
     | Error err ->
-      Printf.eprintf "[WARN] [backend] expired lock cleanup failed: %s\n%!"
+      Log.Misc.error "[backend] expired lock cleanup failed: %s"
         (Caqti_error.show err));
     (* Try to acquire lock *)
     match Caqti_eio.Pool.use (fun conn ->

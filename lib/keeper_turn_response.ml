@@ -357,7 +357,7 @@ let finalize_normal_turn ctx ~session ~now_ts ~trajectory_acc ~gate_config (env 
   let meta_turn = env.meta_turn in
   (match write_meta ctx.config meta_turn with
    | Ok () -> ()
-   | Error e -> Printf.eprintf "[keeper:%s] failed to write meta: %s\n%!" meta_turn.name e);
+   | Error e -> Log.Keeper.error "keeper:%s failed to write meta: %s" meta_turn.name e);
   let metrics_path = keeper_metrics_path ctx.config meta_turn.name in
   (try
      let metrics_json = build_normal_turn_metrics_json ~now_ts env in
@@ -372,7 +372,7 @@ let finalize_normal_turn ctx ~session ~now_ts ~trajectory_acc ~gate_config (env 
       Trajectory.Completed
   in
   let _traj = Trajectory.finalize trajectory_acc traj_outcome in
-  Printf.eprintf "[HARNESS] Trajectory finalized: %s turns=%d calls=%d cost=$%.4f outcome=%s\n%!"
+  Log.Misc.info "Trajectory finalized: %s turns=%d calls=%d cost=$%.4f outcome=%s"
     meta_turn.trace_id
     _traj.Trajectory.total_turns
     _traj.Trajectory.total_tool_calls

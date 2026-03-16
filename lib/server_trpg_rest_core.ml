@@ -235,8 +235,7 @@ let trpg_read_events_list ~base_dir ~room_id ~after_seq ~event_type_filter
           in
           (match read_result with
           | Error e ->
-              Printf.eprintf
-                "[trpg] read_events failed room=%s after_seq=%d: %s; returning empty list\n%!"
+              Log.Trpg.error "read_events failed room=%s after_seq=%d: %s; returning empty list"
                 room_id after_seq e;
               Ok []
           | Ok events ->
@@ -364,8 +363,7 @@ let trpg_derive_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
             match Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
             | Ok events -> (events, false)
             | Error e ->
-                Printf.eprintf
-                  "[trpg] derive_state read_events failed room=%s: %s; deriving from empty events\n%!"
+                Log.Trpg.error "derive_state read_events failed room=%s: %s; deriving from empty events"
                   room_id e;
                 ([], true)
           in

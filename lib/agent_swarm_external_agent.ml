@@ -68,12 +68,12 @@ let run_with_masc ~sw ~proc_mgr ~clock ~net ~masc_url config ~goal =
     Fun.protect ~finally:(fun () ->
       (try match Agent_swarm_client.leave ~sw client with
         | Ok _ -> ()
-        | Error msg -> Printf.eprintf "[WARN] [swarm] leave failed: %s\n%!" msg
-      with exn -> Printf.eprintf "[WARN] [swarm] leave error: %s\n%!" (Printexc.to_string exn))
+        | Error msg -> Log.Misc.error "[swarm] leave failed: %s" msg
+      with exn -> Log.Misc.error "[swarm] leave error: %s" (Printexc.to_string exn))
     ) (fun () ->
       (match Agent_swarm_client.broadcast ~sw client
         ~message:(Printf.sprintf "Starting: %s" goal) with
-       | Ok _ -> () | Error msg -> Printf.eprintf "[WARN] [swarm] broadcast failed: %s\n%!" msg);
+       | Ok _ -> () | Error msg -> Log.Misc.error "[swarm] broadcast failed: %s" msg);
       let result = run_cli ~sw ~proc_mgr ~clock config ~prompt:goal in
       let summary = match result with
         | Ok out ->
@@ -83,7 +83,7 @@ let run_with_masc ~sw ~proc_mgr ~clock ~net ~masc_url config ~goal =
       in
       (match Agent_swarm_client.broadcast ~sw client
         ~message:(Printf.sprintf "Done: %s" summary) with
-       | Ok _ -> () | Error msg -> Printf.eprintf "[WARN] [swarm] broadcast failed: %s\n%!" msg);
+       | Ok _ -> () | Error msg -> Log.Misc.error "[swarm] broadcast failed: %s" msg);
       result
     )
   with

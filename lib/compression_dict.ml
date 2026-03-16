@@ -45,7 +45,7 @@ let compress ?(level = 3) (data : string) : string * bool * bool =
       else
         (data, false, false)
     with Failure msg | Zstd.Error msg ->
-      Printf.eprintf "[WARN] compression failed: %s\n%!" msg;
+      Log.Misc.error "compression failed: %s" msg;
       (data, false, false)
 
 (** Decompress data
@@ -59,7 +59,7 @@ let decompress ~orig_size ~(used_dict : bool) (data : string) : string =
   try
     Zstd.decompress orig_size data
   with Failure msg | Zstd.Error msg ->
-    Printf.eprintf "[WARN] decompression failed: %s\n%!" msg;
+    Log.Misc.error "decompression failed: %s" msg;
     data
 
 (** {1 Content-Encoding Headers} *)

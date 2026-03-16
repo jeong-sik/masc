@@ -34,7 +34,7 @@ let log_rejection ~validator ~input ~reason =
   let safe_input = if String.length input > 32
     then String.sub input 0 32 ^ "..."
     else input in
-  Printf.eprintf "[validation] WARN: %s rejected input '%s': %s\n"
+  Log.Misc.warn "%s rejected input '%s': %s"
     validator safe_input reason
 
 (** Agent ID validation *)
@@ -141,10 +141,10 @@ module Safe_float : sig
 end = struct
   let validate f ~name =
     if Float.is_nan f then begin
-      Printf.eprintf "[validation] NaN detected for %s, using 0.0\n" name;
+      Log.Misc.warn "NaN detected for %s, using 0.0" name;
       0.0
     end else if Float.is_infinite f then begin
-      Printf.eprintf "[validation] Inf detected for %s, using 0.0\n" name;
+      Log.Misc.warn "Inf detected for %s, using 0.0" name;
       0.0
     end else
       f

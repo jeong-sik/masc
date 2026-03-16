@@ -14,15 +14,14 @@ let log_keeper_exn ~label exn =
     | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
     | _ -> "[UNEXPECTED] "
   in
-  Printf.eprintf "[keeper] %s%s: %s\n%!" tag label (Printexc.to_string exn)
+  Log.Keeper.info "%s%s: %s" tag label (Printexc.to_string exn)
 
 let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
   let latest_ckpt =
     try Context_manager.load_latest_checkpoint session
     with ex ->
-      Printf.eprintf
-        "[keeper:%s] checkpoint load failed: %s\n%!"
+      Log.Keeper.error "keeper:%s checkpoint load failed: %s"
         trace_id
         (Printexc.to_string ex);
       None
@@ -37,8 +36,7 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
          in
          (session, Some ctx)
        with ex ->
-         Printf.eprintf
-           "[keeper:%s] checkpoint restore failed: %s\n%!"
+         Log.Keeper.error "keeper:%s checkpoint restore failed: %s"
            trace_id
            (Printexc.to_string ex);
          (session, None))

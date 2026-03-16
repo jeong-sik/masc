@@ -324,7 +324,7 @@ let dispatch ctx ~name ~args : tool_result option =
   (* Resident keepers are bootstrapped lazily on tool use as a fallback.
      Server startup also calls bootstrap_existing_keepers for always-on presence. *)
   (try start_existing_keepalives ctx with exn ->
-    Printf.eprintf "[keeper] start_existing_keepalives failed: %s\n%!" (Printexc.to_string exn));
+    Log.Keeper.error "start_existing_keepalives failed: %s" (Printexc.to_string exn));
   match name with
   | "masc_persona_list" -> Some (Persona.handle_persona_list ctx args)
   | "masc_keeper_create_from_persona" -> Some (handle_resident_keeper_create_from_persona ctx args)

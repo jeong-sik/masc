@@ -32,7 +32,7 @@ let get_agents_status config =
               ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
             ] :: !agents
         | Error msg ->
-            Printf.eprintf "[room] agent state read failed: %s\n%!" msg
+            Log.Misc.error "agent state read failed: %s" msg
       end
     );
     `Assoc [

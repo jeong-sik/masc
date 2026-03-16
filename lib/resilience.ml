@@ -29,7 +29,7 @@ module Time = struct
           let offset = local_time -. utc_time in
           Some (local_time +. offset))
     with Scanf.Scan_failure _ | Failure _ | End_of_file ->
-      Printf.eprintf "[Resilience] parse_iso8601_opt failed for: %S\n%!" s;
+      Log.Misc.error "parse_iso8601_opt failed for: %S" s;
       None
 
   (** Check if a timestamp is older than threshold *)
@@ -113,18 +113,18 @@ module ZeroZombie = struct
       (try Eio.Time.sleep clock interval
        with exn ->
          if is_cancelled exn then raise exn;
-         Printf.eprintf "[ZeroZombie] sleep error: %s\n%!" (Printexc.to_string exn));
+         Log.Misc.error "sleep error: %s" (Printexc.to_string exn));
       (try
          ignore (cleanup ~cleanup_fn)
        with exn ->
          if is_cancelled exn then raise exn;
          (* Silently ignore benign errors like "not initialized" *)
          if not (is_benign_error exn) then
-           Printf.eprintf "[ZeroZombie] cleanup error: %s\n%!" (Printexc.to_string exn));
+           Log.Misc.error "cleanup error: %s" (Printexc.to_string exn));
       loop ()
     in
     try loop () with exn ->
       if is_cancelled exn then raise exn
       else if not (is_benign_error exn) then
-        Printf.eprintf "[ZeroZombie] loop error: %s\n%!" (Printexc.to_string exn)
+        Log.Misc.error "loop error: %s" (Printexc.to_string exn)
 end

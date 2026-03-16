@@ -448,10 +448,10 @@ let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string,
         record_complete ctx node.id ~duration_ms ~success:false ~node_type:"adapter";
         Error msg
     | `Passthrough ->
-        Printf.eprintf "Warning: %s (passthrough)\n%!" msg;
+        Log.Chain.warn "%s (passthrough)" msg;
         Ok (finalize ~success:true ~duration_ms "")
     | `Default d ->
-        Printf.eprintf "Warning: %s (default)\n%!" msg;
+        Log.Chain.warn "%s (default)" msg;
         Ok (finalize ~success:true ~duration_ms d)
   end
   else
@@ -1176,7 +1176,7 @@ and execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
           store_node_output ctx inner output;
           store_node_output ctx node output
       | Error msg ->
-          Printf.eprintf "[chain_executor] spawn failed for node %s: %s\n%!" node.id msg;
+          Log.Chain.error "spawn failed for node %s: %s" node.id msg;
           store_node_output ctx node ("<spawn_error: " ^ msg ^ ">"));
 
       let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
@@ -1513,7 +1513,7 @@ and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain :
   let result = match Chain_compiler.compile chain with
   | Error msg ->
       (* Fallback to sequential if compilation fails *)
-      Printf.eprintf "[subgraph] Compilation failed, falling back to sequential: %s\n%!" msg;
+      Log.Chain.error "Compilation failed, falling back to sequential: %s" msg;
       execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec chain.nodes
   | Ok plan ->
       (* Build node lookup map *)
@@ -1522,14 +1522,14 @@ and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain :
 
       (* Execute parallel groups sequentially (groups are independent within, dependent between) *)
       let parallel_groups = plan.parallel_groups in
-      Printf.eprintf "[subgraph] Executing %d parallel groups for chain '%s'\n%!"
+      Log.Chain.info "Executing %d parallel groups for chain '%s'"
         (List.length parallel_groups) chain.id;
 
       let rec execute_groups groups =
         match groups with
         | [] -> Ok ""
         | group :: rest ->
-            Printf.eprintf "[subgraph] Group [%s] (%d nodes)\n%!"
+            Log.Chain.info "Group [%s] (%d nodes)"
               (String.concat ", " group) (List.length group);
             match execute_parallel_group ctx ~sw ~clock ~exec_fn ~tool_exec group node_map with
             | Error msg -> Error msg
@@ -2406,7 +2406,7 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
         Eio.Stream.add stream value
       with exn ->
         if is_cancelled exn then raise exn;
-        Printf.eprintf "[StreamMerge] stream add error: %s\n%!"
+        Log.Chain.error "stream add error: %s"
           (Printexc.to_string exn)
     in
     (try
@@ -2417,7 +2417,7 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
              | Ok output ->
                  Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
                    incr completed_count;
-                   Printf.eprintf "[StreamMerge] %s completed (%d/%d)\n%!"
+                   Log.Chain.info "%s completed (%d/%d)"
                      node.id !completed_count total_count);
                  safe_stream_add (Some (node.id, Ok output))
              | Error msg ->
@@ -2432,14 +2432,14 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
        ) nodes)
      with exn ->
        if is_cancelled exn then raise exn;
-       Printf.eprintf "[StreamMerge] producer crashed: %s\n%!"
+       Log.Chain.info "producer crashed: %s"
          (Printexc.to_string exn));
     (* Signal completion after all producers done *)
     (try
        safe_stream_add None
      with exn ->
        if is_cancelled exn then raise exn;
-       Printf.eprintf "[StreamMerge] completion signal error: %s\n%!"
+       Log.Chain.error "completion signal error: %s"
          (Printexc.to_string exn))
   );
 
@@ -2454,16 +2454,16 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     let now = Time_compat.now () in
     if now > deadline && !results_collected >= min_required then begin
       (* Timeout reached after min_results met *)
-      Printf.eprintf "[StreamMerge] Timeout reached with %d results\n%!" !results_collected;
+      Log.Chain.info "Timeout reached with %d results" !results_collected;
       Ok !acc
     end else begin
       match Eio.Stream.take stream with
       | None ->
           (* All producers finished *)
-          Printf.eprintf "[StreamMerge] All %d nodes processed\n%!" !results_collected;
+          Log.Chain.info "All %d nodes processed" !results_collected;
           Ok !acc
       | Some (id, Error msg) ->
-          Printf.eprintf "[StreamMerge] %s failed: %s\n%!" id msg;
+          Log.Chain.error "%s failed: %s" id msg;
           consume ()  (* Skip failures, continue processing *)
       | Some (id, Ok output) ->
           incr results_collected;
@@ -2482,7 +2482,7 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                 else !acc ^ "\n---\n" ^ Printf.sprintf "[%s via %s]: %s" id func_name output
           in
           acc := new_acc;
-          Printf.eprintf "[StreamMerge] Accumulated %s (%d collected)\n%!" id !results_collected;
+          Log.Chain.info "Accumulated %s (%d collected)" id !results_collected;
 
           (* Check if we can return early (min_results met + optional timeout) *)
           if !results_collected >= min_required && timeout_sec < infinity then begin

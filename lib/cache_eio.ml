@@ -74,10 +74,10 @@ let entry_of_json (json : Yojson.Safe.t) : cache_entry option =
     Some { key; value; created_at; expires_at; tags }
   with
   | U.Type_error (msg, _) ->
-    Printf.eprintf "[cache] JSON type error in entry_of_json: %s\n%!" msg;
+    Log.Misc.error "JSON type error in entry_of_json: %s" msg;
     None
   | e ->
-    Printf.eprintf "[cache] Unexpected error in entry_of_json: %s\n%!" (Printexc.to_string e);
+    Log.Misc.error "Unexpected error in entry_of_json: %s" (Printexc.to_string e);
     None
 
 (** Check if entry is expired *)
@@ -219,7 +219,7 @@ let list config ?(tag : string option) () : cache_entry list =
         | Ok content ->
           match Safe_ops.parse_json_safe ~context:"cache_get_all" content with
           | Error msg ->
-            Printf.eprintf "[cache] %s\n%!" msg;
+            Log.Misc.info "%s" msg;
             None
           | Ok json ->
             match entry_of_json json with

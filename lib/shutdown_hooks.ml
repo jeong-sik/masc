@@ -18,9 +18,9 @@ let run_all () =
   (* Cancel orchestrator first *)
   (match !cancel_orchestrator_ref with
    | Some cancel ->
-     Printf.eprintf "[Shutdown] Cancelling orchestrator...\n%!";
+     Log.Server.info "Cancelling orchestrator...";
      cancel ()
    | None -> ());
   (* Close all SSE clients *)
   let sse_count = Sse.close_all_clients () in
-  Printf.eprintf "[Shutdown] Closed %d SSE clients\n%!" sse_count
+  Log.Server.info "Closed %d SSE clients" sse_count

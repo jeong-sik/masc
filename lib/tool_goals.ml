@@ -405,7 +405,7 @@ let add_fallback_task ctx node err =
   in
   try Some (Room.add_task ctx.config ~title ~priority:2 ~description:desc)
   with exn ->
-    Printf.eprintf "[GOALS] add_fallback_task failed: %s\n%!" (Printexc.to_string exn);
+    Log.Misc.error "add_fallback_task failed: %s" (Printexc.to_string exn);
     None
 
 let run_keeper_call ctx ~models ~keeper_prefix ?(fallback_to_task = true) node =

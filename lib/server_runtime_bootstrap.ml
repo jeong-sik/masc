@@ -48,7 +48,7 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
   Chain_native_eio.ensure_bootstrap state.room_config;
   (try Tool_command_plane.backfill_chain_overlays state.room_config
    with exn ->
-     Printf.eprintf "[chain-backfill] startup backfill failed: %s\n%!"
+     Log.Misc.error "startup backfill failed: %s"
        (Printexc.to_string exn));
   Mcp_server.set_sse_callback state Sse.broadcast
 
@@ -65,11 +65,10 @@ let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
     in
     let stats = Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
     if stats.enabled then
-      Printf.eprintf
-        "[keeper-bootstrap] scanned=%d started=%d stale=%d recovering=%d\n%!"
+      Log.Keeper.info "scanned=%d started=%d stale=%d recovering=%d"
         stats.scanned stats.started stats.stale stats.recovering
   with exn ->
-    Printf.eprintf "[main] keeper bootstrap failed: %s\n%!"
+    Log.Server.error "keeper bootstrap failed: %s"
       (Printexc.to_string exn)
 
 let init_task_backend () =
@@ -77,9 +76,9 @@ let init_task_backend () =
   | Some pool -> (
       match Task_dispatch.init_pg pool with
       | Ok () ->
-          Printf.eprintf "[Task_dispatch] PostgreSQL backend initialized\n%!"
+          Log.Task.info "PostgreSQL backend initialized"
       | Error e ->
-          Printf.eprintf "[Task_dispatch] PG init failed: %s, using JSONL\n%!"
+          Log.Task.error "PG init failed: %s, using JSONL"
             (Types.show_masc_error e))
   | None -> Task_dispatch.init_jsonl ()
 
@@ -132,18 +131,16 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
   | Some pool ->
       let listener = Board_listener.create pool in
       Eio.Fiber.fork ~sw (fun () -> Board_listener.start listener);
-      Printf.eprintf
-        "[Board_listener] Fiber started for real-time Board events\n%!"
+      Log.BoardListener.info "Fiber started for real-time Board events"
   | None ->
-      Printf.eprintf
-        "[Board_listener] Skipped (not using PostgreSQL backend)\n%!");
+      Log.BoardListener.info "Skipped (not using PostgreSQL backend)");
   Eio.Fiber.fork ~sw (fun () ->
       let rec loop () =
         Eio.Time.sleep clock 60.0;
         let stale_sids = Sse.cleanup_stale () in
         List.iter stop_sse_session stale_sids;
         if stale_sids <> [] then
-          Printf.eprintf "[SSE] Reaped %d stale connections (active: %d)\n%!"
+          Log.Server.info "Reaped %d stale connections (active: %d)"
             (List.length stale_sids) (Sse.client_count ());
         loop ()
       in
@@ -246,14 +243,14 @@ let serve ~sw ~clock ~socket ~request_handler =
                 in
                 conn_handler client_addr flow
               with exn ->
-                Printf.eprintf "[HTTP] Connection error: %s\n%!"
+                Log.Misc.error "Connection error: %s"
                   (Printexc.to_string exn)))
       ;
       accept_loop 0.05
     with exn ->
       if is_cancelled exn then ()
       else begin
-        Printf.eprintf "Accept error: %s\n%!" (Printexc.to_string exn);
+        Log.Misc.error "Accept error: %s" (Printexc.to_string exn);
         (try Eio.Time.sleep clock backoff_s with _ -> ());
         accept_loop (Float.min 2.0 (backoff_s *. 1.5))
       end
@@ -291,7 +288,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
       start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
     with exn ->
-      Printf.eprintf "[startup] Background init failed (HTTP still serving): %s\n%!"
+      Log.Server.error "Background init failed (HTTP still serving): %s"
         (Printexc.to_string exn));
 
   (* 3. Start serving — /health responds before init completes *)

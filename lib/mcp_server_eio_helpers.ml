@@ -11,7 +11,7 @@ let log_mcp_exn ~label exn =
     | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
     | _ -> "[UNEXPECTED] "
   in
-  Printf.eprintf "[mcp_server] %s%s: %s\n%!" tag label (Printexc.to_string exn)
+  Log.Mcp.info "%s%s: %s" tag label (Printexc.to_string exn)
 
 (** Unregister agent synchronously - adapter for Session.registry.
     Directly removes from hashtable without extra mutex layer.

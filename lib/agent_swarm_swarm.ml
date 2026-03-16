@@ -4,7 +4,9 @@
     Each agent joins a MASC room, executes its goal using LLM + tools,
     then leaves the room. *)
 
+module Masc_log = Log
 open Agent_sdk
+module Log = Masc_log
 
 type managed_task = {
   title_fragment: string;
@@ -292,7 +294,7 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
           (match Agent_swarm_client.leave ~sw masc with
            | Ok _ -> ()
            | Error warn ->
-               Printf.eprintf "[%s] MASC leave warning: %s\n%!" spec.name warn);
+               Log.Swarm.warn "%s: MASC leave warning: %s" spec.name warn);
           { agent_name = spec.name; result = Error e }
       | Ok managed_task ->
           let result =
@@ -312,15 +314,15 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
                   match Agent_swarm_client.heartbeat ~sw:inner_sw masc with
                   | Ok _ ->
                       if consecutive_failures > 0 then
-                        Printf.eprintf "[%s] heartbeat recovered after %d failures\n%!"
+                        Log.Swarm.info "%s: heartbeat recovered after %d failures"
                           spec.name consecutive_failures;
                       loop 0
                   | Error e ->
                       let failures = consecutive_failures + 1 in
-                      Printf.eprintf "[%s] heartbeat error (%d/%d, next in %.0fs): %s\n%!"
+                      Log.Swarm.error "%s: heartbeat error (%d/%d, next in %.0fs): %s"
                         spec.name failures max_consecutive_failures interval e;
                       if failures >= max_consecutive_failures then (
-                        Printf.eprintf "[%s] heartbeat: %d consecutive failures, declaring dead\n%!"
+                        Log.Swarm.error "%s: heartbeat: %d consecutive failures, declaring dead"
                           spec.name failures;
                         `Stop_daemon)
                       else
@@ -395,7 +397,7 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
            | Error _ -> ());
           (match Agent_swarm_client.leave ~sw masc with
            | Ok _ -> ()
-           | Error e -> Printf.eprintf "[%s] MASC leave warning: %s\n%!" spec.name e);
+           | Error e -> Log.Swarm.warn "%s: MASC leave warning: %s" spec.name e);
           { agent_name = spec.name; result })
 
 (** Run all agents in parallel using Eio fibers.
@@ -416,7 +418,7 @@ let run ~sw ~net ~clock config ~goal =
         ~message:(Printf.sprintf "Fleet starting: %s" goal));
       true
     | Error e ->
-      Printf.eprintf "[swarm-coordinator] MASC join warning: %s\n%!" e;
+      Log.Swarm.warn "MASC join warning: %s" e;
       false
   in
   let results =
@@ -429,7 +431,7 @@ let run ~sw ~net ~clock config ~goal =
             (match Agent_swarm_client.heartbeat ~sw:inner_sw masc with
              | Ok _ -> ()
              | Error e ->
-               Printf.eprintf "[swarm-coordinator] heartbeat error: %s\n%!" e);
+               Log.Swarm.error "heartbeat error: %s" e);
             loop ()
           in
           (try loop ()
@@ -448,10 +450,10 @@ let run ~sw ~net ~clock config ~goal =
     (match Agent_swarm_client.broadcast ~sw masc ~message:"Fleet complete" with
      | Ok _ -> ()
      | Error e ->
-       Printf.eprintf "[swarm-coordinator] broadcast error: %s\n%!" e);
+       Log.Swarm.error "broadcast error: %s" e);
     (match Agent_swarm_client.leave ~sw masc with
      | Ok _ -> ()
      | Error e ->
-       Printf.eprintf "[swarm-coordinator] MASC leave warning: %s\n%!" e)
+       Log.Swarm.warn "MASC leave warning: %s" e)
   end;
   results

@@ -168,8 +168,10 @@
    lodge_topic
    lodge_tom
    lodge_selection
+   knowledge_graph
    memory_consolidation
    memory_stream
+   norm_detector
    agent_planner
    reflection
    prometheus

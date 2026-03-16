@@ -57,6 +57,11 @@
    server_utils
    server_auth
    server_tts_proxy
+   server_trpg_rest_core
+   server_trpg_rest_actor
+   server_trpg_rest_models
+   server_trpg_rest_views
+   server_trpg_rest_runtime
    server_trpg_rest
    dashboard_http_helpers
    dashboard_http_monitoring

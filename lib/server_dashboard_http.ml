@@ -787,8 +787,12 @@ let keeper_history_summary_json
             raw_count + 1,
             fragment_count + (if is_fragment then 1 else 0),
             filtered_count + (if should_filter then 1 else 0) )
-      with _ ->
-        (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
+      with
+      | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
+          (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
+      | exn ->
+          Log.Dashboard.warn "conversation fold: %s" (Printexc.to_string exn);
+          (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
     ) ([], [], 0, 0, 0) history_lines
   in
   let conversation = `List (List.rev conversation_rev) in
@@ -1458,7 +1462,11 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                       | Some s -> `String s
                       | None -> `Null);
                   ])
-              with _ -> None
+              with
+              | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+              | exn ->
+                  Log.Dashboard.warn "metrics item parse: %s" (Printexc.to_string exn);
+                  None
             ) parsed_metrics in
             let sample_points = List.length items in
             let turn_points_int = !turn_points in
@@ -2808,7 +2816,9 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
     if Room.is_initialized config then
       try
         Server_command_plane_http.command_plane_summary_http_json ~state
-      with _ -> `Assoc []
+      with exn ->
+        Log.Dashboard.warn "command_plane_summary: %s" (Printexc.to_string exn);
+        `Assoc []
     else
       `Assoc []
   in

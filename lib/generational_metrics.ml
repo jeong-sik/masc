@@ -162,7 +162,10 @@ let load_task_records_from_jsonl ~agent_name : task_record list =
                 output_tokens = json |> member "output_tokens" |> to_int;
                 timestamp = json |> member "timestamp" |> to_float;
               } :: !records
-          with _ -> ()
+          with
+          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
+          | exn ->
+              Log.Metrics.warn "load_task_records parse: %s" (Printexc.to_string exn)
         end
       done with End_of_file -> ());
       List.rev !records)
@@ -185,7 +188,8 @@ let record_task ~generation ~task_id ~completed ~duration_ms ~error_count
     task_records := record :: !task_records;
     (* JSONL backup — best effort, don't fail the record *)
     (try append_jsonl ~agent_name:"_global" (task_record_to_json record)
-     with _ -> ());
+     with exn ->
+       Log.Metrics.warn "append_jsonl task: %s" (Printexc.to_string exn));
     record)
 
 (** Record a handoff *)
@@ -200,7 +204,8 @@ let record_handoff ~from_generation ~to_generation ~dna_size ~context_ratio =
     } in
     handoff_records := record :: !handoff_records;
     (try append_jsonl ~agent_name:"_global" (handoff_record_to_json record)
-     with _ -> ());
+     with exn ->
+       Log.Metrics.warn "append_jsonl handoff: %s" (Printexc.to_string exn));
     record)
 
 (** Record a knowledge retention test *)
@@ -217,7 +222,9 @@ let summarize_generation_unlocked generation =
   let all_tasks =
     if !task_records = [] then
       (try load_task_records_from_jsonl ~agent_name:"_global"
-       with _ -> [])
+       with exn ->
+         Log.Metrics.warn "load_task_records fallback: %s" (Printexc.to_string exn);
+         [])
     else !task_records
   in
   let tasks = List.filter (fun (t : task_record) -> t.generation = generation) all_tasks in

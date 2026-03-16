@@ -22,7 +22,7 @@ open Gardener_types
 
 let agent_card : Agent_card.agent_card = {
   name = "gardener";
-  version = "2.95.0";
+  version = "2.95.1";
   description = Some "Self-organizing agent ecosystem manager: spawn, retire, homeostatic balance";
   provider = Some { organization = "MASC"; url = None };
   protocol_versions = ["0.3"];

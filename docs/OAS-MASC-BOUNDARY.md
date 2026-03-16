@@ -46,7 +46,7 @@ OAS  ──does NOT──→ know about MASC
 | 4 | Event_bus 브리지 | `Event_bus.Custom` | `Oas_events` | 계획 |
 | 5 | Checkpoint 통합 | `Checkpoint`, `Checkpoint_store` | `Oas_checkpoint_bridge` | 계획 |
 
-### Oas_compat 제거 (v2.95.0)
+### Oas_compat 제거 (v2.95.1)
 
 `Oas_compat` 어댑터 모듈을 제거했다. OAS v0.24.0의 `tool_result` 타입을 MASC에서 직접 사용한다.
 production 코드에서 호출이 없었으므로 (re-export만 존재) 영향 범위는 테스트 코드에 한정되었다.

@@ -2387,11 +2387,14 @@ let parse_snapshot_view = function
   | None -> Full
 
 let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = true)
-    ?(include_keepers = true) (ctx : 'a context) : Yojson.Safe.t =
+    ?(include_keepers = true) ?sessions (ctx : 'a context) : Yojson.Safe.t =
   let config = ctx.config in
   let initialized = Room.is_initialized config in
   let tracked_sessions =
-    if initialized then Team_session_store.list_sessions config else []
+    match sessions with
+    | Some s -> s
+    | None ->
+        if initialized then Team_session_store.list_sessions config else []
   in
   let trace_id = trace_id "ops" in
   let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -2418,7 +2421,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     | Sessions | Keepers -> false
   in
   let command_plane_summary =
-    if initialized then Some (Command_plane_v2.summary_json config) else None
+    if initialized then
+      Some (Command_plane_v2.summary_json ~sessions:tracked_sessions config)
+    else None
   in
   let summary_fields =
     if initialized && (match view with Summary | Full -> true | _ -> false) then

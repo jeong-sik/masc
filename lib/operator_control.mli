@@ -13,6 +13,7 @@ val snapshot_json :
   ?include_messages:bool ->
   ?include_sessions:bool ->
   ?include_keepers:bool ->
+  ?sessions:Team_session_types.session list ->
   'a context ->
   Yojson.Safe.t
 

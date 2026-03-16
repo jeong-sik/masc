@@ -1879,6 +1879,12 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
           mcp_session_id = None;
         }
       in
+      (* Load sessions once; pass to snapshot_json to avoid repeated filesystem scans *)
+      let sessions =
+        if Room.is_initialized config then
+          Team_session_store.list_sessions config
+        else []
+      in
       let snapshot_json =
         Operator_control.snapshot_json
           ~actor:effective_actor
@@ -1886,6 +1892,7 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
           ~include_messages:false
           ~include_sessions:true
           ~include_keepers:true
+          ~sessions
           ctx
       in
       let digest_json =

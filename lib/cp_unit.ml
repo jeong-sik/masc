@@ -442,13 +442,18 @@ let rec descendant_units_of_kind units unit_id kind =
       (fun (child : unit_record) -> descendant_units_of_kind units child.unit_id kind)
       direct_children
 
-let projected_team_session_operations config units managed_operations =
+let projected_team_session_operations ?sessions config units managed_operations =
   let managed_session_ids =
     managed_operations
     |> List.filter_map (fun (operation : operation_record) -> operation.detachment_session_id)
     |> List.sort_uniq String.compare
   in
-  Team_session_store.list_sessions config
+  let all_sessions =
+    match sessions with
+    | Some s -> s
+    | None -> Team_session_store.list_sessions config
+  in
+  all_sessions
   |> List.filter (fun (session : Team_session_types.session) ->
          not (List.mem session.session_id managed_session_ids))
   |> List.map (fun (session : Team_session_types.session) ->
@@ -555,10 +560,10 @@ let projected_swarm_operations config units managed_operations =
         ]
   | _ -> []
 
-let all_operations config units =
+let all_operations ?sessions config units =
   let managed = read_operations config in
   managed
-  @ projected_team_session_operations config units managed
+  @ projected_team_session_operations ?sessions config units managed
   @ projected_swarm_operations config units managed
 
 let operation_by_id operations operation_id =
@@ -566,14 +571,23 @@ let operation_by_id operations operation_id =
     (fun (operation : operation_record) -> String.equal operation.operation_id operation_id)
     operations
 
-let projected_team_session_detachments config operations =
+let projected_team_session_detachments ?sessions config operations =
+  let find_session session_id =
+    match sessions with
+    | Some cached ->
+        List.find_opt
+          (fun (s : Team_session_types.session) ->
+            String.equal s.session_id session_id)
+          cached
+    | None -> Team_session_store.load_session config session_id
+  in
   operations
   |> List.filter_map (fun (operation : operation_record) ->
          match operation.detachment_session_id with
          | None when operation.source = "projected" -> None
          | None -> None
          | Some session_id -> (
-             match Team_session_store.load_session config session_id with
+             match find_session session_id with
              | None -> None
              | Some session ->
                  Some
@@ -653,7 +667,7 @@ let projected_swarm_detachments config operations =
           ])
   | _ -> []
 
-let all_detachments config units operations =
+let all_detachments ?sessions config units operations =
   let managed = read_detachments config in
   let managed_operation_ids =
     managed
@@ -667,7 +681,7 @@ let all_detachments config units operations =
   in
   let _ = units in
   managed
-  @ projected_team_session_detachments config projected_ops
+  @ projected_team_session_detachments ?sessions config projected_ops
   @ projected_swarm_detachments config projected_ops
 
 let projected_operator_decisions config =

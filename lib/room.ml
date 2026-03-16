@@ -24,12 +24,29 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
           agent_name  (* Legacy: agent_name is the type *)
   in
 
-  (* Generate unique nickname if agent_name is just a type *)
+  (* Reuse existing nickname for same agent_type if already joined,
+     otherwise generate a new one. This prevents identity drift when
+     the same agent_name joins multiple times within a session. *)
   let nickname =
     if Nickname.is_generated_nickname agent_name then
       agent_name  (* Already a nickname, use as-is *)
-    else
-      Nickname.generate agent_type  (* Generate new nickname *)
+    else begin
+      let dir = agents_dir config in
+      let prefix = safe_filename agent_type ^ "-" in
+      let existing =
+        if Sys.file_exists dir && Sys.is_directory dir then
+          Array.to_list (Sys.readdir dir)
+          |> List.find_opt (fun f ->
+               Filename.check_suffix f ".json"
+               && String.length f > String.length prefix
+               && String.sub f 0 (String.length prefix) = prefix)
+          |> Option.map (fun f -> Filename.chop_suffix f ".json")
+        else None
+      in
+      match existing with
+      | Some nick -> nick  (* Reuse existing nickname for this agent_type *)
+      | None -> Nickname.generate agent_type
+    end
   in
 
   (* Dedup: if agent already joined, update last_seen and return early *)

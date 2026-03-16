@@ -90,6 +90,7 @@ val start :
   initiator:string ->
   ?max_turns:int ->
   ?initial_content:string ->
+  ?mentions:string list ->
   ?source_post_id:string ->
   unit ->
   (thread, string) result

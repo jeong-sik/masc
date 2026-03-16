@@ -426,16 +426,15 @@ let discover config ?(endpoint : string option) ?(capability : string option) ()
     @param skill_id Skill ID to query
     @return Skill details
 *)
-let query_skill config ~agent_name ~skill_id : (Yojson.Safe.t, string) result =
+let query_skill config ~schemas ~agent_name ~skill_id : (Yojson.Safe.t, string) result =
   (* First, find the agent *)
   let agents = Room.get_agents_raw config in
   let agent_opt = List.find_opt (fun (a : agent) -> a.name = agent_name) agents in
   match agent_opt with
   | None -> Error (Printf.sprintf "Agent '%s' not found" agent_name)
   | Some _agent ->
-    (* Look up skill from MASC skills *)
-    let card = Agent_card.generate_default () in
-    let skills = card.skills in
+    (* Look up skill from dynamic MCP tool schemas *)
+    let skills = Agent_card.skills_from_tools schemas in
     let skill_opt = List.find_opt (fun (s : Agent_card.skill) -> s.id = skill_id) skills in
     match skill_opt with
     | None -> Error (Printf.sprintf "Skill '%s' not found" skill_id)

@@ -21,7 +21,7 @@ let handle_a2a_discover ctx args =
 let handle_a2a_query_skill ctx args =
   let skill_agent_name = get_string args "agent_name" "" in
   let skill_id = get_string args "skill_id" "" in
-  match A2a_tools.query_skill ctx.config ~agent_name:skill_agent_name ~skill_id with
+  match A2a_tools.query_skill ctx.config ~schemas:Config.raw_all_tool_schemas ~agent_name:skill_agent_name ~skill_id with
   | Ok json -> (true, Yojson.Safe.pretty_to_string json)
   | Error e -> (false, Printf.sprintf "❌ Query skill failed: %s" e)
 

@@ -27,10 +27,10 @@ type skill = {
   id: string;
   name: string;
   description: string option;
-  tags: string list;           (** Category tags for skill discovery *)
+  tags: string list [@default []];           (** Category tags for skill discovery *)
   input_modes: string list;    (** MIME types: "text/plain", "application/json" *)
   output_modes: string list;   (** MIME types: "text/plain", "application/json" *)
-  tool_count: int;             (** Number of MCP tools under this skill *)
+  tool_count: int [@default 0];             (** Number of MCP tools under this skill *)
 } [@@deriving yojson, show, eq]
 
 (** Protocol binding for agent communication.

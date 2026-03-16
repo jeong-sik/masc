@@ -3563,6 +3563,8 @@ let tool_output_schema_field = function
   | _ -> None
 
 let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
+  let category_str = Mode.category_to_string (Mode.tool_category schema.name) in
+  let tier_str = Tool_catalog.tier_to_string (Tool_catalog.tool_tier schema.name) in
   let base =
     [
       ("name", `String schema.name);
@@ -3572,14 +3574,16 @@ let tool_json_for_profile ?usage_summary profile (schema : Types.tool_schema) =
         `List
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
+      ("x-category", `String category_str);
+      ("x-tier", `String tier_str);
     ]
     @ Tool_catalog.metadata_to_fields schema.name
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
     @
-    match usage_summary with
+    (match usage_summary with
     | Some summary -> Telemetry_eio.tool_usage_fields summary schema.name
-    | None -> []
+    | None -> [])
   in
   `Assoc base
 

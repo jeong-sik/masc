@@ -1315,7 +1315,9 @@ let run_heartbeat_llm_traced ?(require_json = false) ?(temperature = 0.7) ~agent
   cascade_result
 
 (** Compute dynamic temperature for an agent based on current mood.
-    Uses time-of-day + jitter when actual reaction signals are unavailable. *)
+    Uses time-of-day + jitter when actual reaction signals are unavailable.
+    [agent_name] is accepted but unused — extension point for per-agent
+    curiosity from Neo4j (planned: Track B+, OAS migration). *)
 let agent_temperature ~agent_name:_ =
   let mood = Lodge_atmosphere.compute_mood_default () in
   Lodge_personality.compute_temperature ~mood ~curiosity:0.5

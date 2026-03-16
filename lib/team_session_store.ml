@@ -94,11 +94,9 @@ let save_session config (session : Team_session_types.session) =
 
 let load_session config session_id : Team_session_types.session option =
   let path = session_json_path config session_id in
-  if not (path_exists config path) then
-    None
-  else
-    (* Read-only: no lock needed. read_json is atomic (tmp+rename writes). *)
-    Team_session_types.session_of_yojson (read_json config path)
+  match read_json_opt config path with
+  | None -> None
+  | Some json -> Team_session_types.session_of_yojson json
 
 let load_session_or_error config session_id =
   match load_session config session_id with
@@ -229,13 +227,25 @@ let read_recent_events config session_id ~max_count :
     []
 
 let list_sessions config : Team_session_types.session list =
-  let root = sessions_root config in
-  if not (path_exists config root) then
-    []
-  else
-    Sys.readdir root
-    |> Array.to_list
-    |> List.filter_map (fun session_id -> load_session config session_id)
+  match backend_get_all config ~prefix:"team-sessions:" with
+  | Ok pairs ->
+      pairs
+      |> List.filter_map (fun (key, value) ->
+             if not (String.ends_with ~suffix:":session.json" key) then None
+             else
+               let trimmed = String.trim value in
+               if trimmed = "" then None
+               else
+                 match Safe_ops.parse_json_safe ~context:"list_sessions" trimmed with
+                 | Ok json -> Team_session_types.session_of_yojson json
+                 | Error _ -> None)
+  | Error _ ->
+      let root = sessions_root config in
+      if not (path_exists config root) then []
+      else
+        Sys.readdir root
+        |> Array.to_list
+        |> List.filter_map (fun session_id -> load_session config session_id)
 
 let update_session config session_id f =
   let path = session_json_path config session_id in

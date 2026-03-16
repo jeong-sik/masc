@@ -205,10 +205,21 @@ let path_exists config path =
   | None -> Sys.file_exists path
 
 let read_json_opt config path =
-  if path_exists config path then
-    Some (read_json config path)
-  else
-    None
+  match key_of_path config path with
+  | Some key -> (
+      match backend_get config ~key with
+      | Ok (Some content) ->
+          let trimmed = String.trim content in
+          if trimmed = "" then None
+          else (
+            match Safe_ops.parse_json_safe ~context:"read_json_opt" trimmed with
+            | Ok json -> Some json
+            | Error _ -> None)
+      | Ok None -> None
+      | Error _ -> None)
+  | None ->
+      if Sys.file_exists path then Some (read_json_local path)
+      else None
 
 (* ============================================ *)
 (* File locking                                 *)

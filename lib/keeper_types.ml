@@ -1175,9 +1175,12 @@ let register_resident_keeper_from_meta config (meta : keeper_meta) :
       updated_at = now_iso ();
     }
 
-let persistent_agent_names config =
+let persistent_agent_names ?resident_names config =
   let dir = keeper_dir config in
-  let resident = resident_keeper_names config in
+  let resident = match resident_names with
+    | Some n -> n
+    | None -> resident_keeper_names config
+  in
   match Safe_ops.list_dir_safe dir with
   | Error _ -> []
   | Ok files ->

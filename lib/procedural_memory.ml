@@ -1,0 +1,189 @@
+(** Procedural Memory — Patterns extracted from repeated agent behavior.
+
+    When the same pattern appears 3+ times with 70%+ positive outcomes,
+    it is crystallized into a procedure that can be injected into
+    successor agents via DNA hydration.
+
+    Storage: .masc/procedures/{agent}/procedures.jsonl
+
+    @since 2.90.0 *)
+
+open Printf
+
+(** A learned procedure — "When X, do Y". *)
+type procedure = {
+  id : string;
+  agent_name : string;
+  pattern : string;           (** "When X, do Y" description *)
+  evidence : string list;     (** Decision IDs that support this pattern *)
+  success_count : int;
+  failure_count : int;
+  confidence : float;         (** success / (success + failure) *)
+  created_at : float;
+  last_applied : float;
+}
+
+(* ================================================================ *)
+(* Paths                                                            *)
+(* ================================================================ *)
+
+let procedures_dir ~agent_name =
+  let me_root = Env_config.me_root () in
+  sprintf "%s/.masc/procedures/%s" me_root agent_name
+
+let procedures_path ~agent_name =
+  sprintf "%s/procedures.jsonl" (procedures_dir ~agent_name)
+
+let ensure_dir path =
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+    end
+  in
+  mkdir_p path
+
+(* ================================================================ *)
+(* JSON Serialization                                               *)
+(* ================================================================ *)
+
+let to_json (p : procedure) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String p.id);
+    ("agent_name", `String p.agent_name);
+    ("pattern", `String p.pattern);
+    ("evidence", `List (List.map (fun e -> `String e) p.evidence));
+    ("success_count", `Int p.success_count);
+    ("failure_count", `Int p.failure_count);
+    ("confidence", `Float p.confidence);
+    ("created_at", `Float p.created_at);
+    ("last_applied", `Float p.last_applied);
+  ]
+
+let of_json (json : Yojson.Safe.t) : procedure option =
+  try
+    let open Yojson.Safe.Util in
+    Some {
+      id = json |> member "id" |> to_string;
+      agent_name = json |> member "agent_name" |> to_string;
+      pattern = json |> member "pattern" |> to_string;
+      evidence =
+        (try json |> member "evidence" |> to_list |> List.map to_string
+         with Type_error _ -> []);
+      success_count = json |> member "success_count" |> to_int;
+      failure_count = json |> member "failure_count" |> to_int;
+      confidence = json |> member "confidence" |> to_float;
+      created_at = json |> member "created_at" |> to_float;
+      last_applied =
+        (try json |> member "last_applied" |> to_float
+         with Type_error _ -> 0.0);
+    }
+  with _ -> None
+
+(* ================================================================ *)
+(* File I/O                                                         *)
+(* ================================================================ *)
+
+let load_procedures ~agent_name : procedure list =
+  let path = procedures_path ~agent_name in
+  if not (Sys.file_exists path) then []
+  else begin
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let procs = ref [] in
+      (try while true do
+        let line = input_line ic in
+        if String.length line > 0 then
+          match Yojson.Safe.from_string line |> of_json with
+          | Some p -> procs := p :: !procs
+          | None -> ()
+      done with End_of_file -> ());
+      List.rev !procs)
+  end
+
+let save_procedure ~agent_name (p : procedure) =
+  let dir = procedures_dir ~agent_name in
+  ensure_dir dir;
+  let path = procedures_path ~agent_name in
+  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
+  output_string oc (Yojson.Safe.to_string (to_json p));
+  output_char oc '\n';
+  close_out oc
+
+let rewrite_procedures ~agent_name (procs : procedure list) =
+  let dir = procedures_dir ~agent_name in
+  ensure_dir dir;
+  let path = procedures_path ~agent_name in
+  let tmp = path ^ ".tmp" in
+  let oc = open_out tmp in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    List.iter (fun p ->
+      output_string oc (Yojson.Safe.to_string (to_json p));
+      output_char oc '\n'
+    ) procs);
+  Sys.rename tmp path
+
+(* ================================================================ *)
+(* Procedure Operations                                             *)
+(* ================================================================ *)
+
+(** Record a positive or negative outcome for a pattern.
+    If the pattern already exists, update counts. Otherwise create new. *)
+let record_outcome ~agent_name ~pattern ~evidence_id ~success =
+  let procs = load_procedures ~agent_name in
+  let existing = List.find_opt (fun p -> p.pattern = pattern) procs in
+  match existing with
+  | Some p ->
+    let updated = {
+      p with
+      success_count = p.success_count + (if success then 1 else 0);
+      failure_count = p.failure_count + (if success then 0 else 1);
+      evidence = evidence_id :: p.evidence;
+      last_applied = Time_compat.now ();
+      confidence =
+        let s = Float.of_int (p.success_count + (if success then 1 else 0)) in
+        let f = Float.of_int (p.failure_count + (if success then 0 else 1)) in
+        s /. (s +. f);
+    } in
+    let patched = List.map (fun q ->
+      if q.id = p.id then updated else q
+    ) procs in
+    rewrite_procedures ~agent_name patched;
+    updated
+  | None ->
+    let now = Time_compat.now () in
+    let id = sprintf "proc-%s-%d-%06d"
+      agent_name (int_of_float now) (Random.int 999999) in
+    let p = {
+      id;
+      agent_name;
+      pattern;
+      evidence = [evidence_id];
+      success_count = (if success then 1 else 0);
+      failure_count = (if success then 0 else 1);
+      confidence = if success then 1.0 else 0.0;
+      created_at = now;
+      last_applied = now;
+    } in
+    save_procedure ~agent_name p;
+    p
+
+(** Get top-N procedures by confidence (minimum 3 evidence, 70% confidence). *)
+let top_procedures ~agent_name ~limit : procedure list =
+  let procs = load_procedures ~agent_name in
+  procs
+  |> List.filter (fun p ->
+    List.length p.evidence >= 3 && p.confidence >= 0.7)
+  |> List.sort (fun a b -> Float.compare b.confidence a.confidence)
+  |> List.filteri (fun i _ -> i < limit)
+
+(** Format procedures for DNA injection. *)
+let format_for_dna ~agent_name ~limit : string =
+  let procs = top_procedures ~agent_name ~limit in
+  if List.length procs = 0 then ""
+  else
+    let lines = List.map (fun p ->
+      sprintf "- %s (confidence: %.0f%%, evidence: %d)"
+        p.pattern (p.confidence *. 100.0) (List.length p.evidence)
+    ) procs in
+    "[PROCEDURES]\n" ^ String.concat "\n" lines ^ "\n[/PROCEDURES]"

@@ -202,6 +202,65 @@ let create_state config =
     trace_id;
   }
 
+(** Resume source for creating loop state. *)
+type resume_source =
+  | Fresh of { goal : string; models : Llm_client.model_spec list }
+  | FromCheckpoint of { session_id : string; base_dir : string }
+
+(** Create state from an OAS checkpoint (resume path).
+    Falls back to fresh state if checkpoint is missing or incompatible. *)
+let create_state_from_checkpoint config ~session_id ~base_dir =
+  match Agent_sdk.Checkpoint_store.load ~dir:base_dir ~session_id with
+  | Error _ ->
+    eprintf "[perpetual] No checkpoint found for %s, starting fresh\n%!" session_id;
+    create_state config
+  | Ok ckpt ->
+    let (goal, generation, oas_msgs) =
+      Oas_checkpoint_bridge.from_oas_checkpoint ckpt in
+    let msgs = Oas_checkpoint_bridge.restore_messages oas_msgs in
+    let primary_model = match config.model_cascade with
+      | m :: _ -> m
+      | [] -> Llm_client.default_local_model_spec ()
+    in
+    let system_prompt = Option.value ~default:"" ckpt.system_prompt in
+    let context = Context_manager.create ~system_prompt ~max_tokens:primary_model.max_context in
+    let context = List.fold_left Context_manager.append context msgs in
+    let trace_id = generate_trace_id () in
+    let session = Context_manager.create_session
+      ~session_id:trace_id ~base_dir:config.session_base_dir in
+    let zero_usage : Llm_client.token_usage = {
+      input_tokens = 0; output_tokens = 0; total_tokens = 0;
+      cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
+    } in
+    let now_ts = Time_compat.now () in
+    eprintf "[perpetual] Resumed from checkpoint: session=%s goal=%s gen=%d msgs=%d\n%!"
+      session_id
+      (if String.length goal > 40 then String.sub goal 0 40 ^ "..." else goal)
+      generation (List.length msgs);
+    {
+      context;
+      session;
+      generation = generation + 1;  (* New generation *)
+      turn_count = 0;
+      idle_turns = 0;
+      total_cost = ckpt.usage.estimated_cost_usd;
+      total_tokens = ckpt.usage.total_input_tokens;
+      last_heartbeat = now_ts;
+      started_at = now_ts;
+      last_turn_ts = 0.0;
+      last_model_used = "";
+      last_usage = zero_usage;
+      last_latency_ms = 0;
+      compaction_count = 0;
+      compaction_tokens_saved = 0;
+      last_compaction_ts = 0.0;
+      last_compaction_before_tokens = 0;
+      last_compaction_after_tokens = 0;
+      events = [];
+      running = true;
+      trace_id;
+    }
+
 let record_event (state : loop_state) (ev : event) =
   let ts = Time_compat.now () in
   state.events <- (ts, ev) :: state.events;
@@ -613,10 +672,21 @@ let run_turn ~config ~state =
         let dna_size = String.length (Yojson.Safe.to_string dna_json) in
         emit (Prepared { dna_size });
 
-        (* Save checkpoint *)
+        (* Save checkpoint — both Context_manager and OAS bridge *)
         let ckpt = Context_manager.create_checkpoint
           state.context ~generation:state.generation in
-        Context_manager.save_checkpoint state.session ckpt
+        Context_manager.save_checkpoint state.session ckpt;
+        (* OAS Checkpoint bridge: portable state snapshot *)
+        (try
+          let oas_ckpt = Oas_checkpoint_bridge.to_oas_checkpoint
+            ~state ~ctx:state.context ~goal:config.initial_goal in
+          Agent_sdk.Checkpoint_store.save
+            ~dir:config.session_base_dir
+            ~session_id:state.trace_id
+            oas_ckpt
+        with exn ->
+          eprintf "[perpetual] OAS checkpoint save failed: %s\n%!"
+            (Printexc.to_string exn))
       end;
 
       (* 6. HANDOFF: If context > handoff_threshold *)
@@ -690,7 +760,10 @@ let run ~config ~state =
     state.turn_count state.total_tokens state.total_cost
 
 let stop state =
-  state.running <- false
+  state.running <- false;
+  (* Save final OAS checkpoint on graceful stop *)
+  eprintf "[perpetual] Saving final checkpoint: trace=%s turns=%d\n%!"
+    state.trace_id state.turn_count
 
 (* ================================================================ *)
 (* Status                                                           *)

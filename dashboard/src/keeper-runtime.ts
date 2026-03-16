@@ -32,11 +32,12 @@ export const keeperSending = signal<Record<string, boolean>>({})
 export const keeperProbing = signal<Record<string, boolean>>({})
 export const keeperRecovering = signal<Record<string, boolean>>({})
 export const keeperActionErrors = signal<Record<string, string | null>>({})
+export const keeperStreamStartedAt = signal<Record<string, number | null>>({})
 
 const keeperStreamControllers = new Map<string, AbortController>()
 const keeperStreamEntryIds = new Map<string, string>()
 
-function setRecordValue<T>(state: typeof keeperThreads | typeof keeperHydrating | typeof keeperSending | typeof keeperProbing | typeof keeperRecovering | typeof keeperActionErrors, key: string, value: T): void {
+function setRecordValue<T>(state: typeof keeperThreads | typeof keeperHydrating | typeof keeperSending | typeof keeperProbing | typeof keeperRecovering | typeof keeperActionErrors | typeof keeperStreamStartedAt, key: string, value: T): void {
   state.value = {
     ...state.value,
     [key]: value,
@@ -589,14 +590,26 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
   })
   setRecordValue(keeperSending, keeperName, true)
   setRecordValue(keeperActionErrors, keeperName, null)
+  setRecordValue(keeperStreamStartedAt, keeperName, Date.now())
   const controller = new AbortController()
   setActiveStream(keeperName, assistantId, controller)
+  let idleTimeoutId: ReturnType<typeof setInterval> | null = null
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
+
+    let lastEventAt = Date.now()
+    idleTimeoutId = setInterval(() => {
+      if (Date.now() - lastEventAt > 120_000) {
+        if (idleTimeoutId != null) clearInterval(idleTimeoutId)
+        idleTimeoutId = null
+        abortKeeperThreadMessage(keeperName)
+      }
+    }, 5_000)
 
     await streamKeeperMessage(keeperName, message, undefined, {
       signal: controller.signal,
       onEvent: event => {
+        lastEventAt = Date.now()
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
         if (error) {
           throw new Error(error)
@@ -686,8 +699,10 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
+    if (idleTimeoutId != null) clearInterval(idleTimeoutId)
     clearActiveStream(keeperName)
     setRecordValue(keeperSending, keeperName, false)
+    setRecordValue(keeperStreamStartedAt, keeperName, null)
     await refreshDashboardState()
   }
 }

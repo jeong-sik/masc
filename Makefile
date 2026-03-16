@@ -3,10 +3,10 @@
 
 .PHONY: build test test-unit test-contract test-contract-live test-all clean coverage coverage-summary coverage-html coverage-percent doc install-deps dev-setup fmt fmt-check health ci dashboard build-all viewer-build viewer-serve harness-game-view-contract harness-streamable-http-contract harness-trpg-session-contract harness-trpg-grimland-smoke viewer-local-e2e-check
 
-# Default target
-all: build
+# Default target — OCaml + dashboard
+all: build-all
 
-# Build the project
+# Build OCaml only
 build:
 	dune build --root .
 

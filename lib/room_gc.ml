@@ -37,6 +37,8 @@ let empty_cp_result = {
     and Cp_cleanup (e.g. command_plane_v2.ml or room.ml post-include).
     This avoids a circular dependency: Cp_cleanup depends on Cp_io which
     depends on Room, and Room includes Room_gc. *)
+let cp_cleanup_connected = ref false
+
 let cp_cleanup_fn
   : (config -> cp_cleanup_result) ref
   = ref (fun _config -> empty_cp_result)
@@ -341,6 +343,10 @@ let gc config ?(days=7) () =
     results := "✅ No team sessions to archive" :: !results;
 
   (* 7. CP data cleanup (dead units, stale operations, orphaned detachments) *)
+  if not !cp_cleanup_connected then
+    log_event config (Printf.sprintf
+      "{\"type\":\"gc_warning\",\"msg\":\"cp_cleanup_fn not connected, CP cleanup skipped\",\"ts\":\"%s\"}"
+      (now_iso ()));
   let cp_result = !cp_cleanup_fn config in
   let cp_total =
     cp_result.dead_units_removed + cp_result.orphaned_units_removed

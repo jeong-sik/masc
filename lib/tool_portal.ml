@@ -43,3 +43,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_portal_close" -> Some (handle_portal_close ctx args)
   | "masc_portal_status" -> Some (handle_portal_status ctx args)
   | _ -> None
+
+let schemas = Tool_schemas_portal.schemas

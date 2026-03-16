@@ -275,6 +275,12 @@
    tools_schemas_10
    tools_schemas_11
    tool_args
+   tool_schemas_plan
+   tool_schemas_portal
+   tool_schemas_worktree
+   tool_schemas_auth
+   tool_schemas_agent
+   tool_schemas_room
    tool_plan
    tool_run
    tool_cache
@@ -400,7 +406,13 @@
    procedural_memory
    oas_events
    oas_checkpoint_bridge
-   env_config_core
+   tool_schemas_plan
+ tool_schemas_portal
+ tool_schemas_worktree
+ tool_schemas_auth
+ tool_schemas_agent
+ tool_schemas_room
+ env_config_core
    env_config_runtime
    env_config_governance
    env_config_keeper

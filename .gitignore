@@ -52,7 +52,11 @@ logs/
 # Dashboard SPA (Vite)
 dashboard/node_modules/
 dashboard/dist/
+assets/dashboard/
 viewer/dist-build/
+
+# Generated opam file (dune regenerates from dune-project)
+*.opam
 
 # Local Claude session scratch
 .claude/

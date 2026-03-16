@@ -128,7 +128,7 @@ make test                     # 테스트
 | Directory | Contents |
 |-----------|----------|
 | `dashboard/` | TypeScript source (Preact + HTM components) |
-| `assets/dashboard/` | Vite build output (committed to git) |
+| `assets/dashboard/` | Vite build output (.gitignore, built at runtime) |
 
 ### Development
 
@@ -149,9 +149,9 @@ cd dashboard && npm run build  # Production build → ../assets/dashboard/
 
 1. Edit TypeScript source in `dashboard/src/`
 2. Test with `npm run dev` (hot reload)
-3. Build: `npm run build`
-4. Commit both source changes AND `assets/dashboard/` build output
-5. `dune build --root .` + `make test` (OCaml side unchanged since Phase 2)
+3. Build: `npm run build` (auto: `start-masc-mcp.sh`가 실행 시 빌드)
+4. Commit source changes only (빌드 산출물은 .gitignore)
+5. `dune build --root .` + `make test`
 
 ### OCaml Integration
 

@@ -4,9 +4,22 @@
 
 ## Overview
 
-MASC MCP provides 140+ tools across 12 categories. Most agents don't need all of them. The **Mode System** lets you enable only the categories you use, reducing token consumption by narrowing the enabled tool surface.
+MASC MCP provides 300+ tools across 19 categories. Most agents don't need all of them. The **Mode System** lets you enable only the categories you use, reducing token consumption by narrowing the enabled tool surface.
 
-Default room mode is `full`. Start there for maximum tool visibility, then reduce the surface with `masc_switch_mode` when you want lower token overhead.
+Default room mode is `full` (changed from `standard` in v2.99). Start there for maximum tool visibility, then reduce the surface with `masc_switch_mode` when you want lower token overhead.
+
+## 3-Layer Filter Architecture
+
+Tools pass through 3 filters before being exposed to MCP clients:
+
+```
+raw_all_tool_schemas (all registered tools)
+  → capability_registry (surface projection: Public_mcp / Keeper / Worker)
+  → tool_catalog (visibility: Default/Hidden, lifecycle: Active/Deprecated)
+  → mode filter (category check against current mode's enabled_categories)
+```
+
+`masc_switch_mode` and `masc_get_config` bypass the mode filter (always available).
 
 ## Why Mode System?
 
@@ -21,14 +34,14 @@ Default room mode is `full`. Start there for maximum tool visibility, then reduc
 
 ### Preset Modes
 
-| Mode | Categories | Tools | Tokens (approx) |
-|------|------------|-------|-----------------|
-| **full** | All 12 | dynamic | varies |
-| **parallel** | core, comm, portal, worktree, health, discovery, voting, interrupt | dynamic | varies |
-| **coding** | core, worktree, code, health, plan, consensus | dynamic | varies |
-| **standard** | core, comm, worktree, health | dynamic | varies |
-| **minimal** | core, health | dynamic | varies |
-| **solo** | core, worktree | dynamic | varies |
+| Mode | Categories | Use Case |
+|------|-----------|----------|
+| **full** (default) | All 19 | MCP clients, general use |
+| **standard** | core, comm, worktree, health, plan, board, consensus | Reduced tool count for simple workflows |
+| **parallel** | core, comm, portal, worktree, health, discovery, plan, board, consensus, voting, interrupt | Multi-agent coordination |
+| **coding** | core, worktree, code, health, plan, consensus | Agent development |
+| **minimal** | core, health | Bare minimum |
+| **solo** | core, worktree | Single-agent work |
 
 ### Mode Selection Guide
 
@@ -151,6 +164,52 @@ AES-256-GCM data protection.
 masc_encryption_status, masc_encryption_enable, masc_encryption_disable, masc_generate_key
 ```
 
+### Board (11 tools)
+
+Agent board: posts, comments, votes, search.
+
+```
+masc_board_post, masc_board_list, masc_board_get, masc_board_comment,
+masc_board_vote, masc_board_comment_vote, masc_board_hearths,
+masc_board_search, masc_board_stats, masc_board_profile, masc_board_migrate
+```
+
+### Plan (dynamic)
+
+Plan and goal management.
+
+```
+masc_plan_init, masc_plan_get, masc_plan_set_task, masc_plan_update,
+masc_goal_upsert, masc_goal_list, masc_intent_create, masc_intent_status
+```
+
+### Consensus (dynamic)
+
+Governance V2: petitions, rulings, WALPH, conversations, decisions.
+
+```
+masc_petition_submit, masc_case_brief_submit, masc_cases, masc_case_status,
+masc_convo_start, masc_convo_reply, masc_convo_get, decision_create, decision_finalize
+```
+
+### Ecosystem (dynamic)
+
+Agent lifecycle: gardener, keeper, perpetual, MDAL, autoresearch, handover, library.
+
+```
+masc_gardener_health, masc_keeper_up, masc_keeper_down, masc_keeper_msg,
+masc_perpetual_start, masc_mdal_start, masc_autoresearch_start,
+masc_handover_create, masc_spawn
+```
+
+### TRPG (dynamic)
+
+Tabletop RPG engine: sessions, actors, dice, quests.
+
+### RISC (dynamic)
+
+RISC pipeline simulation: decode, issue, speculate, cache.
+
 ## Usage
 
 ### Switch Mode
@@ -258,7 +317,7 @@ Switch to a preset mode or enable custom categories.
 
 **Valid Categories:**
 
-`core`, `comm`, `portal`, `worktree`, `health`, `discovery`, `voting`, `interrupt`, `cost`, `auth`, `ratelimit`, `encryption`
+`core`, `comm`, `portal`, `worktree`, `code`, `health`, `discovery`, `voting`, `interrupt`, `cost`, `auth`, `ratelimit`, `encryption`, `board`, `plan`, `consensus`, `ecosystem`, `trpg`, `risc`
 
 ### masc_get_config
 
@@ -282,9 +341,10 @@ Get current mode configuration.
 ### "Invalid category name" Error
 
 Check spelling. Valid names are lowercase:
-- `core`, `comm`, `portal`, `worktree`, `health`
+- `core`, `comm`, `portal`, `worktree`, `code`, `health`
 - `discovery`, `voting`, `interrupt`, `cost`
 - `auth`, `ratelimit`, `encryption`
+- `board`, `plan`, `consensus`, `ecosystem`, `trpg`, `risc`
 
 ### Mode Not Persisting
 

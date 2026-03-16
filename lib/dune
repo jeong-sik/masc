@@ -162,7 +162,10 @@
    lodge_atmosphere
    lodge_decision
    lodge_worker
+   lodge_ecosystem
    lodge_heartbeat
+   lodge_rate_limit
+   lodge_trace
    lodge_memory
    lodge_memory_gc
    lodge_reaction

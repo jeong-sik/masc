@@ -1,6 +1,14 @@
 # Changelog
 
 
+## [2.93.0] - 2026-03-16
+
+### Changed
+- **lodge_heartbeat split phase 2** — extracted 3 modules from `lodge_heartbeat.ml` (2909→2304 lines, -20.8%)
+  - `lodge_ecosystem.ml` (580 lines): gap signal tracking, duplicate detection, agent spawning
+  - `lodge_rate_limit.ml` (108 lines): per-agent rate limiting, check-in tracking
+  - `lodge_trace.ml` (62 lines): prompt/response capture, JSONL file I/O
+
 ## [2.90.0] - 2026-03-16
 
 ### Security

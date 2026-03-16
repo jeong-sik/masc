@@ -381,11 +381,10 @@ let serve_agent_card ~host ~port request reqd =
                 (host_name, resolved_port)
             | _ -> (host, port))
       in
-      let card =
-        Agent_card.generate_default ~host:resolved_host
+      let (_card, json) =
+        Agent_card.get_cached ~host:resolved_host
           ~port:resolved_port ~schemas:Config.raw_all_tool_schemas ()
       in
-      let json = Agent_card.to_json card |> Yojson.Safe.to_string in
       let a2a_version = A2a_tools.default_a2a_version in
       Http_server_eio.Response.json ~extra_headers:[ ("A2A-Version", a2a_version) ] json
         reqd)

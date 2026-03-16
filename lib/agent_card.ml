@@ -413,3 +413,34 @@ let with_extension (card : agent_card) (key : string) (value : Yojson.Safe.t) : 
     @ [(key, value)]
   in
   { card with extensions; updated_at = timestamp }
+
+(* ── Agent Card Cache ─────────────────────────────────────── *)
+
+(** Cached agent card with generation counter for invalidation.
+    The card is generated once on first access and reused until
+    [invalidate_cache] is called (e.g. when tools change). *)
+type cached_card = {
+  card: agent_card;
+  card_json: string;  (** Pre-serialized JSON for fast HTTP response *)
+  generation: int;
+}
+
+let _cache : cached_card option ref = ref None
+let _cache_generation : int ref = ref 0
+
+(** Get cached agent card, generating if needed.
+    [schemas] is used only on first generation or after invalidation.
+    Returns [(card, json_string)] for direct HTTP response. *)
+let get_cached ?(port=8935) ?(host="127.0.0.1") ~schemas () : agent_card * string =
+  let gen = !_cache_generation in
+  match !_cache with
+  | Some c when c.generation = gen -> (c.card, c.card_json)
+  | _ ->
+    let card = generate_default ~port ~host ~schemas () in
+    let json_str = to_json card |> Yojson.Safe.to_string in
+    _cache := Some { card; card_json = json_str; generation = gen };
+    (card, json_str)
+
+(** Invalidate the cached agent card. Call when tools are added/removed. *)
+let invalidate_cache () =
+  incr _cache_generation

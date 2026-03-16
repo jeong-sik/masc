@@ -6,9 +6,7 @@ import { useEffect } from 'preact/hooks'
 import { route, initRouter } from './router'
 import { connectSSE, disconnectSSE } from './sse'
 import {
-  refreshExecution,
   refreshDashboardSemantics,
-  refreshShell,
 } from './store'
 import { refreshRoomTruth } from './room-truth-store'
 import { setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
@@ -23,7 +21,6 @@ import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
 import { DASHBOARD_NAV_ITEMS } from './config/navigation'
-import { refreshMissionSnapshot } from './mission-store'
 
 export function App() {
   useEffect(() => {
@@ -32,11 +29,12 @@ export function App() {
 
     // Connect SSE and start data fetching
     connectSSE()
-    refreshShell()
+
+    // room-truth is the single source — it includes shell + execution data.
+    // Removed redundant refreshShell(), refreshExecution(), refreshMissionSnapshot()
+    // that caused 5 concurrent API calls (server computes same data 3-6x).
     refreshRoomTruth()
-    refreshExecution()
     refreshDashboardSemantics()
-    refreshMissionSnapshot()
 
     // Setup SSE -> store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()
@@ -49,13 +47,6 @@ export function App() {
       unsubSSE()
       stopPeriodicRefresh()
     }
-  }, [])
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      refreshForTab(route.value.tab)
-    }, 15000)
-    return () => { clearInterval(interval) }
   }, [])
 
   useEffect(() => {

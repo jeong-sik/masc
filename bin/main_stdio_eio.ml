@@ -20,6 +20,7 @@ let run_cmd base_path =
   Masc_mcp.Llm_response_cache.enable_eio ();
   Masc_mcp.Chain_telemetry.enable_eio ();
   Masc_mcp.Generational_metrics.enable_eio ();
+  Masc_mcp.Dashboard_cache.enable_eio ();
   Masc_mcp.Time_compat.set_clock (Eio.Stdenv.clock env);
   Masc_mcp.Cancellation.TokenStore.init ();
   Eio.Switch.run @@ fun sw ->

@@ -1369,28 +1369,36 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
     }
   in
   let snapshot_json =
-    Operator_control.snapshot_json
-      ~actor:actor_name
-      ~view:"summary"
-      ~include_messages:false
-      ~include_sessions:true
-      ~include_keepers:true
-      ctx
+    Dashboard_cache.get_or_compute
+      (Printf.sprintf "snapshot:%s" actor_name)
+      ~ttl:3.0
+      (fun () ->
+        Operator_control.snapshot_json
+          ~actor:actor_name
+          ~view:"summary"
+          ~include_messages:false
+          ~include_sessions:true
+          ~include_keepers:true
+          ctx)
   in
   let digest_json =
-    match Operator_control.digest_json ~actor:actor_name ctx with
-    | Ok json -> json
-    | Error message ->
-        `Assoc
-          [
-            ("health", `String "warn");
-            ("attention_items", `List []);
-            ("recommended_actions", `List []);
-            ("session_cards", `List []);
-            ("swarm_status", Swarm_status.empty_json);
-            ("command_plane", `Assoc []);
-            ("error", `String message);
-          ]
+    Dashboard_cache.get_or_compute
+      (Printf.sprintf "digest:%s" actor_name)
+      ~ttl:5.0
+      (fun () ->
+        match Operator_control.digest_json ~actor:actor_name ctx with
+        | Ok json -> json
+        | Error message ->
+            `Assoc
+              [
+                ("health", `String "warn");
+                ("attention_items", `List []);
+                ("recommended_actions", `List []);
+                ("session_cards", `List []);
+                ("swarm_status", Swarm_status.empty_json);
+                ("command_plane", `Assoc []);
+                ("error", `String message);
+              ])
   in
   let room_json = member_assoc "room" snapshot_json in
   let command_json = member_assoc "command_plane" snapshot_json in

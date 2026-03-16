@@ -148,7 +148,7 @@ export function startPeriodicRefresh(): void {
       invalidateDashboardCache()
     }
     refreshDashboard()
-  }, 10000)
+  }, 30000)
 }
 
 export function stopPeriodicRefresh(): void {

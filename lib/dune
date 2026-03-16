@@ -44,6 +44,7 @@
    config
    context_router
    dashboard
+   dashboard_cache
    dashboard_governance
    dashboard_governance_judge
    dashboard_operator_judge

@@ -174,6 +174,7 @@ module Generational_metrics = Generational_metrics
 module Handoff_quality = Handoff_quality
 module Adaptive_thresholds = Adaptive_thresholds
 module Dashboard = Dashboard
+module Dashboard_cache = Dashboard_cache
 module Dashboard_governance = Dashboard_governance
 module Dashboard_governance_judge = Dashboard_governance_judge
 module Dashboard_operator_judge = Dashboard_operator_judge

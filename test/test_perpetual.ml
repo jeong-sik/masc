@@ -672,6 +672,62 @@ let test_integration () = group "Integration" (fun () ->
   assert_true "integration:compact_reduces"
     (after_ctx.token_count < before);
 
+  (* 3b. compact_via_oas produces equivalent results *)
+  let after_oas = Context_manager.compact_via_oas big_ctx
+    [PruneToolOutputs; MergeContiguous; SummarizeOld] in
+  assert_true "integration:compact_via_oas_reduces"
+    (after_oas.token_count < before);
+  assert_true "integration:compact_via_oas_comparable"
+    (after_oas.token_count <= after_ctx.token_count * 2);
+
+  (* 3c. OAS tagged roundtrip preserves role information *)
+  let tool_msg_rt = Llm_client.tool_msg ~name:"grep" ~call_id:"tc1" "search results" in
+  let sys_msg_rt = Llm_client.system_msg "you are a helper" in
+  let user_msg_rt = Llm_client.user_msg "hello" in
+  let asst_msg_rt = Llm_client.assistant_msg "hi there" in
+  List.iter (fun (label, orig_msg) ->
+    let oas_msg = Context_manager.masc_msg_to_oas_tagged orig_msg in
+    let back = Context_manager.oas_msg_to_masc_tagged oas_msg in
+    assert_true (sprintf "roundtrip:%s:role" label) (back.role = orig_msg.role);
+    assert_true (sprintf "roundtrip:%s:content" label)
+      (String.length back.content > 0)
+  ) [("tool", tool_msg_rt); ("system", sys_msg_rt);
+     ("user", user_msg_rt); ("assistant", asst_msg_rt)];
+
+  (* 3d. compact_via_oas with tool messages preserves Tool role *)
+  let ctx_with_tools = Context_manager.append_many
+    (Context_manager.create ~system_prompt:"test" ~max_tokens:10000)
+    [Llm_client.user_msg "run grep";
+     Llm_client.tool_msg ~name:"grep" ~call_id:"c1" (String.make 800 'r');
+     Llm_client.assistant_msg "found results"] in
+  let pruned_oas = Context_manager.compact_via_oas ctx_with_tools [PruneToolOutputs] in
+  let tool_msgs = List.filter (fun (m : Llm_client.message) ->
+    m.role = Llm_client.Tool) pruned_oas.messages in
+  assert_equal "oas_prune:tool_preserved" 1 (List.length tool_msgs);
+  let tool_content = (List.hd tool_msgs).content in
+  assert_true "oas_prune:tool_truncated" (String.length tool_content < 800);
+
+  (* 3e. Llm_client OAS type adapters *)
+  let provider_config = Llm_client.to_oas_provider Llm_client.claude_opus in
+  assert_true "oas_adapter:claude_mapped" (Option.is_some provider_config);
+  let provider_config_custom = Llm_client.to_oas_provider
+    { Llm_client.llama_default with provider = Llm_client.Custom "test" } in
+  assert_true "oas_adapter:custom_none" (Option.is_none provider_config_custom);
+
+  (* 3f. Llm_client message/usage roundtrip *)
+  let test_msg = Llm_client.user_msg "test" in
+  let oas_m = Llm_client.to_oas_message test_msg in
+  let back_m = Llm_client.of_oas_message oas_m in
+  assert_true "oas_adapter:msg_roundtrip" (back_m.content = "test");
+
+  let test_usage : Llm_client.token_usage =
+    { input_tokens = 100; output_tokens = 50; total_tokens = 150;
+      cache_creation_input_tokens = 10; cache_read_input_tokens = 20 } in
+  let oas_u = Llm_client.to_oas_usage test_usage in
+  let back_u = Llm_client.of_oas_usage oas_u in
+  assert_equal "oas_adapter:usage_input" 100 back_u.input_tokens;
+  assert_equal "oas_adapter:usage_output" 50 back_u.output_tokens;
+
   (* 4. Tool schema validation *)
   let schemas = Tool_perpetual.schemas in
   assert_equal "integration:schema_count" 4 (List.length schemas);

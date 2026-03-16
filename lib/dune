@@ -155,6 +155,9 @@
    chain_composer
    chain_evaluator
    chain_parser
+   chain_mermaid_parse
+   chain_mermaid_node_content
+   chain_mermaid_graph
    chain_mermaid_parser
    chain_compiler
    chain_registry
@@ -488,6 +491,9 @@
    trpg_schema
    trpg_types
    trpg_action
+   trpg_round_fallback
+   trpg_round_keeper_parse
+   trpg_round_prompt
    trpg_round
    trpg_handlers
    tool_trpg
@@ -615,7 +621,15 @@
   keeper_turn_response
   keeper_turn_setup
   keeper_turn_up
-  keeper_turn_lifecycle)
+  keeper_turn_lifecycle
+  ;; chain_mermaid_parser sub-modules
+  chain_mermaid_parse
+  chain_mermaid_node_content
+  chain_mermaid_graph
+  ;; trpg_round sub-modules
+  trpg_round_fallback
+  trpg_round_keeper_parse
+  trpg_round_prompt)
  (libraries
    yojson
    base64

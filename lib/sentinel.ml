@@ -1,4 +1,4 @@
-(** Sentinel — MASC default resident agent.
+(** Sentinel — MASC default resident agent (OAS-integrated).
 
     Ensures at least one agent is always alive when the server runs.
     Integrates Guardian's zombie/gc consumers and adds:
@@ -10,12 +10,60 @@
     LLM judgment layer via Prompt_registry + Lodge_cascade.
     When LLM is unavailable, judgment consumers skip silently.
 
+    OAS integration: exports Agent Card, publishes events via Event_bus.
+
     Opt-out via MASC_SENTINEL_ENABLED=false.
     LLM layer opt-out via MASC_SENTINEL_LLM_ENABLED=false. *)
 
 open Printf
 
 let agent_name = "sentinel"
+
+(* ── OAS Agent Card ──────────────────────────────────────── *)
+
+let agent_card : Agent_card.agent_card = {
+  name = "sentinel";
+  version = "2.95.0";
+  description = Some "Default resident agent: heartbeat, board patrol, task hygiene, keeper health";
+  provider = Some { organization = "MASC"; url = None };
+  protocol_versions = ["0.3"];
+  capabilities = { streaming = false; push_notifications = false; extended_agent_card = false };
+  skills = [
+    { id = "heartbeat"; name = "Heartbeat";
+      description = Some "Keep sentinel visible in the room";
+      input_modes = []; output_modes = ["application/json"] };
+    { id = "board-patrol"; name = "Board Patrol";
+      description = Some "LLM-driven stale post detection";
+      input_modes = []; output_modes = ["application/json"] };
+    { id = "task-hygiene"; name = "Task Hygiene";
+      description = Some "LLM-driven orphaned/stuck task detection";
+      input_modes = []; output_modes = ["application/json"] };
+    { id = "keeper-health"; name = "Keeper Health";
+      description = Some "LLM-driven stale keeper monitoring";
+      input_modes = []; output_modes = ["application/json"] };
+  ];
+  supported_interfaces = [];
+  security_schemes = [];
+  default_input_modes = ["application/json"];
+  default_output_modes = ["application/json"];
+  extensions = [];
+  signatures = [];
+  icon_url = None;
+  documentation_url = None;
+  created_at = "2026-03-16T00:00:00Z";
+  updated_at = "2026-03-16T00:00:00Z";
+}
+
+(* ── Event_bus ref ───────────────────────────────────────── *)
+
+let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
+
+let publish_event name payload =
+  match !bus_ref with
+  | Some bus ->
+      Agent_sdk.Event_bus.publish bus
+        (Agent_sdk.Event_bus.Custom (name, payload))
+  | None -> ()
 
 let log_debug msg = Log.Sentinel.debug "%s" msg
 let log_info msg = Log.Sentinel.info "%s" msg
@@ -209,6 +257,14 @@ let make_board_patrol_consumer config : (module Pulse.Consumer) =
                                 ~visibility:Board.Internal
                                 ~hearth:"sentinel" () with
                         | Ok _post ->
+                            publish_event "masc:sentinel:board_patrol"
+                              (`Assoc [
+                                ("agent_name", `String agent_name);
+                                ("action", `String "posted");
+                                ("stale_count", `Int stale_posts);
+                                ("reason", match decision.reason with Some r -> `String r | None -> `Null);
+                                ("timestamp", `Float now_f);
+                              ]);
                             record_result ~checked_at:now_f ~action:"posted"
                               ?reason:decision.reason ~stale_count:stale_posts ();
                             log_info "board patrol attention posted"
@@ -272,6 +328,9 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
           ) !candidates in
           let task_list_str = String.concat "\n" task_lines in
 
+          let orphan_count = List.length (List.filter (fun (_, _, _, alive, _) -> not alive) !candidates) in
+          let stuck_count = List.length !candidates - orphan_count in
+
           (* LLM-first: let LLM assess each task *)
           let llm_result = call_sentinel_llm
             ~cascade_name:"sentinel_task"
@@ -283,6 +342,7 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
                log_debug
                  (sprintf "task hygiene LLM assessed %d tasks" (List.length items));
                let warnings = ref [] in
+               let reassigned = ref 0 in
                List.iter
                  (fun item ->
                    let open Yojson.Safe.Util in
@@ -309,6 +369,7 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
                          Room.force_release_task_r config ~agent_name ~task_id ()
                        with
                        | Ok _msg ->
+                           incr reassigned;
                            Log.Sentinel.info "auto-released %s → todo (%s)" task_id
                              reason;
                            Sse.broadcast
@@ -345,7 +406,15 @@ let make_task_hygiene_consumer config : (module Pulse.Consumer) =
                          `List (List.map (fun w -> `String w) all_warnings) );
                        ("ts", `String (Types.now_iso ()));
                      ])
-               end
+               end;
+               publish_event "masc:sentinel:task_hygiene"
+                 (`Assoc [
+                   ("agent_name", `String agent_name);
+                   ("orphan_count", `Int orphan_count);
+                   ("stuck_count", `Int stuck_count);
+                   ("reassigned", `Int !reassigned);
+                   ("timestamp", `Float (Time_compat.now ()));
+                 ])
            | _ ->
                log_debug
                  (sprintf "%d candidate stuck tasks, LLM unavailable — skipping"
@@ -591,7 +660,8 @@ let status_json () : Yojson.Safe.t =
 
 (* ── Start ─────────────────────────────────────────────────── *)
 
-let start ~sw ~clock ~net config =
+let start ?bus ~sw ~clock ~net config =
+  bus_ref := bus;
   if not Env_config.Sentinel.enabled then
     log_debug "disabled (set MASC_SENTINEL_ENABLED=true)"
   else begin
@@ -610,7 +680,7 @@ let start ~sw ~clock ~net config =
     Pulse.run ~sw p_hb;
 
     (* 3. Embedded guardian masc loops: zombie + gc stay under sentinel ownership. *)
-    Guardian.start_embedded_masc_loops ~sw ~clock config;
+    Guardian.start_embedded_masc_loops ?bus ~sw ~clock config;
 
     (* 4. Board patrol (10min) *)
     let p_board = Pulse.create

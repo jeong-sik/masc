@@ -8,7 +8,7 @@ let mission_briefing_surface_contract_json =
       ("basis", `String "truth");
     ]
 type cache_state = {
-  mutex : Mutex.t;
+  mutex : Eio.Mutex.t;
   mutable cached_at : float;
   mutable cached_json : Yojson.Safe.t option;
   mutable refresh_in_flight : bool;
@@ -17,7 +17,7 @@ type cache_state = {
 
 let cache =
   {
-    mutex = Mutex.create ();
+    mutex = Eio.Mutex.create ();
     cached_at = 0.0;
     cached_json = None;
     refresh_in_flight = false;
@@ -25,8 +25,7 @@ let cache =
   }
 
 let with_cache_lock f =
-  Mutex.lock cache.mutex;
-  Fun.protect f ~finally:(fun () -> Mutex.unlock cache.mutex)
+  Eio.Mutex.use_rw ~protect:true cache.mutex f
 
 let compact_text ?(max_len = 96) raw =
   let normalized =

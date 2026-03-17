@@ -230,10 +230,11 @@ let make_zero_zombie_consumer ~room_config
 let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   let config = load_config () in
 
-  (* Zero-Zombie cleanup: always enabled, 60s interval *)
-  Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: 60s)";
+  (* Zero-Zombie cleanup: always enabled, configurable interval *)
+  let neo4j_interval = Env_config_governance.Timeouts.neo4j_timeout_sec in
+  Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: %.0fs)" neo4j_interval;
   let zombie_consumer = make_zero_zombie_consumer ~room_config in
-  let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm 60.0) ~lifecycle:Perpetual ~consumers:[zombie_consumer] in
+  let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Perpetual ~consumers:[zombie_consumer] in
   zombie_pulse := Some zp;
   Eio.Fiber.fork ~sw (fun () -> Pulse.run ~sw zp);
 

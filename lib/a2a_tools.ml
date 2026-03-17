@@ -229,7 +229,7 @@ type buffered_event = {
 let event_buffers : (string, buffered_event list) Hashtbl.t = Hashtbl.create 16
 
 (* Max events per subscription to prevent memory bloat *)
-let max_buffered_events = 100
+let max_buffered_events = Env_config_governance.Timeouts.event_buffer_size
 
 (** Generate UUID using stdlib Random + timestamp (no Mirage_crypto dependency)
     For A2A subscriptions, cryptographic randomness is not required.

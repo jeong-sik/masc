@@ -388,7 +388,9 @@ let offload_messages
     Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
       let _ = Unix.write_substring fd content 0 (String.length content) in ());
     Some path
-  with _exn ->
+  with exn ->
+    Printf.eprintf "[context_manager] offload_messages failed: %s\n%!"
+      (Printexc.to_string exn);
     None
 
 (** Apply compaction with history offload.

@@ -128,6 +128,15 @@ export const observatoryGroups: ReadonlySignal<ObservatoryGroup[]> = computed(()
   for (const w of workers) allNames.add(w.name)
   for (const c of continuities) allNames.add(c.agent_name ?? c.name)
 
+  // Build reverse lookup: agent name → session ID from member_names
+  // Covers agents whose relatedSessionId is missing but are still session members
+  const membershipLookup = new Map<string, string>()
+  for (const s of sessions) {
+    for (const memberName of (s.member_names ?? [])) {
+      membershipLookup.set(memberName, s.session_id)
+    }
+  }
+
   // Build ObservatoryAgent for each, grouped by session
   const grouped = new Map<string | null, ObservatoryAgent[]>()
 
@@ -137,7 +146,9 @@ export const observatoryGroups: ReadonlySignal<ObservatoryGroup[]> = computed(()
     const continuity = continuityMap.get(name) ?? null
 
     const obsAgent = buildObservatoryAgent(agent, worker, continuity)
-    const sessionId = obsAgent.relatedSessionId ?? null
+    // Primary: relatedSessionId from worker/continuity briefs
+    // Fallback: reverse lookup from session member_names
+    const sessionId = obsAgent.relatedSessionId ?? membershipLookup.get(name) ?? null
 
     const list = grouped.get(sessionId) ?? []
     list.push(obsAgent)

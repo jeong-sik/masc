@@ -125,6 +125,7 @@ module Backoff = Backoff
 module Server_checkpoint = Server_checkpoint
 module Shutdown = Shutdown
 module Supervisor = Supervisor
+module Keeper_chat_ag_ui = Keeper_chat_ag_ui
 module Mind_eio = Mind_eio
 module Noosphere_eio = Noosphere_eio
 module Metrics_store_eio = Metrics_store_eio

@@ -235,6 +235,94 @@ let json_schema =
     ]);
   ]
 
+(** {1 Swarm Message Envelope — #991}
+
+    Wraps structured_message with sender/timestamp metadata for swarm channels.
+    Rejects malformed envelopes at the boundary. *)
+
+type swarm_envelope = {
+  sender : string;
+  timestamp : float;
+  sequence : int;
+  channel : string;  (** e.g. "broadcast", "direct", "swarm" *)
+  message : structured_message;
+}
+[@@deriving show, eq]
+
+let envelope_to_json (e : swarm_envelope) : Yojson.Safe.t =
+  `Assoc [
+    ("sender", `String e.sender);
+    ("timestamp", `Float e.timestamp);
+    ("sequence", `Int e.sequence);
+    ("channel", `String e.channel);
+    ("message", to_json e.message);
+  ]
+
+let envelope_of_json (json : Yojson.Safe.t) : (swarm_envelope, string) result =
+  match json with
+  | `Assoc fields ->
+      let sender = match List.assoc_opt "sender" fields with
+        | Some (`String s) when String.trim s <> "" -> Ok s
+        | Some (`String _) -> Error "envelope: sender cannot be empty"
+        | _ -> Error "envelope: missing or invalid 'sender' (string)"
+      in
+      let timestamp = match List.assoc_opt "timestamp" fields with
+        | Some (`Float f) -> Ok f
+        | Some (`Int n) -> Ok (float_of_int n)
+        | _ -> Error "envelope: missing or invalid 'timestamp' (number)"
+      in
+      let sequence = match List.assoc_opt "sequence" fields with
+        | Some (`Int n) when n >= 0 -> Ok n
+        | _ -> Error "envelope: missing or invalid 'sequence' (non-negative int)"
+      in
+      let channel = match List.assoc_opt "channel" fields with
+        | Some (`String s) when String.trim s <> "" -> Ok s
+        | _ -> Error "envelope: missing or invalid 'channel' (string)"
+      in
+      let message = match List.assoc_opt "message" fields with
+        | Some msg_json -> of_json msg_json
+        | None -> Error "envelope: missing 'message' field"
+      in
+      (match sender, timestamp, sequence, channel, message with
+       | Ok sender, Ok timestamp, Ok sequence, Ok channel, Ok message ->
+           Ok { sender; timestamp; sequence; channel; message }
+       | Error e, _, _, _, _ | _, Error e, _, _, _
+       | _, _, Error e, _, _ | _, _, _, Error e, _
+       | _, _, _, _, Error e -> Error e)
+  | _ -> Error "envelope: expected JSON object"
+
+(** Validate a raw JSON string as a swarm envelope.
+    In Strict mode, rejects invalid envelopes.
+    In Permissive mode, wraps invalid content as a Freeform envelope. *)
+let validate_envelope ?(mode=Permissive) raw_json =
+  match Yojson.Safe.from_string raw_json with
+  | json ->
+      (match envelope_of_json json with
+       | Ok envelope -> Ok envelope
+       | Error reason ->
+           match mode with
+           | Strict -> Error (Printf.sprintf "Envelope validation failed: %s" reason)
+           | Warn ->
+               Log.Session.warn "[MessageSchema] envelope warn: %s" reason;
+               Ok { sender = "unknown"; timestamp = Time_compat.now ();
+                    sequence = 0; channel = "freeform";
+                    message = Freeform raw_json }
+           | Permissive ->
+               Ok { sender = "unknown"; timestamp = Time_compat.now ();
+                    sequence = 0; channel = "freeform";
+                    message = Freeform raw_json })
+  | exception _ ->
+      match mode with
+      | Strict -> Error "Envelope must be valid JSON in strict mode"
+      | _ ->
+          Ok { sender = "unknown"; timestamp = Time_compat.now ();
+               sequence = 0; channel = "freeform";
+               message = Freeform raw_json }
+
 let roundtrip msg =
   let json = to_json msg in
   of_json json
+
+let roundtrip_envelope env =
+  let json = envelope_to_json env in
+  envelope_of_json json

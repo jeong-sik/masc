@@ -385,6 +385,136 @@ let () = test "nudge_coalescing" (fun () ->
     failwith (Printf.sprintf "expected >=2 beats, got %d" s.total_beats)
 )
 
+(* ── Test: consumer recovery — disabled after consecutive failures ── *)
+
+let () = test "consumer disabled after 3 consecutive failures" (fun () ->
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let fail_consumer = (module struct
+    let name = "always_fail"
+    let should_act _b = true
+    let on_beat _b = Error "intentional"
+  end : Pulse.Consumer) in
+  let ok_count = ref 0 in
+  let ok_consumer = (module struct
+    let name = "always_ok"
+    let should_act _b = true
+    let on_beat _b = incr ok_count; Ok ()
+  end : Pulse.Consumer) in
+  let t = Pulse.create
+    ~clock
+    ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.01; max_s = 1.0; quiet = (1, 6) }
+    ~lifecycle:(Pulse.Bounded (fun b -> b.seq >= 5))
+    ~consumers:[fail_consumer; ok_consumer]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Pulse.run ~sw t;
+  Eio.Time.sleep clock 1.0;
+  (* fail_consumer should be disabled after 3 failures *)
+  let disabled = Pulse.disabled_consumers t in
+  assert (List.mem "always_fail" disabled);
+  (* ok_consumer should NOT be disabled *)
+  assert (not (List.mem "always_ok" disabled));
+  (* ok_consumer should have been called for all beats *)
+  assert (!ok_count >= 5)
+)
+
+(* ── Test: reenable disabled consumer ──────────────────────── *)
+
+let () = test "reenable previously disabled consumer" (fun () ->
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let fail_count = ref 0 in
+  let consumer = (module struct
+    let name = "flaky"
+    let should_act _b = true
+    let on_beat _b =
+      incr fail_count;
+      if !fail_count <= 3 then Error "flaky"
+      else Ok ()
+  end : Pulse.Consumer) in
+  let t = Pulse.create
+    ~clock
+    ~rhythm:{ Pulse.base_s = 0.05; min_s = 0.01; max_s = 1.0; quiet = (1, 6) }
+    ~lifecycle:Pulse.Perpetual
+    ~consumers:[consumer]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Pulse.run ~sw t;
+  Eio.Time.sleep clock 0.5;
+  (* Should be disabled after 3 failures *)
+  assert (List.mem "flaky" (Pulse.disabled_consumers t));
+  (* Re-enable *)
+  let restored = Pulse.reenable_consumer t "flaky" in
+  assert restored;
+  assert (not (List.mem "flaky" (Pulse.disabled_consumers t)));
+  Pulse.shutdown t;
+  Eio.Time.sleep clock 0.1
+)
+
+(* ── Test: backoff delay_sequence ──────────────────────────── *)
+
+let () = test "backoff delay_sequence produces correct values" (fun () ->
+  let p = Backoff.{ max_attempts = 4; base_delay_s = 1.0;
+                     max_delay_s = 10.0; multiplier = 2.0; jitter = false } in
+  let seq = Backoff.delay_sequence p in
+  (* 3 delays for 4 attempts: 1.0, 2.0, 4.0 *)
+  assert (List.length seq = 3);
+  let expected = [1.0; 2.0; 4.0] in
+  List.iter2 (fun actual exp ->
+    if Float.abs (actual -. exp) > 0.001 then
+      failwith (Printf.sprintf "expected %.1f, got %.1f" exp actual)
+  ) seq expected
+)
+
+(* ── Test: backoff delay capping ───────────────────────────── *)
+
+let () = test "backoff delay capped at max_delay_s" (fun () ->
+  let p = Backoff.{ max_attempts = 5; base_delay_s = 5.0;
+                     max_delay_s = 10.0; multiplier = 3.0; jitter = false } in
+  let seq = Backoff.delay_sequence p in
+  (* delays: 5.0, 15.0→10.0, 45.0→10.0, 135.0→10.0 *)
+  List.iter (fun d ->
+    if d > 10.001 then
+      failwith (Printf.sprintf "delay %.1f exceeds max 10.0" d)
+  ) seq
+)
+
+(* ── Test: circuit_breaker wrap ────────────────────────────── *)
+
+let () = test "circuit_breaker wrap records success/failure" (fun () ->
+  Eio_main.run @@ fun _env ->
+  let cb = Circuit_breaker.create
+    ~failure_threshold:2 ~failure_window:60.0 ~cooldown:1.0 () in
+  (* Success path *)
+  let r1 = Circuit_breaker.wrap cb ~agent_id:"test" (fun () -> Ok 42) in
+  assert (r1 = Ok 42);
+  let s = Circuit_breaker.get_status cb ~agent_id:"test" in
+  assert (s.state_name = "closed");
+  (* 2 failures should open the breaker *)
+  ignore (Circuit_breaker.wrap cb ~agent_id:"test" (fun () -> Error "fail1"));
+  ignore (Circuit_breaker.wrap cb ~agent_id:"test" (fun () -> Error "fail2"));
+  let s2 = Circuit_breaker.get_status cb ~agent_id:"test" in
+  assert (s2.state_name = "open");
+  (* Wrapped call should be rejected while open *)
+  let r2 = Circuit_breaker.wrap cb ~agent_id:"test" (fun () -> Ok 99) in
+  (match r2 with Error _ -> () | Ok _ -> failwith "expected Error while open")
+)
+
+(* ── Test: circuit_breaker wrap_exn ────────────────────────── *)
+
+let () = test "circuit_breaker wrap_exn catches exceptions" (fun () ->
+  Eio_main.run @@ fun _env ->
+  let cb = Circuit_breaker.create
+    ~failure_threshold:3 ~failure_window:60.0 ~cooldown:1.0 () in
+  let r = Circuit_breaker.wrap_exn cb ~agent_id:"exc-test" (fun () ->
+    failwith "boom"
+  ) in
+  (match r with Error _ -> () | Ok _ -> failwith "expected Error from exception");
+  let s = Circuit_breaker.get_status cb ~agent_id:"exc-test" in
+  assert (s.recent_failures = 1)
+)
+
 (* ── Summary ───────────────────────────────────────────────── *)
 
 let () =

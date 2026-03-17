@@ -45,16 +45,11 @@ let tool_executor_ref : tool_executor option ref = ref None
 let set_tool_executor executor =
   tool_executor_ref := Some executor
 
-let bootstrap_mutex = Mutex.create ()
+let bootstrap_mutex = Eio.Mutex.create ()
 let bootstrapped_roots : (string, unit) Hashtbl.t = Hashtbl.create 4
 
 let with_mutex mutex f =
-  Mutex.lock mutex;
-  Common.protect
-    ~module_name:"chain_native_eio"
-    ~finally_label:"Mutex.unlock"
-    ~finally:(fun () -> Mutex.unlock mutex)
-    f
+  Eio.Mutex.use_rw ~protect:true mutex f
 
 let starts_with ~prefix s =
   let plen = String.length prefix in

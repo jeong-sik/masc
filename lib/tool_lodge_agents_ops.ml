@@ -11,15 +11,13 @@ let core_lodge_agents () = get_all_agent_names ()
 
 (** Get all Lodge agents via GraphQL *)
 let get_cached_agents_tuple () =
-  Mutex.lock agent_cache_mu;
-  let agents = Hashtbl.fold (fun _ cfg acc ->
-    if cfg.status = "active" then
-      (cfg.name, Option.value cfg.primary_value ~default:"unknown", Option.value cfg.prompt_template ~default:"", cfg.korean_name, cfg.generation) :: acc
-    else
-      acc
-  ) agent_cache [] in
-  Mutex.unlock agent_cache_mu;
-  agents
+  Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+    Hashtbl.fold (fun _ cfg acc ->
+      if cfg.status = "active" then
+        (cfg.name, Option.value cfg.primary_value ~default:"unknown", Option.value cfg.prompt_template ~default:"", cfg.korean_name, cfg.generation) :: acc
+      else
+        acc
+    ) agent_cache [])
 
 let get_all_agents () =
   (* DO NOT reduce below 15: GRAPHQL_MAX_COST=2000 (c09140c). 15 agents exist. *)

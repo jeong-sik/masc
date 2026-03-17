@@ -91,7 +91,19 @@ let event_run_error session ~error : Ag_ui.event =
     When native provider streaming is available, this adapter should be
     replaced with direct delta forwarding from llm_client. *)
 
-let chunk_size = 64  (* characters per chunk *)
+let chunk_size = 64  (* target bytes per chunk *)
+
+(** Advance [pos] to the next UTF-8 character boundary at or after [pos].
+    UTF-8 continuation bytes have the form 10xxxxxx (0x80..0xBF). *)
+let utf8_safe_boundary s pos =
+  let len = String.length s in
+  if pos >= len then len
+  else
+    let p = ref pos in
+    while !p < len && Char.code (String.get s !p) land 0xC0 = 0x80 do
+      incr p
+    done;
+    !p
 
 let events_for_response session ~response : Ag_ui.event list =
   let msg_id, start_event = event_text_start session in
@@ -100,7 +112,7 @@ let events_for_response session ~response : Ag_ui.event list =
     let rec split pos acc =
       if pos >= len then List.rev acc
       else
-        let end_pos = min (pos + chunk_size) len in
+        let end_pos = utf8_safe_boundary response (min (pos + chunk_size) len) in
         let chunk = String.sub response pos (end_pos - pos) in
         split end_pos (chunk :: acc)
     in

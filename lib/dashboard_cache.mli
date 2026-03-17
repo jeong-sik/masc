@@ -31,12 +31,18 @@ val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Sa
     deadlocking.  Concurrent requests for the same key are serialised — only
     one [f] runs; others wait for the result (stampede protection). *)
 
+exception Compute_timeout of string
+(** Raised internally when the compute function exceeds [timeout_sec].
+    Callers of [get_or_compute_with_timeout] do not need to handle this —
+    it is caught and converted to a timeout-error JSON response. *)
+
 val get_or_compute_with_timeout :
   string -> ttl:float -> clock:_ Eio.Time.clock -> timeout_sec:float ->
   (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 (** Like [get_or_compute] but wraps the compute function with an Eio timeout.
-    On timeout, returns a timeout-error JSON as a normal cached value so
-    subsequent requests within the TTL window get an instant response. *)
+    On timeout in the stale-while-revalidate path, the stale value is
+    preserved (not overwritten by error JSON).  On timeout with no stale
+    data, returns a timeout-error JSON without caching it. *)
 
 val invalidate : string -> unit
 (** Remove a single cache entry.  If the key is currently being computed,

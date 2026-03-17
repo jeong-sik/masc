@@ -246,19 +246,28 @@ let get_or_compute key ~ttl compute =
     if a stale value exists and the recompute times out, the stale value
     was already returned to the caller by [get_or_compute_eio].
 
-    On timeout, a partial-error JSON is returned as a normal value so it
-    gets cached (with the normal TTL).  This prevents subsequent requests
-    from re-triggering the expensive computation during the TTL window. *)
+    On timeout the inner compute raises [Compute_timeout] so that
+    [get_or_compute_eio]'s exception handler preserves the stale value
+    in the background-revalidation path (instead of overwriting it with
+    error JSON).  The outer [try] catches the exception for the no-stale
+    path and returns [timeout_error_json] to the caller without caching
+    it. *)
+
+exception Compute_timeout of string
+
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
-  get_or_compute key ~ttl (fun () ->
-    match
-      Eio.Time.with_timeout clock timeout_sec (fun () ->
-        Ok (compute ()))
-    with
-    | Ok value -> value
-    | Error `Timeout ->
-      Printf.eprintf "[WARN] Dashboard cache compute timeout: %s (%.0fs)\n%!" key timeout_sec;
-      timeout_error_json key timeout_sec)
+  try
+    get_or_compute key ~ttl (fun () ->
+      match
+        Eio.Time.with_timeout clock timeout_sec (fun () ->
+          Ok (compute ()))
+      with
+      | Ok value -> value
+      | Error `Timeout ->
+        Printf.eprintf "[WARN] Dashboard cache compute timeout: %s (%.0fs)\n%!" key timeout_sec;
+        raise (Compute_timeout key))
+  with Compute_timeout k ->
+    timeout_error_json k timeout_sec
 
 let invalidate key =
   if !eio_available then

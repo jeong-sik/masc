@@ -87,7 +87,7 @@ let test_mode_of_string_invalid () =
   check (option bool) "empty" None (Option.map (fun _ -> true) (Mode.mode_of_string ""))
 
 let test_mode_roundtrip () =
-  let modes = [Mode.Minimal; Mode.Standard; Mode.Parallel; Mode.Full; Mode.Solo; Mode.Custom] in
+  let modes = [Mode.Minimal; Mode.Standard; Mode.Parallel; Mode.Full; Mode.Solo; Mode.Agent; Mode.Custom] in
   List.iter (fun mode ->
     let s = Mode.mode_to_string mode in
     match Mode.mode_of_string s with
@@ -100,7 +100,7 @@ let test_mode_roundtrip () =
    ============================================================ *)
 
 let test_all_categories_count () =
-  check int "18 categories" 18 (List.length Mode.all_categories)
+  check int "21 categories" 21 (List.length Mode.all_categories)
 
 let test_all_categories_unique () =
   let rec has_duplicates = function
@@ -115,24 +115,27 @@ let test_all_categories_unique () =
 
 let test_categories_minimal () =
   let cats = Mode.categories_for_mode Mode.Minimal in
-  check bool "has core" true (List.mem Mode.Core cats);
+  check bool "has core_room" true (List.mem Mode.Core_Room cats);
+  check bool "has core_task" true (List.mem Mode.Core_Task cats);
   check bool "has health" true (List.mem Mode.Health cats);
-  check int "count" 2 (List.length cats)
+  check int "count" 3 (List.length cats)
 
 let test_categories_standard () =
   let cats = Mode.categories_for_mode Mode.Standard in
-  check bool "has core" true (List.mem Mode.Core cats);
+  check bool "has core_room" true (List.mem Mode.Core_Room cats);
+  check bool "has core_task" true (List.mem Mode.Core_Task cats);
   check bool "has comm" true (List.mem Mode.Comm cats);
   check bool "has worktree" true (List.mem Mode.Worktree cats);
   check bool "has health" true (List.mem Mode.Health cats);
   check bool "has plan" true (List.mem Mode.Plan cats);
   check bool "has board" true (List.mem Mode.Board cats);
   check bool "has consensus" true (List.mem Mode.Consensus cats);
-  check int "count" 7 (List.length cats)
+  check int "count" 10 (List.length cats)
 
 let test_categories_parallel () =
   let cats = Mode.categories_for_mode Mode.Parallel in
-  check bool "has core" true (List.mem Mode.Core cats);
+  check bool "has core_room" true (List.mem Mode.Core_Room cats);
+  check bool "has core_task" true (List.mem Mode.Core_Task cats);
   check bool "has comm" true (List.mem Mode.Comm cats);
   check bool "has portal" true (List.mem Mode.Portal cats);
   check bool "has worktree" true (List.mem Mode.Worktree cats);
@@ -143,17 +146,33 @@ let test_categories_parallel () =
   check bool "has plan" true (List.mem Mode.Plan cats);
   check bool "has board" true (List.mem Mode.Board cats);
   check bool "has consensus" true (List.mem Mode.Consensus cats);
-  check int "count" 11 (List.length cats)
+  check int "count" 14 (List.length cats)
+
+let test_categories_coding () =
+  let cats = Mode.categories_for_mode Mode.Coding in
+  check bool "has core_room" true (List.mem Mode.Core_Room cats);
+  check bool "has code" true (List.mem Mode.Code cats);
+  check int "count" 9 (List.length cats)
+
+let test_categories_agent () =
+  let cats = Mode.categories_for_mode Mode.Agent in
+  check bool "has core_room" true (List.mem Mode.Core_Room cats);
+  check bool "has core_task" true (List.mem Mode.Core_Task cats);
+  check bool "has worktree" true (List.mem Mode.Worktree cats);
+  check bool "no core_session" false (List.mem Mode.Core_Session cats);
+  check bool "no core_ops" false (List.mem Mode.Core_Ops cats);
+  check int "count" 3 (List.length cats)
 
 let test_categories_full () =
   let cats = Mode.categories_for_mode Mode.Full in
-  check int "all categories" 18 (List.length cats)
+  check int "all categories" 21 (List.length cats)
 
 let test_categories_solo () =
   let cats = Mode.categories_for_mode Mode.Solo in
-  check bool "has core" true (List.mem Mode.Core cats);
+  check bool "has core_room" true (List.mem Mode.Core_Room cats);
+  check bool "has core_task" true (List.mem Mode.Core_Task cats);
   check bool "has worktree" true (List.mem Mode.Worktree cats);
-  check int "count" 2 (List.length cats)
+  check int "count" 3 (List.length cats)
 
 let test_categories_custom () =
   let cats = Mode.categories_for_mode Mode.Custom in
@@ -164,42 +183,46 @@ let test_categories_custom () =
    ============================================================ *)
 
 let test_tool_category_core () =
-  check bool "join" true (Mode.tool_category "masc_join" = Mode.Core);
-  check bool "status" true (Mode.tool_category "masc_status" = Mode.Core);
+  (* Core_Room *)
+  check bool "join" true (Mode.tool_category "masc_join" = Mode.Core_Room);
+  (* Core_Task *)
+  check bool "status" true (Mode.tool_category "masc_status" = Mode.Core_Task);
   check bool "claim" true (Mode.tool_category "masc_claim" = Mode.Unknown);
   check bool "done" true (Mode.tool_category "masc_done" = Mode.Unknown);
-  check bool "tasks" true (Mode.tool_category "masc_tasks" = Mode.Core);
-  check bool "add_task" true (Mode.tool_category "masc_add_task" = Mode.Core);
+  check bool "tasks" true (Mode.tool_category "masc_tasks" = Mode.Core_Task);
+  check bool "add_task" true (Mode.tool_category "masc_add_task" = Mode.Core_Task);
+  (* Core_Session *)
   check bool "team_session_list" true
-    (Mode.tool_category "masc_team_session_list" = Mode.Core);
+    (Mode.tool_category "masc_team_session_list" = Mode.Core_Session);
   check bool "team_session_compare" true
-    (Mode.tool_category "masc_team_session_compare" = Mode.Core);
+    (Mode.tool_category "masc_team_session_compare" = Mode.Core_Session);
   check bool "team_session_step" true
-    (Mode.tool_category "masc_team_session_step" = Mode.Core);
+    (Mode.tool_category "masc_team_session_step" = Mode.Core_Session);
   check bool "team_session_finalize" true
-    (Mode.tool_category "masc_team_session_finalize" = Mode.Core);
+    (Mode.tool_category "masc_team_session_finalize" = Mode.Core_Session);
   check bool "team_session_turn" true
     (Mode.tool_category "masc_team_session_turn" = Mode.Unknown);
   check bool "team_session_events" true
-    (Mode.tool_category "masc_team_session_events" = Mode.Core);
+    (Mode.tool_category "masc_team_session_events" = Mode.Core_Session);
+  (* Core_Ops *)
   check bool "operator_snapshot" true
-    (Mode.tool_category "masc_operator_snapshot" = Mode.Core);
+    (Mode.tool_category "masc_operator_snapshot" = Mode.Core_Ops);
   check bool "operator_digest" true
-    (Mode.tool_category "masc_operator_digest" = Mode.Core);
+    (Mode.tool_category "masc_operator_digest" = Mode.Core_Ops);
   check bool "llama_models" true
-    (Mode.tool_category "masc_llama_models" = Mode.Core);
+    (Mode.tool_category "masc_llama_models" = Mode.Core_Ops);
   check bool "runtime_verify" true
-    (Mode.tool_category "masc_runtime_verify" = Mode.Core);
+    (Mode.tool_category "masc_runtime_verify" = Mode.Core_Ops);
   check bool "llama_runtime_verify" true
     (Mode.tool_category "masc_llama_runtime_verify" = Mode.Unknown);
   check bool "observe_swarm" true
-    (Mode.tool_category "masc_observe_swarm" = Mode.Core);
+    (Mode.tool_category "masc_observe_swarm" = Mode.Core_Ops);
   check bool "operator_action" true
-    (Mode.tool_category "masc_operator_action" = Mode.Core);
+    (Mode.tool_category "masc_operator_action" = Mode.Core_Ops);
   check bool "operator_confirm" true
-    (Mode.tool_category "masc_operator_confirm" = Mode.Core);
+    (Mode.tool_category "masc_operator_confirm" = Mode.Core_Ops);
   check bool "team_session_prove" true
-    (Mode.tool_category "masc_team_session_prove" = Mode.Core)
+    (Mode.tool_category "masc_team_session_prove" = Mode.Core_Session)
 
 let test_tool_category_comm () =
   check bool "broadcast" true (Mode.tool_category "masc_broadcast" = Mode.Comm);
@@ -244,7 +267,7 @@ let test_tool_category_auth () =
 
 let test_tool_category_core_admin_snapshot () =
   check bool "tool_admin_snapshot" true
-    (Mode.tool_category "masc_tool_admin_snapshot" = Mode.Core)
+    (Mode.tool_category "masc_tool_admin_snapshot" = Mode.Core_Ops)
 
 let test_tool_category_ratelimit () =
   check bool "rate_limit_status" true (Mode.tool_category "masc_rate_limit_status" = Mode.RateLimit);
@@ -273,8 +296,8 @@ let test_tool_category_namespace_mapping () =
   check bool "experiment namespace" true (Mode.tool_category "experiment.start" = Mode.Ecosystem);
   check bool "decision namespace" true (Mode.tool_category "decision.create" = Mode.Consensus);
   check bool "decision underscore" true (Mode.tool_category "decision_consensus" = Mode.Consensus);
-  check bool "client namespace" true (Mode.tool_category "client.session.open" = Mode.Core);
-  check bool "client underscore" true (Mode.tool_category "client_input_submit" = Mode.Core)
+  check bool "client namespace" true (Mode.tool_category "client.session.open" = Mode.Core_Ops);
+  check bool "client underscore" true (Mode.tool_category "client_input_submit" = Mode.Core_Ops)
 
 let test_tool_category_unknown () =
   check bool "unknown is Unknown" true
@@ -338,7 +361,7 @@ let test_is_tool_enabled_mode_management_always_on () =
    ============================================================ *)
 
 let test_mode_description () =
-  let modes = [Mode.Minimal; Mode.Standard; Mode.Parallel; Mode.Full; Mode.Solo; Mode.Custom] in
+  let modes = [Mode.Minimal; Mode.Standard; Mode.Parallel; Mode.Full; Mode.Solo; Mode.Agent; Mode.Custom] in
   List.iter (fun mode ->
     let desc = Mode.mode_description mode in
     check bool "non-empty" true (String.length desc > 0)
@@ -421,7 +444,9 @@ let () =
       test_case "standard" `Quick test_categories_standard;
       test_case "parallel" `Quick test_categories_parallel;
       test_case "full" `Quick test_categories_full;
+      test_case "coding" `Quick test_categories_coding;
       test_case "solo" `Quick test_categories_solo;
+      test_case "agent" `Quick test_categories_agent;
       test_case "custom" `Quick test_categories_custom;
     ];
     "tool_category", [

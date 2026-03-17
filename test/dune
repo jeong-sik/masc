@@ -56,10 +56,11 @@
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))
 
 ; Room coverage tests (claim_next auto-release, batch ops, transitions)
+; Requires eio_main because Room.init uses Eio.Mutex internally
 (test
  (name test_room_coverage)
  (modules test_room_coverage)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest yojson unix eio_main))
 
 ; Streamable HTTP test (requires Eio for Eio.Mutex)
 (test

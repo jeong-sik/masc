@@ -7,7 +7,11 @@
 
 (** Tool categories *)
 type category =
-  | Core        (* room, tasks, run, team_session, unit, operation, dispatch, policy, observe, operator *)
+  | Core        (* backward compat alias — expands to Core_Room + Core_Task + Core_Session + Core_Ops *)
+  | Core_Room   (* room entry/exit: join, leave, room_create, rooms_list *)
+  | Core_Task   (* task lifecycle: add_task, claim, transition, status *)
+  | Core_Session (* team sessions: team_session_start/step/finalize *)
+  | Core_Ops    (* advanced: operations, dispatch, policy, observe, operator, run, units, etc. *)
   | Comm        (* broadcast, messages, lock, unlock, listen, who, reset, lodge_* *)
   | Portal      (* portal_open, portal_send, portal_close, portal_status *)
   | Worktree    (* worktree_create, worktree_remove, worktree_list *)
@@ -29,17 +33,22 @@ type category =
 
 (** Mode presets *)
 type mode =
-  | Minimal   (* core, health *)
+  | Minimal   (* core_room, core_task, health *)
   | Standard  (* core, comm, worktree, health, plan, board, consensus *)
   | Parallel  (* core, comm, portal, worktree, health, discovery, plan, board, consensus, voting, interrupt *)
   | Coding    (* core, worktree, code, health, plan *)
   | Full      (* all categories *)
-  | Solo      (* core, worktree *)
+  | Solo      (* core_room, core_task, worktree *)
+  | Agent     (* core_room, core_task, worktree — 20 tools, PR #814 sweet spot *)
   | Custom    (* user-defined categories *)
 
 (** Category to string conversion *)
 let category_to_string = function
   | Core -> "core"
+  | Core_Room -> "core_room"
+  | Core_Task -> "core_task"
+  | Core_Session -> "core_session"
+  | Core_Ops -> "core_ops"
   | Comm -> "comm"
   | Portal -> "portal"
   | Worktree -> "worktree"
@@ -62,6 +71,10 @@ let category_to_string = function
 (** String to category conversion *)
 let category_of_string = function
   | "core" -> Some Core
+  | "core_room" -> Some Core_Room
+  | "core_task" -> Some Core_Task
+  | "core_session" -> Some Core_Session
+  | "core_ops" -> Some Core_Ops
   | "comm" -> Some Comm
   | "portal" -> Some Portal
   | "worktree" -> Some Worktree
@@ -89,6 +102,7 @@ let mode_to_string = function
   | Coding -> "coding"
   | Full -> "full"
   | Solo -> "solo"
+  | Agent -> "agent"
   | Custom -> "custom"
 
 (** String to mode conversion *)
@@ -99,25 +113,31 @@ let mode_of_string = function
   | "coding" -> Some Coding
   | "full" -> Some Full
   | "solo" -> Some Solo
+  | "agent" -> Some Agent
   | "custom" -> Some Custom
   | _ -> None
 
+(** Core sub-categories expanded *)
+let core_all = [Core_Room; Core_Task; Core_Session; Core_Ops]
+
 (** All categories (Unknown intentionally excluded — unmapped tools are blocked) *)
-let all_categories = [
-  Core; Comm; Portal; Worktree; Code; Health; Discovery;
+let all_categories =
+  core_all @ [
+  Comm; Portal; Worktree; Code; Health; Discovery;
   Voting; Interrupt; Cost; Auth; RateLimit; Encryption;
   Board; Plan; Consensus; Ecosystem; TRPG
 ]
 
 (** Categories for each mode preset *)
 let categories_for_mode = function
-  | Minimal -> [Core; Health]
-  | Standard -> [Core; Comm; Worktree; Health; Plan; Board; Consensus]
-  | Parallel -> [Core; Comm; Portal; Worktree; Health; Discovery;
+  | Minimal -> [Core_Room; Core_Task; Health]
+  | Standard -> core_all @ [Comm; Worktree; Health; Plan; Board; Consensus]
+  | Parallel -> core_all @ [Comm; Portal; Worktree; Health; Discovery;
                  Plan; Board; Consensus; Voting; Interrupt]
-  | Coding -> [Core; Worktree; Code; Health; Plan; Consensus]
+  | Coding -> core_all @ [Worktree; Code; Health; Plan; Consensus]
   | Full -> all_categories
-  | Solo -> [Core; Worktree]
+  | Solo -> [Core_Room; Core_Task; Worktree]
+  | Agent -> [Core_Room; Core_Task; Worktree]
   | Custom -> [] (* Will be loaded from config *)
 
 (** Tool name to category mapping.
@@ -128,27 +148,36 @@ let categories_for_mode = function
 let tool_category tool_name =
   match tool_name with
 
-  (* ── Core: room, tasks, run pipeline, team session, CPv2 orchestration ── *)
+  (* ── Core_Room: room entry/exit, essential coordination (7 tools) ── *)
   | "masc_set_room" | "masc_init" | "masc_join" | "masc_leave"
-  | "masc_status" | "masc_workflow_guide" | "masc_check"
+  | "masc_room_create" | "masc_room_enter" | "masc_rooms_list" -> Core_Room
+
+  (* ── Core_Task: task lifecycle (13 tools) ── *)
   | "masc_add_task" | "masc_batch_add_tasks"
-  | "masc_tasks" | "masc_archive_view" | "masc_claim_next"
+  | "masc_tasks" | "masc_claim_next"
   | "masc_update_priority" | "masc_transition"
-  | "masc_task_history" | "masc_dashboard" | "masc_agent_timeline"
-  (* Run pipeline *)
-  | "masc_run_init" | "masc_run_plan" | "masc_run_log"
-  | "masc_run_deliverable" | "masc_run_get" | "masc_run_list"
-  (* Team session *)
+  | "masc_task_history"
+  | "masc_status" | "masc_workflow_guide" | "masc_check"
+  | "masc_room_strategy_get" | "masc_room_strategy_set"
+  (* Mode management - always available via is_tool_enabled bypass *)
+  | "masc_switch_mode" | "masc_get_config" -> Core_Task
+
+  (* ── Core_Session: team session orchestration (11 tools) ── *)
   | "masc_team_session_start" | "masc_team_session_step"
   | "masc_team_session_status" | "masc_team_session_finalize"
   | "masc_team_session_stop" | "masc_team_session_report"
   | "masc_team_session_list" | "masc_team_session_compare"
   | "masc_team_session_events"
-  | "masc_team_session_prove" | "masc_team_session_verify_trace"
+  | "masc_team_session_prove" | "masc_team_session_verify_trace" -> Core_Session
+
+  (* ── Core_Ops: advanced orchestration, run pipeline, policy, observe (36 tools) ── *)
+  | "masc_archive_view" | "masc_dashboard" | "masc_agent_timeline"
+  (* Run pipeline *)
+  | "masc_run_init" | "masc_run_plan" | "masc_run_log"
+  | "masc_run_deliverable" | "masc_run_get" | "masc_run_list"
   (* LLM runtime *)
   | "masc_llama_models" | "masc_llama_runtime_status"
-  | "masc_runtime_verify"
-  | "masc_llama_runtime_bench"
+  | "masc_runtime_verify" | "masc_llama_runtime_bench"
   (* Units *)
   | "masc_unit_define" | "masc_unit_list"
   | "masc_unit_reparent" | "masc_unit_reassign"
@@ -158,10 +187,9 @@ let tool_category tool_name =
   | "masc_operation_resume" | "masc_operation_stop"
   | "masc_operation_finalize"
   (* Dispatch *)
-  | "masc_dispatch_plan"
-  | "masc_dispatch_assign" | "masc_dispatch_rebalance"
-  | "masc_dispatch_escalate" | "masc_dispatch_recall"
-  | "masc_dispatch_tick"
+  | "masc_dispatch_plan" | "masc_dispatch_assign"
+  | "masc_dispatch_rebalance" | "masc_dispatch_escalate"
+  | "masc_dispatch_recall" | "masc_dispatch_tick"
   (* Policy *)
   | "masc_policy_status" | "masc_policy_approve"
   | "masc_policy_deny" | "masc_policy_update"
@@ -185,14 +213,9 @@ let tool_category tool_name =
   | "masc_hat_status" | "masc_hat_wear"
   (* Pause/resume *)
   | "masc_pause" | "masc_pause_status" | "masc_resume" | "masc_suspend"
-  (* Room management *)
-  | "masc_room_create" | "masc_room_enter" | "masc_rooms_list"
-  | "masc_room_strategy_get" | "masc_room_strategy_set"
-  (* Swarm live run (non-deprecated entry point) *)
+  (* Swarm live run *)
   | "masc_swarm_live_run"
-  (* Mode management - always available *)
-  | "masc_switch_mode" | "masc_get_config" -> Core
-  | "masc_tool_help" | "masc_tool_admin_snapshot" | "masc_keeper_tool_catalog" -> Core
+  | "masc_tool_help" | "masc_tool_admin_snapshot" | "masc_keeper_tool_catalog" -> Core_Ops
 
   (* ── Communication ── *)
   | "masc_broadcast" | "masc_messages"
@@ -386,35 +409,44 @@ let tool_category tool_name =
   | _ when String.starts_with ~prefix:"experiment." tool_name -> Ecosystem
   | _ when String.starts_with ~prefix:"experiment_" tool_name -> Ecosystem
   | _ when String.starts_with ~prefix:"trpg." tool_name -> TRPG
-  | _ when String.starts_with ~prefix:"client." tool_name -> Core
-  | _ when String.starts_with ~prefix:"client_" tool_name -> Core
+  | _ when String.starts_with ~prefix:"client." tool_name -> Core_Ops
+  | _ when String.starts_with ~prefix:"client_" tool_name -> Core_Ops
 
   (* Unmapped tools are excluded from all mode presets.
      Add new tools explicitly above to make them available. *)
   | _ -> Unknown
 
-(** Check if a tool is enabled for given categories *)
+(** Check if a tool is enabled for given categories.
+    Core is a virtual super-category — if enabled_categories contains Core,
+    all Core sub-categories are allowed. *)
 let is_tool_enabled enabled_categories tool_name =
   if tool_name = "masc_switch_mode" || tool_name = "masc_get_config" then
     true
   else
     match tool_category tool_name with
     | Unknown -> false
+    | (Core_Room | Core_Task | Core_Session | Core_Ops) as cat ->
+        List.mem cat enabled_categories || List.mem Core enabled_categories
     | cat -> List.mem cat enabled_categories
 
 (** Mode descriptions for help text *)
 let mode_description = function
-  | Minimal -> "Core task management + health checks only"
+  | Minimal -> "Room + task + health only (~20 tools)"
   | Standard -> "Core, communication, worktree, health, plan, board, and consensus"
   | Parallel -> "Multi-agent: adds portal, discovery, plan, board, consensus, voting, and interrupt"
   | Coding -> "Core, worktree, code navigation, health, plan, and consensus for agent development"
-  | Full -> "All categories enabled"
-  | Solo -> "Single-agent work: core and worktree only"
+  | Full -> "All categories enabled (~322 tools)"
+  | Solo -> "Room + task + worktree (~23 tools)"
+  | Agent -> "Focused agent: room + task + worktree (~20 tools, PR #814 sweet spot)"
   | Custom -> "User-defined category set"
 
 (** Category descriptions *)
 let category_description = function
-  | Core -> "Task lifecycle, room, run pipeline, CPv2 orchestration"
+  | Core -> "All core sub-categories (room + task + session + ops)"
+  | Core_Room -> "Room entry, exit, and space management (7 tools)"
+  | Core_Task -> "Task lifecycle: add, claim, transition, status (15 tools)"
+  | Core_Session -> "Team session orchestration (11 tools)"
+  | Core_Ops -> "Advanced: operations, dispatch, policy, observe, operator (36 tools)"
   | Comm -> "Communication: broadcast, messages, listen, lodge"
   | Portal -> "A2A direct messaging and delegation"
   | Worktree -> "Git worktrees: create, list, remove"

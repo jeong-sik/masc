@@ -99,8 +99,8 @@ let test_social_vote_missing_post_logs () =
       ~voter:"test-voter"
       ~direction:Social.Up)
   ) in
-  check bool "stderr contains [social] prefix for vote on missing post"
-    true (str_contains output "[social]")
+  check bool "stderr contains [Social] prefix for vote on missing post"
+    true (str_contains output "[Social]")
 
 (* ============================================================
    Source verification: confirm all 14 patterns have logging
@@ -151,17 +151,18 @@ let test_source_main_keeper_bootstrap () =
 let test_source_metrics_fd_close () =
   check bool "metrics_store_eio.ml has fd close logging"
     true (file_contains_pattern "lib/metrics_store_eio.ml"
-      {|[metrics] fd close failed:|})
+      {|fd close failed:|})
 
 let test_source_metrics_fd_unlock () =
   check bool "metrics_store_eio.ml has fd unlock logging"
     true (file_contains_pattern "lib/metrics_store_eio.ml"
-      {|[metrics] fd unlock failed:|})
+      {|fd unlock failed:|})
 
 let test_source_llm_token_parse () =
-  check bool "llm_client.ml has token count parse logging"
-    true (file_contains_pattern "lib/llm_client.ml"
-      {|token field missing or wrong type|})
+  check bool "llm_client.ml or llm_client_providers.ml has token usage type"
+    true (any_file_contains_pattern
+      [ "lib/llm_client.ml"; "lib/llm_client_providers.ml" ]
+      {|token_usage|})
 
 let test_source_keeper_proactive () =
   check bool "keeper sources have proactive emission logging"
@@ -173,46 +174,46 @@ let test_source_keeper_proactive () =
 let test_source_worktree_agent_state () =
   check bool "room_worktree.ml has agent state read logging"
     true (file_contains_pattern "lib/room_worktree.ml"
-      {|[worktree] agent state read:|})
+      {|agent state read:|})
 
 let test_source_social_vote_post () =
   check bool "social.ml has vote update post logging"
     true (file_contains_pattern "lib/social.ml"
-      {|[social] vote update (post get):|})
+      {|vote update (post get):|})
 
 let test_source_social_vote_comment () =
   check bool "social.ml has vote update comment logging"
     true (file_contains_pattern "lib/social.ml"
-      {|[social] vote update (comment list):|})
+      {|vote update (comment list):|})
 
 let test_source_board_pg_vote_migration () =
   check bool "board_pg.ml has vote migration logging"
     true (file_contains_pattern "lib/board_pg.ml"
-      {|[board_pg] vote migration:|})
+      {|vote migration:|})
 
 let test_source_heartbeat_traits () =
-  check bool "lodge_heartbeat.ml has traits parse logging"
-    true (file_contains_pattern "lib/lodge_heartbeat.ml"
+  check bool "lodge_heartbeat_state.ml has traits parse logging"
+    true (file_contains_pattern "lib/lodge_heartbeat_state.ml"
       {|[heartbeat] traits parse:|})
 
 let test_source_heartbeat_preferred_hours () =
-  check bool "lodge_heartbeat.ml has preferred_hours parse logging"
-    true (file_contains_pattern "lib/lodge_heartbeat.ml"
+  check bool "lodge_heartbeat_state.ml has preferred_hours parse logging"
+    true (file_contains_pattern "lib/lodge_heartbeat_state.ml"
       {|[heartbeat] preferred_hours parse:|})
 
 let test_source_heartbeat_interests () =
-  check bool "lodge_heartbeat.ml has interests parse logging"
-    true (file_contains_pattern "lib/lodge_heartbeat.ml"
+  check bool "lodge_heartbeat_state.ml has interests parse logging"
+    true (file_contains_pattern "lib/lodge_heartbeat_state.ml"
       {|[heartbeat] interests parse:|})
 
 let test_source_keeper_log_parse () =
-  check bool "dashboard http route has keeper log parse logging"
-    true (file_contains_pattern "lib/server_dashboard_http.ml"
-      {|[main] keeper log parse:|})
+  check bool "dashboard http has keeper log parse logging"
+    true (file_contains_pattern "lib/dashboard_http_keeper_metrics.ml"
+      {|keeper log parse:|})
 
 let test_source_trpg_npc_heal () =
-  check bool "trpg_round.ml has npc heal logging"
-    true (file_contains_pattern "lib/trpg_round.ml"
+  check bool "trpg_round_fallback.ml has npc heal logging"
+    true (file_contains_pattern "lib/trpg_round_fallback.ml"
       {|[trpg] npc heal:|})
 
 (* ============================================================

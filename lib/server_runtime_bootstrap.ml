@@ -51,6 +51,18 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
    with exn ->
      Log.Misc.error "startup backfill failed: %s"
        (Printexc.to_string exn));
+  (* Warm up Tool_registry from persistent telemetry.jsonl *)
+  (try
+     let summary =
+       Telemetry_eio.summarize_tool_usage state.room_config
+     in
+     if summary.telemetry_available then
+       let n = Tool_registry.warm_up summary in
+       Log.Misc.info "tool registry: warmed up %d tools (%d calls) from telemetry"
+         n summary.total_calls
+   with exn ->
+     Log.Misc.error "tool registry warm-up failed: %s"
+       (Printexc.to_string exn));
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =

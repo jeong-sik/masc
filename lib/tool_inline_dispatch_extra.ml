@@ -315,13 +315,15 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
 
   | "masc_convo_start" ->
       let topic = arg_get_string "topic" "" in
-      let initiator = arg_get_string "initiator" agent_name in
+      let raw_initiator = arg_get_string "initiator" agent_name in
+      let initiator = String.trim raw_initiator in
       let initial_content = arg_get_string "initial_content" "" in
       let max_turns = arg_get_int "max_turns" 50 in
       let source_post_id = arg_get_string_opt "post_id" in
       let mentions = arg_get_string_list "mentions" in
       let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if topic = "" then Some (false, "topic required")
+      else if initiator = "" then Some (false, "initiator required (non-empty agent name)")
       else begin
         let convo_config : Council.Conversation.config = {
           base_path = config.base_path;

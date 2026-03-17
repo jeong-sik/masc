@@ -387,12 +387,16 @@ let infer_post_kind ~author ~visibility ~expires_at ~hearth =
     | Some value -> String.lowercase_ascii (String.trim value)
     | None -> ""
   in
-  if author = "lodge-system" || author = "team-session" then
+  if author = "lodge-system" || author = "team-session"
+     || author = "sentinel" || author = "gardener" || author = "ecosystem" then
     System_post
   else if visibility = Internal && expires_at > 0.0 && hearth <> ""
           && (String.starts_with ~prefix:"mdal" hearth
               || contains_substring hearth "harness")
   then
+    Automation_post
+  else if String.starts_with ~prefix:"auto-" author
+          || contains_substring author "researcher" then
     Automation_post
   else
     Human_post

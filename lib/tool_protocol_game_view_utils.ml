@@ -66,6 +66,10 @@ let default_trpg_room_id = "default"
 
 let supported_client_topics =
   [
+    "task_updates";
+    "agent_events";
+    "board";
+    "keeper_events";
     "trpg.events";
     "trpg.state";
     "trpg.world";

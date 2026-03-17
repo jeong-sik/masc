@@ -69,6 +69,12 @@ let client_subscriptions_path config =
 let client_inputs_path config =
   Filename.concat (Room.masc_dir config) "game_view_inputs.json"
 
+(** Guard concurrent read-modify-write cycles on the JSONL-backed stores.
+    Without this, concurrent create_client_input or transition_client_input calls
+    can race on the load->modify->save sequence and lose writes.
+    Safe in Eio single-domain context (all fibers share one domain). *)
+let inputs_mutex = Eio.Mutex.create ()
+
 let decision_to_json (d : decision) =
   `Assoc [
     ("decision_id", `String d.decision_id);
@@ -349,58 +355,60 @@ let get_client_inputs (config : Room.config) ~session_id : client_input list =
 
 let create_client_input (config : Room.config) ~session_id ~input ~submitted_by
     : client_input =
-  let now = Time_compat.now () in
-  let input_id = Printf.sprintf "gvinput-%Ld" (Int64.of_float (now *. 1_000_000.0)) in
-  let item = {
-    input_id;
-    session_id;
-    input;
-    status = Pending;
-    submitted_by = if String.trim submitted_by = "" then "unknown" else submitted_by;
-    submitted_at = now;
-    handled_by = None;
-    handled_at = None;
-    reject_reason = None;
-  } in
-  let all = load_client_inputs config in
-  save_client_inputs config (item :: all);
-  item
+  Eio.Mutex.use_rw ~protect:true inputs_mutex (fun () ->
+    let now = Time_compat.now () in
+    let input_id = Printf.sprintf "gvinput-%Ld" (Int64.of_float (now *. 1_000_000.0)) in
+    let item = {
+      input_id;
+      session_id;
+      input;
+      status = Pending;
+      submitted_by = if String.trim submitted_by = "" then "unknown" else submitted_by;
+      submitted_at = now;
+      handled_by = None;
+      handled_at = None;
+      reject_reason = None;
+    } in
+    let all = load_client_inputs config in
+    save_client_inputs config (item :: all);
+    item)
 
 let transition_client_input (config : Room.config) ~session_id ~input_id
     ~status ~handled_by ~reject_reason
     : (client_input, string) result =
-  let all : client_input list = load_client_inputs config in
-  let now = Time_compat.now () in
-  let rec loop acc = function
-    | [] ->
-        Error
-          (Printf.sprintf
-             "input not found: %s (session: %s)"
-             input_id
-             session_id)
-    | (i : client_input) :: rest ->
-        if i.session_id = session_id && i.input_id = input_id then
-          if i.status <> Pending then
-            Error
-              (Printf.sprintf
-                 "input already handled: %s (status=%s)"
-                 input_id
-                 (client_input_status_to_string i.status))
+  Eio.Mutex.use_rw ~protect:true inputs_mutex (fun () ->
+    let all : client_input list = load_client_inputs config in
+    let now = Time_compat.now () in
+    let rec loop acc = function
+      | [] ->
+          Error
+            (Printf.sprintf
+               "input not found: %s (session: %s)"
+               input_id
+               session_id)
+      | (i : client_input) :: rest ->
+          if i.session_id = session_id && i.input_id = input_id then
+            if i.status <> Pending then
+              Error
+                (Printf.sprintf
+                   "input already handled: %s (status=%s)"
+                   input_id
+                   (client_input_status_to_string i.status))
+            else
+              let updated = {
+                i with
+                status;
+                handled_by = Some handled_by;
+                handled_at = Some now;
+                reject_reason;
+              } in
+              let merged = List.rev_append acc (updated :: rest) in
+              save_client_inputs config merged;
+              Ok updated
           else
-            let updated = {
-              i with
-              status;
-              handled_by = Some handled_by;
-              handled_at = Some now;
-              reject_reason;
-            } in
-            let merged = List.rev_append acc (updated :: rest) in
-            save_client_inputs config merged;
-            Ok updated
-        else
-          loop (i :: acc) rest
-  in
-  loop [] all
+            loop (i :: acc) rest
+    in
+    loop [] all)
 
 let create_decision (config : Room.config)
     ~session_id ~issue ~options ~criteria ~weights
@@ -440,7 +448,12 @@ let finalize_decision (config : Room.config)
         Error (Printf.sprintf "decision not found: %s (session: %s)" decision_id session_id)
     | (d : decision) :: rest ->
         if d.session_id = session_id && d.decision_id = decision_id then begin
-          if not (List.mem selected_option d.options) then
+          if is_finalized d then
+            Error (Printf.sprintf
+                     "decision %s is already finalized (at %s)"
+                     decision_id
+                     (match d.finalized_at with Some ts -> Printf.sprintf "%.0f" ts | None -> "unknown"))
+          else if not (List.mem selected_option d.options) then
             Error (Printf.sprintf
                      "selected_option '%s' not in decision options"
                      selected_option)

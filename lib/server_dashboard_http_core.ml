@@ -32,9 +32,11 @@ let dashboard_semantics_http_json () =
 let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
-  let tasks = Room.get_tasks_raw config in
-  let agents = Room.get_agents_raw config in
-  let msgs = Room.get_messages_raw config ~since_seq:0 ~limit:20 in
+  (* M-17 fix: use room-scoped queries consistent with compact/shell dashboard *)
+  let room_id = Room.current_room_id config in
+  let tasks = Room.get_tasks_raw_in_room config room_id in
+  let agents = Room.get_agents_raw_in_room config room_id in
+  let msgs = Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit:20 in
   let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let social_runtime_json = Social_runtime.status_json ~config in
   let now_ts = Time_compat.now () in

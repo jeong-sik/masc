@@ -82,7 +82,10 @@ let parse_chain_launch args =
     | None -> "native"
   in
   match orchestration_kind with
-  | "native" -> Ok None
+  | "native" ->
+      (* TODO [M-14]: chain_goal is silently ignored when orchestration_kind=native.
+         Consider: if chain_goal is set with native, either error or auto-switch to chain_dsl. *)
+      Ok None
   | "chain_dsl" ->
       let chain_id = get_string_opt args "chain_id" in
       let chain_goal = get_string_opt args "chain_goal" in

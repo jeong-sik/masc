@@ -148,11 +148,11 @@ let categories_for_mode = function
 let tool_category tool_name =
   match tool_name with
 
-  (* ── Core_Room: room entry/exit, essential coordination (7 tools) ── *)
-  | "masc_set_room" | "masc_init" | "masc_join" | "masc_leave"
+  (* ── Core_Room: room entry/exit, essential coordination ── *)
+  | "masc_start" | "masc_set_room" | "masc_init" | "masc_join" | "masc_leave"
   | "masc_room_create" | "masc_room_enter" | "masc_rooms_list" -> Core_Room
 
-  (* ── Core_Task: task lifecycle (13 tools) ── *)
+  (* ── Core_Task: task lifecycle ── *)
   | "masc_add_task" | "masc_batch_add_tasks"
   | "masc_tasks" | "masc_claim_next"
   | "masc_update_priority" | "masc_transition"

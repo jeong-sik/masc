@@ -911,6 +911,12 @@
  (modules test_proof_criteria)
  (libraries masc_mcp alcotest yojson))
 
+; Tool registration consistency linter (no server required)
+(test
+ (name test_tool_registration_consistency)
+ (modules test_tool_registration_consistency)
+ (libraries masc_mcp alcotest yojson))
+
 ; LLM Scoring Demo — compare keyword vs LLM capability matching
 ; Run with: MASC_CAPABILITY_MATCH_MODE=llm dune exec test/test_llm_scoring_demo.exe
 (executable

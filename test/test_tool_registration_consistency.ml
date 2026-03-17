@@ -1,0 +1,103 @@
+(** Structural linter: verifies tool registration consistency.
+
+    1. Every tool in Config.all_tool_schemas must be mapped in Mode.tool_category
+       (not Unknown). An Unknown tool is invisible in all mode presets.
+    2. Every tool referenced in Workflow_guide must exist in Config.all_tool_schemas.
+
+    This test catches registration drift when new tools are added to schemas
+    but not to mode.ml, or when workflow_guide references stale tool names. *)
+
+open Masc_mcp
+module WG = Masc_mcp__Workflow_guide
+
+(* ── All schema tool names ─────────────────────────────────────── *)
+
+let all_schema_names =
+  List.map (fun (s : Types.tool_schema) -> s.name) Config.all_tool_schemas
+
+(* ── Test 1: No Unknown tools in schemas ──────────────────────── *)
+
+let test_no_unknown_tools () =
+  let unknown_tools =
+    List.filter
+      (fun name -> Mode.tool_category name = Mode.Unknown)
+      all_schema_names
+  in
+  match unknown_tools with
+  | [] -> ()
+  | tools ->
+      Alcotest.fail
+        (Printf.sprintf
+           "Found %d tool(s) with Unknown category (invisible in all modes):\n  %s\n\
+            Fix: add them to Mode.tool_category in lib/mode.ml"
+           (List.length tools)
+           (String.concat "\n  " tools))
+
+(* ── Test 2: Workflow guide references valid tools ────────────── *)
+
+let test_workflow_guide_tools_exist () =
+  let guide_tools = [
+    "masc_start"; "masc_set_room"; "masc_join"; "masc_status";
+    "masc_claim"; "masc_claim_next"; "masc_done"; "masc_transition";
+    "masc_add_task"; "masc_batch_add_tasks";
+    "masc_plan_set_task"; "masc_set_current_task";
+    "masc_heartbeat"; "masc_broadcast";
+    "masc_worktree_create"; "masc_init"; "masc_switch_mode";
+    "masc_operator_digest";
+    "masc_operation_start"; "masc_dispatch_tick";
+    "masc_team_session_start"; "masc_team_session_step";
+    "masc_team_session_prove"; "masc_team_session_stop";
+  ] in
+  List.iter (fun tool_name ->
+    let g_ok = WG.next_steps ~tool_name ~success:true in
+    List.iter (fun (s : WG.step) ->
+      if not (List.mem s.tool all_schema_names) then
+        Alcotest.fail
+          (Printf.sprintf
+             "WG.next_steps(%s) references '%s' which is not in Config.all_tool_schemas"
+             tool_name s.tool)
+    ) g_ok.next_steps;
+    let g_fail = WG.next_steps ~tool_name ~success:false in
+    List.iter (fun (s : WG.step) ->
+      if not (List.mem s.tool all_schema_names) then
+        Alcotest.fail
+          (Printf.sprintf
+             "WG.next_steps(%s, fail) references '%s' which is not in Config.all_tool_schemas"
+             tool_name s.tool)
+    ) g_fail.next_steps
+  ) guide_tools
+
+(* ── Test 3: No duplicate tool names in schemas ──────────────── *)
+
+let test_no_duplicate_schemas () =
+  let seen = Hashtbl.create 256 in
+  let duplicates = ref [] in
+  List.iter (fun name ->
+    if Hashtbl.mem seen name then
+      duplicates := name :: !duplicates
+    else
+      Hashtbl.replace seen name true
+  ) all_schema_names;
+  match !duplicates with
+  | [] -> ()
+  | dups ->
+      Alcotest.fail
+        (Printf.sprintf "Found %d duplicate tool schema(s):\n  %s"
+           (List.length dups)
+           (String.concat "\n  " dups))
+
+(* ── Runner ───────────────────────────────────────────────────── *)
+
+let () =
+  Alcotest.run "tool_registration_consistency"
+    [
+      ( "linter",
+        [
+          Alcotest.test_case "no Unknown tools in schemas" `Quick
+            test_no_unknown_tools;
+          Alcotest.test_case "workflow guide references valid tools" `Quick
+            test_workflow_guide_tools_exist;
+          Alcotest.test_case "no duplicate tool schemas" `Quick
+            test_no_duplicate_schemas;
+        ] );
+    ]

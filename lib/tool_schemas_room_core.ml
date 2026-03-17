@@ -2,6 +2,23 @@ open Types
 
 let schemas : tool_schema list = [
   {
+    name = "masc_start";
+    description = "One-step onboarding: sets room, joins as agent, and optionally creates+claims a task. Use this instead of calling masc_set_room, masc_join, masc_add_task, masc_claim separately.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Project directory path (absolute, relative, or ~/...). Omit if room is already set.");
+        ]);
+        ("task_title", `Assoc [
+          ("type", `String "string");
+          ("description", `String "If provided, creates a task with this title, claims it, and sets it as current_task. Omit to just join without a task.");
+        ]);
+      ]);
+    ];
+  };
+  {
     name = "masc_set_room";
     description = "Set the working directory for MASC operations. Use this to work with .masc/ in a different project.";
     input_schema = `Assoc [

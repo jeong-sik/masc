@@ -2,7 +2,7 @@ open Masc_mcp
 open Test_tool_team_session_support
 
 let test_proof_exposes_spawn_selection_rationale () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -160,7 +160,7 @@ let test_proof_exposes_spawn_selection_rationale () =
   cleanup_dir base_dir
 
 let test_report_and_proof_expose_spawn_tool_usage () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -407,7 +407,7 @@ let test_report_uses_participant_and_turn_metrics () =
   cleanup_dir base_dir
 
 let test_prove_requires_multi_actor_turn_coverage () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in

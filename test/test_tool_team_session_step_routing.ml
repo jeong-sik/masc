@@ -2,7 +2,7 @@ open Masc_mcp
 open Test_tool_team_session_support
 
 let test_step_spawn_batch_records_planned_workers () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -75,7 +75,7 @@ let test_step_spawn_batch_records_planned_workers () =
   cleanup_dir base_dir
 
 let test_step_spawn_batch_applies_hybrid_routing () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -263,7 +263,7 @@ let test_parse_step_spawn_specs_applies_worker_policy_fields () =
   | _ -> Alcotest.fail "expected exactly two parsed spawn specs"
 
 let test_status_reports_worker_run_progress_summary () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -362,7 +362,7 @@ let test_status_reports_worker_run_progress_summary () =
   cleanup_dir base_dir
 
 let test_step_spawn_batch_infers_exact_env_model_tiers () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect

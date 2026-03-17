@@ -1,3 +1,4 @@
+[@@@warning "-33"]
 (** Tool_team_session_step types — type definitions for step handling. *)
 
 (** Extracted handle_step logic for team session step operations.

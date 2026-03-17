@@ -291,3 +291,4 @@ let legacy_transport_deprecation_headers =
   ]
 
 let force_json_response =
+  env_flag "MASC_FORCE_JSON_RESPONSE" || env_flag "MCP_FORCE_JSON_RESPONSE"

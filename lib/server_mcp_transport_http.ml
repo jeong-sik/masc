@@ -3,8 +3,6 @@
 
 include Server_mcp_transport_http_protocol
 
-  env_flag "MASC_FORCE_JSON_RESPONSE" || env_flag "MCP_FORCE_JSON_RESPONSE"
-
 let sse_retry_ms = 3000
 
 let sse_prime_event () =

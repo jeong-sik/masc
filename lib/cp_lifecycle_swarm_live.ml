@@ -3,6 +3,153 @@
 
 include Cp_lifecycle_swarm_live_core
 
+let swarm_live_json config ?run_id ?operation_id () =
+  let room_id = Room.current_room_id config in
+  let agents = Room.get_agents_raw config in
+  let tasks = Room.get_tasks_raw config in
+  let messages = Room.get_messages_raw config ~since_seq:0 ~limit:400 in
+  let _, _, units, _ = topology_units config in
+  let operations = all_operations config units in
+  let detachments = all_detachments config units operations in
+  let decisions = all_policy_decisions config in
+  let selected_operation =
+    match operation_id with
+    | Some value ->
+        option_or_else
+          (operation_by_id operations value)
+          (fun () ->
+            operations
+            |> List.find_opt (fun (operation : operation_record) ->
+                   String.equal operation.trace_id value))
+    | None -> (
+        match run_id with
+        | Some value ->
+            let tokens = run_tokens value in
+            operations
+            |> List.find_opt (fun (operation : operation_record) ->
+                   value_matches_tokens tokens operation.operation_id
+                   || value_matches_tokens tokens operation.objective
+                   || option_matches_tokens tokens operation.note
+                   || option_matches_tokens tokens operation.checkpoint_ref
+                   || value_matches_tokens tokens operation.trace_id)
+        | None ->
+            operations
+            |> List.find_opt (fun (operation : operation_record) ->
+                   option_matches_tokens [ "swarm-live"; "agent swarm"; "harness" ]
+                     operation.note
+                   || value_matches_tokens [ "swarm-live"; "agent swarm"; "harness" ]
+                        operation.objective))
+  in
+  let effective_run_id =
+    match run_id with
+    | Some value -> value
+    | None -> (
+        match selected_operation with
+        | Some operation -> (
+            let candidates =
+              [
+                operation.note;
+                operation.checkpoint_ref;
+              ]
+              |> List.filter_map Fun.id
+            in
+            candidates |> List.find_map extract_run_id
+            |> Option.value ~default:"swarm-live")
+        | None -> "swarm-live")
+  in
+  let operation_started_at =
+    Option.bind selected_operation (fun (operation : operation_record) ->
+        Room.parse_iso_time_opt operation.created_at)
+  in
+  let message_in_scope (message : Types.message) =
+    match operation_started_at with
+    | Some boundary -> timestamp_on_or_after ~boundary message.timestamp
+    | None -> true
+  in
+  let task_in_scope (task : Types.task) =
+    match operation_started_at with
+    | Some boundary -> timestamp_on_or_after ~boundary task.created_at
+    | None -> true
+  in
+  let scoped_tasks = tasks |> List.filter task_in_scope in
+  let harness_summary =
+    find_swarm_live_artifact_json config effective_run_id "swarm-live-summary.json"
+  in
+  let slot_telemetry =
+    find_swarm_live_artifact_json config effective_run_id "slot-telemetry.json"
+  in
+  let runtime_doctor =
+    Option.bind
+      (find_swarm_live_artifact_path config effective_run_id "runtime-doctor.json")
+      (fun path ->
+        let run_dir = Filename.dirname path in
+        read_runtime_doctor_json run_dir)
+  in
+  let live_slot_samples =
+    match find_swarm_live_artifact_path config effective_run_id "slot-samples.jsonl" with
+    | Some path when not (Option.is_some slot_telemetry) && Sys.file_exists path ->
+        read_jsonl_local path
+    | _ -> []
+  in
+  let worker_count_from_artifact =
+    Option.bind harness_summary (fun json ->
+        U.member "worker_count" json |> U.to_int_option)
+  in
+  let worker_count_from_operation =
+    Option.bind selected_operation (fun (operation : operation_record) ->
+        Option.bind operation.note
+          (extract_int_field_from_note ~field:"worker_count"))
+  in
+  let required_final_markers =
+    Option.bind harness_summary (fun json ->
+        U.member "required_final_markers" json |> U.to_int_option)
+  in
+  let required_final_markers_from_operation =
+    Option.bind selected_operation (fun (operation : operation_record) ->
+        Option.bind operation.note
+          (extract_int_field_from_note ~field:"required_final_markers"))
+  in
+  let min_hot_slots =
+    Option.bind harness_summary (fun json ->
+        U.member "min_hot_slots" json |> U.to_int_option)
+  in
+  let min_hot_slots_from_operation =
+    Option.bind selected_operation (fun (operation : operation_record) ->
+        Option.bind operation.note
+          (extract_int_field_from_note ~field:"min_hot_slots"))
+  in
+  let min_hot_slots =
+    Option.value min_hot_slots
+      ~default:(Option.value min_hot_slots_from_operation ~default:10)
+  in
+  let plans =
+    Agent_swarm_live_harness.build_worker_plans
+      ~worker_count:
+        (Option.value worker_count_from_artifact
+           ~default:(Option.value worker_count_from_operation ~default:12))
+      effective_run_id
+  in
+  let expected_workers = List.map (fun (plan : Agent_swarm_live_harness.worker_plan) -> plan.name) plans in
+  let operation_detachments =
+    detachments
+    |> List.filter (fun (detachment : detachment_record) ->
+           match selected_operation with
+           | Some operation -> String.equal detachment.operation_id operation.operation_id
+           | None -> true)
+  in
+  let matched_detachment =
+    match selected_operation with
+    | Some _ ->
+        best_overlap expected_workers operation_detachments
+          (fun (row : detachment_record) -> row.roster)
+        |> Option.map fst
+    | None ->
+        best_overlap expected_workers detachments
+          (fun (row : detachment_record) -> row.roster)
+        |> Option.map fst
+  in
+  let matched_squad =
+    match selected_operation with
     | Some operation ->
         option_or_else
           (lookup_unit units operation.assigned_unit_id)
@@ -50,22 +197,6 @@ include Cp_lifecycle_swarm_live_core
     |> List.filteri (fun idx _ -> idx < 12)
     |> List.rev
   in
-  let message_contains ~from_agent needle =
-    List.exists
-      (fun (message : Types.message) ->
-        String.equal message.from_agent from_agent
-        && string_contains ~needle message.content)
-      matching_messages
-  in
-  let message_starts_with ~from_agent prefix =
-    let prefix_len = String.length prefix in
-    List.exists
-      (fun (message : Types.message) ->
-        String.equal message.from_agent from_agent
-        && String.length message.content >= prefix_len
-        && String.sub message.content 0 prefix_len = prefix)
-      matching_messages
-  in
   let task_by_id =
     List.map (fun (task : Types.task) -> (task.id, task)) tasks
   in
@@ -79,180 +210,12 @@ include Cp_lifecycle_swarm_live_core
     List.assoc_opt task_id task_by_id
     |> Option.map (fun (task : Types.task) -> Types.string_of_task_status task.task_status)
   in
-  let task_assignee (task : Types.task) =
-    match task.task_status with
-    | Types.Claimed { assignee; _ }
-    | Types.InProgress { assignee; _ }
-    | Types.Done { assignee; _ } -> Some assignee
-    | Types.Todo | Types.Cancelled _ -> None
+  let worker_row_ctx =
+    { find_agent; task_by_id; effective_run_id; scoped_tasks;
+      recent_messages; matching_messages; all_tasks = tasks;
+      matched_squad; matched_detachment; find_task_title; find_task_status }
   in
-  let task_done (task : Types.task) =
-    match task.task_status with
-    | Types.Done _ -> true
-    | _ -> false
-  in
-  let worker_rows =
-    plans
-    |> List.map (fun (plan : Agent_swarm_live_harness.worker_plan) ->
-           let agent = find_agent plan.name in
-           let current_task = Option.bind agent (fun (value : Types.agent) -> value.current_task) in
-           let heartbeat_age_sec =
-             Option.bind agent (fun (value : Types.agent) -> float_age_seconds value.last_seen)
-           in
-           let task_matches_run =
-             match current_task with
-             | Some task_id -> (
-                 match List.assoc_opt task_id task_by_id with
-                 | Some task ->
-                     value_matches_tokens (run_tokens effective_run_id) task.title
-                     || value_matches_tokens [ plan.name ] task.title
-                 | None -> false)
-             | None -> false
-           in
-           let assigned_task =
-             scoped_tasks
-             |> List.find_opt (fun (task : Types.task) ->
-                    match task_assignee task with
-                    | Some assignee when String.equal assignee plan.name ->
-                        value_matches_tokens (run_tokens effective_run_id) task.title
-                        || value_matches_tokens [ plan.name ] task.title
-                    | _ -> false)
-           in
-           let last_message =
-             recent_messages
-             |> List.find_opt (fun (message : Types.message) ->
-                    String.equal message.from_agent plan.name)
-           in
-           let claim_marker_seen =
-             message_contains ~from_agent:plan.name plan.claim_marker
-           in
-           let done_marker_seen =
-             message_contains ~from_agent:plan.name plan.done_marker
-           in
-           let final_marker_seen =
-             message_starts_with ~from_agent:plan.name plan.final_marker
-           in
-           let runtime_assisted_final_marker_seen =
-             List.exists
-               (fun (message : Types.message) ->
-                 String.equal message.from_agent plan.name
-                 && string_contains
-                      ~needle:
-                        (Printf.sprintf
-                           "RUNTIME_ASSISTED_FINAL_MARKER expected=%s"
-                           plan.final_marker)
-                      message.content)
-               matching_messages
-           in
-           let completed_task =
-             if done_marker_seen || final_marker_seen
-                || runtime_assisted_final_marker_seen
-             then
-               tasks
-               |> List.find_opt (fun (task : Types.task) ->
-                      match task_assignee task with
-                      | Some assignee when String.equal assignee plan.name ->
-                          value_matches_tokens (run_tokens effective_run_id) task.title
-                      | _ -> false)
-             else
-               None
-           in
-           let agent_is_active = match agent with Some a -> a.status = Types.Active | None -> false in
-           let joined =
-             agent_is_active
-             || Option.is_some assigned_task
-             || Option.is_some completed_task
-             || Option.is_some last_message
-             || claim_marker_seen
-             || done_marker_seen
-             || final_marker_seen
-             || runtime_assisted_final_marker_seen
-           in
-           let task_bound =
-             task_matches_run || Option.is_some assigned_task
-             || Option.is_some completed_task
-           in
-           let bound_task_id =
-             option_first_some (if task_matches_run then current_task else None)
-               (option_first_some
-                  (Option.map (fun (task : Types.task) -> task.id) assigned_task)
-                  (Option.map (fun (task : Types.task) -> task.id) completed_task))
-           in
-           let bound_task_title =
-             match bound_task_id with
-             | Some value -> find_task_title value
-             | None ->
-                 option_first_some
-                   (Option.map (fun (task : Types.task) -> task.title) assigned_task)
-                   (Option.map (fun (task : Types.task) -> task.title) completed_task)
-           in
-           let bound_task_status =
-             match bound_task_id with
-             | Some value -> find_task_status value
-             | None ->
-                 option_first_some
-                   (assigned_task
-                    |> Option.map (fun (task : Types.task) ->
-                           Types.string_of_task_status task.task_status))
-                   (completed_task
-                    |> Option.map (fun (task : Types.task) ->
-                           Types.string_of_task_status task.task_status))
-           in
-           let completed =
-             match option_first_some assigned_task completed_task with
-             | Some task -> task_done task
-             | None ->
-                 done_marker_seen
-                 && (final_marker_seen || runtime_assisted_final_marker_seen)
-           in
-           let heartbeat_fresh =
-             match heartbeat_age_sec with
-             | Some age -> age <= Room.heartbeat_timeout_seconds
-             | None -> completed
-           in
-           `Assoc
-             [
-               ("name", `String plan.name);
-               ("role", `String (Agent_swarm_live_harness.string_of_worker_role plan.role));
-               ("lane", `String (Agent_swarm_live_harness.string_of_fixture_lane plan.lane));
-               ("joined", `Bool joined);
-               ("live_presence", `Bool (match agent with Some a -> a.status = Types.Active | None -> false));
-               ("completed", `Bool completed);
-               ( "status",
-                 match agent with
-                 | Some value -> `String (Types.string_of_agent_status value.status)
-                 | None -> `String "offline" );
-               ("current_task", match current_task with Some value -> `String value | None -> `Null);
-               ("bound_task_id", match bound_task_id with Some value -> `String value | None -> `Null);
-               ("bound_task_title", match bound_task_title with Some value -> `String value | None -> `Null);
-               ("bound_task_status", match bound_task_status with Some value -> `String value | None -> `Null);
-               ("current_task_matches_run", `Bool task_bound);
-               ("squad_member", `Bool (option_exists (fun (unit : unit_record) -> List.mem plan.name unit.roster) matched_squad));
-               ("detachment_member", `Bool (option_exists (fun (detachment : detachment_record) -> List.mem plan.name detachment.roster) matched_detachment));
-               ( "last_seen",
-                 match agent with
-                 | Some value -> `String value.last_seen
-                 | None -> `Null );
-               ("heartbeat_age_sec", match heartbeat_age_sec with Some value -> `Float value | None -> `Null);
-               ("heartbeat_fresh", `Bool heartbeat_fresh);
-               ("claim_marker_seen", `Bool claim_marker_seen);
-               ("done_marker_seen", `Bool done_marker_seen);
-               ("final_marker_seen", `Bool final_marker_seen);
-               ("runtime_assisted_final_marker_seen", `Bool runtime_assisted_final_marker_seen);
-               ("claim_marker", `String plan.claim_marker);
-               ("done_marker", `String plan.done_marker);
-               ("final_marker", `String plan.final_marker);
-               ( "last_message",
-                 match last_message with
-                 | Some message ->
-                     `Assoc
-                       [
-                         ("seq", `Int message.seq);
-                         ("content", `String message.content);
-                         ("timestamp", `String message.timestamp);
-                       ]
-                 | None -> `Null );
-             ])
+  let worker_rows = plans |> List.map (build_worker_row worker_row_ctx)
   in
   let joined_workers =
     count_true worker_rows (fun row ->

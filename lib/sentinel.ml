@@ -641,8 +641,36 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
               ~source_refs:["post-" ^ Board.Post_id.to_string p.id] ()
         ) board_posts;
 
-        if !petitions_created > 0 then
-          log_info (sprintf "governance sweep: %d petition(s) created" !petitions_created)
+        (* BUG-007: Execute Ready_auto_execute cases that have Queued_auto orders.
+           Without this step, cases remain in Ready_auto_execute indefinitely. *)
+        let executed_count = ref 0 in
+        let ready_cases =
+          Council.Governance_v2.list_cases ~include_test:false
+            ~status_filter:Council.Governance_v2.Ready_auto_execute base_path
+        in
+        List.iter (fun (case_ : Council.Governance_v2.case_record) ->
+          match Council.Governance_v2.load_execution_order base_path case_.id with
+          | Some order when order.Council.Governance_v2.status = Council.Governance_v2.Queued_auto ->
+              let updated_order = { order with
+                status = Council.Governance_v2.Auto_executed;
+                updated_at = Time_compat.now ();
+                result_summary = Some "Auto-executed by sentinel sweep";
+                actor = Some agent_name;
+              } in
+              (match Council.Governance_v2.save_execution_order base_path updated_order with
+               | Ok _ ->
+                   incr executed_count;
+                   log_info (sprintf "governance auto-executed case %s (%s)"
+                     case_.id case_.title)
+               | Error msg ->
+                   log_warn (sprintf "governance auto-execute failed for %s: %s"
+                     case_.id msg))
+          | _ -> ()
+        ) ready_cases;
+
+        if !petitions_created > 0 || !executed_count > 0 then
+          log_info (sprintf "governance sweep: %d petition(s), %d auto-executed"
+            !petitions_created !executed_count)
         else
           log_debug "governance sweep: no issues detected";
         Ok ()

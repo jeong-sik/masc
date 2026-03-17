@@ -95,9 +95,11 @@ module Llm = struct
   let cache_max_temperature =
     get_float ~default:0.0 "MASC_LLM_CACHE_MAX_TEMP"
 
-  (** L1 in-memory entry cap. *)
+  (** L1 in-memory entry cap.
+      BUG-015: Reduced from 2048 to 512 — unbounded growth with 2048 default
+      caused excessive memory usage in long-running servers. *)
   let cache_l1_max_entries =
-    get_int ~default:2048 "MASC_LLM_CACHE_L1_MAX_ENTRIES"
+    get_int ~default:512 "MASC_LLM_CACHE_L1_MAX_ENTRIES"
 
   (** Spawn cache policy:
       - off

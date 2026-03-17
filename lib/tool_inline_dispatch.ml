@@ -1068,6 +1068,8 @@ Call masc_listen again to continue listening.
       let current_room = Room.read_current_room config |> Option.value ~default:"default" in
       if thread_id = "" || content = "" then
         Some (false, "thread_id and content required")
+      else if not (try Room.is_agent_joined config ~agent_name:speaker with _ -> false) then
+        Some (false, Printf.sprintf "Speaker '%s' is not a member of this room" speaker)
       else begin
         let convo_config : Council.Conversation.config = {
           base_path = config.base_path;

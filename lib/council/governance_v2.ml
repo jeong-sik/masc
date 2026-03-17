@@ -300,6 +300,22 @@ let normalize_key title action =
            | 'a' .. 'z' | '0' .. '9' -> ch
            | _ -> '-')
     |> String.of_seq
+    (* BUG-008: Collapse consecutive dashes and trim leading/trailing dashes *)
+    |> (fun s ->
+      let buf = Buffer.create (String.length s) in
+      let prev_dash = ref false in
+      String.iter (fun c ->
+        if c = '-' then (if not !prev_dash then Buffer.add_char buf c; prev_dash := true)
+        else (Buffer.add_char buf c; prev_dash := false)
+      ) s;
+      let result = Buffer.contents buf in
+      (* Trim leading/trailing dashes *)
+      let len = String.length result in
+      let start = ref 0 in
+      let stop = ref (len - 1) in
+      while !start < len && result.[!start] = '-' do incr start done;
+      while !stop > !start && result.[!stop] = '-' do decr stop done;
+      if !start > !stop then "" else String.sub result !start (!stop - !start + 1))
   in
   let action_key =
     match action with

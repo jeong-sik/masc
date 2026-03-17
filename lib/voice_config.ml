@@ -307,6 +307,8 @@ let load () =
         Error (Printf.sprintf "invalid voice config json: %s" error)
     | Sys_error error ->
         Error (Printf.sprintf "voice config read failed: %s" error)
+    | Eio.Io _ as exn ->
+        Error (Printf.sprintf "voice config Eio read failed: %s" (Printexc.to_string exn))
 
 let enabled_endpoints (endpoints : endpoint list) =
   List.filter (fun (endpoint : endpoint) -> endpoint.enabled) endpoints

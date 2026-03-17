@@ -151,7 +151,7 @@ let load_store path : stats_store =
           | _ -> default_store)
       | `List rows -> List.filter_map stats_entry_of_json rows
       | _ -> default_store
-    with Yojson.Json_error _ | Sys_error _ -> default_store
+    with Yojson.Json_error _ | Sys_error _ | Eio.Io _ -> default_store
 
 let save_store path (store : stats_store) =
   ensure_dir (Filename.dirname path);

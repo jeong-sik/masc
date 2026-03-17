@@ -94,7 +94,9 @@ let stats_data : raw_data = {
   active_chains = 0;
 }
 
-(** Eio mutex for fiber-cooperative synchronization *)
+(** Eio mutex for fiber-cooperative synchronization.
+    Created at module init time (not lazily) to guarantee availability
+    before any concurrent fiber accesses stats_data or cascade_data. *)
 let stats_mutex = Eio.Mutex.create ()
 
 (** Helper for mutex-protected operations *)

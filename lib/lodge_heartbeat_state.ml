@@ -34,11 +34,18 @@ let lodge_lock : Eio.Mutex.t option ref = ref None
 let lodge_init_lock () =
   if !lodge_lock = None then lodge_lock := Some (Eio.Mutex.create ())
 
-(** Run [f] under lodge mutex. Falls back to unprotected if not yet initialized. *)
+(** Run [f] under lodge mutex. Falls back to unprotected if not yet initialized.
+
+    The [None] case is safe only during single-domain startup before
+    [lodge_init_lock] is called (i.e., before any Eio fibers are spawned).
+    Once the Eio scheduler is running, [lodge_init_lock] must have been
+    called so that all concurrent accesses are properly serialized. *)
 let with_lodge_lock f =
   match !lodge_lock with
   | Some mutex -> Eio.Mutex.use_rw ~protect:true mutex f
-  | None -> f ()
+  | None ->
+    (* Pre-Eio startup: single domain, no concurrent fibers possible. *)
+    f ()
 
 (** Active agents: name -> (uuid, started_at) *)
 let active_agents : (string, string * float) Hashtbl.t = Hashtbl.create 10

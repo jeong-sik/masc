@@ -262,7 +262,6 @@
    mcp_server_eio_execute
    mcp_server_eio_call_tool
    mcp_server_eio_tool_profile
-   mcp_server_eio_dispatch
    mcp_server_eio_protocol
    mcp_session
    metrics_store_eio
@@ -456,6 +455,7 @@
    tool_catalog
    tool_result
    tool_dispatch
+   tool_tag_init
    tool_trace_hooks
    tool_permissions
    sse_room_filter
@@ -555,6 +555,8 @@
    keeper_persona
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
+   ;; LLM Pool (provider-based concurrency)
+   llm_pool
    ;; Perpetual Agent Runtime (infinite context system)
    llm_types
    llm_transport

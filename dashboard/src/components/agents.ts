@@ -280,21 +280,23 @@ function QueueCard({ item, selected }: { item: DashboardExecutionQueueItem; sele
 function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutionQueueItem[] }) {
   const activeItems = queueRows.filter(item => !isTerminalStatus(item.status))
   const terminalItems = queueRows.filter(item => isTerminalStatus(item.status))
+  const hasActive = activeItems.length > 0
+  const hasTerminal = terminalItems.length > 0
 
   return html`
     <div class="monitor-section-head">
       <h2 class="monitor-headline">개입이 필요한 실행</h2>
-      <p class="monitor-subheadline">진행 중인 세션과 작전 중 막힌 항목을 보여줍니다. 종료된 세션은 하단에 접혀 있습니다.</p>
+      <p class="monitor-subheadline">진행 중인 세션과 작전 중 막힌 항목을 보여줍니다.${hasTerminal ? ' 종료된 항목은 하단에 접혀 있습니다.' : ''}</p>
     </div>
     <div class="monitor-alert-list">
-      ${activeItems.length === 0
-        ? html`<div class="empty-state">지금은 개입이 필요한 실행이 없습니다.</div>`
-        : activeItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)}
+      ${hasActive
+        ? activeItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)
+        : html`<div class="empty-state">지금은 개입이 필요한 실행이 없습니다.</div>`}
     </div>
-    ${terminalItems.length > 0
+    ${hasTerminal
       ? html`
           <details class="runtime-collapsible" data-testid="execution.queue-terminal">
-            <summary class="runtime-summary">종료된 세션 ${terminalItems.length}건</summary>
+            <summary class="runtime-summary">종료된 항목 ${terminalItems.length}건</summary>
             <div class="monitor-alert-list">
               ${terminalItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)}
             </div>
@@ -350,6 +352,8 @@ function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrie
 function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecutionSessionBrief[] }) {
   const activeSessions = sessionRows.filter(row => !isTerminalStatus(row.status))
   const terminalSessions = sessionRows.filter(row => isTerminalStatus(row.status))
+  const hasActive = activeSessions.length > 0
+  const hasTerminal = terminalSessions.length > 0
 
   return html`
     <div class="monitor-section-head">
@@ -357,14 +361,11 @@ function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecutionSes
       <p class="monitor-subheadline">대기열에서 고른 실행이 어떤 세션 목표와 실행 막힘을 갖는지 요약합니다.</p>
     </div>
     <div class="monitor-list">
-      ${activeSessions.length === 0 && terminalSessions.length === 0
-        ? html`<div class="empty-state">선택된 실행과 연결된 세션이 없습니다.</div>`
-        : activeSessions.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)}
-      ${activeSessions.length === 0 && terminalSessions.length > 0
-        ? html`<div class="empty-state">진행 중인 세션이 없습니다.</div>`
-        : null}
+      ${hasActive
+        ? activeSessions.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)
+        : html`<div class="empty-state">${hasTerminal ? '진행 중인 세션이 없습니다.' : '선택된 실행과 연결된 세션이 없습니다.'}</div>`}
     </div>
-    ${terminalSessions.length > 0
+    ${hasTerminal
       ? html`
           <details class="runtime-collapsible" data-testid="execution.sessions-terminal">
             <summary class="runtime-summary">종료된 세션 ${terminalSessions.length}건</summary>
@@ -378,9 +379,10 @@ function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecutionSes
 }
 
 function OperationCard({ brief, selected }: { brief: DashboardExecutionOperationBrief; selected: boolean }) {
+  const terminal = isTerminalStatus(brief.status)
   return html`
     <button
-      class="mission-card-select ${selected ? 'active' : ''}"
+      class="mission-card-select ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.operation-card"
       onClick=${() => {
         selectedOperationId.value = selected ? null : brief.operation_id
@@ -392,7 +394,7 @@ function OperationCard({ brief, selected }: { brief: DashboardExecutionOperation
           <div class="mission-card-target">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
           <div class="mission-card-title">${brief.objective}</div>
         </div>
-        <span class="command-chip ${toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>
+        <span class="command-chip ${terminal ? 'muted' : toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>
       </div>
       <div class="mission-card-meta">
         ${brief.stage ? html`<span>단계 · ${brief.stage}</span>` : null}
@@ -638,7 +640,7 @@ export function Execution() {
         semanticId="execution.queue"
         testId="execution.queue"
       >
-        ${html`<${ExecutionQueueBody} queueRows=${queueRows} />`}
+        <${ExecutionQueueBody} queueRows=${queueRows} />
       <//>
 
       <div class="agents-workbench">
@@ -648,7 +650,7 @@ export function Execution() {
           semanticId="execution.sessions"
           testId="execution.session-briefs"
         >
-          ${html`<${SessionBriefsBody} sessionRows=${sessionRows} />`}
+          <${SessionBriefsBody} sessionRows=${sessionRows} />
         <//>
 
         <${Card}

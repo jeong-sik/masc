@@ -1,16 +1,16 @@
-(** MASC Dashboard - Terminal-based Status Visualization
+(** MASC Dashboard - Operator-First Status Visualization
 
     Usage:
     - MCP: masc_dashboard
     - CLI: masc dashboard | watch -n 1 masc dashboard
 
-    Shows:
-    - Active agents (with zombie detection)
-    - Task board (by status)
-    - File locks
-    - Recent broadcasts
-    - Tempo status
-    - Active worktrees
+    Information hierarchy (operator questions drive section order):
+    1. ATTENTION REQUIRED — what needs my action right now?
+    2. AGENTS — who is working, stuck, or idle?
+    3. TOP TASKS — what are the important tasks?
+    4. SWARM HEALTH — is the system healthy?
+    5. RECENT ACTIVITY — what just happened?
+    6. Footer — tempo, locks, worktrees (one line)
 *)
 
 (* ===== Constants ===== *)
@@ -43,7 +43,8 @@ type scope =
   | All
   | Current
 
-type room_snapshot = {
+(** Re-export shared types from Dashboard_labels to avoid breaking existing callers *)
+type room_snapshot = Dashboard_labels.room_snapshot = {
   room_id: string;
   is_current: bool;
   agents: Types.agent list;
@@ -52,7 +53,7 @@ type room_snapshot = {
   locks: int;
 }
 
-type swarm_lane_summary = {
+type swarm_lane_summary = Dashboard_labels.swarm_lane_summary = {
   label: string;
   present: bool;
   phase: string;
@@ -78,36 +79,9 @@ let format_section (s : section) : string =
   in
   String.concat "\n" ([top_border] @ content @ [bottom_border])
 
-(** Parse ISO timestamp to Unix time (UTC) *)
-let parse_iso_timestamp (s : string) : float option =
-  (* Format: 2025-01-09T12:00:00Z or 2025-01-09T12:00:00.123Z *)
-  try
-    let open Scanf in
-    sscanf s "%d-%d-%dT%d:%d:%d" (fun y m d h min sec ->
-      let tm = {
-        Unix.tm_sec = sec; tm_min = min; tm_hour = h;
-        tm_mday = d; tm_mon = m - 1; tm_year = y - 1900;
-        tm_wday = 0; tm_yday = 0; tm_isdst = false
-      } in
-      (* Unix.mktime interprets tm as local time, but ISO 8601 'Z' means UTC.
-         Adjust: local_t is too small by tz_offset, so add it back.
-         tz_offset = local_t - mktime(gmtime(local_t)) = seconds east of UTC. *)
-      let (local_t, _) = Unix.mktime tm in
-      let utc_tm = Unix.gmtime local_t in
-      let (utc_as_local, _) = Unix.mktime utc_tm in
-      let tz_offset = local_t -. utc_as_local in
-      Some (local_t +. tz_offset)
-    )
-  with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
-
-let format_elapsed now timestamp fallback =
-  match parse_iso_timestamp timestamp with
-  | Some ts ->
-      let elapsed = now -. ts in
-      if elapsed < 60.0 then Printf.sprintf "%.0fs ago" elapsed
-      else if elapsed < 3600.0 then Printf.sprintf "%.0fm ago" (elapsed /. 60.0)
-      else Printf.sprintf "%.1fh ago" (elapsed /. 3600.0)
-  | None -> fallback
+(** Delegate to Dashboard_labels (canonical implementation) *)
+let parse_iso_timestamp = Dashboard_labels.parse_iso_timestamp
+let format_elapsed = Dashboard_labels.format_elapsed
 
 let truncate_path (path : string) : string =
   if String.length path > max_path_length then
@@ -325,19 +299,10 @@ let swarm_lane_summaries now json =
       |> List.filter (fun lane -> lane.present)
   | _ -> []
 
-let swarm_section now (config : Room_utils.config) : section =
+(** Operator-friendly swarm health section with translated labels *)
+let swarm_health_section now (_config : Room_utils.config) (json : Yojson.Safe.t) : section =
   let open Yojson.Safe.Util in
-  let json = swarm_json config in
-  let overview = json |> member "overview" in
-  let active_lanes = overview |> member "active_lanes" |> to_int_option |> Option.value ~default:0 in
-  let moving_lanes = overview |> member "moving_lanes" |> to_int_option |> Option.value ~default:0 in
-  let stalled_lanes = overview |> member "stalled_lanes" |> to_int_option |> Option.value ~default:0 in
-  let projected_lanes = overview |> member "projected_lanes" |> to_int_option |> Option.value ~default:0 in
-  let last_movement =
-    match overview |> member "last_movement_at" |> to_string_option with
-    | Some timestamp -> format_elapsed now timestamp "n/a"
-    | None -> "n/a"
-  in
+  let lanes = swarm_lane_summaries now json in
   let next_action = json |> member "recommended_next_action" in
   let next_label =
     next_action |> member "label" |> to_string_option
@@ -347,38 +312,36 @@ let swarm_section now (config : Room_utils.config) : section =
     next_action |> member "tool" |> to_string_option
     |> Option.value ~default:"masc_operator_snapshot"
   in
-  let gap_items =
-    match json |> member "gaps" |> member "items" with
-    | `List items ->
-        items
-        |> List.filter_map (fun item ->
-               let code = item |> member "code" |> to_string_option in
-               let count = item |> member "count" |> to_int_option |> Option.value ~default:0 in
-               Option.map (fun code -> Printf.sprintf "%s (%d)" code count) code)
-    | _ -> []
-  in
+  let verdict = Dashboard_labels.health_verdict lanes in
   let lane_lines =
-    swarm_lane_summaries now json
-    |> List.map (fun lane ->
-           let flags =
-             match lane.hard_flags with
-             | [] -> "none"
-             | flags -> String.concat ", " flags
+    lanes
+    |> List.map (fun (lane : swarm_lane_summary) ->
+           let status =
+             Dashboard_labels.translate_lane_status ~phase:lane.phase
+               ~motion_state:lane.motion_state ~age:lane.age
            in
-           Printf.sprintf "%s: %s / %s / %s | step=%s | flags=%s"
-             lane.label lane.phase lane.motion_state lane.age lane.current_step flags)
+           let extras =
+             match lane.hard_flags with
+             | [] -> ""
+             | flags ->
+                 " | "
+                 ^ String.concat ", "
+                     (List.map Dashboard_labels.translate_flag_code flags)
+           in
+           Printf.sprintf "%s: %s%s" lane.label status extras)
   in
   let content =
-    [
-      Printf.sprintf "Overview: %d active | %d moving | %d stalled | %d projected | last movement %s"
-        active_lanes moving_lanes stalled_lanes projected_lanes last_movement;
-      Printf.sprintf "Next Action: %s (%s)" next_label next_tool;
-    ]
-    @ (if gap_items = [] then [ "Hard Flags: none" ]
-       else [ "Hard Flags: " ^ String.concat ", " gap_items ])
-    @ add_group "Lanes" lane_lines "(no active lanes)"
+    [ verdict ]
+    @ (if lane_lines = [] then [ "(no active lanes)" ]
+       else [ "" ] @ lane_lines)
+    @ [ ""; Printf.sprintf "Next: %s (%s)" next_label next_tool ]
   in
-  { title = "Swarm"; content; empty_msg = "(no swarm activity)" }
+  { title = "Swarm Health"; content; empty_msg = "(no swarm activity)" }
+
+(* Legacy wrapper for backward compatibility *)
+let swarm_section now (config : Room_utils.config) : section =
+  let json = swarm_json config in
+  swarm_health_section now config json
 
 let room_overview_section (snapshots : room_snapshot list) : section =
   let content =
@@ -459,6 +422,69 @@ let agent_workflow_section now (_config : Room_utils.config) (agents : Types.age
   in
   { title = "Agent Workflows"; content; empty_msg = "(no active agents)" }
 
+(** Operator-friendly agents section grouped by Working / Stuck / Idle *)
+let agents_grouped_section now (agents : Types.agent list) : section =
+  let format_agent (agent : Types.agent) =
+    let status_label =
+      Dashboard_labels.translate_agent_status ~now agent.status agent.last_seen
+    in
+    let elapsed = format_elapsed now agent.last_seen "" in
+    let task_info =
+      match agent.current_task with
+      | Some t -> truncate_message t
+      | None -> "(unassigned)"
+    in
+    Printf.sprintf "%-20s %-10s %s" agent.name elapsed task_info
+    ^ (if String.length status_label > 0 then "" else "")
+    (* status is reflected in the group header *)
+  in
+  let working =
+    List.filter
+      (fun a ->
+        Dashboard_labels.classify_agent ~now a = Dashboard_labels.Working)
+      agents
+  in
+  let stuck =
+    List.filter
+      (fun a ->
+        Dashboard_labels.classify_agent ~now a = Dashboard_labels.Stuck)
+      agents
+  in
+  let idle =
+    List.filter
+      (fun a ->
+        Dashboard_labels.classify_agent ~now a = Dashboard_labels.Idle)
+      agents
+  in
+  let offline =
+    List.filter
+      (fun a ->
+        Dashboard_labels.classify_agent ~now a = Dashboard_labels.Offline)
+      agents
+  in
+  let content =
+    (if working <> [] then
+       add_group "Working" (List.map format_agent working) ""
+     else [])
+    @ (if stuck <> [] then
+         add_group "Stuck" (List.map format_agent stuck) ""
+       else [])
+    @ (if idle <> [] then
+         add_group "Idle" (List.map format_agent idle) ""
+       else [])
+    @ (if offline <> [] then
+         add_group "Offline" (List.map format_agent offline) ""
+       else [])
+  in
+  { title = "Agents"; content; empty_msg = "(no agents)" }
+
+(** Attention section: items requiring operator action *)
+let attention_section now (snapshots : room_snapshot list)
+    (swarm_json_data : Yojson.Safe.t) : section =
+  let items = Dashboard_attention.collect ~now snapshots swarm_json_data in
+  let content = Dashboard_attention.format_items items in
+  { title = "Attention Required"; content; empty_msg = "No action needed" }
+
 let generate ?(scope = All) (config : Room_utils.config) : string =
   let now = Time_compat.now () in
   let timestamp =
@@ -468,45 +494,47 @@ let generate ?(scope = All) (config : Room_utils.config) : string =
       tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
   in
   let (current_room, room_ids) = ordered_room_ids config in
-  let snapshots = List.map (room_snapshot config ~current_room) room_ids in
+  let snapshots =
+    match scope with
+    | All -> List.map (room_snapshot config ~current_room) room_ids
+    | Current -> [room_snapshot config ~current_room current_room]
+  in
+  let all_agents = List.concat_map (fun s -> s.agents) snapshots in
+  let all_tasks = List.concat_map (fun s -> s.tasks) snapshots in
+  let swarm = swarm_json config in
   let header =
     Printf.sprintf
-      "========================================\n   MASC Dashboard   %s\n   Scope: %s | Current Room: %s | Rooms: %d\n========================================"
+      "========================================\n   MASC Dashboard   %s\n   Room: %s | %d room%s | %d agents\n========================================"
       timestamp
-      (match scope with All -> "all" | Current -> "current")
       current_room
       (List.length room_ids)
+      (if List.length room_ids > 1 then "s" else "")
+      (List.length all_agents)
   in
+  (* Operator-first section order *)
   let sections =
-    match scope with
-    | All ->
-        let all_agents = List.concat_map (fun s -> s.agents) snapshots in
-        [
-          room_overview_section snapshots;
-          agent_workflow_section now config all_agents;
-          swarm_section now config;
-          tempo_section config;
-          worktrees_section config;
-        ]
-        @ List.map (room_section now) snapshots
-    | Current ->
-        let snapshot = room_snapshot config ~current_room current_room in
-        [
-          agents_section now snapshot.agents;
-          agent_workflow_section now config snapshot.agents;
-          tasks_section snapshot.tasks;
-          messages_section snapshot.messages;
-          locks_section snapshot.locks;
-          swarm_section now config;
-          tempo_section config;
-          worktrees_section config;
-        ]
+    [
+      attention_section now snapshots swarm;
+      agents_grouped_section now all_agents;
+      tasks_section all_tasks;
+      swarm_health_section now config swarm;
+      messages_section
+        (List.concat_map (fun s -> s.messages) snapshots);
+    ]
+  in
+  let tempo = Tempo.get_tempo config in
+  let worktrees = parse_worktrees (Room.worktree_list config) in
+  let total_locks =
+    List.fold_left (fun acc s -> acc + s.locks) 0 snapshots
+  in
+  let footer =
+    Printf.sprintf "-- Tempo: %.0fs | Locks: %d | Worktrees: %d"
+      tempo.Tempo.current_interval_s total_locks (List.length worktrees)
   in
   let section_strs = List.map format_section sections in
-  String.concat "\n\n" ([header] @ section_strs @ ["\nRefresh: watch -n 1 masc dashboard"])
+  String.concat "\n\n" ([header] @ section_strs @ [footer])
 
 let generate_compact ?(scope = All) (config : Room_utils.config) : string =
-  let tempo = Tempo.get_tempo config in
   let (current_room, room_ids) = ordered_room_ids config in
   let now = Time_compat.now () in
   let snapshots =
@@ -514,42 +542,60 @@ let generate_compact ?(scope = All) (config : Room_utils.config) : string =
     | All -> List.map (room_snapshot config ~current_room) room_ids
     | Current -> [room_snapshot config ~current_room current_room]
   in
-  let (agents_count, active_count, pending_count, locks_count) =
-    List.fold_left (fun (agents_acc, active_acc, pending_acc, locks_acc) snapshot ->
-      let (active, pending) = split_tasks snapshot.tasks in
-      ( agents_acc + List.length snapshot.agents,
-        active_acc + List.length active,
-        pending_acc + List.length pending,
-        locks_acc + snapshot.locks )
-    ) (0, 0, 0, 0) snapshots
+  let all_agents = List.concat_map (fun s -> s.agents) snapshots in
+  let all_tasks = List.concat_map (fun s -> s.tasks) snapshots in
+  let (active_tasks, pending_tasks) = split_tasks all_tasks in
+  let blocked_tasks =
+    List.filter (fun (t : Types.task) ->
+      match t.task_status with
+      | Types.Claimed _ -> true (* claimed but not in-progress = potentially blocked *)
+      | _ -> false
+    ) all_tasks
   in
+  (* Agent counts by group *)
+  let working_count =
+    List.length
+      (List.filter
+         (fun a -> Dashboard_labels.classify_agent ~now a = Dashboard_labels.Working)
+         all_agents)
+  in
+  let stuck_count =
+    List.length
+      (List.filter
+         (fun a -> Dashboard_labels.classify_agent ~now a = Dashboard_labels.Stuck)
+         all_agents)
+  in
+  let idle_count =
+    List.length
+      (List.filter
+         (fun a -> Dashboard_labels.classify_agent ~now a = Dashboard_labels.Idle)
+         all_agents)
+  in
+  let offline_count =
+    List.length all_agents - working_count - stuck_count - idle_count
+  in
+  (* Swarm health *)
   let swarm = swarm_json config in
+  let lanes = swarm_lane_summaries now swarm in
+  let health = Dashboard_labels.health_verdict lanes in
+  (* Attention *)
+  let attention_items = Dashboard_attention.collect ~now snapshots swarm in
+  let attention_line = Dashboard_attention.compact_summary attention_items in
+  (* Next action *)
   let open Yojson.Safe.Util in
-  let overview = swarm |> member "overview" in
-  let moving_lanes = overview |> member "moving_lanes" |> to_int_option |> Option.value ~default:0 in
-  let stalled_lanes = overview |> member "stalled_lanes" |> to_int_option |> Option.value ~default:0 in
-  let projected_lanes = overview |> member "projected_lanes" |> to_int_option |> Option.value ~default:0 in
-  let last_movement =
-    match overview |> member "last_movement_at" |> to_string_option with
-    | Some timestamp -> format_elapsed now timestamp "n/a"
-    | None -> "n/a"
+  let next_tool =
+    swarm |> member "recommended_next_action" |> member "tool"
+    |> to_string_option |> Option.value ~default:"masc_observe_swarm"
   in
-  let next_action =
-    swarm |> member "recommended_next_action" |> member "label" |> to_string_option
-    |> Option.value ~default:"Observe operator state"
-  in
-  Printf.sprintf
-    "Scope: %s | Rooms: %d | Current: %s | Agents: %d | Tasks: %d active, %d pending | Locks: %d | Swarm: %d moving, %d stalled, %d projected, last %s | Next: %s | Tempo: %.0fs"
-    (match scope with All -> "all" | Current -> "current")
-    (List.length snapshots)
-    current_room
-    agents_count
-    active_count
-    pending_count
-    locks_count
-    moving_lanes
-    stalled_lanes
-    projected_lanes
-    last_movement
-    next_action
-    tempo.Tempo.current_interval_s
+  String.concat "\n"
+    [
+      Printf.sprintf "MASC [%s] %d agents / %d tasks"
+        current_room (List.length all_agents)
+        (List.length all_tasks);
+      Printf.sprintf "ATTENTION: %s" attention_line;
+      Printf.sprintf "AGENTS: %d working / %d idle / %d stuck / %d offline | TASKS: %d active / %d pending / %d blocked"
+        working_count idle_count stuck_count offline_count
+        (List.length active_tasks) (List.length pending_tasks)
+        (List.length blocked_tasks);
+      Printf.sprintf "HEALTH: %s | Next: %s" health next_tool;
+    ]

@@ -421,6 +421,49 @@ let dashboard_agents_safe config =
 let dashboard_messages_safe config ~since_seq ~limit =
   Room.get_messages_raw_in_room config ~room_id:(dashboard_current_room_id config) ~since_seq ~limit
 
+let provider_capacity_json () : Yojson.Safe.t =
+  let glm_stats = Glm_pool.get_stats () in
+  let glm_models =
+    List.map
+      (fun (model_id, in_flight, limit) ->
+        `Assoc
+          [
+            ("model", `String model_id);
+            ("in_flight", `Int in_flight);
+            ("limit", `Int limit);
+          ])
+      glm_stats
+  in
+  let gardener_enabled =
+    match Sys.getenv_opt "MASC_GARDENER_ENABLED" with
+    | Some "true" | Some "1" -> true
+    | _ -> false
+  in
+  let env_int key default =
+    match Sys.getenv_opt key with
+    | Some s -> (try int_of_string s with _ -> default)
+    | None -> default
+  in
+  `Assoc
+    [
+      ( "glm_pool",
+        `Assoc
+          [
+            ("models", `List glm_models);
+            ("total_capacity", `Int Glm_pool.total_capacity);
+            ("current_load", `Int (Glm_pool.current_load ()));
+            ("has_capacity", `Bool (Glm_pool.has_capacity ()));
+          ] );
+      ( "agent_capacity",
+        `Assoc
+          [
+            ("gardener_enabled", `Bool gardener_enabled);
+            ("min_agents", `Int (env_int "MASC_GARDENER_MIN_AGENTS" 5));
+            ("target_agents", `Int (env_int "MASC_GARDENER_TARGET_AGENTS" 15));
+            ("max_agents", `Int (env_int "MASC_GARDENER_MAX_AGENTS" 30));
+          ] );
+    ]
+
 let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
   Dashboard_cache.get_or_compute "shell" ~ttl:2.0 (fun () ->
     let agents = dashboard_agents_safe config in
@@ -438,6 +481,7 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
             ("tasks", `Int (List.length tasks));
             ("keepers", `Int keepers_total);
           ] );
+      ("providers", provider_capacity_json ());
       ])
 
 let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =

@@ -2,7 +2,7 @@
 // 4-Layer information architecture: Situation -> Anomaly -> Entity Grid -> Timeline
 
 import { html } from 'htm/preact'
-import { agents, keepers, tasks, shellCounts } from '../../store'
+import { agents, keepers, tasks, shellCounts, providerCapacity } from '../../store'
 import { missionSnapshot } from '../../mission-store'
 import { journal } from '../../sse'
 import { navigate } from '../../router'
@@ -79,6 +79,8 @@ export function Overview() {
         taskBreakdown=${taskBreakdown}
       />
 
+      <${ProviderGauge} />
+
       <div class="overview-main-v2">
         <div class="overview-left-col">
           <div class="overview-section-label">에이전트</div>
@@ -146,6 +148,40 @@ export function Overview() {
           </button>
         `)}
       </nav>
+    </div>
+  `
+}
+
+function ProviderGauge() {
+  const cap = providerCapacity.value
+  if (!cap) return null
+
+  const pool = cap.glm_pool
+  const agentCap = cap.agent_capacity
+  const loadPct = pool.total_capacity > 0
+    ? Math.round((pool.current_load / pool.total_capacity) * 100)
+    : 0
+  const loadTone = loadPct < 50 ? 'ok' : loadPct < 80 ? 'warn' : 'bad'
+
+  return html`
+    <div class="mission-stat-grid" style="margin-bottom: var(--space-md, 16px);">
+      <div class="summary-stat-card ${loadTone}">
+        <span>GLM Pool</span>
+        <strong>${pool.current_load}/${pool.total_capacity}</strong>
+        <small>${pool.has_capacity ? 'capacity available' : 'at capacity'}</small>
+      </div>
+      <div class="summary-stat-card">
+        <span>Agent Slots</span>
+        <strong>${agentCap.target_agents}</strong>
+        <small>${agentCap.min_agents}-${agentCap.max_agents} range${agentCap.gardener_enabled ? '' : ' (gardener off)'}</small>
+      </div>
+      ${pool.models.length > 0 ? html`
+        <div class="summary-stat-card">
+          <span>Models</span>
+          <strong>${pool.models.length}</strong>
+          <small>${pool.models.map((m: { model: string }) => m.model).join(', ')}</small>
+        </div>
+      ` : null}
     </div>
   `
 }

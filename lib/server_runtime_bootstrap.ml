@@ -297,13 +297,36 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
 
   (* 2. All init in background fiber — protected so failures don't kill HTTP *)
   Eio.Fiber.fork ~sw (fun () ->
-    try
+    let init_state () =
       let state =
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
       in
       bootstrap_server_state state;
       bootstrap_keepers ~sw ~clock state;
       init_task_backend ();
+      state
+    in
+    try
+      let pg_init_timeout =
+        Safe_ops.get_env_float_logged "MASC_PG_INIT_TIMEOUT_SEC" ~default:10.0
+      in
+      let state =
+        let has_pg = match Sys.getenv_opt "MASC_POSTGRES_URL" with
+          | Some s when String.trim s <> "" -> true
+          | _ -> false
+        in
+        if has_pg then
+          (try
+             Eio.Time.with_timeout_exn clock pg_init_timeout init_state
+           with Eio.Time.Timeout ->
+             Log.Server.error
+               "PG init timed out after %.0fs, retrying with JSONL fallback"
+               pg_init_timeout;
+             Unix.putenv "MASC_POSTGRES_URL" "";
+             init_state ())
+        else
+          init_state ()
+      in
       let resolved_base, masc_dir =
         start_background_maintenance ~sw ~clock state
       in

@@ -459,7 +459,7 @@ let make_keeper_health_consumer _config : (module Pulse.Consumer) =
             if Filename.check_suffix name ".json" then begin
               let path = Filename.concat keepers_dir name in
               try
-                let json = Yojson.Safe.from_file path in
+                let json = Safe_ops.read_json_eio path in
                 (match Yojson.Safe.Util.member "last_turn_at" json with
                  | `String ts ->
                      let last = parse_iso_or_epoch ts in
@@ -606,7 +606,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
             if Filename.check_suffix fname ".json" then begin
               let path = Filename.concat keepers_dir fname in
               try
-                let json = Yojson.Safe.from_file path in
+                let json = Safe_ops.read_json_eio path in
                 let consecutive_failures =
                   match Yojson.Safe.Util.member "consecutive_failures" json with
                   | `Int n -> n
@@ -680,6 +680,41 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
         Error msg
   end)
 
+(** Message GC consumer: caps message files per room to MASC_MESSAGE_MAX_COUNT.
+    Runs on the same pulse as task hygiene (5min). Deletes oldest by filename sort. *)
+let make_message_gc_consumer config : (module Pulse.Consumer) =
+  (module struct
+    let name = "sentinel-message-gc"
+    let should_act _beat = true
+    let on_beat _beat =
+      try
+        let max_count = Env_config_runtime.Message.max_count in
+        let msgs_path = Room.messages_dir config in
+        if Sys.file_exists msgs_path && Sys.is_directory msgs_path then begin
+          let files = Sys.readdir msgs_path |> Array.to_list in
+          let count = List.length files in
+          if count > max_count then begin
+            let sorted = List.sort String.compare files in
+            let to_delete = count - max_count in
+            let deleted = ref 0 in
+            List.iteri (fun i name ->
+              if i < to_delete then begin
+                let path = Filename.concat msgs_path name in
+                (try Sys.remove path; incr deleted
+                 with Sys_error _ -> ())
+              end
+            ) sorted;
+            log_info (sprintf "message GC: removed %d/%d files (cap=%d)"
+              !deleted count max_count);
+          end
+        end;
+        Ok ()
+      with exn ->
+        let msg = sprintf "message GC failed: %s" (Printexc.to_string exn) in
+        log_warn msg;
+        Error msg
+  end)
+
 (* ── Status ────────────────────────────────────────────────── *)
 
 let started = ref false
@@ -716,6 +751,7 @@ let status_json () : Yojson.Safe.t =
       `String "sentinel-board-patrol";
       `String "sentinel-task-hygiene";
       `String "sentinel-keeper-health";
+      `String "sentinel-message-gc";
     ]
     @
     (if Env_config.Sentinel.governance_enabled then
@@ -774,7 +810,7 @@ let start ?bus ~sw ~clock ~net config =
     in
     Pulse.run ~sw p_board;
 
-    (* 5. Task hygiene + Keeper health (5min) *)
+    (* 5. Task hygiene + Keeper health + Message GC (5min) *)
     let p_ops = Pulse.create
       ~clock
       ~rhythm:(Guardian.fixed_rhythm Env_config.Sentinel.task_hygiene_interval_sec)
@@ -782,6 +818,7 @@ let start ?bus ~sw ~clock ~net config =
       ~consumers:[
         make_task_hygiene_consumer config;
         make_keeper_health_consumer config;
+        make_message_gc_consumer config;
       ]
     in
     Pulse.run ~sw p_ops;

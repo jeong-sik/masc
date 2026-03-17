@@ -276,4 +276,13 @@ module Cp = struct
     get_int ~default:14 "MASC_CP_CLEANUP_DAYS"
 end
 
+(** {1 Message GC Configuration} *)
+
+module Message = struct
+  (** Maximum number of message files to retain per room (default 200).
+      Oldest messages (by filename sort) are deleted when count exceeds this. *)
+  let max_count =
+    get_int ~default:200 "MASC_MESSAGE_MAX_COUNT"
+end
+
 (** {1 Internal Guardian Configuration} *)

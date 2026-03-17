@@ -30,16 +30,14 @@ let parse_json_safe ~context str : (Yojson.Safe.t, string) result =
     let preview = if String.length str > 50 then String.sub str 0 50 ^ "..." else str in
     Error (Printf.sprintf "[%s] JSON parse error: %s (input: %s)" context msg preview)
 
-(** Read file contents with error handling *)
+(** Read file contents with error handling.
+    Uses Eio-native I/O via Fs_compat when available (after set_fs),
+    falls back to blocking I/O in non-Eio contexts. *)
 let read_file_safe path : (string, string) result =
   if not (Sys.file_exists path) then
     Error (Printf.sprintf "File not found: %s" path)
   else
-    try
-      let ic = open_in path in
-      let content = Common.protect ~module_name:"safe_ops" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        really_input_string ic (in_channel_length ic)) in
-      Ok content
+    try Ok (Fs_compat.load_file path)
     with e ->
       Error (Printf.sprintf "Failed to read %s: %s" path (Printexc.to_string e))
 
@@ -70,6 +68,13 @@ let read_json_file_safe path : (Yojson.Safe.t, string) result =
   match read_file_safe path with
   | Error e -> Error e
   | Ok content -> parse_json_safe ~context:path content
+
+(** Read JSON file via Eio-native I/O (Fs_compat).
+    Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts.
+    Falls back to blocking I/O when Eio fs is not set. *)
+let read_json_eio (path : string) : Yojson.Safe.t =
+  let content = Fs_compat.load_file path in
+  Yojson.Safe.from_string content
 
 (** List files in directory safely *)
 let list_dir_safe path : (string list, string) result =

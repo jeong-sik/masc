@@ -247,7 +247,8 @@ let get_pg_pool ~sw ~env =
     match get_postgres_url () with
     | None -> Error "DATABASE_URL not set"
     | Some url ->
-      match Caqti_eio_unix.connect_pool ~sw (Uri.of_string url) ~stdenv:env with
+      let pool_config = Caqti_pool_config.create ~max_size:3 () in
+      match Caqti_eio_unix.connect_pool ~sw ~pool_config (Uri.of_string url) ~stdenv:env with
       | Ok pool ->
         pg_pool_ref := Some pool;
         Ok pool

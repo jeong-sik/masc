@@ -134,26 +134,21 @@ module State = struct
   type t = {
     mutable sse_broadcast: Yojson.Safe.t -> unit;
     trackers: (string, Tracker.t) Hashtbl.t;
-    mutex: Mutex.t;
+    mutex: Eio.Mutex.t;
   }
 
   let create () = {
     sse_broadcast = (fun _ ->
-      (* Default no-op. Unlike notify_ref, this is expected during init.
-         set_sse_callback should be called before any progress notifications. *)
       ()
     );
     trackers = Hashtbl.create 32;
-    mutex = Mutex.create ();
+    mutex = Eio.Mutex.create ();
   }
 
-  (** Module singleton - initialized once *)
   let global = create ()
 
-  (** Thread-safe operation wrapper *)
   let with_lock f =
-    Mutex.lock global.mutex;
-    Fun.protect ~finally:(fun () -> Mutex.unlock global.mutex) f
+    Eio.Mutex.use_rw ~protect:true global.mutex f
 
   (** Reset for testing only *)
   let reset () =

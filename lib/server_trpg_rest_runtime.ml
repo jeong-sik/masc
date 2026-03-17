@@ -57,7 +57,7 @@ let trpg_keeper_call_with_runtime
   | exn -> `Error (Printexc.to_string exn)
 
 type trpg_round_run_guard_state = {
-  mutex : Mutex.t;
+  mutex : Eio.Mutex.t;
   inflight_rooms : (string, unit) Hashtbl.t;
   idempotency_cache : (string, Yojson.Safe.t) Hashtbl.t;
   mutable cache_writes : int;
@@ -65,7 +65,7 @@ type trpg_round_run_guard_state = {
 
 let trpg_round_run_guard : trpg_round_run_guard_state =
   {
-    mutex = Mutex.create ();
+    mutex = Eio.Mutex.create ();
     inflight_rooms = Hashtbl.create 64;
     idempotency_cache = Hashtbl.create 512;
     cache_writes = 0;
@@ -104,8 +104,7 @@ let trpg_round_run_json
     ~body_str
   : trpg_api_result =
   let with_round_run_guard_lock f =
-    Mutex.lock trpg_round_run_guard.mutex;
-    Fun.protect ~finally:(fun () -> Mutex.unlock trpg_round_run_guard.mutex) f
+    Eio.Mutex.use_rw ~protect:true trpg_round_run_guard.mutex f
   in
   let trpg_round_run_extract_room_id (args : Yojson.Safe.t) : string =
     let pick key =

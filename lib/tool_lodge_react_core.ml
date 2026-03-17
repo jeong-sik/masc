@@ -10,10 +10,8 @@ open Tool_lodge_agents_cache
 
 (** Get all cached agent names *)
 let get_all_agent_names () =
-  Mutex.lock agent_cache_mu;
-  let r = Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache [] in
-  Mutex.unlock agent_cache_mu;
-  r
+  Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+    Hashtbl.fold (fun k _ acc -> k :: acc) agent_cache [])
 
 (** Pick a random agent name from cache *)
 let random_agent_name () =
@@ -28,13 +26,11 @@ let validate_agent_name name =
     | Some _ -> Some name
     | None ->
       (* Try Korean name lookup *)
-      Mutex.lock agent_cache_mu;
-      let found = Hashtbl.fold (fun k v acc ->
-        match acc with Some _ -> acc | None ->
-        if v.korean_name = name then Some k else None
-      ) agent_cache None in
-      Mutex.unlock agent_cache_mu;
-      found
+      Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+        Hashtbl.fold (fun k v acc ->
+          match acc with Some _ -> acc | None ->
+          if v.korean_name = name then Some k else None
+        ) agent_cache None)
 
 (** Get model for agent (from Neo4j cache) *)
 let get_agent_model name =

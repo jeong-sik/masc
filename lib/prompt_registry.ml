@@ -89,17 +89,10 @@ let registry : (string, prompt_entry) Hashtbl.t = Hashtbl.create 64
 (** Version index: id -> [version list] for quick version lookup *)
 let version_index : (string, string list) Hashtbl.t = Hashtbl.create 64
 
-(** Standard mutex for thread-safe operations *)
-let registry_mutex = Mutex.create ()
+let registry_mutex = Eio.Mutex.create ()
 
-(** Helper for mutex-protected operations *)
 let with_mutex f =
-  Mutex.lock registry_mutex;
-  Common.protect
-    ~module_name:"prompt_registry"
-    ~finally_label:"Mutex.unlock"
-    ~finally:(fun () -> Mutex.unlock registry_mutex)
-    f
+  Eio.Mutex.use_rw ~protect:true registry_mutex f
 
 (** {1 Persistence} *)
 

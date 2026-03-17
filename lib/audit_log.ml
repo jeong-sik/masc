@@ -150,7 +150,7 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
 
 (** {1 File Operations} *)
 
-let mutex = Mutex.create ()
+let mutex = Eio.Mutex.create ()
 
 let get_audit_path (config : Room.config) =
   let masc_dir = Room_utils.masc_dir config in
@@ -191,20 +191,15 @@ let ensure_dir path =
 
 (** Append a single entry to the audit log (thread-safe) *)
 let append_entry (config : Room.config) (entry : audit_entry) =
-  Mutex.lock mutex;
-  Common.protect
-    ~module_name:"audit_log"
-    ~finally_label:"unlock"
-    ~finally:(fun () -> Mutex.unlock mutex)
-    (fun () ->
-      let path = get_audit_path config in
-      ensure_dir path;  (* Now safe: EEXIST handled, inside mutex *)
-      let json_line = Yojson.Safe.to_string (entry_to_json entry) ^ "\n" in
-      let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-      Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
-        output_string oc json_line
-      )
+  Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+    let path = get_audit_path config in
+    ensure_dir path;
+    let json_line = Yojson.Safe.to_string (entry_to_json entry) ^ "\n" in
+    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
+    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+      output_string oc json_line
     )
+  )
 
 (** {1 Logging API} *)
 

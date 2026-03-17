@@ -89,7 +89,7 @@ let builtin_core_agent_configs () =
 
 (** In-memory cache for dynamic agents (protected by mutex for concurrent access) *)
 let agent_cache : (string, agent_config) Hashtbl.t = Hashtbl.create 10
-let agent_cache_mu = Mutex.create ()
+let agent_cache_mu = Eio.Mutex.create ()
 
 (** {2 File-based cache for offline fallback} *)
 
@@ -142,9 +142,8 @@ let agent_config_of_yojson (json : Yojson.Safe.t) : agent_config option =
 
 (** Save in-memory agent cache to file *)
 let save_agents_to_file_cache () =
-  Mutex.lock agent_cache_mu;
-  let agents = Hashtbl.fold (fun _ v acc -> v :: acc) agent_cache [] in
-  Mutex.unlock agent_cache_mu;
+  let agents = Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+    Hashtbl.fold (fun _ v acc -> v :: acc) agent_cache []) in
   if agents = [] then ()
   else begin
     let cache_json = `Assoc [
@@ -184,9 +183,8 @@ let load_agents_from_file_cache () : bool =
       end else begin
         let agents_json = json |> member "agents" |> to_list in
         let loaded = List.filter_map agent_config_of_yojson agents_json in
-        Mutex.lock agent_cache_mu;
-        List.iter (fun a -> Hashtbl.replace agent_cache a.name a) loaded;
-        Mutex.unlock agent_cache_mu;
+        Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+          List.iter (fun a -> Hashtbl.replace agent_cache a.name a) loaded);
         Log.Lodge.info "Loaded %d agents from file cache (%.1f hours old)" (List.length loaded) age_hours;
         true
       end
@@ -196,9 +194,8 @@ let load_agents_from_file_cache () : bool =
   end
 
 let has_cached_agents_in_memory () =
-  Mutex.lock agent_cache_mu;
-  let n = Hashtbl.length agent_cache in
-  Mutex.unlock agent_cache_mu;
+  let n = Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+    Hashtbl.length agent_cache) in
   n > 0
 
 let load_agents_from_cache_if_available () =
@@ -208,11 +205,10 @@ let load_agents_from_cache_if_available () =
     false
 
 let prime_builtin_core_agents () =
-  Mutex.lock agent_cache_mu;
-  List.iter
-    (fun cfg -> Hashtbl.replace agent_cache cfg.name cfg)
-    (builtin_core_agent_configs ());
-  Mutex.unlock agent_cache_mu
+  Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+    List.iter
+      (fun cfg -> Hashtbl.replace agent_cache cfg.name cfg)
+      (builtin_core_agent_configs ()))
 
 (** Load agents from Neo4j via GraphQL API with file cache fallback *)
 let load_agents_config () =
@@ -259,14 +255,12 @@ let load_agents_config () =
                      model = Yojson.Safe.Util.(member "model" node |> to_string_option) |> Option.value ~default:(default_model ());
                      interests;
                    } in
-                   Mutex.lock agent_cache_mu;
-                   Hashtbl.replace agent_cache config.name config;
-                   Mutex.unlock agent_cache_mu
+                   Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+                     Hashtbl.replace agent_cache config.name config)
                  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()
                ) edges;
-               Mutex.lock agent_cache_mu;
-               let n = Hashtbl.length agent_cache in
-               Mutex.unlock agent_cache_mu;
+               let n = Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+                 Hashtbl.length agent_cache) in
                if n > 0 then begin
                  graphql_success := true;
                  Log.Lodge.info "✅ Loaded %d SOUL agents from Neo4j" n;
@@ -289,10 +283,8 @@ let load_agents_config () =
 
 (** Get cached agent config, or None if not loaded *)
 let get_cached_agent name =
-  Mutex.lock agent_cache_mu;
-  let r = Hashtbl.find_opt agent_cache name in
-  Mutex.unlock agent_cache_mu;
-  r
+  Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+    Hashtbl.find_opt agent_cache name)
 
 (** Get primary value from cached agent (for SOUL-based decisions) *)
 let get_agent_primary_value name =
@@ -392,14 +384,12 @@ let evolve_agent ~name ~dimension ~outcome =
         in
         let (status, _output) = run_cmd_with_status ~timeout_sec:60.0 argv in
         (match status with Unix.WEXITED 0 -> () | _ -> raise (Failure "cypher-shell failed"));
-        (* Update cache *)
-        Mutex.lock agent_cache_mu;
-        Hashtbl.replace agent_cache name {
-          config with
-          value_weights = Some new_weights_json;
-          generation = new_gen;
-        };
-        Mutex.unlock agent_cache_mu;
+        Eio.Mutex.use_rw ~protect:true agent_cache_mu (fun () ->
+          Hashtbl.replace agent_cache name {
+            config with
+            value_weights = Some new_weights_json;
+            generation = new_gen;
+          });
         Log.Evolution.info "%s evolved: %s %s%.2f -> gen %d"
           name dimension
           (if delta >= 0.0 then "+" else "") delta new_gen;

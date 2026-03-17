@@ -11,23 +11,22 @@ type trpg_actor_spawn_cached = {
 }
 
 type trpg_actor_spawn_guard_state = {
-  mutex : Mutex.t;
-  room_mutexes : (string, Mutex.t) Hashtbl.t;
+  mutex : Eio.Mutex.t;
+  room_mutexes : (string, Eio.Mutex.t) Hashtbl.t;
   idempotency_cache : (string, trpg_actor_spawn_cached) Hashtbl.t;
   mutable next_seq : int;
 }
 
 let trpg_actor_spawn_guard : trpg_actor_spawn_guard_state =
   {
-    mutex = Mutex.create ();
+    mutex = Eio.Mutex.create ();
     room_mutexes = Hashtbl.create 64;
     idempotency_cache = Hashtbl.create 2048;
     next_seq = 0;
   }
 
 let trpg_with_actor_spawn_guard_lock f =
-  Mutex.lock trpg_actor_spawn_guard.mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock trpg_actor_spawn_guard.mutex) f
+  Eio.Mutex.use_rw ~protect:true trpg_actor_spawn_guard.mutex f
 
 let trpg_with_actor_spawn_room_lock ~room_id f =
   let room_key = String.trim room_id in
@@ -37,12 +36,11 @@ let trpg_with_actor_spawn_room_lock ~room_id f =
         match Hashtbl.find_opt trpg_actor_spawn_guard.room_mutexes room_key with
         | Some m -> m
         | None ->
-            let m = Mutex.create () in
+            let m = Eio.Mutex.create () in
             Hashtbl.replace trpg_actor_spawn_guard.room_mutexes room_key m;
             m)
   in
-  Mutex.lock room_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock room_mutex) f
+  Eio.Mutex.use_rw ~protect:true room_mutex f
 
 let trpg_actor_spawn_cache_key ~room_id ~idempotency_key =
   room_id ^ "\x1f" ^ idempotency_key

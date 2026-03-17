@@ -28,46 +28,37 @@ type walph_state = {
   mutable current_preset : string;
   mutable iterations : int;
   mutable completed : int;
-  mutex : Mutex.t;       (* Thread safety for state access *)
-  cond : Condition.t;    (* Proper wait for pause/resume, no busy-wait *)
+  mutex : Eio.Mutex.t;
+  cond : Eio.Condition.t;
 }
 
-(** Global Walph state table with its own mutex for thread-safe access *)
 let walph_states : (string, walph_state) Hashtbl.t = Hashtbl.create 16
-let walph_states_mutex = Mutex.create ()
+let walph_states_mutex = Eio.Mutex.create ()
 
-(** Get or create Walph state for a room (thread-safe) *)
 let get_walph_state config =
   let key = config.base_path in
-  Mutex.lock walph_states_mutex;
-  (* Deadlock fix: use Fun.protect to ensure unlock on exception *)
-  Fun.protect ~finally:(fun () -> Mutex.unlock walph_states_mutex) (fun () ->
+  Eio.Mutex.use_rw ~protect:true walph_states_mutex (fun () ->
     match Hashtbl.find_opt walph_states key with
     | Some s -> s
     | None ->
         let s = {
           running = false; paused = false; stop_requested = false;
           current_preset = ""; iterations = 0; completed = 0;
-          mutex = Mutex.create ();
-          cond = Condition.create ();
+          mutex = Eio.Mutex.create ();
+          cond = Eio.Condition.create ();
         } in
         Hashtbl.replace walph_states key s;
         s
   )
 
-(** Remove Walph state for a room (cleanup) *)
 let remove_walph_state config =
   let key = config.base_path in
-  Mutex.lock walph_states_mutex;
-  (* Deadlock fix: use Fun.protect to ensure unlock on exception *)
-  Fun.protect ~finally:(fun () -> Mutex.unlock walph_states_mutex) (fun () ->
+  Eio.Mutex.use_rw ~protect:true walph_states_mutex (fun () ->
     Hashtbl.remove walph_states key
   )
 
-(** Run with Walph state mutex locked *)
 let with_walph_lock state f =
-  Mutex.lock state.mutex;
-  Common.protect ~module_name:"room" ~finally_label:"finalizer" ~finally:(fun () -> Mutex.unlock state.mutex) f
+  Eio.Mutex.use_rw ~protect:true state.mutex f
 
 (** Parse @walph command from broadcast message
     Returns: (command, args) or None if not a walph command *)
@@ -104,7 +95,7 @@ let walph_control config ~from_agent ~command ~args =
     | "STOP" ->
         if state.running then begin
           state.stop_requested <- true;
-          Condition.broadcast state.cond;  (* Wake up pause wait *)
+          Eio.Condition.broadcast state.cond;  (* Wake up pause wait *)
           Printf.sprintf "🛑 @walph STOP requested by %s (will stop after current iteration)" from_agent
         end else
           "ℹ️ @walph is not currently running"
@@ -119,7 +110,7 @@ let walph_control config ~from_agent ~command ~args =
     | "RESUME" ->
         if state.paused then begin
           state.paused <- false;
-          Condition.broadcast state.cond;  (* Wake up pause wait *)
+          Eio.Condition.broadcast state.cond;  (* Wake up pause wait *)
           Printf.sprintf "▶️ @walph RESUMED by %s" from_agent
         end else if state.running then
           "ℹ️ @walph is already running"
@@ -155,7 +146,7 @@ let walph_should_continue config =
       (* Wait on condition variable - no busy-wait! *)
       (* Condition.wait atomically releases mutex and waits *)
       while state.paused && not state.stop_requested do
-        Condition.wait state.cond state.mutex
+        Eio.Condition.await state.cond state.mutex
       done;
       not state.stop_requested
     end else true

@@ -139,6 +139,13 @@ let find_criterion criteria name =
   |> Option.value ~default:(criterion name false "missing")
   |> bool_of_criterion
 
+let has_criterion criteria name =
+  List.exists (fun item ->
+    match Yojson.Safe.Util.member "name" item with
+    | `String n -> String.equal n name
+    | _ -> false
+  ) criteria
+
 let all_criteria_pass criteria =
   List.for_all bool_of_criterion criteria
 
@@ -215,6 +222,8 @@ let mandatory_ok_for_level ~proof_level criteria =
       && find_criterion criteria "multi_actor_turn_coverage"
       && find_criterion criteria "turn_actor_authorized"
       && find_criterion criteria "report_artifacts"
+      && (not (has_criterion criteria "turn_volume_threshold") || find_criterion criteria "turn_volume_threshold")
+      && (not (has_criterion criteria "communication_volume_threshold") || find_criterion criteria "communication_volume_threshold")
   | Team_session_types.Proof_strong -> all_criteria_pass criteria
 
 let verdict_for_level ~proof_level ~mandatory_ok =

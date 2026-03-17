@@ -136,7 +136,7 @@ let raw_all_tool_schemas : Types.tool_schema list =
     (Tools.raw_schemas
     @ Tool_board.tools
     @ Tool_lodge.tools
-    @ Tool_perpetual.schemas
+    (* Tool_perpetual: 0 calls in 6-day audit *)
     @ Tool_mdal.schemas
     @ Tool_keeper.schemas
     @ Tool_operator.schemas
@@ -147,7 +147,8 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_voice.schemas
     @ Tool_protocol_game_view.schemas
     @ Tool_trpg.schemas
-    @ Tool_code_swarm.schemas)
+    (* Tool_code_swarm: 0 calls in 6-day audit *)
+    )
 
 (** Validate tool schemas at module initialization time.
     Logs warnings for: duplicate names, empty names/descriptions,

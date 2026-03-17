@@ -160,7 +160,8 @@ let tool_category tool_name =
   | "masc_status" | "masc_workflow_guide" | "masc_check"
   | "masc_room_strategy_get" | "masc_room_strategy_set"
   (* Mode management - always available via is_tool_enabled bypass *)
-  | "masc_switch_mode" | "masc_get_config" -> Core_Task
+  | "masc_switch_mode" | "masc_get_config"
+  | "masc_tool_enable" | "masc_tool_disable" -> Core_Task
 
   (* ── Core_Session: team session orchestration (11 tools) ── *)
   | "masc_team_session_start" | "masc_team_session_step"
@@ -416,11 +417,31 @@ let tool_category tool_name =
      Add new tools explicitly above to make them available. *)
   | _ -> Unknown
 
+(** Per-session extra enabled tools (progressive disclosure).
+    Tools in this set bypass mode filtering. *)
+let extra_enabled_tools : (string, unit) Hashtbl.t = Hashtbl.create 16
+
+let tool_enable name =
+  Hashtbl.replace extra_enabled_tools name ()
+
+let tool_disable name =
+  Hashtbl.remove extra_enabled_tools name
+
+let tool_enable_list () =
+  Hashtbl.fold (fun name () acc -> name :: acc) extra_enabled_tools []
+
+let tool_enable_clear () =
+  Hashtbl.clear extra_enabled_tools
+
 (** Check if a tool is enabled for given categories.
     Core is a virtual super-category — if enabled_categories contains Core,
-    all Core sub-categories are allowed. *)
+    all Core sub-categories are allowed.
+    Extra-enabled tools bypass category filtering. *)
 let is_tool_enabled enabled_categories tool_name =
-  if tool_name = "masc_switch_mode" || tool_name = "masc_get_config" then
+  if tool_name = "masc_switch_mode" || tool_name = "masc_get_config"
+     || tool_name = "masc_tool_enable" || tool_name = "masc_tool_disable" then
+    true
+  else if Hashtbl.mem extra_enabled_tools tool_name then
     true
   else
     match tool_category tool_name with

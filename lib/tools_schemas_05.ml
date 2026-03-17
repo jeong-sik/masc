@@ -423,4 +423,54 @@ let schemas : tool_schema list = [
       ("required", `List [`String "full_context"]);
     ];
   };
+
+  (* ============================================ *)
+  (* Progressive Tool Disclosure                  *)
+  (* ============================================ *)
+
+  {
+    name = "masc_tool_enable";
+    description = "Enable specific tools or categories without switching to Full mode. Use when you need a tool not in the current mode. Categories: ecosystem (perpetual, gardener, keeper, mdal, handover, library), discovery (capabilities, agent_card, fitness), code (code_search, code_symbols, code_read), board (post, comment, vote), portal, worktree, consensus (debate, convo, walph), voting, encryption, auth, cost. Pass category= for bulk enable or tool= for individual.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("tool", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Single tool name to enable (e.g. masc_perpetual_start)");
+        ]);
+        ("tools", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Multiple tool names to enable at once");
+        ]);
+        ("category", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Enable all tools in a category (e.g. ecosystem, discovery, code, board)");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_tool_disable";
+    description = "Disable previously extra-enabled tools, or clear all extra-enabled tools with clear=true.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("tool", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Single tool name to disable");
+        ]);
+        ("tools", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Multiple tool names to disable");
+        ]);
+        ("clear", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Clear all extra-enabled tools");
+        ]);
+      ]);
+    ];
+  };
 ]

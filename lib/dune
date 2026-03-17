@@ -611,6 +611,12 @@
    tool_autoresearch
    ;; Anti-Fake Test Quality Scoring (harness P2)
    anti_fake
+   ;; godsplit-phase1: type/schema sub-modules
+   types_core
+   types_auth
+   team_session_types_enums
+   tool_schemas_room_core
+   tool_schemas_room_extra
 )
 (private_modules
  gardener_state
@@ -758,7 +764,13 @@
   ;; team_session_report sub-modules
   team_session_report_core
   team_session_report_proof_helpers
-  team_session_report_proof)
+  team_session_report_proof
+  ;; godsplit-phase1: type/schema sub-modules
+  types_core
+  types_auth
+  team_session_types_enums
+  tool_schemas_room_core
+  tool_schemas_room_extra)
  (libraries
    yojson
    base64

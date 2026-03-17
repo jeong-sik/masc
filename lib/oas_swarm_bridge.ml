@@ -4,7 +4,7 @@
     and OAS Swarm (agent_entry, swarm_config, swarm_result).
 
     MASC responsibilities preserved:
-    - LLM semaphore (global rate limiting via Llm_client_providers.complete)
+    - LLM semaphore (global rate limiting via Llm_client.complete)
     - Task queue (claim/done lifecycle)
     - Room broadcast (status updates)
 
@@ -20,16 +20,16 @@ module ST = Agent_sdk_swarm.Swarm_types
 (* ── MASC → OAS conversion ──────────────────────────────────────── *)
 
 (** Create an OAS swarm agent_entry from a MASC model spec.
-    The run function calls MASC's Llm_client_providers.complete internally,
+    The run function calls MASC's Llm_client.complete internally,
     which respects the global LLM semaphore. *)
 let entry_of_masc_spec
     ~name
     ~role
-    (spec : Llm_client_core.model_spec)
+    (spec : Llm_client.model_spec)
   : ST.agent_entry =
   { ST.name;
     run = (fun ~sw:_ prompt ->
-      let request : Llm_client_core.completion_request = {
+      let request : Llm_client.completion_request = {
         model = spec;
         messages = [{ role = User; content = [Agent_sdk.Types.Text prompt];
                       name = None; tool_call_id = None }];
@@ -38,10 +38,10 @@ let entry_of_masc_spec
         tools = [];
         response_format = `Text;
       } in
-      match Llm_client_providers.complete request with
+      match Llm_client.complete request with
       | Ok response ->
         let usage = {
-          Agent_sdk.Types.input_tokens = response.Llm_client_core.usage.input_tokens;
+          Agent_sdk.Types.input_tokens = response.Llm_client.usage.input_tokens;
           output_tokens = response.usage.output_tokens;
           cache_creation_input_tokens = response.usage.cache_creation_input_tokens;
           cache_read_input_tokens = response.usage.cache_read_input_tokens;
@@ -50,7 +50,7 @@ let entry_of_masc_spec
           Agent_sdk.Types.id = "masc-bridge";
           model = response.model_used;
           stop_reason = Agent_sdk.Types.EndTurn;
-          content = response.Llm_client_core.content;
+          content = response.Llm_client.content;
           usage = Some usage;
         }
       | Error msg ->
@@ -62,7 +62,7 @@ let entry_of_masc_spec
     so bridge agents can reference them when requesting actions. *)
 let swarm_config
     ~prompt
-    ~(specs : (string * ST.agent_role * Llm_client_core.model_spec) list)
+    ~(specs : (string * ST.agent_role * Llm_client.model_spec) list)
     ?(mode = ST.Decentralized)
     ?(max_parallel = 4)
     ?convergence

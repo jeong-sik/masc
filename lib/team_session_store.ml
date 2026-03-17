@@ -226,7 +226,10 @@ let read_recent_events config session_id ~max_count :
       session_id (Printexc.to_string exn);
     []
 
-let list_sessions config : Team_session_types.session list =
+(** List sessions, optionally filtering by mtime to avoid loading stale history.
+    [~since_unix] skips directories whose mtime is older than the given Unix timestamp.
+    This turns a 1448-file full scan into loading only active/recent sessions. *)
+let list_sessions ?(since_unix = 0.0) config : Team_session_types.session list =
   match backend_get_all config ~prefix:"team-sessions:" with
   | Ok pairs ->
       pairs
@@ -243,9 +246,19 @@ let list_sessions config : Team_session_types.session list =
       let root = sessions_root config in
       if not (path_exists config root) then []
       else
-        Sys.readdir root
-        |> Array.to_list
-        |> List.filter_map (fun session_id -> load_session config session_id)
+        let dirs = Sys.readdir root |> Array.to_list in
+        let filtered =
+          if since_unix <= 0.0 then dirs
+          else
+            List.filter (fun session_id ->
+              let dir_path = Filename.concat root session_id in
+              try
+                let stat = Unix.stat dir_path in
+                stat.Unix.st_mtime >= since_unix
+              with Unix.Unix_error _ -> true  (* load if stat fails *)
+            ) dirs
+        in
+        List.filter_map (fun session_id -> load_session config session_id) filtered
 
 let update_session config session_id f =
   let path = session_json_path config session_id in

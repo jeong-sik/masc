@@ -1,5 +1,5 @@
 let () =
-  Alcotest.run "Tool_team_session"
+  Alcotest.run ~verbose:true "Tool_team_session"
     [
       ( "team_session",
         [

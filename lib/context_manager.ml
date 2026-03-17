@@ -51,6 +51,11 @@ type compaction_strategy =
   | DropLowImportance
   | SummarizeOld
 
+type compaction_result = {
+  context : working_context;
+  offloaded_path : string option;
+}
+
 (* ================================================================ *)
 (* Memory Formats                                                  *)
 (* ================================================================ *)
@@ -89,6 +94,19 @@ let extract_state_blocks (s : string) : string list =
          loop next_from (body :: acc))
   in
   loop 0 []
+
+(* ================================================================ *)
+(* Filesystem Utilities                                             *)
+(* ================================================================ *)
+
+let ensure_dir path =
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir) then begin
+      mkdir_p (Filename.dirname dir);
+      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+    end
+  in
+  mkdir_p path
 
 (* ================================================================ *)
 (* Token Estimation                                                 *)
@@ -322,6 +340,94 @@ let compact ctx strategies =
   sync_oas_context ctx
 
 (* ================================================================ *)
+(* Conversation History Offload                                     *)
+(* ================================================================ *)
+
+(** Format a single message as human-readable text: "role: content". *)
+let format_message_readable (m : Llm_client.message) : string =
+  let role_str = match m.role with
+    | Llm_client.System -> "system"
+    | Llm_client.User -> "user"
+    | Llm_client.Assistant -> "assistant"
+    | Llm_client.Tool -> "tool"
+  in
+  let name_suffix = match m.name with
+    | Some n -> sprintf " (%s)" n
+    | None -> ""
+  in
+  sprintf "%s%s: %s" role_str name_suffix (text_of_message m)
+
+(** Offload messages to a markdown file for later retrieval.
+    Returns [Some path] on success, [None] on failure (fail-safe). *)
+let offload_messages
+    ~(session_dir : string)
+    ~(compaction_count : int)
+    (messages : Llm_client.message list) : string option =
+  try
+    let offload_dir = Filename.concat session_dir "offloaded" in
+    ensure_dir offload_dir;
+    let path = Filename.concat offload_dir
+      (sprintf "%d.md" compaction_count) in
+    let timestamp =
+      let t = Time_compat.now () in
+      (* ISO 8601 UTC: manual formatting to avoid external dependency *)
+      let open Unix in
+      let tm = gmtime t in
+      sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+        (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+        tm.tm_hour tm.tm_min tm.tm_sec
+    in
+    let rendered =
+      messages
+      |> List.map format_message_readable
+      |> String.concat "\n\n"
+    in
+    let content = sprintf "## Compacted at %s\n\n%s\n\n" timestamp rendered in
+    let fd = Unix.openfile path
+      [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644 in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+      let _ = Unix.write_substring fd content 0 (String.length content) in ());
+    Some path
+  with _exn ->
+    None
+
+(** Apply compaction with history offload.
+    Messages that would be removed by compaction are saved to a markdown file
+    before compaction runs. The summary message is annotated with the offload path.
+    If offload fails, compaction proceeds normally. *)
+let compact_with_offload
+    ~(session_ctx : session_context)
+    ~(compaction_count : int)
+    (ctx : working_context)
+    (strategies : compaction_strategy list) : compaction_result =
+  (* Capture pre-compaction messages for offload *)
+  let pre_messages = ctx.messages in
+  let offloaded_path =
+    offload_messages
+      ~session_dir:session_ctx.session_dir
+      ~compaction_count
+      pre_messages
+  in
+  (* Run the normal compaction pipeline *)
+  let compacted = List.fold_left apply_strategy ctx strategies in
+  (* If offload succeeded and SummarizeOld produced a summary, annotate it *)
+  let compacted = match offloaded_path with
+    | Some path ->
+      let annotation = sprintf "[Full conversation history saved to %s]\n\n" path in
+      let messages = List.map (fun (m : Llm_client.message) ->
+        let mt = text_of_message m in
+        if starts_with ~prefix:memory_summary_prefix mt then
+          { m with content = [Agent_sdk.Types.Text (annotation ^ mt)] }
+        else m
+      ) compacted.messages in
+      let token_count = count_tokens compacted.system_prompt messages in
+      { compacted with messages; token_count }
+    | None -> compacted
+  in
+  let compacted = sync_oas_context compacted in
+  { context = compacted; offloaded_path }
+
+(* ================================================================ *)
 (* OAS Context_reducer Integration                                  *)
 (* ================================================================ *)
 
@@ -499,15 +605,6 @@ let restore_checkpoint ckpt ~max_tokens =
 (* ================================================================ *)
 (* Session Persistence                                              *)
 (* ================================================================ *)
-
-let ensure_dir path =
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
 
 let create_session ~session_id ~base_dir =
   let session_dir = Filename.concat base_dir session_id in

@@ -13,18 +13,25 @@
 
 .overview-stat {
   padding: 12px 14px;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-sm, 10px);
-  background: var(--card);
+  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border-radius: 6px;
+  background: var(--ff-panel, rgba(13, 21, 38, 0.9));
   display: grid;
   gap: 2px;
+  position: relative;
+  transition: border-color 0.2s;
+}
+
+.overview-stat:hover {
+  border-color: var(--ff-border, rgba(212, 169, 75, 0.35));
 }
 
 .overview-stat__label {
-  color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  color: var(--ff-gold, #d4a94b);
+  font-size: 10px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
+  font-weight: 600;
 }
 
 .overview-stat__value {
@@ -42,10 +49,10 @@
   align-items: center;
   gap: 12px;
   padding: 14px 18px;
-  border-radius: var(--radius-sm, 10px);
-  background: var(--card);
-  border: 1px solid var(--card-border);
-  border-left: 3px solid var(--agent-working, #7ae09a);
+  border-radius: 6px;
+  background: var(--ff-panel, rgba(13, 21, 38, 0.9));
+  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border-left: 3px solid var(--ff-hp, #3dcc5e);
   font-size: 14px;
   font-weight: 500;
   color: var(--text-strong);
@@ -53,11 +60,11 @@
 }
 
 .situation-banner--ok {
-  border-left-color: var(--agent-working, #7ae09a);
+  border-left-color: var(--ff-hp, #3dcc5e);
 }
 
 .situation-banner--warn {
-  border-left-color: var(--agent-busy, #f0c060);
+  border-left-color: var(--ff-xp, #d4a94b);
 }
 
 .situation-banner--bad {

@@ -114,7 +114,9 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
          Only include active (Running/Paused) sessions plus recently finished ones
          (last 24h) to avoid loading all historical sessions on every poll. *)
       (* Pre-filter at filesystem level: only load sessions modified in last 24h.
-         This avoids reading all 1400+ historical session files on each poll. *)
+         This avoids reading all 1400+ historical session files on each poll.
+         Active sessions are preserved by list_sessions ~since_unix which does a
+         lightweight status check on mtime-excluded dirs (avoids full JSON load). *)
       let cutoff_unix = Time_compat.now () -. 86400.0 in
       let all_sessions =
         if Room.is_initialized config then

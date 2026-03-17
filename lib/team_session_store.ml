@@ -254,8 +254,40 @@ let list_sessions ?(since_unix = 0.0) config : Team_session_types.session list =
               let dir_path = Filename.concat root session_id in
               try
                 let stat = Unix.stat dir_path in
-                stat.Unix.st_mtime >= since_unix
-              with Unix.Unix_error _ -> true  (* load if stat fails *)
+                if stat.Unix.st_mtime >= since_unix then true
+                else
+                  (* Lightweight status check: keep Running/Paused sessions
+                     even when mtime is stale (long-lived sessions).
+                     Read first 512 bytes of session.json for quick substring match. *)
+                  let state_path = Filename.concat dir_path "session.json" in
+                  (try
+                    let ic = open_in state_path in
+                    let buf = Bytes.create 512 in
+                    let n =
+                      Common.protect ~module_name:"team_session_store"
+                        ~finally_label:"finalizer"
+                        ~finally:(fun () -> close_in_noerr ic)
+                        (fun () -> input ic buf 0 512)
+                    in
+                    let snippet = Bytes.sub_string buf 0 n in
+                    (* Status field appears early in the JSON *)
+                    let has_sub haystack needle =
+                      let nl = String.length needle in
+                      let hl = String.length haystack in
+                      if nl > hl then false
+                      else
+                        let found = ref false in
+                        let i = ref 0 in
+                        while !i <= hl - nl && not !found do
+                          if String.sub haystack !i nl = needle then found := true
+                          else incr i
+                        done;
+                        !found
+                    in
+                    has_sub snippet {|"Running"|}
+                    || has_sub snippet {|"Paused"|}
+                  with Sys_error _ | End_of_file -> false)
+              with Unix.Unix_error _ -> true
             ) dirs
         in
         List.filter_map (fun session_id -> load_session config session_id) filtered

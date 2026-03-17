@@ -109,8 +109,8 @@ let test_spawn_registry_record_failure_logs () =
     Eio_main.run @@ fun _env ->
     Spawn_registry.record_failure reg "invalid@agent!name"
   ) in
-  check bool "stderr contains [spawn_registry] prefix"
-    true (str_contains output "[spawn_registry]")
+  check bool "stderr contains [Spawn] prefix"
+    true (str_contains output "[Spawn]")
 
 (** list_by_agent with an invalid agent name logs and returns empty list. *)
 let test_spawn_registry_list_by_agent_invalid_logs () =
@@ -121,8 +121,8 @@ let test_spawn_registry_list_by_agent_invalid_logs () =
     (* Verify the function returns [] gracefully *)
     assert (result = [])
   ) in
-  check bool "stderr contains [spawn_registry] prefix for list_by_agent"
-    true (str_contains output "[spawn_registry]")
+  check bool "stderr contains [Spawn] prefix for list_by_agent"
+    true (str_contains output "[Spawn]")
 
 (** clear_failures with an invalid agent name logs (does not crash). *)
 let test_spawn_registry_clear_failures_invalid_logs () =
@@ -131,8 +131,8 @@ let test_spawn_registry_clear_failures_invalid_logs () =
     Eio_main.run @@ fun _env ->
     Spawn_registry.clear_failures reg "  "  (* blank → trimmed to "" → invalid *)
   ) in
-  check bool "stderr contains [spawn_registry] prefix for clear_failures"
-    true (str_contains output "[spawn_registry]")
+  check bool "stderr contains [Spawn] prefix for clear_failures"
+    true (str_contains output "[Spawn]")
 
 (* ============================================================
    tool_task: complete on nonexistent task → "[task]" on stderr
@@ -151,8 +151,8 @@ let test_tool_task_done_nonexistent_logs () =
   let output = capture_stderr (fun () ->
     ignore (Tool_task.handle_done ctx args)
   ) in
-  check bool "stderr contains [task] prefix for done on missing task"
-    true (str_contains output "[task]")
+  check bool "stderr contains [Task] prefix for done on missing task"
+    true (str_contains output "[Task]")
 
 (** handle_cancel with a task_id that does not exist → "[task]" eprintf. *)
 let test_tool_task_cancel_nonexistent_logs () =
@@ -165,8 +165,8 @@ let test_tool_task_cancel_nonexistent_logs () =
   let output = capture_stderr (fun () ->
     ignore (Tool_task.handle_cancel_task ctx args)
   ) in
-  check bool "stderr contains [task] prefix for cancel on missing task"
-    true (str_contains output "[task]")
+  check bool "stderr contains [Task] prefix for cancel on missing task"
+    true (str_contains output "[Task]")
 
 (* ============================================================
    a2a_tools: submit_heartbeat_result unknown status → "[a2a]" on stderr
@@ -188,8 +188,8 @@ let test_a2a_submit_unknown_status_logs () =
       ~decision_confidence:0.0
       ())
   ) in
-  check bool "stderr contains [a2a] prefix for unknown status"
-    true (str_contains output "[a2a]")
+  check bool "stderr contains [Misc] prefix for unknown status"
+    true (str_contains output "[Misc]")
 
 (* ============================================================
    Test runner

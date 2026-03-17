@@ -539,7 +539,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_cost.dispatch { Tool_cost.agent_name } ~name ~args:arguments
     | Mod_walph ->
         (match state.Mcp_server.net with
-         | None -> Some (false, "walph requires net (server_state.net is None)")
+         | None -> None  (* net unavailable: skip walph, let other modules handle *)
          | Some net ->
            let ctx : _ Tool_walph.context = { config; agent_name; net; clock } in
            Tool_walph.dispatch ctx ~name ~args:arguments)
@@ -616,18 +616,37 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_inline_dispatch.dispatch inline_ctx ~name
   in
 
-  (* Primary dispatch: O(1) tag lookup → lazy context creation *)
-  match Tool_dispatch.lookup_tag name with
-  | Some tag ->
-    (match dispatch_by_tag tag with
-     | Some result -> result
-     | None -> (false, Printf.sprintf "Unknown tool: %s" name))
+  (* Primary dispatch: O(1) tag lookup → lazy context creation.
+     Falls through to brute-force chain when tag lookup misses
+     (e.g., tools defined in tool_schemas_core but dispatched by
+     a module whose schemas don't include them). *)
+  let tag_result =
+    match Tool_dispatch.lookup_tag name with
+    | Some tag -> dispatch_by_tag tag
+    | None -> None
+  in
+  match tag_result with
+  | Some result -> result
   | None ->
-    (* Fallback for tools not in tag registry: lazy context per-module chain.
-       This handles modules without exported schemas. Each module's context
-       is created only if the match arm is reached. *)
+    (* Fallback: try tag-registered modules whose schemas may not include
+       all their handled tools (e.g. masc_init is in tool_schemas_core_01
+       but dispatched by Tool_room), then non-tag modules. *)
     let try_dispatch f = f () in
     let fallback_result =
+      (* Tag-registered modules with known schema gaps *)
+      try_dispatch (fun () -> Tool_plan.dispatch { Tool_plan.config } ~name ~args:arguments)
+      |> function Some r -> Some r | None ->
+      try_dispatch (fun () -> Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args:arguments)
+      |> function Some r -> Some r | None ->
+      try_dispatch (fun () -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:arguments)
+      |> function Some r -> Some r | None ->
+      try_dispatch (fun () -> Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:arguments)
+      |> function Some r -> Some r | None ->
+      try_dispatch (fun () -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args:arguments)
+      |> function Some r -> Some r | None ->
+      try_dispatch (fun () -> Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:arguments)
+      |> function Some r -> Some r | None ->
+      (* Non-tag modules *)
       try_dispatch (fun () -> Tool_run.dispatch { Tool_run.config } ~name ~args:arguments)
       |> function Some r -> Some r | None ->
       try_dispatch (fun () -> Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments)

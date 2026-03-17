@@ -70,7 +70,8 @@ let swarm_config
   let entries = List.map (fun (name, role, spec) ->
     entry_of_masc_spec ~name ~role spec
   ) specs in
-  { ST.entries; mode; convergence; max_parallel; prompt; timeout_sec }
+  { ST.entries; mode; convergence; max_parallel; prompt; timeout_sec;
+    budget = ST.no_budget }
 
 (* ── OAS → MASC conversion ──────────────────────────────────────── *)
 

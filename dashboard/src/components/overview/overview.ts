@@ -1,17 +1,38 @@
-// MASC Dashboard — Home Overview Surface
-// Combines all overview sub-components into the Home landing view.
+// MASC Dashboard — Home Overview Surface (Redesigned)
+// 4-Layer information architecture: Situation -> Anomaly -> Entity Grid -> Timeline
+// Replaces flat number display + ring + strip with hierarchical NOC dashboard pattern.
 
 import { html } from 'htm/preact'
 import { agents, keepers, tasks, shellCounts } from '../../store'
 import { missionSnapshot } from '../../mission-store'
 import { journal } from '../../sse'
 import { navigate } from '../../router'
+import { formatDuration } from '../mission-utils'
+import { SituationBanner } from './situation-banner'
+import { AttentionSpotlight } from './attention-spotlight'
+import { AgentGrid } from './agent-grid'
+import { SessionTriage } from './session-triage'
+import { NarrativeTimeline } from './narrative-timeline'
 import { QuickStats } from './quick-stats'
-import { EcosystemRing } from './ecosystem-ring'
-import { SessionStrip } from './session-strip'
-import { HealthBeacon } from './health-beacon'
-import { ActivityTicker } from './activity-ticker'
 import { DASHBOARD_SURFACES } from '../../config/navigation'
+
+// Phase 6: Context pressure bar color thresholds
+function pressureClass(ratio: number | null | undefined): string {
+  if (ratio == null) return ''
+  const pct = ratio * 100
+  if (pct < 50) return 'pressure--ok'
+  if (pct < 70) return 'pressure--amber'
+  if (pct < 85) return 'pressure--orange'
+  return 'pressure--red'
+}
+
+function keeperHealthClass(status?: string): string {
+  const s = (status ?? '').toLowerCase()
+  if (s === 'active' || s === 'running' || s === 'ok') return 'keeper-status--ok'
+  if (s === 'idle' || s === 'listening') return 'keeper-status--idle'
+  if (s === 'offline' || s === 'inactive') return 'keeper-status--offline'
+  return ''
+}
 
 export function Overview() {
   const snap = missionSnapshot.value
@@ -27,24 +48,27 @@ export function Overview() {
     t.status === 'in_progress' || t.status === 'claimed'
   )
 
-  // Use shell counts as fallback when execution data hasn't loaded yet
   const agentCount = activeAgents.length > 0 ? activeAgents.length : (counts?.agents ?? 0)
   const taskCount = activeTasks.length > 0 ? activeTasks.length : (counts?.tasks ?? 0)
   const keeperCount = keeperList.length > 0 ? keeperList.length : (counts?.keepers ?? 0)
 
   const roomHealth = snap?.summary?.room_health ?? null
-  const roomName = snap?.summary?.current_room ?? null
   const attentionCount = snap?.attention_queue?.length ?? snap?.summary?.pending_approvals ?? 0
   const sessions = snap?.sessions ?? snap?.session_briefs ?? []
-
-  // Keeper mini-cards for the health sidebar
+  const agentBriefs = snap?.agent_briefs ?? []
   const keeperBriefs = snap?.keeper_briefs ?? []
 
-  // Navigation surfaces (excluding home itself)
   const navSurfaces = DASHBOARD_SURFACES.filter(s => s.id !== 'home')
 
   return html`
     <div class="overview-surface">
+      <!-- Layer 1: Situation Line -->
+      <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
+
+      <!-- Layer 2: Anomaly Spotlight (only when anomalies exist) -->
+      <${AttentionSpotlight} snap=${snap} />
+
+      <!-- Quick Stats (compact, below situation context) -->
       <${QuickStats}
         agentCount=${agentCount}
         activeTaskCount=${taskCount}
@@ -52,46 +76,64 @@ export function Overview() {
         attentionCount=${attentionCount}
       />
 
-      <div class="overview-main">
-        <div class="overview-ring-col">
-          <div class="overview-section-label">에이전트 생태계</div>
-          <${EcosystemRing}
+      <!-- Layer 3+4: Entity Grid + Session Triage + Timeline -->
+      <div class="overview-main-v2">
+        <div class="overview-left-col">
+          <div class="overview-section-label">에이전트</div>
+          <${AgentGrid}
             agents=${agentList}
-            roomName=${roomName}
-            roomHealth=${roomHealth}
+            agentBriefs=${agentBriefs}
             onAgentClick=${(name: string) => navigate('execution', { agent: name })}
           />
         </div>
 
-        <div class="overview-sessions-col">
-          <div class="overview-section-label">활성 세션</div>
-          <${SessionStrip} sessions=${sessions} />
+        <div class="overview-right-col">
+          <div class="overview-section-label">세션</div>
+          <${SessionTriage} sessions=${sessions} />
 
-          <div class="overview-section-label" style="margin-top: var(--space-sm, 8px)">최근 활동</div>
-          <${ActivityTicker} entries=${journal} maxItems=${8} />
-        </div>
-
-        <div class="overview-health-col">
-          <div class="overview-section-label">시스템 상태</div>
-          <${HealthBeacon} health=${roomHealth} />
-
+          <!-- Phase 6: Enhanced Keeper Cards -->
           ${keeperBriefs.length > 0 ? html`
-            <div class="overview-section-label" style="margin-top: var(--space-sm, 8px)">키퍼</div>
-            ${keeperBriefs.map(k => html`
-              <div class="keeper-mini-card" key=${k.name}>
-                <span class="keeper-mini-card__name">${k.name}</span>
-                <span class="keeper-mini-card__meta">
-                  ${k.status ?? ''}
-                  ${k.context_ratio != null ? ` / ctx ${Math.round(k.context_ratio * 100)}%` : ''}
-                  ${k.generation != null ? ` / gen ${k.generation}` : ''}
-                </span>
-              </div>
-            `)}
+            <div class="overview-section-label" style="margin-top: var(--space-md, 16px)">키퍼</div>
+            <div class="keeper-cards-v2">
+              ${keeperBriefs.map(k => html`
+                <div class="keeper-card-v2 ${keeperHealthClass(k.status)}" key=${k.name}>
+                  <div class="keeper-card-v2__header">
+                    <span class="keeper-card-v2__name">${k.name}</span>
+                    ${k.generation != null ? html`
+                      <span class="keeper-card-v2__gen">G${k.generation}</span>
+                    ` : null}
+                  </div>
+                  ${k.current_work ? html`
+                    <div class="keeper-card-v2__work">${k.current_work}</div>
+                  ` : null}
+                  ${k.context_ratio != null ? html`
+                    <div class="keeper-card-v2__pressure">
+                      <div
+                        class="keeper-card-v2__pressure-bar ${pressureClass(k.context_ratio)}"
+                        style=${{ width: `${Math.round(k.context_ratio * 100)}%` }}
+                      />
+                      <span class="keeper-card-v2__pressure-label">
+                        ctx ${Math.round(k.context_ratio * 100)}%
+                      </span>
+                    </div>
+                  ` : null}
+                  ${k.last_turn_ago_s != null ? html`
+                    <span class="keeper-card-v2__activity">
+                      ${formatDuration(k.last_turn_ago_s)} 전
+                    </span>
+                  ` : null}
+                </div>
+              `)}
+            </div>
           ` : null}
+
+          <!-- Layer 4: Narrative Timeline -->
+          <div class="overview-section-label" style="margin-top: var(--space-md, 16px)">최근 활동</div>
+          <${NarrativeTimeline} entries=${journal} maxItems=${12} />
         </div>
       </div>
 
-      <!-- Navigation to other surfaces (Home has no SideRail) -->
+      <!-- Navigation to other surfaces -->
       <nav class="overview-nav-strip">
         ${navSurfaces.map(surface => html`
           <button

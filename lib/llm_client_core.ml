@@ -181,10 +181,12 @@ let sanitize_text_utf8 (s : string) : string =
   loop 0;
   Buffer.contents buf
 
+let text_of_message (m : message) : string = m.content
+
 let sanitize_message_utf8 (m : message) : message =
   {
     m with
-    content = sanitize_text_utf8 m.content;
+    content = sanitize_text_utf8 (text_of_message m);
     name = Option.map sanitize_text_utf8 m.name;
     tool_call_id = Option.map sanitize_text_utf8 m.tool_call_id;
   }
@@ -273,7 +275,7 @@ let tool_msg ~name ~call_id content =
 
 (** Heuristic: ~4 characters per token (conservative estimate). *)
 let estimate_tokens (msgs : message list) =
-  List.fold_left (fun acc (m : message) -> acc + (String.length m.content / 4) + 4) 0 msgs
+  List.fold_left (fun acc (m : message) -> acc + (String.length (text_of_message m) / 4) + 4) 0 msgs
 
 (* ================================================================ *)
 (* Response cache helpers                                            *)
@@ -294,7 +296,7 @@ let message_fingerprint_json (m : message) : Yojson.Safe.t =
   `Assoc
     [
       ("role", `String (string_of_role m.role));
-      ("content", `String m.content);
+      ("content", `String (text_of_message m));
       ("name", string_opt_to_json m.name);
       ("tool_call_id", string_opt_to_json m.tool_call_id);
     ]
@@ -421,7 +423,7 @@ let completion_response_of_cache_json
   with exn -> Error (Printexc.to_string exn)
 
 let prompt_char_count (req : completion_request) =
-  List.fold_left (fun acc (m : message) -> acc + String.length m.content) 0
+  List.fold_left (fun acc (m : message) -> acc + String.length (text_of_message m)) 0
     req.messages
 
 let request_has_tool_role_message (req : completion_request) =
@@ -453,7 +455,7 @@ let record_cache_bypass reason =
 let message_to_openai_json (m : message) : Yojson.Safe.t =
   let base = [
     ("role", `String (string_of_role m.role));
-    ("content", `String m.content);
+    ("content", `String (text_of_message m));
   ] in
   let with_name = match m.name with
     | Some n -> ("name", `String n) :: base
@@ -515,13 +517,13 @@ let build_claude_body (req : completion_request) : string =
   let sanitized_messages = sanitize_messages_utf8 req.messages in
   (* Claude uses separate system parameter *)
   let system_text = List.fold_left (fun acc m ->
-    match m.role with System -> acc ^ m.content ^ "\n" | _ -> acc
+    match m.role with System -> acc ^ text_of_message m ^ "\n" | _ -> acc
   ) "" sanitized_messages |> String.trim in
   let non_system = List.filter (fun m -> m.role <> System) sanitized_messages in
   let messages_json = List.map (fun m ->
     `Assoc [
       ("role", `String (string_of_role m.role));
-      ("content", `String m.content);
+      ("content", `String (text_of_message m));
     ]
   ) non_system in
   let base = [

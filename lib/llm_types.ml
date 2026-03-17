@@ -170,9 +170,15 @@ let assistant_msg content = { role = Assistant; content; name = None; tool_call_
 let tool_msg ~name ~call_id content =
   { role = Tool; content; name = Some name; tool_call_id = Some call_id }
 
+(** Extract text content from a message.
+    v0.48 migration bridge: consumers should use this instead of direct .content access.
+    When message.content changes to content_block list (Phase B),
+    only this function needs updating. *)
+let text_of_message (m : message) : string = m.content
+
 (** Heuristic: ~4 characters per token (conservative estimate). *)
 let estimate_tokens (msgs : message list) =
-  List.fold_left (fun acc (m : message) -> acc + (String.length m.content / 4) + 4) 0 msgs
+  List.fold_left (fun acc (m : message) -> acc + (String.length (text_of_message m) / 4) + 4) 0 msgs
 
 let rec model_spec_of_string s =
   let s = String.trim s in

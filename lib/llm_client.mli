@@ -169,6 +169,9 @@ val user_msg : string -> message
 val assistant_msg : string -> message
 val tool_msg : name:string -> call_id:string -> string -> message
 
+(** Extract text content from a message. *)
+val text_of_message : message -> string
+
 (** Repair malformed UTF-8 in arbitrary text. *)
 val sanitize_text_utf8 : string -> string
 

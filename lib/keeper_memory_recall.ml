@@ -179,7 +179,7 @@ let latest_message_content_by_role
     |> List.find_opt (fun (m : Llm_client.message) -> m.role = role)
   with
   | None -> None
-  | Some m -> trim_nonempty (String.trim m.content)
+  | Some m -> trim_nonempty (String.trim (Llm_client.text_of_message m))
 
 let previous_assistant_message_content
     (messages : Llm_client.message list) : string option =
@@ -187,7 +187,7 @@ let previous_assistant_message_content
     messages
     |> List.rev
     |> List.filter_map (fun (m : Llm_client.message) ->
-         if m.role = Llm_client.Assistant then trim_nonempty m.content else None)
+         if m.role = Llm_client.Assistant then trim_nonempty (Llm_client.text_of_message m) else None)
   in
   match assistants with
   | _latest :: previous :: _ -> Some previous
@@ -486,7 +486,7 @@ let recent_user_messages (msgs : Llm_client.message list) ~(max_n : int) : strin
   |> List.rev
   |> List.filter_map (fun (m : Llm_client.message) ->
        if m.role = Llm_client.User then
-         let c = String.trim m.content in
+         let c = String.trim (Llm_client.text_of_message m) in
          if c = "" then None else Some c
        else None)
   |> take max_n

@@ -132,6 +132,10 @@ val assistant_msg : string -> message
 (** Create a tool result message. *)
 val tool_msg : name:string -> call_id:string -> string -> message
 
+(** Extract text content from a message.
+    Use this instead of direct [.content] access for v0.48 type convergence. *)
+val text_of_message : message -> string
+
 (** {1 Token Estimation} *)
 
 (** Estimate token count for a message list (heuristic: ~4 chars per token). *)

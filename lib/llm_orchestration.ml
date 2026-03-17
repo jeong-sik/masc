@@ -60,7 +60,7 @@ let message_fingerprint_json (m : message) : Yojson.Safe.t =
   `Assoc
     [
       ("role", `String (string_of_role m.role));
-      ("content", `String m.content);
+      ("content", `String (text_of_message m));
       ("name", string_opt_to_json m.name);
       ("tool_call_id", string_opt_to_json m.tool_call_id);
     ]
@@ -187,7 +187,7 @@ let completion_response_of_cache_json
   with exn -> Error (Printexc.to_string exn)
 
 let prompt_char_count (req : completion_request) =
-  List.fold_left (fun acc (m : message) -> acc + String.length m.content) 0
+  List.fold_left (fun acc (m : message) -> acc + String.length (text_of_message m)) 0
     req.messages
 
 let request_has_tool_role_message (req : completion_request) =

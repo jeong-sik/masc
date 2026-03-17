@@ -69,11 +69,11 @@ let to_oas_message (m : message) : Agent_sdk.Types.message option =
   | Tool ->
     let tool_use_id = Option.value ~default:"masc-tool" m.tool_call_id in
     Some { Agent_sdk.Types.role = User;
-           content = [ToolResult { tool_use_id; content = m.content; is_error = false }] }
+           content = [ToolResult { tool_use_id; content = text_of_message m; is_error = false }] }
   | User ->
-    Some { Agent_sdk.Types.role = User; content = [Text m.content] }
+    Some { Agent_sdk.Types.role = User; content = [Text (text_of_message m)] }
   | Assistant ->
-    Some { Agent_sdk.Types.role = Assistant; content = [Text m.content] }
+    Some { Agent_sdk.Types.role = Assistant; content = [Text (text_of_message m)] }
 
 let of_oas_message (m : Agent_sdk.Types.message) : message =
   (* Role is now the same type -- no mapping needed *)

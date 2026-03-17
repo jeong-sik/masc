@@ -215,7 +215,7 @@ let coding_turn ~config ~state =
     let progress =
       let blocks =
         List.concat_map
-          (fun (m : Llm_client.message) -> Context_manager.extract_state_blocks m.content)
+          (fun (m : Llm_client.message) -> Context_manager.extract_state_blocks (Llm_client.text_of_message m))
           (List.rev state.context.messages)
       in
       match blocks with

@@ -494,3 +494,62 @@ let keeper_rule_guardrail_context_threshold () : float =
     ~default:0.70
     ~min_v:0.0
     ~max_v:1.0
+
+(* ================================================================ *)
+(* Keeper execution — previously hardcoded magic numbers             *)
+(* ================================================================ *)
+
+(** Maximum tool loop rounds before forcing termination.
+    Used in proactive generation and social board event turns.
+    Env: [MASC_KEEPER_MAX_TOOL_ROUNDS]. Default: 3. *)
+let keeper_max_tool_rounds () : int =
+  int_of_env_default
+    "MASC_KEEPER_MAX_TOOL_ROUNDS"
+    ~default:3
+    ~min_v:1
+    ~max_v:20
+
+(** Max tokens for autonomous execution LLM calls.
+    Env: [MASC_KEEPER_AUTONOMOUS_MAX_TOKENS]. Default: 4000. *)
+let keeper_autonomous_max_tokens () : int =
+  int_of_env_default
+    "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS"
+    ~default:4000
+    ~min_v:512
+    ~max_v:16000
+
+(** Max tokens for keeper deliberation calls.
+    Env: [MASC_KEEPER_DELIBERATION_MAX_TOKENS]. Default: 1024. *)
+let keeper_deliberation_max_tokens () : int =
+  int_of_env_default
+    "MASC_KEEPER_DELIBERATION_MAX_TOKENS"
+    ~default:1024
+    ~min_v:256
+    ~max_v:8000
+
+(** Max tokens for explicit reply generation.
+    Env: [MASC_KEEPER_EXPLICIT_REPLY_MAX_TOKENS]. Default: 256. *)
+let keeper_explicit_reply_max_tokens () : int =
+  int_of_env_default
+    "MASC_KEEPER_EXPLICIT_REPLY_MAX_TOKENS"
+    ~default:256
+    ~min_v:64
+    ~max_v:2048
+
+(** Max tokens for social board initial turn.
+    Env: [MASC_KEEPER_SOCIAL_INITIAL_MAX_TOKENS]. Default: 768. *)
+let keeper_social_initial_max_tokens () : int =
+  int_of_env_default
+    "MASC_KEEPER_SOCIAL_INITIAL_MAX_TOKENS"
+    ~default:768
+    ~min_v:256
+    ~max_v:4096
+
+(** Max tokens for social board followup turns.
+    Env: [MASC_KEEPER_SOCIAL_FOLLOWUP_MAX_TOKENS]. Default: 512. *)
+let keeper_social_followup_max_tokens () : int =
+  int_of_env_default
+    "MASC_KEEPER_SOCIAL_FOLLOWUP_MAX_TOKENS"
+    ~default:512
+    ~min_v:128
+    ~max_v:4096

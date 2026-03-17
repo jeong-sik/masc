@@ -226,7 +226,10 @@ let read_recent_events config session_id ~max_count :
       session_id (Printexc.to_string exn);
     []
 
-let list_sessions config : Team_session_types.session list =
+(** List sessions, optionally filtering by mtime to avoid loading stale history.
+    [~since_unix] skips directories whose mtime is older than the given Unix timestamp.
+    This turns a 1448-file full scan into loading only active/recent sessions. *)
+let list_sessions ?(since_unix = 0.0) config : Team_session_types.session list =
   match backend_get_all config ~prefix:"team-sessions:" with
   | Ok pairs ->
       pairs
@@ -243,9 +246,51 @@ let list_sessions config : Team_session_types.session list =
       let root = sessions_root config in
       if not (path_exists config root) then []
       else
-        Sys.readdir root
-        |> Array.to_list
-        |> List.filter_map (fun session_id -> load_session config session_id)
+        let dirs = Sys.readdir root |> Array.to_list in
+        let filtered =
+          if since_unix <= 0.0 then dirs
+          else
+            List.filter (fun session_id ->
+              let dir_path = Filename.concat root session_id in
+              try
+                let stat = Unix.stat dir_path in
+                if stat.Unix.st_mtime >= since_unix then true
+                else
+                  (* Lightweight status check: keep Running/Paused sessions
+                     even when mtime is stale (long-lived sessions).
+                     Read first 512 bytes of session.json for quick substring match. *)
+                  let state_path = Filename.concat dir_path "session.json" in
+                  (try
+                    let ic = open_in state_path in
+                    let buf = Bytes.create 512 in
+                    let n =
+                      Common.protect ~module_name:"team_session_store"
+                        ~finally_label:"finalizer"
+                        ~finally:(fun () -> close_in_noerr ic)
+                        (fun () -> input ic buf 0 512)
+                    in
+                    let snippet = Bytes.sub_string buf 0 n in
+                    (* Status field appears early in the JSON *)
+                    let has_sub haystack needle =
+                      let nl = String.length needle in
+                      let hl = String.length haystack in
+                      if nl > hl then false
+                      else
+                        let found = ref false in
+                        let i = ref 0 in
+                        while !i <= hl - nl && not !found do
+                          if String.sub haystack !i nl = needle then found := true
+                          else incr i
+                        done;
+                        !found
+                    in
+                    has_sub snippet {|"Running"|}
+                    || has_sub snippet {|"Paused"|}
+                  with Sys_error _ | End_of_file -> false)
+              with Unix.Unix_error _ -> true
+            ) dirs
+        in
+        List.filter_map (fun session_id -> load_session config session_id) filtered
 
 let update_session config session_id f =
   let path = session_json_path config session_id in

@@ -113,14 +113,18 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
       (* Load sessions once; pass to snapshot_json to avoid repeated filesystem scans.
          Only include active (Running/Paused) sessions plus recently finished ones
          (last 24h) to avoid loading all historical sessions on every poll. *)
+      (* Pre-filter at filesystem level: only load sessions modified in last 24h.
+         This avoids reading all 1400+ historical session files on each poll.
+         Active sessions are preserved by list_sessions ~since_unix which does a
+         lightweight status check on mtime-excluded dirs (avoids full JSON load). *)
+      let cutoff_unix = Time_compat.now () -. 86400.0 in
       let all_sessions =
         if Room.is_initialized config then
-          Team_session_store.list_sessions config
+          Team_session_store.list_sessions ~since_unix:cutoff_unix config
         else []
       in
       let cutoff_iso =
-        let t = Time_compat.now () -. 86400.0 in
-        let tm = Unix.gmtime t in
+        let tm = Unix.gmtime cutoff_unix in
         Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
           (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
           tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec

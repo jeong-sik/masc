@@ -228,8 +228,8 @@ let execution_scope_to_string = function
   | Limited_code_change -> "limited_code_change"
 
 let execution_scope_of_string = function
-  | "limited_code_change" -> Limited_code_change
-  | _ -> Observe_only
+  | "observe_only" -> Observe_only
+  | _ -> Limited_code_change
 
 let wait_mode_to_string = function
   | Wait_background -> "background"
@@ -553,7 +553,9 @@ let done_delta_by_agent ~(baseline : (string * int) list) ~(current : (string * 
   in
   let extra_agents =
     current
-    |> List.filter (fun (agent, _) -> not (List.mem_assoc agent from_agents))
+    |> List.filter (fun (agent, _) ->
+         not (List.mem_assoc agent from_agents)
+         && List.mem agent normalized_agents)
   in
   (from_agents @ extra_agents)
   |> List.sort (fun (a, _) (b, _) -> compare a b)

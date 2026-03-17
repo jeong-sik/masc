@@ -183,9 +183,11 @@ let dispatch (ctx : context) ~(name : string) : result option =
         Some (false, "path is required: provide the absolute or relative path to your project directory")
       else
       let expanded =
-        if String.length path > 0 && path.[0] = '~' then
+        if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
           let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp" in
-          Filename.concat home (String.sub path 1 (String.length path - 1))
+          Filename.concat home (String.sub path 2 (String.length path - 2))
+        else if String.length path = 1 && path.[0] = '~' then
+          (match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp")
         else if Filename.is_relative path then
           Filename.concat (Sys.getcwd ()) path
         else

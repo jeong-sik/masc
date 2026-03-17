@@ -260,7 +260,7 @@ let generate_proof ?(proof_level = default_proof_level) config
         ~communication_total ~goal_recorded ~participants_count
         ~unique_turn_actors_count ~required_turn_actors
         ~unauthorized_turn_actors ~report_json_exists ~report_md_exists
-        ~done_delta_total
+        ~done_delta_total ()
     in
     let required_spawn_agents = required_spawn_agents_for_session session in
     let spawn_events = count_event_type events "team_step_spawn" in

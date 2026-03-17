@@ -296,11 +296,12 @@ let next_steps ~tool_name ~success =
   | "masc_set_room" -> after_set_room ~success
   | "masc_join" -> after_join ~success
   | "masc_status" -> after_status ~success
-  | "masc_claim" | "masc_claim_next" | "masc_claim_task" -> after_claim ~success
+  | "masc_claim" | "masc_claim_next" -> after_claim ~success
   | "masc_add_task" | "masc_batch_add_tasks" -> after_add_task ~success
   | "masc_plan_set_task" | "masc_set_current_task" -> after_plan_set_task ~success
   | "masc_heartbeat" -> after_heartbeat ~success
-  | "masc_done" | "masc_complete_task" -> after_done ~success
+  | "masc_done" -> after_done ~success
+  | "masc_transition" -> after_claim ~success  (* most common: claim/done; claim path is safer *)
   (* Golden Path 2: CPv2 *)
   | "masc_operation_start" -> after_operation_start ~success
   | "masc_dispatch_tick" -> after_dispatch_tick ~success
@@ -349,16 +350,18 @@ let workflow_context ~tool_name =
   let before = match tool_name with
     | "masc_join" -> [ "masc_set_room" ]
     | "masc_status" -> [ "masc_set_room"; "masc_join" ]
-    | "masc_claim" | "masc_claim_next" | "masc_claim_task" ->
+    | "masc_claim" | "masc_claim_next" ->
         [ "masc_join"; "masc_status" ]
     | "masc_plan_set_task" | "masc_set_current_task" ->
-        [ "masc_claim" ]
+        [ "masc_claim_next" ]
     | "masc_worktree_create" ->
         [ "masc_plan_set_task" ]
     | "masc_heartbeat" ->
         [ "masc_join" ]
-    | "masc_done" | "masc_complete_task" ->
+    | "masc_done" ->
         [ "masc_plan_set_task" ]
+    | "masc_transition" ->
+        [ "masc_join"; "masc_status" ]
     | "masc_operation_start" ->
         [ "masc_unit_define" ]
     | "masc_dispatch_tick" ->

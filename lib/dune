@@ -566,8 +566,6 @@
    llm_provider_bridge
    llm_orchestration
    llm_client
-   llm_client_core
-   llm_client_providers
    llm_response_cache
    context_manager
    verifier
@@ -695,8 +693,6 @@
  keeper_types_resident
  trpg_bestiary
  cp_lifecycle_swarm_live
- llm_client_core
- llm_client_providers
  tool_team_session_routing_workers
  cp_lifecycle_search
  cp_lifecycle_intents

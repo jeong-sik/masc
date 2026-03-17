@@ -161,19 +161,12 @@ let read_entries (config : Room.config) : audit_entry list =
   let path = get_audit_path config in
   if not (Sys.file_exists path) then []
   else
-    let ic = open_in path in
-    let entries = ref [] in
-    (try
-      while true do
-        let line = input_line ic in
-        if String.trim line <> "" then
-          match entry_of_json (Yojson.Safe.from_string line) with
-          | Some e -> entries := e :: !entries
-          | None -> ()
-      done
-    with End_of_file -> ());
-    close_in ic;
-    List.rev !entries
+    let content = Fs_compat.load_file path in
+    String.split_on_char '\n' content
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.filter_map (fun line ->
+        try entry_of_json (Yojson.Safe.from_string line)
+        with Yojson.Json_error _ -> None)
 
 (** Recursively create directory (no shell, safe) *)
 let rec ensure_dir_safe dir =
@@ -194,11 +187,7 @@ let append_entry (config : Room.config) (entry : audit_entry) =
   Eio.Mutex.use_rw ~protect:true mutex (fun () ->
     let path = get_audit_path config in
     ensure_dir path;
-    let json_line = Yojson.Safe.to_string (entry_to_json entry) ^ "\n" in
-    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
-      output_string oc json_line
-    )
+    Fs_compat.append_jsonl path (entry_to_json entry)
   )
 
 (** {1 Logging API} *)
@@ -327,33 +316,31 @@ let get_stats (config : Room.config) =
   else begin
     let size = (Unix.stat path).Unix.st_size in
     (* Count lines and get timestamps *)
-    let ic = open_in path in
+    let content = Fs_compat.load_file path in
+    let lines = String.split_on_char '\n' content
+      |> List.filter (fun line -> String.trim line <> "") in
     let count = ref 0 in
     let oldest = ref None in
     let newest = ref None in
-    (try
-      while true do
-        let line = input_line ic in
-        incr count;
-        (* Parse timestamp from first/last lines *)
-        if !oldest = None || !count <= 1 then begin
-          try
-            let json = Yojson.Safe.from_string line in
-            let ts = Yojson.Safe.Util.(json |> member "timestamp" |> to_float) in
-            if !oldest = None then oldest := Some ts;
-            newest := Some ts
-          with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
-        end else begin
-          (* Just update newest for each line *)
-          try
-            let json = Yojson.Safe.from_string line in
-            let ts = Yojson.Safe.Util.(json |> member "timestamp" |> to_float) in
-            newest := Some ts
-          with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
-        end
-      done
-    with End_of_file -> ());
-    close_in ic;
+    List.iter (fun line ->
+      incr count;
+      (* Parse timestamp from first/last lines *)
+      if !oldest = None || !count <= 1 then begin
+        try
+          let json = Yojson.Safe.from_string line in
+          let ts = Yojson.Safe.Util.(json |> member "timestamp" |> to_float) in
+          if !oldest = None then oldest := Some ts;
+          newest := Some ts
+        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
+      end else begin
+        (* Just update newest for each line *)
+        try
+          let json = Yojson.Safe.from_string line in
+          let ts = Yojson.Safe.Util.(json |> member "timestamp" |> to_float) in
+          newest := Some ts
+        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
+      end
+    ) lines;
     {
       total_entries = !count;
       file_size_bytes = size;

@@ -105,12 +105,8 @@ let load_plan ~agent_name ~date : daily_plan option =
   if not (Sys.file_exists path) then None
   else begin
     try
-      let ic = open_in path in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        let n = in_channel_length ic in
-        let buf = Bytes.create n in
-        really_input ic buf 0 n;
-        Yojson.Safe.from_string (Bytes.to_string buf) |> plan_of_json)
+      let content = Fs_compat.load_file path in
+      Yojson.Safe.from_string content |> plan_of_json
     with exn ->
       Log.Misc.warn "agent_planner: plan load failed: %s" (Printexc.to_string exn);
       None
@@ -120,10 +116,8 @@ let save_plan (plan : daily_plan) =
   let dir = plans_dir ~agent_name:plan.agent_name in
   ensure_dir dir;
   let path = plan_path ~agent_name:plan.agent_name ~date:plan.date in
-  let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    let json_str = Yojson.Safe.to_string ~std:true (plan_to_json plan) in
-    output_string oc json_str)
+  let json_str = Yojson.Safe.to_string ~std:true (plan_to_json plan) in
+  Fs_compat.save_file path json_str
 
 (* ---------- Fallback plan ---------- *)
 

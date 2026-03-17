@@ -194,7 +194,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
                 resolved
               else
                 agent_name
-            with _ -> agent_name)
+            with exn ->
+              log_mcp_exn ~label:"is_agent_joined" exn;
+              agent_name)
           else
             agent_name
         with exn ->

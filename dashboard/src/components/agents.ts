@@ -50,6 +50,15 @@ function isTerminalStatus(status?: string | null): boolean {
   return TERMINAL_STATUSES.has((status ?? '').trim().toLowerCase())
 }
 
+function partitionByTerminal<T>(items: T[], getStatus: (item: T) => string | null | undefined): [active: T[], terminal: T[]] {
+  const active: T[] = []
+  const terminal: T[] = []
+  for (const item of items) {
+    ;(isTerminalStatus(getStatus(item)) ? terminal : active).push(item)
+  }
+  return [active, terminal]
+}
+
 function toneClass(tone?: string | null): string {
   if (tone === 'bad' || tone === 'critical' || tone === 'offline') return 'bad'
   if (tone === 'warn' || tone === 'paused' || tone === 'blocked' || tone === 'interrupted') return 'warn'
@@ -278,8 +287,7 @@ function QueueCard({ item, selected }: { item: DashboardExecutionQueueItem; sele
 }
 
 function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutionQueueItem[] }) {
-  const activeItems = queueRows.filter(item => !isTerminalStatus(item.status))
-  const terminalItems = queueRows.filter(item => isTerminalStatus(item.status))
+  const [activeItems, terminalItems] = partitionByTerminal(queueRows, item => item.status)
   const hasActive = activeItems.length > 0
   const hasTerminal = terminalItems.length > 0
 
@@ -350,8 +358,7 @@ function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrie
 }
 
 function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecutionSessionBrief[] }) {
-  const activeSessions = sessionRows.filter(row => !isTerminalStatus(row.status))
-  const terminalSessions = sessionRows.filter(row => isTerminalStatus(row.status))
+  const [activeSessions, terminalSessions] = partitionByTerminal(sessionRows, row => row.status)
   const hasActive = activeSessions.length > 0
   const hasTerminal = terminalSessions.length > 0
 
@@ -405,6 +412,34 @@ function OperationCard({ brief, selected }: { brief: DashboardExecutionOperation
       ${brief.next_tool ? html`<div class="monitor-footnote">다음 도구 · ${brief.next_tool}</div>` : null}
       <${HandoffButtons} command=${brief.command_handoff} />
     </button>
+  `
+}
+
+function OperationBriefsBody({ operationRows }: { operationRows: DashboardExecutionOperationBrief[] }) {
+  const [activeOps, terminalOps] = partitionByTerminal(operationRows, row => row.status)
+  const hasActive = activeOps.length > 0
+  const hasTerminal = terminalOps.length > 0
+
+  return html`
+    <div class="monitor-section-head">
+      <h2 class="monitor-headline">영향받는 작전</h2>
+      <p class="monitor-subheadline">지휘 평면 작전의 막힘과 다음 도구만 얇게 보여주고, 자세한 근거는 원인 화면으로 넘깁니다.</p>
+    </div>
+    <div class="monitor-list">
+      ${hasActive
+        ? activeOps.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)
+        : html`<div class="empty-state">${hasTerminal ? '진행 중인 작전이 없습니다.' : '선택된 실행과 연결된 작전이 없습니다.'}</div>`}
+    </div>
+    ${hasTerminal
+      ? html`
+          <details class="runtime-collapsible" data-testid="execution.operations-terminal">
+            <summary class="runtime-summary">종료된 작전 ${terminalOps.length}건</summary>
+            <div class="monitor-list">
+              ${terminalOps.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)}
+            </div>
+          </details>
+        `
+      : null}
   `
 }
 
@@ -659,15 +694,7 @@ export function Execution() {
           semanticId="execution.operations"
           testId="execution.operation-briefs"
         >
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">영향받는 작전</h2>
-            <p class="monitor-subheadline">지휘 평면 작전의 막힘과 다음 도구만 얇게 보여주고, 자세한 근거는 원인 화면으로 넘깁니다.</p>
-          </div>
-          <div class="monitor-list">
-            ${operationRows.length === 0
-              ? html`<div class="empty-state">선택된 실행과 연결된 작전이 없습니다.</div>`
-              : operationRows.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)}
-          </div>
+          <${OperationBriefsBody} operationRows=${operationRows} />
         <//>
 
         <${Card}

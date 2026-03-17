@@ -440,7 +440,12 @@ let finalize_decision (config : Room.config)
         Error (Printf.sprintf "decision not found: %s (session: %s)" decision_id session_id)
     | (d : decision) :: rest ->
         if d.session_id = session_id && d.decision_id = decision_id then begin
-          if not (List.mem selected_option d.options) then
+          if is_finalized d then
+            Error (Printf.sprintf
+                     "decision %s is already finalized (at %s)"
+                     decision_id
+                     (match d.finalized_at with Some ts -> Printf.sprintf "%.0f" ts | None -> "unknown"))
+          else if not (List.mem selected_option d.options) then
             Error (Printf.sprintf
                      "selected_option '%s' not in decision options"
                      selected_option)

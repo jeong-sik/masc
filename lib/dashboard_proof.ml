@@ -675,11 +675,28 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
   in
   let session_id = Option.map (fun (s : Team_session_types.session) -> s.session_id) session in
   let proof_doc =
-    match session_id with
-    | Some current ->
+    match session_id, session with
+    | Some current, Some s ->
         let path = Team_session_store.proof_json_path config current in
-        Room_utils.read_json_opt config path
-    | None -> None
+        let existing = Room_utils.read_json_opt config path in
+        (* M-16 fix: auto-generate proof if it doesn't exist yet *)
+        (match existing with
+         | Some _ -> existing
+         | None ->
+            (try
+               match Team_session_report_proof.generate_proof config s with
+               | Ok (proof_json, proof_markdown) ->
+                   Room_utils.write_json config path proof_json;
+                   let md_path = Team_session_store.proof_md_path config current in
+                   Team_session_store.write_text_file md_path proof_markdown;
+                   Some proof_json
+               | Error e ->
+                   Log.Misc.error "dashboard proof auto-gen failed: %s" e;
+                   None
+             with exn ->
+               Log.Misc.error "dashboard proof auto-gen exception: %s" (Printexc.to_string exn);
+               None))
+    | _ -> None
   in
   let events =
     match session_id with

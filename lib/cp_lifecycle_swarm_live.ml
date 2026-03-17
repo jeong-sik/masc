@@ -217,6 +217,12 @@ let swarm_live_json config ?run_id ?operation_id () =
   in
   let worker_rows = plans |> List.map (build_worker_row worker_row_ctx)
   in
+  (* H-3 fix: count workers with actual room presence separately from
+     workers with any evidence (joined includes completed/message-only workers) *)
+  let real_workers =
+    count_true worker_rows (fun row ->
+        U.member "live_presence" row |> U.to_bool_option |> Option.value ~default:false)
+  in
   let joined_workers =
     count_true worker_rows (fun row ->
         U.member "joined" row |> U.to_bool_option |> Option.value ~default:false)
@@ -778,11 +784,8 @@ let swarm_live_json config ?run_id ?operation_id () =
           [
             ("expected_workers", `Int expected_count);
             ("joined_workers", `Int joined_workers);
-            ( "live_workers",
-              `Int
-                (count_true worker_rows (fun row ->
-                     U.member "live_presence" row |> U.to_bool_option
-                     |> Option.value ~default:false)) );
+            ("real_workers", `Int real_workers);
+            ( "live_workers", `Int real_workers );
             ("squad_roster_size", `Int (Option.map (fun (unit : unit_record) -> List.length unit.roster) matched_squad |> Option.value ~default:0));
             ("detachment_roster_size", `Int (Option.map (fun (detachment : detachment_record) -> List.length detachment.roster) matched_detachment |> Option.value ~default:0));
             ("current_task_bound", `Int current_task_bound);

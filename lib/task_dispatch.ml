@@ -123,22 +123,38 @@ let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
   | Postgres t ->
       Task_pg.list_tasks t ~include_done ~include_cancelled
 
+(** Validate that a state transition is allowed.
+    Terminal states (Done, Cancelled) cannot transition to each other. *)
+let validate_transition ~(current : task_status) ~(next : task_status) ~task_id =
+  match current, next with
+  | Done _, Done _ | Done _, Cancelled _ | Cancelled _, Done _ | Cancelled _, Cancelled _ ->
+      Error (TaskInvalidState
+        (Printf.sprintf "task %s: cannot transition from %s to %s"
+           task_id (task_status_to_string current) (task_status_to_string next)))
+  | _ -> Ok ()
+
 (** Update task status (claim, start, complete, cancel) *)
 let update_status config ~task_id ~status =
   match backend () with
   | Jsonl ->
-      (* This delegates to Room functions via status type *)
       let backlog = Room.read_backlog config in
-      let updated_tasks = List.map (fun (t : task) ->
-        if t.id = task_id then { t with task_status = status } else t
-      ) backlog.tasks in
-      let new_backlog = {
-        tasks = updated_tasks;
-        last_updated = now_iso ();
-        version = backlog.version + 1;
-      } in
-      Room.write_backlog config new_backlog;
-      Ok ()
+      let task_opt = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
+      (match task_opt with
+       | None -> Error (TaskNotFound task_id)
+       | Some t ->
+          match validate_transition ~current:t.task_status ~next:status ~task_id with
+          | Error e -> Error e
+          | Ok () ->
+            let updated_tasks = List.map (fun (t : task) ->
+              if t.id = task_id then { t with task_status = status } else t
+            ) backlog.tasks in
+            let new_backlog = {
+              tasks = updated_tasks;
+              last_updated = now_iso ();
+              version = backlog.version + 1;
+            } in
+            Room.write_backlog config new_backlog;
+            Ok ())
   | Postgres t ->
       Task_pg.update_task_status t ~id:task_id ~status
 

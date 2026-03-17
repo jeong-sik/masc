@@ -675,14 +675,13 @@ let keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ~no
     if meta.last_turn_ts <= 0.0 then max_float
     else max 0.0 (now_ts -. meta.last_turn_ts)
   in
-  if
-    not keepalive_running
-    || not agent_exists
-    || agent_status_text = "offline"
-    || agent_status_text = "inactive"
+  if not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive"
   then "offline"
+  (* H-4 fix: report zombie/stale keepers regardless of keepalive or gardener state *)
   else if is_zombie || last_seen_ago_s > stale_threshold_s then
     "stale"
+  else if not keepalive_running then
+    "offline"
   else
     match quiet_reason with
     | Some "graphql_error" | Some "llm_error" -> "degraded"

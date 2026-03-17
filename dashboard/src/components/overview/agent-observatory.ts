@@ -1,5 +1,6 @@
 // Agent Observatory — session-grouped agent view
 // Groups agents by team session, showing each agent's state, focus, tools, and signal age.
+// Stale agents are visually dimmed; all-stale state shows an honest summary.
 
 import { html } from 'htm/preact'
 import { AgentAvatar } from './agent-avatar'
@@ -73,13 +74,29 @@ function truncate(text: string | null, max = 60): string | null {
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean
 }
 
+/** Determine if an agent's signal is stale (no fresh data in 10+ minutes) */
+function isStaleAgent(agent: ObservatoryAgent): boolean {
+  if (agent.signalTruth === 'stale' || agent.signalTruth === 'archived') return true
+  if (agent.lastSignalAgeSec != null && agent.lastSignalAgeSec > 600) return true
+  return agent.state === 'quiet' || agent.state === 'offline'
+}
+
+function staleDurationLabel(ageSec: number | null): string | null {
+  if (ageSec == null) return null
+  if (ageSec < 3600) return `${Math.floor(ageSec / 60)}분 전 마지막 신호`
+  if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}시간 전 마지막 신호`
+  return `${Math.floor(ageSec / 86400)}일 전 마지막 신호`
+}
+
 function AgentRow({ agent, onAgentClick }: { agent: ObservatoryAgent; onAgentClick?: (name: string) => void }) {
   const focusText = truncate(agent.focus ?? agent.currentTask)
   const previewText = truncate(agent.recentOutputPreview, 80)
+  const stale = isStaleAgent(agent)
+  const staleLabel = stale ? staleDurationLabel(agent.lastSignalAgeSec) : null
 
   return html`
     <div
-      class="obs-agent-row obs-agent-row--${agent.state}"
+      class="obs-agent-row obs-agent-row--${agent.state} ${stale ? 'obs-agent-row--stale' : ''}"
       onClick=${onAgentClick ? () => onAgentClick(agent.name) : undefined}
       role=${onAgentClick ? 'button' : undefined}
       tabindex=${onAgentClick ? '0' : undefined}
@@ -104,9 +121,13 @@ function AgentRow({ agent, onAgentClick }: { agent: ObservatoryAgent; onAgentCli
           <span class="obs-agent-row__state obs-agent-row__state--${agent.state}">
             ${stateLabel(agent.state)}
           </span>
+          ${stale ? html`<span class="obs-agent-row__stale-badge">stale</span>` : null}
           ${agent.model ? html`<span class="obs-agent-row__model">${agent.model}</span>` : null}
         </div>
 
+        ${staleLabel && !focusText ? html`
+          <div class="obs-agent-row__focus obs-agent-row__focus--stale">${staleLabel}</div>
+        ` : null}
         ${focusText ? html`
           <div class="obs-agent-row__focus">${focusText}</div>
         ` : null}
@@ -166,7 +187,7 @@ export function AgentObservatory({ onAgentClick }: AgentObservatoryProps) {
   if (groups.length === 0) {
     return html`
       <div class="obs-empty">
-        <div style="color: var(--text-muted); padding: 16px;">에이전트 없음</div>
+        <div style="color: var(--text-muted); padding: 16px;">등록된 에이전트 없음</div>
       </div>
     `
   }
@@ -175,13 +196,22 @@ export function AgentObservatory({ onAgentClick }: AgentObservatoryProps) {
   const totalWorking = groups.reduce(
     (sum: number, g: ObservatoryGroup) => sum + g.agents.filter((a: ObservatoryAgent) => a.state === 'working').length, 0,
   )
+  const totalStale = groups.reduce(
+    (sum: number, g: ObservatoryGroup) => sum + g.agents.filter((a: ObservatoryAgent) => isStaleAgent(a)).length, 0,
+  )
+  const allStale = totalStale === totalAgents && totalAgents > 0
 
   return html`
-    <div class="obs-container">
+    <div class="obs-container ${allStale ? 'obs-container--all-stale' : ''}">
       <div class="obs-summary">
-        <span>${totalAgents} 에이전트</span>
-        ${totalWorking > 0 ? html`<span class="obs-summary__working">${totalWorking} 작업 중</span>` : null}
-        <span>${groups.filter((g: ObservatoryGroup) => g.sessionId).length} 세션</span>
+        ${allStale ? html`
+          <span class="obs-summary__stale-notice">${totalAgents}개 에이전트 등록됨 (활성 신호 없음)</span>
+        ` : html`
+          <span>${totalAgents} 에이전트</span>
+          ${totalWorking > 0 ? html`<span class="obs-summary__working">${totalWorking} 작업 중</span>` : null}
+          ${totalStale > 0 ? html`<span class="obs-summary__stale">${totalStale} stale</span>` : null}
+          <span>${groups.filter((g: ObservatoryGroup) => g.sessionId).length} 세션</span>
+        `}
       </div>
 
       ${groups.map(group => html`

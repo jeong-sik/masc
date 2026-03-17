@@ -9,12 +9,17 @@ module FileSystemBackend : BACKEND = struct
     mutex: Eio.Mutex.t;
   }
 
+  (** Stdlib.Mutex fallback for non-Eio contexts (tests).
+      Allocated once per FileSystemBackend instance. *)
+  let stdlib_mutex = Stdlib.Mutex.create ()
+
   let with_lock t f =
     (* Eio.Mutex requires an Eio runtime (Cancel context).
        When called outside Eio_main.run (e.g. tests), fall back to
-       unprotected execution. Production always runs under Eio.
-       Two-phase: if the mutex itself fails (Poisoned, Effect.Unhandled),
-       run f() without lock. If f() fails inside the lock, re-raise. *)
+       Stdlib.Mutex to preserve mutual exclusion. Production always
+       runs under Eio where Eio.Mutex is preferred.
+       Two-phase: if Eio.Mutex fails (Effect.Unhandled), use Stdlib.Mutex.
+       If f() fails inside the lock, re-raise. *)
     let acquired = ref false in
     match
       Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
@@ -24,8 +29,12 @@ module FileSystemBackend : BACKEND = struct
     with
     | result -> result
     | exception exn ->
-        if !acquired then raise exn  (* f() failed, propagate *)
-        else f ()  (* mutex acquisition failed, run without lock *)
+        if !acquired then raise exn  (* f() failed inside lock, propagate *)
+        else begin
+          (* Eio.Mutex unavailable — use Stdlib.Mutex for serialization *)
+          Stdlib.Mutex.lock stdlib_mutex;
+          Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock stdlib_mutex) f
+        end
 
   (* Security: validate key with strict allowlist (parse, don't sanitize) *)
   let validate_key key =

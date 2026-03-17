@@ -412,9 +412,8 @@ module FileSystemBackend : BACKEND = struct
 
   let close _t = ()
 
-  (* Read operations are lock-free: filesystem reads are atomic at the
-     file level, and worst-case a concurrent write yields a stale or
-     partial read that Safe_ops.parse_json_safe handles gracefully.
+  (* Read operations are lock-free: writes use atomic rename, so a
+     concurrent read always sees either the old or new complete content.
      Removing the Stdlib.Mutex here eliminates 1-6s of Eio scheduler
      starvation when background init fibers hold the write lock. *)
   let get t ~key =
@@ -435,9 +434,14 @@ module FileSystemBackend : BACKEND = struct
       | Ok path ->
           ensure_dir path;
           try
-            Out_channel.with_open_text path (fun oc ->
+            (* Atomic write: write to temp file, then rename.
+               Sys.rename is atomic on POSIX, so concurrent lock-free
+               reads always see complete file content. *)
+            let tmp_path = Printf.sprintf "%s.%d.tmp" path (Unix.getpid ()) in
+            Out_channel.with_open_text tmp_path (fun oc ->
               Out_channel.output_string oc value
             );
+            Sys.rename tmp_path path;
             Ok ()
           with e -> Error (OperationFailed (Printexc.to_string e))
     )

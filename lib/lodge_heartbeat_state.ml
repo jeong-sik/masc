@@ -29,23 +29,14 @@
     This is simpler and sufficient: heartbeat tick is the only hot path,
     and the critical sections are short (Hashtbl lookups/updates). *)
 
-let lodge_lock : Eio.Mutex.t option ref = ref None
+let lodge_lock : Eio.Mutex.t = Eio.Mutex.create ()
 
-let lodge_init_lock () =
-  if !lodge_lock = None then lodge_lock := Some (Eio.Mutex.create ())
+let lodge_init_lock () = ()  (* kept for backward compat; lock is now eagerly created *)
 
-(** Run [f] under lodge mutex. Falls back to unprotected if not yet initialized.
-
-    The [None] case is safe only during single-domain startup before
-    [lodge_init_lock] is called (i.e., before any Eio fibers are spawned).
-    Once the Eio scheduler is running, [lodge_init_lock] must have been
-    called so that all concurrent accesses are properly serialized. *)
+(** Run [f] under lodge mutex.  The lock is eagerly initialized so there
+    is no unprotected fallback path. *)
 let with_lodge_lock f =
-  match !lodge_lock with
-  | Some mutex -> Eio.Mutex.use_rw ~protect:true mutex f
-  | None ->
-    (* Pre-Eio startup: single domain, no concurrent fibers possible. *)
-    f ()
+  Eio.Mutex.use_rw ~protect:true lodge_lock f
 
 (** Active agents: name -> (uuid, started_at) *)
 let active_agents : (string, string * float) Hashtbl.t = Hashtbl.create 10
@@ -680,20 +671,7 @@ let _lodge_enabled = ref false
 let _lodge_manual_tick_running = ref false
 
 let with_manual_tick_state f =
-  lodge_init_lock ();
-  match !lodge_lock with
-  | Some mutex -> (
-      try Eio.Mutex.use_rw ~protect:true mutex f
-      with exn ->
-        let msg = Printexc.to_string exn in
-        if String.starts_with ~prefix:"Stdlib.Effect.Unhandled" msg
-           || String.starts_with ~prefix:"Eio__Eio_mutex.Poisoned" msg
-           || String.starts_with ~prefix:"Eio.Private.Mutex.Poisoned" msg
-        then
-          f ()
-        else
-          raise exn)
-  | None -> f ()
+  Eio.Mutex.use_rw ~protect:true lodge_lock f
 
 let set_manual_tick_running value =
   with_manual_tick_state (fun () -> _lodge_manual_tick_running := value)

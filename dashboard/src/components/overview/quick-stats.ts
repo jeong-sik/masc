@@ -1,10 +1,13 @@
-// MASC Dashboard — Quick Stats Bar (4 key metrics + task distribution)
+// MASC Dashboard — Quick Stats Bar (4 key metrics + task distribution + data source)
 
 import { html } from 'htm/preact'
+import { navigate } from '../../router'
 
 export interface TaskBreakdown {
   todo: number; claimed: number; inProgress: number; done: number
 }
+
+export type TaskSource = 'store' | 'cache'
 
 interface QuickStatsProps {
   agentCount: number
@@ -12,6 +15,7 @@ interface QuickStatsProps {
   keeperCount: number
   attentionCount: number
   taskBreakdown?: TaskBreakdown
+  taskSource?: TaskSource
 }
 
 function TaskDistributionBar({ breakdown }: { breakdown: TaskBreakdown }) {
@@ -38,19 +42,31 @@ function TaskDistributionBar({ breakdown }: { breakdown: TaskBreakdown }) {
   `
 }
 
-export function QuickStats({ agentCount, activeTaskCount, keeperCount, attentionCount, taskBreakdown }: QuickStatsProps) {
+export function QuickStats({ agentCount, activeTaskCount, keeperCount, attentionCount, taskBreakdown, taskSource }: QuickStatsProps) {
   return html`
     <div class="overview-stats">
-      <div class="overview-stat">
+      <div class="overview-stat"
+        style="cursor: pointer;"
+        onClick=${() => navigate('agent-roster')}
+      >
         <span class="overview-stat__label">에이전트</span>
         <strong class="overview-stat__value">${agentCount}</strong>
       </div>
-      <div class="overview-stat">
+      <div class="overview-stat"
+        style="cursor: pointer;"
+        onClick=${() => navigate('planning')}
+      >
         <span class="overview-stat__label">활성 태스크</span>
         <strong class="overview-stat__value">${activeTaskCount}</strong>
+        ${taskSource === 'cache' ? html`
+          <span class="overview-stat__source">(캐시)</span>
+        ` : null}
         ${taskBreakdown ? html`<${TaskDistributionBar} breakdown=${taskBreakdown} />` : null}
       </div>
-      <div class="overview-stat">
+      <div class="overview-stat"
+        style="cursor: pointer;"
+        onClick=${() => navigate('keeper-roster')}
+      >
         <span class="overview-stat__label">키퍼</span>
         <strong class="overview-stat__value">${keeperCount}</strong>
       </div>

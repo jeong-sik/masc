@@ -36,8 +36,8 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     label: '에이전트',
     icon: '\uD83E\uDD16',
     description: '에이전트, 키퍼, 세션, 관계',
-    defaultTab: 'execution',
-    tabs: ['mission', 'execution', 'live', 'social'],
+    defaultTab: 'agent-roster',
+    tabs: ['agent-roster', 'keeper-roster', 'mission', 'execution', 'live', 'social'],
   },
   {
     id: 'work',
@@ -73,6 +73,20 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
     icon: '\uD83C\uDFE0',
     group: 'home',
     description: '에이전트 생태계 전체를 한눈에 보는 개요',
+  },
+  {
+    id: 'agent-roster',
+    label: '에이전트 목록',
+    icon: '\uD83D\uDC65',
+    group: 'agents',
+    description: '전체 에이전트를 스크롤하며 탐색하는 목록 화면',
+  },
+  {
+    id: 'keeper-roster',
+    label: '키퍼 목록',
+    icon: '\uD83D\uDEE1\uFE0F',
+    group: 'agents',
+    description: '전체 키퍼를 스크롤하며 탐색하는 목록 화면',
   },
   {
     id: 'mission',

@@ -28,6 +28,12 @@
   border-radius: 8px;
 }
 
+.pixel-avatar--xl {
+  width: 96px;
+  height: 96px;
+  border-radius: 12px;
+}
+
 .pixel-avatar__cell {
   /* Each cell's color is set via inline style */
 }

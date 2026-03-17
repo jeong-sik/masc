@@ -69,7 +69,7 @@ let run_proactive_generation
       continuity_snapshot
       ~continuity_summary
   in
-  let max_tool_rounds = 3 in
+  let max_tool_rounds = Keeper_config.keeper_max_tool_rounds () in
   let execute_tool_calls
       ~(ctx_work : Context_manager.working_context)
       (tcs : Llm_client.tool_call list) : (Llm_client.tool_call * string) list =
@@ -390,7 +390,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
   in
   let ctx_work = Context_manager.create
     ~system_prompt:(Printf.sprintf "Keeper %s autonomous execution" meta.name)
-    ~max_tokens:4000 in
+    ~max_tokens:(Keeper_config.keeper_autonomous_max_tokens ()) in
   let execute_tool_calls
       (tcs : Llm_client.tool_call list) : (Llm_client.tool_call * string) list =
     List.map
@@ -1050,7 +1050,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                       Llm_client.run_prompt_cascade
                         ~temperature:0.3
                         ~model_specs
-                        ~max_tokens:1024
+                        ~max_tokens:(Keeper_config.keeper_deliberation_max_tokens ())
                         ~prompt
                         ~system:("You are " ^ meta.name
                                  ^ ", a keeper agent. Respond with JSON only.")
@@ -1628,7 +1628,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
                   Llm_client.model;
                   messages = (Llm_client.system_msg ctx_work.system_prompt) :: ctx_work.messages;
                   temperature = Keeper_config.keeper_reflection_temp ();
-                  max_tokens = 256;
+                  max_tokens = Keeper_config.keeper_explicit_reply_max_tokens ();
                   tools = [];
                   response_format = `Text;
                 } : Llm_client.completion_request))
@@ -1794,7 +1794,7 @@ let run_social_board_event_turn
                       (Llm_client.system_msg ctx_work.system_prompt)
                       :: (ctx_work.messages @ [ Llm_client.user_msg prompt ]);
                     temperature = Keeper_config.keeper_planning_temp ();
-                    max_tokens = 768;
+                    max_tokens = Keeper_config.keeper_social_initial_max_tokens ();
                     tools = keeper_allowed_llm_tools meta;
                     response_format = `Text;
                   }
@@ -1804,7 +1804,7 @@ let run_social_board_event_turn
           match Llm_client.cascade requests with
           | Error e -> Error e
           | Ok resp0 ->
-              let max_tool_rounds = 3 in
+              let max_tool_rounds = Keeper_config.keeper_max_tool_rounds () in
               let used_model0 =
                 model_spec_for_used specs resp0.model_used
                 |> Option.value ~default:primary
@@ -1861,7 +1861,7 @@ let run_social_board_event_turn
                               Llm_client.user_msg followup_prompt;
                             ];
                             temperature = Keeper_config.keeper_deterministic_temp ();
-                            max_tokens = 512;
+                            max_tokens = Keeper_config.keeper_social_followup_max_tokens ();
                             tools = next_tools;
                             response_format = `Text;
                           }

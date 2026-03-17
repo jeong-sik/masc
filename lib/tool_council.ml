@@ -199,6 +199,74 @@ let extract_task_id text =
   in
   seek 0
 
+let supported_execution_action_types =
+  [ "add_task"; "start_operation" ]
+
+let parse_requested_action args =
+  match member "requested_action" args with
+  | `Null -> Ok None
+  | (`Assoc _ as value) ->
+      let action_type =
+        value |> member "action_type" |> to_string_option |> Option.value ~default:""
+        |> String.trim
+      in
+      if action_type = "" then
+        Error "requested_action.action_type is required"
+      else if
+        not
+          (List.mem
+             (String.lowercase_ascii action_type)
+             supported_execution_action_types)
+      then
+        Error
+          (Printf.sprintf
+             "unsupported requested_action.action_type: %s"
+             action_type)
+      else
+        let payload =
+          match value |> member "payload" with
+          | `Null -> None
+          | payload -> Some payload
+        in
+        Ok
+          (Some
+             ({
+                action_type;
+                target_type = value |> member "target_type" |> to_string_option;
+                target_id = value |> member "target_id" |> to_string_option;
+                payload;
+              }
+               : GV2.action_request))
+  | _ -> Error "requested_action must be an object"
+
+let high_risk_action_types =
+  [
+    "delete";
+    "reset";
+    "merge";
+    "room_pause";
+    "room_resume";
+    "team_stop";
+    "keeper_recover";
+    "swarm_run_continue";
+    "swarm_run_rerun";
+    "swarm_run_abandon";
+  ]
+
+let derive_risk_class args requested_action =
+  match get_string args "risk_class" "" |> String.lowercase_ascii with
+  | "low" -> Ok GV2.Low
+  | "high" -> Ok GV2.High
+  | "" -> (
+      match requested_action with
+      | Some request
+        when List.mem
+               (String.lowercase_ascii request.GV2.action_type)
+               high_risk_action_types ->
+          Ok GV2.High
+      | _ -> Ok GV2.Low)
+  | value -> Error (Printf.sprintf "invalid risk_class: %s" value)
+
 let parse_stance args =
   match get_string args "stance" "support" |> String.lowercase_ascii with
   | "support" -> Ok GV2.Support
@@ -393,7 +461,54 @@ let execute_action ctx (case_ : GV2.case_record) (order : GV2.execution_order) =
                "unsupported execution action_type for governance v2: %s"
                action_type))
 
-(* handle_petition_submit removed: 0 calls in audit log *)
+let removed_surface name =
+  ( false,
+    Printf.sprintf
+      "%s removed in Governance V2. Use masc_petition_submit, masc_case_brief_submit, masc_cases, masc_case_status, masc_ruling_status, or masc_execution_orders."
+      name )
+
+let handle_petition_submit ctx args =
+  let title = get_string args "title" "" in
+  if String.trim title = "" then
+    (false, "title is required")
+  else
+    match parse_requested_action args with
+    | Error message -> (false, message)
+    | Ok requested_action -> (
+        match derive_risk_class args requested_action with
+        | Error message -> (false, message)
+        | Ok risk_class ->
+            let origin =
+              let value = get_string args "origin" "human" |> String.trim in
+              if value = "" then "human" else value
+            in
+            let subject_type =
+              let value = get_string args "subject_type" "task" |> String.trim in
+              if value = "" then "task" else value
+            in
+            let source_refs = get_string_list args "source_refs" in
+            match
+              GV2.submit_petition ctx.base_path ~title ~origin ~subject_type
+                ~risk_class ~requested_action ~source_refs
+                ~created_by:ctx.agent_name
+            with
+            | Error message -> (false, message)
+            | Ok result -> (
+                match GV2.get_case_bundle ctx.base_path result.case_.id with
+                | Error message -> (false, message)
+                | Ok bundle ->
+                    let ruling = build_ruling bundle in
+                    let _ = GV2.save_ruling ctx.base_path ruling in
+                    let json =
+                      `Assoc
+                        [
+                          ("petition", petition_json result.petition);
+                          ("case", case_json result.case_);
+                          ("merged", `Bool result.merged);
+                          ("ruling", ruling_json ruling);
+                        ]
+                    in
+                    (true, Yojson.Safe.pretty_to_string json)))
 
 let handle_case_brief_submit ctx args =
   let case_id = get_string args "case_id" "" in
@@ -484,7 +599,17 @@ let handle_case_status ctx args =
     | Error message -> (false, message)
     | Ok bundle -> (true, Yojson.Safe.pretty_to_string (case_bundle_json bundle))
 
-(* handle_ruling_status removed: 0 calls in audit log. Ruling is visible via case_status bundle. *)
+let handle_ruling_status ctx args =
+  let case_id = get_string args "case_id" "" in
+  if String.trim case_id = "" then
+    (false, "case_id is required")
+  else
+    match GV2.get_case_bundle ctx.base_path case_id with
+    | Error message -> (false, message)
+    | Ok bundle -> (
+        match bundle.GV2.ruling with
+        | Some ruling -> (true, Yojson.Safe.pretty_to_string (ruling_json ruling))
+        | None -> (false, "ruling not found"))
 
 let handle_execution_orders ctx args =
   let case_id = get_string args "case_id" "" |> String.trim in
@@ -578,7 +703,19 @@ let handle_governance_status ctx _args =
   in
   (true, Yojson.Safe.pretty_to_string json)
 
-(* handle_route removed: 0 calls in audit log. *)
+let handle_route _ctx args =
+  let query = get_string args "query" "" in
+  if String.trim query = "" then (false, "query is required")
+  else
+    let decision = Council.RouterApi.route query in
+    let json =
+      `Assoc
+        [
+          ("reason", `String decision.reason);
+          ("agents", json_string_list (List.map (fun agent -> agent.Council.Router.name) decision.agents));
+        ]
+    in
+    (true, Yojson.Safe.pretty_to_string json)
 
 let handle_execute _ctx args =
   let topic = get_string args "topic" "" in
@@ -623,119 +760,27 @@ let handle_execute_dry_run _ctx args =
 
 let dispatch ctx ~name ~args : result option =
   match name with
+  | "masc_petition_submit" -> Some (handle_petition_submit ctx args)
   | "masc_case_brief_submit" -> Some (handle_case_brief_submit ctx args)
   | "masc_cases" -> Some (handle_cases ctx args)
   | "masc_case_status" -> Some (handle_case_status ctx args)
+  | "masc_ruling_status" -> Some (handle_ruling_status ctx args)
   | "masc_execution_orders" -> Some (handle_execution_orders ctx args)
   | "masc_governance_status" -> Some (handle_governance_status ctx args)
+  | "masc_route" -> Some (handle_route ctx args)
   | "masc_execute" -> Some (handle_execute ctx args)
   | "masc_execute_dry_run" -> Some (handle_execute_dry_run ctx args)
+  | "masc_debate_start"
+  | "masc_debate_argue"
+  | "masc_debate_close"
+  | "masc_debate_status"
+  | "masc_debates"
+  | "masc_consensus_start"
+  | "masc_consensus_vote"
+  | "masc_consensus_close"
+  | "masc_consensus_result"
+  | "masc_sessions" ->
+      Some (removed_surface name)
   | _ -> None
 
-let definitions =
-  [
-    `Assoc
-      [
-        ("name", `String "masc_case_brief_submit");
-        ("description", `String "Add a brief to a governance case. Brief submission can trigger a ruling and execution order.");
-        ( "inputSchema",
-          `Assoc
-            [
-              ("type", `String "object");
-              ( "properties",
-                `Assoc
-                  [
-                    ("case_id", `Assoc [ ("type", `String "string") ]);
-                    ("stance", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "support"; `String "oppose"; `String "neutral" ]) ]);
-                    ("summary", `Assoc [ ("type", `String "string") ]);
-                    ( "evidence_refs",
-                      `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ] );
-                  ] );
-              ("required", `List [ `String "case_id"; `String "summary" ]);
-            ] );
-      ];
-    `Assoc
-      [
-        ("name", `String "masc_cases");
-        ("description", `String "List governance cases from Governance V2.");
-        ( "inputSchema",
-          `Assoc
-            [
-              ("type", `String "object");
-              ( "properties",
-                `Assoc
-                  [
-                    ("status", `Assoc [ ("type", `String "string") ]);
-                    ("include_test", `Assoc [ ("type", `String "boolean") ]);
-                  ] );
-            ] );
-      ];
-    `Assoc
-      [
-        ("name", `String "masc_case_status");
-        ("description", `String "Read a single Governance V2 case bundle.");
-        ( "inputSchema",
-          `Assoc
-            [
-              ("type", `String "object");
-              ("properties", `Assoc [ ("case_id", `Assoc [ ("type", `String "string") ]) ]);
-              ("required", `List [ `String "case_id" ]);
-            ] );
-      ];
-    `Assoc
-      [
-        ("name", `String "masc_execution_orders");
-        ("description", `String "List execution orders, inspect a case order, or confirm/deny a human gate decision.");
-        ( "inputSchema",
-          `Assoc
-            [
-              ("type", `String "object");
-              ( "properties",
-                `Assoc
-                  [
-                    ("case_id", `Assoc [ ("type", `String "string") ]);
-                    ("decision", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "confirm"; `String "deny" ]) ]);
-                  ] );
-            ] );
-      ];
-    `Assoc
-      [
-        ("name", `String "masc_governance_status");
-        ("description", `String "Read a compact Governance V2 status summary.");
-        ("inputSchema", `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ]);
-      ];
-    `Assoc
-      [
-        ("name", `String "masc_execute");
-        ("description", `String "Execute a governance decision topic via the executor API.");
-        ( "inputSchema",
-          `Assoc
-            [
-              ("type", `String "object");
-              ( "properties",
-                `Assoc
-                  [
-                    ("topic", `Assoc [ ("type", `String "string") ]);
-                    ("result", `Assoc [ ("type", `String "string") ]);
-                  ] );
-              ("required", `List [ `String "topic" ]);
-            ] );
-      ];
-    `Assoc
-      [
-        ("name", `String "masc_execute_dry_run");
-        ("description", `String "Dry-run the governance executor for a topic and result.");
-        ( "inputSchema",
-          `Assoc
-            [
-              ("type", `String "object");
-              ( "properties",
-                `Assoc
-                  [
-                    ("topic", `Assoc [ ("type", `String "string") ]);
-                    ("result", `Assoc [ ("type", `String "string") ]);
-                  ] );
-              ("required", `List [ `String "topic" ]);
-            ] );
-      ];
-  ]
+let definitions = Tool_council_schemas.definitions

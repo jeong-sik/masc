@@ -20,12 +20,15 @@
    board_core
    board_votes
    board_pg
+   board_pg_queries
    board_dispatch
    board_listener
    capability_registry
    error
+   backend_core
    backend
    backend_eio
+   backend_eio_compression
    bounded
    cache_eio
    env_config
@@ -46,6 +49,7 @@
    cp_cleanup
    cp_lifecycle
    cp_lifecycle_swarm_live
+   cp_lifecycle_swarm_live_core
    cp_lifecycle_search
    cp_lifecycle_intents
    cp_lifecycle_policy
@@ -68,6 +72,7 @@
    dashboard_mission_assembly
    dashboard_mission
    dashboard_proof
+   dashboard_proof_helpers
    dashboard_mission_briefing
    drift_guard
    server_utils
@@ -84,8 +89,10 @@
    dashboard_http_keeper_metrics
    dashboard_http_keeper_detail
    dashboard_http_keeper
+   dashboard_http_shell
    dashboard_http_mdal
    server_dashboard_http
+   server_dashboard_http_core
    server_routes_http
    server_routes_http_common
    server_routes_http_pages
@@ -102,6 +109,7 @@
    server_h2_gateway_helpers
    server_h2_gateway_cp_write
    server_h2_gateway_routes_extra
+   server_h2_gateway_routes_cp
    server_runtime_bootstrap
    server_command_plane_http
    server_command_plane_http_support
@@ -110,6 +118,7 @@
    server_command_plane_http_help
    server_social_http
    server_mcp_transport_http
+   server_mcp_transport_http_protocol
    server_mcp_transport_http_types
    server_mcp_transport_http_session
    server_mcp_transport_http_headers
@@ -127,6 +136,7 @@
    encryption
    file_lock_eio
    federation
+   federation_types
    gcm_compat
    glm_pool
    graphql_client
@@ -201,6 +211,9 @@
    chain_executor_config
    chain_executor_helpers
    chain_executor_leaf
+   chain_executor_complex
+   chain_executor_search
+   chain_executor_resilience
    chain_executor_eio
    chain_orchestrator_eio
    chain_run_store
@@ -264,6 +277,7 @@
    trace
    mind_eio
    mitosis
+   mitosis_defaults
    mitosis_metrics
    mode
    nickname
@@ -294,6 +308,7 @@
    resilience
    response
    room
+   room_multi
    room_eio
    room_agent
    room_gc
@@ -393,6 +408,8 @@
    tool_team_session_routing
    tool_team_session_routing_workers
    tool_team_session_step
+   tool_team_session_step_exec
+   tool_team_session_step_types
    tool_team_session_schemas
    tool_heartbeat
    tool_encryption
@@ -413,6 +430,7 @@
    tool_misc
    tool_agent_timeline
    tool_llama
+   tool_llama_core
    tool_board
    tool_command_plane
    tool_command_plane_support
@@ -426,6 +444,7 @@
    tool_command_plane_schemas_02
    tool_lodge
    tool_mdal
+   tool_mdal_schemas
    lodge_daemon
    gardener_types
    gardener_state
@@ -444,11 +463,13 @@
    tool_metrics
    tool_harness_health
    tool_inline_dispatch
+   tool_inline_dispatch_extra
    tool_unified
    tool_help_registry
    tool_registry
    library_bridge
    tool_council
+   tool_council_schemas
    tool_code
    code_swarm_plan
    tool_code_swarm
@@ -479,6 +500,7 @@
    build_identity
   voice_config
   voice_bridge_eio
+  voice_bridge_eio_core
   voice_bridge
   voice_session_manager
   voice_stream
@@ -504,12 +526,15 @@
    keeper_memory_bank
    keeper_memory_recall
    keeper_alerting
+   keeper_alerting_path
    keeper_exec_tools
    keeper_exec_status
    keeper_exec_persona
    keeper_exec_context
    keeper_exec_autonomy
    keeper_exec_proactive
+   keeper_exec_social
+
    keeper_exec_room
    keeper_prompt
    keeper_coordination
@@ -525,6 +550,7 @@
    keeper_turn_lifecycle
    keeper_turn
    keeper_status
+   keeper_status_bridge
    keeper_policy
    keeper_persona
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
@@ -541,6 +567,7 @@
    verifier
    succession
    perpetual_loop
+   perpetual_loop_types
    procedural_memory
    oas_events
    oas_checkpoint_bridge
@@ -581,6 +608,8 @@
    trpg_handlers_core
    trpg_handlers_actors
    trpg_handlers_session
+   trpg_round_run_ctx
+   trpg_round_run_process
    trpg_round_run_handler
    tool_trpg
    trpg_store
@@ -594,6 +623,7 @@
    trpg_visibility
    trpg_rule
    trpg_rule_dnd5e_lite
+   trpg_rule_dnd5e_lite_core
    trpg_engine_replay
    trpg_slot
    trpg_slot_rule
@@ -608,9 +638,21 @@
    json_util
    ;; Autoresearch — Karpathy-inspired autonomous experiment loop
    autoresearch
+   autoresearch_types
    tool_autoresearch
    ;; Anti-Fake Test Quality Scoring (harness P2)
    anti_fake
+   ;; godsplit-phase1: type/schema sub-modules
+   types_core
+   types_auth
+   team_session_types_enums
+   tool_schemas_room_core
+   tool_schemas_room_extra
+   ;; godsplit-phase1: file split sub-modules
+   tool_council_schemas
+   dashboard_http_shell
+   keeper_status_bridge
+   server_dashboard_http_core
 )
 (private_modules
  gardener_state
@@ -627,6 +669,9 @@
  tool_schemas_core_03
  mitosis_helpers
  mitosis_spawn
+ mitosis_defaults
+ trpg_round_run_ctx
+ trpg_round_run_process
  trpg_round_run_handler
  board_core
  board_votes
@@ -723,6 +768,7 @@
   keeper_exec_persona
   keeper_exec_context
   keeper_exec_autonomy
+  keeper_exec_social
   keeper_exec_proactive
   keeper_exec_room
   keeper_turn_session
@@ -758,7 +804,29 @@
   ;; team_session_report sub-modules
   team_session_report_core
   team_session_report_proof_helpers
-  team_session_report_proof)
+  team_session_report_proof
+  ;; godsplit-phase1: type/schema sub-modules
+  types_core
+  types_auth
+  team_session_types_enums
+  tool_schemas_room_core
+  ;; godsplit-phase1: chain_executor sub-modules
+  chain_executor_complex
+  chain_executor_search
+  chain_executor_resilience
+  ;; godsplit-phase1: file split sub-modules
+  tool_team_session_step_exec
+  tool_schemas_room_extra
+  tool_council_schemas
+  dashboard_http_shell
+  keeper_status_bridge
+  ;; godsplit-phase2: additional sub-modules
+  autoresearch_types
+  backend_eio_compression
+  perpetual_loop_types
+  room_multi
+  dashboard_proof_helpers
+  keeper_alerting_path)
  (libraries
    yojson
    base64

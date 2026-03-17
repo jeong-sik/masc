@@ -178,7 +178,7 @@ let () =
   register_module_tag ~schemas:Tool_walph.schemas ~tag:Mod_walph;
   register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
   register_module_tag ~schemas:Tool_gardener.schemas ~tag:Mod_gardener;
-  register_module_tag ~schemas:Tool_inline_dispatch.schemas ~tag:Mod_inline;
+  register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
   (* Fix 2: Register modules that lack schema exports.
      Tool_tag_init uses register_name_tag for remaining modules
      that still rely on name-based registration. Called AFTER schema-based

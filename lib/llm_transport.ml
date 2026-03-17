@@ -243,7 +243,7 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
     } in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
-    Ok { content; tool_calls; usage; model_used; latency_ms = 0 }
+    Ok { content = [Agent_sdk.Types.Text content]; tool_calls; usage; model_used; latency_ms = 0 }
   with
   | Failure msg -> Error msg
   | exn -> Error (sprintf "Parse error: %s" (Printexc.to_string exn))
@@ -291,7 +291,7 @@ let parse_claude_response (json_str : string) : (completion_response, string) re
     } in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
-    Ok { content; tool_calls; usage; model_used; latency_ms = 0 }
+    Ok { content = [Agent_sdk.Types.Text content]; tool_calls; usage; model_used; latency_ms = 0 }
   with
   | Failure msg -> Error msg
   | exn -> Error (sprintf "Parse error: %s" (Printexc.to_string exn))

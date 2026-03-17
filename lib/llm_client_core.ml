@@ -122,7 +122,7 @@ type completion_request = {
 }
 
 type completion_response = {
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   tool_calls : tool_call list;
   usage : token_usage;
   model_used : string;
@@ -130,8 +130,9 @@ type completion_response = {
 }
 
 (** Extract text content from a completion_response.
-    Mirror of Llm_types.text_of_response for the local type. *)
-let text_of_response (resp : completion_response) : string = resp.content
+    Delegates to Agent_sdk.Types.text_of_content for rich content_block list. *)
+let text_of_response (resp : completion_response) : string =
+  Agent_sdk.Types.text_of_content resp.content
 
 let clamp_llama_max_tokens max_tokens =
   max 1 (min max_tokens Env_config.Llama.max_tokens)
@@ -409,7 +410,7 @@ let completion_response_of_cache_json
         | Ok usage, Ok tool_calls ->
             Ok
               {
-                content = body |> member "content" |> to_string;
+                content = [Agent_sdk.Types.Text (body |> member "content" |> to_string)];
                 tool_calls;
                 usage;
                 model_used = body |> member "model_used" |> to_string;
@@ -652,7 +653,7 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
     } in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
-    Ok { content; tool_calls; usage; model_used; latency_ms = 0 }
+    Ok { content = [Agent_sdk.Types.Text content]; tool_calls; usage; model_used; latency_ms = 0 }
   with
   | Failure msg -> Error msg
   | exn -> Error (sprintf "Parse error: %s" (Printexc.to_string exn))
@@ -700,7 +701,7 @@ let parse_claude_response (json_str : string) : (completion_response, string) re
     } in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
-    Ok { content; tool_calls; usage; model_used; latency_ms = 0 }
+    Ok { content = [Agent_sdk.Types.Text content]; tool_calls; usage; model_used; latency_ms = 0 }
   with
   | Failure msg -> Error msg
   | exn -> Error (sprintf "Parse error: %s" (Printexc.to_string exn))

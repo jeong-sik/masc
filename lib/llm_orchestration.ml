@@ -176,7 +176,7 @@ let completion_response_of_cache_json
         | Ok usage, Ok tool_calls ->
             Ok
               {
-                content = body |> member "content" |> to_string;
+                content = [Agent_sdk.Types.Text (body |> member "content" |> to_string)];
                 tool_calls;
                 usage;
                 model_used = body |> member "model_used" |> to_string;

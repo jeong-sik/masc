@@ -83,9 +83,11 @@ type completion_request = {
   response_format : [ `Text | `Json ];
 }
 
-(** Completion response. *)
+(** Completion response.
+    [content] is a list of {!Agent_sdk.Types.content_block} for type convergence
+    with OAS api_response. Use {!text_of_response} to extract text. *)
 type completion_response = {
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   tool_calls : tool_call list;
   usage : token_usage;
   model_used : string;

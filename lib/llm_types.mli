@@ -80,9 +80,11 @@ type completion_request = {
   response_format : [ `Text | `Json ];
 }
 
-(** Completion response. *)
+(** Completion response.
+    [content] is a list of {!Agent_sdk.Types.content_block} for type convergence
+    with OAS api_response. Use {!text_of_response} to extract text. *)
 type completion_response = {
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   tool_calls : tool_call list;
   usage : token_usage;
   model_used : string;
@@ -90,7 +92,7 @@ type completion_response = {
 }
 
 (** Extract text content from a completion_response.
-    v0.47 migration bridge: use this instead of direct [.content] access. *)
+    Extracts [Text] blocks, concatenates with newlines. *)
 val text_of_response : completion_response -> string
 
 (** {1 Request Normalization} *)

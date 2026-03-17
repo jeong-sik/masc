@@ -70,7 +70,7 @@ type completion_request = {
 }
 
 type completion_response = {
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   tool_calls : tool_call list;
   usage : token_usage;
   model_used : string;
@@ -78,10 +78,9 @@ type completion_response = {
 }
 
 (** Extract text content from a completion_response.
-    v0.47 migration bridge: consumers should use this instead of direct .content access.
-    When completion_response.content changes to content_block list (Phase B),
-    only this function needs updating — not the 55+ call sites. *)
-let text_of_response (resp : completion_response) : string = resp.content
+    Delegates to Agent_sdk.Types.text_of_content for rich content_block list. *)
+let text_of_response (resp : completion_response) : string =
+  Agent_sdk.Types.text_of_content resp.content
 
 let clamp_llama_max_tokens max_tokens =
   max 1 (min max_tokens Env_config.Llama.max_tokens)

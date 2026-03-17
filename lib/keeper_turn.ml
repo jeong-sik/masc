@@ -415,7 +415,7 @@ let handle_keeper_msg ctx args : tool_result =
                     Log.Trpg.info "Follow-up round %d resp: tool_calls=%d content_len=%d model=%s"
                       round
                       (List.length resp_next.Llm_client.tool_calls)
-                      (String.length resp_next.Llm_client.content)
+                      (String.length (Llm_client.text_of_response resp_next))
                       resp_next.Llm_client.model_used;
                     let used_model_next =
                       model_spec_for_used specs resp_next.model_used

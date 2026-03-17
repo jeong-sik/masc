@@ -540,7 +540,7 @@ let measure_metric_with_retry ~workdir ~timeout_s ?(max_retries = 2) metric_fn =
     match measure_metric ~workdir ~timeout_s metric_fn with
     | Ok _ as ok -> ok
     | Error e when n < max_retries && is_transient e ->
-      Unix.sleepf 1.0;
+      Time_compat.sleep 1.0;
       attempt (n + 1)
     | Error _ as err -> err
   in

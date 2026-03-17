@@ -271,7 +271,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     (match state.Mcp_server.fs with
      | Some fs ->
          (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
-                ~tool_name:name ~success ~duration_ms ()
+                ~tool_name:name ~agent_id:agent_name ~success ~duration_ms ()
           with exn ->
             log_mcp_exn ~label:"telemetry tracking failed" exn)
      | None -> ());

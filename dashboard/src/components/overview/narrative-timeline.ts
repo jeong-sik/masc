@@ -116,12 +116,12 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
 
   return html`
     <div class="narrative-timeline">
-      ${groups.map((group, gi) => html`
-        <div class="narrative-group" key=${gi}>
+      ${groups.map(group => html`
+        <div class="narrative-group" key=${group.label}>
           <div class="narrative-group__label">${group.label}</div>
           <div class="narrative-group__events">
-            ${group.events.map((event, ei) => html`
-              <div class="narrative-event" key=${ei}>
+            ${group.events.map(event => html`
+              <div class="narrative-event" key=${event.timestamp}>
                 <span class="narrative-event__text">${event.text}</span>
                 <details class="narrative-event__raw">
                   <summary>원본</summary>

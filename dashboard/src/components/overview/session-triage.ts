@@ -24,6 +24,15 @@ interface TriageResult {
   running: SessionItem[]
 }
 
+function handleKeyActivate(fn: () => void) {
+  return (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      fn()
+    }
+  }
+}
+
 function triageSessions(sessions: SessionItem[]): TriageResult {
   const critical: SessionItem[] = []
   const watch: SessionItem[] = []
@@ -51,10 +60,14 @@ function triageSessions(sessions: SessionItem[]): TriageResult {
 }
 
 function CriticalCard({ session }: { session: SessionItem }) {
+  const go = () => navigate('mission', { session_id: session.session_id })
   return html`
     <div
       class="triage-card triage-card--critical"
-      onClick=${() => navigate('mission', { session_id: session.session_id })}
+      role="button"
+      tabindex="0"
+      onClick=${go}
+      onKeyDown=${handleKeyActivate(go)}
     >
       <div class="triage-card__header">
         <strong class="triage-card__goal">${session.goal ?? session.session_id}</strong>
@@ -80,10 +93,14 @@ function CriticalCard({ session }: { session: SessionItem }) {
 }
 
 function WatchCard({ session }: { session: SessionItem }) {
+  const go = () => navigate('mission', { session_id: session.session_id })
   return html`
     <div
       class="triage-card triage-card--watch"
-      onClick=${() => navigate('mission', { session_id: session.session_id })}
+      role="button"
+      tabindex="0"
+      onClick=${go}
+      onKeyDown=${handleKeyActivate(go)}
     >
       <strong class="triage-card__goal">${session.goal ?? session.session_id}</strong>
       <div class="triage-card__meta">
@@ -102,10 +119,14 @@ function WatchCard({ session }: { session: SessionItem }) {
 }
 
 function RunningRow({ session }: { session: SessionItem }) {
+  const go = () => navigate('mission', { session_id: session.session_id })
   return html`
     <div
       class="triage-row"
-      onClick=${() => navigate('mission', { session_id: session.session_id })}
+      role="button"
+      tabindex="0"
+      onClick=${go}
+      onKeyDown=${handleKeyActivate(go)}
     >
       <span class="triage-row__goal">${trimText(session.goal, 60) ?? session.session_id}</span>
       <span class="triage-row__meta">

@@ -52,6 +52,24 @@ function signalRingClass(truth?: string): string {
   return ''
 }
 
+function activityDotLabel(ageSec: number | null): string | undefined {
+  if (ageSec == null) return undefined
+  if (ageSec < 60) return '방금 활동'
+  if (ageSec < 300) return '최근 활동'
+  if (ageSec < 1800) return '잠시 비활성'
+  return '비활성'
+}
+
+function handleKeyActivate(onClick?: () => void) {
+  if (!onClick) return undefined
+  return (e: KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      onClick()
+    }
+  }
+}
+
 function truncateWork(text: string | null | undefined, max = 20): string | null {
   if (!text) return null
   const clean = text.replace(/\s+/g, ' ').trim()
@@ -100,11 +118,15 @@ export function AgentAvatar({
       data-status=${statusAttr}
       title=${name}
       onClick=${onClick}
+      onKeyDown=${handleKeyActivate(onClick)}
       role=${onClick ? 'button' : undefined}
       tabindex=${onClick ? '0' : undefined}
     >
       ${cells}
-      <span class="pixel-avatar__activity-dot ${dotClass}" />
+      <span
+        class="pixel-avatar__activity-dot ${dotClass}"
+        aria-label=${activityDotLabel(activityAge ?? null)}
+      />
       ${bubbleText ? html`
         <span class="pixel-avatar__speech-bubble ${alwaysShowBubble ? 'always-visible' : ''}">
           ${bubbleText}

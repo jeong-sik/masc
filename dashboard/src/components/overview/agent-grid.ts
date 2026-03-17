@@ -20,28 +20,31 @@ function signalTruthOrder(truth?: string): number {
 }
 
 export function AgentGrid({ agents, agentBriefs, onAgentClick }: AgentGridProps) {
+  if (agents.length === 0) {
+    return html`
+      <div class="agent-grid">
+        <div style="color: var(--text-muted); padding: 12px;">에이전트 없음</div>
+      </div>
+    `
+  }
+
   const briefMap = new Map(agentBriefs.map(b => [b.agent_name, b]))
 
-  // Combine agent list with briefs for sorting
   const sorted = [...agents].sort((a, b) => {
     const ba = briefMap.get(a.name)
     const bb = briefMap.get(b.name)
 
-    // 1. Attention count DESC
     const attA = ba?.related_attention_count ?? 0
     const attB = bb?.related_attention_count ?? 0
     if (attA !== attB) return attB - attA
 
-    // 2. Signal truth (live first)
     const stA = signalTruthOrder(ba?.signal_truth)
     const stB = signalTruthOrder(bb?.signal_truth)
     if (stA !== stB) return stA - stB
 
-    // 3. Name alpha
     return a.name.localeCompare(b.name)
   })
 
-  // Top 5 active agents always show speech bubbles
   const topActiveNames = new Set(
     sorted
       .filter(a => {
@@ -51,14 +54,6 @@ export function AgentGrid({ agents, agentBriefs, onAgentClick }: AgentGridProps)
       .slice(0, 5)
       .map(a => a.name),
   )
-
-  if (sorted.length === 0) {
-    return html`
-      <div class="agent-grid">
-        <div style="color: var(--text-muted); padding: 12px;">에이전트 없음</div>
-      </div>
-    `
-  }
 
   return html`
     <div class="agent-grid">

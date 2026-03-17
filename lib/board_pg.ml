@@ -192,7 +192,9 @@ let post_of_row
       in
       let meta_json =
         match meta_raw with
-        | Some raw -> (try Some (Yojson.Safe.from_string raw) with _ -> None)
+        | Some raw -> (try Some (Yojson.Safe.from_string raw) with exn ->
+            Log.BoardPg.warn "meta_json parse failed: %s (raw=%s)" (Printexc.to_string exn) raw;
+            None)
         | None -> None
       in
       let title, body, post_kind, meta_json =

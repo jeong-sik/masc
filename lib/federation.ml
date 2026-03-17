@@ -304,11 +304,17 @@ let safe_append_file (path : string) (content : string) : (unit, string) result 
 let validate_path (base_path : string) (target_path : string) : (string, string) result =
   let normalized_base =
     try Unix.realpath base_path
-    with Unix.Unix_error _ -> base_path
+    with Unix.Unix_error (err, _, _) ->
+      Log.Misc.warn "federation: realpath failed for base %s: %s"
+        base_path (Unix.error_message err);
+      base_path
   in
   let normalized_target =
     try Unix.realpath (Filename.dirname target_path) ^ "/" ^ Filename.basename target_path
-    with Unix.Unix_error _ -> target_path
+    with Unix.Unix_error (err, _, _) ->
+      Log.Misc.warn "federation: realpath failed for target %s: %s"
+        target_path (Unix.error_message err);
+      target_path
   in
   if String.length normalized_target >= String.length normalized_base &&
      String.sub normalized_target 0 (String.length normalized_base) = normalized_base then

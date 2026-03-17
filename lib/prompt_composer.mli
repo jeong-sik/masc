@@ -3,17 +3,6 @@
     Replaces ad-hoc Printf.sprintf prompt construction with composable,
     typed sections that can be combined in any order.
 
-    Usage:
-    {[
-      let prompt = Prompt_composer.compose [
-        Identity { name = "worker-1"; role = "developer"; model = "glm-4.7" };
-        TeamContext team_ctx;
-        AvailableTools tool_names;
-        Guidelines ["verify changes"; "use tests"];
-        Task "Implement feature X";
-      ]
-    ]}
-
     @since 3.0.0 *)
 
 (** A section of a composed prompt. *)

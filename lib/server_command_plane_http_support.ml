@@ -51,7 +51,16 @@ let tool_command_plane_http_json ~deps ~state request ~name ~args =
       with Yojson.Json_error _ -> Error payload)
   | None -> Error ("unsupported command-plane tool: " ^ name)
 
-let command_plane_summary_http_json ~state =
+(* --- Command-plane summary proactive cache ---
+   Background refresh via start_cp_summary_refresh_loop.
+   The HTTP handler returns the cached ref immediately (0ms). *)
+
+let _cp_summary_ref : Yojson.Safe.t ref =
+  ref (`Assoc [("generated_at", `String (Types.now_iso ())); ("status", `String "initializing")])
+
+let _cp_summary_refresh_interval_s = 120.0
+
+let compute_cp_summary ~state =
   let config = state.Mcp_server.room_config in
   let summary = Command_plane_v2.summary_json config in
   let swarm_status =
@@ -60,6 +69,34 @@ let command_plane_summary_http_json ~state =
     else Swarm_status.empty_json
   in
   assoc_add "swarm_status" swarm_status summary
+
+let start_cp_summary_refresh_loop ~state ~sw ~clock =
+  Eio.Fiber.fork ~sw (fun () ->
+    Printf.eprintf "[INFO] Dashboard: starting cp-summary proactive refresh loop.\n%!";
+    let rec loop () =
+      let t0 = Time_compat.now () in
+      (try
+        _cp_summary_ref := compute_cp_summary ~state;
+        let dt = Time_compat.now () -. t0 in
+        Printf.eprintf "[INFO] Dashboard: cp-summary refreshed (%.1fs).\n%!" dt
+      with exn ->
+        let dt = Time_compat.now () -. t0 in
+        Printf.eprintf "[WARN] Dashboard: cp-summary refresh failed (%.1fs): %s\n%!"
+          dt (Printexc.to_string exn));
+      Eio.Time.sleep clock _cp_summary_refresh_interval_s;
+      loop ()
+    in
+    loop ())
+
+let command_plane_summary_http_json ~state =
+  let cached = !_cp_summary_ref in
+  match cached with
+  | `Assoc fields when List.mem_assoc "status" fields &&
+      (match List.assoc "status" fields with `String "initializing" -> true | _ -> false) ->
+    let result = compute_cp_summary ~state in
+    _cp_summary_ref := result;
+    result
+  | _ -> cached
 
 let command_plane_snapshot_http_json ~state =
   let config = state.Mcp_server.room_config in

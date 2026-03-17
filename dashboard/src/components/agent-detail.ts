@@ -14,7 +14,10 @@ import {
   tasks,
 } from '../store'
 import { fetchRoomMessages, fetchTaskHistory, sendBroadcast } from '../api'
+import { journal } from '../sse'
 import { missionSnapshot } from '../mission-store'
+import { executionWorkerSupportBriefs } from '../store'
+import type { JournalEntry } from '../types'
 import type {
   Agent,
   DashboardExecutionContinuityBrief,
@@ -137,6 +140,30 @@ async function submitMention(): Promise<void> {
   } finally {
     sendingMention.value = false
   }
+}
+
+function agentJournalEntries(agentName: string | null): JournalEntry[] {
+  if (!agentName) return []
+  const nameLower = agentName.toLowerCase()
+  return journal.value
+    .filter((entry: JournalEntry) => {
+      const text = entry.text.toLowerCase()
+      const agent = entry.agent.toLowerCase()
+      return agent === nameLower || text.includes(nameLower) || text.includes(`@${nameLower}`)
+    })
+    .slice(0, 15)
+}
+
+function workerBriefForAgent(agentName: string | null) {
+  if (!agentName) return null
+  return executionWorkerSupportBriefs.value.find(w => w.name === agentName) ?? null
+}
+
+function journalKindIcon(entry: JournalEntry): string {
+  if (entry.kind === 'board') return 'B'
+  if (entry.kind === 'tasks') return 'T'
+  if (entry.kind === 'keepers') return 'K'
+  return 'S'
 }
 
 function TaskSummary({ task }: { task: Task }) {
@@ -272,13 +299,16 @@ export function AgentDetailOverlay() {
           <${Card} title="Recent Activity">
             ${lines.length === 0
               ? html`<div class="empty-state">No recent room activity match</div>`
-              : html`<div class="agent-activity-list">${lines.map((line, idx) => html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
+              : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) => html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
           <//>
         </div>
+
+        <${AgentJournalStream} agentName=${agentName} />
+        <${AgentWorkerBrief} agentName=${agentName} />
         <${Card} title="Task History">
           ${taskHistories.value.length === 0
             ? html`<div class="empty-state">No task history loaded</div>`
-            : html`<div class="agent-history-list">${taskHistories.value.map(row => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`}
+            : html`<div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`}
         <//>
 
         <${Card} title="Direct Mention">
@@ -303,5 +333,69 @@ export function AgentDetailOverlay() {
         <//>
       </div>
     </div>
+  `
+}
+
+function AgentJournalStream({ agentName }: { agentName: string }) {
+  const entries = agentJournalEntries(agentName)
+
+  return html`
+    <${Card} title="실시간 활동 스트림">
+      ${entries.length === 0
+        ? html`<div class="empty-state">관련 이벤트 없음</div>`
+        : html`
+            <div class="agent-journal-stream">
+              ${entries.map((entry: JournalEntry, idx: number) => html`
+                <div class="agent-journal-entry" key=${idx}>
+                  <span class="agent-journal-kind">${journalKindIcon(entry)}</span>
+                  <span class="agent-journal-type">${entry.eventType}</span>
+                  <span class="agent-journal-text">${compactCopy(entry.text, 120) ?? ''}</span>
+                  ${entry.timestamp ? html`<${TimeAgo} timestamp=${entry.timestamp} />` : null}
+                </div>
+              `)}
+            </div>
+          `}
+    <//>
+  `
+}
+
+function AgentWorkerBrief({ agentName }: { agentName: string }) {
+  const worker = workerBriefForAgent(agentName)
+  if (!worker) return null
+
+  return html`
+    <${Card} title="Worker Status">
+      <div class="agent-worker-brief">
+        <div class="agent-worker-brief__row">
+          <span class="agent-worker-brief__label">State</span>
+          <${StatusBadge} status=${worker.state} />
+        </div>
+        ${worker.focus ? html`
+          <div class="agent-worker-brief__row">
+            <span class="agent-worker-brief__label">Focus</span>
+            <span>${worker.focus}</span>
+          </div>
+        ` : null}
+        ${worker.recent_output_preview ? html`
+          <div class="agent-worker-brief__row">
+            <span class="agent-worker-brief__label">Output</span>
+            <span class="agent-worker-brief__preview">${compactCopy(worker.recent_output_preview, 200)}</span>
+          </div>
+        ` : null}
+        ${worker.related_session_id ? html`
+          <div class="agent-worker-brief__row">
+            <span class="agent-worker-brief__label">Session</span>
+            <span class="mono" style="font-size: 11px">${worker.related_session_id}</span>
+          </div>
+        ` : null}
+        ${worker.last_signal_at ? html`
+          <div class="agent-worker-brief__row">
+            <span class="agent-worker-brief__label">Signal</span>
+            <${TimeAgo} timestamp=${worker.last_signal_at} />
+            ${worker.signal_truth ? html`<span class="pill">${worker.signal_truth}</span>` : null}
+          </div>
+        ` : null}
+      </div>
+    <//>
   `
 }

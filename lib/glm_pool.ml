@@ -3,16 +3,8 @@
     Distributes requests across GLM models with different concurrency limits
     to maximize throughput for MASC social experiments and games.
 
-    Model Concurrency Limits (from Z.ai docs):
-    - GLM-4.5: 10 concurrent
-    - GLM-4.6V: 10 concurrent
-    - GLM-5: 5 concurrent
-    - GLM-4.7: 5 concurrent
-    - GLM-4.6: 3 concurrent
-    - GLM-4.6V-FlashX: 3 concurrent
-    - GLM-4.7-FlashX: 3 concurrent
-    - GLM-4.7-Flash: 1 concurrent
-    - Total: ~39 concurrent calls possible
+    Model configuration loaded from config/glm_pool.json at startup.
+    Falls back to hardcoded defaults if config file is missing or malformed.
 
     @since 2.66.0 *)
 
@@ -22,9 +14,8 @@ type glm_model = {
   description: string;
 }
 
-(** All available GLM Cloud models with default concurrency limits.
-    Ordered by preference (higher concurrency models first for better throughput). *)
-let base_models : glm_model array = [|
+(** Hardcoded fallback models used when config/glm_pool.json is unavailable. *)
+let hardcoded_models : glm_model array = [|
   { model_id = "glm-4.5"; concurrency_limit = 10; description = "High concurrency, general purpose" };
   { model_id = "glm-4.6v"; concurrency_limit = 10; description = "High concurrency, vision-capable" };
   { model_id = "glm-5"; concurrency_limit = 5; description = "Flagship model" };
@@ -32,8 +23,96 @@ let base_models : glm_model array = [|
   { model_id = "glm-4.6"; concurrency_limit = 3; description = "Balanced performance" };
   { model_id = "glm-4.6v-flashx"; concurrency_limit = 3; description = "Fast variant with vision" };
   { model_id = "glm-4.7-flashx"; concurrency_limit = 3; description = "Fast latest generation" };
-  (* glm-4.7-flash has limit 1, excluded from pool for efficiency *)
 |]
+
+(** Parse a single model entry from JSON. Returns None on malformed entries. *)
+let parse_model_json (json : Yojson.Safe.t) : glm_model option =
+  match json with
+  | `Assoc fields ->
+      let get_string key =
+        match List.assoc_opt key fields with
+        | Some (`String s) -> Some s | _ -> None
+      in
+      let get_int key =
+        match List.assoc_opt key fields with
+        | Some (`Int n) -> Some n
+        | Some (`Float f) -> Some (Float.to_int f)
+        | _ -> None
+      in
+      (match get_string "model_id", get_int "concurrency_limit" with
+       | Some model_id, Some concurrency_limit when concurrency_limit > 0 ->
+           let description = match get_string "description" with
+             | Some d -> d | None -> ""
+           in
+           Some { model_id; concurrency_limit; description }
+       | _ -> None)
+  | _ -> None
+
+(** Resolve config file path relative to the MASC MCP project root.
+    Priority: DUNE_SOURCEROOT (project root in tests/builds)
+    > MASC_WORKSPACE_ROOT (explicit override) > cwd.
+    ME_ROOT is the parent workspace, not the project root. *)
+let config_file_path () : string =
+  let base =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root when String.trim root <> "" -> root
+    | _ -> (
+        match Sys.getenv_opt "MASC_WORKSPACE_ROOT" with
+        | Some root when String.trim root <> "" -> root
+        | _ -> Sys.getcwd ())
+  in
+  Filename.concat base "config/glm_pool.json"
+
+(** Load models from config/glm_pool.json. Returns None on any failure. *)
+let load_config_models () : glm_model array option =
+  let path = config_file_path () in
+  if not (Sys.file_exists path) then begin
+    Log.Glm_pool.info "config not found at %s, using hardcoded defaults" path;
+    None
+  end else
+    try
+      let content = In_channel.with_open_text path In_channel.input_all in
+      let json = Yojson.Safe.from_string content in
+      match json with
+      | `Assoc fields -> (
+          match List.assoc_opt "models" fields with
+          | Some (`List items) ->
+              let raw_models = List.filter_map parse_model_json items in
+              (* Reject duplicate model_id entries — pool accounting assumes uniqueness *)
+              let seen = Hashtbl.create (List.length raw_models) in
+              let models = List.filter (fun (m : glm_model) ->
+                if Hashtbl.mem seen m.model_id then begin
+                  Log.Glm_pool.warn "duplicate model_id %s in %s, skipping" m.model_id path;
+                  false
+                end else begin
+                  Hashtbl.replace seen m.model_id ();
+                  true
+                end
+              ) raw_models in
+              if models = [] then begin
+                Log.Glm_pool.warn "config %s has no valid models, using hardcoded defaults" path;
+                None
+              end else begin
+                let arr = Array.of_list models in
+                Log.Glm_pool.info "loaded %d models from %s" (Array.length arr) path;
+                Some arr
+              end
+          | _ ->
+              Log.Glm_pool.warn "config %s missing 'models' array, using hardcoded defaults" path;
+              None)
+      | _ ->
+          Log.Glm_pool.warn "config %s is not a JSON object, using hardcoded defaults" path;
+          None
+    with exn ->
+      Log.Glm_pool.warn "failed to load config %s: %s, using hardcoded defaults"
+        path (Printexc.to_string exn);
+      None
+
+(** Load models from config file, fall back to hardcoded defaults. *)
+let base_models : glm_model array =
+  match load_config_models () with
+  | Some models -> models
+  | None -> hardcoded_models
 
 let env_key_for_limit (model_id : string) : string =
   let b = Buffer.create (String.length model_id + 24) in

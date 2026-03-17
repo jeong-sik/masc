@@ -3,6 +3,11 @@
     Routes Board operations to either JSONL (Board.store) or PostgreSQL (Board_pg.t).
     Backend is selected once at server startup and fixed for the session.
 
+    PG is the primary backend when MASC_POSTGRES_URL is available.
+    JSONL serves as fallback when PG is unavailable or explicitly selected.
+
+    Control: MASC_BOARD_BACKEND env var ("pg" default, "jsonl" to force file-based).
+
     @since 0.6.0
 *)
 
@@ -55,16 +60,24 @@ let init_jsonl () =
 let reset_for_test () =
   backend_state := Uninitialized
 
-(** Get backend or fail *)
+(** Check MASC_BOARD_BACKEND env var. Returns true if JSONL is explicitly forced. *)
+let jsonl_forced () =
+  match Sys.getenv_opt "MASC_BOARD_BACKEND" with
+  | Some s -> String.lowercase_ascii (String.trim s) = "jsonl"
+  | None -> false
+
+(** Get backend or fail.
+    Normal path: Board is initialized by room_utils_backend_setup during server startup.
+    Auto-init: JSONL fallback when startup init was skipped (tests, standalone tools). *)
 let backend () =
   match !backend_state with
   | Active backend -> backend
   | Uninitialized ->
-      (* Auto-init JSONL as safe default *)
+      Log.BoardLog.warn "backend() called before server init, auto-initializing JSONL";
       init_jsonl ();
-      match !backend_state with
-      | Active backend -> backend
-      | Uninitialized -> failwith "[Board_dispatch] init_jsonl failed to activate backend"
+      (match !backend_state with
+       | Active backend -> backend
+       | Uninitialized -> failwith "[Board_dispatch] auto-init failed to activate backend")
 
 (** Get PostgreSQL pool if PG backend is active (for Board_listener) *)
 let get_pg_pool () =

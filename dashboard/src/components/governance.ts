@@ -273,9 +273,28 @@ async function respondToExecutionOrder(decision: 'confirm' | 'deny') {
   }
 }
 
+function formatAgeSummary(seconds: number | null | undefined): string | null {
+  if (seconds == null) return null
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}분`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}시간`
+  return `${Math.floor(seconds / 86400)}일`
+}
+
 function GovernanceSummaryStrip() {
   const summary = governanceData.value?.summary
+  const oldestAge = summary?.oldest_open_case_age_s
+  const lastActivityAge = summary?.last_activity_age_s
+  // Cases older than 24h with no recent activity are likely stale test artifacts
+  const isStale = (oldestAge != null && oldestAge > 86400) || (lastActivityAge != null && lastActivityAge > 86400)
+
   return html`
+    ${isStale ? html`
+      <div class="governance-stale-warning">
+        모든 열린 케이스가 ${formatAgeSummary(oldestAge)} 이상 경과됨.
+        ${lastActivityAge != null ? html` 마지막 활동: ${formatAgeSummary(lastActivityAge)} 전.` : null}
+        테스트 잔재일 가능성이 높습니다.
+      </div>
+    ` : null}
     <div class="board-summary-strip">
       <div class="board-summary-item">
         <span class="board-summary-label">열린 케이스</span>

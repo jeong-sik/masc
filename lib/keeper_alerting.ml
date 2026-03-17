@@ -114,19 +114,21 @@ let alert_dedup_window_sec =
   | None -> 60.0
 
 let alert_dedup_table : (string, float) Hashtbl.t = Hashtbl.create 32
+let alert_dedup_mutex = Eio.Mutex.create ()
 
 let alert_dedup_key ~(keeper_name : string) ~(reasons : string list) : string =
   let sorted = List.sort String.compare reasons in
   keeper_name ^ ":" ^ String.concat "," sorted
 
 let is_alert_deduplicated ~(keeper_name : string) ~(reasons : string list) : bool =
-  let key = alert_dedup_key ~keeper_name ~reasons in
-  let now = Time_compat.now () in
-  match Hashtbl.find_opt alert_dedup_table key with
-  | Some last_ts when now -. last_ts < alert_dedup_window_sec -> true
-  | _ ->
-    Hashtbl.replace alert_dedup_table key now;
-    false
+  Eio.Mutex.use_rw ~protect:true alert_dedup_mutex (fun () ->
+    let key = alert_dedup_key ~keeper_name ~reasons in
+    let now = Time_compat.now () in
+    match Hashtbl.find_opt alert_dedup_table key with
+    | Some last_ts when now -. last_ts < alert_dedup_window_sec -> true
+    | _ ->
+      Hashtbl.replace alert_dedup_table key now;
+      false)
 
 let keeper_alert_signal
     ~(message : string)

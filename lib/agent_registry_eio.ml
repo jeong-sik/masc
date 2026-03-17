@@ -13,20 +13,20 @@
 
 (** {1 Global Registry} *)
 
-(** Global registry instance - must be initialized within Eio context *)
+(** Global registry instance - must be initialized within Eio context.
+    All reads and writes go through [registry_lock] to prevent races. *)
 let global_registry : Agent_identity.Registry.registry option ref = ref None
 let registry_lock = Eio.Mutex.create ()
-let initialized = ref false
 
 let with_registry_lock f = Eio.Mutex.use_rw ~protect:true registry_lock (fun () -> f ())
 
-(** Initialize the global registry. Must be called within Eio context. *)
+(** Initialize the global registry. Must be called within Eio context.
+    Idempotent: checks [global_registry] under lock. *)
 let init () =
   with_registry_lock (fun () ->
-    if not !initialized then begin
-      global_registry := Some (Agent_identity.Registry.create ());
-      initialized := true
-    end
+    match !global_registry with
+    | Some _ -> ()
+    | None -> global_registry := Some (Agent_identity.Registry.create ())
   )
 
 (** Raised when the agent registry cannot be initialized.
@@ -36,17 +36,17 @@ exception Registry_init_failed of string
 (** Get the global registry. Initializes if needed (must be in Eio context).
     Returns [Error msg] if initialization fails instead of raising. *)
 let get_registry () : (Agent_identity.Registry.registry, string) result =
-  match !global_registry with
-  | Some reg -> Ok reg
-  | None ->
-      (* Lazy init - must be in Eio context *)
-      init ();
-      match !global_registry with
-      | Some reg -> Ok reg
-      | None ->
-          Error "agent registry initialization failed at step: lazy_init \
-                 (global_registry is None after init() — \
-                 possible Eio.Mutex contention or ref corruption)"
+  with_registry_lock (fun () ->
+    match !global_registry with
+    | Some reg -> Ok reg
+    | None ->
+        global_registry := Some (Agent_identity.Registry.create ());
+        match !global_registry with
+        | Some reg -> Ok reg
+        | None ->
+            Error "agent registry initialization failed: \
+                   global_registry is None after creation"
+  )
 
 (** Get the registry, raising [Registry_init_failed] on failure.
     Used by internal callers that cannot change their return type. *)
@@ -58,8 +58,7 @@ let get_registry_exn () =
 (** Reset registry for testing *)
 let reset_for_testing () =
   with_registry_lock (fun () ->
-    global_registry := Some (Agent_identity.Registry.create ());
-    initialized := true
+    global_registry := Some (Agent_identity.Registry.create ())
   )
 
 (** {1 Identity Resolution} *)

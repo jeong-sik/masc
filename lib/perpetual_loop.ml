@@ -377,23 +377,33 @@ let publish_to_event_bus bus (ev : event) =
 
 (** Attempt to claim the next task from the Room backlog.
     Only runs when room_config is Some and no task is currently held.
-    Uses exponential backoff on repeated failures (cap at ~16 min). *)
+    Uses exponential backoff on repeated failures (cap at ~16 min).
+    Returns [true] when a new task was claimed this turn. *)
 let try_auto_claim ~config ~state ~emit =
   match config.room_config with
-  | None -> ()
+  | None -> false
   | Some room_config ->
-    if Option.is_some state.current_task_id then ()
+    if Option.is_some state.current_task_id then false
     else begin
       let now = Time_compat.now () in
       let effective_cd =
         config.auto_claim_cooldown_s
         *. (2.0 ** Float.of_int (min 4 state.claim_failure_count))
       in
-      if now -. state.last_claim_attempt_ts < effective_cd then ()
+      if now -. state.last_claim_attempt_ts < effective_cd then false
       else begin
         state.last_claim_attempt_ts <- now;
-        match Room_task.claim_next_r room_config
-                ~agent_name:config.agent_name () with
+        (* P2: claim_next_r calls ensure_initialized which can raise
+           Invalid_argument when room paths are not set up. Catch and
+           skip gracefully to avoid crashing the perpetual loop. *)
+        match
+          (try Room_task.claim_next_r room_config
+                 ~agent_name:config.agent_name ()
+           with exn ->
+             eprintf "[perpetual] auto-claim exception: %s\n%!"
+               (Printexc.to_string exn);
+             Room_task.Claim_next_error (Printexc.to_string exn))
+        with
         | Room_task.Claim_next_claimed { task_id; title; priority; _ } ->
           state.current_task_id <- Some task_id;
           state.claim_failure_count <- 0;
@@ -401,16 +411,20 @@ let try_auto_claim ~config ~state ~emit =
           let msg = Llm_client.user_msg
             (sprintf "[AUTO-CLAIMED] Task %s (P%d): %s" task_id priority title) in
           state.context <- Context_manager.append state.context msg;
-          emit (TaskClaimed { task_id; title; priority })
+          emit (TaskClaimed { task_id; title; priority });
+          true
         | Room_task.Claim_next_no_unclaimed ->
           state.claim_failure_count <- state.claim_failure_count + 1;
-          emit (ClaimSkipped "no_unclaimed_tasks")
+          emit (ClaimSkipped "no_unclaimed_tasks");
+          false
         | Room_task.Claim_next_no_eligible _ ->
           state.claim_failure_count <- state.claim_failure_count + 1;
-          emit (ClaimSkipped "no_eligible")
+          emit (ClaimSkipped "no_eligible");
+          false
         | Room_task.Claim_next_error e ->
           state.claim_failure_count <- state.claim_failure_count + 1;
-          emit (ClaimSkipped (sprintf "error: %s" e))
+          emit (ClaimSkipped (sprintf "error: %s" e));
+          false
       end
     end
 
@@ -422,11 +436,17 @@ let check_task_completion ~config ~state ~emit content =
       with Not_found -> false) ->
     (match config.room_config with
      | Some rc ->
-       ignore (Room_task.complete_task_r rc ~agent_name:config.agent_name
-                 ~task_id ~notes:"completed by perpetual agent");
-       let completed_id = task_id in
-       state.current_task_id <- None;
-       emit (TaskCompleted { task_id = completed_id })
+       (* P1-2: Honor complete_task_r failures. On error, keep current_task_id
+          so the agent can retry completion on the next turn. *)
+       (match Room_task.complete_task_r rc ~agent_name:config.agent_name
+                ~task_id ~notes:"completed by perpetual agent" with
+        | Ok _ ->
+          let completed_id = task_id in
+          state.current_task_id <- None;
+          emit (TaskCompleted { task_id = completed_id })
+        | Error err ->
+          eprintf "[perpetual] complete_task_r failed for %s: %s — will retry next turn\n%!"
+            task_id (Types.masc_error_to_string err))
      | None -> ())
   | _ -> ()
 
@@ -527,8 +547,9 @@ let run_coding_turn ~config ~state =
       end;
 
       (* Auto-claim + task completion in coding mode *)
-      try_auto_claim ~config ~state ~emit;
-      check_task_completion ~config ~state ~emit result.Spawn_eio.output;
+      let just_claimed = try_auto_claim ~config ~state ~emit in
+      if not just_claimed then
+        check_task_completion ~config ~state ~emit result.Spawn_eio.output;
 
       (* Check termination: goal complete, stuck, or spawn indicates context exhaustion *)
       let content = result.Spawn_eio.output in
@@ -748,10 +769,13 @@ let run_turn ~config ~state =
         end;
 
         (* 7b. AUTO-CLAIM: try to pick up a task if idle *)
-        try_auto_claim ~config ~state ~emit;
+        let just_claimed = try_auto_claim ~config ~state ~emit in
 
-        (* 7c. TASK COMPLETION: detect [TASK_DONE] in response *)
-        check_task_completion ~config ~state ~emit resp.content;
+        (* 7c. TASK COMPLETION: detect [TASK_DONE] in response.
+           P1-1: Skip when a task was just claimed this turn — resp.content
+           predates the claim and may contain stale [TASK_DONE] signals. *)
+        if not just_claimed then
+          check_task_completion ~config ~state ~emit resp.content;
 
         (* 8. Check termination conditions *)
         if is_goal_complete resp.content then begin

@@ -78,66 +78,6 @@ let finalize_for_session ctx ~session_id =
   check string "decision.finalize status" "finalized"
     (out_finalize |> parse_json |> member "payload" |> member "status" |> to_string)
 
-let test_precondition_required_without_finalize () =
-  let base_dir = temp_dir () in
-  let _, ctx = mk_ctx base_dir in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let args =
-        `Assoc
-          [ ("session_id", `String "sess-precond"); ("hypothesis", `String "h") ]
-      in
-      let ok, body = dispatch_exn ctx ~name:"experiment.start" ~args in
-      check bool "experiment.start should fail before finalize" false ok;
-      let json = parse_json body in
-      check string "error code"
-        "PRECONDITION_REQUIRED"
-        (json |> member "payload" |> member "code" |> to_string))
-
-let test_decision_then_experiment_start () =
-  let base_dir = temp_dir () in
-  let _, ctx = mk_ctx base_dir in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      finalize_for_session ctx ~session_id:"sess-exp-ok";
-      let args =
-        `Assoc
-          [
-            ("session_id", `String "sess-exp-ok");
-            ("hypothesis", `String "engagement grows");
-            ("metrics", `List [ `String "engagement" ]);
-          ]
-      in
-      let ok, body = dispatch_exn ctx ~name:"experiment.start" ~args in
-      check bool "experiment.start ok" true ok;
-      let status =
-        body |> parse_json |> member "payload" |> member "status" |> to_string
-      in
-      check string "experiment status" "running" status)
-
-let test_legacy_alias_experiment_start_passthrough () =
-  let base_dir = temp_dir () in
-  let _, ctx = mk_ctx base_dir in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      finalize_for_session ctx ~session_id:"sess-exp-legacy";
-      let args =
-        `Assoc
-          [
-            ("session_id", `String "sess-exp-legacy");
-            ("hypothesis", `String "legacy call");
-          ]
-      in
-      let ok, body = dispatch_exn ctx ~name:"experiment_start" ~args in
-      check bool "legacy experiment_start ok" true ok;
-      let json = parse_json body in
-      check string "legacy response keeps status field"
-        "running"
-        (json |> member "status" |> to_string))
-
 let test_trpg_action_submit_persists_events () =
   let base_dir = temp_dir () in
   let config, ctx = mk_ctx base_dir in
@@ -542,7 +482,7 @@ let test_client_subscribe_partial_and_transport () =
               `List
                 [
                   `String "trpg.events";
-                  `String "experiment.events";
+                  `String "trpg.state";
                   `String "unknown.topic";
                   `String "trpg.events";
                 ] );
@@ -564,25 +504,14 @@ let test_client_subscribe_partial_and_transport () =
         |> to_list |> List.map to_string
       in
       check bool "accept trpg.events" true (List.mem "trpg.events" accepted);
-      check bool "accept experiment.events" true
-        (List.mem "experiment.events" accepted);
+      check bool "accept trpg.state" true
+        (List.mem "trpg.state" accepted);
       check bool "reject unknown topic" true (List.mem "unknown.topic" rejected);
+      check bool "dedup trpg.events" true
+        (List.length (List.filter (fun t -> t = "trpg.events") accepted) <= 1);
       check string "transport primary"
         "sse"
         (json |> member "payload" |> member "transport" |> member "primary" |> to_string);
-      let sse_topic =
-        json
-        |> member "payload"
-        |> member "transport"
-        |> member "sse_endpoints"
-        |> to_list
-        |> List.find_opt
-             (fun item ->
-               try
-                 item |> member "topic" |> to_string = "experiment.events"
-               with _ -> false)
-      in
-      check bool "experiment.events sse endpoint exists" true (Option.is_some sse_topic);
       check string "trpg.events fallback tool"
         "trpg.stream.read"
         ( json
@@ -723,12 +652,6 @@ let () =
     [
       ( "protocol",
         [
-          test_case "precondition gate before finalize" `Quick
-            test_precondition_required_without_finalize;
-          test_case "decision finalize then experiment.start" `Quick
-            test_decision_then_experiment_start;
-          test_case "legacy alias experiment_start passthrough" `Quick
-            test_legacy_alias_experiment_start_passthrough;
           test_case "trpg.action.submit persists events" `Quick
             test_trpg_action_submit_persists_events;
           test_case "trpg.world.query requires open" `Quick

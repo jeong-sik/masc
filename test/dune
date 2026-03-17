@@ -96,7 +96,7 @@
 (test
  (name test_dashboard_proof)
  (modules test_dashboard_proof)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 ; Dashboard cache deadlock regression + stampede tests (requires Eio)
 (test
@@ -113,7 +113,7 @@
 (test
  (name test_dashboard_tools)
  (modules test_dashboard_tools)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
  (name test_dashboard_governance)

@@ -26,6 +26,7 @@ let test_dashboard_tools_projection () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Lib.Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
       let json = Lib.Server_dashboard_http.dashboard_tools_http_json config in

@@ -243,6 +243,7 @@ let test_dashboard_proof_projection () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Lib.Room.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       let session_id = "ts-proof-fixture-001" in
@@ -270,6 +271,7 @@ let test_dashboard_proof_exposes_validated_worker_run_evidence () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Lib.Room.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       let session_id = "ts-proof-worker-runs" in
@@ -299,6 +301,7 @@ let test_timeline_json_orders_command_plane_events_by_timestamp () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Lib.Room.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       let session_id = "ts-proof-fixture-ordered" in
@@ -334,6 +337,7 @@ let test_dashboard_proof_prefers_actual_activity_over_stronger_persisted_verdict
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Lib.Room.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       let session_id = "ts-proof-persisted-verdict" in
@@ -386,6 +390,7 @@ let test_dashboard_proof_marks_mentioned_only_actor_as_unanswered () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Lib.Room.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       let session_id = "ts-proof-mentioned-only" in
@@ -436,6 +441,7 @@ let test_dashboard_proof_ignores_unknown_mentions_outside_session () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Lib.Room.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       let session_id = "ts-proof-ignore-unknown-mentions" in
@@ -478,6 +484,7 @@ let test_dashboard_proof_uses_historical_verdict_when_live_is_empty () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Lib.Room.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       let session_id = "ts-proof-historical-only" in

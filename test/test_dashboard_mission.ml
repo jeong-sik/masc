@@ -274,6 +274,7 @@ let test_dashboard_mission_projection () =
     (fun () ->
       let config = Lib.Room_utils.default_config dir in
       let session_id = "ts-mission-fixture-001" in
+      Eio_main.run @@ fun env ->
       seed_room config session_id;
       Lib.A2a_tools.emit_heartbeat_task
         ~agent:"llama-local-alpha"
@@ -311,7 +312,6 @@ let test_dashboard_mission_projection () =
         ();
       Sys.remove
         (Filename.concat (Lib.Room_utils.agents_dir config) "llama-local-delta.json");
-      Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_mission.json
@@ -455,8 +455,8 @@ let test_dashboard_mission_keeper_tool_audit_fallback () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let config = Lib.Room_utils.default_config dir in
-      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       Eio_main.run @@ fun env ->
+      ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       Eio.Switch.run (fun sw ->
         let keeper_ctx : _ Lib.Tool_keeper.context =
           { config; agent_name = "fixture-root"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env) }

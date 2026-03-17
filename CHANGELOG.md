@@ -3,6 +3,9 @@
 
 ## [2.101.0] - 2026-03-17
 
+### Added
+- **Code Swarm** — 3 MCP tools (`masc_code_swarm_plan`, `_verify`, `_merge`) for parallel code modification via team_session workers. Greedy bin-packing, LLM diff verification, auto worktree cleanup (#1292)
+
 ### Fixed
 - **PG connection exhaustion** — pool max_size 10→3, `MASC_PG_POOL_SIZE` env config (#1274)
 - **Init fiber crash isolation** — Eio.Time.with_timeout_exn for lock cleanup, Eio.Fiber.fork per subsystem (#1257)
@@ -12,6 +15,8 @@
 - **28 silent exception patterns** surfaced with proper logging (#1252)
 - **8 silent failures** surfaced with error logging (#1248)
 - **Dashboard stale-while-revalidate** — prevent server hang (#1251)
+- **4 flaky CI tests** — keeper audit FS fallback, TRPG bestiary data, lodge heartbeat source assertions (#1308)
+- **Lodge LLM path** — unify `smart_generate` to `Lodge_cascade.call`, remove hardcoded CLI rotation (#1308)
 
 ### Changed
 - **OAS agent_sdk** — upgrade to v0.40.0 (#1277)

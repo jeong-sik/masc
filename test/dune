@@ -1011,3 +1011,9 @@
  (name test_server_checkpoint)
  (modules test_server_checkpoint)
  (libraries masc_mcp eio eio_main yojson unix))
+
+; Phase 4: Lifecycle tests (Shutdown + Supervisor)
+(test
+ (name test_lifecycle)
+ (modules test_lifecycle)
+ (libraries masc_mcp eio eio_main yojson unix))

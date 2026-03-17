@@ -34,6 +34,13 @@ function synthesizeSituation(snap: DashboardMissionResponse | null): SituationRe
   const blocked = sessions.filter(s => s.blocker_summary).length
   const attentionItems = snap.attention_queue ?? []
   const attention = attentionItems.length
+  const hasAnyAgents = (snap.agent_briefs?.length ?? 0) > 0
+  const hasAnyKeepers = (snap.keeper_briefs?.length ?? 0) > 0
+
+  // Honest empty state: no sessions AND no agents/keepers means the room is idle
+  if (total === 0 && !hasAnyAgents && !hasAnyKeepers) {
+    return { text: '유휴 상태. 세션, 에이전트, 키퍼 모두 비활성.', tone: 'ok', reasons: [] }
+  }
 
   const reasons: SituationReason[] = []
 

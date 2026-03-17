@@ -23,9 +23,8 @@ type category =
   | Board       (* board_post, board_list, board_get, board_comment, board_vote, ... *)
   | Plan        (* plan_*, goal_*, intent_* *)
   | Consensus   (* debate_*, consensus_*, walph_*, convo_*, decision_*, council_status *)
-  | Ecosystem   (* gardener_*, keeper_*, perpetual_*, mdal_*, autoresearch_*, handover_*, library_* *)
+  | Ecosystem   (* gardener_*, keeper_*, perpetual_*, mdal_*, handover_*, library_* *)
   | TRPG        (* masc_trpg_*, trpg_* *)
-  | RISC        (* masc_risc_* *)
   | Unknown     (* unmapped namespace/tool *)
 
 (** Mode presets *)
@@ -58,7 +57,6 @@ let category_to_string = function
   | Consensus -> "consensus"
   | Ecosystem -> "ecosystem"
   | TRPG -> "trpg"
-  | RISC -> "risc"
   | Unknown -> "unknown"
 
 (** String to category conversion *)
@@ -81,7 +79,6 @@ let category_of_string = function
   | "consensus" -> Some Consensus
   | "ecosystem" -> Some Ecosystem
   | "trpg" -> Some TRPG
-  | "risc" -> Some RISC
   | _ -> None
 
 (** Mode to string conversion *)
@@ -109,7 +106,7 @@ let mode_of_string = function
 let all_categories = [
   Core; Comm; Portal; Worktree; Code; Health; Discovery;
   Voting; Interrupt; Cost; Auth; RateLimit; Encryption;
-  Board; Plan; Consensus; Ecosystem; TRPG; RISC
+  Board; Plan; Consensus; Ecosystem; TRPG
 ]
 
 (** Categories for each mode preset *)
@@ -148,7 +145,6 @@ let tool_category tool_name =
   | "masc_team_session_list" | "masc_team_session_compare"
   | "masc_team_session_events"
   | "masc_team_session_prove" | "masc_team_session_verify_trace"
-  | "masc_autoresearch_swarm_start"
   (* LLM runtime *)
   | "masc_llama_models" | "masc_llama_runtime_status"
   | "masc_runtime_verify"
@@ -356,10 +352,6 @@ let tool_category tool_name =
   | "masc_mdal_start" | "masc_mdal_iterate"
   | "masc_mdal_status" | "masc_mdal_stop"
   | "masc_mdal_swarm_start" | "masc_mdal_swarm_status"
-  (* Autoresearch *)
-  | "masc_autoresearch_start" | "masc_autoresearch_status"
-  | "masc_autoresearch_stop" | "masc_autoresearch_inject"
-  | "masc_autoresearch_cycle"
   (* Handover *)
   | "masc_handover_create" | "masc_handover_get"
   | "masc_handover_list" | "masc_handover_claim"
@@ -383,19 +375,6 @@ let tool_category tool_name =
   | "masc_trpg_scene_transition" | "masc_trpg_quest_update"
   | "masc_trpg_world_event"
   | "trpg_roleplay" -> TRPG
-
-  (* ── RISC pipeline simulation ── *)
-  | "masc_risc_register_agent" | "masc_risc_decode"
-  | "masc_risc_pipeline_status" | "masc_risc_pipeline_advance"
-  | "masc_risc_pipeline_flush"
-  | "masc_risc_rs_add" | "masc_risc_rs_issue"
-  | "masc_risc_rs_complete" | "masc_risc_rs_status"
-  | "masc_risc_spec_start" | "masc_risc_spec_commit"
-  | "masc_risc_spec_abort" | "masc_risc_spec_status"
-  | "masc_risc_steal"
-  | "masc_risc_cache_read" | "masc_risc_cache_write"
-  | "masc_risc_cache_status" | "masc_risc_cache_metrics"
-  | "masc_risc_metrics" | "masc_risc_ooo_metrics" -> RISC
 
   (* ── Deprecated/archived tools (hidden via tool_catalog, excluded from presets) ── *)
 
@@ -450,9 +429,8 @@ let category_description = function
   | Board -> "Agent board: posts, comments, votes, search"
   | Plan -> "Plan and goal management: plan_*, goal_*, intent_*"
   | Consensus -> "Multi-agent consensus: debate, WALPH, convo, decision"
-  | Ecosystem -> "Agent lifecycle: gardener, keeper, perpetual, MDAL, autoresearch, handover, library"
+  | Ecosystem -> "Agent lifecycle: gardener, keeper, perpetual, MDAL, handover, library"
   | TRPG -> "Tabletop RPG engine: sessions, actors, dice, quests"
-  | RISC -> "RISC pipeline simulation: decode, issue, speculate, cache"
   | Unknown -> "Unmapped tool (excluded from all presets)"
 
 (** JSON serialization *)

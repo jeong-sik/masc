@@ -30,7 +30,6 @@ type ('clock, 'net) dispatch_contexts = {
   ctx_vote : Tool_vote.context;
   ctx_social : Tool_social.context;
   ctx_council : Tool_council.context;
-  ctx_experiment : Tool_experiment.context;
   ctx_a2a : Tool_a2a.context;
   ctx_handover : Tool_handover.context;
   ctx_relay : Tool_relay.context;
@@ -54,7 +53,6 @@ type ('clock, 'net) dispatch_contexts = {
   ctx_suspend : Tool_suspend.context;
   ctx_library : Tool_library.context;
   ctx_mdal : Tool_mdal.context;
-  ctx_autoresearch : Tool_autoresearch.context;
   ctx_perpetual : Tool_perpetual.context;
   ctx_keeper : float Eio.Time.clock_ty Tool_keeper.context;
   ctx_trpg : Tool_trpg.context;
@@ -82,8 +80,6 @@ let dispatch (c : (_, _) dispatch_contexts) : bool * string =
         ~handler:(fun ~name ~args -> Tool_voice.dispatch c.ctx_voice ~name ~args);
       reg ~schemas:Tool_protocol_game_view.schemas
         ~handler:(fun ~name ~args -> Tool_protocol_game_view.dispatch c.ctx_protocol ~name ~args);
-      reg ~schemas:Tool_experiment.schemas
-        ~handler:(fun ~name ~args -> Tool_experiment.dispatch c.ctx_experiment ~name ~args);
       reg ~schemas:Tool_goals.schemas
         ~handler:(fun ~name ~args -> Tool_goals.dispatch c.ctx_goals ~name ~args);
       reg ~schemas:Tool_perpetual.schemas
@@ -94,10 +90,6 @@ let dispatch (c : (_, _) dispatch_contexts) : bool * string =
         ~handler:(fun ~name ~args -> Tool_keeper.dispatch c.ctx_keeper ~name ~args);
       reg ~schemas:Tool_trpg.schemas
         ~handler:(fun ~name ~args -> Tool_trpg.dispatch c.ctx_trpg ~name ~args);
-      reg ~schemas:Tool_autoresearch.schemas
-        ~handler:(fun ~name ~args -> Tool_autoresearch.dispatch c.ctx_autoresearch ~name ~args);
-      reg ~schemas:Tool_risc.schemas
-        ~handler:(fun ~name ~args -> Some (Tool_risc.dispatch name args));
       reg ~schemas:Tool_agent_timeline.schemas
         ~handler:(fun ~name ~args -> Tool_agent_timeline.dispatch c.ctx_agent_timeline ~name ~args);
       reg ~schemas:Tool_plan.schemas
@@ -169,9 +161,6 @@ let dispatch (c : (_, _) dispatch_contexts) : bool * string =
   | Some result -> result
   | None ->
   match Tool_protocol_game_view.dispatch c.ctx_protocol ~name ~args:arguments with
-  | Some result -> result
-  | None ->
-  match Tool_experiment.dispatch c.ctx_experiment ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_a2a.dispatch c.ctx_a2a ~name ~args:arguments with
@@ -248,9 +237,6 @@ let dispatch (c : (_, _) dispatch_contexts) : bool * string =
   match Tool_mdal.dispatch c.ctx_mdal ~name ~args:arguments with
   | Some result -> result
   | None ->
-  match Tool_autoresearch.dispatch c.ctx_autoresearch ~name ~args:arguments with
-  | Some result -> result
-  | None ->
   match Tool_trpg.dispatch c.ctx_trpg ~name ~args:arguments with
   | Some result -> result
   | None ->
@@ -259,10 +245,6 @@ let dispatch (c : (_, _) dispatch_contexts) : bool * string =
   | None ->
   if String.length name >= 14 && String.sub name 0 14 = "masc_gardener_" then
     Tool_gardener.dispatch () name arguments
-  else
-
-  if Tool_risc.is_risc_tool name then
-    Tool_risc.dispatch name arguments
   else
 
   let inline_ctx = c.build_inline_ctx () in

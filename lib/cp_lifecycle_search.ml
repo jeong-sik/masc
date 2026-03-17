@@ -743,64 +743,6 @@ let take_list n xs =
   in
   loop [] xs n
 
-let speculative_candidates_for_operation (operation : operation_record)
-    (candidates : Cp_search_fabric.scored_candidate list) =
-  List.map
-    (fun (candidate : Cp_search_fabric.scored_candidate) ->
-      {
-        Speculative_engine.label = candidate.unit_id;
-        prompt =
-          Printf.sprintf
-            "Objective: %s\nWorkload: %s\nStage: %s\nArtifact scope: %s\nCandidate unit: %s\nSearch score: %.1f\nRouting reason: %s\n\nDecide whether this is the best execution target. Keep the answer concise."
-            operation.objective
-            (operation_workload_profile operation)
-            (operation_stage_key operation)
-            (if operation.artifact_scope = [] then "(unspecified)"
-             else String.concat ", " operation.artifact_scope)
-            candidate.unit_id
-            candidate.breakdown.total
-            candidate.routing_reason;
-        metadata =
-          `Assoc
-            [
-              ("unit_id", `String candidate.unit_id);
-              ("score", `Float candidate.breakdown.total);
-              ("routing_reason", `String candidate.routing_reason);
-            ];
-      })
-    candidates
-
-let speculative_pick_candidate config (operation : operation_record)
-    (candidates : Cp_search_fabric.scored_candidate list) =
-  if
-    not (room_speculation_enabled config)
-    || operation_search_strategy operation <> Cp_search_fabric.Best_first_v1
-    ||
-    not
-      (String.equal (operation_workload_profile operation) "coding_task"
-       &&
-       match normalize_stage operation.stage with
-       | Some ("inspect" | "review") -> true
-       | _ -> false)
-    || List.length candidates < 2
-  then
-    None
-  else
-    let budget = min (room_speculation_budget config) (List.length candidates) in
-    let candidates = take_list budget candidates in
-    match
-      Speculative_engine.speculate Tool_risc.global_spec_engine
-        ~goal:(Printf.sprintf "route-%s" operation.operation_id)
-        ~original_query:operation.objective
-        ~candidates:(speculative_candidates_for_operation operation candidates)
-    with
-    | Ok outcome ->
-        List.find_opt
-          (fun (candidate : Cp_search_fabric.scored_candidate) ->
-            String.equal candidate.unit_id outcome.candidate_label)
-          candidates
-    | Error _ -> None
-
 let operation_search_json config units operations (operation : operation_record) =
   let readiness = operation_readiness operations operation in
   let candidates =

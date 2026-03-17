@@ -91,41 +91,9 @@ let handle_decision_status (ctx : context) ~canonical_tool args :
              (Printf.sprintf "no decision found for session_id=%s" session_id)
            ())
 
-let delegate_experiment (ctx : context) ~legacy_name ~args =
-  let exp_ctx = experiment_context_of ctx in
-  Tool_experiment.dispatch exp_ctx ~name:legacy_name ~args
-
 let delegate_trpg (ctx : context) ~legacy_name ~args =
   let trpg_ctx = trpg_context_of ctx in
   Tool_trpg.dispatch trpg_ctx ~name:legacy_name ~args
-
-let handle_experiment_canonical (ctx : context) ~canonical_tool ~legacy_name
-    ~require_decision args : (tool_result, tool_result) result =
-  let* () =
-    if require_decision then
-      let* _ = require_finalized_decision ctx ~canonical_tool args in
-      Ok ()
-    else Ok ()
-  in
-  let args =
-    if legacy_name = "experiment_start" then normalize_experiment_start_args args
-    else args
-  in
-  match delegate_experiment ctx ~legacy_name ~args with
-  | Some (true, body) ->
-      Ok (ok_json ~canonical_tool (parse_json_or_string body))
-  | Some (false, msg) ->
-      Error
-        (err_json ~canonical_tool ~code:"LEGACY_ERROR" ~message:msg
-           ~details:(`Assoc [ ("legacy_tool", `String legacy_name) ])
-           ())
-  | None ->
-      Log.Dispatch.info "NOT_IMPLEMENTED: experiment %s (canonical: %s)"
-        legacy_name canonical_tool;
-      Error
-        (err_json ~canonical_tool ~code:"NOT_IMPLEMENTED"
-           ~message:(Printf.sprintf "legacy dispatcher unavailable: %s. Use canonical tool names from dispatch table." legacy_name)
-           ())
 
 let sanitize_room_id (s : string) =
   let b = Bytes.of_string s in
@@ -531,13 +499,6 @@ let handle_client_snapshot_get (ctx : context) ~canonical_tool args :
         | (ev : Trpg_engine_event.t) :: _ -> ev.seq
         | [] -> 0
       in
-      let all_experiments = Tool_experiment.list_experiments ctx.config in
-      let running_experiments =
-        List.filter
-          (fun (e : Tool_experiment.experiment) ->
-            e.status = Tool_experiment.Running)
-          all_experiments
-      in
       let payload =
         `Assoc
           [
@@ -570,16 +531,6 @@ let handle_client_snapshot_get (ctx : context) ~canonical_tool args :
                          (fun (ev : Trpg_engine_event.t) ->
                            Trpg_engine_event.to_yojson ev)
                          recent_events) );
-                ] );
-            ( "experiments",
-              `Assoc
-                [
-                  ("running_count", `Int (List.length running_experiments));
-                  ( "recent",
-                    `List
-                      (List.map
-                         experiment_summary_payload
-                         (take 5 all_experiments)) );
                 ] );
             ("server_time", `Float (Time_compat.now ()));
             ("protocol_version", `String protocol_version);

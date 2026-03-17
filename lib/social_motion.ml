@@ -185,11 +185,23 @@ let client_id_counter = Atomic.make 0
 
 let with_registry_rw f =
   try Eio.Mutex.use_rw ~protect:true registry_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+  with
+  | Effect.Unhandled _ ->
+      Log.Social.warn "registry_rw: Eio effect unhandled, running unprotected";
+      f ()
+  | Eio.Mutex.Poisoned _ ->
+      Log.Social.error "registry_rw: mutex poisoned, running unprotected";
+      f ()
 
 let with_registry_ro f =
   try Eio.Mutex.use_ro registry_mutex f
-  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> f ()
+  with
+  | Effect.Unhandled _ ->
+      Log.Social.warn "registry_ro: Eio effect unhandled, running unprotected";
+      f ()
+  | Eio.Mutex.Poisoned _ ->
+      Log.Social.error "registry_ro: mutex poisoned, running unprotected";
+      f ()
 
 let client_matches (client : client) (value : event) =
   let room_ok =

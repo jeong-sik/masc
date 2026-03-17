@@ -1561,18 +1561,28 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
                 let send data =
                   if !closed || H2.Body.Writer.is_closed writer then begin
+                    if not !closed then
+                      Log.Sse.warn "TRPG SSE writer closed for room %s (seq=%d)"
+                        room_id_trimmed !last_seq;
                     closed := true; false
                   end else begin
-                    H2.Body.Writer.write_string writer data;
-                    H2.Body.Writer.flush writer ignore;
-                    true
+                    (try
+                       H2.Body.Writer.write_string writer data;
+                       H2.Body.Writer.flush writer ignore;
+                       true
+                     with exn ->
+                       Log.Sse.error "TRPG SSE send failed for room %s: %s"
+                         room_id_trimmed (Printexc.to_string exn);
+                       closed := true; false)
                   end
                 in
 
                 let init_comment =
                   Printf.sprintf ": TRPG SSE stream for room %s (after_seq=%d)\nretry: 3000\n\n"
                     room_id_trimmed !last_seq in
-                ignore (send init_comment);
+                if not (send init_comment) then
+                  Log.Sse.warn "TRPG SSE init comment failed for room %s"
+                    room_id_trimmed;
 
                 (* Send existing events *)
                 (match

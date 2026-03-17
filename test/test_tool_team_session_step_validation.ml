@@ -2,7 +2,7 @@ open Masc_mcp
 open Test_tool_team_session_support
 
 let test_missing_required_args () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -66,7 +66,7 @@ let test_missing_required_args () =
   cleanup_dir base_dir
 
 let test_step_actor_must_match_caller () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -99,7 +99,7 @@ let test_step_actor_must_match_caller () =
   cleanup_dir base_dir
 
 let test_step_spawn_requires_proc_mgr () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -153,7 +153,7 @@ let test_step_spawn_requires_proc_mgr () =
   cleanup_dir base_dir
 
 let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -269,7 +269,7 @@ let test_step_spawn_default_local_allows_worker_size_without_spawn_model () =
   cleanup_dir base_dir
 
 let test_step_rejects_legacy_spawn_fields () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -300,7 +300,7 @@ let test_step_rejects_legacy_spawn_fields () =
   cleanup_dir base_dir
 
 let test_step_rejects_legacy_batch_spawn_fields () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -338,7 +338,7 @@ let test_step_rejects_legacy_batch_spawn_fields () =
   cleanup_dir base_dir
 
 let test_step_spawn_batch_defaults_execution_scope_by_worker_class () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -402,7 +402,7 @@ let test_step_spawn_batch_defaults_execution_scope_by_worker_class () =
   cleanup_dir base_dir
 
 let test_step_delegate_requires_target_agent () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -432,7 +432,7 @@ let test_step_delegate_requires_target_agent () =
   cleanup_dir base_dir
 
 let test_step_delegate_unknown_worker_rejected () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in

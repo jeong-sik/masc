@@ -78,6 +78,13 @@ let add_task_id config ~title =
   | t :: _ -> t.id
   | [] -> failwith "failed to create task"
 
+let with_eio f =
+  Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Fun.protect
+    ~finally:(fun () -> Time_compat.clear_clock ())
+    (fun () -> f env)
+
 let transition_task_ok config ~agent_name ~task_id ~action =
   match Room.transition_task_r config ~agent_name ~task_id ~action () with
   | Ok _ -> ()

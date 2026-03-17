@@ -5,7 +5,9 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_petition_submit");
-        ("description", `String "Submit a governance petition and file or merge a case in Governance V2.");
+        ("description", `String "Submit a governance petition and file or merge a case in Governance V2. \
+Use when proposing a policy change, reporting a violation, or requesting a governance action. \
+Pair with masc_case_status to track the resulting case.");
         ( "inputSchema",
           `Assoc
             [
@@ -39,7 +41,9 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_case_brief_submit");
-        ("description", `String "Add a brief to a governance case. Brief submission can trigger a ruling and execution order.");
+        ("description", `String "Add a brief (support/oppose/neutral) to a governance case, which can trigger a ruling and execution order. \
+Use when providing evidence or opinion on an open governance case. \
+After masc_case_status identifies the case_id; pair with masc_ruling_status to check for a ruling.");
         ( "inputSchema",
           `Assoc
             [
@@ -59,7 +63,9 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_cases");
-        ("description", `String "List governance cases from Governance V2.");
+        ("description", `String "List governance cases from Governance V2 with optional status filter. \
+Use when reviewing open, pending, or resolved governance cases. \
+Pair with masc_case_status to inspect a specific case in detail.");
         ( "inputSchema",
           `Assoc
             [
@@ -75,7 +81,9 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_case_status");
-        ("description", `String "Read a single Governance V2 case bundle.");
+        ("description", `String "Read a single Governance V2 case bundle with petitions, briefs, and rulings. \
+Use when inspecting the full details of a specific governance case. \
+After masc_cases lists available cases; pair with masc_case_brief_submit to contribute.");
         ( "inputSchema",
           `Assoc
             [
@@ -87,7 +95,9 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_ruling_status");
-        ("description", `String "Read the latest ruling for a Governance V2 case.");
+        ("description", `String "Read the latest ruling for a Governance V2 case. \
+Use when checking whether a case has been decided and what the outcome is. \
+After masc_case_brief_submit may trigger a ruling; pair with masc_execution_orders for enforcement.");
         ( "inputSchema",
           `Assoc
             [
@@ -99,7 +109,9 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_execution_orders");
-        ("description", `String "List execution orders, inspect a case order, or confirm/deny a human gate decision.");
+        ("description", `String "List execution orders, inspect a case order, or confirm/deny a human gate decision. \
+Use when reviewing or acting on enforcement actions from governance rulings. \
+After masc_ruling_status shows a ruling; confirm/deny to execute or block the order.");
         ( "inputSchema",
           `Assoc
             [
@@ -115,13 +127,17 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_governance_status");
-        ("description", `String "Read a compact Governance V2 status summary.");
+        ("description", `String "Read a compact Governance V2 status summary with open cases, pending decisions, and recent rulings. \
+Use when getting a quick overview of the governance system state. \
+Pair with masc_cases for detailed case listing or masc_governance_report for audit-level detail.");
         ("inputSchema", `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ]);
       ];
     `Assoc
       [
         ("name", `String "masc_route");
-        ("description", `String "Route a query to appropriate agents using the governance router.");
+        ("description", `String "Route a query to appropriate agents using the governance router. \
+Use when you need to find which agents should handle a governance-related question. \
+Pair with masc_portal_open to directly contact the recommended agent.");
         ( "inputSchema",
           `Assoc
             [
@@ -133,7 +149,9 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_execute");
-        ("description", `String "Execute a governance decision topic via the executor API.");
+        ("description", `String "Execute a governance decision topic via the executor API to apply the ruling. \
+Use when a governance ruling needs to be enforced as an action. \
+After masc_ruling_status confirms the ruling; pair with masc_execute_dry_run to preview first.");
         ( "inputSchema",
           `Assoc
             [
@@ -150,7 +168,9 @@ let definitions =
     `Assoc
       [
         ("name", `String "masc_execute_dry_run");
-        ("description", `String "Dry-run the governance executor for a topic and result.");
+        ("description", `String "Dry-run the governance executor to preview what a ruling execution would do without applying it. \
+Use when you want to verify the effects of a governance execution before committing. \
+Before masc_execute to run the actual execution.");
         ( "inputSchema",
           `Assoc
             [

@@ -10,7 +10,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_status";
-    description = "Get current room/cluster status: active agents with capabilities, task queue, recent broadcasts, and cluster info. Shows cluster name (from MASC_CLUSTER_NAME or basename of ME_ROOT) and storage backend (fs or postgres).";
+    description = "Get current room/cluster status: active agents, task queue, recent broadcasts, and cluster info. \
+Use when you need a snapshot of who is online and what tasks are available. \
+Call after masc_join to orient yourself. Pair with masc_tasks for detailed backlog.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

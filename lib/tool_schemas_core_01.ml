@@ -3,7 +3,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_init";
-    description = "Initialize MASC room for multi-agent collaboration. Creates .masc/ folder in current project. Call this ONCE at the start of a multi-agent session. If .masc/ already exists, you'll auto-join. Workflow: init → join → (claim tasks / broadcast / portal) → leave";
+    description = "Initialize a MASC room by creating the .masc/ folder in the current project root. \
+Use when starting a new multi-agent session for the first time; if .masc/ already exists, you auto-join instead. \
+Workflow: masc_init -> masc_join -> masc_add_task/masc_claim_next -> masc_leave. Call once per project.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -16,7 +18,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_transition";
-    description = "Unified task state transition (single entrypoint). Actions: claim, start, done, cancel, release. Supports CAS via expected_version (backlog.version). Use notes for done, reason for cancel.";
+    description = "Transition a task through its lifecycle states via a single entrypoint. Actions: claim, start, done, cancel, release. \
+Use when moving a task forward after masc_add_task or masc_claim_next. Supports optimistic concurrency via expected_version (CAS guard). \
+Pair with masc_add_task to create tasks, then masc_transition to advance them.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -50,7 +54,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_register_capabilities";
-    description = "Register your capabilities for agent discovery. Other agents can then find you by capability. Examples: ['typescript', 'code-review', 'testing', 'python', 'architecture'].";
+    description = "Register your capabilities so other agents can discover you by skill. \
+Call when joining a room or when your capabilities change. Pair with masc_find_by_capability for the lookup side. \
+Examples: ['typescript', 'code-review', 'testing', 'python', 'architecture']. Discovery category.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -69,7 +75,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_find_by_capability";
-    description = "Find agents by capability. Use this to discover who can help with specific tasks. Only returns non-zombie agents.";
+    description = "Find active agents that match a given capability (e.g., 'typescript', 'testing'). Only returns non-zombie agents. \
+Use when you need help with a specific skill and want to discover who is available. \
+Pair with masc_register_capabilities (write side) and masc_a2a_delegate to send work. Discovery category.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -83,8 +91,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_route";
-    description = "Route a query to appropriate agents using MoE-style selection. \
-Returns: selected agents, estimated cost, complexity score.";
+    description = "Route a query to the best-matching agents using MoE-style selection. Returns selected agents, estimated cost, and complexity score. \
+Use when you have a task but do not know which agent should handle it. \
+After routing, use masc_a2a_delegate or masc_spawn to dispatch work to the selected agents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -102,7 +111,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_generate_key";
-    description = "Generate a new random 256-bit encryption key. Returns the key in hex format. Store this securely - losing the key means losing access to encrypted data.";
+    description = "Generate a random 256-bit encryption key in hex or base64 format. \
+Use when setting up encrypted communication between agents or securing cached data. \
+Store the key securely; losing it means losing access to encrypted data. Pair with governance tools for full security setup.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -116,7 +127,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_switch_mode";
-    description = "Switch MASC mode to reduce token usage. Available modes: 'minimal' (core+health), 'standard' (core+comm+worktree+health), 'parallel' (multi-agent heavy: comm+portal+discovery+voting+interrupt), 'full' (all features), 'solo' (single-agent: core+worktree). Use 'custom' with categories parameter for fine-grained control.";
+    description = "Switch the active MASC tool surface to control token usage. Modes: minimal (core+health), standard (core+comm+worktree+health), \
+parallel (multi-agent: comm+portal+discovery+voting), full (everything), solo (single-agent: core+worktree), custom (pick categories). \
+Call when starting a session or changing collaboration scope. Use masc_get_config to see current mode. Most-called MASC tool.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -136,7 +149,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_get_config";
-    description = "Get current MASC mode configuration. Shows enabled categories, disabled categories, and available mode presets.";
+    description = "Show the current MASC mode configuration including enabled/disabled tool categories and available presets. \
+Use when you need to verify which tools are active before calling them, or to debug 'tool not found' errors. \
+Pair with masc_switch_mode to change the active tool surface.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -144,7 +159,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_spawn";
-    description = "Spawn an agent to execute a task. Use this to orchestrate multi-agent collaboration without manual terminal setup. When agent_name='llama', you must provide model explicitly.";
+    description = "Spawn an agent process (claude, gemini, codex, or llama) to execute a task in a subprocess. \
+Use when orchestrating multi-agent work without manual terminal setup. For llama, the model parameter is required. \
+After spawning, monitor progress via masc_dashboard or masc_observe_swarm. Pair with masc_route for agent selection.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -175,7 +192,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_relay_checkpoint";
-    description = "Save a checkpoint of current state for smooth handoff. Call at key moments (after completing subtasks, before complex operations). Checkpoints enable proactive relay with minimal context loss.";
+    description = "Save a checkpoint of current work state (summary, TODOs, relevant files) for smooth handoff. \
+Call when completing a subtask, before starting a complex operation, or periodically in long sessions. \
+Pair with masc_relay_now to trigger handoff using the saved checkpoint. Enables proactive relay with minimal context loss.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -207,7 +226,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_relay_now";
-    description = "Trigger immediate relay to a new agent. Use when context is getting full or before a complex task. The new agent will receive compressed context and continue seamlessly.";
+    description = "Trigger an immediate relay handoff to a new agent, passing compressed context for seamless continuation. \
+Use when your context window is getting full or before a task that would exceed remaining capacity. \
+After masc_relay_checkpoint saves state, call this to execute the handoff. The successor inherits your work.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -235,7 +256,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_relay_smart_check";
-    description = "Proactive relay check with task hint. Predicts if upcoming task will overflow context and suggests relay BEFORE starting the task. Key for smooth transitions.";
+    description = "Predict whether an upcoming task will overflow your context window and suggest relay before you start. \
+Call when about to begin a large_file read, multi_file edit, long_running operation, or exploration. \
+Pair with masc_relay_checkpoint to save state if relay is recommended. Prevents mid-task context exhaustion.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -262,7 +285,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_mitosis_all";
-    description = "Get mitosis status of ALL agents in the cluster (cross-machine). Shows each agent's context pressure so you can see if another agent needs handoff help. Use for collaboration awareness.";
+    description = "Get mitosis (context lifecycle) status of all agents in the cluster, including cross-machine peers. \
+Use when coordinating handoffs or checking if another agent needs help due to context pressure. \
+Pair with masc_mitosis_divide or masc_mitosis_handoff to assist agents approaching their limits.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -270,7 +295,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_mitosis_pool";
-    description = "View the stem cell pool - reserve agents ready for instant handoff. Shows warm cells, their generation, and readiness state.";
+    description = "View the stem cell pool of reserve agents pre-warmed for instant handoff. Shows warm cells, generation number, and readiness. \
+Use when planning a handoff to check if a successor is already available, avoiding cold-start delay. \
+Pair with masc_mitosis_divide to consume a warm cell, or masc_mitosis_handoff for automated lifecycle.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -278,7 +305,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_mitosis_divide";
-    description = "Manually trigger cell division (mitosis). Parent cell dies gracefully (apoptosis) while child cell inherits compressed DNA (context). Use for proactive handoff.";
+    description = "Manually trigger cell division: the current agent (parent) dies gracefully while a child agent inherits compressed context (DNA). \
+Use when you want explicit control over the handoff moment rather than automatic threshold-based handoff. \
+For automated lifecycle management, prefer masc_mitosis_handoff. Pair with masc_mitosis_prepare to extract DNA first.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -296,7 +325,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_mitosis_check";
-    description = "2-Phase mitosis check. Phase 1 (50%): should_prepare=true → extract DNA. Phase 2 (80%): should_handoff=true → execute handoff. Returns current phase and thresholds.";
+    description = "Check your current mitosis phase based on context_ratio. Phase 1 (50%): should_prepare=true, extract DNA. Phase 2 (80%): should_handoff=true, execute handoff. \
+Call when you want to know your lifecycle phase without taking action. \
+Pair with masc_mitosis_prepare at 50% and masc_mitosis_divide at 80%, or use masc_mitosis_handoff for the full automated flow.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -309,7 +340,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_mitosis_record";
-    description = "Record activity for mitosis trigger tracking. Call after completing tasks or tool calls to update counters.";
+    description = "Record an activity event (task completion or tool call) to update mitosis trigger counters. \
+Call when you finish a task or make a tool call so that mitosis thresholds stay accurate. \
+Pair with masc_mitosis_check to read the counters and determine if handoff preparation is needed.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -326,7 +359,9 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_mitosis_prepare";
-    description = "Phase 1: Prepare for division - extract DNA and mark cell as ready. Does NOT handoff yet. Call this at 50% context to prepare early, actual handoff happens at 80%.";
+    description = "Phase 1 of mitosis: extract compressed DNA from your full context and mark yourself as ready for division. Does NOT handoff yet. \
+Call when masc_mitosis_check reports should_prepare=true (around 50% context). \
+After preparation, masc_mitosis_divide or masc_mitosis_handoff executes the actual handoff at 80%.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -340,15 +375,10 @@ Returns: selected agents, estimated cost, complexity score.";
   };
   {
     name = "masc_mitosis_handoff";
-    description = {|2-Phase Proactive Context Management - THE CORE MITOSIS TOOL
-
-Call this periodically with your estimated context_ratio. It handles the full lifecycle:
-- <50%: Returns "none" - continue working normally
-- 50-80%: Returns "prepared" - DNA extracted, ready for handoff
-- >80%: Returns "handoff" - spawns successor agent with DNA
-
-Unlike masc_mitosis_divide (manual), this auto-detects phase and takes appropriate action.
-Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
+    description = "Automated 2-phase context lifecycle manager. Call periodically with your estimated context_ratio. \
+<50%: returns 'none' (keep working). 50-80%: returns 'prepared' (DNA extracted). >80%: returns 'handoff' (spawns successor). \
+Use when you want hands-off lifecycle management instead of manual masc_mitosis_check/prepare/divide steps. \
+Supports async saga, LLM verification, and configurable pass consensus. The primary mitosis tool for most agents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -431,16 +461,10 @@ Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
   };
   {
     name = "masc_metrics_compare";
-    description = {|Compare generational performance metrics.
-
-Evidence for "Are successors better than predecessors?"
-Compares two generations across:
-- Task completion rate
-- Error rate
-- Duration (speed)
-- Token efficiency
-
-Returns verdict: "improved" / "degraded" / "neutral"|};
+    description = "Compare performance metrics between two agent generations (completion rate, error rate, duration, token efficiency). \
+Returns a verdict: improved, degraded, or neutral. \
+Use when evaluating whether mitosis succession is producing better agents over time. \
+Pair with masc_metrics_record to populate the data that this tool analyzes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -458,9 +482,9 @@ Returns verdict: "improved" / "degraded" / "neutral"|};
   };
   {
     name = "masc_metrics_record";
-    description = {|Record a task completion for generational metrics.
-
-Call after completing a task to track performance across generations.|};
+    description = "Record a task completion event (duration, errors, tokens) for generational performance tracking. \
+Call when you finish a task to feed data into the metrics system. \
+Pair with masc_metrics_compare to analyze trends across generations.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -494,15 +518,10 @@ Call after completing a task to track performance across generations.|};
   };
   {
     name = "masc_memento_mori";
-    description = {|Memento Mori - Agent self-awareness of mortality.
-A convenience tool combining mitosis check + prepare + divide in one call.
-Call this periodically to check your context health and auto-handle lifecycle:
-- <50%: Returns "continue" - keep working
-- 50-80%: Auto-prepares DNA, returns "prepared" - ready for handoff when needed
-- >80%: Auto-divides and spawns successor, returns handoff result
-
-This embodies the philosophical concept of "memento mori" - agents should be aware
-of their context limits and gracefully hand over work to successors.|};
+    description = "All-in-one context health check combining mitosis check + prepare + divide in a single call. \
+<50%: continue. 50-80%: auto-prepares DNA. >80%: auto-divides and spawns successor. \
+Call when you want a simple periodic lifecycle check without managing individual mitosis steps. \
+Similar to masc_mitosis_handoff but with a simpler interface. Use either one, not both.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -532,17 +551,9 @@ of their context limits and gracefully hand over work to successors.|};
   };
   {
     name = "masc_episode_flush";
-    description = {|Flush pending episodes to Neo4j and PostgreSQL.
-
-Episodes are queued locally during mitosis handoff (file-based queue for reliability).
-This tool flushes them to persistent storage (Neo4j for graph relationships, PostgreSQL for queries).
-
-Part of the Agent Being Protocol - agents are "beings" with memory continuity across generations.
-
-Returns:
-- flushed: Number of episodes successfully saved to DB
-- failed: Number of episodes that failed (kept in queue for retry)
-- pending: Remaining episodes in queue|};
+    description = "Flush locally queued episodes to Neo4j (graph) and PostgreSQL (relational) persistent storage. \
+Use when episodes have accumulated during mitosis handoffs and need to be persisted. Returns flushed/failed/pending counts. \
+Call periodically or after handoff events. Pair with masc_episode_list to verify persisted episodes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -559,12 +570,9 @@ Returns:
   };
   {
     name = "masc_episode_list";
-    description = {|List recent episodes from PostgreSQL.
-
-Query agent episodes with optional filters. Returns episode metadata for debugging
-and understanding agent lineage.
-
-Part of the Agent Being Protocol - agents can reflect on their history.|};
+    description = "List recent agent episodes from PostgreSQL with optional filters by agent_name and generation. \
+Use when debugging agent lineage, reviewing past handoffs, or understanding what a previous generation accomplished. \
+Pair with masc_episode_flush to ensure local episodes are persisted before querying.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -585,16 +593,9 @@ Part of the Agent Being Protocol - agents can reflect on their history.|};
   };
   {
     name = "masc_self_introspect";
-    description = {|Agent self-awareness introspection.
-
-Returns the agent's current lifecycle state:
-- generation: Current generation number (how many mitosis events in lineage)
-- context_used: Estimated context usage percentage
-- siblings: Other agents of the same generation in the room
-- parent_episode: Episode ID of the parent (if known)
-- estimated_lifespan: Tokens/turns remaining before mitosis needed
-
-Part of the Agent Being Protocol - agents should know their place in the lifecycle.|};
+    description = "Return your current lifecycle state: generation number, context usage, sibling agents, parent episode, and estimated remaining lifespan. \
+Use when you need self-awareness about your position in the agent lineage or to decide if mitosis preparation is needed. \
+Pair with masc_mitosis_check for threshold-based decisions or masc_episode_list for historical context. Discovery category.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -602,12 +603,9 @@ Part of the Agent Being Protocol - agents should know their place in the lifecyc
   };
   {
     name = "masc_recall_search";
-    description = {|Semantic memory search using local memory sources.
-
-Searches the agent's episodic memories using relevance scoring.
-Part of the Agent Being Protocol - agents can recall relevant past experiences.
-
-Returns matched memories with relevance scores, sorted by relevance.|};
+    description = "Search agent episodic memories using semantic relevance scoring. Returns matched memories sorted by relevance. \
+Use when you need to recall past experiences, decisions, or context from previous generations or sessions. \
+Pair with masc_episode_list for structured episode queries, or masc_self_introspect for current lifecycle state.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

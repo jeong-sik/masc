@@ -17,7 +17,9 @@
 let schemas : Types.tool_schema list = [
   {
     name = "masc_mdal_start";
-    description = "Start a strict metric-driven loop for a deterministic numeric goal. MDAL requires auditable tool use plus re-measurement; do not use it for qualitative work.";
+    description = "Start a strict metric-driven improvement loop for a deterministic numeric goal with auditable tool use and re-measurement. \
+Use when you have a measurable target (e.g., coverage >= 0.95, lint errors <= 0) and want automated iterations. \
+Pair with masc_mdal_iterate to advance iterations and masc_mdal_stop to end the loop.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -83,7 +85,8 @@ MDAL itself does not read or score this path.");
   {
     name = "masc_mdal_status";
     description = "Get the current MDAL loop state, metric history, and persistence metadata. \
-Persisted `running` loops hydrate as `interrupted` after restart.";
+Use when checking loop progress or diagnosing an interrupted loop after restart. \
+Pair with masc_mdal_iterate to continue or masc_mdal_stop to end.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -97,7 +100,9 @@ Persisted `running` loops hydrate as `interrupted` after restart.";
 
   {
     name = "masc_mdal_iterate";
-    description = "Advance one strict MDAL iteration. The worker must use at least one auditable tool and then MDAL re-measures the metric. Only running or interrupted strict loops can iterate.";
+    description = "Advance one strict MDAL iteration: the worker uses auditable tools, then MDAL re-measures the metric. \
+Use when the loop is running/interrupted and you want to make progress toward the goal. \
+After masc_mdal_start; check masc_mdal_status to see if the goal was met.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -111,8 +116,9 @@ Persisted `running` loops hydrate as `interrupted` after restart.";
 
   {
     name = "masc_mdal_stop";
-    description = "Stop an MDAL loop when the numeric goal is no longer worth continuing. \
-Persists the final state and stop reason.";
+    description = "Stop a running MDAL loop, persisting the final state and stop reason. \
+Use when the goal is met, the metric plateaus, or the loop is no longer worth continuing. \
+After masc_mdal_iterate; pair with masc_mdal_status to review final metrics.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -129,8 +135,9 @@ Persists the final state and stop reason.";
   };
   {
     name = "masc_mdal_swarm_start";
-    description = "Start N parallel MDAL workers, each targeting a different metric. \
-A coordinator tracks aggregate progress and stops when the aggregate goal is met.";
+    description = "Start N parallel MDAL workers, each targeting a different metric, with aggregate progress tracking. \
+Use when multiple metrics need simultaneous improvement (e.g., coverage + lint + docs). \
+Pair with masc_mdal_status per worker to check individual progress.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

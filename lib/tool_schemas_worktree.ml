@@ -3,7 +3,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_worktree_create";
-    description = "Create an isolated Git worktree for your work. This requires the active MASC base repository to have `.git` (resolved with git root detection) and always creates worktrees under `<repo_root>/.worktrees/{agent}-{task}/` with a new branch. If you are in a workspace with multiple repos, run MASC from the target repo root. This is BETTER than file locks: you get complete isolation and can work in parallel. After work, create a PR with `gh pr create` and remove the worktree.";
+    description = "Create an isolated Git worktree for your work under <repo_root>/.worktrees/{agent}-{task}/ with a new branch. \
+Use when starting a new task that needs file isolation from other agents. \
+After work, create a PR with `gh pr create` and call masc_worktree_remove.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -26,7 +28,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_worktree_remove";
-    description = "Remove a worktree after your work is merged. This cleans up both the worktree directory and the local branch. Call this after your PR is merged to keep the repo clean.";
+    description = "Remove a worktree and its local branch after your work is merged. \
+Use when your PR has been merged and the worktree is no longer needed. \
+After completing work in a worktree created by masc_worktree_create.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -44,7 +48,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_worktree_list";
-    description = "List all active worktrees in the project. Shows which agents are working on what tasks.";
+    description = "List all active worktrees in the project, showing which agents are working on what tasks. \
+Use when checking for stale worktrees or seeing who is working in parallel. \
+Pair with masc_worktree_remove to clean up stale entries.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

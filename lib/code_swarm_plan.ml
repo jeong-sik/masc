@@ -225,7 +225,7 @@ let split_into_workers ~max_workers files_with_counts =
   |> List.filter (fun w -> w.files <> [])
 
 let create_plan ~base_path ~pattern ~file_glob ~max_workers ~exclude_files =
-  let hard_limit = min 5 max_workers in
+  let hard_limit = max_workers |> max 1 |> min 5 in
   let files_with_counts =
     grep_matches ~base_path ~pattern ~file_glob ~exclude_files
   in
@@ -458,10 +458,17 @@ let merge_workers ~base_path ~plan_id ~strategy ~auto_pr ~build_verify
           Process_eio.run_argv_with_status ~timeout_sec:30.0
             [ "git"; "-C"; base_path; "checkout"; "-b"; merged_branch; "main" ]
         in
-        (match create_branch with
-        | Unix.WEXITED 0, _ -> ()
-        | _, msg ->
-            eprintf "[code_swarm] branch create warning: %s\n%!" msg);
+        let branch_ok =
+          match create_branch with
+          | Unix.WEXITED 0, _ -> true
+          | _ -> false
+        in
+        if not branch_ok then
+          let _, msg = create_branch in
+          Error
+            (sprintf "Failed to create merge branch '%s': %s"
+               merged_branch msg)
+        else
         (* Cherry-pick or merge each worker *)
         let conflicts = ref [] in
         let total_files = ref 0 in
@@ -491,6 +498,11 @@ let merge_workers ~base_path ~plan_id ~strategy ~auto_pr ~build_verify
             let status, output =
               Process_eio.run_argv_with_status ~timeout_sec:60.0 argv
             in
+            let abort_cmd =
+              match strategy with
+              | "octopus" -> "merge"
+              | _ -> "cherry-pick"
+            in
             (match status with
             | Unix.WEXITED 0 ->
                 total_files := !total_files + List.length worker.files
@@ -498,7 +510,7 @@ let merge_workers ~base_path ~plan_id ~strategy ~auto_pr ~build_verify
                 conflicts := worker.worker_id :: !conflicts;
                 ignore
                   (Process_eio.run_argv_with_status ~timeout_sec:10.0
-                     [ "git"; "-C"; base_path; "cherry-pick"; "--abort" ]);
+                     [ "git"; "-C"; base_path; abort_cmd; "--abort" ]);
                 eprintf "[code_swarm] merge conflict for %s: %s\n%!"
                   worker.worker_id output))
           passing_workers;

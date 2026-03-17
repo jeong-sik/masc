@@ -35,10 +35,16 @@ let trpg_default_fast_keeper_models () : string list =
     | Ok label -> [ label ]
     | Error _ -> []
   in
+  let glm_model =
+    let m = Env_config_governance.Llm.default_model in
+    if m = "" then "auto" else m
+  in
+  let glm_label = Printf.sprintf "glm:%s" glm_model in
+  let gemini_label = Printf.sprintf "gemini:%s" Env_config_governance.Gemini.flash_model in
   match (glm_available, gemini_available) with
-  | true, true -> [ "glm:glm-4.7"; "gemini:gemini-2.5-flash" ] @ llama_models
-  | true, false -> [ "glm:glm-4.7" ] @ llama_models
-  | false, true -> [ "gemini:gemini-2.5-flash" ] @ llama_models
+  | true, true -> [ glm_label; gemini_label ] @ llama_models
+  | true, false -> [ glm_label ] @ llama_models
+  | false, true -> [ gemini_label ] @ llama_models
   | false, false -> llama_models
 
 let trpg_keeper_models_override_csv () : string option =

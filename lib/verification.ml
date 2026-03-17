@@ -290,7 +290,7 @@ let load_request base_path req_id =
   let path = request_path base_path req_id in
   if Sys.file_exists path then
     try
-      let json = Yojson.Safe.from_file path in
+      let json = Safe_ops.read_json_eio path in
       request_of_yojson json
     with exn ->
       Error (Printf.sprintf "Failed to load verification %s: %s" req_id (Printexc.to_string exn))

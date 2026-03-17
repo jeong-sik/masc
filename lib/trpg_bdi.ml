@@ -241,7 +241,7 @@ let bdi_path ~room_dir ~actor_id =
 let load ~room_dir ~actor_id =
   let path = bdi_path ~room_dir ~actor_id in
   try
-    let json = Yojson.Safe.from_file path in
+    let json = Safe_ops.read_json_eio path in
     match of_yojson json with
     | Ok st -> st
     | Error _e -> empty ~actor_id

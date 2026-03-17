@@ -111,7 +111,7 @@ let json_string_member_opt json key =
 
 let read_json_file_opt path =
   if Sys.file_exists path then
-    Some (Yojson.Safe.from_file path)
+    (try Some (Safe_ops.read_json_eio path) with _ -> None)
   else
     None
 

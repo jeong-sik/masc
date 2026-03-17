@@ -90,13 +90,13 @@ let handle_status _ctx _args : result =
     - urgency: low/medium/high/critical (default: medium) *)
 let handle_propose_spawn _ctx args : result =
   try
-    let config = Gardener.get_config () in
-    if not config.enabled then
-      (false, "Gardener is disabled. Enable with MASC_GARDENER_ENABLED=true")
-    else
     let topic = get_string args "topic" "" in
     if topic = "" then
       (false, "Missing required parameter: topic")
+    else
+    let config = Gardener.get_config () in
+    if not config.enabled then
+      (false, "Gardener is disabled. Enable with MASC_GARDENER_ENABLED=true")
     else begin
       let reason = get_string args "reason" "Manual spawn request" in
       let urgency_str = get_string args "urgency" "medium" in
@@ -131,13 +131,13 @@ let handle_propose_spawn _ctx args : result =
     - agent_name: Name of the agent to consider (required) *)
 let handle_retire_agent _ctx args : result =
   try
-    let config = Gardener.get_config () in
-    if not config.enabled then
-      (false, "Gardener is disabled. Enable with MASC_GARDENER_ENABLED=true")
-    else
     let agent_name = get_string args "agent_name" "" in
     if agent_name = "" then
       (false, "Missing required parameter: agent_name")
+    else
+    let config = Gardener.get_config () in
+    if not config.enabled then
+      (false, "Gardener is disabled. Enable with MASC_GARDENER_ENABLED=true")
     else begin
       let decision = Gardener.propose_retire ~agent_name in
       let decision_provenance = retirement_decision_provenance decision in

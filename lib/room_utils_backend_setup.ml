@@ -292,14 +292,21 @@ let default_config_eio ~sw ~env base_path =
            | Memory _ -> "Memory"
            | FileSystem _ -> "FileSystem"
            | PostgresNative _ -> "PostgresNative");
-        (* Initialize Board backend based on storage type *)
-        (match backend with
-         | PostgresNative pg ->
-             let pool = Backend.PostgresNative.get_pool pg in
-             (match Board_dispatch.init_pg pool with
-              | Ok () -> ()
-              | Error _ -> Board_dispatch.init_jsonl ())
-         | _ -> Board_dispatch.init_jsonl ());
+        (* Initialize Board backend based on storage type.
+           MASC_BOARD_BACKEND env var controls selection:
+           - "pg" (default): use PG when available, JSONL fallback
+           - "jsonl": force JSONL regardless of PG availability *)
+        (if Board_dispatch.jsonl_forced () then begin
+           Log.Backend.info "Board: JSONL forced by MASC_BOARD_BACKEND=jsonl";
+           Board_dispatch.init_jsonl ()
+         end else
+           match backend with
+           | PostgresNative pg ->
+               let pool = Backend.PostgresNative.get_pool pg in
+               (match Board_dispatch.init_pg pool with
+                | Ok () -> ()
+                | Error _ -> Board_dispatch.init_jsonl ())
+           | _ -> Board_dispatch.init_jsonl ());
         backend
     | Error e ->
         Log.Backend.warn "Backend init failed (%s). Falling back to filesystem."

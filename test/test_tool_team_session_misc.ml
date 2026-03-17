@@ -2,7 +2,7 @@ open Masc_mcp
 open Test_tool_team_session_support
 
 let test_prove_strong_requires_additional_evidence () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -50,7 +50,7 @@ let test_prove_strong_requires_additional_evidence () =
   cleanup_dir base_dir
 
 let test_dispatch_unknown () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -65,7 +65,7 @@ let test_dispatch_unknown () =
   cleanup_dir base_dir
 
 let test_unauthorized_session_access () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -160,7 +160,7 @@ let test_unauthorized_session_access () =
   cleanup_dir base_dir
 
 let test_final_done_delta_snapshot_stable () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -232,7 +232,7 @@ let test_final_done_delta_snapshot_stable () =
   cleanup_dir base_dir
 
 let test_verify_trace_uses_worker_run_raw_trace () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -280,7 +280,7 @@ let test_verify_trace_uses_worker_run_raw_trace () =
   cleanup_dir base_dir
 
 let test_verify_trace_reports_summary_only_without_checkpoint () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -318,7 +318,7 @@ let test_verify_trace_reports_summary_only_without_checkpoint () =
   cleanup_dir base_dir
 
 let test_verify_trace_reports_summary_only_when_direct_evidence_missing () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -357,7 +357,7 @@ let test_verify_trace_reports_summary_only_when_direct_evidence_missing () =
   cleanup_dir base_dir
 
 let test_delegate_rejects_not_ready_worker_with_guidance () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in

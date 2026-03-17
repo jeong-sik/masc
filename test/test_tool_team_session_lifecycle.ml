@@ -2,7 +2,7 @@ open Masc_mcp
 open Test_tool_team_session_support
 
 let test_start_status_report_stop () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -102,7 +102,7 @@ let test_start_status_report_stop () =
   cleanup_dir base_dir
 
 let test_start_attached_operation_session () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -299,7 +299,7 @@ let test_start_attached_operation_session () =
   cleanup_dir base_dir
 
 let test_duration_reached_path () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -325,7 +325,7 @@ let test_duration_reached_path () =
   cleanup_dir base_dir
 
 let test_recover_elapsed_session () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in

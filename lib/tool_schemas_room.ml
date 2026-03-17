@@ -2,6 +2,19 @@ open Types
 
 let schemas : tool_schema list = [
   {
+    name = "masc_init";
+    description = "Initialize MASC room for multi-agent collaboration. Creates .masc/ folder in current project.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent identity: 'claude', 'gemini', or 'codex'");
+        ]);
+      ]);
+    ];
+  };
+  {
     name = "masc_set_room";
     description = "Set the working directory for MASC operations. Use this to work with .masc/ in a different project.";
     input_schema = `Assoc [

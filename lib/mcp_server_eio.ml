@@ -52,6 +52,11 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
   (try Team_session_engine_eio.recover_running_sessions ~sw ~clock
          ~config:state.Mcp_server.room_config
    with exn -> log_mcp_exn ~label:"team_session recovery skipped" exn);
+  (* Reconcile Prometheus active_agents gauge with existing agent files *)
+  (try
+     let masc_dir = Filename.concat state.Mcp_server.room_config.base_path ".masc" in
+     Prometheus.reconcile_active_agents_gauge masc_dir
+   with exn -> log_mcp_exn ~label:"prometheus agent reconciliation skipped" exn);
   state
 
 (** {1 Re-exported Mcp_server Functions} *)

@@ -2,11 +2,13 @@ include Team_session_engine_status
 
 let write_checkpoint (config : Room.config) (session : Team_session_types.session) =
   let now = Time_compat.now () in
+  let active_agents = session_active_agent_names config session ~now in
+  let participant_agents = match active_agents with [] -> session.agent_names | a -> a in
   let backlog = Room.read_backlog config in
   let current_done = Team_session_types.done_counts_from_backlog backlog in
   let deltas =
     Team_session_types.done_delta_by_agent ~baseline:session.baseline_done_counts
-      ~current:current_done ~agents:session.agent_names
+      ~current:current_done ~agents:participant_agents
   in
   let done_total = List.fold_left (fun acc (_, n) -> acc + n) 0 deltas in
   let elapsed = max 0.0 (now -. session.started_at) in
@@ -17,7 +19,6 @@ let write_checkpoint (config : Room.config) (session : Team_session_types.sessio
     else
       min 100.0 (100.0 *. (elapsed /. float_of_int session.duration_seconds))
   in
-  let active_agents = session_active_agent_names config session ~now in
   let checkpoint : Team_session_types.checkpoint =
     {
       ts = now;
@@ -105,6 +106,8 @@ let maybe_add_fallback_task ~(config : Room.config)
   in
   if not should_create then
     session
+  else if session.fallback_task_created > 0 then
+    session  (* already created a fallback task for this session *)
   else
     let title =
       Printf.sprintf "Team session fallback (%s)" session.session_id

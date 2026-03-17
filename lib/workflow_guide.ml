@@ -45,7 +45,7 @@ let after_join ~success =
   if success then
     { next_steps =
         [ s "masc_status" "Check current room state and available tasks";
-          s "masc_claim" "Claim an existing task if available";
+          s "masc_transition" "Claim an existing task if available (action=claim)";
           s "masc_add_task" "Create a new task if none exist" ];
       preconditions = [ "room_set" ];
       common_mistakes =
@@ -60,7 +60,7 @@ let after_join ~success =
 let after_status ~success =
   if success then
     { next_steps =
-        [ s "masc_claim" "Claim a task from the available list";
+        [ s "masc_transition" "Claim a task from the available list (action=claim)";
           s "masc_add_task" "Add a new task if the list is empty";
           s "masc_workflow_guide" "Get personalized guidance for your current state" ];
       preconditions = [ "room_set"; "joined" ];
@@ -91,7 +91,7 @@ let after_claim ~success =
 let after_add_task ~success =
   if success then
     { next_steps =
-        [ s "masc_claim" "Claim the task you just created";
+        [ s "masc_transition" "Claim the task you just created (action=claim)";
           s "masc_status" "Verify the task appears in the list" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes =
@@ -111,7 +111,7 @@ let after_plan_set_task ~success =
       common_mistakes = [] }
   else
     { next_steps =
-        [ s "masc_claim" "Claim a task first";
+        [ s "masc_transition" "Claim a task first (action=claim)";
           s "masc_status" "Verify your claimed task exists" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes =
@@ -121,7 +121,7 @@ let after_heartbeat ~success =
   if success then
     { next_steps =
         [ s "masc_broadcast" "Share progress with other agents";
-          s "masc_done" "Mark task complete when finished" ];
+          s "masc_transition" "Mark task complete when finished (action=done)" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
   else
@@ -134,7 +134,7 @@ let after_done ~success =
   if success then
     { next_steps =
         [ s "masc_status" "Check for remaining tasks";
-          s "masc_claim" "Pick up the next task";
+          s "masc_transition" "Pick up the next task (action=claim)";
           s "masc_leave" "Leave room if all work is complete" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
@@ -210,7 +210,7 @@ let after_team_session_prove ~success =
   if success then
     { next_steps =
         [ s "masc_team_session_stop" "End the session after evidence is collected";
-          s "masc_done" "Mark the underlying task as complete" ];
+          s "masc_transition" "Mark the underlying task as complete (action=done)" ];
       preconditions = [ "room_set"; "joined"; "session_active" ];
       common_mistakes = [] }
   else
@@ -402,7 +402,7 @@ let current_state_guidance ~room_set ~joined ~task_claimed
   else if not task_claimed then
     { next_steps =
         [ s "masc_status" "Check available tasks";
-          s "masc_claim" "Claim an existing task";
+          s "masc_transition" "Claim an existing task (action=claim)";
           s "masc_add_task" "Create a new task if none exist" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes =
@@ -431,6 +431,6 @@ let current_state_guidance ~room_set ~joined ~task_claimed
     { next_steps =
         [ s "masc_heartbeat" "Signal liveness while working";
           s "masc_broadcast" "Share progress with teammates";
-          s "masc_done" "Mark task complete when finished" ];
+          s "masc_transition" "Mark task complete when finished (action=done)" ];
       preconditions = [ "room_set"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ];
       common_mistakes = [] }

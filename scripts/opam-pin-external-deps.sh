@@ -25,6 +25,7 @@ fi
 
 opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
 opam pin add mcp_protocol_eio https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
+opam pin add mcp_protocol_http https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
 opam pin add agent_sdk https://github.com/jeong-sik/oas.git#main -n -y
 opam pin add ocaml-webrtc https://github.com/jeong-sik/ocaml-webrtc.git#main -n -y
 opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y

@@ -25,6 +25,19 @@
   --warm-lavender: #b8a4d6;
   --warm-sage: #8dbd97;
 
+  /* FF Character Sheet theme */
+  --ff-gold: #d4a94b;
+  --ff-gold-bright: #f0d080;
+  --ff-gold-dim: rgba(212, 169, 75, 0.25);
+  --ff-navy: #0d1526;
+  --ff-navy-light: #142040;
+  --ff-border: rgba(212, 169, 75, 0.35);
+  --ff-border-subtle: rgba(212, 169, 75, 0.12);
+  --ff-panel: rgba(13, 21, 38, 0.9);
+  --ff-hp: #3dcc5e;
+  --ff-mp: #4a9ef5;
+  --ff-xp: #d4a94b;
+
   /* Agent status (soft tones) */
   --agent-working: #7ae09a;
   --agent-idle: #b8cae8;

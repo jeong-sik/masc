@@ -2,8 +2,7 @@
 // 4-Layer information architecture: Situation -> Anomaly -> Entity Grid -> Timeline
 
 import { html } from 'htm/preact'
-import { agents, keepers, tasks, shellCounts, providerCapacity, agentActivity, refreshAgentActivity } from '../../store'
-import { useEffect } from 'preact/hooks'
+import { agents, keepers, tasks, shellCounts } from '../../store'
 import { missionSnapshot } from '../../mission-store'
 import { journal } from '../../sse'
 import { navigate } from '../../router'
@@ -14,8 +13,7 @@ import { AgentObservatory } from './agent-observatory'
 import { SessionTriage } from './session-triage'
 import { NarrativeTimeline } from './narrative-timeline'
 import { QuickStats } from './quick-stats'
-import type { TaskBreakdown } from './quick-stats'
-import { DASHBOARD_SURFACES } from '../../config/navigation'
+import type { TaskBreakdown, TaskSource } from './quick-stats'
 
 function pressureClass(ratio: number | null | undefined): string {
   if (ratio == null) return ''
@@ -35,7 +33,6 @@ function keeperHealthClass(status?: string): string {
 }
 
 export function Overview() {
-  useEffect(() => { refreshAgentActivity() }, [])
   const snap = missionSnapshot.value
   const agentList = agents.value
   const keeperList = keepers.value
@@ -51,6 +48,7 @@ export function Overview() {
 
   const agentCount = activeAgents.length > 0 ? activeAgents.length : (counts?.agents ?? 0)
   const taskCount = activeTasks.length > 0 ? activeTasks.length : (counts?.tasks ?? 0)
+  const taskSource: TaskSource = activeTasks.length > 0 ? 'store' : 'cache'
   const keeperCount = keeperList.length > 0 ? keeperList.length : (counts?.keepers ?? 0)
 
   const taskBreakdown: TaskBreakdown = {
@@ -65,8 +63,6 @@ export function Overview() {
   const sessions = snap?.sessions ?? snap?.session_briefs ?? []
   const keeperBriefs = snap?.keeper_briefs ?? []
 
-  const navSurfaces = DASHBOARD_SURFACES.filter(s => s.id !== 'home')
-
   return html`
     <div class="overview-surface">
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
@@ -78,13 +74,15 @@ export function Overview() {
         keeperCount=${keeperCount}
         attentionCount=${attentionCount}
         taskBreakdown=${taskBreakdown}
+        taskSource=${taskSource}
       />
-
-      <${ProviderGauge} />
 
       <div class="overview-main-v2">
         <div class="overview-left-col">
-          <div class="overview-section-label">에이전트 Observatory</div>
+          <div class="overview-section-header">
+            <span class="overview-section-label">에이전트 Observatory</span>
+            <a class="overview-section-link" onClick=${() => navigate('agent-roster')}>전체 보기</a>
+          </div>
           <${AgentObservatory}
             onAgentClick=${(name: string) => navigate('execution', { agent: name })}
           />
@@ -95,7 +93,10 @@ export function Overview() {
           <${SessionTriage} sessions=${sessions} />
 
           ${keeperBriefs.length > 0 ? html`
-            <div class="overview-section-label" style="margin-top: var(--space-md, 16px)">키퍼</div>
+            <div class="overview-section-header" style="margin-top: var(--space-md, 16px)">
+              <span class="overview-section-label">키퍼</span>
+              <a class="overview-section-link" onClick=${() => navigate('keeper-roster')}>전체 보기</a>
+            </div>
             <div class="keeper-cards-v2">
               ${keeperBriefs.map(k => html`
                 <div class="keeper-card-v2 ${keeperHealthClass(k.status)}" key=${k.name}>
@@ -131,92 +132,9 @@ export function Overview() {
 
           <div class="overview-section-label" style="margin-top: var(--space-md, 16px)">최근 활동</div>
           <${NarrativeTimeline} entries=${journal} maxItems=${12} />
-
-          <${AgentActivityPanel} />
         </div>
       </div>
-
-      <nav class="overview-nav-strip">
-        ${navSurfaces.map(surface => html`
-          <button
-            class="overview-nav-btn"
-            key=${surface.id}
-            onClick=${() => navigate(surface.defaultTab)}
-          >
-            <span class="overview-nav-icon">${surface.icon}</span>
-            <span class="overview-nav-label">${surface.label}</span>
-            <span class="overview-nav-desc">${surface.description}</span>
-          </button>
-        `)}
-      </nav>
     </div>
   `
 }
 
-function ProviderGauge() {
-  const cap = providerCapacity.value
-  if (!cap) return null
-
-  const pool = cap.glm_pool
-  const agentCap = cap.agent_capacity
-  const loadPct = pool.total_capacity > 0
-    ? Math.round((pool.current_load / pool.total_capacity) * 100)
-    : 0
-  const loadTone = loadPct < 50 ? 'ok' : loadPct < 80 ? 'warn' : 'bad'
-
-  return html`
-    <div class="mission-stat-grid" style="margin-bottom: var(--space-md, 16px);">
-      <div class="summary-stat-card ${loadTone}">
-        <span>GLM Pool</span>
-        <strong>${pool.current_load}/${pool.total_capacity}</strong>
-        <small>${pool.has_capacity ? 'capacity available' : 'at capacity'}</small>
-      </div>
-      <div class="summary-stat-card">
-        <span>Agent Slots</span>
-        <strong>${agentCap.target_agents}</strong>
-        <small>${agentCap.min_agents}-${agentCap.max_agents} range${agentCap.gardener_enabled ? '' : ' (gardener off)'}</small>
-      </div>
-      ${pool.models.length > 0 ? html`
-        <div class="summary-stat-card">
-          <span>Models</span>
-          <strong>${pool.models.length}</strong>
-          <small>${pool.models.map((m: { model: string }) => m.model).join(', ')}</small>
-        </div>
-      ` : null}
-    </div>
-  `
-}
-
-function relativeTimeShort(ts: number): string {
-  const diff = (Date.now() / 1000) - ts
-  if (diff < 60) return 'just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
-}
-
-function AgentActivityPanel() {
-  const activities = agentActivity.value
-  if (activities.length === 0) return null
-
-  return html`
-    <div style="margin-top: var(--space-md, 16px);">
-      <div class="overview-section-label">에이전트 활동 (24h)</div>
-      <div style="display: flex; flex-direction: column; gap: 6px;">
-        ${activities.slice(0, 8).map(a => html`
-          <div class="mission-activity-row" style="padding: 8px 12px;" key=${a.agent_id}>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <strong style="font-size: 13px;">${a.agent_id}</strong>
-              <span class="command-chip ${a.failure_count > 0 ? 'warn' : 'ok'}" style="font-size: 11px;">
-                ${a.tool_calls} calls
-              </span>
-            </div>
-            <div style="font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 2px;">
-              ${a.success_count} ok / ${a.failure_count} fail · ${relativeTimeShort(a.last_seen)}
-            </div>
-          </div>
-        `)}
-      </div>
-    </div>
-  `
-}

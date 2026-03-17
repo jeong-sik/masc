@@ -10,7 +10,7 @@ import {
   type AvatarPalette,
 } from '../../config/avatar-palettes'
 
-type AvatarSize = 'sm' | 'md' | 'lg'
+type AvatarSize = 'sm' | 'md' | 'lg' | 'xl'
 
 interface AgentAvatarProps {
   name: string
@@ -93,7 +93,7 @@ export function AgentAvatar({
   const palette = paletteForAgent(name)
   const template = templateForAgent(name, traits)
   const grid = PIXEL_TEMPLATES[template]
-  const sizeClass = size === 'sm' ? 'pixel-avatar--sm' : size === 'lg' ? 'pixel-avatar--lg' : ''
+  const sizeClass = size === 'sm' ? 'pixel-avatar--sm' : size === 'lg' ? 'pixel-avatar--lg' : size === 'xl' ? 'pixel-avatar--xl' : ''
   const statusAttr = status ?? 'idle'
   const blockerClass = hasBlocker ? 'pixel-avatar--has-blocker' : ''
   const ringClass = signalRingClass(signalTruth)

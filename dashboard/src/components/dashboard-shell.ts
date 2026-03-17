@@ -1,8 +1,9 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { route, navigate } from '../router'
-import { connected, eventCount } from '../sse'
+import { connected } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
+import { missionSnapshot } from '../mission-store'
 import { Mission } from './mission'
 import { Proof } from './proof'
 import { Command } from './command'
@@ -16,6 +17,8 @@ import { Social } from './social'
 import { Lab } from './lab'
 import { Live } from './live'
 import { Overview } from './overview/overview'
+import { AgentRoster } from './agent-roster'
+import { KeeperRoster } from './keeper-roster'
 import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
 import {
@@ -29,11 +32,20 @@ const buildIdentityOpen = signal(false)
 
 export function ConnectionStatus() {
   const isConnected = connected.value
+  const snap = missionSnapshot.value
+  const attentionCount = snap?.attention_queue?.length ?? 0
+
   return html`
     <div class="connection-status ${isConnected ? 'connected' : 'disconnected'}">
       <span class="status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
       <span class="status-text">${isConnected ? '연결됨' : '재연결 중...'}</span>
-      <span class="event-count">이벤트 ${eventCount.value}</span>
+      ${attentionCount > 0 ? html`
+        <span
+          class="event-count attention-badge"
+          onClick=${() => navigate('home')}
+          style="cursor: pointer;"
+        >주의 ${attentionCount}건</span>
+      ` : null}
     </div>
   `
 }
@@ -181,6 +193,10 @@ export function TabContent() {
       return html`<${Mission} />`
     case 'proof':
       return html`<${Proof} />`
+    case 'agent-roster':
+      return html`<${AgentRoster} />`
+    case 'keeper-roster':
+      return html`<${KeeperRoster} />`
     case 'execution':
       return html`<${Execution} />`
     case 'tools':

@@ -200,7 +200,7 @@ let extract_task_id text =
   seek 0
 
 let supported_execution_action_types =
-  [ "add_task"; "start_operation" ]
+  [ "add_task"; "start_operation"; "set_param" ]
 
 let parse_requested_action args =
   match member "requested_action" args with
@@ -986,13 +986,14 @@ let handle_governance_feed ctx args =
       ] :: !items
     ) human
   end;
-  (* Sort by time (most recent first) — items are already reverse-chronological *)
+  (* Reverse to restore source order (cons reverses each batch) then take *)
+  let all = List.rev !items in
   let rec take n = function
     | [] -> []
     | _ when n <= 0 -> []
     | x :: rest -> x :: take (n - 1) rest
   in
-  let result = take limit !items in
+  let result = take limit all in
   (true, Yojson.Safe.pretty_to_string (`List result))
 
 let handle_runtime_params _ctx _args =

@@ -637,7 +637,7 @@ const runtimeParams = signal<RuntimeParam[]>([])
 const runtimeSurfaces = signal<RuntimeParamsSurface[]>([])
 const runtimeLoading = signal(false)
 
-async function loadRuntimeParams() {
+export async function loadRuntimeParams() {
   runtimeLoading.value = true
   try {
     const data = await fetchRuntimeParams()

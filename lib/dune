@@ -595,6 +595,9 @@
    trpg_harness
    trpg_actor_match
    json_util
+   ;; Autoresearch — Karpathy-inspired autonomous experiment loop
+   autoresearch
+   tool_autoresearch
    ;; Anti-Fake Test Quality Scoring (harness P2)
    anti_fake
 )

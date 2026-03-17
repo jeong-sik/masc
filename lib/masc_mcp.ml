@@ -368,6 +368,10 @@ module Trpg_harness = Trpg_harness
 module Trpg_dm_intent = Trpg_dm_intent
 module Trpg_actor_match = Trpg_actor_match
 
+(* Autoresearch — Karpathy-inspired autonomous experiment loop *)
+module Autoresearch = Autoresearch
+module Tool_autoresearch = Tool_autoresearch
+
 (* OAS Integration — Agent SDK v0.24+ bridge *)
 module Oas_events = Oas_events
 module Oas_checkpoint_bridge = Oas_checkpoint_bridge

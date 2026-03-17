@@ -77,7 +77,18 @@ let load_config_models () : glm_model array option =
       | `Assoc fields -> (
           match List.assoc_opt "models" fields with
           | Some (`List items) ->
-              let models = List.filter_map parse_model_json items in
+              let raw_models = List.filter_map parse_model_json items in
+              (* Reject duplicate model_id entries — pool accounting assumes uniqueness *)
+              let seen = Hashtbl.create (List.length raw_models) in
+              let models = List.filter (fun (m : glm_model) ->
+                if Hashtbl.mem seen m.model_id then begin
+                  Log.Glm_pool.warn "duplicate model_id %s in %s, skipping" m.model_id path;
+                  false
+                end else begin
+                  Hashtbl.replace seen m.model_id ();
+                  true
+                end
+              ) raw_models in
               if models = [] then begin
                 Log.Glm_pool.warn "config %s has no valid models, using hardcoded defaults" path;
                 None

@@ -25,6 +25,10 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 
 일반 작업이든 benchmark든 먼저 이 순서를 맞춘다.
 
+**Quick path**: `masc_start(path="/repo", task_title="My task")` — 1~6번을 한 번에 처리.
+
+**Step-by-step**:
+
 1. `masc_set_room`
    - repo root를 room으로 잡는다.
    - worktree 경로를 줘도 room은 repo-root 기준으로 동작한다.

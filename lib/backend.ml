@@ -720,6 +720,9 @@ module PostgresNative : sig
   (* create_eio requires Caqti-compatible Eio environment (net, clock, mono_clock) *)
   val create_eio : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> config -> (t, error) result
 
+  (** Lightweight pool for a different Eio domain (no schema init, max_size=1). *)
+  val create_eio_readonly : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> config -> (t, error) result
+
   (* Expose Caqti pool for Board_pg and other PG-backed modules *)
   val get_pool : t -> (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t
 
@@ -940,6 +943,22 @@ end = struct
             (match init_result with
              | Error err -> Error (caqti_error_to_masc err)
              | Ok () -> Ok { pool; namespace = cfg.cluster_name; _sw = sw })
+
+  (** Lightweight pool creation for use in a different Eio domain.
+      Skips schema initialization (assumed already done by the main pool).
+      Uses max_size=1 since this is for read-heavy dashboard compute.
+      The caller's [sw] is captured by Caqti, making this pool safe to
+      use from the domain that owns [sw]. *)
+  let[@warning "-32"] create_eio_readonly ~sw ~env (cfg : config) : (t, error) result =
+    match cfg.postgres_url with
+    | None -> Error (ConnectionFailed "PostgreSQL URL not configured")
+    | Some url ->
+        let uri = Uri.of_string url in
+        let pool_config = Caqti_pool_config.create ~max_size:1 () in
+        match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
+        | Error err -> Error (caqti_error_to_masc err)
+        | Ok pool ->
+            Ok { pool; namespace = cfg.cluster_name; _sw = sw }
 
   let close _t = ()
 

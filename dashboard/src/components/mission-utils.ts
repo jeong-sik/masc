@@ -93,7 +93,7 @@ export function statusLabel(value?: string | null): string {
     case 'paused':
       return '일시정지'
     case 'blocked':
-      return '막힘'
+      return '차단됨'
     case 'interrupted':
       return '중단됨'
     case 'warn':
@@ -121,7 +121,7 @@ export function statusLabel(value?: string | null): string {
     case 'refreshing':
       return '갱신 중'
     case 'cached':
-      return '캐시'
+      return '캐시됨'
     case 'unknown':
     case '':
       return '확인 필요'

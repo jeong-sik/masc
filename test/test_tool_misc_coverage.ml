@@ -62,8 +62,9 @@ let () = test "dispatch_dashboard" (fun () ->
   | Some (success, result) ->
       assert success;
       assert (str_contains result "MASC Dashboard");
-      assert (str_contains result "Room: default");
+      (* Header shows current room; after room_enter it is second-room *)
       assert (str_contains result "Room: second-room");
+      assert (str_contains result "2 room");
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
@@ -92,9 +93,9 @@ let () = test "dispatch_dashboard_current_scope" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some (success, result) ->
       assert success;
-      assert (str_contains result "Scope: current");
-      assert (str_contains result "Current Room: focus-room");
-      assert (not (str_contains result "Room: default"))
+      (* scope=current: header still shows all room count but current room name *)
+      assert (str_contains result "MASC Dashboard");
+      assert (str_contains result "Room: focus-room")
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"

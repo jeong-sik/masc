@@ -398,15 +398,11 @@ let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
       ("tool_usage", Tool_unified.summary_report ());
     ]
 
-(** Proactive execution cache.  A background fiber recomputes the
-    execution JSON periodically, so HTTP requests never block on
-    computation.  This avoids the Eio cooperative-scheduling problem
-    where on-demand compute gets starved by other fibers (Guardian,
-    Lodge, SSE), inflating wall-clock time from 60ms to 30s+.
-
-    The HTTP handler reads [_execution_json_ref] immediately (0ms).
-    Parameterized requests (fixture/actor) fall back to on-demand
-    compute with a generous timeout. *)
+(** Executor pool for offloading heavy dashboard compute to a separate
+    OS domain, bypassing Eio cooperative-scheduling starvation.
+    Set via [set_executor_pool] at server startup. *)
+let _executor_pool : Eio.Executor_pool.t option ref = ref None
+let set_executor_pool pool = _executor_pool := Some pool
 
 let _execution_json_ref : Yojson.Safe.t ref =
   ref (`Assoc [
@@ -415,27 +411,47 @@ let _execution_json_ref : Yojson.Safe.t ref =
     ("message", `String "Execution data is being computed. Refresh in a few seconds.");
   ])
 
-let _execution_refresh_interval_s = 120.0
+let _execution_refresh_interval_s = 60.0
 
-(** Start the proactive execution refresh loop.  Call once after server
-    state is initialized.  The loop runs forever, recomputing every
-    [_execution_refresh_interval_s] seconds. *)
+(** Start the proactive execution refresh loop.  When an Executor_pool
+    is available, each refresh runs in a pool domain with a domain-local
+    Caqti pool (the main domain's Caqti pool is domain-bound due to
+    Switch capture in release).  Falls back to in-domain compute. *)
 let start_execution_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   Eio.Fiber.fork ~sw (fun () ->
-    Printf.eprintf "[INFO] Dashboard: starting execution proactive refresh loop.\n%!";
+    Printf.eprintf "[INFO] Dashboard: starting execution refresh loop.\n%!";
     let rec loop () =
+      let t0 = Time_compat.now () in
       (try
         let json =
-          Dashboard_execution.json ~config ~sw ~clock ~proc_mgr ()
+          match !_executor_pool with
+          | Some pool ->
+            (* Pool domain: create domain-local Caqti pool to avoid
+               cross-domain Switch crash in Caqti release. *)
+            Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
+              Eio.Switch.run @@ fun pool_sw ->
+              match Room_utils_backend_setup.with_domain_local_pg_backend ~sw:pool_sw config with
+              | Some domain_config ->
+                Dashboard_execution.json ~config:domain_config ~sw:pool_sw ~clock ~proc_mgr ()
+              | None ->
+                (* Cannot safely use main-domain PG pool in a different domain
+                   (Switch is domain-bound). Raise to trigger the outer catch. *)
+                failwith "domain-local PG backend creation failed; skipping pool refresh")
+          | None ->
+            Dashboard_execution.json ~config ~sw ~clock ~proc_mgr ()
         in
         _execution_json_ref := json;
-        Printf.eprintf "[INFO] Dashboard: execution cache refreshed (%.0fB).\n%!"
+        let dt = Time_compat.now () -. t0 in
+        Printf.eprintf "[INFO] Dashboard: execution refreshed (%.0fB, %.1fs, %s).\n%!"
           (Float.of_int (String.length (Yojson.Safe.to_string json)))
+          dt
+          (if !_executor_pool <> None then "pool" else "in-domain")
       with exn ->
-        Printf.eprintf "[WARN] Dashboard: execution refresh failed: %s\n%!"
-          (Printexc.to_string exn));
+        let dt = Time_compat.now () -. t0 in
+        Printf.eprintf "[WARN] Dashboard: execution refresh failed (%.1fs): %s\n%!"
+          dt (Printexc.to_string exn));
       Eio.Time.sleep clock _execution_refresh_interval_s;
       loop ()
     in
@@ -446,17 +462,18 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
   match fixture, actor with
   | None, None ->
-    (* Fast path: return proactively cached value immediately. *)
+    (* Default: return proactively cached value immediately (0ms). *)
     !_execution_json_ref
   | _ ->
-    (* Parameterized request (fixture/actor): on-demand with short TTL. *)
+    (* Parameterized requests (fixture/actor): on-demand with SWR cache.
+       These are rare (test fixtures, actor-specific views). *)
     let cache_key =
       Printf.sprintf "execution:%s:%s"
         (Option.value ~default:"" actor)
         (Option.value ~default:"" fixture)
     in
-    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:10.0
-      ~clock ~timeout_sec:10.0 (fun () ->
+    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
+      ~clock ~timeout_sec:120.0 (fun () ->
       Dashboard_execution.json ?actor ?fixture
         ~config:state.Mcp_server.room_config ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr ())

@@ -31,8 +31,9 @@ type model_spec = {
 
 (** {1 Message Types} *)
 
-(** Role in a conversation. *)
-type role = System | User | Assistant | Tool
+(** Role in a conversation.
+    Unified with {!Agent_sdk.Types.role} via {!Llm_provider.Types}. *)
+type role = Agent_sdk.Types.role = System | User | Assistant | Tool
 
 (** A single message in a conversation. *)
 type message = {
@@ -98,7 +99,8 @@ val normalize_request : completion_request -> completion_request
 (** String representation of provider. *)
 val string_of_provider : provider -> string
 
-(** String representation of role. *)
+(** String representation of role.
+    Delegates to {!Llm_provider.Types.role_to_string}. *)
 val string_of_role : role -> string
 
 (** {1 Built-in Model Specs} *)

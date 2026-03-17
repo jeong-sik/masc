@@ -57,7 +57,9 @@ let entry_of_masc_spec
         Error (Agent_sdk.Error.Internal msg));
     role }
 
-(** Build an OAS swarm config from MASC agent specs. *)
+(** Build an OAS swarm config from MASC agent specs.
+    [~include_tool_catalog] injects available MASC tool names into the prompt
+    so bridge agents can reference them when requesting actions. *)
 let swarm_config
     ~prompt
     ~(specs : (string * ST.agent_role * Llm_client_core.model_spec) list)
@@ -67,11 +69,26 @@ let swarm_config
     ?timeout_sec
     ?(budget : ST.resource_budget =
         { max_total_tokens = None; max_total_time_sec = None; max_total_api_calls = None })
+    ?(include_tool_catalog = false)
     ()
   : ST.swarm_config =
   let entries = List.map (fun (name, role, spec) ->
     entry_of_masc_spec ~name ~role spec
   ) specs in
+  let prompt =
+    if include_tool_catalog then
+      let tool_names =
+        Agent_tool_surfaces.build_tool_catalog ~role:"autonomous" ()
+      in
+      let catalog_section =
+        Printf.sprintf
+          "\n\nAvailable MASC tools (use masc_tool_help for details):\n%s"
+          (String.concat "\n"
+             (List.map (fun n -> "- " ^ n) tool_names))
+      in
+      prompt ^ catalog_section
+    else prompt
+  in
   { ST.entries; mode; convergence; max_parallel; prompt; timeout_sec; budget }
 
 (* ── OAS → MASC conversion ──────────────────────────────────────── *)

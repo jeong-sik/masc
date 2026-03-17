@@ -521,3 +521,90 @@ let local_worker_tool_schemas ?names () :
              (String.concat ", " missing))
       else
         Ok schemas
+
+(** Admin tool names that should be excluded from autonomous agents. *)
+let admin_tool_names : string list =
+  [
+    "masc_tool_admin_snapshot";
+    "masc_operator_snapshot";
+    "masc_operator_action";
+    "masc_operator_confirm";
+    "masc_team_session_stop";
+    "masc_team_session_finalize";
+    "masc_gardener_execute_spawn";
+    "masc_gardener_execute_retire";
+    "masc_gardener_reset_circuit";
+  ]
+
+(** Coordination tool names for coordinators and fleet leaders. *)
+let coordination_tool_names : string list =
+  [
+    "masc_status";
+    "masc_tasks";
+    "masc_add_task";
+    "masc_broadcast";
+    "masc_join";
+    "masc_leave";
+    "masc_who";
+    "masc_heartbeat";
+    "masc_messages";
+    "masc_board_list";
+    "masc_board_post";
+    "masc_board_comment";
+    "masc_board_vote";
+    "masc_board_get";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_team_session_start";
+    "masc_team_session_status";
+    "masc_team_session_events";
+    "masc_team_session_report";
+    "masc_team_session_list";
+    "masc_spawn";
+    "masc_portal_open";
+    "masc_portal_send";
+    "masc_portal_status";
+  ]
+
+(** Execution tool names for worker agents. *)
+let execution_tool_names : string list =
+  [
+    "masc_heartbeat";
+    "masc_memento_mori";
+    "masc_team_session_step";
+    "masc_team_session_status";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_broadcast";
+    "masc_code_search";
+    "masc_code_symbols";
+    "masc_code_read";
+    "masc_run_init";
+    "masc_run_log";
+    "masc_run_deliverable";
+    "masc_run_get";
+    "masc_tool_help";
+  ]
+
+(** Build a role-based tool catalog from the full registered tool set.
+    [role] determines which subset of tools the agent sees:
+    - ["worker"]: execution-focused tools
+    - ["coordinator"]: coordination and orchestration tools
+    - [_]: all non-admin tools (autonomous default)
+    Returns tool names (unprefixed). *)
+let build_tool_catalog ~(role : string) () : string list =
+  let all_names =
+    spawned_agent_public_tool_names @ local_worker_public_tool_names
+    |> unique_preserve_order
+  in
+  let filtered =
+    match role with
+    | "worker" -> execution_tool_names
+    | "coordinator" | "fleet_leader" -> coordination_tool_names
+    | _ ->
+        (* autonomous: all except admin *)
+        List.filter
+          (fun name -> not (List.mem name admin_tool_names))
+          all_names
+  in
+  unique_preserve_order filtered

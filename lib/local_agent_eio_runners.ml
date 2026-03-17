@@ -63,8 +63,22 @@ let run_worker_oas ~sw ~base_path ~worker_name
             | Team_session_types.Observe_only ->
                 "Readonly worker protocol: use file_read and shell_exec for \
                  inspection, but do not modify files."
+            | Team_session_types.Autonomous ->
+                "You have full read and write access. Choose the approach that \
+                 best accomplishes your task. Use tools to verify your work. \
+                 Prefer reading code before modifying it, and run tests or \
+                 builds to confirm changes are correct."
+          in
+          let team_ctx_section =
+            match team_session_id with
+            | Some sid ->
+                let ctx = Team_context.build ~base_path ~team_session_id:sid in
+                let section = Team_context.to_prompt_section ctx in
+                if section = "" then "" else "\n\n" ^ section
+            | None -> ""
           in
           String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
+          ^ team_ctx_section
         in
         let* () =
           save_worker_meta ~base_path ~team_session_id ~worker_name meta
@@ -149,6 +163,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
             match execution_scope with
             | Team_session_types.Limited_code_change -> 20
             | Team_session_types.Observe_only -> 12
+            | Team_session_types.Autonomous -> 30
           in
           let max_turns =
             match max_turns with
@@ -392,6 +407,10 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                   | Team_session_types.Observe_only ->
                       "Readonly worker protocol: use file_read and shell_exec \
                        for inspection, but do not modify files."
+                  | Team_session_types.Autonomous ->
+                      "You have full read and write access. Choose the approach \
+                       that best accomplishes your task. Use tools to verify \
+                       your work."
                 in
                 String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
               in
@@ -401,7 +420,8 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                 | None ->
                     (match meta.execution_scope with
                     | Team_session_types.Limited_code_change -> 20
-                    | Team_session_types.Observe_only -> 8)
+                    | Team_session_types.Observe_only -> 8
+                    | Team_session_types.Autonomous -> 30)
               in
               let thinking_enabled =
                 Option.value ~default:false meta.thinking_enabled

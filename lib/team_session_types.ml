@@ -13,6 +13,7 @@ type session_status =
 type execution_scope =
   | Observe_only
   | Limited_code_change
+  | Autonomous
 
 type wait_mode =
   | Wait_background
@@ -226,9 +227,11 @@ let status_of_string = function
 let execution_scope_to_string = function
   | Observe_only -> "observe_only"
   | Limited_code_change -> "limited_code_change"
+  | Autonomous -> "autonomous"
 
 let execution_scope_of_string = function
   | "observe_only" -> Observe_only
+  | "autonomous" -> Autonomous
   | _ -> Limited_code_change
 
 let wait_mode_to_string = function

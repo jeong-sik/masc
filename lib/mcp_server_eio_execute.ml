@@ -494,6 +494,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     worker_runner = None;
     clock = Some clock;
   } in
+  let simple_ctx_autoresearch : Tool_autoresearch.context = {
+    base_path = config.base_path;
+    agent_name = Some agent_name;
+    start_operation = None;     (* TODO: wire to Command_plane_v2 operation launcher *)
+    start_team_session = None;  (* TODO: wire to team_session swarm launcher *)
+  } in
   let simple_ctx_perpetual : Tool_perpetual.context = {
     agent_name;
     start_loop = Some (fun loop_state loop_config ->
@@ -631,6 +637,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         ~handler:(fun ~name ~args -> Tool_keeper.dispatch simple_ctx_keeper ~name ~args);
       reg ~schemas:Tool_trpg.schemas
         ~handler:(fun ~name ~args -> Tool_trpg.dispatch simple_ctx_trpg ~name ~args);
+      reg ~schemas:Tool_autoresearch.schemas
+        ~handler:(fun ~name ~args -> Tool_autoresearch.dispatch simple_ctx_autoresearch ~name ~args);
       reg ~schemas:Tool_agent_timeline.schemas
         ~handler:(fun ~name ~args -> Tool_agent_timeline.dispatch simple_ctx_agent_timeline ~name ~args);
       (* B-0a: newly registered modules with domain schema files *)
@@ -782,6 +790,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_mdal.dispatch simple_ctx_mdal ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_autoresearch.dispatch simple_ctx_autoresearch ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_trpg.dispatch simple_ctx_trpg ~name ~args:arguments with

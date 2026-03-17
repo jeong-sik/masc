@@ -469,6 +469,8 @@
    validation
    circuit_breaker
    backoff
+   shutdown
+   supervisor
    audit_log
    build_identity
   voice_config

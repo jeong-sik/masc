@@ -112,9 +112,14 @@ export function setupSSEReaction(): () => void {
       scheduleRefresh('board', refreshBoard)
     }
 
-    // Governance events
-    if (event.type.startsWith('decision_')) {
-      scheduleRefresh('governance', () => _refreshGovernanceFn?.())
+    // Governance events (including param changes from governance enforcement)
+    if (event.type.startsWith('decision_') || event.type === 'governance_param_changed') {
+      scheduleRefresh('governance', async () => {
+        _refreshGovernanceFn?.()
+        // Also refresh runtime params panel so it reflects param changes immediately
+        const { loadRuntimeParams } = await import('./components/governance')
+        loadRuntimeParams()
+      })
     }
 
     // MDAL events

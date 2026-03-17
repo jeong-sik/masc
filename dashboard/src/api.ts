@@ -638,6 +638,33 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
   })
 }
 
+export interface RuntimeParam {
+  key: string
+  current: unknown
+  default: unknown
+  has_override: boolean
+}
+
+export interface RuntimeParamsSurface {
+  id: string
+  description: string
+  risk: string
+  param_keys: string[]
+}
+
+export interface RuntimeParamsResponse {
+  parameters: RuntimeParam[]
+  surfaces: RuntimeParamsSurface[]
+}
+
+export function fetchRuntimeParams(): Promise<RuntimeParamsResponse> {
+  return get('/api/v1/governance/params')
+}
+
+export function fetchGovernanceFeed(filter = 'decisions', limit = 20): Promise<unknown[]> {
+  return get(`/api/v1/governance/feed?filter=${filter}&limit=${limit}`)
+}
+
 export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
   return get('/api/v1/dashboard/semantics')
 }

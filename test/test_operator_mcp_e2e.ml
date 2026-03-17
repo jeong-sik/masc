@@ -365,9 +365,10 @@ let extract_tool_payload_json label json =
     fail (Printf.sprintf "%s tool payload invalid JSON: %s\ntext=%s" label err text)
 
 let extract_nickname_from_join_result result =
+  (* Try "  Nickname: <nick>" line (first-join format) *)
   let prefix = "  Nickname: " in
   let lines = String.split_on_char '\n' result in
-  match
+  let from_nickname_line =
     List.find_map
       (fun line ->
         if String.length line >= String.length prefix
@@ -379,7 +380,8 @@ let extract_nickname_from_join_result result =
         else
           None)
       lines
-  with
+  in
+  match from_nickname_line with
   | Some nickname when nickname <> "" -> nickname
   | _ ->
       (* Handle "already in room" format: "... <nickname> already in room ..." *)

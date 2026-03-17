@@ -157,7 +157,9 @@ let save_handover ~fs config (h : handover_record) : (unit, string) result =
     let path = Eio.Path.(fs / file) in
     Eio.Path.save ~create:(`Or_truncate 0o600) path (Yojson.Safe.pretty_to_string json);
     Ok ()
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
     Error (Printf.sprintf "Failed to save handover: %s" (Printexc.to_string exn))
 
 (** Load handover from filesystem *)

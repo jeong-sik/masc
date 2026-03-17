@@ -456,13 +456,26 @@ let start_execution_refresh_loop ~state ~sw ~clock =
     in
     loop ())
 
-let dashboard_execution_http_json ~state:_ ~sw:_ ~clock:_ request =
-  let _fixture = query_param request "fixture" in
-  let _actor = operator_actor_hint request in
-  (* Always return proactively cached value immediately.
-     With Executor_pool, the cache is refreshed every 60s in a separate
-     OS domain with ~60ms latency instead of 30s+ fiber starvation. *)
-  !_execution_json_ref
+let dashboard_execution_http_json ~state ~sw ~clock request =
+  let fixture = query_param request "fixture" in
+  let actor = operator_actor_hint request in
+  match fixture, actor with
+  | None, None ->
+    (* Default: return proactively cached value immediately (0ms). *)
+    !_execution_json_ref
+  | _ ->
+    (* Parameterized requests (fixture/actor): on-demand with SWR cache.
+       These are rare (test fixtures, actor-specific views). *)
+    let cache_key =
+      Printf.sprintf "execution:%s:%s"
+        (Option.value ~default:"" actor)
+        (Option.value ~default:"" fixture)
+    in
+    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
+      ~clock ~timeout_sec:120.0 (fun () ->
+      Dashboard_execution.json ?actor ?fixture
+        ~config:state.Mcp_server.room_config ~sw ~clock
+        ~proc_mgr:state.Mcp_server.proc_mgr ())
 
 let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =

@@ -3,6 +3,7 @@ open Test_tool_team_session_support
 
 let test_prove_strong_requires_additional_evidence () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -51,6 +52,7 @@ let test_prove_strong_requires_additional_evidence () =
 
 let test_dispatch_unknown () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -66,6 +68,7 @@ let test_dispatch_unknown () =
 
 let test_unauthorized_session_access () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -161,6 +164,7 @@ let test_unauthorized_session_access () =
 
 let test_final_done_delta_snapshot_stable () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -233,6 +237,7 @@ let test_final_done_delta_snapshot_stable () =
 
 let test_verify_trace_uses_worker_run_raw_trace () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -281,6 +286,7 @@ let test_verify_trace_uses_worker_run_raw_trace () =
 
 let test_verify_trace_reports_summary_only_without_checkpoint () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -319,6 +325,7 @@ let test_verify_trace_reports_summary_only_without_checkpoint () =
 
 let test_verify_trace_reports_summary_only_when_direct_evidence_missing () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -358,6 +365,7 @@ let test_verify_trace_reports_summary_only_when_direct_evidence_missing () =
 
 let test_delegate_rejects_not_ready_worker_with_guidance () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in

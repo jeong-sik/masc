@@ -3,6 +3,7 @@ open Test_tool_team_session_support
 
 let test_recover_orphan_session () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -105,6 +106,7 @@ let test_read_events_limit () =
 
 let test_list_and_compare () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -171,6 +173,7 @@ let test_list_and_compare () =
 
 let test_turn_events_and_prove () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -305,6 +308,7 @@ let test_turn_events_and_prove () =
 
 let test_step_plain_turn_matches_legacy_turn () =
   Eio_main.run @@ fun env ->
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in

@@ -264,5 +264,16 @@ let llm_cache_metrics_json () =
       ("hit_rate", `Float hit_rate);
     ]
 
+(** Reconcile active_agents gauge with existing agent files on disk.
+    Call after Room/server initialization to sync Prometheus state. *)
+let reconcile_active_agents_gauge masc_dir =
+  let agents_dir = Filename.concat masc_dir "agents" in
+  if Sys.file_exists agents_dir && Sys.is_directory agents_dir then
+    let files = Sys.readdir agents_dir in
+    let count = Array.fold_left (fun acc f ->
+      if Filename.check_suffix f ".json" then acc + 1 else acc
+    ) 0 files in
+    set_active_agents count
+
 (** Initialize on module load *)
 let () = init ()

@@ -181,7 +181,7 @@ let list_active ?(within_seconds = 300.0) () =
 
 (** {1 Cleanup} *)
 
-(** Clean up stale session mappings *)
+(** Clean up stale session mappings and resolved-name cache entries *)
 let cleanup_stale_sessions () =
   match get_registry () with
   | Error _ -> 0
@@ -193,7 +193,12 @@ let cleanup_stale_sessions () =
         | None -> to_remove := sid :: !to_remove
         | Some _ -> ()
       ) session_identity_map;
-      List.iter (fun sid -> Hashtbl.remove session_identity_map sid) !to_remove;
+      List.iter (fun sid ->
+        Hashtbl.remove session_identity_map sid;
+        (* P2 fix: evict resolved-name cache for stale sessions *)
+        Eio.Mutex.use_rw ~protect:true resolved_names_lock (fun () ->
+          Hashtbl.remove resolved_names sid)
+      ) !to_remove;
       List.length !to_remove
     )
 
@@ -209,5 +214,10 @@ let unregister session_key =
       Hashtbl.iter (fun sid sk ->
         if sk = session_key then to_remove := sid :: !to_remove
       ) session_identity_map;
-      List.iter (fun sid -> Hashtbl.remove session_identity_map sid) !to_remove
+      List.iter (fun sid ->
+        Hashtbl.remove session_identity_map sid;
+        (* P2 fix: evict resolved-name cache *)
+        Eio.Mutex.use_rw ~protect:true resolved_names_lock (fun () ->
+          Hashtbl.remove resolved_names sid)
+      ) !to_remove
     )

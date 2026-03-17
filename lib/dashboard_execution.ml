@@ -150,7 +150,7 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
       in
       Eio.Fiber.yield ();
       let digest_json =
-        match Operator_control.digest_json ~actor:effective_actor ctx with
+        match Operator_control.digest_json ~actor:effective_actor ~sessions ctx with
         | Ok json -> json
         | Error message ->
             `Assoc

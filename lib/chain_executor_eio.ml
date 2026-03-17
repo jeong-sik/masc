@@ -836,7 +836,7 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                   | Some p -> Printf.sprintf "%s\n\nOutput to evaluate:\n%s" p sim_output
                   | None -> Printf.sprintf "Rate this output from 0.0 to 1.0:\n%s" sim_output
                 in
-                (match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
+                (match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt ?tools:None () with
                  | Ok s ->
                      let raw = Safe_parse.float ~context:"llm_judge" ~default:0.5 (String.trim s) in
                      Float.min 1.0 (Float.max 0.0 raw)
@@ -879,7 +879,7 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                     "Rate this code/test quality from 0.0 to 1.0. Check for: fake tests, missing assertions, incomplete coverage.\n\n%s"
                     sim_output
                   in
-                  match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
+                  match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt ?tools:None () with
                   | Ok s -> Safe_parse.float ~context:"anti_fake:llm" ~default:0.5 (String.trim s)
                   | Error _ -> 0.5
                 in
@@ -1775,7 +1775,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           "Evaluate the following output for '%s' metric. Return ONLY a number between 0.0 and 1.0:\n\n%s"
           goal_metric output
         in
-        let result = exec_fn ~model:"gemini" ?system:None ~prompt:prompt ?tools:None () in
+        let result = exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt:prompt ?tools:None () in
         (match result with
          | Ok score_str ->
              (try Some (float_of_string (String.trim score_str))
@@ -1884,7 +1884,7 @@ and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       | Some p -> Printf.sprintf "%s\n\nCandidate output:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
       | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
     in
-    let result = exec_fn ~model:"gemini" ?system:None ~prompt:prompt ?tools:None () in
+    let result = exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt:prompt ?tools:None () in
     match result with
     | Ok score_str ->
         (* Extract float from response *)
@@ -2018,7 +2018,7 @@ Reply with ONLY a number between 0.0 and 1.0:|}
                 (String.sub output 0 (min 1500 (String.length output)))
               in
               let llm_score =
-                match exec_fn ~model:"gemini" ?system:None ~prompt:llm_prompt ?tools:None () with
+                match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt:llm_prompt ?tools:None () with
                 | Ok score_str ->
                     (try float_of_string (String.trim score_str) *. 0.5
                      with Failure _ -> 0.25)
@@ -2123,7 +2123,7 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           | Some p -> Printf.sprintf "%s\n\nOutput to evaluate:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
           | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
         in
-        (match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
+        (match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt ?tools:None () with
          | Ok score_str ->
              let cleaned = String.trim score_str in
              (try min 1.0 (max 0.0 (float_of_string cleaned))
@@ -2162,7 +2162,7 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       "The following output scored %.2f out of 1.0 for quality. Provide specific, actionable feedback on how to improve it:\n\n%s\n\nProvide 2-3 concrete suggestions for improvement:"
       score output
     in
-    match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
+    match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt ?tools:None () with
     | Ok feedback -> feedback
     | Error _ -> "Please improve the quality and accuracy of the output."
   in

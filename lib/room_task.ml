@@ -656,6 +656,24 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
       in
       let eligible = List.filter (fun t -> not (List.mem t.id all_excluded)) unclaimed in
 
+      (* Helper: clear agent current_task and reset status after auto-release
+         when no replacement task can be claimed. *)
+      let clear_agent_state_after_release () =
+        match released_task_id with
+        | Some _ ->
+            let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
+            if Sys.file_exists agent_file then begin
+              let json = read_json config agent_file in
+              match agent_of_yojson json with
+              | Ok agent ->
+                  let updated = { agent with status = Active; current_task = None } in
+                  write_json config agent_file (agent_to_yojson updated)
+              | Error msg ->
+                  Log.Misc.error "agent state clear failed: %s" msg
+            end
+        | None -> ()
+      in
+
       match unclaimed, eligible with
       | [], _ ->
           (* Even if we released a task, there may be nothing else to claim.
@@ -669,6 +687,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
                } in
                write_backlog config new_backlog
            | None -> ());
+          clear_agent_state_after_release ();
           Claim_next_no_unclaimed
       | _ :: _, [] ->
           (match released_task_id with
@@ -680,6 +699,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
                } in
                write_backlog config new_backlog
            | None -> ());
+          clear_agent_state_after_release ();
           Claim_next_no_eligible { excluded_count = List.length exclude_task_ids }
       | _ :: _, task :: _ ->
           (* Claim this task *)

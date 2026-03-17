@@ -128,6 +128,7 @@ let test_worktrees_section_empty () =
   cleanup_dir dir
 
 let test_lodge_status_json_has_runtime_fields () =
+  Eio_main.run @@ fun _env ->
   let json = Lib.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
   let open Yojson.Safe.Util in
   let has_key key =

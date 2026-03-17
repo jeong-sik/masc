@@ -14,6 +14,11 @@ val get_or_create_identity : ?mcp_session_id:string -> Yojson.Safe.t -> Agent_id
 val get_by_name : string -> Agent_identity.t option
 val get_by_session : string -> Agent_identity.t option
 
+(** {1 Resolved Agent Name Cache} *)
+
+val get_resolved_name : string -> string option
+val set_resolved_name : string -> string -> unit
+
 (** {1 Statistics} *)
 
 val active_count : ?within_seconds:float -> unit -> int

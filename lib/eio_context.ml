@@ -7,6 +7,7 @@ type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
 let current_net : eio_net option ref = ref None
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+let current_mono_clock : Eio.Time.Mono.ty Eio.Resource.t option ref = ref None
 let current_sw : Eio.Switch.t option ref = ref None
 let net_initialized : bool ref = ref false
 let global_ctx_mutex = Eio.Mutex.create ()
@@ -19,6 +20,16 @@ let set_net net =
 let set_clock clock =
   Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
       current_clock := Some clock)
+
+let set_mono_clock mc =
+  Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->
+      current_mono_clock := Some mc)
+
+let get_mono_clock () =
+  Eio.Mutex.use_ro global_ctx_mutex (fun () ->
+      match !current_mono_clock with
+      | Some mc -> mc
+      | None -> invalid_arg "Eio mono_clock not initialized")
 
 let set_switch sw =
   Eio.Mutex.use_rw ~protect:true global_ctx_mutex (fun () ->

@@ -292,6 +292,18 @@ let augment_managed_units units agents =
       else
         units
     in
+    (* BUG-002: Preserve existing leader if still live, instead of always
+       picking the first alphabetically sorted name. *)
+    let existing_company_leader =
+      match List.find_opt (fun (u : unit_record) -> u.kind = Company) units with
+      | Some u -> u.leader_id
+      | None -> None
+    in
+    let pick_leader_stable ~existing_leader candidates =
+      match existing_leader with
+      | Some leader when List.mem leader candidates -> Some leader
+      | _ -> List.nth_opt candidates 0
+    in
     let root_units =
       if roots_need_runtime_root then
         [
@@ -300,7 +312,7 @@ let augment_managed_units units agents =
             label = "Runtime Company";
             kind = Company;
             parent_unit_id = None;
-            leader_id = List.nth_opt live_names 0;
+            leader_id = pick_leader_stable ~existing_leader:existing_company_leader live_names;
             roster = live_names;
             capability_profile = [];
             policy = default_policy Company;
@@ -336,13 +348,18 @@ let augment_managed_units units agents =
         []
       else
         let squad_id = "squad-unassigned" in
+        let existing_squad_leader =
+          match List.find_opt (fun (u : unit_record) -> u.unit_id = squad_id) units with
+          | Some u -> u.leader_id
+          | None -> None
+        in
         let squad =
           {
             unit_id = squad_id;
             label = "Unassigned Squad";
             kind = Squad;
             parent_unit_id = Some fallback_parent_id;
-            leader_id = List.nth_opt unassigned 0;
+            leader_id = pick_leader_stable ~existing_leader:existing_squad_leader unassigned;
             roster = unassigned;
             capability_profile = [ "unassigned" ];
             policy = default_policy Squad;
@@ -850,7 +867,12 @@ let rec build_tree_json ~child_map ~unit_lookup ~agent_statuses ~live_agents ~op
           ])
 
 let topology_units config =
-  let agents = Room.get_agents_raw config in
+  (* BUG-012: Filter to only actually-joined agents to prevent phantom entries *)
+  let agents =
+    Room.get_agents_raw config
+    |> List.filter (fun (agent : Types.agent) ->
+         try Room.is_agent_joined config ~agent_name:agent.name with _ -> false)
+  in
   let managed_units = read_units config in
   let normalized_units = augment_managed_units managed_units agents in
   let source =

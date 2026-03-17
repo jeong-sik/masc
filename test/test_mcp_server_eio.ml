@@ -1045,6 +1045,8 @@ let test_execute_tool_hidden_active_utility_direct_call () =
   ignore (Masc_mcp.Room.init state.room_config ~agent_name:(Some "test-agent"));
   let room_path = Masc_mcp.Room.masc_dir state.room_config in
   let _ = Config.switch_mode room_path Mode.Full in
+  (* Room.init required: vote_create calls ensure_initialized *)
+  ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
 
   let (ok_post, post_msg) =
     Mcp_eio.execute_tool_eio ~sw ~clock state

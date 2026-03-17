@@ -6,6 +6,12 @@
  (_
   (env-vars
    (MASC_STORAGE_TYPE filesystem)
+   ; Unset all PostgreSQL URL env vars to prevent auto-detect PG backend.
+   ; postgres_url_from_env() checks these 4 in cascade order.
+   (MASC_POSTGRES_URL "")
+   (DATABASE_URL "")
+   (SUPABASE_DB_URL "")
+   (SB_PG_URL "")
    ; Avoid non-deterministic external network calls during unit tests.
    (GRAPHQL_API_KEY "")
    (ZAI_API_KEY ""))))

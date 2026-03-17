@@ -7,8 +7,11 @@ open Masc_mcp
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
-(** Check if PG is available *)
-let pg_url () = Sys.getenv_opt "MASC_POSTGRES_URL"
+(** Check if PG is available (empty string treated as absent) *)
+let pg_url () =
+  match Sys.getenv_opt "MASC_POSTGRES_URL" with
+  | Some s when String.trim s <> "" -> Some s
+  | _ -> None
 
 (** {1 Helper: run test inside Eio with PG pool} *)
 

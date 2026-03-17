@@ -205,10 +205,10 @@ let test_unified_backend () =
       | Ok v -> Alcotest.(check string) "unified get" "unified value" v
       | Error _ -> Alcotest.fail "unified get failed")
 
-(** Test Postgres backend if URL provided *)
+(** Test Postgres backend if URL provided (empty string treated as absent) *)
 let test_postgres_backend () =
   match Sys.getenv_opt "MASC_POSTGRES_URL" with
-  | None -> () (* Skip if no Postgres URL *)
+  | None | Some "" -> () (* Skip if no Postgres URL *)
   | Some url ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->

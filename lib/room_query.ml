@@ -88,6 +88,26 @@ let get_agents_raw_in_room config room_id =
           | Ok _ | Error _ -> None
         )
 
+(** Like [get_agents_raw_in_room] but includes Inactive agents.
+    Useful for gardener backlog-triage enrollment where inactive agents
+    should still participate as a fallback. *)
+let get_all_agents_in_room config room_id =
+  if not (root_is_initialized config) then []
+  else
+    let agents_path = agents_dir_in_room config room_id in
+    if not (Sys.file_exists agents_path) then []
+    else
+      Sys.readdir agents_path
+      |> Array.to_list
+      |> List.filter (fun name -> Filename.check_suffix name ".json")
+      |> List.filter_map (fun name ->
+          let path = Filename.concat agents_path name in
+          let json = read_json config path in
+          match agent_of_yojson json with
+          | Ok agent -> Some agent
+          | Error _ -> None
+        )
+
 (** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents.
     Matches assignees by exact name or agent-type prefix (e.g. "claude" matches "claude-xxx").
     Agents with Inactive status are excluded from the active set. *)

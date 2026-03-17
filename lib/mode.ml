@@ -150,7 +150,8 @@ let tool_category tool_name =
 
   (* ── Core_Room: room entry/exit, essential coordination ── *)
   | "masc_start" | "masc_set_room" | "masc_init" | "masc_join" | "masc_leave"
-  | "masc_room_create" | "masc_room_enter" | "masc_rooms_list" -> Core_Room
+  | "masc_room_create" | "masc_room_enter" | "masc_rooms_list"
+  | "masc_discover_tools" -> Core_Room
 
   (* ── Core_Task: task lifecycle ── *)
   | "masc_add_task" | "masc_batch_add_tasks"

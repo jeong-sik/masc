@@ -61,8 +61,6 @@ let safe_exec args =
   | Unix.WEXITED 0, output -> (true, output)
   | _, output -> (false, if output = "" then "Command failed" else output)
 
-let schemas = Tool_schemas_inline.schemas
-
 (** Dispatch a tool call.
     Returns [Some (success, message)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)
@@ -939,5 +937,39 @@ Call masc_listen again to continue listening.
       ] in
       Some (true, Yojson.Safe.pretty_to_string response)
 
+
+  | "masc_discover_tools" ->
+      let query = String.lowercase_ascii (arg_get_string "query" "") in
+      let limit = arg_get_int "limit" 20 in
+      if query = "" then
+        Some (false, "query is required")
+      else
+        let all_schemas = Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false () in
+        let words = String.split_on_char ' ' query |> List.filter (fun w -> String.length w > 0) in
+        let matches =
+          all_schemas
+          |> List.filter (fun (schema : Types.tool_schema) ->
+                 let name_l = String.lowercase_ascii schema.name in
+                 let desc_l = String.lowercase_ascii schema.description in
+                 let haystack = name_l ^ " " ^ desc_l in
+                 words |> List.exists (fun w ->
+                   try ignore (Str.search_forward (Str.regexp_string w) haystack 0); true
+                   with Not_found -> false))
+          |> List.filteri (fun i _ -> i < limit)
+        in
+        let results = List.map (fun (schema : Types.tool_schema) ->
+          `Assoc [
+            ("name", `String schema.name);
+            ("description", `String schema.description);
+            ("category", `String (Mode.category_to_string (Mode.tool_category schema.name)));
+            ("tier", `String (Tool_catalog.tier_to_string (Tool_catalog.tool_tier schema.name)));
+          ]
+        ) matches in
+        Some (true, Yojson.Safe.to_string (`Assoc [
+          ("query", `String query);
+          ("count", `Int (List.length results));
+          ("tools", `List results);
+          ("hint", `String "These tools are callable via tools/call even if not in the default tools/list.");
+        ]))
 
   | _ -> Tool_inline_dispatch_extra.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name

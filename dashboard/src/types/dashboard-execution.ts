@@ -13,6 +13,7 @@ export interface DashboardShellResponse {
     tasks?: number
     keepers?: number
   }
+  providers?: Record<string, unknown>
 }
 
 export interface DashboardRoomTruthAttentionSummary {

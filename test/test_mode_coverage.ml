@@ -100,7 +100,7 @@ let test_mode_roundtrip () =
    ============================================================ *)
 
 let test_all_categories_count () =
-  check int "19 categories" 19 (List.length Mode.all_categories)
+  check int "18 categories" 18 (List.length Mode.all_categories)
 
 let test_all_categories_unique () =
   let rec has_duplicates = function
@@ -147,7 +147,7 @@ let test_categories_parallel () =
 
 let test_categories_full () =
   let cats = Mode.categories_for_mode Mode.Full in
-  check int "all categories" 19 (List.length cats)
+  check int "all categories" 18 (List.length cats)
 
 let test_categories_solo () =
   let cats = Mode.categories_for_mode Mode.Solo in

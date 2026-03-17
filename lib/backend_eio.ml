@@ -265,7 +265,9 @@ module FileSystem = struct
             (* Write file *)
             Eio.Path.save ~create:(`Or_truncate 0o644) path compressed;
             Ok ()
-          with exn ->
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
             Error (IOError (Printexc.to_string exn))
     )
 

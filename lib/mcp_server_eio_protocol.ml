@@ -458,7 +458,9 @@ let handle_request
                        let err = Printexc.to_string exn in
                        Log.Mcp.error "Request handling failed: %s" err;
                        make_error ~id (-32603) (Printf.sprintf "Internal error: %s" err))
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
     make_error ~id:`Null ~data:(`String (Printexc.to_string exn)) (-32603) "Internal error"
 
 (** {1 Transport} *)

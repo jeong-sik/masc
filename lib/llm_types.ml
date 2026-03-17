@@ -208,7 +208,10 @@ let sanitize_message_utf8 (m : message) : message =
       match block with
       | Agent_sdk.Types.Text s -> Agent_sdk.Types.Text (sanitize_text_utf8 s)
       | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error } ->
-          Agent_sdk.Types.ToolResult { tool_use_id; content = sanitize_text_utf8 content; is_error }
+          Agent_sdk.Types.ToolResult {
+            tool_use_id = sanitize_text_utf8 tool_use_id;
+            content = sanitize_text_utf8 content;
+            is_error }
       | other -> other
     ) m.content;
     name = Option.map sanitize_text_utf8 m.name;

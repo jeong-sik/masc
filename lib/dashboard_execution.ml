@@ -223,7 +223,7 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
       (* --- Payload size reduction: filter + limit --- *)
       (* Sessions: running/paused first, then by severity, max 15 *)
       let sorted_sessions = List.sort (fun (a : session_context) (b : session_context) ->
-        let status_ord s = match string_field_opt "status" s.json with
+        let status_ord (s : session_context) = match string_field_opt "status" s.json with
           | Some "running" -> 0 | Some "paused" -> 1 | _ -> 2 in
         let cmp = compare (status_ord a) (status_ord b) in
         if cmp <> 0 then cmp

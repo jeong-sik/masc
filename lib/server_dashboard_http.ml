@@ -398,19 +398,68 @@ let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
       ("tool_usage", Tool_unified.summary_report ());
     ]
 
+(** Proactive execution cache.  A background fiber recomputes the
+    execution JSON periodically, so HTTP requests never block on
+    computation.  This avoids the Eio cooperative-scheduling problem
+    where on-demand compute gets starved by other fibers (Guardian,
+    Lodge, SSE), inflating wall-clock time from 60ms to 30s+.
+
+    The HTTP handler reads [_execution_json_ref] immediately (0ms).
+    Parameterized requests (fixture/actor) fall back to on-demand
+    compute with a generous timeout. *)
+
+let _execution_json_ref : Yojson.Safe.t ref =
+  ref (`Assoc [
+    ("status", `String "initializing");
+    ("generated_at", `String (Types.now_iso ()));
+    ("message", `String "Execution data is being computed. Refresh in a few seconds.");
+  ])
+
+let _execution_refresh_interval_s = 120.0
+
+(** Start the proactive execution refresh loop.  Call once after server
+    state is initialized.  The loop runs forever, recomputing every
+    [_execution_refresh_interval_s] seconds. *)
+let start_execution_refresh_loop ~state ~sw ~clock =
+  let config = state.Mcp_server.room_config in
+  let proc_mgr = state.Mcp_server.proc_mgr in
+  Eio.Fiber.fork ~sw (fun () ->
+    Printf.eprintf "[INFO] Dashboard: starting execution proactive refresh loop.\n%!";
+    let rec loop () =
+      (try
+        let json =
+          Dashboard_execution.json ~config ~sw ~clock ~proc_mgr ()
+        in
+        _execution_json_ref := json;
+        Printf.eprintf "[INFO] Dashboard: execution cache refreshed (%.0fB).\n%!"
+          (Float.of_int (String.length (Yojson.Safe.to_string json)))
+      with exn ->
+        Printf.eprintf "[WARN] Dashboard: execution refresh failed: %s\n%!"
+          (Printexc.to_string exn));
+      Eio.Time.sleep clock _execution_refresh_interval_s;
+      loop ()
+    in
+    loop ())
+
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let fixture = query_param request "fixture" in
   let actor = operator_actor_hint request in
-  let cache_key =
-    Printf.sprintf "execution:%s:%s"
-      (Option.value ~default:"" actor)
-      (Option.value ~default:"" fixture)
-  in
-  Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:30.0
-    ~clock ~timeout_sec:30.0 (fun () ->
-    Dashboard_execution.json ?actor ?fixture
-      ~config:state.Mcp_server.room_config ~sw ~clock
-      ~proc_mgr:state.Mcp_server.proc_mgr ())
+  match fixture, actor with
+  | None, None ->
+    (* Fast path: return proactively cached value immediately. *)
+    !_execution_json_ref
+  | _ ->
+    (* Parameterized request (fixture/actor): on-demand with cache. *)
+    let cache_key =
+      Printf.sprintf "execution:%s:%s"
+        (Option.value ~default:"" actor)
+        (Option.value ~default:"" fixture)
+    in
+    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
+      ~clock ~timeout_sec:120.0 (fun () ->
+      Dashboard_execution.json ?actor ?fixture
+        ~config:state.Mcp_server.room_config ~sw ~clock
+        ~proc_mgr:state.Mcp_server.proc_mgr ())
 
 let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =

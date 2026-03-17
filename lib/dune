@@ -192,6 +192,7 @@
    chain_executor_retry
    chain_adapter_eio
    checkpoint_store
+   server_checkpoint
    run_log_eio
    langfuse
    chain_spawn_registry

@@ -1005,3 +1005,9 @@
  (modules test_agent_neo4j)
  (libraries masc_mcp alcotest yojson))
 
+
+; Server checkpoint tests (Phase 3: State Management)
+(test
+ (name test_server_checkpoint)
+ (modules test_server_checkpoint)
+ (libraries masc_mcp eio eio_main yojson unix))

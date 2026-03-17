@@ -19,7 +19,7 @@ let schemas : Types.tool_schema list = [
 The agent will think → act → observe → verify in a loop, compacting context as needed \
 and handing off to successor agents when context fills up. \
 Requires: goal (what to accomplish), models (LLM cascade in priority order). \
-Example models: 'default', 'default:glm-5', 'gemini:gemini-3-flash-preview', 'claude:opus'.";
+Example models: 'default', 'default:auto', 'gemini:flash', 'claude:opus'.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -31,7 +31,7 @@ Example models: 'default', 'default:glm-5', 'gemini:gemini-3-flash-preview', 'cl
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "LLM model cascade in priority order. \
-Format: 'provider:model_id' or 'default[:model_id]'. Examples: 'default', 'default:glm-5', 'gemini:gemini-3-flash-preview', 'claude:opus'");
+Format: 'provider:model_id' or 'default[:model_id]'. Examples: 'default', 'default:auto', 'gemini:flash', 'claude:opus'");
         ]);
         ("verify", `Assoc [
           ("type", `String "boolean");

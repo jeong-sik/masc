@@ -291,6 +291,15 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | `Float f -> Printf.sprintf "%0.0f" f
     | _ -> "unknown"
   in
+  (* Append recovery hint on failure *)
+  let message =
+    if success then message
+    else
+      let hint = Masc_error_recovery.recovery_hint message in
+      match hint with
+      | None -> message
+      | Some h -> message ^ "\n\n💡 Recovery: " ^ h
+  in
   let (status, required_follow_up) = parse_status_from_message ~success ~message in
   let quality = quality_from_result ~success ~message ~attempts in
   let workflow_guidance =

@@ -26,6 +26,21 @@ let s tool reason = { tool; reason }
 
 (* ── Golden Path 1: Room/Task Hygiene ────────────────────────────── *)
 
+let after_start ~success =
+  if success then
+    { next_steps =
+        [ s "masc_worktree_create" "Create an isolated worktree for this task";
+          s "masc_heartbeat" "Signal liveness before starting work" ];
+      preconditions = [];
+      common_mistakes =
+        [ "Forgetting masc_worktree_create — working on main branch directly" ] }
+  else
+    { next_steps =
+        [ s "masc_set_room" "Set the room manually if path was wrong";
+          s "masc_init" "Initialize MASC if not yet set up" ];
+      preconditions = [];
+      common_mistakes = [] }
+
 let after_set_room ~success =
   if success then
     { next_steps =
@@ -293,6 +308,7 @@ let after_operator_digest ~success =
 let next_steps ~tool_name ~success =
   match tool_name with
   (* Golden Path 1: Room/Task Hygiene *)
+  | "masc_start" -> after_start ~success
   | "masc_set_room" -> after_set_room ~success
   | "masc_join" -> after_join ~success
   | "masc_status" -> after_status ~success

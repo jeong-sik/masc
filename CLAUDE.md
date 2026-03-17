@@ -56,6 +56,8 @@ let cmd = Printf.sprintf
 
 MASC usage는 문서마다 흩어져 있지 않다. 아래 문서를 기준으로 본다.
 
+- `docs/QUICK-START.md`
+  - 1-step setup (`masc_start`), mode 선택, error recovery
 - `docs/COMMAND-PLANE-RUNBOOK.md`
   - room/task hygiene
   - CPv2 benchmark / swarm canonical path

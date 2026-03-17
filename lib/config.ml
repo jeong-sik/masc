@@ -11,11 +11,11 @@ type t = {
   enabled_categories : category list;
 }
 
-(** Default configuration — Full mode gives new users access to all tools.
-    Use masc_switch_mode to restrict if needed (BUG-017 revisited). *)
+(** Default configuration — Coding mode (~80 tools) balances usability with
+    context efficiency. Use masc_switch_mode(mode:"full") for all 371+ tools. *)
 let default = {
-  mode = Full;
-  enabled_categories = categories_for_mode Full;
+  mode = Coding;
+  enabled_categories = categories_for_mode Coding;
 }
 
 (** Config file name *)

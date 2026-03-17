@@ -430,7 +430,7 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_tool_enable";
-    description = "Enable specific tools without switching to Full mode. Bypasses mode filtering for listed tools. Use when you need a tool that is not in the current mode. Always available.";
+    description = "Enable specific tools or categories without switching to Full mode. Use when you need a tool not in the current mode. Categories: ecosystem (perpetual, gardener, keeper, mdal, handover, library), discovery (capabilities, agent_card, fitness), code (code_search, code_symbols, code_read), board (post, comment, vote), portal, worktree, consensus (debate, convo, walph), voting, encryption, auth, cost. Pass category= for bulk enable or tool= for individual.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -442,6 +442,10 @@ let schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Multiple tool names to enable at once");
+        ]);
+        ("category", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Enable all tools in a category (e.g. ecosystem, discovery, code, board)");
         ]);
       ]);
     ];

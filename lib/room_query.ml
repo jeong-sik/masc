@@ -84,11 +84,13 @@ let get_agents_raw_in_room config room_id =
           let path = Filename.concat agents_path name in
           let json = read_json config path in
           match agent_of_yojson json with
-          | Ok agent -> Some agent
-          | Error _ -> None
+          | Ok agent when agent.status <> Types.Inactive -> Some agent
+          | Ok _ | Error _ -> None
         )
 
-(** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents. *)
+(** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents.
+    Matches assignees by exact name or agent-type prefix (e.g. "claude" matches "claude-xxx").
+    Agents with Inactive status are excluded from the active set. *)
 let audit_orphan_tasks config : (Types.task * string) list =
   if not (is_initialized config) then []
   else
@@ -103,16 +105,24 @@ let audit_orphan_tasks config : (Types.task * string) list =
             let path = Filename.concat agents_path name in
             let json = read_json config path in
             match agent_of_yojson json with
-            | Ok agent -> Some agent.name
-            | Error _ -> None)
+            | Ok agent when agent.status <> Types.Inactive -> Some agent.name
+            | Ok _ | Error _ -> None)
       else []
+    in
+    let is_active_agent assignee =
+      List.mem assignee active_names
+      || let prefix = assignee ^ "-" in
+         List.exists (fun name ->
+           String.length name > String.length prefix
+           && String.sub name 0 (String.length prefix) = prefix
+         ) active_names
     in
     let backlog = read_backlog config in
     List.filter_map (fun (task : Types.task) ->
       match task.task_status with
       | Types.Claimed { assignee; _ }
       | Types.InProgress { assignee; _ } ->
-          if List.mem assignee active_names then None
+          if is_active_agent assignee then None
           else Some (task, assignee)
       | _ -> None
     ) backlog.tasks

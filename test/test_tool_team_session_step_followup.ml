@@ -2,7 +2,7 @@ open Masc_mcp
 open Test_tool_team_session_support
 
 let test_step_spawn_batch_preserves_explicit_hierarchical_assignments () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
@@ -141,7 +141,7 @@ let test_reconcile_failed_spawn_actor_detaches_without_turn () =
   cleanup_dir base_dir
 
 let test_reconcile_failed_spawn_actor_retains_after_turn () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -182,7 +182,7 @@ let test_reconcile_failed_spawn_actor_retains_after_turn () =
   cleanup_dir base_dir
 
 let test_proof_exposes_failed_spawn_and_detach_counts () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
@@ -355,7 +355,7 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
   cleanup_dir base_dir
 
 let test_report_and_proof_expose_empty_note_turn_evidence () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in

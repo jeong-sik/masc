@@ -973,3 +973,8 @@ Call masc_listen again to continue listening.
         ]))
 
   | _ -> Tool_inline_dispatch_extra.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name
+
+(* Inline dispatch tools have schemas in Tool_schemas_core_01 and other
+   schema modules. This empty list satisfies register_module_tag;
+   name-based registration is handled by Tool_tag_init. *)
+let schemas : Types.tool_schema list = []

@@ -664,7 +664,10 @@ let handle_verify_handoff _ctx args =
     (true, Yojson.Safe.pretty_to_string result)
 
 let handle_gc ctx args =
-  let days = get_int args "days" 7 in
+  let days_raw = get_int args "days" 7 in
+  let days = max 1 days_raw in
+  if days_raw < 1 then
+    Log.Misc.warn "masc_gc days=%d clamped to 1 (minimum guardrail)" days_raw;
   let gc_result = Room.gc ctx.config ~days () in
   (* Also expire pending decisions past TTL *)
   let expired =

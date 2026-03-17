@@ -28,7 +28,7 @@ let start_runtime_loop ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
               if stop_requested then
                 ignore
                   (finalize_session ~config ~session_id
-                     ~final_status:Team_session_types.Interrupted ~reason:stop_reason
+                     ~final_status:Team_session_types.Completed ~reason:stop_reason
                      ~generate_report:generate_report_on_finalize)
               else if now >= session.planned_end_at then
                 ignore
@@ -308,7 +308,7 @@ let stop_session ~(config : Room.config) ~(session_id : string) ~(reason : strin
           | Some s when s.status <> Team_session_types.Running -> Some s
           | _ ->
               finalize_session ~config ~session_id
-                ~final_status:Team_session_types.Interrupted ~reason
+                ~final_status:Team_session_types.Completed ~reason
                 ~generate_report
         in
         (match updated with

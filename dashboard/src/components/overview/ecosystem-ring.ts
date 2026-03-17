@@ -1,7 +1,7 @@
-// MASC Dashboard — Ecosystem Ring (circular agent layout with pixel avatars)
-// Places agents in a ring around the room center.
+// MASC Dashboard — Ecosystem Ring (circular agent layout with status indicators)
 
 import { html } from 'htm/preact'
+import { useSignal } from '@preact/signals'
 import type { Agent } from '../../types'
 import { AgentAvatar } from './agent-avatar'
 
@@ -20,9 +20,19 @@ function healthLabel(h: string | null | undefined): string {
   return '위험'
 }
 
+function categorizeStatus(s: string): 'active' | 'idle' | 'offline' {
+  if (s === 'active' || s === 'busy' || s === 'listening') return 'active'
+  if (s === 'idle') return 'idle'
+  return 'offline'
+}
+
 export function EcosystemRing({ agents, roomName, roomHealth, onAgentClick }: EcosystemRingProps) {
+  const hoveredAgent = useSignal<string | null>(null)
   const total = agents.length
-  const radius = 42 // % from center
+  const radius = 42
+
+  const counts = { active: 0, idle: 0, offline: 0 }
+  for (const a of agents) counts[categorizeStatus(a.status)]++
 
   return html`
     <div class="ecosystem-ring">
@@ -34,12 +44,16 @@ export function EcosystemRing({ agents, roomName, roomHealth, onAgentClick }: Ec
         const angle = (2 * Math.PI * i) / Math.max(total, 1) - Math.PI / 2
         const x = 50 + radius * Math.cos(angle)
         const y = 50 + radius * Math.sin(angle)
+        const cat = categorizeStatus(agent.status)
+        const isHovered = hoveredAgent.value === agent.name
 
         return html`
           <div
-            class="ecosystem-ring__agent"
+            class="ecosystem-ring__agent ecosystem-ring__agent--${cat}"
             key=${agent.name}
             style=${{ left: `${x}%`, top: `${y}%` }}
+            onMouseEnter=${() => { hoveredAgent.value = agent.name }}
+            onMouseLeave=${() => { hoveredAgent.value = null }}
           >
             <${AgentAvatar}
               name=${agent.name}
@@ -49,9 +63,20 @@ export function EcosystemRing({ agents, roomName, roomHealth, onAgentClick }: Ec
               showName=${true}
               onClick=${onAgentClick ? () => onAgentClick(agent.name) : undefined}
             />
+            ${isHovered ? html`
+              <div class="ecosystem-ring__tooltip">
+                <div><strong>${agent.name}</strong></div>
+                <div>상태: ${agent.status}</div>
+                ${agent.current_task ? html`<div>태스크: ${agent.current_task}</div>` : null}
+                ${agent.model ? html`<div>모델: ${agent.model}</div>` : null}
+              </div>
+            ` : null}
           </div>
         `
       })}
+    </div>
+    <div class="ecosystem-ring__distribution">
+      active ${counts.active} / idle ${counts.idle} / offline ${counts.offline}
     </div>
   `
 }

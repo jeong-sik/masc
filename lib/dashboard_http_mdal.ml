@@ -11,7 +11,7 @@ let perpetual_dashboard_json () : Yojson.Safe.t =
   let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
   let items =
     Hashtbl.fold (fun trace_id (state, (config : Perpetual_loop.loop_config)) acc ->
-      let base = Perpetual_loop.status state in
+      let base = Perpetual_loop.status ~config state in
       let with_cfg =
         match base with
         | `Assoc fields ->

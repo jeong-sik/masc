@@ -127,6 +127,7 @@ type context = {
   start_loop : (Perpetual_loop.loop_state -> Perpetual_loop.loop_config -> unit) option;
   sw : Eio.Switch.t option;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
+  room_config : Room_utils_backend_setup.config option;
 }
 
 (* ================================================================ *)
@@ -150,6 +151,7 @@ let handle_start ctx args =
                      | Some s -> s
                      | None -> Provider_adapter.default_cli_agent_name () in
   let coding_timeout = Safe_ops.json_int ~default:Env_config.Spawn.coding_timeout_seconds "coding_timeout_sec" args in
+  let auto_claim_cooldown = Safe_ops.json_float ~default:60.0 "auto_claim_cooldown_sec" args in
   (* Parse model specs *)
   let models = List.filter_map (fun s ->
     match Llm_client.model_spec_of_string s with
@@ -169,6 +171,9 @@ let handle_start ctx args =
       coding_timeout_s = coding_timeout;
       coding_sw = ctx.sw;
       coding_proc_mgr = ctx.proc_mgr;
+      room_config = ctx.room_config;
+      agent_name = ctx.agent_name;
+      auto_claim_cooldown_s = auto_claim_cooldown;
       on_event = (fun ev ->
         match ev with
         | Perpetual_loop.TurnStart n ->
@@ -176,6 +181,10 @@ let handle_start ctx args =
         | Perpetual_loop.CodingSpawn { agent; exit_code; elapsed_ms } ->
           Log.Perpetual.info "agent=%s exit=%d elapsed=%dms"
             agent exit_code elapsed_ms
+        | Perpetual_loop.TaskClaimed { task_id; title; priority } ->
+          Log.Perpetual.info "Auto-claimed [P%d] %s: %s" priority task_id title
+        | Perpetual_loop.TaskCompleted { task_id } ->
+          Log.Perpetual.info "Task completed: %s" task_id
         | Perpetual_loop.Error e ->
           Log.Perpetual.error "%s" e
         | Perpetual_loop.Terminated reason ->
@@ -209,7 +218,7 @@ let handle_status args =
     match Hashtbl.find_opt active_agents id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Agent %s not found" id))]
     | Some (state, config) ->
-      let base = Perpetual_loop.status state in
+      let base = Perpetual_loop.status ~config state in
       (match base with
        | `Assoc fields ->
          let models =

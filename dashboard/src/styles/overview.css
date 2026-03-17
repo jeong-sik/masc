@@ -743,3 +743,100 @@
   color: var(--text-muted);
   font-size: 11px;
 }
+
+/* Task distribution bar */
+.task-distribution-bar__track {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(138, 163, 211, 0.1);
+}
+
+.task-distribution-bar__segment {
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+
+.task-distribution-bar__legend {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Keeper summary card */
+.keeper-summary-card {
+  padding: 10px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.keeper-summary-card:hover {
+  border-color: rgba(71, 184, 255, 0.4);
+}
+
+.keeper-summary-card__header { display: grid; gap: 2px; }
+.keeper-summary-card__name { color: var(--text-strong); font-weight: 500; }
+.keeper-summary-card__meta { color: var(--text-muted); font-size: 11px; }
+
+.keeper-summary-card__context-bar {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(138, 163, 211, 0.1);
+  overflow: hidden;
+}
+
+.keeper-summary-card__context-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.keeper-summary-card__context-fill--green { background: #4ade80; }
+.keeper-summary-card__context-fill--yellow { background: #f59e0b; }
+.keeper-summary-card__context-fill--red { background: #ef4444; }
+
+.keeper-summary-card__context-label {
+  position: absolute; right: 0; top: -14px;
+  font-size: 10px; color: var(--text-muted);
+}
+
+.keeper-summary-card__footer { display: flex; justify-content: space-between; align-items: center; }
+.keeper-summary-card__activity { color: var(--text-muted); font-size: 11px; }
+.keeper-summary-card__tools { display: flex; gap: 4px; }
+.keeper-summary-card__tool-pill {
+  padding: 1px 6px; border-radius: 4px;
+  background: rgba(138, 163, 211, 0.1); color: var(--text-muted); font-size: 10px;
+}
+
+/* Ecosystem ring status variants */
+.ecosystem-ring__agent--active { animation: agent-pulse 2s ease-in-out infinite; }
+.ecosystem-ring__agent--idle { opacity: 0.7; }
+.ecosystem-ring__agent--offline { opacity: 0.4; filter: grayscale(0.6); }
+
+@keyframes agent-pulse {
+  0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+  50% { filter: drop-shadow(0 0 6px rgba(74, 222, 128, 0.5)); }
+}
+
+.ecosystem-ring__tooltip {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  padding: 8px 10px; background: var(--card, #1a1d23); border: 1px solid var(--card-border);
+  border-radius: 6px; font-size: 11px; line-height: 1.5; white-space: nowrap;
+  z-index: 10; color: var(--text-body); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+.ecosystem-ring__distribution {
+  text-align: center; font-size: 11px; color: var(--text-muted);
+  margin-top: var(--space-xs, 4px);
+}

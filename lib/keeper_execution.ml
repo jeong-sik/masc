@@ -652,6 +652,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    start_loop = None;
                    sw = None;
                    proc_mgr = None;
+                   room_config = None;
                  } in
                  (match Tool_perpetual.dispatch perp_ctx ~name:"masc_perpetual_start" ~args:perp_args with
                   | Some (true, result_json) ->

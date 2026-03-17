@@ -1,6 +1,5 @@
 // MASC Dashboard — Home Overview Surface (Redesigned)
 // 4-Layer information architecture: Situation -> Anomaly -> Entity Grid -> Timeline
-// Replaces flat number display + ring + strip with hierarchical NOC dashboard pattern.
 
 import { html } from 'htm/preact'
 import { agents, keepers, tasks, shellCounts } from '../../store'
@@ -14,9 +13,9 @@ import { AgentGrid } from './agent-grid'
 import { SessionTriage } from './session-triage'
 import { NarrativeTimeline } from './narrative-timeline'
 import { QuickStats } from './quick-stats'
+import type { TaskBreakdown } from './quick-stats'
 import { DASHBOARD_SURFACES } from '../../config/navigation'
 
-// Phase 6: Context pressure bar color thresholds
 function pressureClass(ratio: number | null | undefined): string {
   if (ratio == null) return ''
   const pct = ratio * 100
@@ -41,16 +40,23 @@ export function Overview() {
   const taskList = tasks.value
   const counts = shellCounts.value
 
-  const activeAgents = agentList.filter(a =>
+  const activeAgents = agentList.filter((a: { status: string }) =>
     a.status === 'active' || a.status === 'busy' || a.status === 'listening'
   )
-  const activeTasks = taskList.filter(t =>
+  const activeTasks = taskList.filter((t: { status: string }) =>
     t.status === 'in_progress' || t.status === 'claimed'
   )
 
   const agentCount = activeAgents.length > 0 ? activeAgents.length : (counts?.agents ?? 0)
   const taskCount = activeTasks.length > 0 ? activeTasks.length : (counts?.tasks ?? 0)
   const keeperCount = keeperList.length > 0 ? keeperList.length : (counts?.keepers ?? 0)
+
+  const taskBreakdown: TaskBreakdown = {
+    todo: taskList.filter((t: { status: string }) => t.status === 'todo').length,
+    claimed: taskList.filter((t: { status: string }) => t.status === 'claimed').length,
+    inProgress: taskList.filter((t: { status: string }) => t.status === 'in_progress').length,
+    done: taskList.filter((t: { status: string }) => t.status === 'done').length,
+  }
 
   const roomHealth = snap?.summary?.room_health ?? null
   const attentionCount = snap?.attention_queue?.length ?? snap?.summary?.pending_approvals ?? 0
@@ -62,21 +68,17 @@ export function Overview() {
 
   return html`
     <div class="overview-surface">
-      <!-- Layer 1: Situation Line -->
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
-
-      <!-- Layer 2: Anomaly Spotlight (only when anomalies exist) -->
       <${AttentionSpotlight} snap=${snap} />
 
-      <!-- Quick Stats (compact, below situation context) -->
       <${QuickStats}
         agentCount=${agentCount}
         activeTaskCount=${taskCount}
         keeperCount=${keeperCount}
         attentionCount=${attentionCount}
+        taskBreakdown=${taskBreakdown}
       />
 
-      <!-- Layer 3+4: Entity Grid + Session Triage + Timeline -->
       <div class="overview-main-v2">
         <div class="overview-left-col">
           <div class="overview-section-label">에이전트</div>
@@ -91,7 +93,6 @@ export function Overview() {
           <div class="overview-section-label">세션</div>
           <${SessionTriage} sessions=${sessions} />
 
-          <!-- Phase 6: Enhanced Keeper Cards -->
           ${keeperBriefs.length > 0 ? html`
             <div class="overview-section-label" style="margin-top: var(--space-md, 16px)">키퍼</div>
             <div class="keeper-cards-v2">
@@ -127,13 +128,11 @@ export function Overview() {
             </div>
           ` : null}
 
-          <!-- Layer 4: Narrative Timeline -->
           <div class="overview-section-label" style="margin-top: var(--space-md, 16px)">최근 활동</div>
           <${NarrativeTimeline} entries=${journal} maxItems=${12} />
         </div>
       </div>
 
-      <!-- Navigation to other surfaces -->
       <nav class="overview-nav-strip">
         ${navSurfaces.map(surface => html`
           <button

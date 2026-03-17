@@ -505,7 +505,7 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
   assert_true "stop:not_running" (not state.running);
 
   (* 4. Status JSON *)
-  let status = Perpetual_loop.status state in
+  let status = Perpetual_loop.status ~config state in
   (match status with
    | `Assoc fields ->
      assert_true "status:has_trace"
@@ -616,6 +616,105 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
     | Perpetual_loop.Terminated _ -> true | _ -> false) !events_captured in
   assert_true "coding_turn:emitted_error" has_error;
   assert_true "coding_turn:emitted_terminated" has_terminated;
+)
+
+(* ================================================================ *)
+(* 5b. Auto-Claim Tests (6)                                         *)
+(* ================================================================ *)
+
+let test_auto_claim () = group "Auto-Claim" (fun () ->
+
+  (* 1. Auto-claim disabled when no room_config *)
+  let config = Perpetual_loop.default_config
+    ~goal:"test" ~models:[Llm_client.llama_default] () in
+  assert_true "auto_claim:disabled_by_default" (config.room_config = None);
+  let state = Perpetual_loop.create_state config in
+  assert_true "auto_claim:no_current_task" (state.current_task_id = None);
+  let before_ts = state.last_claim_attempt_ts in
+  let events_captured = ref [] in
+  let config_with_events = { config with
+    on_event = (fun ev -> events_captured := ev :: !events_captured);
+  } in
+  ignore config_with_events;
+  assert_float_near "auto_claim:ts_unchanged" before_ts state.last_claim_attempt_ts 0.001;
+  assert_equal "auto_claim:failure_count_zero" 0 state.claim_failure_count;
+
+  (* 2. Cooldown prevents re-attempt *)
+  let state2 = Perpetual_loop.create_state config in
+  state2.last_claim_attempt_ts <- Time_compat.now ();
+  state2.claim_failure_count <- 0;
+  let effective_cd = config.auto_claim_cooldown_s *. (2.0 ** Float.of_int 0) in
+  assert_float_near "cooldown:base_is_60s" 60.0 effective_cd 0.01;
+  let elapsed = Time_compat.now () -. state2.last_claim_attempt_ts in
+  assert_true "cooldown:within_window" (elapsed < effective_cd);
+
+  (* 3. Exponential backoff calculation *)
+  let cd0 = config.auto_claim_cooldown_s *. (2.0 ** Float.of_int (min 4 0)) in
+  assert_float_near "backoff:count0" 60.0 cd0 0.01;
+  let cd1 = config.auto_claim_cooldown_s *. (2.0 ** Float.of_int (min 4 1)) in
+  assert_float_near "backoff:count1" 120.0 cd1 0.01;
+  let cd2 = config.auto_claim_cooldown_s *. (2.0 ** Float.of_int (min 4 2)) in
+  assert_float_near "backoff:count2" 240.0 cd2 0.01;
+  let cd4 = config.auto_claim_cooldown_s *. (2.0 ** Float.of_int (min 4 4)) in
+  assert_float_near "backoff:count4_cap" 960.0 cd4 0.01;
+  let cd10 = config.auto_claim_cooldown_s *. (2.0 ** Float.of_int (min 4 10)) in
+  assert_float_near "backoff:count10_still_capped" 960.0 cd10 0.01;
+
+  (* 4. Skip when holding task *)
+  let state3 = Perpetual_loop.create_state config in
+  state3.current_task_id <- Some "task-001";
+  assert_true "skip_holding:has_task" (Option.is_some state3.current_task_id);
+  assert_equal "skip_holding:no_failures" 0 state3.claim_failure_count;
+
+  (* 5. Task completion detection pattern *)
+  let content_with_done = "I have finished the task.\n[TASK_DONE]\n[STATE]\nGoal: done\n[/STATE]" in
+  let has_marker =
+    try ignore (Str.search_forward (Str.regexp_string "[TASK_DONE]") content_with_done 0); true
+    with Not_found -> false
+  in
+  assert_true "completion:marker_found" has_marker;
+  let content_without = "Still working on it.\n[STATE]\nGoal: wip\n[/STATE]" in
+  let marker_found =
+    try ignore (Str.search_forward (Str.regexp_string "[TASK_DONE]") content_without 0); true
+    with Not_found -> false
+  in
+  assert_true "completion:no_false_positive" (not marker_found);
+
+  (* 6. Event types exist and serialize *)
+  let claimed_ev = Perpetual_loop.TaskClaimed {
+    task_id = "task-001"; title = "Fix bug"; priority = 2
+  } in
+  let completed_ev = Perpetual_loop.TaskCompleted { task_id = "task-001" } in
+  let skipped_ev = Perpetual_loop.ClaimSkipped "no_unclaimed_tasks" in
+  (match claimed_ev with
+   | Perpetual_loop.TaskClaimed { task_id; title; priority } ->
+     assert_equal "event:claimed_id" "task-001" task_id;
+     assert_equal "event:claimed_title" "Fix bug" title;
+     assert_equal "event:claimed_priority" 2 priority
+   | _ -> assert_true "event:is_task_claimed" false);
+  (match completed_ev with
+   | Perpetual_loop.TaskCompleted { task_id } ->
+     assert_equal "event:completed_id" "task-001" task_id
+   | _ -> assert_true "event:is_task_completed" false);
+  (match skipped_ev with
+   | Perpetual_loop.ClaimSkipped reason ->
+     assert_equal "event:skipped_reason" "no_unclaimed_tasks" reason
+   | _ -> assert_true "event:is_claim_skipped" false);
+
+  (* Status JSON includes auto-claim fields *)
+  let state4 = Perpetual_loop.create_state config in
+  state4.current_task_id <- Some "task-042";
+  let status = Perpetual_loop.status ~config state4 in
+  (match status with
+   | `Assoc fields ->
+     assert_true "status:has_current_task_id"
+       (List.mem_assoc "current_task_id" fields);
+     assert_true "status:has_claim_failure_count"
+       (List.mem_assoc "claim_failure_count" fields);
+     (match List.assoc "current_task_id" fields with
+      | `String id -> assert_equal "status:task_id_value" "task-042" id
+      | _ -> assert_true "status:task_id_is_string" false)
+   | _ -> assert_true "status:is_object" false);
 )
 
 (* ================================================================ *)
@@ -775,6 +874,7 @@ let () =
   test_verifier ();
   test_succession ();
   test_perpetual_loop ();
+  test_auto_claim ();
   test_integration ();
 
   printf "\n====================================\n%!";

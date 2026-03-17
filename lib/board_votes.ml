@@ -10,15 +10,13 @@ let append_vote_log ~target ~voter ~direction =
   try
     ensure_masc_dir ();
     let path = vote_log_path () in
-    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      let json = `Assoc [
-        ("target", `String target);
-        ("voter", `String voter);
-        ("direction", `String (vote_direction_to_string direction));
-        ("ts", `Float (Time_compat.now ()));
-      ] in
-      output_string oc (Yojson.Safe.to_string json ^ "\n"));
+    let json = `Assoc [
+      ("target", `String target);
+      ("voter", `String voter);
+      ("direction", `String (vote_direction_to_string direction));
+      ("ts", `Float (Time_compat.now ()));
+    ] in
+    Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
     rotate_if_needed path
   with Sys_error msg -> Log.BoardLog.error "persist error (append_vote_log): %s" msg
 
@@ -242,23 +240,18 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
 
 let load_persisted_posts store =
   let path = persist_path () in
-  if Sys.file_exists path then begin
+  if Fs_compat.file_exists path then begin
     try
-      let ic = open_in path in
       let now = Time_compat.now () in
       let loaded = ref 0 in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        (try
-          while true do
-            let line = input_line ic in
-            if String.length line > 0 then
-              match Yojson.Safe.from_string line |> post_of_yojson with
-              | Some p when p.expires_at = 0.0 || p.expires_at > now ->
-                  Hashtbl.replace store.posts (Post_id.to_string p.id) p;
-                  incr loaded
-              | _ -> ()
-          done
-        with End_of_file -> ()));
+      let lines = Fs_compat.load_jsonl path in
+      List.iter (fun json ->
+        match post_of_yojson json with
+        | Some p when p.expires_at = 0.0 || p.expires_at > now ->
+            Hashtbl.replace store.posts (Post_id.to_string p.id) p;
+            incr loaded
+        | _ -> ()
+      ) lines;
       store.post_count := Hashtbl.length store.posts;
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d posts from %s" !loaded path
@@ -270,28 +263,23 @@ let load_persisted_posts store =
 
 let load_persisted_comments store =
   let path = comments_path () in
-  if Sys.file_exists path then begin
+  if Fs_compat.file_exists path then begin
     try
-      let ic = open_in path in
       let now = Time_compat.now () in
       let loaded = ref 0 in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        (try
-          while true do
-            let line = input_line ic in
-            if String.length line > 0 then
-              match Yojson.Safe.from_string line |> comment_of_yojson with
-              | Some c when c.expires_at > now ->
-                  let cid = Comment_id.to_string c.id in
-                  Hashtbl.replace store.comments cid c;
-                  (* Build comments_by_post index *)
-                  let post_key = Post_id.to_string c.post_id in
-                  let existing = try Hashtbl.find store.comments_by_post post_key with Not_found -> [] in
-                  Hashtbl.replace store.comments_by_post post_key (cid :: existing);
-                  incr loaded
-              | _ -> ()
-          done
-        with End_of_file -> ()));
+      let lines = Fs_compat.load_jsonl path in
+      List.iter (fun json ->
+        match comment_of_yojson json with
+        | Some c when c.expires_at > now ->
+            let cid = Comment_id.to_string c.id in
+            Hashtbl.replace store.comments cid c;
+            (* Build comments_by_post index *)
+            let post_key = Post_id.to_string c.post_id in
+            let existing = try Hashtbl.find store.comments_by_post post_key with Not_found -> [] in
+            Hashtbl.replace store.comments_by_post post_key (cid :: existing);
+            incr loaded
+        | _ -> ()
+      ) lines;
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d comments from %s" !loaded path
       else
@@ -320,25 +308,20 @@ let recalculate_reply_counts store =
 
 let load_persisted_votes store =
   let path = vote_log_path () in
-  if Sys.file_exists path then begin
+  if Fs_compat.file_exists path then begin
     try
-      let ic = open_in path in
       let loaded = ref 0 in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        (try
-          while true do
-            let line = input_line ic in
-            if String.length line > 0 then begin
-              let open Yojson.Safe.Util in
-              let json = Yojson.Safe.from_string line in
-              let target = json |> member "target" |> to_string in
-              let dir_str = json |> member "direction" |> to_string in
-              let direction = if dir_str = "down" then Down else Up in
-              Hashtbl.replace store.vote_log target direction;
-              incr loaded
-            end
-          done
-        with End_of_file | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> ()));
+      let lines = Fs_compat.load_jsonl path in
+      List.iter (fun json ->
+        try
+          let open Yojson.Safe.Util in
+          let target = json |> member "target" |> to_string in
+          let dir_str = json |> member "direction" |> to_string in
+          let direction = if dir_str = "down" then Down else Up in
+          Hashtbl.replace store.vote_log target direction;
+          incr loaded
+        with Yojson.Safe.Util.Type_error _ -> ()
+      ) lines;
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
       else

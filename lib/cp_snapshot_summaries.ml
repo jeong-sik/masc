@@ -569,47 +569,42 @@ let recent_operator_trace_events config ?trace_id limit =
   if not (Room_utils.path_exists config (operator_action_log_path config)) then
     []
   else
-    In_channel.with_open_text (operator_action_log_path config) (fun ic ->
-        let rec loop acc =
-          match input_line ic with
-          | line ->
-              let trimmed = String.trim line in
-              let acc' =
-                if trimmed = "" then
-                  acc
-                else
-                  match Safe_ops.parse_json_safe ~context:"command_plane_v2.operator_log" trimmed with
-                  | Ok (`Assoc _ as row) ->
-                      let row_trace_id = get_string_opt row "trace_id" in
-                      let keep =
-                        match trace_id, row_trace_id with
-                        | None, _ -> true
-                        | Some expected, Some actual -> String.equal expected actual
-                        | Some _, None -> false
-                      in
-                      if keep then
-                        `Assoc
-                          [
-                            ("event_id", `String (next_event_id "trace"));
-                            ("trace_id", `String (get_string_default row "trace_id" "operator"));
-                            ("event_type", `String (get_string_default row "action_type" "operator_action"));
-                            ("operation_id", `Null);
-                            ("unit_id", `Null);
-                            ("actor", match get_string_opt row "actor" with Some value -> `String value | None -> `Null);
-                            ("source", `String "operator");
-                            ("timestamp", `String (get_string_default row "created_at" (Types.now_iso ())));
-                            ("detail", row);
-                          ]
-                        :: acc
-                      else
-                        acc
-                  | Ok _ | Error _ -> acc
-              in
-              loop acc'
-          | exception End_of_file -> List.rev acc
-        in
-        loop []
-        |> List.rev |> List.filteri (fun idx _ -> idx < limit) |> List.rev)
+    Fs_compat.load_file (operator_action_log_path config)
+    |> String.split_on_char '\n'
+    |> List.filter_map (fun line ->
+           let trimmed = String.trim line in
+           if trimmed = "" then None
+           else
+             match Safe_ops.parse_json_safe ~context:"command_plane_v2.operator_log" trimmed with
+             | Ok (`Assoc _ as row) ->
+                 let row_trace_id = get_string_opt row "trace_id" in
+                 let keep =
+                   match trace_id, row_trace_id with
+                   | None, _ -> true
+                   | Some expected, Some actual -> String.equal expected actual
+                   | Some _, None -> false
+                 in
+                 if keep then
+                   Some
+                     (`Assoc
+                       [
+                         ("event_id", `String (next_event_id "trace"));
+                         ("trace_id", `String (get_string_default row "trace_id" "operator"));
+                         ("event_type", `String (get_string_default row "action_type" "operator_action"));
+                         ("operation_id", `Null);
+                         ("unit_id", `Null);
+                         ("actor", match get_string_opt row "actor" with Some value -> `String value | None -> `Null);
+                         ("source", `String "operator");
+                         ("timestamp", `String (get_string_default row "created_at" (Types.now_iso ())));
+                         ("detail", row);
+                       ])
+                 else
+                   None
+             | Ok _ | Error _ -> None)
+    |> (fun events ->
+         let rev = List.rev events in
+         let limited = List.filteri (fun idx _ -> idx < limit) rev in
+         List.rev limited)
 
 let recent_swarm_trace_events config limit =
   if not (Room_utils.path_exists config (swarm_path config)) then

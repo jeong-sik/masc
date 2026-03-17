@@ -607,11 +607,10 @@ let format_for_welcome (inst : institution) : string =
     Returns empty string if no institution exists.
 *)
 let load_and_format_for_welcome ~fs:_ (config : config) : string =
-  (* Use stdlib file I/O - Eio fs has cwd path issues with absolute paths *)
   let file = institution_file config in
-  if Sys.file_exists file then
+  if Fs_compat.file_exists file then
     try
-      let content = In_channel.with_open_text file In_channel.input_all in
+      let content = Fs_compat.load_file file in
       let json = Yojson.Safe.from_string content in
       let inst = institution_of_json json in
       format_for_welcome inst
@@ -647,10 +646,7 @@ let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings 
   } in
   let path = episodes_jsonl_path () in
   (try
-    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-    output_string oc (Yojson.Safe.to_string (episode_to_json episode));
-    output_char oc '\n';
-    close_out oc
+    Fs_compat.append_jsonl path (episode_to_json episode)
   with exn ->
     Log.Institution.error "JSONL episode write failed: %s"
       (Printexc.to_string exn));
@@ -659,25 +655,19 @@ let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings 
 (** Load recent episodes from JSONL (last N entries). *)
 let load_recent_episodes_jsonl ~limit : episode list =
   let path = episodes_jsonl_path () in
-  if not (Sys.file_exists path) then []
-  else begin
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let eps = ref [] in
-      (try while true do
-        let line = input_line ic in
-        if String.length line > 0 then
-          (try eps := episode_of_json (Yojson.Safe.from_string line) :: !eps
-           with
-           | Yojson.Json_error _ -> ()
-           | exn -> Log.Institution.warn "episode parse failed: %s" (Printexc.to_string exn))
-      done with End_of_file -> ());
-      let all = List.rev !eps in
-      let total = List.length all in
-      if total <= limit then all
-      else
-        let rec drop n = function
-          | [] -> [] | _ when n <= 0 -> all | _ :: rest -> drop (n-1) rest
-        in
-        drop (total - limit) all)
-  end
+  let jsons = Fs_compat.load_jsonl path in
+  let all = List.filter_map (fun json ->
+    try Some (episode_of_json json)
+    with
+    | Yojson.Safe.Util.Type_error _ -> None
+    | exn ->
+        Log.Institution.warn "episode parse failed: %s" (Printexc.to_string exn);
+        None
+  ) jsons in
+  let total = List.length all in
+  if total <= limit then all
+  else
+    let rec drop n = function
+      | [] -> [] | _ when n <= 0 -> all | _ :: rest -> drop (n-1) rest
+    in
+    drop (total - limit) all

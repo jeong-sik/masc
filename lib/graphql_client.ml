@@ -35,10 +35,7 @@ let with_auth_header_file key f =
     Fun.protect
       ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
       (fun () ->
-         let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
-         let oc = Unix.out_channel_of_descr fd in
-         output_string oc ("Authorization: Bearer " ^ key ^ "\n");
-         close_out oc;
+         Fs_compat.save_file path ("Authorization: Bearer " ^ key ^ "\n");
          f (Some path))
 
 let with_body_file body f =
@@ -46,10 +43,7 @@ let with_body_file body f =
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
-       let oc = open_out_bin path in
-       Fun.protect
-         ~finally:(fun () -> close_out_noerr oc)
-         (fun () -> output_string oc body);
+       Fs_compat.save_file path body;
        f path)
 
 (** curl-based fallback for Railway containers with DNS issues. *)

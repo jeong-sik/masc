@@ -123,29 +123,20 @@ let autonomy_record_of_yojson (json : Yojson.Safe.t) =
 (* ================================================================ *)
 
 let persist_record r =
-  let line = Yojson.Safe.to_string (autonomy_record_to_yojson r) in
+  let line = Yojson.Safe.to_string (autonomy_record_to_yojson r) ^ "\n" in
   let path = autonomy_path () in
-  let oc = open_out_gen [Open_append; Open_creat; Open_wronly] 0o644 path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      output_string oc line;
-      output_char oc '\n')
+  Fs_compat.append_file path line
 
 let load_all_from_disk () =
   let path = autonomy_path () in
-  if not (Sys.file_exists path) then ()
+  if not (Fs_compat.file_exists path) then ()
   else begin
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        try while true do
-          let line = input_line ic in
-          if String.length line > 0 then begin
-            match autonomy_record_of_yojson (Yojson.Safe.from_string line) with
-            | Ok r -> Hashtbl.replace table r.agent_name r
-            | Error _ -> ()  (* skip malformed lines *)
-          end
-        done with End_of_file -> ())
+    let lines = Fs_compat.load_jsonl path in
+    List.iter (fun json ->
+      match autonomy_record_of_yojson json with
+      | Ok r -> Hashtbl.replace table r.agent_name r
+      | Error _ -> ()  (* skip malformed lines *)
+    ) lines
   end
 
 let ensure_loaded =

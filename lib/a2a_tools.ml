@@ -190,9 +190,7 @@ let save_subscriptions () =
     let json = `Assoc [("subscriptions", `List subs)] in
     let content = Yojson.Safe.pretty_to_string json in
     try
-      let oc = open_out !subscriptions_file in
-      Common.protect ~module_name:"a2a_tools" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-        output_string oc content)
+      Fs_compat.save_file !subscriptions_file content
     with e ->
       Log.Misc.error "save_subscriptions failed: %s" (Printexc.to_string e)
 

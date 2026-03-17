@@ -58,11 +58,11 @@ let test_message_roundtrip () =
     name = None;
     tool_call_id = None;
   } in
-  let oas_msg = Oas_checkpoint_bridge.masc_msg_to_oas masc_msg in
+  let oas_msg = Llm_client.to_oas_message masc_msg in
   (match oas_msg with
    | None -> Alcotest.fail "Assistant message should not be dropped"
    | Some msg ->
-     let roundtrip = Oas_checkpoint_bridge.oas_msg_to_masc msg in
+     let roundtrip = Llm_client.of_oas_message msg in
      Alcotest.(check string) "role preserved"
        "assistant"
        (match roundtrip.role with Llm_client.Assistant -> "assistant" | _ -> "other");
@@ -76,7 +76,7 @@ let test_system_role_dropped () =
     name = None;
     tool_call_id = None;
   } in
-  let oas_msg = Oas_checkpoint_bridge.masc_msg_to_oas masc_msg in
+  let oas_msg = Llm_client.to_oas_message masc_msg in
   Alcotest.(check bool) "system message dropped (belongs in system_prompt)"
     true (Option.is_none oas_msg)
 

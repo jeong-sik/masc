@@ -174,7 +174,10 @@ let backlog_triage_session_agents ~(room_config : Room_utils.config) ~(room_id :
   if active_agents <> [] then
     active_agents
   else
-    agents
+    (* get_agents_raw_in_room filters out Inactive agents, so fall back to
+       get_all_agents_in_room which includes them.  Backlog triage should
+       still enroll inactive agents when no active ones are available. *)
+    Room.get_all_agents_in_room room_config room_id
     |> List.map (fun (agent : Types.agent) -> agent.name)
     |> Team_session_types.dedup_strings
     |> List.sort String.compare

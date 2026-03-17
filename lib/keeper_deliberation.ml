@@ -46,6 +46,8 @@ type deliberation_action =
   | TaskClaim of { task_id: string; reason: string }
   | Broadcast of { message: string }
   | ProposeSpawn of { topic: string; reason: string }
+  | StartDiscussion of { topic: string; context: string }
+  | ShareFinding of { finding: string; source: string }
   | MultiStep of deliberation_action list
 
 let rec deliberation_action_to_string = function
@@ -57,6 +59,8 @@ let rec deliberation_action_to_string = function
   | TaskClaim _ -> "task_claim"
   | Broadcast _ -> "broadcast"
   | ProposeSpawn _ -> "propose_spawn"
+  | StartDiscussion { topic; _ } -> "start_discussion:" ^ topic
+  | ShareFinding { finding; _ } -> "share_finding:" ^ finding
   | MultiStep actions ->
       "multi_step:["
       ^ String.concat "," (List.map deliberation_action_to_string actions)
@@ -73,6 +77,8 @@ let deliberation_action_to_legacy_string = function
   | TaskClaim _ -> "task_claim"
   | Broadcast _ -> "broadcast"
   | ProposeSpawn _ -> "propose_spawn"
+  | StartDiscussion _ -> "start_discussion"
+  | ShareFinding _ -> "share_finding"
   | MultiStep _ -> "multi_step"
 
 let rec deliberation_action_to_json = function
@@ -124,6 +130,20 @@ let rec deliberation_action_to_json = function
           ("type", `String "propose_spawn");
           ("topic", `String topic);
           ("reason", `String reason);
+        ]
+  | StartDiscussion { topic; context } ->
+      `Assoc
+        [
+          ("type", `String "start_discussion");
+          ("topic", `String topic);
+          ("context", `String context);
+        ]
+  | ShareFinding { finding; source } ->
+      `Assoc
+        [
+          ("type", `String "share_finding");
+          ("finding", `String finding);
+          ("source", `String source);
         ]
   | MultiStep actions ->
       `Assoc

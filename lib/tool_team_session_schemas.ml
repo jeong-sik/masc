@@ -57,6 +57,7 @@ let schemas : tool_schema list =
                             [
                               `String "observe_only";
                               `String "limited_code_change";
+                              `String "autonomous";
                             ] );
                       ] );
                   ( "checkpoint_interval_sec",
@@ -250,6 +251,7 @@ let schemas : tool_schema list =
 	                            [
 	                              `String "observe_only";
 	                              `String "limited_code_change";
+	                              `String "autonomous";
 	                            ] );
 	                      ] );
 	                  ( "worker_class",
@@ -373,6 +375,7 @@ let schemas : tool_schema list =
 	                                              [
 	                                                `String "observe_only";
 	                                                `String "limited_code_change";
+	                                                `String "autonomous";
 	                                              ] );
 	                                        ] );
 	                                    ( "worker_class",

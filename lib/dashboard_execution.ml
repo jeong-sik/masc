@@ -98,9 +98,6 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
   match dashboard_fixture_name ?fixture () with
   | Some "execution_smoke" -> execution_smoke_fixture_json ()
   | _ ->
-      let tasks = tasks_safe config in
-      let agents = agents_safe config in
-      let messages = messages_safe config in
       let ctx : _ Operator_control.context =
         {
           config;
@@ -150,7 +147,7 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
       in
       Eio.Fiber.yield ();
       let digest_json =
-        match Operator_control.digest_json ~actor:effective_actor ctx with
+        match Operator_control.digest_json ~actor:effective_actor ~sessions ctx with
         | Ok json -> json
         | Error message ->
             `Assoc
@@ -190,6 +187,13 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
         | _ -> []
       in
       Eio.Fiber.yield ();
+      (* Load tasks/agents/messages late — they are only needed for
+         worker_support_briefs and the final response payload.  Loading
+         them earlier blocked the Eio scheduler for 3-6s due to Stdlib
+         Mutex contention with background init fibers. *)
+      let tasks = tasks_safe config in
+      let agents = agents_safe config in
+      let messages = messages_safe config in
       let now_ts = Time_compat.now () in
       let worker_rows =
         build_worker_support_briefs ~now_ts ~tasks ~agents ~messages session_contexts

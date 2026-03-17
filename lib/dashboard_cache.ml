@@ -242,11 +242,19 @@ let get_or_compute key ~ttl compute =
   if !eio_available then get_or_compute_eio key ~ttl compute
   else get_or_compute_simple key ~ttl compute
 
-exception Compute_timeout of string
-
 (** Compute with Eio timeout.  Stale-while-revalidate applies here too:
     if a stale value exists and the recompute times out, the stale value
-    was already returned to the caller by [get_or_compute_eio]. *)
+    was already returned to the caller by [get_or_compute_eio].
+
+    On timeout the inner compute raises [Compute_timeout] so that
+    [get_or_compute_eio]'s exception handler preserves the stale value
+    in the background-revalidation path (instead of overwriting it with
+    error JSON).  The outer [try] catches the exception for the no-stale
+    path and returns [timeout_error_json] to the caller without caching
+    it. *)
+
+exception Compute_timeout of string
+
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   try
     get_or_compute key ~ttl (fun () ->

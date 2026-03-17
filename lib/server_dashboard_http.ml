@@ -449,14 +449,14 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     (* Fast path: return proactively cached value immediately. *)
     !_execution_json_ref
   | _ ->
-    (* Parameterized request (fixture/actor): on-demand with cache. *)
+    (* Parameterized request (fixture/actor): on-demand with short TTL. *)
     let cache_key =
       Printf.sprintf "execution:%s:%s"
         (Option.value ~default:"" actor)
         (Option.value ~default:"" fixture)
     in
-    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-      ~clock ~timeout_sec:120.0 (fun () ->
+    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:10.0
+      ~clock ~timeout_sec:10.0 (fun () ->
       Dashboard_execution.json ?actor ?fixture
         ~config:state.Mcp_server.room_config ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr ())

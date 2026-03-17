@@ -284,8 +284,8 @@ let room_recommendations ?command_plane_summary config =
     | Some item -> [ item ]
     | None -> [])
 
-let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a context) :
-    (Yojson.Safe.t, string) result =
+let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
+    (ctx : 'a context) : (Yojson.Safe.t, string) result =
   let config = ctx.config in
   if not (Room.is_initialized config) then
     Ok
@@ -320,9 +320,21 @@ let digest_json ?actor ?target_type ?target_id ?include_workers (ctx : 'a contex
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let* target_type = normalize_digest_target_type target_type in
     let now = Time_compat.now () in
-    let tracked_sessions = Team_session_store.list_sessions config in
-    let command_plane_snapshot_json = Command_plane_v2.snapshot_json config in
-    let command_plane_digest_json = Command_plane_v2.summary_json config in
+    let tracked_sessions =
+      match sessions with
+      | Some s -> s
+      | None -> Team_session_store.list_sessions config
+    in
+    (* Pass pre-loaded sessions to avoid redundant list_sessions calls.
+       Each function still builds its own snapshot_state internally, but
+       skips the session filesystem scan since sessions are provided. *)
+    let command_plane_snapshot_json =
+      Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
+    in
+    Eio.Fiber.yield ();
+    let command_plane_digest_json =
+      Command_plane_v2.summary_json ~sessions:tracked_sessions config
+    in
     let swarm_status_json =
       Swarm_status.build_json_from_snapshot config command_plane_snapshot_json
     in

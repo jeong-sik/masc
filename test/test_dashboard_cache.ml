@@ -141,11 +141,89 @@ let test_invalidate_all_wakes_waiters () =
        Atomic.set finished true);
   Alcotest.(check bool) "both fibers finished" true (Atomic.get finished)
 
+(* -- 9. Timeout during stale-while-revalidate preserves stale value -------- *)
+
+(** When [get_or_compute_with_timeout] is called for a stale (but within grace)
+    entry and the recomputation times out, the stale value must be preserved in
+    the cache.  The caller receives the stale value immediately, and the
+    background fiber's Compute_timeout exception triggers the restore path.
+    A subsequent cache lookup must return the stale value, not timeout-error
+    JSON.  (Regression test for Codex review P2 on PR #1314.) *)
+let test_stale_preserved_on_timeout ~clock ~sw () =
+  Dashboard_cache.invalidate_all ();
+  Dashboard_cache.set_sw sw;
+  let original = `String "original_data" in
+  (* 1. Seed the cache with a short-lived entry (TTL 0.1s, stale grace 0.3s) *)
+  let v0 =
+    Dashboard_cache.get_or_compute "stale_timeout" ~ttl:0.1 (fun () -> original)
+  in
+  check_json "seed" original v0;
+  (* 2. Wait for expiry but stay within stale grace *)
+  Eio.Time.sleep clock 0.15;
+  (* 3. Call with timeout shorter than compute time — compute will time out.
+     The function should return the stale value immediately. *)
+  let result =
+    Dashboard_cache.get_or_compute_with_timeout "stale_timeout" ~ttl:0.1
+      ~clock ~timeout_sec:0.05 (fun () ->
+        (* Simulate slow computation that exceeds timeout *)
+        Eio.Time.sleep clock 1.0;
+        `String "never_reached")
+  in
+  check_json "stale value returned on timeout" original result;
+  (* 4. Let the background fiber finish (it will timeout + restore stale) *)
+  Eio.Fiber.yield ();
+  Eio.Time.sleep clock 0.1;
+  (* 5. Subsequent lookup: must get stale data or recompute, NOT timeout JSON *)
+  let after =
+    Dashboard_cache.get_or_compute "stale_timeout" ~ttl:0.1 (fun () ->
+      `String "fresh_recompute")
+  in
+  let is_timeout_error =
+    match after with
+    | `Assoc pairs ->
+      (match List.assoc_opt "error" pairs with
+       | Some (`String "computation_timeout") -> true
+       | _ -> false)
+    | _ -> false
+  in
+  Alcotest.(check bool) "no timeout error cached" false is_timeout_error
+
+(* -- 10. Timeout with no stale data returns error JSON (not cached) -------- *)
+
+(** When there is no stale data (first compute for a key), timeout should
+    return error JSON to the caller but NOT cache it — subsequent calls
+    should trigger a fresh recompute. *)
+let test_timeout_no_stale_returns_error ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let result =
+    Dashboard_cache.get_or_compute_with_timeout "no_stale_timeout" ~ttl:1.0
+      ~clock ~timeout_sec:0.05 (fun () ->
+        Eio.Time.sleep clock 1.0;
+        `String "never_reached")
+  in
+  (* Should get timeout error JSON *)
+  let is_timeout_error =
+    match result with
+    | `Assoc pairs ->
+      (match List.assoc_opt "error" pairs with
+       | Some (`String "computation_timeout") -> true
+       | _ -> false)
+    | _ -> false
+  in
+  Alcotest.(check bool) "timeout error returned" true is_timeout_error;
+  (* Next call should recompute, not return cached error *)
+  let v2 =
+    Dashboard_cache.get_or_compute "no_stale_timeout" ~ttl:1.0 (fun () ->
+      `String "recovered")
+  in
+  check_json "recompute after timeout" (`String "recovered") v2
+
 (* -- Harness ---------------------------------------------------------------- *)
 
 let () =
-  Eio_main.run @@ fun _env ->
-  Dashboard_cache.enable_eio ();
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Dashboard_cache.enable_eio ~clock ();
   let open Alcotest in
   run ~and_exit:false "Dashboard_cache"
     [
@@ -166,5 +244,14 @@ let () =
       ( "concurrency",
         [
           test_case "stampede protection" `Quick test_stampede;
+        ] );
+      ( "timeout",
+        [
+          test_case "stale preserved on timeout" `Quick
+            (fun () ->
+               Eio.Switch.run @@ fun sw ->
+               test_stale_preserved_on_timeout ~clock ~sw ());
+          test_case "no-stale timeout returns error, not cached" `Quick
+            (test_timeout_no_stale_returns_error ~clock);
         ] );
     ]

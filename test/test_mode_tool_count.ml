@@ -60,8 +60,8 @@ let assert_in_range mode ~low ~high =
   check bool label true (n >= low && n <= high)
 
 let test_minimal_range () =
-  (* Minimal = [Core; Health] — baseline ~144, allow ±20% for tool additions *)
-  assert_in_range Minimal ~low:115 ~high:175
+  (* Minimal = [Core_Room; Core_Task; Health] — baseline ~75 after Core split *)
+  assert_in_range Minimal ~low:50 ~high:110
 
 let test_standard_range () =
   (* Standard = [Core; Comm; Worktree; Health; Plan; Board; Consensus] — baseline ~221 *)
@@ -72,16 +72,16 @@ let test_parallel_range () =
   assert_in_range Parallel ~low:200 ~high:305
 
 let test_coding_range () =
-  (* Coding = [Core; Worktree; Code; Health; Plan; Consensus] *)
-  assert_in_range Coding ~low:135 ~high:220
+  (* Coding = core_all @ [Worktree; Code; Health; Plan; Consensus] *)
+  assert_in_range Coding ~low:135 ~high:250
 
 let test_full_range () =
   (* Full = all 19 categories = all visible tools — baseline ~362 *)
   assert_in_range Full ~low:290 ~high:440
 
 let test_solo_range () =
-  (* Solo = [Core; Worktree] — baseline ~97 *)
-  assert_in_range Solo ~low:75 ~high:120
+  (* Solo = [Core_Room; Core_Task; Worktree] — baseline ~25 after Core split *)
+  assert_in_range Solo ~low:15 ~high:40
 
 (* ============================================================
    Full mode = all visible tools (no filtering loss)
@@ -102,7 +102,7 @@ let test_full_equals_visible () =
    ============================================================ *)
 
 let test_mode_mgmt_tools_always_present () =
-  let modes = [Mode.Minimal; Standard; Parallel; Coding; Full; Solo] in
+  let modes = [Mode.Minimal; Standard; Parallel; Coding; Full; Solo; Agent] in
   List.iter (fun mode ->
     let names = tool_names_for_mode mode in
     let has name = List.mem name names in
@@ -116,7 +116,7 @@ let test_mode_mgmt_tools_always_present () =
    ============================================================ *)
 
 let test_no_unknown_tools () =
-  let modes = [Mode.Minimal; Standard; Parallel; Coding; Full; Solo] in
+  let modes = [Mode.Minimal; Standard; Parallel; Coding; Full; Solo; Agent] in
   List.iter (fun mode ->
     let names = tool_names_for_mode mode in
     List.iter (fun name ->

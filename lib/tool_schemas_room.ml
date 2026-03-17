@@ -851,7 +851,7 @@ Example: masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pu
         ]);
         ("model", `Assoc [
           ("type", `String "string");
-          ("description", `String "Model name (e.g., opus-4, gemini-2)");
+          ("description", `String "Model name (e.g., opus, sonnet, pro, flash)");
         ]);
         ("input_tokens", `Assoc [
           ("type", `String "integer");

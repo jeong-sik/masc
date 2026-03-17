@@ -368,7 +368,7 @@ let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
                 with
                 | Ok _ -> ()
                 | Error e ->
-                    eprintf "[local-worker] heartbeat error for %s: %s\n%!"
+                    Log.LocalWorker.warn "heartbeat error for %s: %s"
                       worker_name e;
                 loop ()))
           in
@@ -376,7 +376,7 @@ let start_worker_heartbeat ~sw ~(auth_token : string option) ~session_id
           with
           | Eio.Cancel.Cancelled _ as ex -> raise ex
           | exn ->
-            eprintf "[local-worker] heartbeat loop error for %s: %s\n%!"
+            Log.LocalWorker.error "heartbeat loop error for %s: %s"
               worker_name (Printexc.to_string exn));
       fun () -> active := false
 
@@ -444,7 +444,7 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
               Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
                 ~duration_ms ~agent_id:worker_name ()
             with exn ->
-              eprintf "[local-worker] telemetry error for %s/%s: %s\n%!"
+              Log.LocalWorker.warn "telemetry error for %s/%s: %s"
                 worker_name tool_name (Printexc.to_string exn))
         | _ -> ());
         ()
@@ -599,7 +599,7 @@ let materialize_direct_evidence ~base_path ~worker_name
       match Oas.Direct_evidence.persist ~agent ~raw_trace ~options () with
       | Ok _ -> ()
       | Error err ->
-          eprintf
-            "[local-worker] direct evidence persist failed for %s/%s: %s\n%!"
+          Log.LocalWorker.error
+            "direct evidence persist failed for %s/%s: %s"
             worker_name session_id (Oas.Error.to_string err)
 

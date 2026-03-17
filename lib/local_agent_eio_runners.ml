@@ -80,7 +80,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
                   with
                   | Ok _ -> ()
                   | Error e ->
-                      eprintf "[local-worker] heartbeat error for %s: %s\n%!"
+                      Log.LocalWorker.warn "heartbeat error for %s: %s"
                         worker_name e) } ]
           else []
         in
@@ -99,6 +99,10 @@ let run_worker_oas ~sw ~base_path ~worker_name
           let* mcp_tools =
             build_oas_mcp_tools ~sw ~auth_token ~session_id:mcp_session_id
               ~worker_name ~prompt ~allowed_tools
+          in
+          let mcp_tools =
+            List.map (Oas.Tool.with_defaults
+              [("agent_name", `String worker_name)]) mcp_tools
           in
           let* shell_tools =
             build_local_shell_tools ~room_config ~worker_name ~execution_scope
@@ -278,7 +282,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                     with
                     | Ok _ -> ()
                     | Error e ->
-                        eprintf "[local-worker] heartbeat error for %s: %s\n%!"
+                        Log.LocalWorker.warn "heartbeat error for %s: %s"
                           worker_name e) } ]
             else []
           in
@@ -306,6 +310,10 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                 build_oas_mcp_tools ~sw ~auth_token
                   ~session_id:meta.mcp_session_id ~worker_name ~prompt
                   ~allowed_tools
+              in
+              let mcp_tools =
+                List.map (Oas.Tool.with_defaults
+                  [("agent_name", `String worker_name)]) mcp_tools
               in
               let shell_tools =
                 match meta.shell_profile with

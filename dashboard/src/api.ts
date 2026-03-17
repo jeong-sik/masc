@@ -524,6 +524,24 @@ export function fetchDashboardShell(): Promise<DashboardShellResponse> {
   return get('/api/v1/dashboard/shell')
 }
 
+export interface AgentActivityEntry {
+  agent_id: string
+  tool_calls: number
+  success_count: number
+  failure_count: number
+  first_seen: number
+  last_seen: number
+}
+
+export interface AgentActivityResponse {
+  hours: number
+  agents: AgentActivityEntry[]
+}
+
+export function fetchAgentActivity(hours = 24): Promise<AgentActivityResponse> {
+  return get(`/api/v1/agent-activity?hours=${hours}`)
+}
+
 export function fetchDashboardRoomTruth(): Promise<DashboardRoomTruthResponse> {
   return get('/api/v1/dashboard/room-truth', { timeoutMs: ROOM_TRUTH_GET_TIMEOUT_MS })
 }

@@ -2,7 +2,8 @@
 // 4-Layer information architecture: Situation -> Anomaly -> Entity Grid -> Timeline
 
 import { html } from 'htm/preact'
-import { agents, keepers, tasks, shellCounts, providerCapacity } from '../../store'
+import { agents, keepers, tasks, shellCounts, providerCapacity, agentActivity, refreshAgentActivity } from '../../store'
+import { useEffect } from 'preact/hooks'
 import { missionSnapshot } from '../../mission-store'
 import { journal } from '../../sse'
 import { navigate } from '../../router'
@@ -34,6 +35,7 @@ function keeperHealthClass(status?: string): string {
 }
 
 export function Overview() {
+  useEffect(() => { refreshAgentActivity() }, [])
   const snap = missionSnapshot.value
   const agentList = agents.value
   const keeperList = keepers.value
@@ -132,6 +134,8 @@ export function Overview() {
 
           <div class="overview-section-label" style="margin-top: var(--space-md, 16px)">최근 활동</div>
           <${NarrativeTimeline} entries=${journal} maxItems=${12} />
+
+          <${AgentActivityPanel} />
         </div>
       </div>
 
@@ -182,6 +186,40 @@ function ProviderGauge() {
           <small>${pool.models.map((m: { model: string }) => m.model).join(', ')}</small>
         </div>
       ` : null}
+    </div>
+  `
+}
+
+function relativeTimeShort(ts: number): string {
+  const diff = (Date.now() / 1000) - ts
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
+
+function AgentActivityPanel() {
+  const activities = agentActivity.value
+  if (activities.length === 0) return null
+
+  return html`
+    <div style="margin-top: var(--space-md, 16px);">
+      <div class="overview-section-label">에이전트 활동 (24h)</div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        ${activities.slice(0, 8).map(a => html`
+          <div class="mission-activity-row" style="padding: 8px 12px;" key=${a.agent_id}>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <strong style="font-size: 13px;">${a.agent_id}</strong>
+              <span class="command-chip ${a.failure_count > 0 ? 'warn' : 'ok'}" style="font-size: 11px;">
+                ${a.tool_calls} calls
+              </span>
+            </div>
+            <div style="font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 2px;">
+              ${a.success_count} ok / ${a.failure_count} fail · ${relativeTimeShort(a.last_seen)}
+            </div>
+          </div>
+        `)}
+      </div>
     </div>
   `
 }

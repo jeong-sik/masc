@@ -145,6 +145,33 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
+  (* Agent activity — per-agent tool call stats from telemetry *)
+  |> Http.Router.get "/api/v1/agent-activity" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let hours =
+           match Server_utils.query_param req "hours" with
+           | Some h -> (try float_of_string h with _ -> 24.0)
+           | None -> 24.0
+         in
+         let since = Time_compat.now () -. (hours *. 3600.0) in
+         let activities =
+           Telemetry_eio.summarize_agent_activity state.Mcp_server.room_config ~since
+         in
+         let json = `Assoc [
+           ("hours", `Float hours);
+           ("agents", `List (List.map (fun (a : Telemetry_eio.agent_activity) ->
+             `Assoc [
+               ("agent_id", `String a.agent_id);
+               ("tool_calls", `Int a.tool_calls);
+               ("success_count", `Int a.success_count);
+               ("failure_count", `Int a.failure_count);
+               ("first_seen", `Float a.first_seen);
+               ("last_seen", `Float a.last_seen);
+             ]) activities));
+         ] in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   (* Tool metrics — unified registry stats for dashboard (P4 Phase 4.5) *)
   |> Http.Router.get "/api/v1/tool-metrics" (fun request reqd ->
        with_public_read (fun _state req reqd ->

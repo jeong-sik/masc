@@ -9,7 +9,6 @@
     - Mcp_server_eio_execute: Core execute_tool_eio function
     - Mcp_server_eio_call_tool: Tool call handler (retry, timeout, result envelope)
     - Mcp_server_eio_tool_profile: Profile/schema/annotation/pagination helpers
-    - Mcp_server_eio_dispatch: Context construction + V2/legacy dispatch chain
     - Mcp_server_eio_protocol: JSON-RPC handlers, subscriptions, transport
     - Mcp_server_eio_governance: Governance and MCP session helpers
 *)
@@ -164,12 +163,11 @@ let () =
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
   register_module_tag ~schemas:Tool_trpg.schemas ~tag:Mod_trpg;
   register_module_tag ~schemas:Tool_notifications.schemas ~tag:Mod_notifications;
-  (* Core schema tools dispatched by tag-only modules (not in fallback chain)
-     need explicit name registration. These have schemas in Tool_schemas_core
-     but dispatch via modules only reachable through the tag system. *)
-  register_name_tag ~tool_name:"masc_init" ~tag:Mod_room;
-  register_name_tag ~tool_name:"masc_register_capabilities" ~tag:Mod_agent;
-  register_name_tag ~tool_name:"masc_find_by_capability" ~tag:Mod_agent;
+  (* Fix 2: Register modules that lack schema exports.
+     Tool_tag_init uses register_name_tag for 25 modules (195+ tools)
+     that previously relied on the fallback chain. Called AFTER schema-based
+     registrations so it fills gaps without overwriting correct mappings. *)
+  Tool_tag_init.register_all ();
   mark_tag_registry_initialized ();
   Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ())
 

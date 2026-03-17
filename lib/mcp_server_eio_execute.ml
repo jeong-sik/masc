@@ -694,10 +694,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       else
       try_dispatch (fun () -> Tool_task.dispatch { Tool_task.config; agent_name } ~name ~args:arguments)
       |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
+      (* Tool_control and Tool_misc already tried above (lines 647-649) — duplicates removed *)
       try_dispatch (fun () -> Tool_suspend.dispatch { Tool_suspend.config; caller_agent = Some agent_name } ~name ~args:arguments)
       |> function Some r -> Some r | None ->
       try_dispatch (fun () -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args:arguments)

@@ -169,6 +169,7 @@ let cleanup_zombies config =
 
 (** Garbage collection - cleanup zombies, stale tasks, old messages *)
 let gc config ?(days=7) () =
+  let days = max 1 days in
   ensure_initialized config;
 
   let results = ref [] in

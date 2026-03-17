@@ -323,7 +323,10 @@ let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "")
             with Not_found -> List.rev acc
           in
           collect 0 []
-        with _ -> []
+        with exn ->
+          Printf.eprintf "[Council] mention extraction failed: %s\n%!"
+            (Printexc.to_string exn);
+          []
       in
       let turn = {
         id = generate_turn_id ~thread_id:id ~seq:0;

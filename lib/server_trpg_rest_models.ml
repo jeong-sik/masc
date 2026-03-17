@@ -240,7 +240,10 @@ let trpg_running_llama_cpp_urls () : string list =
         |> String.concat ","
         |> split_csv_nonempty
     | _ -> []
-  with _ -> []
+  with exn ->
+    Log.Trpg.warn "llama-cpp URL detection failed: %s"
+      (Printexc.to_string exn);
+    []
 
 let trpg_openai_compatible_urls () : string list =
   let env_urls =

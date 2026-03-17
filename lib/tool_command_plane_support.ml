@@ -111,7 +111,10 @@ let json_string_member_opt json key =
 
 let read_json_file_opt path =
   if Sys.file_exists path then
-    (try Some (Safe_ops.read_json_eio path) with _ -> None)
+    (try Some (Safe_ops.read_json_eio path)
+     with exn ->
+       Log.CmdPlane.warn "read_json_file_opt %s: %s" path (Printexc.to_string exn);
+       None)
   else
     None
 

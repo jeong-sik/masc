@@ -217,7 +217,13 @@ let get_or_compute_simple key ~ttl compute =
   | Some (Ready entry) when entry.expires_at > now () -> entry.value
   | Some (Ready entry) when entry.stale_until > now () ->
     (* Stale but usable — recompute inline (no fibers available) *)
-    let value = try compute () with _ -> entry.value in
+    let value =
+      try compute ()
+      with exn ->
+        Log.Dashboard.warn "stale cache recompute failed for %s: %s"
+          key (Printexc.to_string exn);
+        entry.value
+    in
     let ts = now () in
     Hashtbl.replace table key
       (Ready { value; expires_at = ts +. ttl;

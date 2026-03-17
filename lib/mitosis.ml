@@ -801,9 +801,7 @@ let write_status ~base_path ~cell ~config =
   (* Ensure .masc directory exists *)
   if Sys.file_exists masc_dir && Sys.is_directory masc_dir then begin
     try
-      let oc = open_out status_file in
-      Common.protect ~module_name:"mitosis" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-        output_string oc (Yojson.Safe.pretty_to_string json ^ "\n"))
+      Fs_compat.save_file status_file (Yojson.Safe.pretty_to_string json ^ "\n")
     with exn ->
       Log.Mitosis_log.error "Failed to write status: %s" (Printexc.to_string exn)
   end
@@ -847,10 +845,7 @@ let write_status_with_backend ~room_config ~cell ~config =
   let status_file = Filename.concat masc_dir "mitosis-status.json" in
   if Sys.file_exists masc_dir && Sys.is_directory masc_dir then begin
     try
-      let oc = open_out status_file in
-      Common.protect ~module_name:"mitosis" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-        output_string oc (Yojson.Safe.pretty_to_string json ^ "\n")
-      )
+      Fs_compat.save_file status_file (Yojson.Safe.pretty_to_string json ^ "\n")
     with exn ->
       Log.Mitosis_log.error "Failed to write status file: %s"
         (Printexc.to_string exn)

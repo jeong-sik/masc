@@ -52,13 +52,7 @@ let history_path ~agent_name =
   sprintf "%s/history.jsonl" (reputation_dir ~agent_name)
 
 let ensure_dir path =
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
+  Fs_compat.mkdir_p path
 
 (* ================================================================ *)
 (* JSON Serialization                                               *)
@@ -103,27 +97,12 @@ let append_snapshot ~agent_name (s : reputation_snapshot) =
   let dir = reputation_dir ~agent_name in
   ensure_dir dir;
   let path = history_path ~agent_name in
-  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-  output_string oc (Yojson.Safe.to_string (snapshot_to_json s));
-  output_char oc '\n';
-  close_out oc
+  Fs_compat.append_jsonl path (snapshot_to_json s)
 
 let load_history ~agent_name : reputation_snapshot list =
   let path = history_path ~agent_name in
-  if not (Sys.file_exists path) then []
-  else begin
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let snaps = ref [] in
-      (try while true do
-        let line = input_line ic in
-        if String.length line > 0 then
-          match Yojson.Safe.from_string line |> snapshot_of_json with
-          | Some s -> snaps := s :: !snaps
-          | None -> ()
-      done with End_of_file -> ());
-      List.rev !snaps)
-  end
+  Fs_compat.load_jsonl path
+  |> List.filter_map snapshot_of_json
 
 (* ================================================================ *)
 (* Core Logic                                                       *)

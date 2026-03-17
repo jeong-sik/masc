@@ -67,25 +67,20 @@ let ensure_session_dirs config session_id =
   mkdir_p (worker_runs_dir config session_id)
 
 let read_text_file path =
-  if Sys.file_exists path then
-    In_channel.with_open_text path In_channel.input_all
+  if Fs_compat.file_exists path then
+    Fs_compat.load_file path
   else
     ""
 
 let write_text_file path content =
-  mkdir_p (Filename.dirname path);
+  Fs_compat.mkdir_p (Filename.dirname path);
   let tmp = path ^ ".tmp" in
-  Out_channel.with_open_text tmp (fun oc ->
-    Out_channel.output_string oc content;
-    Out_channel.flush oc);
+  Fs_compat.save_file tmp content;
   Unix.rename tmp path
 
 let append_text_file path content =
-  mkdir_p (Filename.dirname path);
-  let oc = open_out_gen [ Open_creat; Open_append; Open_wronly ] 0o600 path in
-  Common.protect ~module_name:"team_session_store" ~finally_label:"finalizer"
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content)
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.append_file path content
 
 let save_session config (session : Team_session_types.session) =
   let path = session_json_path config session.session_id in
@@ -118,45 +113,25 @@ let read_events ?max_events config session_id : Yojson.Safe.t list =
     []
   else
     (* Read-only: no lock needed. Append-only JSONL is safe for concurrent reads. *)
+    let content = Fs_compat.load_file path in
+    let all_lines = String.split_on_char '\n' content in
+    let parsed =
+      List.filter_map (fun line ->
+        let trimmed = String.trim line in
+        if trimmed = "" then None
+        else
+          match Safe_ops.parse_json_safe ~context:"team_session.events" trimmed with
+          | Ok json -> Some json
+          | Error _ -> None
+      ) all_lines
+    in
     match max_events with
     | Some n when n > 0 ->
-        let q = Queue.create () in
-        In_channel.with_open_text path (fun ic ->
-            (try
-               while true do
-                 let line = input_line ic in
-                 let trimmed = String.trim line in
-                 if trimmed <> "" then
-                   match
-                     Safe_ops.parse_json_safe ~context:"team_session.events" trimmed
-                   with
-                   | Ok json ->
-                       Queue.add json q;
-                       if Queue.length q > n then ignore (Queue.take q)
-                   | Error _ -> ()
-               done
-             with End_of_file -> ());
-            Queue.to_seq q |> List.of_seq)
-    | _ ->
-        In_channel.with_open_text path (fun ic ->
-            let rec loop acc =
-              match input_line ic with
-              | line ->
-                  let trimmed = String.trim line in
-                  let acc' =
-                    if trimmed = "" then
-                      acc
-                    else
-                      match
-                        Safe_ops.parse_json_safe ~context:"team_session.events" trimmed
-                      with
-                      | Ok json -> json :: acc
-                      | Error _ -> acc
-                  in
-                  loop acc'
-              | exception End_of_file -> List.rev acc
-            in
-            loop [])
+        let total = List.length parsed in
+        if total <= n then parsed
+        else
+          parsed |> List.filteri (fun i _ -> i >= total - n)
+    | _ -> parsed
 
 let write_checkpoint config session_id (checkpoint : Team_session_types.checkpoint) =
   let filename = Printf.sprintf "%Ld.json" (Int64.of_float (checkpoint.ts *. 1000.0)) in
@@ -261,15 +236,11 @@ let list_sessions ?(since_unix = 0.0) config : Team_session_types.session list =
                      Read first 512 bytes of session.json for quick substring match. *)
                   let state_path = Filename.concat dir_path "session.json" in
                   (try
-                    let ic = open_in state_path in
-                    let buf = Bytes.create 512 in
-                    let n =
-                      Common.protect ~module_name:"team_session_store"
-                        ~finally_label:"finalizer"
-                        ~finally:(fun () -> close_in_noerr ic)
-                        (fun () -> input ic buf 0 512)
+                    let content = Fs_compat.load_file state_path in
+                    let snippet =
+                      if String.length content > 512 then String.sub content 0 512
+                      else content
                     in
-                    let snippet = Bytes.sub_string buf 0 n in
                     (* Status field appears early in the JSON *)
                     let has_sub haystack needle =
                       let nl = String.length needle in

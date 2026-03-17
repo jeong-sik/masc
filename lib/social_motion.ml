@@ -154,16 +154,10 @@ let read_current_seq config =
   | Error _ -> 0
 
 let write_current_seq config seq =
-  let oc = open_out (seq_path config) in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc (string_of_int seq))
+  Fs_compat.save_file (seq_path config) (string_of_int seq)
 
 let append_line path line =
-  let fd =
-    Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o644
-  in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-      ignore (Unix.write_substring fd line 0 (String.length line)))
+  Fs_compat.append_file path line
 
 let format_sse_event (value : event) =
   let data = Yojson.Safe.to_string (event_to_yojson value) in
@@ -275,19 +269,14 @@ let read_all_events config =
   collect_event_files config
   |> List.fold_left
        (fun acc path ->
-         let ic = open_in path in
-         Fun.protect
-           ~finally:(fun () -> close_in_noerr ic)
-           (fun () ->
-             let rec loop rows =
-               match input_line ic with
-               | line -> (
-                   match parse_event_line line with
-                   | Some value -> loop (value :: rows)
-                   | None -> loop rows)
-               | exception End_of_file -> List.rev_append rows acc
-             in
-             loop []))
+         let content = Fs_compat.load_file path in
+         let lines = String.split_on_char '\n' content in
+         let rows =
+           List.filter_map (fun line ->
+             if String.trim line = "" then None
+             else parse_event_line line) lines
+         in
+         List.rev_append rows acc)
        []
   |> List.sort (fun a b -> Int.compare a.seq b.seq)
 

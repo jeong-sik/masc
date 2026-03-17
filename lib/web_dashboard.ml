@@ -32,12 +32,7 @@ let index_path () =
 
 let html () =
   try
-    let ic = open_in (index_path ()) in
-    let n = in_channel_length ic in
-    let s = Bytes.create n in
-    really_input ic s 0 n;
-    close_in ic;
-    Bytes.to_string s
+    Fs_compat.load_file (index_path ())
   with Sys_error _ ->
     "<html><body>Dashboard build not found. Run: cd dashboard &amp;&amp; npm run build</body></html>"
 

@@ -35,11 +35,8 @@ let states : (string, state) Hashtbl.t = Hashtbl.create 4
 let with_lock (st : state) f =
   Eio.Mutex.use_rw ~protect:true st.mutex f
 
-let rec ensure_dir path =
-  if not (Sys.file_exists path) then (
-    let parent = Filename.dirname path in
-    if parent <> path && not (Sys.file_exists parent) then ensure_dir parent;
-    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+let ensure_dir path =
+  Fs_compat.mkdir_p path
 
 let iso_of_unix = Dashboard_utils.iso_of_unix
 let parse_iso_opt = Dashboard_utils.parse_iso_opt
@@ -103,7 +100,8 @@ let load_latest_from_disk base_path =
   if not (Sys.file_exists path) then Hashtbl.create 32
   else
     let table = Hashtbl.create 32 in
-    In_channel.with_open_text path In_channel.input_lines
+    let content = Fs_compat.load_file path in
+    String.split_on_char '\n' content
     |> List.iter (fun line ->
            let trimmed = String.trim line in
            if trimmed <> "" then
@@ -319,17 +317,9 @@ let compute_judgments ~base_path:_ ~factual_json =
 let append_judgments base_path judgments =
   ensure_dir (governance_dir base_path);
   let path = judgments_path base_path in
-  let oc =
-    open_out_gen [ Open_creat; Open_text; Open_append ] 0o644 path
-  in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      List.iter
-        (fun json ->
-          output_string oc (Yojson.Safe.to_string json);
-          output_char oc '\n')
-        judgments)
+  List.iter
+    (fun json -> Fs_compat.append_jsonl path json)
+    judgments
 
 let refresh_once ~base_path ~build_facts =
   let st = get_state base_path in

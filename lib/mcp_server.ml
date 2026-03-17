@@ -444,14 +444,9 @@ let read_event_lines config ~limit =
     let collected = ref [] in
     let remaining = ref limit in
     let read_lines path =
-      let ic = open_in path in
-      Common.protect ~module_name:"mcp_server" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        let rec loop acc =
-          match input_line ic with
-          | line -> loop (line :: acc)
-          | exception End_of_file -> List.rev acc
-        in
-        loop [])
+      let content = Fs_compat.load_file path in
+      String.split_on_char '\n' content
+      |> List.filter (fun s -> s <> "")
     in
     let add_lines path =
       if !remaining <= 0 then ()

@@ -259,12 +259,9 @@ let validate_endpoint (url : string) : (string, string) result =
 let safe_write_file (path : string) (content : string) : (unit, string) result =
   try
     let dir = Filename.dirname path in
-    if not (Sys.file_exists dir) then
-      Unix.mkdir dir 0o700;
+    Fs_compat.mkdir_p dir;
     let tmp_path = path ^ ".tmp" in
-    let oc = open_out_gen [Open_wronly; Open_creat; Open_trunc] 0o600 tmp_path in
-    Common.protect ~module_name:"federation" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc content);
+    Fs_compat.save_file tmp_path content;
     (* Atomic rename for consistency *)
     Sys.rename tmp_path path;
     Ok ()
@@ -275,13 +272,10 @@ let safe_write_file (path : string) (content : string) : (unit, string) result =
 (** Safe file read with proper error handling *)
 let safe_read_file (path : string) : (string, string) result =
   try
-    if not (Sys.file_exists path) then
+    if not (Fs_compat.file_exists path) then
       Error (Printf.sprintf "File not found: %s" path)
     else
-      let ic = open_in path in
-      let content = Common.protect ~module_name:"federation" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        really_input_string ic (in_channel_length ic)) in
-      Ok content
+      Ok (Fs_compat.load_file path)
   with
   | Sys_error msg -> Error (Printf.sprintf "File read error: %s" msg)
 
@@ -289,11 +283,8 @@ let safe_read_file (path : string) : (string, string) result =
 let safe_append_file (path : string) (content : string) : (unit, string) result =
   try
     let dir = Filename.dirname path in
-    if not (Sys.file_exists dir) then
-      Unix.mkdir dir 0o700;
-    let oc = open_out_gen [Open_append; Open_creat] 0o600 path in
-    Common.protect ~module_name:"federation" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc content);
+    Fs_compat.mkdir_p dir;
+    Fs_compat.append_file path content;
     Ok ()
   with
   | Sys_error msg -> Error (Printf.sprintf "File append error: %s" msg)

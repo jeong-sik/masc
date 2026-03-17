@@ -503,6 +503,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           log_mcp_exn ~label:(Printf.sprintf "perpetual loop crashed for %s" loop_state.Perpetual_loop.trace_id) exn));
     sw = Some sw;
     proc_mgr = state.Mcp_server.proc_mgr;
+    room_config = Some config;
   } in
   let simple_ctx_keeper : _ Tool_keeper.context =
     {

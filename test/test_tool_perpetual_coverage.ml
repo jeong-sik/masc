@@ -21,6 +21,7 @@ let make_ctx () : Tool_perpetual.context = {
   start_loop = None;
   sw = None;
   proc_mgr = None;
+  room_config = None;
 }
 
 (** Create a default model spec for testing. *)

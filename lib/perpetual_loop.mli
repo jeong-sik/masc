@@ -23,6 +23,9 @@ type event =
   | IdleDetected of int
   | Terminated of string
   | CodingSpawn of { agent : string; exit_code : int; elapsed_ms : int }
+  | TaskClaimed of { task_id : string; title : string; priority : int }
+  | TaskCompleted of { task_id : string }
+  | ClaimSkipped of string
 
 (** {1 Configuration} *)
 
@@ -47,6 +50,9 @@ type loop_config = {
   coding_timeout_s : int;                        (** Timeout per coding turn in seconds *)
   coding_sw : Eio.Switch.t option;               (** Eio switch for coding mode spawning *)
   coding_proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;  (** Process manager for coding mode *)
+  room_config : Room_utils_backend_setup.config option;             (** Room config for auto-claim *)
+  agent_name : string;                                              (** Agent name for auto-claim *)
+  auto_claim_cooldown_s : float;                                    (** Cooldown between claim attempts *)
 }
 
 (** {1 Loop State} *)
@@ -74,6 +80,9 @@ type loop_state = {
   mutable events : (float * event) list;
   mutable running : bool;
   trace_id : string;
+  mutable current_task_id : string option;
+  mutable last_claim_attempt_ts : float;
+  mutable claim_failure_count : int;
 }
 
 (** {1 Core Functions} *)
@@ -93,7 +102,7 @@ val run : config:loop_config -> state:loop_state -> unit
 val stop : loop_state -> unit
 
 (** Get current status as JSON. *)
-val status : loop_state -> Yojson.Safe.t
+val status : config:loop_config -> loop_state -> Yojson.Safe.t
 
 (** {1 Defaults} *)
 

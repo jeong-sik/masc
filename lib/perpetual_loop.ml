@@ -34,6 +34,9 @@ type event =
   | IdleDetected of int
   | Terminated of string
   | CodingSpawn of { agent : string; exit_code : int; elapsed_ms : int }
+  | TaskClaimed of { task_id : string; title : string; priority : int }
+  | TaskCompleted of { task_id : string }
+  | ClaimSkipped of string
 
 type loop_config = {
   initial_goal : string;
@@ -56,6 +59,10 @@ type loop_config = {
   coding_timeout_s : int;
   coding_sw : Eio.Switch.t option;
   coding_proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
+  (* Auto-claim: connect perpetual agent to Room task backlog *)
+  room_config : Room_utils_backend_setup.config option;
+  agent_name : string;
+  auto_claim_cooldown_s : float;
 }
 
 type loop_state = {
@@ -80,6 +87,10 @@ type loop_state = {
   mutable events : (float * event) list;
   mutable running : bool;
   trace_id : string;
+  (* Auto-claim state *)
+  mutable current_task_id : string option;
+  mutable last_claim_attempt_ts : float;
+  mutable claim_failure_count : int;
 }
 
 (* ================================================================ *)
@@ -124,6 +135,9 @@ let default_config ~goal ~models ?verifier ?session_dir () =
     coding_timeout_s = Env_config.Spawn.coding_timeout_seconds;
     coding_sw = None;
     coding_proc_mgr = None;
+    room_config = None;
+    agent_name = "perpetual";
+    auto_claim_cooldown_s = 60.0;
   }
 
 (* ================================================================ *)
@@ -200,6 +214,9 @@ let create_state config =
     events = [];
     running = true;
     trace_id;
+    current_task_id = None;
+    last_claim_attempt_ts = 0.0;
+    claim_failure_count = 0;
   }
 
 let record_event (state : loop_state) (ev : event) =
@@ -355,6 +372,88 @@ let publish_to_event_bus bus (ev : event) =
   | _ -> ()
 
 (* ================================================================ *)
+(* Auto-Claim                                                       *)
+(* ================================================================ *)
+
+(** Attempt to claim the next task from the Room backlog.
+    Only runs when room_config is Some and no task is currently held.
+    Uses exponential backoff on repeated failures (cap at ~16 min).
+    Returns [true] when a new task was claimed this turn. *)
+let try_auto_claim ~config ~state ~emit =
+  match config.room_config with
+  | None -> false
+  | Some room_config ->
+    if Option.is_some state.current_task_id then false
+    else begin
+      let now = Time_compat.now () in
+      let effective_cd =
+        config.auto_claim_cooldown_s
+        *. (2.0 ** Float.of_int (min 4 state.claim_failure_count))
+      in
+      if now -. state.last_claim_attempt_ts < effective_cd then false
+      else begin
+        state.last_claim_attempt_ts <- now;
+        (* P2: claim_next_r calls ensure_initialized which can raise
+           Invalid_argument when room paths are not set up. Catch and
+           skip gracefully to avoid crashing the perpetual loop. *)
+        match
+          (try Room_task.claim_next_r room_config
+                 ~agent_name:config.agent_name ()
+           with exn ->
+             eprintf "[perpetual] auto-claim exception: %s\n%!"
+               (Printexc.to_string exn);
+             Room_task.Claim_next_error (Printexc.to_string exn))
+        with
+        | Room_task.Claim_next_claimed { task_id; title; priority; _ } ->
+          state.current_task_id <- Some task_id;
+          state.claim_failure_count <- 0;
+          state.idle_turns <- 0;
+          let msg = Llm_client.user_msg
+            (sprintf "[AUTO-CLAIMED] Task %s (P%d): %s" task_id priority title) in
+          state.context <- Context_manager.append state.context msg;
+          emit (TaskClaimed { task_id; title; priority });
+          true
+        | Room_task.Claim_next_no_unclaimed ->
+          (* Empty queue is not a failure — do not increment backoff counter *)
+          emit (ClaimSkipped "no_unclaimed_tasks");
+          false
+        | Room_task.Claim_next_no_eligible _ ->
+          state.claim_failure_count <- state.claim_failure_count + 1;
+          emit (ClaimSkipped "no_eligible");
+          false
+        | Room_task.Claim_next_error e ->
+          state.claim_failure_count <- state.claim_failure_count + 1;
+          emit (ClaimSkipped (sprintf "error: %s" e));
+          false
+      end
+    end
+
+(** Detect [TASK_DONE] in LLM response and complete the current task. *)
+let check_task_completion ~config ~state ~emit content =
+  match state.current_task_id with
+  | Some task_id when (
+      try ignore (Str.search_forward (Str.regexp_string "[TASK_DONE]") content 0); true
+      with Not_found -> false) ->
+    (match config.room_config with
+     | Some rc ->
+       (* P1-2: Honor complete_task_r failures. On error, keep current_task_id
+          so the agent can retry completion on the next turn. *)
+       (match Room_task.complete_task_r rc ~agent_name:config.agent_name
+                ~task_id ~notes:"completed by perpetual agent" with
+        | Ok _ ->
+          let completed_id = task_id in
+          state.current_task_id <- None;
+          emit (TaskCompleted { task_id = completed_id })
+        | Error err ->
+          eprintf "[perpetual] complete_task_r failed for %s: %s — will retry next turn\n%!"
+            task_id (Types.masc_error_to_string err))
+     | None ->
+       (* No room_config but task is held — clear to prevent deadlock *)
+       eprintf "[perpetual] check_task_completion: room_config is None, clearing orphaned task %s\n%!" task_id;
+       state.current_task_id <- None)
+  | _ -> ()
+
+(* ================================================================ *)
 (* Single Turn Execution                                            *)
 (* ================================================================ *)
 
@@ -449,6 +548,11 @@ let run_coding_turn ~config ~state =
         let pct = Context_manager.context_ratio state.context *. 100.0 in
         emit (Heartbeat { turn; context_pct = pct })
       end;
+
+      (* Auto-claim + task completion in coding mode *)
+      let just_claimed = try_auto_claim ~config ~state ~emit in
+      if not just_claimed then
+        check_task_completion ~config ~state ~emit result.Spawn_eio.output;
 
       (* Check termination: goal complete, stuck, or spawn indicates context exhaustion *)
       let content = result.Spawn_eio.output in
@@ -667,6 +771,15 @@ let run_turn ~config ~state =
           emit (Heartbeat { turn; context_pct = pct })
         end;
 
+        (* 7b. AUTO-CLAIM: try to pick up a task if idle *)
+        let just_claimed = try_auto_claim ~config ~state ~emit in
+
+        (* 7c. TASK COMPLETION: detect [TASK_DONE] in response.
+           P1-1: Skip when a task was just claimed this turn — resp.content
+           predates the claim and may contain stale [TASK_DONE] signals. *)
+        if not just_claimed then
+          check_task_completion ~config ~state ~emit resp.content;
+
         (* 8. Check termination conditions *)
         if is_goal_complete resp.content then begin
           emit (Terminated "Goal complete");
@@ -721,7 +834,7 @@ let stop state =
 (* Status                                                           *)
 (* ================================================================ *)
 
-let status state : Yojson.Safe.t =
+let status ~config state : Yojson.Safe.t =
   let now_ts = Time_compat.now () in
   let age_s = if state.started_at <= 0.0 then 0.0 else now_ts -. state.started_at in
   let last_turn_ago_s = if state.last_turn_ts <= 0.0 then 0.0 else now_ts -. state.last_turn_ts in
@@ -743,6 +856,9 @@ let status state : Yojson.Safe.t =
     | IdleDetected _ -> "idle_detected"
     | Terminated _ -> "terminated"
     | CodingSpawn _ -> "coding_spawn"
+    | TaskClaimed _ -> "task_claimed"
+    | TaskCompleted _ -> "task_completed"
+    | ClaimSkipped _ -> "claim_skipped"
   in
   let event_to_json (ev : event) : Yojson.Safe.t =
     match ev with
@@ -793,6 +909,17 @@ let status state : Yojson.Safe.t =
         ("exit_code", `Int exit_code);
         ("elapsed_ms", `Int elapsed_ms);
       ]
+    | TaskClaimed { task_id; title; priority } ->
+      `Assoc [
+        ("kind", `String (event_kind ev));
+        ("task_id", `String task_id);
+        ("title", `String title);
+        ("priority", `Int priority);
+      ]
+    | TaskCompleted { task_id } ->
+      `Assoc [("kind", `String (event_kind ev)); ("task_id", `String task_id)]
+    | ClaimSkipped reason ->
+      `Assoc [("kind", `String (event_kind ev)); ("reason", `String reason)]
   in
   let rec take n = function
     | [] -> []
@@ -841,4 +968,8 @@ let status state : Yojson.Safe.t =
     ("context_tokens", `Int state.context.token_count);
     ("context_max", `Int state.context.max_tokens);
     ("message_count", `Int (List.length state.context.messages));
+    ("current_task_id", match state.current_task_id with
+      | Some id -> `String id | None -> `Null);
+    ("claim_failure_count", `Int state.claim_failure_count);
+    ("auto_claim_enabled", `Bool (Option.is_some config.room_config));
   ]

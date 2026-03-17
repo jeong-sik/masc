@@ -826,6 +826,12 @@
   color: #f87171;
 }
 
+.command-chip.muted,
+.command-tag.muted {
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.35);
+}
+
 .command-tree-meta,
 .command-tag-row {
   display: flex;

@@ -150,7 +150,7 @@ function actorActivityTone(item: DashboardProofActorContribution): string {
     return (item.interaction_count ?? 0) > 0 || (item.tool_evidence_count ?? 0) > 0 ? 'ok' : 'warn'
   }
   if (item.activity_state === 'mentioned_only') return 'warn'
-  return 'bad'
+  return 'muted'
 }
 
 function actorActivityLabel(item: DashboardProofActorContribution): string {
@@ -330,8 +330,9 @@ function ActorContributionRow({ item }: { item: DashboardProofActorContribution 
   const eventSummary = item.recent_event_summary ?? null
   const requestPreview = item.recent_request_preview ?? null
   const lastSeen = item.last_active_at ?? item.recent_request_at ?? null
+  const isPlanned = item.activity_state === 'planned_only'
   return html`
-    <article class="mission-activity-row proof-actor-row">
+    <article class="mission-activity-row proof-actor-row" style="${isPlanned ? 'opacity: 0.45;' : ''}"
       <div class="mission-activity-head">
         <div>
           <strong>${item.actor}</strong>
@@ -444,7 +445,11 @@ export function Proof() {
 
   const summary = snapshot?.summary
   const selection = snapshot?.selection ?? null
-  const contributions = safeArray<DashboardProofActorContribution>(snapshot?.actor_contributions)
+  const rawContributions = safeArray<DashboardProofActorContribution>(snapshot?.actor_contributions)
+  const activityOrder: Record<string, number> = { acted: 0, mentioned_only: 1, planned_only: 2 }
+  const contributions = [...rawContributions].sort(
+    (a, b) => (activityOrder[a.activity_state ?? ''] ?? 2) - (activityOrder[b.activity_state ?? ''] ?? 2)
+  )
   const artifacts = safeArray<DashboardProofArtifactRef>(snapshot?.artifacts)
   const toolEvidence = safeArray<DashboardProofToolEvidence>(snapshot?.tool_evidence)
   const verdict = snapshot?.proof_verdict ?? 'insufficient'
@@ -508,52 +513,57 @@ export function Proof() {
           <strong>${verdictLabel(verdict)}</strong>
           <small>${summary?.detail ?? '협업 증거를 verdict로 요약합니다.'}</small>
         </div>
-        <div class="summary-stat-card ${verdictTone(liveVerdict)}">
-          <span>Live 판정</span>
-          <strong>${liveVerdict}</strong>
-          <small>${verdictBasisLabel(verdictBasis)} 기준 최종 판정에 반영</small>
-        </div>
-        <div class="summary-stat-card ${verdictTone(historicalVerdict ?? 'insufficient')}">
-          <span>Historical proof</span>
-          <strong>${historicalVerdict ?? 'none'}</strong>
-          <small>persisted proof 문서 기준</small>
-        </div>
         <div class="summary-stat-card">
           <span>실제 흔적</span>
           <strong>${actorCount}</strong>
-          <small>이벤트를 남긴 actor 수</small>
-        </div>
-        <div class="summary-stat-card ${plannedActorCount > actorCount ? 'warn' : 'ok'}">
-          <span>계획된 참여자</span>
-          <strong>${plannedActorCount}</strong>
-          <small>${mentionedActorCount > 0 ? `${mentionedActorCount}명 호출됨` : '호출 기록 없음'}</small>
-        </div>
-        <div class="summary-stat-card ${unansweredActorCount > 0 ? 'warn' : 'ok'}">
-          <span>무응답</span>
-          <strong>${unansweredActorCount}</strong>
-          <small>${unansweredActorCount > 0 ? '호출됐지만 응답 근거 없음' : '무응답 참여자 없음'}</small>
-        </div>
-        <div class="summary-stat-card ${interactionCount > 0 ? 'ok' : 'warn'}">
-          <span>직접 상호작용</span>
-          <strong>${interactionCount}</strong>
-          <small>참여자 간 직접 연결 근거</small>
+          <small>이벤트를 남긴 actor 수${plannedActorCount > 0 ? ` (계획 ${plannedActorCount})` : ''}</small>
         </div>
         <div class="summary-stat-card ${evidenceCount > 0 ? 'ok' : 'warn'}">
           <span>근거</span>
           <strong>${evidenceCount}</strong>
-          <small>도구 / 산출물 / 체크포인트</small>
-        </div>
-        <div class="summary-stat-card ${traceCount > 0 ? 'ok' : 'warn'}">
-          <span>CP 트레이스</span>
-          <strong>${traceCount}</strong>
-          <small>관리형 backing 이벤트</small>
-        </div>
-        <div class="summary-stat-card ${(missingArtifacts === 0 && artifacts.length > 0) ? 'ok' : 'warn'}">
-          <span>산출물</span>
-          <strong>${presentArtifacts}/${artifacts.length}</strong>
-          <small>${missingArtifacts > 0 ? `${missingArtifacts}개 누락` : '전부 존재함'}</small>
+          <small>도구 ${(toolEvidence?.length ?? 0)} / 산출물 ${presentArtifacts}/${artifacts.length} / CP ${traceCount}</small>
         </div>
       </div>
+      <details style="margin-bottom: 12px;">
+        <summary style="cursor: pointer; color: rgba(255,255,255,0.5); font-size: 13px; padding: 6px 0;">상세 지표 (${7}개)</summary>
+        <div class="mission-stat-grid" style="margin-top: 8px;">
+          <div class="summary-stat-card ${verdictTone(liveVerdict)}">
+            <span>Live 판정</span>
+            <strong>${liveVerdict}</strong>
+            <small>${verdictBasisLabel(verdictBasis)} 기준</small>
+          </div>
+          <div class="summary-stat-card ${verdictTone(historicalVerdict ?? 'insufficient')}">
+            <span>Historical</span>
+            <strong>${historicalVerdict ?? 'none'}</strong>
+            <small>persisted proof 문서 기준</small>
+          </div>
+          <div class="summary-stat-card ${unansweredActorCount > 0 ? 'warn' : 'ok'}">
+            <span>무응답</span>
+            <strong>${unansweredActorCount}</strong>
+            <small>${unansweredActorCount > 0 ? '호출됐지만 응답 없음' : '없음'}</small>
+          </div>
+          <div class="summary-stat-card ${interactionCount > 0 ? 'ok' : 'warn'}">
+            <span>직접 상호작용</span>
+            <strong>${interactionCount}</strong>
+            <small>참여자 간 직접 연결</small>
+          </div>
+          <div class="summary-stat-card ${traceCount > 0 ? 'ok' : 'warn'}">
+            <span>CP 트레이스</span>
+            <strong>${traceCount}</strong>
+            <small>관리형 backing</small>
+          </div>
+          <div class="summary-stat-card ${(missingArtifacts === 0 && artifacts.length > 0) ? 'ok' : 'warn'}">
+            <span>산출물</span>
+            <strong>${presentArtifacts}/${artifacts.length}</strong>
+            <small>${missingArtifacts > 0 ? `${missingArtifacts}개 누락` : '전부 존재함'}</small>
+          </div>
+          <div class="summary-stat-card ${plannedActorCount > actorCount ? 'warn' : 'ok'}">
+            <span>계획된 참여자</span>
+            <strong>${plannedActorCount}</strong>
+            <small>${mentionedActorCount > 0 ? `${mentionedActorCount}명 호출됨` : '호출 기록 없음'}</small>
+          </div>
+        </div>
+      </details>
 
       <div class="mission-human-grid">
         <${Card} title="3줄 근거 요약" class="mission-list-card" semanticId="proof.summary">

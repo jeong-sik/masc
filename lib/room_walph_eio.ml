@@ -265,7 +265,7 @@ let get_chain_id_for_preset = function
   | _ -> None
 
 let walph_response_is_valid (resp : Llm_client.completion_response) =
-  let content = String.trim resp.content in
+  let content = String.trim (Llm_client.text_of_response resp) in
   let lower = String.lowercase_ascii content in
   let len = String.length content in
   len > 0

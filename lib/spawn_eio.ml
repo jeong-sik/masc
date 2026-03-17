@@ -320,7 +320,7 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
     | Ok resp ->
         {
           success = true;
-          output = resp.Llm_client.content;
+          output = Llm_client.text_of_response resp;
           exit_code = 0;
           elapsed_ms = resp.Llm_client.latency_ms;
           tool_call_count = 0;

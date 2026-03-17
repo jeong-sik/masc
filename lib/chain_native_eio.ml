@@ -317,7 +317,7 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
         }
       in
       (match Llm_client.complete ~timeout_sec req with
-      | Ok resp when trim resp.content <> "" -> Ok resp.content
+      | Ok resp when trim (Llm_client.text_of_response resp) <> "" -> Ok (Llm_client.text_of_response resp)
       | Ok resp when resp.tool_calls <> [] ->
           Ok (Yojson.Safe.to_string (llm_tool_calls_json resp.tool_calls))
       | Ok _ -> Error "empty completion"

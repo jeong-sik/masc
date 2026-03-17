@@ -214,12 +214,12 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                         in
                         (match
                            Keeper_deliberation.parse_deliberation_response
-                             response.content
+                             (Llm_client.text_of_response response)
                          with
                          | Error msg ->
                              Log.KeeperExec.error "%s parse failed: %s (raw: %s)"
                                meta.name msg
-                               (Keeper_types.short_preview response.content);
+                               (Keeper_types.short_preview (Llm_client.text_of_response response));
                              (* Update meta with cost even on parse failure *)
                              let updated =
                                { meta with

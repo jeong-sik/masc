@@ -15,14 +15,8 @@
 
     @since 2.90.0 *)
 
-(** Convert a MASC Llm_client.message to an OAS Types.message option.
-    System messages return None (belong in system_prompt, not messages). *)
-let masc_msg_to_oas (m : Llm_client.message) : Agent_sdk.Types.message option =
-  Llm_client.to_oas_message m
-
-(** Convert an OAS Types.message back to MASC Llm_client.message. *)
-let oas_msg_to_masc (m : Agent_sdk.Types.message) : Llm_client.message =
-  Llm_client.of_oas_message m
+(* v0.50: masc_msg_to_oas / oas_msg_to_masc removed — were identity wrappers
+   around Llm_client.to_oas_message / of_oas_message. Call sites inlined. *)
 
 (** Minimal perpetual-loop state needed for OAS checkpoint persistence. *)
 type checkpoint_state = {
@@ -73,7 +67,7 @@ let to_oas_checkpoint
     "trace_id" (`String state.trace_id);
   Agent_sdk.Context.set_scoped oas_ctx Agent_sdk.Context.App
     "masc_version" (`String Version.version);
-  let messages = List.filter_map masc_msg_to_oas ctx.messages in
+  let messages = List.filter_map Llm_client.to_oas_message ctx.messages in
   {
     Agent_sdk.Checkpoint.version = 3;
     session_id = state.session_id;
@@ -126,4 +120,4 @@ let from_oas_checkpoint (ckpt : Agent_sdk.Checkpoint.t)
 
 (** Convert OAS messages back to MASC messages for working context init. *)
 let restore_messages (oas_msgs : Agent_sdk.Types.message list) : Llm_client.message list =
-  List.map oas_msg_to_masc oas_msgs
+  List.map Llm_client.of_oas_message oas_msgs

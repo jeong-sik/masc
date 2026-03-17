@@ -35,7 +35,7 @@ type role = Agent_sdk.Types.role = System | User | Assistant | Tool
 
 type message = {
   role : role;
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   name : string option;
   tool_call_id : string option;
 }
@@ -70,12 +70,17 @@ type completion_request = {
 }
 
 type completion_response = {
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   tool_calls : tool_call list;
   usage : token_usage;
   model_used : string;
   latency_ms : int;
 }
+
+(** Extract text content from a completion_response.
+    Delegates to Agent_sdk.Types.text_of_content for rich content_block list. *)
+let text_of_response (resp : completion_response) : string =
+  Agent_sdk.Types.text_of_content resp.content
 
 let clamp_llama_max_tokens max_tokens =
   max 1 (min max_tokens Env_config.Llama.max_tokens)
@@ -158,16 +163,26 @@ let gemini_pro = {
   cost_per_1k_output = 0.0;
 }
 
-let system_msg content = { role = System; content; name = None; tool_call_id = None }
-let user_msg content = { role = User; content; name = None; tool_call_id = None }
-let assistant_msg content = { role = Assistant; content; name = None; tool_call_id = None }
+let system_msg text =
+  { role = System; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
+let user_msg text =
+  { role = User; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
+let assistant_msg text =
+  { role = Assistant; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
 
-let tool_msg ~name ~call_id content =
-  { role = Tool; content; name = Some name; tool_call_id = Some call_id }
+let tool_msg ~name ~call_id text =
+  { role = Tool;
+    content = [Agent_sdk.Types.ToolResult { tool_use_id = call_id; content = text; is_error = false }];
+    name = Some name; tool_call_id = Some call_id }
+
+(** Extract text content from a message.
+    Delegates to Agent_sdk.Types.text_of_content for rich content_block list. *)
+let text_of_message (m : message) : string =
+  Agent_sdk.Types.text_of_content m.content
 
 (** Heuristic: ~4 characters per token (conservative estimate). *)
 let estimate_tokens (msgs : message list) =
-  List.fold_left (fun acc (m : message) -> acc + (String.length m.content / 4) + 4) 0 msgs
+  List.fold_left (fun acc (m : message) -> acc + (String.length (text_of_message m) / 4) + 4) 0 msgs
 
 let rec model_spec_of_string s =
   let s = String.trim s in

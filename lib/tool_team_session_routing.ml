@@ -470,19 +470,9 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
           model = llama_router_model_spec judge_model;
           messages =
             [
-              {
-                Llm_client.role = Llm_client.System;
-                content =
-                  "You are a routing judge for a hybrid swarm. Output only JSON.";
-                name = None;
-                tool_call_id = None;
-              };
-              {
-                Llm_client.role = Llm_client.User;
-                content = prompt;
-                name = None;
-                tool_call_id = None;
-              };
+              Llm_client.system_msg
+                "You are a routing judge for a hybrid swarm. Output only JSON.";
+              Llm_client.user_msg prompt;
             ];
           temperature = 0.0;
           max_tokens = 220;
@@ -495,7 +485,7 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
       with
       | Ok response -> (
           try
-            Yojson.Safe.from_string response.content
+            Yojson.Safe.from_string (Llm_client.text_of_response response)
             |> parse_routing_decision_json
           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
       | Error _ -> None

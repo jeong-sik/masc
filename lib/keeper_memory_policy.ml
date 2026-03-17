@@ -488,7 +488,7 @@ let latest_state_snapshot_from_messages (messages : Llm_client.message list) :
     match msgs with
     | [] -> None
     | msg :: rest ->
-      match parse_state_snapshot_from_reply msg.content with
+      match parse_state_snapshot_from_reply (Llm_client.text_of_message msg) with
       | None -> loop rest
       | Some snapshot -> Some snapshot
   in

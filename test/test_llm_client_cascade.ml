@@ -115,11 +115,11 @@ let test_cascade_uses_next_cached_response_when_validator_rejects () =
       match
         Llm_client.cascade
           ~accept:(fun (resp : Llm_client.completion_response) ->
-            not (String.equal resp.content "reject me"))
+            not (String.equal (Llm_client.text_of_response resp) "reject me"))
           [ first; second ]
       with
       | Ok resp ->
-          check string "content" "accept me" resp.content;
+          check string "content" "accept me" (Llm_client.text_of_response resp);
           check string "winner" "cached-2" resp.model_used
       | Error e -> fail ("unexpected cascade error: " ^ e))
 
@@ -131,7 +131,7 @@ let test_cascade_returns_error_when_all_responses_rejected () =
       match
         Llm_client.cascade
           ~accept:(fun (resp : Llm_client.completion_response) ->
-            not (String.equal resp.content "reject me"))
+            not (String.equal (Llm_client.text_of_response resp) "reject me"))
           [ first ]
       with
       | Ok _ -> fail "expected rejection error"
@@ -207,11 +207,11 @@ let test_run_prompt_cascade_uses_same_request_shape () =
       match
         Llm_client.run_prompt_cascade ~temperature:0.0 ~timeout_sec:30
           ~accept:(fun (resp : Llm_client.completion_response) ->
-            not (String.equal resp.content "reject me"))
+            not (String.equal (Llm_client.text_of_response resp) "reject me"))
           ~model_specs:[ model1; model2 ] ~max_tokens:32 ~prompt ()
       with
       | Ok resp ->
-          check string "content" "accept me" resp.content;
+          check string "content" "accept me" (Llm_client.text_of_response resp);
           check string "winner" "run-prompt-2" resp.model_used
       | Error e -> fail ("unexpected run_prompt_cascade error: " ^ e))
 

@@ -649,11 +649,11 @@ let run_proactive_generation
               ~acc_tools_used ~last_resp =
             if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
               let content =
-                let c = String.trim last_resp.Llm_client.content in
+                let c = String.trim (Llm_client.text_of_response last_resp) in
                 if c = "" && acc_tools_used <> [] then
                   Printf.sprintf "(tools executed: %s)"
                     (String.concat ", " acc_tools_used)
-                else last_resp.Llm_client.content
+                else Llm_client.text_of_response last_resp
               in
               ( content,
                 acc_usage,
@@ -674,7 +674,7 @@ let run_proactive_generation
               let followup_prompt =
                 keeper_tool_followup_prompt
                   ~user_message:prompt
-                  ~draft_reply:last_resp.Llm_client.content
+                  ~draft_reply:(Llm_client.text_of_response last_resp)
                   ~tool_outputs
                   ~already_executed:all_tools_so_far
               in
@@ -708,7 +708,7 @@ let run_proactive_generation
               in
               match run_cascade followup_requests with
               | Error _ ->
-                  ( last_resp.Llm_client.content,
+                  ( Llm_client.text_of_response last_resp,
                     acc_usage,
                     last_resp.Llm_client.model_used,
                     acc_latency,

@@ -14,6 +14,8 @@
 
 open Printf
 
+let text_of_message = Llm_client.text_of_message
+
 (* ================================================================ *)
 (* Types                                                            *)
 (* ================================================================ *)
@@ -94,7 +96,7 @@ let extract_state_blocks (s : string) : string list =
 
 (** Count tokens in a message (~4 chars/token + role overhead). *)
 let msg_tokens (m : Llm_client.message) =
-  (String.length m.content / 4) + 4
+  (String.length (text_of_message m) / 4) + 4
 
 let count_tokens (system_prompt : string) (msgs : Llm_client.message list) =
   let sys_tokens = (String.length system_prompt / 4) + 4 in
@@ -167,7 +169,8 @@ let score_importance ctx =
       | Llm_client.Assistant -> 0.4
     in
     (* Content signal: very short = less important, very long = average *)
-    let len = String.length m.content in
+    let msg_text = text_of_message m in
+    let len = String.length msg_text in
     let content_w = if len < 20 then 0.3
       else if len < 100 then 0.6
       else if len < 500 then 0.8
@@ -178,8 +181,8 @@ let score_importance ctx =
     let score = 0.4 *. recency +. 0.25 *. role_w +. 0.2 *. content_w +. 0.15 *. tool_w in
     (* Sticky memory: never drop compacted memory summary or goal injection. *)
     let score =
-      if starts_with ~prefix:memory_summary_prefix m.content
-         || starts_with ~prefix:goal_prefix m.content then
+      if starts_with ~prefix:memory_summary_prefix msg_text
+         || starts_with ~prefix:goal_prefix msg_text then
         Float.max score 0.95
       else
         score
@@ -197,12 +200,13 @@ let score_importance ctx =
 let prune_tool_outputs ?(max_len=500) ?(keep_len=100) ctx =
   let messages = List.map (fun (m : Llm_client.message) ->
     match m.role with
-    | Llm_client.Tool when String.length m.content > max_len ->
-      let head = String.sub m.content 0 keep_len in
-      let tail_start = String.length m.content - keep_len in
-      let tail = String.sub m.content tail_start keep_len in
-      { m with content = sprintf "%s\n[...truncated %d chars...]\n%s"
-          head (String.length m.content - 2 * keep_len) tail }
+    | Llm_client.Tool when String.length (text_of_message m) > max_len ->
+      let mc = text_of_message m in
+      let head = String.sub mc 0 keep_len in
+      let tail_start = String.length mc - keep_len in
+      let tail = String.sub mc tail_start keep_len in
+      { m with content = [Agent_sdk.Types.Text (sprintf "%s\n[...truncated %d chars...]\n%s"
+          head (String.length mc - 2 * keep_len) tail)] }
     | _ -> m
   ) ctx.messages in
   let token_count = count_tokens ctx.system_prompt messages in
@@ -215,7 +219,7 @@ let merge_contiguous ctx =
     | [m] -> [m]
     | (m1 : Llm_client.message) :: (m2 :: rest as tail) ->
       if m1.role = m2.role then
-        let merged = { m1 with content = m1.content ^ "\n" ^ m2.content } in
+        let merged = { m1 with content = [Agent_sdk.Types.Text (text_of_message m1 ^ "\n" ^ text_of_message m2)] } in
         merge (merged :: rest)
       else
         m1 :: merge tail
@@ -253,7 +257,7 @@ let summarize_old ?(oldest_pct=0.3) ctx =
        "instructions" and breaking behavior. *)
     let blocks =
       old_msgs
-      |> List.concat_map (fun (m : Llm_client.message) -> extract_state_blocks m.content)
+      |> List.concat_map (fun (m : Llm_client.message) -> extract_state_blocks (text_of_message m))
     in
     let take_last n lst =
       let len = List.length lst in
@@ -277,9 +281,10 @@ let summarize_old ?(oldest_pct=0.3) ctx =
             | System -> "SYS" | User -> "USR"
             | Assistant -> "AST" | Tool -> "TOOL"
           in
-          let truncated = if String.length m.content > 80
-            then String.sub m.content 0 80 ^ "..."
-            else m.content in
+          let mc = text_of_message m in
+          let truncated = if String.length mc > 80
+            then String.sub mc 0 80 ^ "..."
+            else mc in
           sprintf "[%s] %s" role_str truncated
         ) old_msgs in
         sprintf "%s\n(Fallback summary of %d earlier messages; reference only.)\n%s"
@@ -333,8 +338,8 @@ let masc_msg_to_oas_tagged (m : Llm_client.message) : Agent_sdk.Types.message =
     | Llm_client.Assistant -> Agent_sdk.Types.Assistant, None
   in
   let text = match tag with
-    | Some t -> t ^ m.content
-    | None -> m.content
+    | Some t -> t ^ text_of_message m
+    | None -> text_of_message m
   in
   let content = match m.role with
     | Llm_client.Tool ->
@@ -379,7 +384,7 @@ let oas_msg_to_masc_tagged (m : Agent_sdk.Types.message) : Llm_client.message =
     | Llm_client.Tool -> tool_id
     | _ -> None
   in
-  { Llm_client.role; content; name = None; tool_call_id }
+  { Llm_client.role; content = [Agent_sdk.Types.Text content]; name = None; tool_call_id }
 
 let oas_strategy_of_compaction (s : compaction_strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
@@ -439,7 +444,7 @@ let message_to_json (m : Llm_client.message) : Yojson.Safe.t =
   let m = Llm_client.sanitize_message_utf8 m in
   let base = [
     ("role", `String (role_to_string m.role));
-    ("content", `String m.content);
+    ("content", `String (text_of_message m));
   ] in
   let with_name = match m.name with
     | Some n -> ("name", `String n) :: base | None -> base in
@@ -451,7 +456,7 @@ let message_of_json (json : Yojson.Safe.t) : Llm_client.message =
   let open Yojson.Safe.Util in
   {
     role = json |> member "role" |> to_string |> role_of_string;
-    content = json |> member "content" |> to_string |> Llm_client.sanitize_text_utf8;
+    content = [Agent_sdk.Types.Text (json |> member "content" |> to_string |> Llm_client.sanitize_text_utf8)];
     name = json |> member "name" |> to_string_option |> Option.map Llm_client.sanitize_text_utf8;
     tool_call_id =
       json |> member "tool_call_id" |> to_string_option

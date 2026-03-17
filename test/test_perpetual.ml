@@ -170,7 +170,7 @@ let test_llm_client () = group "LLM Client" (fun () ->
   (* 4. Message constructors *)
   let msg = Llm_client.system_msg "hello" in
   assert_true "msg:system_role" (msg.role = Llm_client.System);
-  assert_equal "msg:system_content" "hello" msg.content;
+  assert_equal "msg:system_content" "hello" (Llm_client.text_of_message msg);
 
   let msg2 = Llm_client.tool_msg ~name:"grep" ~call_id:"c1" "results" in
   assert_true "msg:tool_role" (msg2.role = Llm_client.Tool);
@@ -272,9 +272,9 @@ let test_context_manager () = group "Context Manager" (fun () ->
   let ctx5 = Context_manager.append ctx long_tool_msg in
   let pruned = Context_manager.apply_strategy ctx5 PruneToolOutputs in
   let pruned_msg = List.hd pruned.messages in
-  assert_true "prune:shorter" (String.length pruned_msg.content < 1000);
+  assert_true "prune:shorter" (String.length (Llm_client.text_of_message pruned_msg) < 1000);
   assert_true "prune:has_truncated" (
-    try let _ = Str.search_forward (Str.regexp_string "truncated") pruned_msg.content 0 in true
+    try let _ = Str.search_forward (Str.regexp_string "truncated") (Llm_client.text_of_message pruned_msg) 0 in true
     with Not_found -> false);
 
   (* 8. MergeContiguous *)
@@ -328,10 +328,11 @@ let test_context_manager () = group "Context Manager" (fun () ->
   assert_true "restore:utf8_content_valid"
     (List.for_all
        (fun (msg : Llm_client.message) ->
+         let s = Llm_client.text_of_message msg in
          let rec valid_from i =
-           if i >= String.length msg.content then true
+           if i >= String.length s then true
            else
-             let dec = String.get_utf_8_uchar msg.content i in
+             let dec = String.get_utf_8_uchar s i in
              let dlen = Uchar.utf_decode_length dec in
              dlen > 0 && Uchar.utf_decode_is_valid dec && valid_from (i + dlen)
          in
@@ -546,7 +547,7 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
          msg.role = Llm_client.User &&
          Str.string_match
            (Str.regexp_string (Context_manager.goal_prefix ^ " test"))
-           msg.content 0)
+           (Llm_client.text_of_message msg) 0)
        state2.context.messages);
 
   (* 8. Cost starts at zero *)
@@ -792,7 +793,7 @@ let test_integration () = group "Integration" (fun () ->
     let back = Context_manager.oas_msg_to_masc_tagged oas_msg in
     assert_true (sprintf "roundtrip:%s:role" label) (back.role = orig_msg.role);
     assert_true (sprintf "roundtrip:%s:content" label)
-      (String.length back.content > 0)
+      (String.length (Llm_client.text_of_message back) > 0)
   ) [("tool", tool_msg_rt); ("system", sys_msg_rt);
      ("user", user_msg_rt); ("assistant", asst_msg_rt)];
 
@@ -806,7 +807,7 @@ let test_integration () = group "Integration" (fun () ->
   let tool_msgs = List.filter (fun (m : Llm_client.message) ->
     m.role = Llm_client.Tool) pruned_oas.messages in
   assert_equal "oas_prune:tool_preserved" 1 (List.length tool_msgs);
-  let tool_content = (List.hd tool_msgs).content in
+  let tool_content = Llm_client.text_of_message (List.hd tool_msgs) in
   assert_true "oas_prune:tool_truncated" (String.length tool_content < 800);
 
   (* 3d2. Tagged roundtrip preserves tool_call_id *)
@@ -835,7 +836,7 @@ let test_integration () = group "Integration" (fun () ->
    | None -> assert_true "oas_adapter:msg_roundtrip" false
    | Some oas_m ->
      let back_m = Llm_client.of_oas_message oas_m in
-     assert_true "oas_adapter:msg_roundtrip" (back_m.content = "test"));
+     assert_true "oas_adapter:msg_roundtrip" (Llm_client.text_of_message back_m = "test"));
 
   let test_usage : Llm_client.token_usage =
     { input_tokens = 100; output_tokens = 50; total_tokens = 150;

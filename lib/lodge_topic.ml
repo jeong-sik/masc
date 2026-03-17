@@ -237,7 +237,7 @@ let parse_topics_response (text : string) : string list =
     Rejects empty, garbage, or non-array responses so the cascade retries
     with the next model. *)
 let topics_response_is_valid (result : Llm_client.completion_response) : bool =
-  let text = String.trim result.Llm_client.content in
+  let text = String.trim (Llm_client.text_of_response result) in
   (* Must contain at least one bracket pair *)
   if not (String.contains text '[' && String.contains text ']') then false
   else

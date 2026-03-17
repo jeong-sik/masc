@@ -298,6 +298,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     init_runtime_context env
   in
 
+  (* Initialize Eio environment for LLM HTTP calls (cohttp-eio via Llm_provider) *)
+  Llm_eio_env.init ~sw ~net;
+
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = make_http_config ~host ~port in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in

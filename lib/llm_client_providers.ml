@@ -586,6 +586,8 @@ let of_oas_message (m : Agent_sdk.Types.message) : message =
   let role = match m.role with
     | Agent_sdk.Types.User -> User
     | Agent_sdk.Types.Assistant -> Assistant
+    | Agent_sdk.Types.System -> System
+    | Agent_sdk.Types.Tool -> Tool
   in
   let content =
     m.content

@@ -370,7 +370,9 @@ let oas_msg_to_masc_tagged (m : Agent_sdk.Types.message) : Llm_client.message =
     else
       (match m.role with
        | Agent_sdk.Types.User -> Llm_client.User
-       | Agent_sdk.Types.Assistant -> Llm_client.Assistant),
+       | Agent_sdk.Types.Assistant -> Llm_client.Assistant
+       | Agent_sdk.Types.System -> Llm_client.System
+       | Agent_sdk.Types.Tool -> Llm_client.Tool),
       text
   in
   let tool_call_id = match role with

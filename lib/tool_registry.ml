@@ -142,6 +142,29 @@ let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
     ("never_called_count", `Int (List.length never_called));
   ]
 
+(** Warm up registry from telemetry summary.
+    Called once at server startup to restore persistent metrics. *)
+let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+      let count = ref 0 in
+      Hashtbl.iter
+        (fun tool_name (stats : Telemetry_eio.tool_usage_stats) ->
+          if not (Hashtbl.mem registry tool_name) then (
+            Hashtbl.replace registry tool_name
+              {
+                call_count = stats.count;
+                success_count = stats.success_count;
+                failure_count = stats.failure_count;
+                last_called_at =
+                  (match stats.last_used_at with
+                  | Some t -> t
+                  | None -> 0.0);
+                total_duration_ms = 0;
+              };
+            incr count))
+        summary.stats_by_tool;
+      !count)
+
 (** Reset all counters (for testing) *)
 let reset () =
   Eio.Mutex.use_rw ~protect:true registry_mutex (fun () -> Hashtbl.clear registry)

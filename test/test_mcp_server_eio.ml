@@ -1042,6 +1042,7 @@ let test_execute_tool_hidden_active_utility_direct_call () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Room.init state.room_config ~agent_name:(Some "test-agent"));
   let room_path = Masc_mcp.Room.masc_dir state.room_config in
   let _ = Config.switch_mode room_path Mode.Full in
 

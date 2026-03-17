@@ -20,7 +20,7 @@ let test_standard_all_pass () =
       ~goal_recorded:true ~participants_count:2
       ~unique_turn_actors_count:2 ~required_turn_actors:2
       ~unauthorized_turn_actors:[] ~report_json_exists:true
-      ~report_md_exists:true ~done_delta_total:5
+      ~report_md_exists:true ~done_delta_total:5 ()
   in
   check_bool "all_criteria_pass (happy path)" true
     (Team_session_report.all_criteria_pass criteria);
@@ -51,7 +51,7 @@ let test_standard_all_fail () =
       ~unique_turn_actors_count:0 ~required_turn_actors:2
       ~unauthorized_turn_actors:["intruder"]
       ~report_json_exists:false ~report_md_exists:false
-      ~done_delta_total:(-1)
+      ~done_delta_total:(-1) ()
   in
   check_bool "all_criteria_pass (all fail)" false
     (Team_session_report.all_criteria_pass criteria);
@@ -77,7 +77,7 @@ let test_checkpoint_boundary () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[] ~report_json_exists:true
-      ~report_md_exists:true ~done_delta_total:0
+      ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "checkpoint=0 fails" false
     (Team_session_report.find_criterion c0 "checkpoint_recorded");
@@ -87,7 +87,7 @@ let test_checkpoint_boundary () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[] ~report_json_exists:true
-      ~report_md_exists:true ~done_delta_total:0
+      ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "checkpoint=1 passes" true
     (Team_session_report.find_criterion c1 "checkpoint_recorded")
@@ -100,7 +100,7 @@ let test_turn_or_communication_edge () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[] ~report_json_exists:true
-      ~report_md_exists:true ~done_delta_total:0
+      ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "turn=0,comm=0 fails" false
     (Team_session_report.find_criterion c_none "turn_or_communication_recorded");
@@ -111,7 +111,7 @@ let test_turn_or_communication_edge () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[] ~report_json_exists:true
-      ~report_md_exists:true ~done_delta_total:0
+      ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "turn=0,comm=1 passes (OR)" true
     (Team_session_report.find_criterion c_comm "turn_or_communication_recorded");
@@ -122,7 +122,7 @@ let test_turn_or_communication_edge () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[] ~report_json_exists:true
-      ~report_md_exists:true ~done_delta_total:0
+      ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "turn=1,comm=0 passes (OR)" true
     (Team_session_report.find_criterion c_turn "turn_or_communication_recorded")
@@ -134,7 +134,7 @@ let test_unauthorized_actors () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:["x"]
-      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0
+      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "one unauthorized actor fails" false
     (Team_session_report.find_criterion c_one "turn_actor_authorized")
@@ -146,7 +146,7 @@ let test_report_artifacts_partial () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[]
-      ~report_json_exists:true ~report_md_exists:false ~done_delta_total:0
+      ~report_json_exists:true ~report_md_exists:false ~done_delta_total:0 ()
   in
   check_bool "json only -> report_artifacts fails" false
     (Team_session_report.find_criterion c_json_only "report_artifacts");
@@ -156,7 +156,7 @@ let test_report_artifacts_partial () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[]
-      ~report_json_exists:false ~report_md_exists:true ~done_delta_total:0
+      ~report_json_exists:false ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "md only -> report_artifacts fails" false
     (Team_session_report.find_criterion c_md_only "report_artifacts")
@@ -168,7 +168,7 @@ let test_done_delta_boundary () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[]
-      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:(-1)
+      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:(-1) ()
   in
   check_bool "done_delta=-1 fails" false
     (Team_session_report.find_criterion c_neg "outcome_traceable");
@@ -178,7 +178,7 @@ let test_done_delta_boundary () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[]
-      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0
+      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "done_delta=0 passes" true
     (Team_session_report.find_criterion c_zero "outcome_traceable")
@@ -194,7 +194,7 @@ let test_find_criterion_missing () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[]
-      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0
+      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "nonexistent criterion returns false" false
     (Team_session_report.find_criterion criteria "nonexistent_criterion_xyz")
@@ -210,7 +210,7 @@ let test_mandatory_standard_pass () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[]
-      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0
+      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "standard mandatory ok" true
     (Team_session_report.mandatory_ok_for_level
@@ -223,7 +223,7 @@ let test_mandatory_standard_fail_no_checkpoint () =
       ~goal_recorded:true ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[]
-      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0
+      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "standard fails without checkpoint" false
     (Team_session_report.mandatory_ok_for_level
@@ -238,7 +238,7 @@ let test_mandatory_strong_requires_all () =
       ~participants_count:1
       ~unique_turn_actors_count:1 ~required_turn_actors:1
       ~unauthorized_turn_actors:[]
-      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0
+      ~report_json_exists:true ~report_md_exists:true ~done_delta_total:0 ()
   in
   check_bool "strong fails when goal missing" false
     (Team_session_report.mandatory_ok_for_level

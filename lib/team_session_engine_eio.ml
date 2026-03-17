@@ -26,9 +26,15 @@ let start_runtime_loop ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
               in
               let now = Time_compat.now () in
               if stop_requested then
+                let final_status =
+                  match stop_reason with
+                  | "runtime_missing" | "interrupted" | "signal" ->
+                      Team_session_types.Interrupted
+                  | _ -> Team_session_types.Completed
+                in
                 ignore
                   (finalize_session ~config ~session_id
-                     ~final_status:Team_session_types.Interrupted ~reason:stop_reason
+                     ~final_status ~reason:stop_reason
                      ~generate_report:generate_report_on_finalize)
               else if now >= session.planned_end_at then
                 ignore

@@ -153,7 +153,8 @@ let make_standard_criteria ~event_started ~checkpoints_count ~turn_events
     ~communication_total ~goal_recorded ~participants_count
     ~unique_turn_actors_count ~required_turn_actors
     ~unauthorized_turn_actors ~report_json_exists ~report_md_exists
-    ~done_delta_total =
+    ~done_delta_total
+    ?(min_turn_events = 1) ?(min_communication = 0) () =
   [
     criterion "session_started_event" event_started "session_started 이벤트 존재";
     criterion "checkpoint_recorded" (checkpoints_count > 0)
@@ -162,6 +163,13 @@ let make_standard_criteria ~event_started ~checkpoints_count ~turn_events
       (turn_events > 0 || communication_total > 0)
       (Printf.sprintf "turn_events=%d communication_total=%d" turn_events
          communication_total);
+    criterion "turn_volume_threshold" (turn_events >= min_turn_events)
+      (Printf.sprintf "turn_events=%d min_turn_events=%d" turn_events
+         min_turn_events);
+    criterion "communication_volume_threshold"
+      (communication_total >= min_communication)
+      (Printf.sprintf "communication_total=%d min_communication=%d"
+         communication_total min_communication);
     criterion "goal_recorded" goal_recorded "goal 문자열 존재";
     criterion "participants_recorded" (participants_count > 0)
       (Printf.sprintf "participants=%d" participants_count);

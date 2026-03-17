@@ -226,7 +226,7 @@ let check_assertion st assertion =
          "Call masc_join to register your agent in the room")
     | "task_claimed" ->
         (st.task_claimed,
-         "Call masc_claim or masc_add_task + masc_claim to get a task")
+         "Call masc_claim_next or masc_transition(action=claim) to get a task")
     | "current_task_set" ->
         (st.current_task_set,
          "Call masc_plan_set_task after claiming a task")

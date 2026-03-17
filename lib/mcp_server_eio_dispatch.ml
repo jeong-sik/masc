@@ -26,6 +26,7 @@ type ('clock, 'net) dispatch_contexts = {
   ctx_mitosis : Tool_mitosis.context;
   ctx_portal : Tool_portal.context;
   ctx_worktree : Tool_worktree.context;
+  ctx_code_swarm : Tool_code_swarm.context;
   ctx_code : Tool_code.context;
   ctx_vote : Tool_vote.context;
   ctx_social : Tool_social.context;
@@ -98,6 +99,8 @@ let dispatch (c : (_, _) dispatch_contexts) : bool * string =
         ~handler:(fun ~name ~args -> Tool_portal.dispatch c.ctx_portal ~name ~args);
       reg ~schemas:Tool_worktree.schemas
         ~handler:(fun ~name ~args -> Tool_worktree.dispatch c.ctx_worktree ~name ~args);
+      reg ~schemas:Tool_code_swarm.schemas
+        ~handler:(fun ~name ~args -> Tool_code_swarm.dispatch c.ctx_code_swarm ~name ~args);
       reg ~schemas:Tool_auth.schemas
         ~handler:(fun ~name ~args -> Tool_auth.dispatch c.ctx_auth ~name ~args);
       reg ~schemas:Tool_agent.schemas
@@ -146,6 +149,9 @@ let dispatch (c : (_, _) dispatch_contexts) : bool * string =
   | Some result -> result
   | None ->
   match Tool_worktree.dispatch c.ctx_worktree ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_code_swarm.dispatch c.ctx_code_swarm ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_code.dispatch c.ctx_code ~name ~args:arguments with

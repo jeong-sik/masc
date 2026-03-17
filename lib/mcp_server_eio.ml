@@ -128,6 +128,7 @@ let requires_join_tools = [
   "masc_vote_cast"; "masc_vote_revoke";
   "masc_register_capabilities"; "masc_suspend"; "masc_leave";
   "masc_operator_action"; "masc_operator_confirm";
+  "masc_code_swarm_plan"; "masc_code_swarm_verify"; "masc_code_swarm_merge";
 ]
 
 let () = Tool_dispatch.init_read_only_set read_only_tools

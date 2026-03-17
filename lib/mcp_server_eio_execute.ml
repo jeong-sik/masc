@@ -421,6 +421,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
   let simple_ctx_portal : Tool_portal.context = { config; agent_name } in
   let simple_ctx_worktree : Tool_worktree.context = { config; agent_name } in
+  let simple_ctx_code_swarm : Tool_code_swarm.context = { config; agent_name } in
   let simple_ctx_code : Tool_code.context = { config; agent_name } in
   let simple_ctx_vote : Tool_vote.context = { config; agent_name } in
   let simple_ctx_social : Tool_social.context = { config; agent_name } in
@@ -639,6 +640,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         ~handler:(fun ~name ~args -> Tool_portal.dispatch simple_ctx_portal ~name ~args);
       reg ~schemas:Tool_worktree.schemas
         ~handler:(fun ~name ~args -> Tool_worktree.dispatch simple_ctx_worktree ~name ~args);
+      reg ~schemas:Tool_code_swarm.schemas
+        ~handler:(fun ~name ~args -> Tool_code_swarm.dispatch simple_ctx_code_swarm ~name ~args);
       reg ~schemas:Tool_auth.schemas
         ~handler:(fun ~name ~args -> Tool_auth.dispatch simple_ctx_auth ~name ~args);
       reg ~schemas:Tool_agent.schemas
@@ -687,6 +690,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_worktree.dispatch simple_ctx_worktree ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_code_swarm.dispatch simple_ctx_code_swarm ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_code.dispatch simple_ctx_code ~name ~args:arguments with

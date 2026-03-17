@@ -444,6 +444,8 @@
    library_bridge
    tool_council
    tool_code
+   code_swarm_plan
+   tool_code_swarm
    tool_protocol_game_view_utils
    tool_protocol_game_view_handlers
    tool_protocol_game_view

@@ -146,7 +146,8 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_team_session.schemas
     @ Tool_voice.schemas
     @ Tool_protocol_game_view.schemas
-    @ Tool_trpg.schemas)
+    @ Tool_trpg.schemas
+    @ Tool_code_swarm.schemas)
 
 (** Validate tool schemas at module initialization time.
     Logs warnings for: duplicate names, empty names/descriptions,

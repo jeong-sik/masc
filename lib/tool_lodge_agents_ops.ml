@@ -96,7 +96,7 @@ let neo4j_http_cypher cypher =
 	    Log.Lodge.info "POST %s (body=%d chars)" url (String.length body);
 	    try
 	      let output =
-	        Process_eio.run_argv_with_stdin ~timeout_sec:30.0 ~stdin_content:body argv
+	        Process_eio.run_argv_with_stdin ~timeout_sec:Env_config_governance.Timeouts.graphql_timeout_sec ~stdin_content:body argv
 	      in
 	      Log.Lodge.info "response: %s" (if String.length output < 200 then output else String.sub output 0 200 ^ "...");
 	      if String.length output > 0 then Ok output
@@ -149,7 +149,7 @@ let spawn_agent ~net:_ ~parent_name ~child_name ~child_role ~child_prompt =
 	           "-d"; "@-"]
 	        in
 	        let output =
-	          Process_eio.run_argv_with_stdin ~timeout_sec:30.0 ~stdin_content:body argv
+	          Process_eio.run_argv_with_stdin ~timeout_sec:Env_config_governance.Timeouts.graphql_timeout_sec ~stdin_content:body argv
 	        in
 	        Log.Spawn.info "GraphQL response: %s" (if String.length output < 300 then output else String.sub output 0 300 ^ "...");
 	        (* Parse response *)

@@ -1,8 +1,8 @@
 include Cp_lifecycle_swarm_live
 include Cp_lifecycle_intents
 
-let snapshot_json config =
-  let state = build_snapshot_state config in
+let snapshot_json ?sessions config =
+  let state = build_snapshot_state ?sessions config in
   let topology = topology_json_from_state state in
   let intents = intents_summary_json_from_state state in
   let operations = list_operations_json_from_state state in

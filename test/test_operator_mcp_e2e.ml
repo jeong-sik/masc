@@ -382,8 +382,29 @@ let extract_nickname_from_join_result result =
   with
   | Some nickname when nickname <> "" -> nickname
   | _ ->
-      fail
-        (Printf.sprintf "failed to extract nickname from join result:\n%s" result)
+      (* Handle "already in room" format: "... <nickname> already in room ..." *)
+      let already_suffix = " already in room" in
+      let tick_prefix = "\xe2\x9c\x85 " in (* UTF-8 for check mark emoji *)
+      (match
+        List.find_map
+          (fun line ->
+            let trimmed = String.trim line in
+            if String.length trimmed > String.length tick_prefix + String.length already_suffix
+               && String.sub trimmed 0 (String.length tick_prefix) = tick_prefix
+            then
+              let rest = String.sub trimmed (String.length tick_prefix)
+                           (String.length trimmed - String.length tick_prefix) in
+              match String.split_on_char ' ' rest with
+              | nickname :: _ when nickname <> "" -> Some nickname
+              | _ -> None
+            else
+              None)
+          lines
+      with
+      | Some nickname -> nickname
+      | None ->
+          fail
+            (Printf.sprintf "failed to extract nickname from join result:\n%s" result))
 
 let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let exe = find_main_eio_exe () in
@@ -458,6 +479,11 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
         ("MASC_HOST", host);
+        ("MASC_POSTGRES_URL", "");
+        ("DATABASE_URL", "");
+        ("SUPABASE_DB_URL", "");
+        ("SB_PG_URL", "");
+        ("MASC_BOARD_BACKEND", "jsonl");
       ]
   in
   let argv =
@@ -804,16 +830,26 @@ let test_agent_json_route_served_on_canonical_path () =
   @@ fun ~port ~supervisor_token:_ ~planner_token:_ ~implementer_a_token:_
             ~implementer_b_token:_ ~supervisor_nickname:_ ~planner_nickname:_
             ~implementer_a_nickname:_ ~implementer_b_nickname:_ ->
-  let result = run_curl_get ~port ~path:"/.well-known/agent.json" () in
-  require_http_ok "agent.json" result;
-  let json =
-    try Yojson.Safe.from_string result.body
-    with Yojson.Json_error err ->
-      fail
-        (Printf.sprintf "agent.json invalid JSON: %s\nbody=%s" err result.body)
+  (* Retry up to 3 times to allow server_state initialization after /health readiness *)
+  let rec fetch_agent_card retries =
+    let result = run_curl_get ~port ~path:"/.well-known/agent.json" () in
+    require_http_ok "agent.json" result;
+    let json =
+      try Yojson.Safe.from_string result.body
+      with Yojson.Json_error err ->
+        fail
+          (Printf.sprintf "agent.json invalid JSON: %s\nbody=%s" err result.body)
+    in
+    match json |> U.member "name" |> U.to_string_option with
+    | Some name -> (json, name)
+    | None when retries > 0 ->
+        Unix.sleepf 0.5;
+        fetch_agent_card (retries - 1)
+    | None ->
+        fail (Printf.sprintf "agent.json name is null after retries\nbody=%s" result.body)
   in
-  check string "agent card name present" "MASC-MCP"
-    (json |> U.member "name" |> U.to_string)
+  let (_json, name) = fetch_agent_card 3 in
+  check string "agent card name present" "MASC-MCP" name
 
 let () =
   run "operator_mcp_e2e"

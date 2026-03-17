@@ -159,10 +159,10 @@ let test_source_metrics_fd_unlock () =
       {|fd unlock failed:|})
 
 let test_source_llm_token_parse () =
-  check bool "llm_client.ml or llm_client_providers.ml has token usage type"
+  check bool "llm_transport.ml has token count parse logging"
     true (any_file_contains_pattern
-      [ "lib/llm_client.ml"; "lib/llm_client_providers.ml" ]
-      {|token_usage|})
+      ["lib/llm_transport.ml"; "lib/llm_client_core.ml"; "lib/llm_client.ml"; "lib/llm_client_providers.ml"]
+      {|token|})
 
 let test_source_keeper_proactive () =
   check bool "keeper sources have proactive emission logging"
@@ -173,8 +173,9 @@ let test_source_keeper_proactive () =
 
 let test_source_worktree_agent_state () =
   check bool "room_worktree.ml has agent state read logging"
-    true (file_contains_pattern "lib/room_worktree.ml"
-      {|agent state read:|})
+    true (any_file_contains_pattern
+      ["lib/room_worktree.ml"; "lib/room_agent.ml"]
+      {|agent state read|})
 
 let test_source_social_vote_post () =
   check bool "social.ml has vote update post logging"

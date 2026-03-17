@@ -357,7 +357,7 @@ export async function refreshShell(): Promise<void> {
       }
     }
     if (data.providers) {
-      providerCapacity.value = data.providers as ProviderCapacity
+      providerCapacity.value = data.providers as unknown as ProviderCapacity
     }
   } catch (err) {
     console.error('Dashboard shell fetch error:', err)

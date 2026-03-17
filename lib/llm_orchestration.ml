@@ -255,10 +255,10 @@ let complete ?timeout_sec (req : completion_request) : (completion_response, str
     | None ->
       let upstream_result =
           match req.model.provider with
-          | Llama -> Llm_transport.call_openai_compatible ?timeout_sec req
-          | Claude -> Llm_transport.call_claude ?timeout_sec req
-          | Glm_cloud -> Llm_transport.call_glm_cloud_with_pool ?timeout_sec req
-          | OpenAI | Gemini | OpenRouter | Custom _ -> Llm_transport.call_openai_compatible ?timeout_sec req
+          | Glm_cloud ->
+              Llm_provider_bridge.call_glm_cloud_with_pool ?timeout_sec req
+          | _ ->
+              Llm_provider_bridge.call ?timeout_sec req
         in
         (match (cache_key, upstream_result) with
         | Some key, Ok resp -> (

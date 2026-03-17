@@ -94,6 +94,86 @@ function toneClass(raw: string | null | undefined): string {
   return 'neutral'
 }
 
+function caseStatusLabel(value: string | null | undefined): string {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case 'pending':
+    case 'pending_ruling':
+      return '판정 대기'
+    case 'ready_auto_execute':
+      return '자동집행 준비'
+    case 'needs_human_gate':
+      return '승인 대기'
+    case 'executed':
+      return '집행 완료'
+    case 'blocked':
+      return '보류'
+    case 'closed':
+      return '종결'
+    default:
+      return value?.trim() || '확인 필요'
+  }
+}
+
+function orderStatusLabel(value: string | null | undefined): string {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case 'queued_auto':
+      return '자동 대기'
+    case 'needs_human_gate':
+      return '승인 대기'
+    case 'auto_executed':
+      return '자동 집행됨'
+    case 'done':
+      return '완료'
+    case 'denied':
+      return '거부됨'
+    case 'blocked':
+      return '보류'
+    case 'none':
+      return '없음'
+    default:
+      return value?.trim() || '없음'
+  }
+}
+
+function stanceLabel(value: string): string {
+  switch (value) {
+    case 'support':
+      return '찬성'
+    case 'oppose':
+      return '반대'
+    case 'neutral':
+      return '중립'
+    default:
+      return value
+  }
+}
+
+function kindLabel(value: string): string {
+  switch (value) {
+    case 'case':
+      return '사건'
+    case 'petition':
+      return '청원'
+    default:
+      return value
+  }
+}
+
+function activityKindLabel(value: string): string {
+  switch (value) {
+    case 'petition_submitted':
+      return '청원 접수'
+    case 'brief_submitted':
+      return '의견 제출'
+    case 'ruling_issued':
+      return '판정 발행'
+    case 'execution_order':
+      return '집행 명령'
+    default:
+      return value
+  }
+}
+
 function confidenceText(confidence: number | null | undefined): string {
   if (typeof confidence !== 'number' || Number.isNaN(confidence)) return '판정 대기'
   return `${Math.round(confidence * 100)}%`
@@ -210,7 +290,7 @@ function GovernanceSummaryStrip() {
         <strong>${summary?.ready_auto_execute ?? 0}</strong>
       </div>
       <div class="board-summary-item">
-        <span class="board-summary-label">사람 승인 대기</span>
+        <span class="board-summary-label">관리자 승인 대기</span>
         <strong>${summary?.needs_human_gate ?? 0}</strong>
       </div>
       <div class="board-summary-item">
@@ -293,7 +373,7 @@ function DecisionInbox() {
                 >
                   <div class="council-row-main">
                     <div class="governance-row-head">
-                      <span class="governance-kind">${item.kind}</span>
+                      <span class="governance-kind">${kindLabel(item.kind)}</span>
                       <span class="council-topic">${item.topic}</span>
                     </div>
                     <div class="council-sub">
@@ -307,7 +387,7 @@ function DecisionInbox() {
                       ${item.risk_class ? html`<span class="governance-chip">${item.risk_class}</span>` : null}
                       ${item.provenance ? html`<span class="governance-chip">${item.provenance}</span>` : null}
                       ${item.status === 'needs_human_gate'
-                        ? html`<span class="governance-chip warn">사람 승인 필요</span>`
+                        ? html`<span class="governance-chip warn">관리자 승인 필요</span>`
                         : null}
                       ${item.status === 'executed'
                         ? html`<span class="governance-chip ok">집행 완료</span>`
@@ -315,8 +395,8 @@ function DecisionInbox() {
                     </div>
                   </div>
                   <div class="governance-row-side">
-                    <span class="council-state ${toneClass(item.status)}">${item.status}</span>
-                    <span class="governance-vote-meter">${item.brief_count ?? 0} briefs</span>
+                    <span class="council-state ${toneClass(item.status)}">${caseStatusLabel(item.status)}</span>
+                    <span class="governance-vote-meter">${item.brief_count ?? 0}건</span>
                   </div>
                 </button>
               `
@@ -330,7 +410,7 @@ function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['petitions
   return html`
     <div class="governance-ledger-row">
       <div class="governance-ledger-head">
-        <span class="governance-badge neutral">petition</span>
+        <span class="governance-badge neutral">청원</span>
         <strong>${petition.created_by || petition.origin || 'system'}</strong>
         ${petition.created_at ? html`<span><${TimeAgo} timestamp=${petition.created_at} /></span>` : null}
       </div>
@@ -346,7 +426,7 @@ function BriefEntry({ brief }: { brief: GovernanceCaseBrief }) {
   return html`
     <div class="governance-ledger-row">
       <div class="governance-ledger-head">
-        <span class="governance-badge ${toneClass(brief.stance)}">${brief.stance}</span>
+        <span class="governance-badge ${toneClass(brief.stance)}">${stanceLabel(brief.stance)}</span>
         <strong>${brief.author}</strong>
         ${brief.created_at ? html`<span><${TimeAgo} timestamp=${brief.created_at} /></span>` : null}
       </div>
@@ -379,17 +459,17 @@ function DecisionDetail() {
                   <h3>${detail.case.title}</h3>
                   <div class="council-sub">
                     <span>${detail.case.id}</span>
-                    <span>${detail.case.status}</span>
+                    <span>${caseStatusLabel(detail.case.status)}</span>
                     ${detail.case.updated_at
                       ? html`<span><${TimeAgo} timestamp=${detail.case.updated_at} /></span>`
                       : null}
                   </div>
                 </div>
                 <div class="governance-balance-grid">
-                  <span class="governance-balance"><strong>${petitions.length}</strong> petitions</span>
-                  <span class="governance-balance"><strong>${briefs.length}</strong> briefs</span>
-                  <span class="governance-balance"><strong>${item.confidence != null ? Math.round(item.confidence * 100) : 0}</strong>% ruling</span>
-                  <span class="governance-balance"><strong>${detail.execution_order?.status || 'none'}</strong></span>
+                  <span class="governance-balance"><strong>${petitions.length}</strong>건 청원</span>
+                  <span class="governance-balance"><strong>${briefs.length}</strong>건 의견</span>
+                  <span class="governance-balance"><strong>${item.confidence != null ? Math.round(item.confidence * 100) : 0}</strong>% 확신도</span>
+                  <span class="governance-balance"><strong>${orderStatusLabel(detail.execution_order?.status)}</strong></span>
                 </div>
               </div>
               <div class="governance-ledger">
@@ -399,7 +479,7 @@ function DecisionDetail() {
               </div>
               <div class="governance-ledger">
                 ${briefs.length === 0
-                  ? html`<div class="empty-state">심의 brief가 아직 없습니다.</div>`
+                  ? html`<div class="empty-state">심의 의견이 아직 없습니다.</div>`
                   : briefs.map(brief => html`<${BriefEntry} key=${brief.id} brief=${brief} />`)}
               </div>
             `}
@@ -415,7 +495,7 @@ function ActionRequestCard({ order }: { order: GovernanceExecutionOrder | null |
       <h4>집행 명령</h4>
       <div class="council-sub">
         <span>${request.resolved_tool || request.action_kind || request.target_type || 'action'}</span>
-        <span>${order.status}</span>
+        <span>${orderStatusLabel(order.status)}</span>
       </div>
       ${request.target_type ? html`<div class="governance-side-line">대상 ${request.target_type}${request.target_id ? `:${request.target_id}` : ''}</div>` : null}
       ${request.reason ? html`<div class="governance-side-line">${request.reason}</div>` : null}
@@ -440,13 +520,13 @@ function GuardrailPane() {
               <div class="governance-side-block">
                 <h4>판정</h4>
                 <div class="council-sub">
-                  <span>${ruling?.status || 'pending'}</span>
+                  <span>${caseStatusLabel(ruling?.status || 'pending')}</span>
                   <span>${confidenceText(ruling?.confidence)}</span>
                   ${ruling?.generated_at ? html`<span><${TimeAgo} timestamp=${ruling.generated_at} /></span>` : null}
                 </div>
                 ${ruling?.summary
                   ? html`<div class="governance-summary-callout">${ruling.summary}</div>`
-                  : html`<div class="governance-side-line">아직 ruling이 생성되지 않았습니다.</div>`}
+                  : html`<div class="governance-side-line">아직 판정이 생성되지 않았습니다.</div>`}
                 <div class="governance-chip-row">
                   ${item.provenance ? html`<span class="governance-chip">${item.provenance}</span>` : null}
                   ${item.risk_class ? html`<span class="governance-chip">${item.risk_class}</span>` : null}
@@ -457,7 +537,7 @@ function GuardrailPane() {
               ${order?.status === 'needs_human_gate'
                 ? html`
                     <div class="governance-side-block">
-                      <h4>사람 승인</h4>
+                      <h4>관리자 승인</h4>
                       <div class="governance-side-line">이 집행은 고위험으로 분류되어 수동 결재가 필요합니다.</div>
                       <div class="governance-action-row">
                         <button class="control-btn secondary" onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>
@@ -474,7 +554,7 @@ function GuardrailPane() {
     <//>
       <${Card} title="심의 입력" class="section" semanticId="governance.context">
         ${!item
-          ? html`<div class="empty-state">사건을 선택한 뒤 brief를 추가하세요.</div>`
+          ? html`<div class="empty-state">사건을 선택한 뒤 의견을 추가하세요.</div>`
           : html`
               <div class="governance-side-block">
                 <div class="governance-filter-row">
@@ -485,14 +565,14 @@ function GuardrailPane() {
                         governanceBriefStance.value = stance
                       }}
                     >
-                      ${stance}
+                      ${stanceLabel(stance)}
                     </button>
                   `)}
                 </div>
                 <textarea
                   class="control-input"
                   rows=${5}
-                  placeholder="이 사건에 대한 brief를 입력하세요..."
+                  placeholder="이 사건에 대한 심의 의견을 입력하세요..."
                   value=${governanceBriefInput.value}
                   onInput=${(event: Event) => {
                     governanceBriefInput.value = (event.target as HTMLTextAreaElement).value
@@ -504,7 +584,7 @@ function GuardrailPane() {
                     onClick=${submitBrief}
                     disabled=${governanceBriefSubmitting.value || governanceBriefInput.value.trim() === ''}
                   >
-                    ${governanceBriefSubmitting.value ? '기록 중...' : 'brief 추가'}
+                    ${governanceBriefSubmitting.value ? '기록 중...' : '의견 추가'}
                   </button>
                 </div>
               </div>
@@ -524,7 +604,7 @@ function ActivityRail() {
           : events.map((event: GovernanceTimelineEvent) => html`
               <div class="governance-activity-row">
                 <div class="governance-ledger-head">
-                  <span class="governance-badge ${toneClass(event.kind)}">${event.kind}</span>
+                  <span class="governance-badge ${toneClass(event.kind)}">${activityKindLabel(event.kind)}</span>
                   ${event.created_at ? html`<span><${TimeAgo} timestamp=${event.created_at} /></span>` : null}
                 </div>
                 <div class="governance-ledger-body">${event.summary || event.topic || '활동이 기록되었습니다.'}</div>

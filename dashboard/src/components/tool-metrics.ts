@@ -23,6 +23,14 @@ async function loadMetrics() {
   }
 }
 
+function tierLabel(tier: string): string {
+  switch (tier) {
+    case 'essential': return '필수'
+    case 'standard': return '표준'
+    default: return '전체'
+  }
+}
+
 function tierBadgeClass(tier: string): string {
   switch (tier) {
     case 'essential': return 'badge-essential'
@@ -32,7 +40,7 @@ function tierBadgeClass(tier: string): string {
 }
 
 function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount: number }) {
-  if (items.length === 0) return html`<p class="muted">No tool calls recorded yet.</p>`
+  if (items.length === 0) return html`<p class="muted">아직 도구 호출 기록이 없습니다.</p>`
   return html`
     <div class="tool-bar-chart">
       ${items.map(item => {
@@ -40,7 +48,7 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
         return html`
           <div class="tool-bar-row" key=${item.name}>
             <span class="tool-bar-name">${item.name}</span>
-            <span class="tool-bar-tier ${tierBadgeClass(item.tier)}">${item.tier}</span>
+            <span class="tool-bar-tier ${tierBadgeClass(item.tier)}">${tierLabel(item.tier)}</span>
             <div class="tool-bar-track">
               <div class="tool-bar-fill" style=${{ width: `${pct}%` }} />
             </div>
@@ -61,17 +69,17 @@ function TierDistribution({ dist }: { dist: { essential: number; standard: numbe
   return html`
     <div class="tier-dist">
       <div class="tier-dist-row">
-        <span class="tier-dist-label badge-essential">Essential</span>
+        <span class="tier-dist-label badge-essential">필수</span>
         <span class="tier-dist-count">${dist.essential}</span>
         <span class="tier-dist-pct">${essentialPct}%</span>
       </div>
       <div class="tier-dist-row">
-        <span class="tier-dist-label badge-standard">Standard</span>
+        <span class="tier-dist-label badge-standard">표준</span>
         <span class="tier-dist-count">${dist.standard}</span>
         <span class="tier-dist-pct">${standardPct}%</span>
       </div>
       <div class="tier-dist-row">
-        <span class="tier-dist-label badge-full">Full-only</span>
+        <span class="tier-dist-label badge-full">전체 전용</span>
         <span class="tier-dist-count">${fullOnlyCount}</span>
         <span class="tier-dist-pct">${fullOnlyPct}%</span>
       </div>
@@ -93,13 +101,13 @@ export function ToolMetrics() {
   return html`
     <div class="tool-metrics">
       <div class="tool-metrics-header">
-        <h3 class="tool-metrics-title">Tool Usage</h3>
+        <h3 class="tool-metrics-title">도구 사용 현황</h3>
         <button
           class="control-btn ghost"
           onClick=${() => void loadMetrics()}
           disabled=${loading}
         >
-          ${loading ? 'Loading...' : data ? 'Refresh' : 'Load'}
+          ${loading ? '불러오는 중...' : data ? '새로고침' : '불러오기'}
         </button>
       </div>
 
@@ -109,19 +117,19 @@ export function ToolMetrics() {
         <div class="tool-metrics-summary">
           <div class="tool-metrics-stat">
             <span class="stat-value">${data.total_calls}</span>
-            <span class="stat-label">Total Calls</span>
+            <span class="stat-label">총 호출 수</span>
           </div>
           <div class="tool-metrics-stat">
             <span class="stat-value">${data.distinct_tools_called}</span>
-            <span class="stat-label">Distinct Tools</span>
+            <span class="stat-label">사용된 도구</span>
           </div>
           <div class="tool-metrics-stat">
             <span class="stat-value">${data.never_called_count}</span>
-            <span class="stat-label">Never Called</span>
+            <span class="stat-label">미사용 도구</span>
           </div>
           <div class="tool-metrics-stat">
             <span class="stat-value">${data.registered_count}</span>
-            <span class="stat-label">Registered (v2)</span>
+            <span class="stat-label">등록됨 (v2)</span>
           </div>
           <div class="tool-metrics-stat">
             <span class="stat-value">${data.dispatch_v2_enabled ? 'ON' : 'OFF'}</span>
@@ -131,11 +139,11 @@ export function ToolMetrics() {
 
         <div class="tool-metrics-sections">
           <div class="tool-metrics-section">
-            <h4>Tier Distribution</h4>
+            <h4>계층 분포</h4>
             <${TierDistribution} dist=${data.tier_distribution} />
           </div>
           <div class="tool-metrics-section">
-            <h4>Top 20 Tools</h4>
+            <h4>상위 20 도구</h4>
             <${BarChart}
               items=${data.top_20}
               maxCount=${data.top_20.length > 0 ? data.top_20[0]!.call_count : 0}
@@ -143,7 +151,7 @@ export function ToolMetrics() {
           </div>
         </div>
       ` : !loading ? html`
-        <p class="muted">Click Load to fetch tool usage statistics.</p>
+        <p class="muted">불러오기를 눌러 도구 사용 통계를 확인하세요.</p>
       ` : null}
     </div>
   `

@@ -180,20 +180,17 @@ module MemoryBackend : BACKEND = struct
   type t = {
     data: (string, string) Hashtbl.t;
     locks: (string, lock_info) Hashtbl.t;
-    mutex: Mutex.t;
+    mutex: Eio.Mutex.t;
   }
 
   let with_lock t f =
-    Mutex.lock t.mutex;
-    let result = try f () with e -> Mutex.unlock t.mutex; raise e in
-    Mutex.unlock t.mutex;
-    result
+    Eio.Mutex.use_rw ~protect:true t.mutex f
 
   let create (_cfg : config) : (t, error) result =
     Ok {
       data = Hashtbl.create 1000;
       locks = Hashtbl.create 100;
-      mutex = Mutex.create ();
+      mutex = Eio.Mutex.create ();
     }
 
   let close _t = ()
@@ -312,14 +309,11 @@ end
 module FileSystemBackend : BACKEND = struct
   type t = {
     base_path: string;
-    mutex: Mutex.t;
+    mutex: Eio.Mutex.t;
   }
 
   let with_lock t f =
-    Mutex.lock t.mutex;
-    let result = try f () with e -> Mutex.unlock t.mutex; raise e in
-    Mutex.unlock t.mutex;
-    result
+    Eio.Mutex.use_rw ~protect:true t.mutex f
 
   (* Security: validate key with strict allowlist (parse, don't sanitize) *)
   let validate_key key =
@@ -408,14 +402,13 @@ module FileSystemBackend : BACKEND = struct
         Unix.mkdir path 0o755
     with Unix.Unix_error (err, _, _) ->
       Log.Misc.error "Failed to mkdir %s: %s" path (Unix.error_message err));
-    Ok { base_path = path; mutex = Mutex.create () }
+    Ok { base_path = path; mutex = Eio.Mutex.create () }
 
   let close _t = ()
 
   (* Read operations are lock-free: writes use atomic rename, so a
      concurrent read always sees either the old or new complete content.
-     Removing the Stdlib.Mutex here eliminates 1-6s of Eio scheduler
-     starvation when background init fibers hold the write lock. *)
+     Eio.Mutex is cooperative and does not starve the scheduler. *)
   let get t ~key =
     match safe_key_to_path t key with
     | Error e -> Error e

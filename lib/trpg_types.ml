@@ -172,7 +172,7 @@ let keeper_preflight ctx ~(keepers : string list) : (unit, string) Stdlib.result
           (Printf.sprintf "keeper preflight failed: %s"
              (String.concat "; " failures))
 
-let keeper_busy_mutex = Mutex.create ()
+let keeper_busy_mutex = Eio.Mutex.create ()
 let keeper_busy_counts : (string, int) Hashtbl.t = Hashtbl.create 128
 
 let with_keeper_reservation ~(keepers : string list)
@@ -183,41 +183,35 @@ let with_keeper_reservation ~(keepers : string list)
     |> List.sort_uniq String.compare
   in
   let reserve () =
-    Mutex.lock keeper_busy_mutex;
-    Fun.protect
-      ~finally:(fun () -> Mutex.unlock keeper_busy_mutex)
-      (fun () ->
-        let busy =
-          List.filter
-            (fun key ->
-              let cnt = Hashtbl.find_opt keeper_busy_counts key |> Option.value ~default:0 in
-              cnt > 0)
-            keeper_keys
-        in
-        if busy <> [] then
-          Error
-            (Printf.sprintf
-               "keeper busy: %s (each spawned keeper can handle only one round at a time)"
-               (String.concat ", " busy))
-        else (
-          List.iter
-            (fun key ->
-              let cnt = Hashtbl.find_opt keeper_busy_counts key |> Option.value ~default:0 in
-              Hashtbl.replace keeper_busy_counts key (cnt + 1))
-            keeper_keys;
-          Ok ()))
-  in
-  let release () =
-    Mutex.lock keeper_busy_mutex;
-    Fun.protect
-      ~finally:(fun () -> Mutex.unlock keeper_busy_mutex)
-      (fun () ->
+    Eio.Mutex.use_rw ~protect:true keeper_busy_mutex (fun () ->
+      let busy =
+        List.filter
+          (fun key ->
+            let cnt = Hashtbl.find_opt keeper_busy_counts key |> Option.value ~default:0 in
+            cnt > 0)
+          keeper_keys
+      in
+      if busy <> [] then
+        Error
+          (Printf.sprintf
+             "keeper busy: %s (each spawned keeper can handle only one round at a time)"
+             (String.concat ", " busy))
+      else (
         List.iter
           (fun key ->
             let cnt = Hashtbl.find_opt keeper_busy_counts key |> Option.value ~default:0 in
-            if cnt <= 1 then Hashtbl.remove keeper_busy_counts key
-            else Hashtbl.replace keeper_busy_counts key (cnt - 1))
-          keeper_keys)
+            Hashtbl.replace keeper_busy_counts key (cnt + 1))
+          keeper_keys;
+        Ok ()))
+  in
+  let release () =
+    Eio.Mutex.use_rw ~protect:true keeper_busy_mutex (fun () ->
+      List.iter
+        (fun key ->
+          let cnt = Hashtbl.find_opt keeper_busy_counts key |> Option.value ~default:0 in
+          if cnt <= 1 then Hashtbl.remove keeper_busy_counts key
+          else Hashtbl.replace keeper_busy_counts key (cnt - 1))
+        keeper_keys)
   in
   match reserve () with
   | Error _ as e -> e

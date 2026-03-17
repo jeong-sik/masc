@@ -43,17 +43,10 @@ type registry_stats = {
 (** In-memory registry storage *)
 let registry : (string, registry_entry) Hashtbl.t = Hashtbl.create 64
 
-(** Standard mutex for thread-safe operations *)
-let registry_mutex = Mutex.create ()
+let registry_mutex = Eio.Mutex.create ()
 
-(** Helper for mutex-protected operations *)
 let with_mutex f =
-  Mutex.lock registry_mutex;
-  Common.protect
-    ~module_name:"chain_registry"
-    ~finally_label:"Mutex.unlock"
-    ~finally:(fun () -> Mutex.unlock registry_mutex)
-    f
+  Eio.Mutex.use_rw ~protect:true registry_mutex f
 
 (** File-based persistence directory *)
 let registry_dir = ref None

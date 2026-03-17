@@ -391,7 +391,7 @@ let trpg_available_models_json_base ?(warnings : string list = []) () : Yojson.S
   trpg_available_models_json_collect ~warnings ~include_live:false ()
 
 type trpg_model_catalog_cache = {
-  mutex : Mutex.t;
+  mutex : Eio.Mutex.t;
   mutable cached_at : float;
   mutable cached_json : Yojson.Safe.t option;
   mutable refresh_in_flight : bool;
@@ -401,7 +401,7 @@ let trpg_model_catalog_cache_ttl_sec = 15.0
 
 let trpg_model_catalog_cache : trpg_model_catalog_cache =
   {
-    mutex = Mutex.create ();
+    mutex = Eio.Mutex.create ();
     cached_at = 0.0;
     cached_json = None;
     refresh_in_flight = false;
@@ -410,8 +410,7 @@ let trpg_model_catalog_cache : trpg_model_catalog_cache =
 let trpg_available_models_json () : Yojson.Safe.t =
   let now = Unix.gettimeofday () in
   let cached, should_refresh =
-    Mutex.lock trpg_model_catalog_cache.mutex;
-    Fun.protect ~finally:(fun () -> Mutex.unlock trpg_model_catalog_cache.mutex) (fun () ->
+    Eio.Mutex.use_rw ~protect:true trpg_model_catalog_cache.mutex (fun () ->
       let snapshot = trpg_model_catalog_cache.cached_json in
       let fresh_snapshot =
         match trpg_model_catalog_cache.cached_json with
@@ -429,8 +428,7 @@ let trpg_available_models_json () : Yojson.Safe.t =
             trpg_model_catalog_cache.refresh_in_flight <- true;
             true
       in
-      ((match fresh_snapshot with Some json -> Some json | None -> snapshot), should_refresh)
-    )
+      ((match fresh_snapshot with Some json -> Some json | None -> snapshot), should_refresh))
   in
   match (cached, should_refresh) with
   | Some json, false -> json
@@ -441,9 +439,8 @@ let trpg_available_models_json () : Yojson.Safe.t =
       let fallback_json =
         Fun.protect
           ~finally:(fun () ->
-            Mutex.lock trpg_model_catalog_cache.mutex;
-            trpg_model_catalog_cache.refresh_in_flight <- false;
-            Mutex.unlock trpg_model_catalog_cache.mutex)
+            Eio.Mutex.use_rw ~protect:true trpg_model_catalog_cache.mutex (fun () ->
+              trpg_model_catalog_cache.refresh_in_flight <- false))
           (fun () ->
             let outcome =
               try Ok (trpg_available_models_json_uncached ())
@@ -461,9 +458,8 @@ let trpg_available_models_json () : Yojson.Safe.t =
                     trpg_available_models_json_base
                       ~warnings:[Printf.sprintf "가용 모델 조회 실패: %s" err] ()))
       in
-      Mutex.lock trpg_model_catalog_cache.mutex;
-      trpg_model_catalog_cache.cached_json <- Some fallback_json;
-      trpg_model_catalog_cache.cached_at <- Unix.gettimeofday ();
-      Mutex.unlock trpg_model_catalog_cache.mutex;
+      Eio.Mutex.use_rw ~protect:true trpg_model_catalog_cache.mutex (fun () ->
+        trpg_model_catalog_cache.cached_json <- Some fallback_json;
+        trpg_model_catalog_cache.cached_at <- Unix.gettimeofday ());
       fallback_json
 

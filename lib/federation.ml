@@ -211,15 +211,10 @@ let make_federation_member ~(org : organization) ~now : federation_member = {
 (* Thread Safety: Mutex for Global State       *)
 (* ============================================ *)
 
-(** Mutex for thread-safe state access *)
-let state_mutex = Mutex.create ()
+let state_mutex = Eio.Mutex.create ()
 
-(** Execute function with mutex held *)
 let with_lock f =
-  Mutex.lock state_mutex;
-  match f () with
-  | result -> Mutex.unlock state_mutex; result
-  | exception e -> Mutex.unlock state_mutex; raise e
+  Eio.Mutex.use_rw ~protect:true state_mutex f
 
 (* ============================================ *)
 (* Input Validation                            *)

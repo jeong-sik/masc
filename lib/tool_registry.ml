@@ -21,7 +21,7 @@ type call_stats = {
 
 (** Global registry - process-lifetime, protected by mutex for fiber safety *)
 let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
-let registry_mutex = Mutex.create ()
+let registry_mutex = Eio.Mutex.create ()
 
 let known_tool_names : (string, unit) Hashtbl.t Lazy.t =
   lazy
@@ -36,10 +36,7 @@ let is_known_tool tool_name =
 
 (** Record a tool call. Called from handle_call_tool_eio after execution. *)
 let record_call ~tool_name ~success ~duration_ms =
-  Mutex.lock registry_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock registry_mutex)
-    (fun () ->
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
       let stats =
         match Hashtbl.find_opt registry tool_name with
         | Some s -> s
@@ -68,10 +65,7 @@ let record_call_if_known ~tool_name ~success ~duration_ms =
 
 (** Get all stats as a sorted list (by call_count descending) *)
 let get_stats () : (string * call_stats) list =
-  Mutex.lock registry_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock registry_mutex)
-    (fun () ->
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
       Hashtbl.fold (fun name stats acc -> (name, stats) :: acc) registry []
       |> List.sort (fun (_, a) (_, b) -> compare b.call_count a.call_count))
 
@@ -89,10 +83,7 @@ let get_top_n n : (string * call_stats) list =
     Only includes tools that are registered (have been called at least once)
     but not recently. *)
 let get_unused_since (cutoff : float) : string list =
-  Mutex.lock registry_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock registry_mutex)
-    (fun () ->
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
       Hashtbl.fold
         (fun name stats acc ->
           if stats.last_called_at < cutoff then name :: acc else acc)
@@ -102,10 +93,7 @@ let get_unused_since (cutoff : float) : string list =
 (** Get tools that have never been called (not in registry at all)
     compared against a list of all known tool names *)
 let get_never_called (all_tool_names : string list) : string list =
-  Mutex.lock registry_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock registry_mutex)
-    (fun () ->
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
       List.filter
         (fun name -> not (Hashtbl.mem registry name))
         all_tool_names
@@ -113,18 +101,12 @@ let get_never_called (all_tool_names : string list) : string list =
 
 (** Total calls across all tools *)
 let total_calls () : int =
-  Mutex.lock registry_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock registry_mutex)
-    (fun () ->
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
       Hashtbl.fold (fun _ stats acc -> acc + stats.call_count) registry 0)
 
 (** Number of distinct tools that have been called *)
 let distinct_tools_called () : int =
-  Mutex.lock registry_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock registry_mutex)
-    (fun () -> Hashtbl.length registry)
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () -> Hashtbl.length registry)
 
 (** Convert call_stats to JSON *)
 let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
@@ -162,7 +144,4 @@ let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
 
 (** Reset all counters (for testing) *)
 let reset () =
-  Mutex.lock registry_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock registry_mutex)
-    (fun () -> Hashtbl.clear registry)
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () -> Hashtbl.clear registry)

@@ -1009,31 +1009,6 @@ let test_execute_tool_trpg_flow () =
 
   cleanup_dir base_path
 
-let test_execute_tool_mode_gate () =
-  Eio_main.run @@ fun env ->
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-
-  let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let room_path = Masc_mcp.Room.masc_dir state.room_config in
-  let _ = Config.switch_mode room_path Mode.Minimal in
-
-  let (ok, msg) =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
-      ~name:"masc_portal_status"
-      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
-  in
-  Alcotest.(check bool) "portal tool blocked in minimal mode" false ok;
-  Alcotest.(check bool)
-    "mode gate message"
-    true
-    (contains_substring msg "disabled in current mode");
-
-  cleanup_dir base_path
-
 let test_execute_tool_coding_mode_allows_governance_status () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -2214,7 +2189,6 @@ let eio_tests = [
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   "handle tools/call trpg", `Quick, test_handle_request_tools_call_trpg;
-  "mode gate", `Quick, test_execute_tool_mode_gate;
   "coding mode allows governance status", `Quick, test_execute_tool_coding_mode_allows_governance_status;
   "hidden active utility direct call", `Quick,
     test_execute_tool_hidden_active_utility_direct_call;

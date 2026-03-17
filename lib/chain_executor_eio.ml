@@ -662,7 +662,9 @@ and execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
       (* Execute inner node in spawned context *)
       let result =
         try execute_node spawn_ctx ~sw ~clock ~exec_fn ~tool_exec inner
-        with exn ->
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
           Error (Printf.sprintf "Spawn execution failed: %s" (Printexc.to_string exn))
       in
 

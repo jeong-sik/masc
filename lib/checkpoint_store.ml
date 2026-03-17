@@ -129,7 +129,9 @@ let save_eio ~fs (store : checkpoint_store) (cp : checkpoint) : (unit, string) r
     let file_path = Eio.Path.(fs / path) in
     Eio.Path.save ~create:(`Or_truncate 0o644) file_path content;
     Ok ()
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
     Error (Printf.sprintf "Failed to save checkpoint: %s" (Printexc.to_string exn))
 
 (** Save a checkpoint (non-Eio version for compatibility) *)

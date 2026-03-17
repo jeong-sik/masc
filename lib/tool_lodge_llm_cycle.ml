@@ -43,7 +43,9 @@ let fetch_hn_article ~net =
             |> Option.value ~default:(Printf.sprintf "https://news.ycombinator.com/item?id=%d" story_id) in
           if title = "" then Error "❌ Fetch: HN story has empty title"
           else Ok { title; url; source = HackerNews }
-    with exn -> Error (Printf.sprintf "❌ Parse: HN JSON error [%s]" (Printexc.to_string exn))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printf.sprintf "❌ Parse: HN JSON error [%s]" (Printexc.to_string exn))
 
 let decode_xml_entities s =
   s
@@ -190,7 +192,9 @@ let save_interests_to_neo4j ~agent_name interests =
           Ok (Printf.sprintf "saved %d interests for %s" (List.length interests) agent_name)
       | Unix.WEXITED n -> Error (Printf.sprintf "Neo4j exit %d" n)
       | _ -> Error "Neo4j signaled"
-    with exn -> Error (Printf.sprintf "Neo4j error: %s" (Printexc.to_string exn))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printf.sprintf "Neo4j error: %s" (Printexc.to_string exn))
 
 (** Get agent's existing interests from Neo4j *)
 let get_agent_interests ~agent_name =

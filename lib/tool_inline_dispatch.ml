@@ -252,7 +252,9 @@ let dispatch (ctx : context) ~(name : string) : result option =
       (match state.Mcp_server.fs with
        | Some fs ->
            (try Telemetry_eio.track_agent_joined ~fs config ~agent_id:nickname ()
-            with exn ->
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
               Log.Telemetry.debug "track_agent_joined (join): %s" (Printexc.to_string exn))
        | None -> ());
       Some (true, final_result)
@@ -278,7 +280,9 @@ let dispatch (ctx : context) ~(name : string) : result option =
       (match state.Mcp_server.fs with
        | Some fs ->
            (try Telemetry_eio.track_agent_left ~fs config ~agent_id:agent_name ~reason:"leave"
-            with exn ->
+            with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
               Log.Telemetry.debug "track_agent_left: %s" (Printexc.to_string exn))
        | None -> ());
       Some (true, result)

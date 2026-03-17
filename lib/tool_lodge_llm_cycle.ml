@@ -151,29 +151,17 @@ let _local_llama_generate ~net:_ ?model ?(temperature = 0.7) ?(num_predict = 500
   | Yojson.Json_error msg -> Error (Printf.sprintf "❌ Parse: JSON error [%s]" msg)
   | exn -> Error (Printf.sprintf "❌ LLM: llama exception [%s]" (Printexc.to_string exn))
 
-(** Smart LLM generate — CLI rotation with cloud GLM fallback *)
-let smart_generate ~net ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
-  (* 1. Try CLI first (rotation: gemini → claude → codex) *)
-  let cli = next_cli_provider () in
-  Log.Llm.info "Trying %s..." (string_of_provider cli);
-  match cli_generate cli ~system prompt with
-  | Ok response ->
-      Log.Llm.info "%s succeeded" (string_of_provider cli);
-      Ok response
-  | Error e1 ->
-      Log.Llm.error "[fail] %s: %s" (string_of_provider cli) e1;
-      (* 2. Try another CLI *)
-      let cli2 = next_cli_provider () in
-      Log.Llm.info "Trying %s..." (string_of_provider cli2);
-      match cli_generate cli2 ~system prompt with
-      | Ok response ->
-          Log.Llm.info "%s succeeded" (string_of_provider cli2);
-          Ok response
-      | Error e2 ->
-          Log.Llm.error "[fail] %s: %s" (string_of_provider cli2) e2;
-          (* 3. Fallback to cloud GLM via Z.ai API — 200K context, no VRAM *)
-          Log.Llm.info "Falling back to cloud GLM (Z.ai)...";
-          glm_direct ~net ~temperature ~max_tokens:num_predict ~system prompt
+(** Smart LLM generate — delegates to Lodge_cascade for provider selection.
+    Uses cascade_name "lodge_direct" which resolves through
+    config/llm_cascade.json → env-var defaults (llama → glm:auto). *)
+let smart_generate ~net:_ ?(temperature = 0.7) ?(num_predict = 500) ~system prompt =
+  match Lodge_cascade.call ~cascade_name:"lodge_direct"
+      ~prompt ~temperature ~timeout_sec:120 ~max_tokens:num_predict ~system () with
+  | Ok r when String.length r.response > 0 ->
+      Log.Llm.info "smart_generate: %s (%dms)" r.llm_used r.duration_ms;
+      Ok r.response
+  | Ok _ -> Error "LLM: cascade returned empty response"
+  | Error e -> Error (Printf.sprintf "LLM: cascade failed [%s]" e)
 
 (** {1 READ: Content Fetching} *)
 

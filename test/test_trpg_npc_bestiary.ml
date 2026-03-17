@@ -240,15 +240,15 @@ let test_narration_empty_fallback () =
   in
   Alcotest.(check string)
     "empty narrations -> default fallback"
-    "잔존한 적이 반격해 전열을 흔든다." narration
+    "적이 공격한다." narration
 
 (* -- find_npc_template_by_name -- *)
 
 let test_find_by_name_exists () =
-  match Tool_trpg.find_npc_template_by_name "Ironclad Golem" with
+  match Tool_trpg.find_npc_template_by_name "Ironhide Ogre" with
   | Some t ->
-      Alcotest.(check string) "archetype" "construct-brute" t.archetype
-  | None -> Alcotest.fail "Ironclad Golem not found in bestiary"
+      Alcotest.(check string) "archetype" "warrior-brute" t.archetype
+  | None -> Alcotest.fail "Ironhide Ogre not found in bestiary"
 
 let test_find_by_name_not_found () =
   match Tool_trpg.find_npc_template_by_name "Nonexistent Dragon" with

@@ -83,11 +83,11 @@ type model_spec = {
   cost_per_1k_output : float;
 }
 
-type role = System | User | Assistant | Tool
+type role = Agent_sdk.Types.role = System | User | Assistant | Tool
 
 type message = {
   role : role;
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   name : string option;
   tool_call_id : string option;
 }
@@ -157,11 +157,7 @@ let string_of_provider = function
   | OpenRouter -> "openrouter"
   | Custom s -> sprintf "custom(%s)" s
 
-let string_of_role = function
-  | System -> "system"
-  | User -> "user"
-  | Assistant -> "assistant"
-  | Tool -> "tool"
+let string_of_role = Agent_sdk.Types.role_to_string
 
 let sanitize_text_utf8 (s : string) : string =
   let len = String.length s in
@@ -181,12 +177,13 @@ let sanitize_text_utf8 (s : string) : string =
   loop 0;
   Buffer.contents buf
 
-let text_of_message (m : message) : string = m.content
+let text_of_message (m : message) : string =
+  Agent_sdk.Types.text_of_content m.content
 
 let sanitize_message_utf8 (m : message) : message =
   {
     m with
-    content = sanitize_text_utf8 (text_of_message m);
+    content = [Agent_sdk.Types.Text (sanitize_text_utf8 (text_of_message m))];
     name = Option.map sanitize_text_utf8 m.name;
     tool_call_id = Option.map sanitize_text_utf8 m.tool_call_id;
   }
@@ -262,12 +259,17 @@ let gemini_pro = {
 (* Message Constructors                                             *)
 (* ================================================================ *)
 
-let system_msg content = { role = System; content; name = None; tool_call_id = None }
-let user_msg content = { role = User; content; name = None; tool_call_id = None }
-let assistant_msg content = { role = Assistant; content; name = None; tool_call_id = None }
+let system_msg text =
+  { role = System; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
+let user_msg text =
+  { role = User; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
+let assistant_msg text =
+  { role = Assistant; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
 
-let tool_msg ~name ~call_id content =
-  { role = Tool; content; name = Some name; tool_call_id = Some call_id }
+let tool_msg ~name ~call_id text =
+  { role = Tool;
+    content = [Agent_sdk.Types.ToolResult { tool_use_id = call_id; content = text; is_error = false }];
+    name = Some name; tool_call_id = Some call_id }
 
 (* ================================================================ *)
 (* Token Estimation                                                 *)

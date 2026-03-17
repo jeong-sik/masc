@@ -35,10 +35,12 @@ type model_spec = {
     Unified with {!Agent_sdk.Types.role} via {!Llm_provider.Types}. *)
 type role = Agent_sdk.Types.role = System | User | Assistant | Tool
 
-(** A single message in a conversation. *)
+(** A single message in a conversation.
+    [content] is a list of {!Agent_sdk.Types.content_block} for type convergence
+    with OAS message. Use {!text_of_message} to extract text. *)
 type message = {
   role : role;
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   name : string option;       (** For tool messages: tool name *)
   tool_call_id : string option; (** For tool result messages *)
 }

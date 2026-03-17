@@ -127,15 +127,17 @@ let test_llm_client_sanitize_message_utf8_repairs_invalid_fields () =
   let raw =
     {
       Masc_mcp.Llm_client.role = Masc_mcp.Llm_client.User;
-      content = "hello\x80.world";
+      content = [Agent_sdk.Types.Text "hello\x80.world"];
       name = Some "to\xFFol";
       tool_call_id = Some "id\x80";
     }
   in
   let sanitized = Masc_mcp.Llm_client.sanitize_message_utf8 raw in
   check bool "role preserved" true (sanitized.role = raw.role);
-  check bool "content valid utf8" true (string_is_valid_utf8 sanitized.content);
-  check bool "content changed" true (sanitized.content <> raw.content);
+  let sanitized_text = Masc_mcp.Llm_client.text_of_message sanitized in
+  let raw_text = Masc_mcp.Llm_client.text_of_message raw in
+  check bool "content valid utf8" true (string_is_valid_utf8 sanitized_text);
+  check bool "content changed" true (sanitized_text <> raw_text);
   check bool "name valid utf8" true
     (match sanitized.name with Some v -> string_is_valid_utf8 v | None -> false);
   check bool "tool_call_id valid utf8" true
@@ -154,7 +156,7 @@ let test_llm_client_sanitize_messages_utf8_preserves_message_count () =
   check int "count preserved" 2 (List.length sanitized);
   check bool "all valid utf8" true
     (List.for_all
-       (fun (msg : Masc_mcp.Llm_client.message) -> string_is_valid_utf8 msg.content)
+       (fun (msg : Masc_mcp.Llm_client.message) -> string_is_valid_utf8 (Masc_mcp.Llm_client.text_of_message msg))
        sanitized)
 
 let test_resolved_keeper_skill_route_marks_agent_judgment () =

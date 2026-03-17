@@ -278,8 +278,8 @@ let normalize_for_model (msgs : Llm_client.message list)
         | Llm_client.Tool ->
           (* Convert tool messages to user messages for models without tool support *)
           { m with role = Llm_client.User;
-                   content = sprintf "[Tool result: %s]\n%s"
-                     (Option.value ~default:"unknown" m.name) (text_of_message m) }
+                   content = [Agent_sdk.Types.Text (sprintf "[Tool result: %s]\n%s"
+                     (Option.value ~default:"unknown" m.name) (text_of_message m))] }
         | _ -> m
       ) msgs
     | Llm_client.Claude ->
@@ -290,7 +290,7 @@ let normalize_for_model (msgs : Llm_client.message list)
         | (m1 : Llm_client.message) :: ((m2 : Llm_client.message) :: rest as tail) ->
           if m1.role = m2.role && m1.role <> Llm_client.System then
             (* Merge consecutive same-role *)
-            let merged = { m1 with content = text_of_message m1 ^ "\n" ^ text_of_message m2 } in
+            let merged = { m1 with content = [Agent_sdk.Types.Text (text_of_message m1 ^ "\n" ^ text_of_message m2)] } in
             fix_alternation (merged :: rest)
           else
             m1 :: fix_alternation tail

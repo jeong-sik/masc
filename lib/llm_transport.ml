@@ -28,7 +28,7 @@ let sanitize_text_utf8 (s : string) : string =
 let sanitize_message_utf8 (m : message) : message =
   {
     m with
-    content = sanitize_text_utf8 (text_of_message m);
+    content = [Agent_sdk.Types.Text (sanitize_text_utf8 (text_of_message m))];
     name = Option.map sanitize_text_utf8 m.name;
     tool_call_id = Option.map sanitize_text_utf8 m.tool_call_id;
   }

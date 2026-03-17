@@ -31,7 +31,7 @@ let entry_of_masc_spec
     run = (fun ~sw:_ prompt ->
       let request : Llm_client_core.completion_request = {
         model = spec;
-        messages = [{ role = User; content = prompt;
+        messages = [{ role = User; content = [Agent_sdk.Types.Text prompt];
                       name = None; tool_call_id = None }];
         temperature = 0.7;
         max_tokens = 4096;

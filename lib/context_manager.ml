@@ -205,8 +205,8 @@ let prune_tool_outputs ?(max_len=500) ?(keep_len=100) ctx =
       let head = String.sub mc 0 keep_len in
       let tail_start = String.length mc - keep_len in
       let tail = String.sub mc tail_start keep_len in
-      { m with content = sprintf "%s\n[...truncated %d chars...]\n%s"
-          head (String.length mc - 2 * keep_len) tail }
+      { m with content = [Agent_sdk.Types.Text (sprintf "%s\n[...truncated %d chars...]\n%s"
+          head (String.length mc - 2 * keep_len) tail)] }
     | _ -> m
   ) ctx.messages in
   let token_count = count_tokens ctx.system_prompt messages in
@@ -219,7 +219,7 @@ let merge_contiguous ctx =
     | [m] -> [m]
     | (m1 : Llm_client.message) :: (m2 :: rest as tail) ->
       if m1.role = m2.role then
-        let merged = { m1 with content = text_of_message m1 ^ "\n" ^ text_of_message m2 } in
+        let merged = { m1 with content = [Agent_sdk.Types.Text (text_of_message m1 ^ "\n" ^ text_of_message m2)] } in
         merge (merged :: rest)
       else
         m1 :: merge tail
@@ -384,7 +384,7 @@ let oas_msg_to_masc_tagged (m : Agent_sdk.Types.message) : Llm_client.message =
     | Llm_client.Tool -> tool_id
     | _ -> None
   in
-  { Llm_client.role; content; name = None; tool_call_id }
+  { Llm_client.role; content = [Agent_sdk.Types.Text content]; name = None; tool_call_id }
 
 let oas_strategy_of_compaction (s : compaction_strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
@@ -456,7 +456,7 @@ let message_of_json (json : Yojson.Safe.t) : Llm_client.message =
   let open Yojson.Safe.Util in
   {
     role = json |> member "role" |> to_string |> role_of_string;
-    content = json |> member "content" |> to_string |> Llm_client.sanitize_text_utf8;
+    content = [Agent_sdk.Types.Text (json |> member "content" |> to_string |> Llm_client.sanitize_text_utf8)];
     name = json |> member "name" |> to_string_option |> Option.map Llm_client.sanitize_text_utf8;
     tool_call_id =
       json |> member "tool_call_id" |> to_string_option

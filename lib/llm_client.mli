@@ -38,10 +38,11 @@ type model_spec = {
 (** Role in a conversation. *)
 type role = System | User | Assistant | Tool
 
-(** A single message in a conversation. *)
+(** A single message in a conversation.
+    [content] uses {!Agent_sdk.Types.content_block} list for OAS type convergence. *)
 type message = {
   role : role;
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   name : string option;       (** For tool messages: tool name *)
   tool_call_id : string option; (** For tool result messages *)
 }

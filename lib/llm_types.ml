@@ -35,7 +35,7 @@ type role = Agent_sdk.Types.role = System | User | Assistant | Tool
 
 type message = {
   role : role;
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   name : string option;
   tool_call_id : string option;
 }
@@ -163,18 +163,22 @@ let gemini_pro = {
   cost_per_1k_output = 0.0;
 }
 
-let system_msg content = { role = System; content; name = None; tool_call_id = None }
-let user_msg content = { role = User; content; name = None; tool_call_id = None }
-let assistant_msg content = { role = Assistant; content; name = None; tool_call_id = None }
+let system_msg text =
+  { role = System; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
+let user_msg text =
+  { role = User; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
+let assistant_msg text =
+  { role = Assistant; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
 
-let tool_msg ~name ~call_id content =
-  { role = Tool; content; name = Some name; tool_call_id = Some call_id }
+let tool_msg ~name ~call_id text =
+  { role = Tool;
+    content = [Agent_sdk.Types.ToolResult { tool_use_id = call_id; content = text; is_error = false }];
+    name = Some name; tool_call_id = Some call_id }
 
 (** Extract text content from a message.
-    v0.48 migration bridge: consumers should use this instead of direct .content access.
-    When message.content changes to content_block list (Phase B),
-    only this function needs updating. *)
-let text_of_message (m : message) : string = m.content
+    Delegates to Agent_sdk.Types.text_of_content for rich content_block list. *)
+let text_of_message (m : message) : string =
+  Agent_sdk.Types.text_of_content m.content
 
 (** Heuristic: ~4 characters per token (conservative estimate). *)
 let estimate_tokens (msgs : message list) =

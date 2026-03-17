@@ -76,9 +76,9 @@ let to_oas_message (m : message) : Agent_sdk.Types.message option =
     Some { Agent_sdk.Types.role = Assistant; content = [Text (text_of_message m)] }
 
 let of_oas_message (m : Agent_sdk.Types.message) : message =
-  (* Role is now the same type -- no mapping needed *)
-  let content = Agent_sdk.Types.text_of_content m.content in
-  { role = m.role; content; name = None; tool_call_id = None }
+  (* Role is now the same type -- no mapping needed.
+     Content is now the same type too -- pass through directly. *)
+  { role = m.role; content = m.content; name = None; tool_call_id = None }
 
 let of_oas_usage (u : Agent_sdk.Types.api_usage) : token_usage =
   {

@@ -54,7 +54,7 @@ let test_event_bus_task_transition () =
 let test_message_roundtrip () =
   let masc_msg : Llm_client.message = {
     role = Llm_client.Assistant;
-    content = "test content";
+    content = [Agent_sdk.Types.Text "test content"];
     name = None;
     tool_call_id = None;
   } in
@@ -67,12 +67,12 @@ let test_message_roundtrip () =
        "assistant"
        (match roundtrip.role with Llm_client.Assistant -> "assistant" | _ -> "other");
      Alcotest.(check string) "content preserved"
-       "test content" roundtrip.content)
+       "test content" (Llm_client.text_of_message roundtrip))
 
 let test_system_role_dropped () =
   let masc_msg : Llm_client.message = {
     role = Llm_client.System;
-    content = "system prompt";
+    content = [Agent_sdk.Types.Text "system prompt"];
     name = None;
     tool_call_id = None;
   } in
@@ -90,7 +90,7 @@ let test_restore_messages () =
   let masc_msgs = Oas_checkpoint_bridge.restore_messages oas_msgs in
   Alcotest.(check int) "2 messages" 2 (List.length masc_msgs);
   Alcotest.(check string) "first content" "hello"
-    (List.hd masc_msgs).Llm_client.content
+    (Llm_client.text_of_message (List.hd masc_msgs))
 
 (* ================================================================ *)
 (* Context_manager OAS sync tests                                    *)

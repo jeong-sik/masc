@@ -53,6 +53,8 @@
    config
    context_router
    dashboard
+   dashboard_labels
+   dashboard_attention
    dashboard_cache
    dashboard_governance
    dashboard_governance_judge

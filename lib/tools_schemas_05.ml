@@ -423,4 +423,50 @@ let schemas : tool_schema list = [
       ("required", `List [`String "full_context"]);
     ];
   };
+
+  (* ============================================ *)
+  (* Progressive Tool Disclosure                  *)
+  (* ============================================ *)
+
+  {
+    name = "masc_tool_enable";
+    description = "Enable specific tools without switching to Full mode. Bypasses mode filtering for listed tools. Use when you need a tool that is not in the current mode. Always available.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("tool", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Single tool name to enable (e.g. masc_perpetual_start)");
+        ]);
+        ("tools", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Multiple tool names to enable at once");
+        ]);
+      ]);
+    ];
+  };
+
+  {
+    name = "masc_tool_disable";
+    description = "Disable previously extra-enabled tools, or clear all extra-enabled tools with clear=true.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("tool", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Single tool name to disable");
+        ]);
+        ("tools", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Multiple tool names to disable");
+        ]);
+        ("clear", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Clear all extra-enabled tools");
+        ]);
+      ]);
+    ];
+  };
 ]

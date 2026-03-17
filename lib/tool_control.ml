@@ -121,6 +121,52 @@ let handle_get_config ctx _args =
   let summary = Config.get_config_summary room_path in
   (true, Yojson.Safe.pretty_to_string summary)
 
+let handle_tool_enable _ctx args =
+  let tools = get_string_list args "tools" in
+  let tool = get_string args "tool" "" |> String.trim in
+  let all_tools =
+    (if tool <> "" then [tool] else []) @ tools
+    |> List.filter (fun t -> String.trim t <> "")
+  in
+  if all_tools = [] then
+    (false, "tool or tools is required")
+  else begin
+    List.iter Mode.tool_enable all_tools;
+    let enabled = Mode.tool_enable_list () in
+    let json = `Assoc [
+      ("enabled", `List (List.map (fun t -> `String t) all_tools));
+      ("extra_enabled_total", `Int (List.length enabled));
+      ("all_extra", `List (List.map (fun t -> `String t) (List.sort String.compare enabled)));
+    ] in
+    (true, Yojson.Safe.pretty_to_string json)
+  end
+
+let handle_tool_disable _ctx args =
+  let tools = get_string_list args "tools" in
+  let tool = get_string args "tool" "" |> String.trim in
+  let clear = get_bool args "clear" false in
+  if clear then begin
+    Mode.tool_enable_clear ();
+    (true, "All extra-enabled tools cleared.")
+  end
+  else begin
+    let all_tools =
+      (if tool <> "" then [tool] else []) @ tools
+      |> List.filter (fun t -> String.trim t <> "")
+    in
+    if all_tools = [] then
+      (false, "tool, tools, or clear=true is required")
+    else begin
+      List.iter Mode.tool_disable all_tools;
+      let enabled = Mode.tool_enable_list () in
+      let json = `Assoc [
+        ("disabled", `List (List.map (fun t -> `String t) all_tools));
+        ("extra_enabled_total", `Int (List.length enabled));
+      ] in
+      (true, Yojson.Safe.pretty_to_string json)
+    end
+  end
+
 (* Dispatch function *)
 let dispatch ctx ~name ~args : result option =
   match name with
@@ -129,4 +175,6 @@ let dispatch ctx ~name ~args : result option =
   | "masc_pause_status" -> Some (handle_pause_status ctx args)
   | "masc_switch_mode" -> Some (handle_switch_mode ctx args)
   | "masc_get_config" -> Some (handle_get_config ctx args)
+  | "masc_tool_enable" -> Some (handle_tool_enable ctx args)
+  | "masc_tool_disable" -> Some (handle_tool_disable ctx args)
   | _ -> None

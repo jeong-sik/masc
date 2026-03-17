@@ -54,6 +54,7 @@ type ('clock, 'net) dispatch_contexts = {
   ctx_suspend : Tool_suspend.context;
   ctx_library : Tool_library.context;
   ctx_mdal : Tool_mdal.context;
+  ctx_autoresearch : Tool_autoresearch.context;
   ctx_perpetual : Tool_perpetual.context;
   ctx_keeper : float Eio.Time.clock_ty Tool_keeper.context;
   ctx_trpg : Tool_trpg.context;
@@ -91,6 +92,8 @@ let dispatch (c : (_, _) dispatch_contexts) : bool * string =
         ~handler:(fun ~name ~args -> Tool_keeper.dispatch c.ctx_keeper ~name ~args);
       reg ~schemas:Tool_trpg.schemas
         ~handler:(fun ~name ~args -> Tool_trpg.dispatch c.ctx_trpg ~name ~args);
+      reg ~schemas:Tool_autoresearch.schemas
+        ~handler:(fun ~name ~args -> Tool_autoresearch.dispatch c.ctx_autoresearch ~name ~args);
       reg ~schemas:Tool_agent_timeline.schemas
         ~handler:(fun ~name ~args -> Tool_agent_timeline.dispatch c.ctx_agent_timeline ~name ~args);
       reg ~schemas:Tool_plan.schemas
@@ -241,6 +244,9 @@ let dispatch (c : (_, _) dispatch_contexts) : bool * string =
   | Some result -> result
   | None ->
   match Tool_mdal.dispatch c.ctx_mdal ~name ~args:arguments with
+  | Some result -> result
+  | None ->
+  match Tool_autoresearch.dispatch c.ctx_autoresearch ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_trpg.dispatch c.ctx_trpg ~name ~args:arguments with

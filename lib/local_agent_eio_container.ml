@@ -280,8 +280,8 @@ let load_worker_meta ~base_path ~team_session_id ~worker_name =
   let path = worker_meta_path ~base_path ~team_session_id ~worker_name in
   if Sys.file_exists path then
     try
-      Yojson.Safe.from_file path |> worker_meta_of_yojson
-    with Yojson.Json_error _ | Sys_error _ -> None
+      Safe_ops.read_json_eio path |> worker_meta_of_yojson
+    with Yojson.Json_error _ | Sys_error _ | Eio.Io _ -> None
   else
     None
 

@@ -122,7 +122,7 @@ let load_plan base_path plan_id : (swarm_plan, string) result =
   if not (Sys.file_exists path) then Error (sprintf "Plan not found: %s" plan_id)
   else
     try
-      let json = Yojson.Safe.from_file path in
+      let json = Safe_ops.read_json_eio path in
       let open Yojson.Safe.Util in
       let workers =
         json |> member "workers" |> to_list

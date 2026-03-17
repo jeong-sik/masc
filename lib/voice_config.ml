@@ -295,7 +295,7 @@ let load () =
     Error (Printf.sprintf "voice config missing at %s" path)
   else
     try
-      let json = Yojson.Safe.from_file path in
+      let json = Safe_ops.read_json_eio path in
       let open Result in
       let* tts = parse_tts json in
       let* stt = parse_stt json in
@@ -307,6 +307,8 @@ let load () =
         Error (Printf.sprintf "invalid voice config json: %s" error)
     | Sys_error error ->
         Error (Printf.sprintf "voice config read failed: %s" error)
+    | Eio.Io _ as exn ->
+        Error (Printf.sprintf "voice config Eio read failed: %s" (Printexc.to_string exn))
 
 let enabled_endpoints (endpoints : endpoint list) =
   List.filter (fun (endpoint : endpoint) -> endpoint.enabled) endpoints

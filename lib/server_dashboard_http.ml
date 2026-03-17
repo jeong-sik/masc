@@ -175,56 +175,114 @@ let operator_actor_hint request =
       if trimmed = "" then None else Some trimmed
   | None -> None
 
+(* --- Operator proactive refresh ---
+   Default (no-param) requests are served from a background-refreshed ref.
+   Parameterized requests fall back to on-demand compute with SWR cache. *)
+
+let _operator_snapshot_ref : Yojson.Safe.t ref =
+  ref (`Assoc [("status", `String "initializing"); ("generated_at", `String (Types.now_iso ()))])
+
+let _operator_digest_ref : Yojson.Safe.t ref =
+  ref (`Assoc [("health", `String "initializing"); ("generated_at", `String (Types.now_iso ()))])
+
+let _operator_refresh_interval_s = 120.0
+
+let start_operator_refresh_loop ~state ~sw ~clock =
+  let config = state.Mcp_server.room_config in
+  let proc_mgr = state.Mcp_server.proc_mgr in
+  Eio.Fiber.fork ~sw (fun () ->
+    Printf.eprintf "[INFO] Dashboard: starting operator proactive refresh loop.\n%!";
+    let rec loop () =
+      let t0 = Time_compat.now () in
+      let ctx : _ Operator_control.context =
+        { config; agent_name = "dashboard"; sw; clock; proc_mgr; mcp_session_id = None }
+      in
+      (try
+        _operator_snapshot_ref :=
+          Operator_control.snapshot_json ~actor:"dashboard"
+            ~include_messages:true ~include_sessions:true ~include_keepers:true ctx;
+        (match Operator_control.digest_json ~actor:"dashboard" ctx with
+         | Ok json -> _operator_digest_ref := json
+         | Error _ -> ());
+        let dt = Time_compat.now () -. t0 in
+        Printf.eprintf "[INFO] Dashboard: operator refreshed (%.1fs).\n%!" dt
+      with exn ->
+        let dt = Time_compat.now () -. t0 in
+        Printf.eprintf "[WARN] Dashboard: operator refresh failed (%.1fs): %s\n%!"
+          dt (Printexc.to_string exn));
+      Eio.Time.sleep clock _operator_refresh_interval_s;
+      loop ()
+    in
+    loop ())
+
 let operator_snapshot_http_json ~state ~sw ~clock request =
-  let ctx : _ Operator_control.context =
-    {
-      config = state.Mcp_server.room_config;
-      agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
-      sw;
-      clock;
-      proc_mgr = state.Mcp_server.proc_mgr;
-      mcp_session_id = None;
-    }
+  let actor = operator_actor_hint request in
+  let has_params =
+    actor <> None
+    || query_param request "include_messages" <> None
+    || query_param request "include_sessions" <> None
+    || query_param request "include_keepers" <> None
   in
-  let include_messages =
-    match query_param request "include_messages" with
-    | Some ("0" | "false" | "no") -> false
-    | _ -> true
-  in
-  let include_sessions =
-    match query_param request "include_sessions" with
-    | Some ("0" | "false" | "no") -> false
-    | _ -> true
-  in
-  let include_keepers =
-    match query_param request "include_keepers" with
-    | Some ("0" | "false" | "no") -> false
-    | _ -> true
-  in
-  Operator_control.snapshot_json ?actor:(operator_actor_hint request)
-    ~include_messages ~include_sessions ~include_keepers ctx
+  if not has_params then
+    !_operator_snapshot_ref
+  else begin
+    let ctx : _ Operator_control.context =
+      {
+        config = state.Mcp_server.room_config;
+        agent_name = Option.value ~default:"dashboard" actor;
+        sw;
+        clock;
+        proc_mgr = state.Mcp_server.proc_mgr;
+        mcp_session_id = None;
+      }
+    in
+    let include_messages =
+      match query_param request "include_messages" with
+      | Some ("0" | "false" | "no") -> false
+      | _ -> true
+    in
+    let include_sessions =
+      match query_param request "include_sessions" with
+      | Some ("0" | "false" | "no") -> false
+      | _ -> true
+    in
+    let include_keepers =
+      match query_param request "include_keepers" with
+      | Some ("0" | "false" | "no") -> false
+      | _ -> true
+    in
+    Operator_control.snapshot_json ?actor
+      ~include_messages ~include_sessions ~include_keepers ctx
+  end
 
 let operator_digest_http_json ~state ~sw ~clock request =
-  let ctx : _ Operator_control.context =
-    {
-      config = state.Mcp_server.room_config;
-      agent_name = Option.value ~default:"dashboard" (operator_actor_hint request);
-      sw;
-      clock;
-      proc_mgr = state.Mcp_server.proc_mgr;
-      mcp_session_id = None;
-    }
-  in
+  let actor = operator_actor_hint request in
   let target_type = query_param request "target_type" in
   let target_id = query_param request "target_id" in
-  let include_workers =
-    match query_param request "include_workers" with
-    | Some ("0" | "false" | "no") -> Some false
-    | Some ("1" | "true" | "yes") -> Some true
-    | _ -> None
+  let has_params =
+    actor <> None || target_type <> None || target_id <> None
+    || query_param request "include_workers" <> None
   in
-  Operator_control.digest_json ?actor:(operator_actor_hint request)
-    ?target_type ?target_id ?include_workers ctx
+  if not has_params then
+    Ok !_operator_digest_ref
+  else
+    let ctx : _ Operator_control.context =
+      {
+        config = state.Mcp_server.room_config;
+        agent_name = Option.value ~default:"dashboard" actor;
+        sw;
+        clock;
+        proc_mgr = state.Mcp_server.proc_mgr;
+        mcp_session_id = None;
+      }
+    in
+    let include_workers =
+      match query_param request "include_workers" with
+      | Some ("0" | "false" | "no") -> Some false
+      | Some ("1" | "true" | "yes") -> Some true
+      | _ -> None
+    in
+    Operator_control.digest_json ?actor ?target_type ?target_id ?include_workers ctx
 
 (* --- Mission proactive refresh (same pattern as execution) ----------
    A background fiber recomputes the mission snapshot every

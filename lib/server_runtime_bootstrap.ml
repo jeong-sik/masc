@@ -351,6 +351,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Printf.eprintf "[INFO] Executor_pool created (2 domains) for dashboard.\n%!";
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
+      Server_dashboard_http.start_operator_refresh_loop ~state ~sw ~clock;
+      Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
       start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
     with exn ->
       Log.Server.error "Background init failed (HTTP still serving): %s"

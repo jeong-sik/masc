@@ -10,7 +10,7 @@ import { navigate } from '../../router'
 import { formatDuration } from '../mission-utils'
 import { SituationBanner } from './situation-banner'
 import { AttentionSpotlight } from './attention-spotlight'
-import { AgentGrid } from './agent-grid'
+import { AgentObservatory } from './agent-observatory'
 import { SessionTriage } from './session-triage'
 import { NarrativeTimeline } from './narrative-timeline'
 import { QuickStats } from './quick-stats'
@@ -63,7 +63,6 @@ export function Overview() {
   const roomHealth = snap?.summary?.room_health ?? null
   const attentionCount = snap?.attention_queue?.length ?? snap?.summary?.pending_approvals ?? 0
   const sessions = snap?.sessions ?? snap?.session_briefs ?? []
-  const agentBriefs = snap?.agent_briefs ?? []
   const keeperBriefs = snap?.keeper_briefs ?? []
 
   const navSurfaces = DASHBOARD_SURFACES.filter(s => s.id !== 'home')
@@ -85,10 +84,8 @@ export function Overview() {
 
       <div class="overview-main-v2">
         <div class="overview-left-col">
-          <div class="overview-section-label">에이전트</div>
-          <${AgentGrid}
-            agents=${agentList}
-            agentBriefs=${agentBriefs}
+          <div class="overview-section-label">에이전트 Observatory</div>
+          <${AgentObservatory}
             onAgentClick=${(name: string) => navigate('execution', { agent: name })}
           />
         </div>

@@ -242,15 +242,17 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
     |> List.filter (fun e -> e.ts >= cutoff)
     |> List.sort (fun a b -> compare a.ts b.ts)
   in
-  (* Truncate to limit *)
+  (* Truncate to limit — keep the most recent events (tail of sorted list) *)
   let events =
-    if List.length filtered > limit then
-      let rec take n acc = function
-        | [] -> List.rev acc
-        | _ when n <= 0 -> List.rev acc
-        | x :: rest -> take (n - 1) (x :: acc) rest
+    let len = List.length filtered in
+    if len > limit then
+      let drop = len - limit in
+      let rec skip n = function
+        | [] -> []
+        | _ :: rest when n > 0 -> skip (n - 1) rest
+        | remaining -> remaining
       in
-      take limit [] filtered
+      skip drop filtered
     else filtered
   in
   (* Compute summary *)

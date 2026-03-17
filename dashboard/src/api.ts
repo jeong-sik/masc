@@ -542,6 +542,33 @@ export function fetchAgentActivity(hours = 24): Promise<AgentActivityResponse> {
   return get(`/api/v1/agent-activity?hours=${hours}`)
 }
 
+export interface AgentTimelineEvent {
+  ts: string
+  type: string
+  detail: Record<string, unknown>
+}
+
+export interface AgentTimelineResponse {
+  agent: string
+  period: { from: string; to: string }
+  events: AgentTimelineEvent[]
+  summary: {
+    tasks_completed: number
+    tasks_claimed: number
+    messages_sent: number
+    active_duration_minutes: number
+    total_events: number
+  }
+}
+
+export function fetchAgentTimeline(
+  agentName: string,
+  sinceHours = 4,
+  limit = 20,
+): Promise<AgentTimelineResponse> {
+  return get(`/api/v1/agent-timeline?agent_name=${encodeURIComponent(agentName)}&since_hours=${sinceHours}&limit=${limit}`)
+}
+
 export function fetchDashboardRoomTruth(): Promise<DashboardRoomTruthResponse> {
   return get('/api/v1/dashboard/room-truth', { timeoutMs: ROOM_TRUTH_GET_TIMEOUT_MS })
 }

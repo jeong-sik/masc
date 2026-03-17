@@ -157,6 +157,8 @@ export type TabId =
   | 'command'
   | 'lab'
   | 'social'
+  | 'agent-roster'
+  | 'keeper-roster'
 
 export const VALID_TABS: TabId[] = [
   'home',
@@ -172,6 +174,8 @@ export const VALID_TABS: TabId[] = [
   'command',
   'lab',
   'social',
+  'agent-roster',
+  'keeper-roster',
 ]
 
 // --- Social Graph types ---

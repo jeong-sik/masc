@@ -28,6 +28,16 @@
   border-radius: 8px;
 }
 
+.pixel-avatar--xl {
+  width: 96px;
+  height: 96px;
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 2px var(--ff-navy, #0d1526),
+    0 0 0 3px var(--ff-gold, #d4a94b),
+    0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
 .pixel-avatar__cell {
   /* Each cell's color is set via inline style */
 }

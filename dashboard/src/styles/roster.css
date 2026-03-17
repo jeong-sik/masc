@@ -1,0 +1,426 @@
+/* MASC Dashboard — Roster Pages (FF Character Sheet Theme) */
+
+/* ============================================
+   Roster Page — Full-page entity list
+   FF-inspired: navy panels, gold borders,
+   ornamental corners, RPG stat blocks
+   ============================================ */
+
+.roster-page {
+  padding: var(--space-lg, 24px);
+  max-width: 960px;
+}
+
+.roster-header {
+  margin-bottom: var(--space-lg, 24px);
+}
+
+.roster-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ff-gold-bright, #f0d080);
+  margin: 0 0 var(--space-md, 16px) 0;
+  letter-spacing: 0.5px;
+  text-shadow: 0 1px 4px rgba(212, 169, 75, 0.2);
+}
+
+.roster-controls {
+  display: flex;
+  gap: var(--space-md, 16px);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.roster-search {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  background: var(--ff-navy, #0d1526);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  width: 200px;
+  transition: border-color 0.2s;
+}
+
+.roster-search:focus {
+  outline: none;
+  border-color: var(--ff-gold, #d4a94b);
+  box-shadow: 0 0 0 2px var(--ff-gold-dim, rgba(212, 169, 75, 0.25));
+}
+
+.roster-search::placeholder {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.roster-filters {
+  display: flex;
+  gap: 4px;
+}
+
+.roster-filter-btn {
+  padding: 4px 10px;
+  border-radius: 3px;
+  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.roster-filter-btn:hover {
+  background: var(--ff-gold-dim, rgba(212, 169, 75, 0.25));
+  color: var(--ff-gold-bright, #f0d080);
+  border-color: var(--ff-border, rgba(212, 169, 75, 0.35));
+}
+
+.roster-filter-btn.active {
+  background: var(--ff-gold-dim, rgba(212, 169, 75, 0.25));
+  color: var(--ff-gold-bright, #f0d080);
+  border-color: var(--ff-gold, #d4a94b);
+}
+
+/* ============================================
+   Roster Cards — FF Character Sheet style
+   ============================================ */
+
+.roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.roster-card {
+  display: flex;
+  gap: var(--space-md, 16px);
+  padding: 16px 20px;
+  background: var(--ff-panel, rgba(13, 21, 38, 0.9));
+  border: 1px solid var(--ff-border, rgba(212, 169, 75, 0.35));
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+/* FF corner ornaments */
+.roster-card::before,
+.roster-card::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-color: var(--ff-gold, #d4a94b);
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+.roster-card::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+}
+
+.roster-card::after {
+  bottom: -1px;
+  right: -1px;
+  border-bottom: 2px solid;
+  border-right: 2px solid;
+}
+
+.roster-card:hover {
+  background: var(--ff-navy-light, #142040);
+  border-color: var(--ff-gold, #d4a94b);
+  box-shadow: 0 0 12px rgba(212, 169, 75, 0.1);
+}
+
+.roster-card:hover::before,
+.roster-card:hover::after {
+  opacity: 1;
+}
+
+/* Avatar frame — pixel art portrait */
+.roster-card__avatar {
+  flex-shrink: 0;
+  position: relative;
+}
+
+.roster-card__avatar::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border-radius: 14px;
+  pointer-events: none;
+}
+
+.roster-card__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  justify-content: center;
+}
+
+.roster-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 8px);
+}
+
+.roster-card__name {
+  font-size: 15px;
+  color: var(--ff-gold-bright, #f0d080);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.roster-card__work {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roster-card__work--empty {
+  color: rgba(255, 255, 255, 0.2);
+  font-style: italic;
+}
+
+.roster-card__meta {
+  display: flex;
+  gap: var(--space-sm, 8px);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.roster-card__model {
+  padding: 1px 6px;
+  background: rgba(212, 169, 75, 0.08);
+  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border-radius: 3px;
+  color: rgba(212, 169, 75, 0.6);
+}
+
+/* ============================================
+   Status Badges — RPG class labels
+   ============================================ */
+
+.roster-badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.roster-badge--active {
+  background: rgba(61, 204, 94, 0.12);
+  color: var(--ff-hp, #3dcc5e);
+  border: 1px solid rgba(61, 204, 94, 0.25);
+}
+
+.roster-badge--idle {
+  background: rgba(212, 169, 75, 0.1);
+  color: var(--ff-xp, #d4a94b);
+  border: 1px solid rgba(212, 169, 75, 0.2);
+}
+
+.roster-badge--offline {
+  background: rgba(100, 100, 120, 0.1);
+  color: #667;
+  border: 1px solid rgba(100, 100, 120, 0.15);
+}
+
+.roster-empty {
+  padding: var(--space-xl, 32px);
+  text-align: center;
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 14px;
+  border: 1px dashed var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border-radius: 6px;
+}
+
+/* ============================================
+   Keeper Roster — HP/MP bar style
+   ============================================ */
+
+.keeper-roster-card {
+  flex-direction: column;
+  padding: 14px 20px;
+}
+
+.keeper-roster__main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.keeper-roster__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 8px);
+}
+
+.keeper-roster__gen {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: rgba(74, 158, 245, 0.12);
+  color: var(--ff-mp, #4a9ef5);
+  border: 1px solid rgba(74, 158, 245, 0.2);
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+/* Context pressure — FF HP bar */
+.keeper-roster__pressure {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.keeper-roster__pressure-track {
+  flex: 1;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 2px;
+  overflow: hidden;
+  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+}
+
+.keeper-roster__pressure-bar {
+  height: 100%;
+  border-radius: 1px;
+  transition: width 0.3s ease;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+.keeper-roster__pressure-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+  min-width: 60px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================
+   Situation Reasons (WHY panel)
+   ============================================ */
+
+.situation-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px var(--space-md, 16px);
+  margin-bottom: var(--space-sm, 8px);
+  border-left: 2px solid var(--ff-border, rgba(212, 169, 75, 0.35));
+}
+
+.situation-reason {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, 8px);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.situation-reason--bad {
+  color: rgba(239, 68, 68, 0.9);
+}
+
+.situation-reason--warn {
+  color: var(--ff-gold, #d4a94b);
+}
+
+.situation-reason__tag {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: rgba(212, 169, 75, 0.08);
+  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.situation-reason__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================
+   Overview Enhancements
+   ============================================ */
+
+.overview-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.overview-section-link {
+  font-size: 12px;
+  color: var(--ff-gold, #d4a94b);
+  cursor: pointer;
+  transition: color 0.15s;
+  opacity: 0.6;
+}
+
+.overview-section-link:hover {
+  color: var(--ff-gold-bright, #f0d080);
+  opacity: 1;
+}
+
+.overview-stat__source {
+  font-size: 10px;
+  color: rgba(212, 169, 75, 0.35);
+  margin-left: 4px;
+}
+
+/* Attention badge — gold warning */
+.attention-badge {
+  background: rgba(212, 169, 75, 0.15);
+  color: var(--ff-gold, #d4a94b);
+  border: 1px solid rgba(212, 169, 75, 0.3);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+/* Session triage additions */
+.triage-card__summary {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  margin: 2px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.triage-routine-label {
+  color: rgba(255, 255, 255, 0.25);
+}
+
+/* Pressure bar colors — FF HP gradient */
+.pressure--ok {
+  background: linear-gradient(90deg, #1a9c3a, #3dcc5e);
+}
+
+.pressure--amber {
+  background: linear-gradient(90deg, #c98a0a, #f5c542);
+}
+
+.pressure--orange {
+  background: linear-gradient(90deg, #c65d0a, #f97316);
+}
+
+.pressure--red {
+  background: linear-gradient(90deg, #b91c1c, #ef4444);
+}

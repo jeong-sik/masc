@@ -470,6 +470,22 @@ let local_worker_spawn_schemas : Types.tool_schema list =
                   ("prompt", `Assoc [ ("type", `String "string") ]);
                   ("timeout_seconds", `Assoc [ ("type", `String "integer") ]);
                   ("working_dir", `Assoc [ ("type", `String "string") ]);
+                  ( "execution_scope",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ( "enum",
+                          `List
+                            [
+                              `String "observe_only";
+                              `String "limited_code_change";
+                              `String "autonomous";
+                            ] );
+                        ( "description",
+                          `String
+                            "Execution scope for the spawned agent. \
+                             Determines tool surface and prompt composition." );
+                      ] );
                 ] );
             ("required", `List [ `String "agent_name"; `String "prompt" ]);
           ];

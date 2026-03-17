@@ -35,7 +35,9 @@ let parse_model_json (json : Yojson.Safe.t) : glm_model option =
       in
       let get_int key =
         match List.assoc_opt key fields with
-        | Some (`Int n) -> Some n | _ -> None
+        | Some (`Int n) -> Some n
+        | Some (`Float f) -> Some (Float.to_int f)
+        | _ -> None
       in
       (match get_string "model_id", get_int "concurrency_limit" with
        | Some model_id, Some concurrency_limit when concurrency_limit > 0 ->

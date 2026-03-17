@@ -274,6 +274,15 @@ let test_parse_model_json_no_description () =
   | Some m -> check string "default empty description" "" m.description
   | None -> fail "expected Some"
 
+let test_parse_model_json_float_limit () =
+  let json = `Assoc [
+    ("model_id", `String "x");
+    ("concurrency_limit", `Float 5.0)
+  ] in
+  match Glm_pool.parse_model_json json with
+  | Some m -> check int "float parsed as int" 5 m.concurrency_limit
+  | None -> fail "expected Some for float limit"
+
 let test_hardcoded_models_count () =
   check int "hardcoded has 7 models" 7
     (Array.length Glm_pool.hardcoded_models)
@@ -346,5 +355,6 @@ let () =
       test_case "parse no description" `Quick test_parse_model_json_no_description;
       test_case "hardcoded model count" `Quick test_hardcoded_models_count;
       test_case "hardcoded total capacity" `Quick test_hardcoded_models_total_capacity;
+      test_case "parse float limit" `Quick test_parse_model_json_float_limit;
     ];
   ]

@@ -322,22 +322,22 @@ module Request = struct
 
     read_body_async_with_limit reqd
       ~on_body:(fun body_str ->
-        Eio.Mutex.use_rw ~protect:false mutex (fun () ->
+        Eio.Mutex.use_rw ~protect:true mutex (fun () ->
           result := Some (Ok body_str);
           Eio.Condition.broadcast cond))
       ~on_error:(function
         | `Too_large max_bytes ->
             respond_too_large reqd max_bytes;
-            Eio.Mutex.use_rw ~protect:false mutex (fun () ->
+            Eio.Mutex.use_rw ~protect:true mutex (fun () ->
               result := Some (Error (Printf.sprintf "Request too large (max %d bytes)" max_bytes));
               Eio.Condition.broadcast cond)
         | `Internal exn ->
             respond_internal_error reqd exn;
-            Eio.Mutex.use_rw ~protect:false mutex (fun () ->
+            Eio.Mutex.use_rw ~protect:true mutex (fun () ->
               result := Some (Error (Printexc.to_string exn));
               Eio.Condition.broadcast cond));
 
-    Eio.Mutex.use_rw ~protect:false mutex (fun () ->
+    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
       while !result = None do
         Eio.Condition.await_no_mutex cond
       done);

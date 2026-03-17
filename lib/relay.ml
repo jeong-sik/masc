@@ -55,6 +55,10 @@ let calibration = {
   correction_factor = 1.0;
 }
 
+(** Mutex protecting calibration_state. All reads and writes to
+    calibration.samples and calibration.correction_factor go through this. *)
+let calibration_mutex = Eio.Mutex.create ()
+
 (** Record actual token count vs estimated for calibration.
     Keeps the last 10 samples and updates a moving-average correction factor. *)
 let record_actual_tokens ~estimated ~actual =
@@ -62,30 +66,31 @@ let record_actual_tokens ~estimated ~actual =
     | Some "false" | Some "0" -> false
     | _ -> true
   in
-  if enabled then begin
-    calibration.samples <- (estimated, actual) :: calibration.samples;
-    (* Keep last 10 *)
-    if List.length calibration.samples > 10 then
-      calibration.samples <- List.filteri (fun i _ -> i < 10) calibration.samples;
-    (* Update correction factor: moving average of actual/estimated ratios *)
-    let ratios = List.filter_map (fun (e, a) ->
-      if e > 0 then Some (float_of_int a /. float_of_int e) else None
-    ) calibration.samples in
-    match ratios with
-    | [] -> ()
-    | rs ->
-      let sum = List.fold_left (+.) 0.0 rs in
-      calibration.correction_factor <- sum /. float_of_int (List.length rs)
-  end
+  if enabled then
+    Eio.Mutex.use_rw ~protect:true calibration_mutex (fun () ->
+      calibration.samples <- (estimated, actual) :: calibration.samples;
+      (* Keep last 10 *)
+      if List.length calibration.samples > 10 then
+        calibration.samples <- List.filteri (fun i _ -> i < 10) calibration.samples;
+      (* Update correction factor: moving average of actual/estimated ratios *)
+      let ratios = List.filter_map (fun (e, a) ->
+        if e > 0 then Some (float_of_int a /. float_of_int e) else None
+      ) calibration.samples in
+      match ratios with
+      | [] -> ()
+      | rs ->
+        let sum = List.fold_left (+.) 0.0 rs in
+        calibration.correction_factor <- sum /. float_of_int (List.length rs))
 
 (** Get calibration info as JSON for debugging *)
 let get_calibration_info () =
-  `Assoc [
-    ("correction_factor", `Float calibration.correction_factor);
-    ("sample_count", `Int (List.length calibration.samples));
-    ("enabled", `Bool (match Sys.getenv_opt "MASC_RELAY_CALIBRATION_ENABLED" with
-      | Some "false" | Some "0" -> false | _ -> true));
-  ]
+  Eio.Mutex.use_rw ~protect:true calibration_mutex (fun () ->
+    `Assoc [
+      ("correction_factor", `Float calibration.correction_factor);
+      ("sample_count", `Int (List.length calibration.samples));
+      ("enabled", `Bool (match Sys.getenv_opt "MASC_RELAY_CALIBRATION_ENABLED" with
+        | Some "false" | Some "0" -> false | _ -> true));
+    ])
 
 (** Estimate context usage based on heuristics *)
 let estimate_context ~messages ~tool_calls ~model =
@@ -98,7 +103,9 @@ let estimate_context ~messages ~tool_calls ~model =
   let message_tokens = messages * (tokens_per_user_msg + tokens_per_assistant_msg) in
   let tool_tokens = tool_calls * (tokens_per_tool_call + tokens_per_tool_result) in
   let estimated_raw = message_tokens + tool_tokens in
-  let estimated = int_of_float (float_of_int estimated_raw *. calibration.correction_factor) in
+  let factor = Eio.Mutex.use_rw ~protect:true calibration_mutex
+    (fun () -> calibration.correction_factor) in
+  let estimated = int_of_float (float_of_int estimated_raw *. factor) in
 
   (* Model-specific max context *)
   let max_tokens = match model with

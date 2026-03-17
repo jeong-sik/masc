@@ -52,30 +52,30 @@ let level_of_string = function
 type format = Text | Json
 
 type config = {
-  mutable min_level: level;
-  mutable format: format;
-  mutable show_timestamp: bool;
-  mutable show_module: bool;
+  min_level: level Atomic.t;
+  format: format Atomic.t;
+  show_timestamp: bool Atomic.t;
+  show_module: bool Atomic.t;
 }
 
 let config = {
-  min_level = Info;
-  format = Text;
-  show_timestamp = true;
-  show_module = true;
+  min_level = Atomic.make Info;
+  format = Atomic.make Text;
+  show_timestamp = Atomic.make true;
+  show_module = Atomic.make true;
 }
 
 let init () =
   (* Read from environment *)
   (match Sys.getenv_opt "MASC_CHAIN_LOG_LEVEL" with
-   | Some s -> config.min_level <- level_of_string (String.lowercase_ascii s)
+   | Some s -> Atomic.set config.min_level (level_of_string (String.lowercase_ascii s))
    | None -> ());
   (match Sys.getenv_opt "MASC_CHAIN_LOG_FORMAT" with
-   | Some "json" -> config.format <- Json
-   | _ -> config.format <- Text)
+   | Some "json" -> Atomic.set config.format Json
+   | _ -> Atomic.set config.format Text)
 
-let set_level level = config.min_level <- level
-let set_format fmt = config.format <- fmt
+let set_level level = Atomic.set config.min_level level
+let set_format fmt = Atomic.set config.format fmt
 
 (** {1 Timestamp} *)
 
@@ -96,8 +96,8 @@ let level_emoji = function
   | Critical -> "\027[35m[!]\027[0m"  (* Magenta *)
 
 let output_text level module_name ctx msg =
-  let ts = if config.show_timestamp then timestamp () ^ " " else "" in
-  let mod_str = if config.show_module then Printf.sprintf "[%s] " module_name else "" in
+  let ts = if Atomic.get config.show_timestamp then timestamp () ^ " " else "" in
+  let mod_str = if Atomic.get config.show_module then Printf.sprintf "[%s] " module_name else "" in
   let ctx_str =
     match ctx with
     | [] -> ""
@@ -119,9 +119,9 @@ let output_json level module_name ctx msg =
     (timestamp ()) (level_to_string level) module_name (String.escaped msg) ctx_json
 
 let log level module_name ?(ctx=[]) fmt =
-  if level_to_int level >= level_to_int config.min_level then
+  if level_to_int level >= level_to_int (Atomic.get config.min_level) then
     Printf.ksprintf (fun msg ->
-      match config.format with
+      match Atomic.get config.format with
       | Text -> output_text level module_name ctx msg
       | Json -> output_json level module_name ctx msg
     ) fmt

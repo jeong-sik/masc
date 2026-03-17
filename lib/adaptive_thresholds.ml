@@ -145,26 +145,18 @@ let state_file_path ~(room : string) : string =
 let save_state ~(room : string) (state : adaptive_state) : unit =
   let path = state_file_path ~room in
   let dir = Filename.dirname path in
-  (* Ensure directory exists *)
-  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fs_compat.mkdir_p dir;
   let json_str = Yojson.Safe.pretty_to_string (state_to_json state) in
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc json_str)
+  Fs_compat.save_file path json_str
 
 (** Load state from persistence, None if not found or invalid *)
 let load_state ~(room : string) : adaptive_state option =
   let path = state_file_path ~room in
   if Sys.file_exists path then
     try
-      let ic = open_in path in
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr ic)
-        (fun () ->
-          let content = In_channel.input_all ic in
-          let json = Yojson.Safe.from_string content in
-          state_of_json json)
+      let content = Fs_compat.load_file path in
+      let json = Yojson.Safe.from_string content in
+      state_of_json json
     with exn ->
       Log.Misc.warn "adaptive_thresholds: state load failed: %s" (Printexc.to_string exn);
       None

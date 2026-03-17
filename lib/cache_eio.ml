@@ -143,9 +143,7 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
         let json = entry_to_json entry in
         let content = Yojson.Safe.pretty_to_string json in
         try
-          let oc = open_out path in
-          Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-            output_string oc content);
+          Fs_compat.save_file path content;
           Ok entry
         with e ->
           Error (Printexc.to_string e)
@@ -158,9 +156,7 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
       let json = entry_to_json entry in
       let content = Yojson.Safe.pretty_to_string json in
       try
-        let oc = open_out path in
-        Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-          output_string oc content);
+        Fs_compat.save_file path content;
         Ok entry
       with e ->
         Error (Printexc.to_string e)
@@ -174,9 +170,7 @@ let get config ~key : (cache_entry option, string) result =
     Ok None
   else
     try
-      let ic = open_in path in
-      let content = Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        really_input_string ic (in_channel_length ic)) in
+      let content = Fs_compat.load_file path in
       let json = Yojson.Safe.from_string content in
       match entry_of_json json with
       | Some entry ->

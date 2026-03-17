@@ -139,10 +139,7 @@ let save_to_jsonl pid =
   let dir = permanence_dir () in
   ensure_dir dir;
   let file = Filename.concat dir (pid.display_name ^ ".jsonl") in
-  let line = Yojson.Safe.to_string (to_yojson pid) ^ "\n" in
-  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 file in
-  output_string oc line;
-  close_out oc
+  Fs_compat.append_jsonl file (to_yojson pid)
 
 (** Load the most recent permanent_id from JSONL file. *)
 let load_from_jsonl ~name =
@@ -150,18 +147,13 @@ let load_from_jsonl ~name =
   let file = Filename.concat dir (name ^ ".jsonl") in
   if not (Sys.file_exists file) then None
   else
-    let last_line = ref "" in
-    let ic = open_in file in
-    (try
-       while true do
-         let line = input_line ic in
-         if String.length line > 0 then last_line := line
-       done
-     with End_of_file -> ());
-    close_in ic;
-    if !last_line = "" then None
-    else
-      match Yojson.Safe.from_string !last_line |> of_yojson with
+    let content = Fs_compat.load_file file in
+    let lines = String.split_on_char '\n' content
+      |> List.filter (fun line -> String.length (String.trim line) > 0) in
+    match List.rev lines with
+    | [] -> None
+    | last_line :: _ ->
+      match Yojson.Safe.from_string last_line |> of_yojson with
       | Ok pid -> Some pid
       | Error _ -> None
 

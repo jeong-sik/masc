@@ -117,33 +117,18 @@ let planning_dir (config : Room.config) task_id =
   Filename.concat config.base_path (Printf.sprintf "planning/%s" task_id)
 
 let ensure_dir path =
-  if not (Sys.file_exists path) then
-    let rec mkdir_p dir =
-      if not (Sys.file_exists dir) then begin
-        mkdir_p (Filename.dirname dir);
-        Unix.mkdir dir 0o755
-      end
-    in
-    mkdir_p path
+  Fs_compat.mkdir_p path
 
-(** Safe file read with Fun.protect *)
+(** File read via Fs_compat (Eio-native when available, blocking fallback) *)
 let read_file_content path =
-  if Sys.file_exists path then
-    let ic = open_in path in
-    Common.protect ~module_name:"planning_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_in ic) (fun () ->
-      really_input_string ic (in_channel_length ic))
+  if Fs_compat.file_exists path then
+    Fs_compat.load_file path
   else ""
 
-(** Safe file write with Fun.protect and exclusive lock *)
+(** File write via Fs_compat (Eio-native when available, blocking fallback) *)
 let write_file_content path content =
   ensure_dir (Filename.dirname path);
-  let oc = open_out path in
-  Common.protect ~module_name:"planning_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out oc) (fun () ->
-    (* Use exclusive lock for concurrent writes *)
-    let fd = Unix.descr_of_out_channel oc in
-    Unix.lockf fd Unix.F_LOCK 0;
-    Common.protect ~module_name:"planning_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) (fun () ->
-      output_string oc content))
+  Fs_compat.save_file path content
 
 (* ===== Core Operations (Pure Sync) ===== *)
 

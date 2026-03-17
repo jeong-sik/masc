@@ -11,6 +11,8 @@ export type TaskSource = 'store' | 'cache'
 
 interface QuickStatsProps {
   agentCount: number
+  staleAgentCount?: number
+  totalAgentCount?: number
   activeTaskCount: number
   keeperCount: number
   attentionCount: number
@@ -42,15 +44,29 @@ function TaskDistributionBar({ breakdown }: { breakdown: TaskBreakdown }) {
   `
 }
 
-export function QuickStats({ agentCount, activeTaskCount, keeperCount, attentionCount, taskBreakdown, taskSource }: QuickStatsProps) {
+export function QuickStats({
+  agentCount, staleAgentCount, totalAgentCount,
+  activeTaskCount, keeperCount, attentionCount, taskBreakdown, taskSource,
+}: QuickStatsProps) {
+  const hasStale = (staleAgentCount ?? 0) > 0 && agentCount === 0
+  const agentLabel = hasStale ? '활성 에이전트' : '에이전트'
+  const agentAnnotation = hasStale
+    ? `${totalAgentCount ?? staleAgentCount}개 등록됨 (모두 stale)`
+    : (staleAgentCount ?? 0) > 0
+      ? `+ ${staleAgentCount} stale`
+      : null
+
   return html`
     <div class="overview-stats">
-      <div class="overview-stat"
+      <div class="overview-stat ${hasStale ? 'overview-stat--dimmed' : ''}"
         style="cursor: pointer;"
         onClick=${() => navigate('agent-roster')}
       >
-        <span class="overview-stat__label">에이전트</span>
+        <span class="overview-stat__label">${agentLabel}</span>
         <strong class="overview-stat__value">${agentCount}</strong>
+        ${agentAnnotation ? html`
+          <span class="overview-stat__annotation">${agentAnnotation}</span>
+        ` : null}
       </div>
       <div class="overview-stat"
         style="cursor: pointer;"

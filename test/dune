@@ -827,6 +827,12 @@
  (modules test_adaptive_thresholds)
  (libraries masc_mcp alcotest str yojson unix))
 
+; LLM Pool tests (provider-based concurrency, no LLM calls)
+(test
+ (name test_llm_pool)
+ (modules test_llm_pool)
+ (libraries masc_mcp str eio_main))
+
 ; Perpetual Agent Runtime tests (infinite context system)
 (test
  (name test_perpetual)

@@ -122,6 +122,7 @@ module Prometheus = Prometheus
 module Rate_limit = Rate_limit
 module Circuit_breaker = Circuit_breaker
 module Backoff = Backoff
+module Server_checkpoint = Server_checkpoint
 module Mind_eio = Mind_eio
 module Noosphere_eio = Noosphere_eio
 module Metrics_store_eio = Metrics_store_eio

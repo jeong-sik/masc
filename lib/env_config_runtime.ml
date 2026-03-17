@@ -285,4 +285,14 @@ module Message = struct
     get_int ~default:200 "MASC_MESSAGE_MAX_COUNT"
 end
 
+(** {1 Chain Executor Configuration} *)
+
+module Chain = struct
+  (** Model used for evaluator/judge calls in chain execution.
+      Applies to MCTS scoring, anti-fake detection, goal metric evaluation,
+      and feedback loop quality assessment. *)
+  let judge_model =
+    get_string ~default:"gemini" "MASC_CHAIN_JUDGE_MODEL"
+end
+
 (** {1 Internal Guardian Configuration} *)

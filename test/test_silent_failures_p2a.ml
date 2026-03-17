@@ -167,7 +167,7 @@ let test_source_llm_token_parse () =
 let test_source_keeper_proactive () =
   check bool "keeper sources have proactive emission logging"
     true (any_file_contains_pattern (keeper_source_files ())
-      {|[keeper] proactive emission failed:|})
+      {|proactive emission failed:|})
 
 (* MEDIUM priority patterns *)
 

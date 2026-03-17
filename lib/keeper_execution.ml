@@ -409,7 +409,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
          in
          let result = match decision, result_opt with
            | Trajectory.Reject reason, _ ->
-               Printf.eprintf "[keeper-autonomy] GATE BLOCKED %s: %s\n%!"
+               Log.Keeper.error "autonomy GATE BLOCKED %s: %s"
                  tc.call_name reason;
                Yojson.Safe.to_string (`Assoc [("gate_blocked", `String tc.call_name); ("reason", `String reason)])
            | _, Some r -> r
@@ -552,7 +552,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~config ~goal_ids:meta.active_goal_ids ~keeper_name:meta.name in
             (match next with
              | Propose pa ->
-                 Printf.eprintf "[keeper-autonomy] %s L2 suggest: %s (risk=%s, cost=$%.2f)\n%!"
+                 Log.Keeper.info "autonomy %s L2 suggest: %s (risk=%s, cost=$%.2f)"
                    meta.name pa.action_description
                    (Keeper_autonomy.risk_level_to_string pa.risk_level)
                    pa.estimated_cost_usd;
@@ -577,14 +577,14 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                  in
                  let (ok, _msg) = Tool_board.handle_tool "masc_board_post" board_args in
                  if not ok then
-                   Printf.eprintf "[keeper-autonomy] %s L2 board post failed\n%!" meta.name;
+                   Log.Keeper.error "autonomy %s L2 board post failed" meta.name;
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
                    autonomous_action_count = meta.autonomous_action_count + 1;
                    updated_at = now_iso ();
                  }
              | StartPerpetualAgent req ->
-                 Printf.eprintf "[keeper-autonomy] %s L2 perpetual suggest: %s\n%!"
+                 Log.Keeper.info "autonomy %s L2 perpetual suggest: %s"
                    meta.name req.goal_title;
                  let board_args = `Assoc [
                    ("author", `String meta.name);
@@ -608,7 +608,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                  (match Tool_board.handle_tool "masc_board_post" board_args with
                   | (true, _) -> ()
                   | (false, err) ->
-                      Printf.eprintf "[keeper-autonomy] %s L2 perpetual board post failed: %s\n%!" meta.name err
+                      Log.Keeper.error "autonomy %s L2 perpetual board post failed: %s" meta.name err
                   | exception exn ->
                       log_keeper_exn ~label:(Printf.sprintf "autonomy %s L2 board post error" meta.name) exn);
                  Some { meta with
@@ -630,17 +630,17 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
             in
             (match result with
              | NothingToDo reason ->
-                 Printf.eprintf "[keeper-autonomy] %s: nothing to do (%s)\n%!" meta.name reason;
+                 Log.Keeper.info "autonomy %s: nothing to do (%s)" meta.name reason;
                  None
              | PerpetualRequested req ->
-                 Printf.eprintf "[keeper-autonomy] %s PERPETUAL: starting for %s\n%!"
+                 Log.Keeper.info "autonomy %s PERPETUAL: starting for %s"
                    meta.name req.goal_title;
                  (* Keeper runs in heartbeat timer context without Eio.Switch.t,
                     so coding_mode (= Claude Code spawn) is structurally unavailable.
                     Force LLM-only mode to prevent guaranteed failure. *)
                  let effective_coding_mode = false in
                  (if req.coding_mode then
-                    Printf.eprintf "[keeper-autonomy] %s: coding_mode requested but unavailable (no Eio.Switch in heartbeat context), falling back to LLM-only\n%!" meta.name);
+                    Log.Keeper.warn "autonomy %s: coding_mode requested but unavailable (no Eio.Switch in heartbeat context), falling back to LLM-only" meta.name);
                  let perp_args = `Assoc [
                    ("goal", `String req.goal_title);
                    ("models", `List (List.map (fun m -> `String m) req.models));
@@ -656,7 +656,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                  } in
                  (match Tool_perpetual.dispatch perp_ctx ~name:"masc_perpetual_start" ~args:perp_args with
                   | Some (true, result_json) ->
-                      Printf.eprintf "[keeper-autonomy] %s perpetual started: %s\n%!"
+                      Log.Keeper.info "autonomy %s perpetual started: %s"
                         meta.name result_json;
                       (* Update goal with perpetual agent info *)
                       (try ignore (Goal_store.review_goal config
@@ -686,7 +686,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                       (match Tool_board.handle_tool "masc_board_post" board_args with
                        | (true, _) -> ()
                        | (false, err) ->
-                           Printf.eprintf "[keeper-autonomy] %s: board post failed: %s\n%!" meta.name err
+                           Log.Keeper.error "autonomy %s: board post failed: %s" meta.name err
                        | exception exn ->
                            log_keeper_exn ~label:(Printf.sprintf "autonomy %s board post error" meta.name) exn);
                       Some { meta with
@@ -695,14 +695,14 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                         updated_at = now_iso ();
                       }
                   | Some (false, err) ->
-                      Printf.eprintf "[keeper-autonomy] %s perpetual start failed: %s\n%!"
+                      Log.Keeper.error "autonomy %s perpetual start failed: %s"
                         meta.name err;
                       None
                   | None ->
-                      Printf.eprintf "[keeper-autonomy] %s perpetual dispatch returned None\n%!" meta.name;
+                      Log.Keeper.error "autonomy %s perpetual dispatch returned None" meta.name;
                       None)
              | Approved (pa, plan) ->
-                 Printf.eprintf "[keeper-autonomy] %s APPROVED: %s\n%!"
+                 Log.Keeper.info "autonomy %s APPROVED: %s"
                    meta.name pa.action_description;
                  (* 5-3: Create trajectory accumulator for this autonomous turn *)
                  let masc_root = Filename.concat config.base_path ".masc" in
@@ -777,7 +777,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    updated_at = now_iso ();
                  }
              | Cautioned (pa, plan, warning) ->
-                 Printf.eprintf "[keeper-autonomy] %s CAUTIONED: %s (warning: %s)\n%!"
+                 Log.Keeper.warn "autonomy %s CAUTIONED: %s (warning: %s)"
                    meta.name pa.action_description warning;
                  (* 5-3: Trajectory with warning recorded *)
                  let masc_root = Filename.concat config.base_path ".masc" in
@@ -868,19 +868,19 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    updated_at = now_iso ();
                  }
              | Rejected (pa, reason) ->
-                 Printf.eprintf "[keeper-autonomy] %s REJECTED: %s (%s)\n%!"
+                 Log.Keeper.info "autonomy %s REJECTED: %s (%s)"
                    meta.name pa.action_description reason;
                  None)
 
 let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
   let log_proactive_failure reason =
-    Printf.eprintf "[keeper] proactive emission failed: %s\n%!" reason
+    Log.Keeper.error "proactive emission failed: %s" reason
   in
   if not meta.proactive_enabled then meta
   else if Agent_economy.economic_pressure
             ~base_path:ctx.config.base_path ~agent_name:meta.name
           = Agent_economy.Hustle then begin
-    Printf.eprintf "[keeper] economy hustle mode: suppressing proactive for %s\n%!" meta.name;
+    Log.Keeper.info "economy hustle mode: suppressing proactive for %s" meta.name;
     meta  (* Skip proactive entirely in Hustle mode *)
   end
   else
@@ -929,8 +929,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                   ~daily_budget_usd:daily_budget
                   ~cost_today_usd:meta.deliberation_cost_total_usd)
         then (
-          Printf.eprintf
-            "[keeper-deliberation] %s budget exhausted (%.4f >= %.4f)\n%!"
+          Log.Keeper.warn "deliberation %s budget exhausted (%.4f >= %.4f)"
             meta.name meta.deliberation_cost_total_usd daily_budget;
           meta)
         else
@@ -984,8 +983,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                       trigger_strs
                   in
                   if triggers = [] then (
-                    Printf.eprintf
-                      "[keeper-deliberation] %s no parseable triggers from: %s\n%!"
+                    Log.Keeper.warn "deliberation %s no parseable triggers from: %s"
                       meta.name meta.last_triage_triggers;
                     meta)
                   else
@@ -1060,8 +1058,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                     in
                     match result with
                     | Error msg ->
-                        Printf.eprintf
-                          "[keeper-deliberation] %s LLM call failed: %s\n%!"
+                        Log.Keeper.error "deliberation %s LLM call failed: %s"
                           meta.name msg;
                         meta
                     | Ok response ->
@@ -1085,8 +1082,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                              response.content
                          with
                          | Error msg ->
-                             Printf.eprintf
-                               "[keeper-deliberation] %s parse failed: %s (raw: %s)\n%!"
+                             Log.Keeper.error "deliberation %s parse failed: %s (raw: %s)"
                                meta.name msg
                                (Keeper_types.short_preview response.content);
                              (* Update meta with cost even on parse failure *)
@@ -1104,13 +1100,11 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                              (match write_meta ctx.config updated with
                               | Ok () -> ()
                               | Error msg ->
-                                  Printf.eprintf
-                                    "[keeper-deliberation] write_meta failed: %s\n%!"
+                                  Log.Keeper.error "deliberation write_meta failed: %s"
                                     msg);
                              updated
                          | Ok (action, reasoning, confidence) ->
-                             Printf.eprintf
-                               "[keeper-deliberation] %s decided: %s (confidence=%.2f, reason=%s)\n%!"
+                             Log.Keeper.info "deliberation %s decided: %s (confidence=%.2f, reason=%s)"
                                meta.name
                                (Keeper_deliberation.deliberation_action_to_string action)
                                confidence
@@ -1147,8 +1141,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                          ~agent_name:meta.agent_name
                                          ~task_id
                                      in
-                                     Printf.eprintf
-                                       "[keeper-deliberation] task_claim result: %s\n%!"
+                                     Log.Keeper.info "deliberation task_claim result: %s"
                                        result
                                    with exn ->
                                      log_keeper_exn ~label:"deliberation task_claim failed" exn)
@@ -1218,8 +1211,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                       if !stop then ()
                                       else (
                                         incr step_count;
-                                        Printf.eprintf
-                                          "[keeper-deliberation] %s multi_step %d/%d: %s\n%!"
+                                        Log.Keeper.info "deliberation %s multi_step %d/%d: %s"
                                           meta.name !step_count (List.length steps_to_run)
                                           (Keeper_deliberation.deliberation_action_to_string
                                              step_action);
@@ -1283,8 +1275,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                                     ~from_agent:meta.agent_name
                                                     ~content:msg)
                                            | Keeper_deliberation.MultiStep _ ->
-                                               Printf.eprintf
-                                                 "[keeper-deliberation] %s nested multi_step skipped\n%!"
+                                               Log.Keeper.warn "deliberation %s nested multi_step skipped"
                                                  meta.name
                                          with exn ->
                                            log_keeper_exn ~label:(Printf.sprintf "deliberation %s multi_step %d failed" meta.name !step_count) exn;
@@ -1334,8 +1325,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                              (match write_meta ctx.config updated with
                               | Ok () -> ()
                               | Error msg ->
-                                  Printf.eprintf
-                                    "[keeper-deliberation] write_meta failed: %s\n%!"
+                                  Log.Keeper.error "deliberation write_meta failed: %s"
                                     msg);
                              updated)))
       else
@@ -1355,7 +1345,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                     (match write_meta ctx.config updated_meta with
                      | Ok () -> ()
                      | Error msg ->
-                         Printf.eprintf "[keeper] write_meta failed after goal turn: %s\n%!" msg);
+                         Log.Keeper.error "write_meta failed after goal turn: %s" msg);
                     updated_meta
                 | None ->
                let primary =
@@ -1493,7 +1483,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                        (match write_meta ctx.config updated with
                         | Ok () -> ()
                         | Error msg ->
-                            Printf.eprintf "[keeper] write_meta failed after proactive turn: %s\n%!" msg);
+                            Log.Keeper.error "write_meta failed after proactive turn: %s" msg);
                        (try
                           let metrics_path = keeper_metrics_path ctx.config updated.name in
                           let metrics_json =
@@ -2156,22 +2146,20 @@ let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : ke
                   if keeper_policy_mode_is_learned current_meta then
                     (match run_learned_policy_room_event ctx ~meta:current_meta ~room_id msg with
                      | Error err ->
-                         Printf.eprintf
-                           "[keeper] learned policy room action failed for %s in %s: %s\n%!"
+                         Log.Keeper.error "learned policy room action failed for %s in %s: %s"
                            current_meta.name room_id err;
                          current_meta
                      | Ok updated_meta ->
                          (match write_meta ctx.config updated_meta with
                           | Ok () -> ()
                           | Error err ->
-                              Printf.eprintf
-                                "[keeper] write_meta after learned policy room action failed: %s\n%!"
+                              Log.Keeper.error "write_meta after learned policy room action failed: %s"
                                 err);
                          updated_meta)
                   else
                     match generate_explicit_room_reply ctx ~meta:current_meta ~room_id msg with
                     | Error err ->
-                        Printf.eprintf "[keeper] explicit room reply failed for %s in %s: %s\n%!"
+                        Log.Keeper.error "explicit room reply failed for %s in %s: %s"
                           current_meta.name room_id err;
                         current_meta
                     | Ok (updated_meta, reply) ->
@@ -2184,7 +2172,7 @@ let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : ke
                         (match write_meta ctx.config updated_meta with
                          | Ok () -> ()
                          | Error err ->
-                             Printf.eprintf "[keeper] write_meta after explicit room reply failed: %s\n%!"
+                             Log.Keeper.error "write_meta after explicit room reply failed: %s"
                                err);
                         updated_meta)
               meta_acc
@@ -2197,7 +2185,7 @@ let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : ke
           (match write_meta ctx.config updated_meta with
            | Ok () -> ()
            | Error err ->
-               Printf.eprintf "[keeper] write_meta after room cursor update failed: %s\n%!" err);
+               Log.Keeper.error "write_meta after room cursor update failed: %s" err);
           updated_meta)
         meta
         meta.joined_room_ids

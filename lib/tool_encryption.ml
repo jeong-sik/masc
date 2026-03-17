@@ -91,6 +91,39 @@ let handle_generate_key _ctx args =
       let msg = Printf.sprintf "🔑 Generated 256-bit AES key (%s):\n\n%s\n\n⚠️ Store this securely! Losing the key = losing encrypted data." output key_str in
       (true, msg)
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_encryption_status";
+    description = "Get encryption status for this MASC room. Shows if encryption is enabled, key status, and RNG state.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    name = "masc_encryption_enable";
+    description = "Enable encryption for sensitive data in this MASC room. Requires setting MASC_ENCRYPTION_KEY environment variable (32-byte key) or providing a key file path.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("key_source", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Key source: 'env' (from MASC_ENCRYPTION_KEY), 'file:<path>' (from file), or 'generate' (create new key)");
+          ("default", `String "env");
+        ]);
+      ]);
+    ];
+  };
+  {
+    name = "masc_encryption_disable";
+    description = "Disable encryption for this MASC room. Existing encrypted data will remain encrypted but new data will be stored in plain text.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+]
+
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_encryption_status" -> Some (handle_encryption_status ctx args)

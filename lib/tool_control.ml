@@ -185,6 +185,38 @@ let handle_tool_disable _ctx args =
     end
   end
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_pause";
+    description = "Pause the MASC room. Stops orchestrator from spawning new agents. Broadcasts notification to all agents. Use when you need to stop automated work temporarily.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reason for pausing (e.g., 'Need to review', 'Taking a break')");
+          ("default", `String "Manual pause");
+        ]);
+      ]);
+    ];
+  };
+  {
+    name = "masc_resume";
+    description = "Resume the MASC room after pause. Allows orchestrator to spawn agents again. Broadcasts notification to all agents.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    name = "masc_pause_status";
+    description = "Check if the room is currently paused and get pause details.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+]
 (* Dispatch function *)
 let dispatch ctx ~name ~args : result option =
   match name with

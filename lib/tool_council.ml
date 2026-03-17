@@ -758,6 +758,150 @@ let handle_execute_dry_run _ctx args =
     in
     (true, Council.ExecutorApi.dry_run ~topic ~result)
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_petition_submit";
+    description = "Submit a Governance V2 petition. Creates or merges a case, records requested action metadata, and files the item into the petition inbox.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("title", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Petition title or agenda item");
+        ]);
+        ("origin", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Origin tag such as human, automation, test, or harness");
+        ]);
+        ("subject_type", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Subject classification such as task, operation, policy, or dispute");
+        ]);
+        ("risk_class", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "low"; `String "high"]);
+          ("description", `String "Explicit risk classification. If omitted, the runtime derives it from the requested action.");
+        ]);
+        ("requested_action", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Action metadata to execute when the case is adopted");
+          ("properties", `Assoc [
+            ("action_type", `Assoc [("type", `String "string")]);
+            ("target_type", `Assoc [("type", `String "string")]);
+            ("target_id", `Assoc [("type", `String "string")]);
+            ("payload", `Assoc [("type", `String "object")]);
+          ]);
+        ]);
+        ("source_refs", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Evidence or source references attached to the petition");
+        ]);
+      ]);
+      ("required", `List [`String "title"]);
+    ];
+  };
+  {
+    name = "masc_case_brief_submit";
+    description = "Add a support/oppose/neutral brief to a Governance V2 case. Brief submission can trigger a ruling and execution order.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("case_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Governance V2 case ID");
+        ]);
+        ("stance", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "support"; `String "oppose"; `String "neutral"]);
+          ("description", `String "Brief stance for the case");
+        ]);
+        ("summary", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Short brief text");
+        ]);
+        ("evidence_refs", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Evidence references supporting the brief");
+        ]);
+      ]);
+      ("required", `List [`String "case_id"; `String "summary"]);
+    ];
+  };
+  {
+    name = "masc_cases";
+    description = "List Governance V2 cases. Use this instead of the legacy debate/session listing tools.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("status", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional case status filter");
+        ]);
+        ("include_test", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Include test/harness cases that are hidden by default");
+        ]);
+      ]);
+    ];
+  };
+  {
+    name = "masc_case_status";
+    description = "Read a single Governance V2 case bundle including petitions, briefs, ruling, and execution order.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("case_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Governance V2 case ID");
+        ]);
+      ]);
+      ("required", `List [`String "case_id"]);
+    ];
+  };
+  {
+    name = "masc_ruling_status";
+    description = "Read the latest Governance V2 ruling for a case.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("case_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Governance V2 case ID");
+        ]);
+      ]);
+      ("required", `List [`String "case_id"]);
+    ];
+  };
+  {
+    name = "masc_execution_orders";
+    description = "List Governance V2 execution orders, inspect one case order, or confirm/deny a human gate.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("case_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Governance V2 case ID");
+        ]);
+        ("decision", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "confirm"; `String "deny"]);
+          ("description", `String "Optional human-gate decision for a high-risk execution order");
+        ]);
+      ]);
+    ];
+  };
+  {
+    name = "masc_governance_status";
+    description = "Get Governance V2 status (pending rulings, auto-executable cases, human-gated orders, executed cases).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+]
+
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_petition_submit" -> Some (handle_petition_submit ctx args)

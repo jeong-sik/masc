@@ -21,6 +21,8 @@ val handle_tempo_adjust : context -> Yojson.Safe.t -> result
 val handle_tempo_reset : context -> Yojson.Safe.t -> result
 val handle_tempo : context -> Yojson.Safe.t -> result
 
+val schemas : Types.tool_schema list
+
 (** {1 Dispatcher} *)
 
 (** Dispatch tempo tool by name. Returns None if not a tempo tool. *)

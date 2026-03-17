@@ -16,4 +16,6 @@ val handle_handover_claim : context -> Yojson.Safe.t -> result
 val handle_handover_claim_and_spawn : context -> Yojson.Safe.t -> result
 val handle_handover_get : context -> Yojson.Safe.t -> result
 
+val schemas : Types.tool_schema list
+
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option

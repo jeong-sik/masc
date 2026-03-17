@@ -51,6 +51,21 @@ let handle_tempo ctx args : result =
   | _ ->
       (false, "❌ Unknown action. Use 'get' or 'set'")
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_tempo_reset";
+    description = "Reset room tempo to default 300s (5 minutes). \
+Tempo controls SSE heartbeat interval and agent timeout detection. \
+Use after: intensive work phase complete, debugging tempo issues. \
+Lower tempo = faster detection but more overhead. Default balances both. \
+Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+]
+
 (** {1 Dispatcher} *)
 
 let dispatch ctx ~name ~args : result option =

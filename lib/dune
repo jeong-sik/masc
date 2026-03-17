@@ -654,6 +654,7 @@
    team_session_types_enums
    tool_schemas_room_core
    tool_schemas_room_extra
+   tool_schemas_inline
    ;; godsplit-phase1: file split sub-modules
    tool_council_schemas
    dashboard_http_shell

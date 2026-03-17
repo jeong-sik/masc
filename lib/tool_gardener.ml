@@ -284,6 +284,25 @@ let handle_reset_circuit _ctx _args : result =
   with exn ->
     (false, Printf.sprintf "Error resetting circuit: %s" (Printexc.to_string exn))
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_gardener_status";
+    description = "Get truth-only gardener loop runtime status. Returns liveness, last tick timestamps, last decision source, last action, last error, cooldown/circuit state, and the last observed health summary.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    name = "masc_gardener_reset_circuit";
+    description = "Manually reset the circuit breaker if it's stuck open due to consecutive failures. Use with caution — only when you've addressed the root cause of the failures.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+]
+
 (** {1 Tool Dispatcher} *)
 
 (** Dispatch gardener tool calls to appropriate handlers *)

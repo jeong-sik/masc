@@ -154,6 +154,31 @@ let handle_relay_smart_check _ctx args =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_relay_status";
+    description = "Check current context usage and relay readiness. Shows estimated token count, usage ratio, and whether relay is recommended. Call periodically to monitor context health.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("messages", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of messages in conversation");
+        ]);
+        ("tool_calls", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of tool calls made");
+        ]);
+        ("model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Model name (claude, gemini, codex) for max context lookup");
+          ("default", `String "claude");
+        ]);
+      ]);
+    ];
+  };
+]
+
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_relay_status" -> Some (handle_relay_status ctx args)

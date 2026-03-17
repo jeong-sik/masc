@@ -8,6 +8,8 @@ type context = {
 
 type result = bool * string
 
+val schemas : Types.tool_schema list
+
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
 
 val definitions : Yojson.Safe.t list

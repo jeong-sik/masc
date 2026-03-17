@@ -50,6 +50,48 @@ let handle_rate_limit_config ctx _args =
   Buffer.add_string buf (Printf.sprintf "  • Admin: %.1fx\n" cfg.admin_multiplier);
   (true, Buffer.contents buf)
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_rate_limit_status";
+    description = "Get your current rate limit status. Shows remaining requests per category (general, broadcast, task ops, file locks) and burst tokens.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+  {
+    name = "masc_rate_limit_config";
+    description = "Get or update rate limit configuration (admin only). Shows limits per category and role multipliers.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("per_minute", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Base requests per minute (default: 10)");
+        ]);
+        ("burst_allowed", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Burst tokens available (default: 5)");
+        ]);
+        ("broadcast_per_minute", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Broadcast operations per minute (default: 15)");
+        ]);
+        ("task_ops_per_minute", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Task operations per minute (default: 30)");
+        ]);
+      ]);
+    ];
+  };
+]
+
 (* Dispatch handler *)
 let dispatch ctx ~name ~args =
   match name with

@@ -644,6 +644,12 @@ Call masc_listen again to continue listening.
         | `String s when s <> "" -> Some s
         | _ -> None
       in
+      let execution_scope =
+        match arguments |> U.member "execution_scope" with
+        | `String s when s <> "" ->
+            Some (Team_session_types.execution_scope_of_string s)
+        | _ -> None
+      in
        (match runtime_model with
        | Error e -> Some (false, e)
        | Ok runtime_model ->
@@ -651,7 +657,7 @@ Call masc_listen again to continue listening.
             | Some pm ->
                 let result =
                   Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name:spawn_agent_name
-                    ~prompt ~timeout_seconds ?working_dir
+                    ~prompt ~timeout_seconds ?working_dir ?execution_scope
                     ~room_config:state.Mcp_server.room_config
                     ~runtime_model ()
                 in

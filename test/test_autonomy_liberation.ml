@@ -171,6 +171,63 @@ let test_share_finding_action () =
   Alcotest.(check bool) "json finding" true
     (contains_s finding_val "race condition")
 
+(* ── Phase 2 Integration: End-to-End Wiring ─────────────────── *)
+
+let test_autonomous_tool_count () =
+  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"autonomous" () in
+  let count = List.length tools in
+  Alcotest.(check bool) "at least 15 tools" true (count >= 15);
+  let prefixed = Agent_tool_surfaces.prefixed_tool_names tools in
+  List.iter
+    (fun name ->
+      Alcotest.(check bool)
+        ("prefixed: " ^ name)
+        true
+        (String.length name > 11
+        && String.sub name 0 11 = "mcp__masc__"))
+    prefixed
+
+let test_finding_accumulation () =
+  let base_path =
+    Filename.concat (Filename.get_temp_dir_name ()) "test_findings_al"
+  in
+  let masc_dir = Filename.concat base_path ".masc" in
+  let session_dir = Filename.concat masc_dir "session_test_al" in
+  (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
+  (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+  (try Sys.mkdir session_dir 0o755 with Sys_error _ -> ());
+  let sid = "test_al" in
+  Team_context.add_finding ~base_path ~team_session_id:sid ~worker_name:"w1"
+    ~finding:"found issue A";
+  Team_context.add_finding ~base_path ~team_session_id:sid ~worker_name:"w2"
+    ~finding:"found issue B";
+  let findings = Team_context.load_findings ~base_path ~team_session_id:sid in
+  Alcotest.(check int) "two findings" 2 (List.length findings);
+  Alcotest.(check bool) "has issue A" true
+    (List.exists (fun f -> contains_s f "found issue A") findings);
+  Alcotest.(check bool) "has issue B" true
+    (List.exists (fun f -> contains_s f "found issue B") findings);
+  (* Cleanup *)
+  let findings_file =
+    Filename.concat session_dir "shared_findings.jsonl"
+  in
+  (try Sys.remove findings_file with Sys_error _ -> ());
+  (try Sys.rmdir session_dir with Sys_error _ -> ());
+  (try Sys.rmdir masc_dir with Sys_error _ -> ());
+  (try Sys.rmdir base_path with Sys_error _ -> ())
+
+let test_scope_default_unchanged () =
+  (* Limited_code_change is still the default for unknown strings *)
+  let scope = Team_session_types.execution_scope_of_string "whatever" in
+  let s = Team_session_types.execution_scope_to_string scope in
+  Alcotest.(check string) "default scope" "limited_code_change" s;
+  (* Worker tools should remain a small focused set *)
+  let worker_tools =
+    Agent_tool_surfaces.build_tool_catalog ~role:"worker" ()
+  in
+  Alcotest.(check bool) "worker tools < 20" true
+    (List.length worker_tools < 20)
+
 (* ── Test runner ──────────────────────────────────────────────── *)
 
 let () =
@@ -216,5 +273,14 @@ let () =
           Alcotest.test_case "start discussion" `Quick
             test_start_discussion_action;
           Alcotest.test_case "share finding" `Quick test_share_finding_action;
+        ] );
+      ( "phase2_integration",
+        [
+          Alcotest.test_case "autonomous tool count >= 15" `Quick
+            test_autonomous_tool_count;
+          Alcotest.test_case "finding accumulation roundtrip" `Quick
+            test_finding_accumulation;
+          Alcotest.test_case "scope default unchanged" `Quick
+            test_scope_default_unchanged;
         ] );
     ]

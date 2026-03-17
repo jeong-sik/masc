@@ -470,6 +470,22 @@ let local_worker_spawn_schemas : Types.tool_schema list =
                   ("prompt", `Assoc [ ("type", `String "string") ]);
                   ("timeout_seconds", `Assoc [ ("type", `String "integer") ]);
                   ("working_dir", `Assoc [ ("type", `String "string") ]);
+                  ( "execution_scope",
+                    `Assoc
+                      [
+                        ("type", `String "string");
+                        ( "enum",
+                          `List
+                            [
+                              `String "observe_only";
+                              `String "limited_code_change";
+                              `String "autonomous";
+                            ] );
+                        ( "description",
+                          `String
+                            "Execution scope for the spawned agent. \
+                             Determines tool surface and prompt composition." );
+                      ] );
                 ] );
             ("required", `List [ `String "agent_name"; `String "prompt" ]);
           ];
@@ -608,3 +624,14 @@ let build_tool_catalog ~(role : string) () : string list =
           all_names
   in
   unique_preserve_order filtered
+
+(** [local_worker_resolvable_tool_names ()] returns only the tool names
+    that [local_worker_tool_schemas] can actually resolve.  Use this to
+    intersect with [build_tool_catalog] output before passing to
+    [run_worker], so that the autonomous catalog does not include names
+    unknown to the local worker schema registry. *)
+let local_worker_resolvable_tool_names () : string list =
+  match local_worker_tool_schemas () with
+  | Ok schemas ->
+      List.map (fun (s : Types.tool_schema) -> s.name) schemas
+  | Error _ -> []

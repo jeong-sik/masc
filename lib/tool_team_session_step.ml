@@ -398,6 +398,30 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                                             ~task_description:None
                                             ~task_priority:3)
                                    | _ -> ());
+                                   (* Record finding for successful spawns so
+                                      subsequent workers see prior results *)
+                                   (if spawn_result.success
+                                       && String.length spawn_result.output > 0
+                                    then
+                                      let finding_preview =
+                                        let len =
+                                          String.length spawn_result.output
+                                        in
+                                        if len <= 200 then spawn_result.output
+                                        else
+                                          String.sub spawn_result.output 0 200
+                                      in
+                                      let worker_name =
+                                        Option.value
+                                          ~default:
+                                            (Printf.sprintf "spawn-%d" index)
+                                          prepared.runtime_actor_name
+                                      in
+                                      Team_context.add_finding
+                                        ~base_path:
+                                          ctx.config.Room_utils.base_path
+                                        ~team_session_id:session_id
+                                        ~worker_name ~finding:finding_preview);
                                    (match (spawn_result.success, prepared.runtime_actor_name) with
                                    | false, Some worker_actor ->
                                        ignore

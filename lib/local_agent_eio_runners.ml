@@ -52,33 +52,74 @@ let run_worker_oas ~sw ~base_path ~worker_name
              turn_kind=\"note\", you must include a non-empty message field. \
              Calls missing message fail."
           in
-          let workflow_contract =
-            match execution_scope with
-            | Team_session_types.Limited_code_change ->
-                "Coding worker protocol: you must use tools before answering. \
-                 If the task requires a code change, the expected loop is \
-                 file_read -> shell_exec -> file_write -> shell_exec, and you \
-                 should not finish until the verification shell_exec succeeds. \
-                 If the task is inspection-only, do not modify files."
-            | Team_session_types.Observe_only ->
-                "Readonly worker protocol: use file_read and shell_exec for \
-                 inspection, but do not modify files."
-            | Team_session_types.Autonomous ->
-                "You have full read and write access. Choose the approach that \
-                 best accomplishes your task. Use tools to verify your work. \
-                 Prefer reading code before modifying it, and run tests or \
-                 builds to confirm changes are correct."
-          in
-          let team_ctx_section =
-            match team_session_id with
-            | Some sid ->
-                let ctx = Team_context.build ~base_path ~team_session_id:sid in
-                let section = Team_context.to_prompt_section ctx in
-                if section = "" then "" else "\n\n" ^ section
-            | None -> ""
-          in
-          String.concat "\n\n" [ tool_contract; workflow_contract; prompt ]
-          ^ team_ctx_section
+          match execution_scope with
+          | Team_session_types.Autonomous ->
+              let resolvable =
+                Agent_tool_surfaces.local_worker_resolvable_tool_names ()
+              in
+              let tool_names =
+                Agent_tool_surfaces.build_tool_catalog ~role:"autonomous" ()
+                |> List.filter (fun name -> List.mem name resolvable)
+              in
+              let team_ctx =
+                match team_session_id with
+                | Some sid -> Team_context.build ~base_path ~team_session_id:sid
+                | None -> Team_context.empty
+              in
+              Prompt_composer.compose
+                [
+                  Identity
+                    {
+                      name = worker_name;
+                      role =
+                        (match role with
+                        | Some r -> r
+                        | None -> "autonomous");
+                      model = model.model_id;
+                    };
+                  TeamContext team_ctx;
+                  AvailableTools tool_names;
+                  Guidelines
+                    [
+                      tool_contract;
+                      "You have full read and write access. Choose the \
+                       approach that best accomplishes your task. Use tools to \
+                       verify your work. Prefer reading code before modifying \
+                       it, and run tests or builds to confirm changes are \
+                       correct.";
+                    ];
+                  Task prompt;
+                ]
+          | _ ->
+              let workflow_contract =
+                match execution_scope with
+                | Team_session_types.Limited_code_change ->
+                    "Coding worker protocol: you must use tools before \
+                     answering. If the task requires a code change, the \
+                     expected loop is file_read -> shell_exec -> file_write \
+                     -> shell_exec, and you should not finish until the \
+                     verification shell_exec succeeds. If the task is \
+                     inspection-only, do not modify files."
+                | Team_session_types.Observe_only ->
+                    "Readonly worker protocol: use file_read and shell_exec \
+                     for inspection, but do not modify files."
+                | Team_session_types.Autonomous ->
+                    (* Handled above; unreachable *)
+                    ""
+              in
+              let team_ctx_section =
+                match team_session_id with
+                | Some sid ->
+                    let ctx =
+                      Team_context.build ~base_path ~team_session_id:sid
+                    in
+                    let section = Team_context.to_prompt_section ctx in
+                    if section = "" then "" else "\n\n" ^ section
+                | None -> ""
+              in
+              String.concat "\n\n"
+                [ tool_contract; workflow_contract; prompt ]
+              ^ team_ctx_section
         in
         let* () =
           save_worker_meta ~base_path ~team_session_id ~worker_name meta

@@ -424,7 +424,15 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
         | None -> ""
   in
 
-  let augmented_prompt = prompt ^ institution_memory ^ masc_lifecycle_suffix in
+  let role_instructions =
+    match execution_scope with
+    | Some Team_session_types.Autonomous ->
+        "\n" ^ Agent_swarm_prompts.masc_instructions_for_role ~role:"autonomous" ()
+    | _ -> ""
+  in
+  let augmented_prompt =
+    prompt ^ institution_memory ^ masc_lifecycle_suffix ^ role_instructions
+  in
 
   (* GLM agents use Llm_client cascade (no chdir needed — direct HTTP).
      Non-GLM agents need chdir + fork protected by mutex. *)
@@ -501,6 +509,13 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
              ~prompt:augmented_prompt
              ~allowed_tools:
                (match execution_scope with
+               | Some Team_session_types.Autonomous ->
+                   let resolvable =
+                     Agent_tool_surfaces.local_worker_resolvable_tool_names ()
+                   in
+                   Agent_tool_surfaces.build_tool_catalog ~role:"autonomous" ()
+                   |> List.filter (fun name -> List.mem name resolvable)
+                   |> Agent_tool_surfaces.prefixed_tool_names
                | Some Team_session_types.Limited_code_change ->
                    coding_worker_mcp_tools
                | _ -> llama_mcp_tools)

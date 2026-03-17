@@ -30,6 +30,7 @@ import './styles/tool-metrics.css'
 import './styles/tools.css'
 import './styles/chat.css'
 import './styles/roster.css'
+import './styles/ff-theme.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

@@ -33,10 +33,15 @@ let lodge_lock : Eio.Mutex.t = Eio.Mutex.create ()
 
 let lodge_init_lock () = ()  (* kept for backward compat; lock is now eagerly created *)
 
-(** Run [f] under lodge mutex.  The lock is eagerly initialized so there
-    is no unprotected fallback path. *)
+(** Run [f] under lodge mutex when Eio context is available.
+    Falls back to unprotected execution outside Eio (e.g. in test harnesses
+    that call lodge_status without Eio_main.run).  This is safe because
+    the unprotected path only runs when no concurrent Eio fibers exist. *)
 let with_lodge_lock f =
-  Eio.Mutex.use_rw ~protect:true lodge_lock f
+  try Eio.Mutex.use_rw ~protect:true lodge_lock f
+  with Effect.Unhandled _ ->
+    (* No Eio scheduler: single-threaded context, safe to run unprotected *)
+    f ()
 
 (** Active agents: name -> (uuid, started_at) *)
 let active_agents : (string, string * float) Hashtbl.t = Hashtbl.create 10
@@ -671,7 +676,8 @@ let _lodge_enabled = ref false
 let _lodge_manual_tick_running = ref false
 
 let with_manual_tick_state f =
-  Eio.Mutex.use_rw ~protect:true lodge_lock f
+  try Eio.Mutex.use_rw ~protect:true lodge_lock f
+  with Effect.Unhandled _ -> f ()
 
 let set_manual_tick_running value =
   with_manual_tick_state (fun () -> _lodge_manual_tick_running := value)

@@ -135,6 +135,8 @@ let worker_profiles_of_scope scope =
       (Profile_session_min, Shell_readonly)
   | Team_session_types.Limited_code_change ->
       (Profile_session_dev, Shell_dev)
+  | Team_session_types.Autonomous ->
+      (Profile_session_dev, Shell_dev)
 
 let derive_effective_tier worker_size model_id =
   match worker_size with
@@ -454,7 +456,8 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
           Ok
             (Agent_swarm_dev_tools.make_readonly_tools ~proc_mgr ~clock
                ~workdir ~on_exec ())
-      | Team_session_types.Limited_code_change ->
+      | Team_session_types.Limited_code_change
+      | Team_session_types.Autonomous ->
           Ok
             (Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir
                ~on_exec ()))

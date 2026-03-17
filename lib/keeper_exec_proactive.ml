@@ -327,6 +327,32 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ~content:msg)
                                    with exn ->
                                      log_keeper_exn ~label:"deliberation propose_spawn failed" exn)
+                              | Keeper_deliberation.StartDiscussion { topic; context } ->
+                                  (try
+                                     let msg =
+                                       Printf.sprintf
+                                         "[discussion] %s opens topic '%s': %s"
+                                         meta.name topic context
+                                     in
+                                     ignore
+                                       (Room.broadcast ctx.config
+                                          ~from_agent:meta.agent_name
+                                          ~content:msg)
+                                   with exn ->
+                                     log_keeper_exn ~label:"deliberation start_discussion failed" exn)
+                              | Keeper_deliberation.ShareFinding { finding; source } ->
+                                  (try
+                                     let msg =
+                                       Printf.sprintf
+                                         "[finding] %s shares from %s: %s"
+                                         meta.name source finding
+                                     in
+                                     ignore
+                                       (Room.broadcast ctx.config
+                                          ~from_agent:meta.agent_name
+                                          ~content:msg)
+                                   with exn ->
+                                     log_keeper_exn ~label:"deliberation share_finding failed" exn)
                               | Keeper_deliberation.MultiStep actions ->
                                   let max_steps = 5 in
                                   let steps_to_run =
@@ -404,6 +430,26 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                                  Printf.sprintf
                                                    "[spawn-proposal] %s proposes spawning agent for topic '%s': %s"
                                                    meta.name topic reason
+                                               in
+                                               ignore
+                                                 (Room.broadcast ctx.config
+                                                    ~from_agent:meta.agent_name
+                                                    ~content:msg)
+                                           | Keeper_deliberation.StartDiscussion { topic; context } ->
+                                               let msg =
+                                                 Printf.sprintf
+                                                   "[discussion] %s opens topic '%s': %s"
+                                                   meta.name topic context
+                                               in
+                                               ignore
+                                                 (Room.broadcast ctx.config
+                                                    ~from_agent:meta.agent_name
+                                                    ~content:msg)
+                                           | Keeper_deliberation.ShareFinding { finding; source } ->
+                                               let msg =
+                                                 Printf.sprintf
+                                                   "[finding] %s shares from %s: %s"
+                                                   meta.name source finding
                                                in
                                                ignore
                                                  (Room.broadcast ctx.config

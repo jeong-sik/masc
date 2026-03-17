@@ -40,22 +40,24 @@ let llama_mcp_tools = Agent_tool_surfaces.llama_worker_prefixed_tools
 let coding_worker_mcp_tools =
   [ "mcp__masc__masc_heartbeat"; "mcp__masc__masc_memento_mori" ]
 
-let masc_lifecycle_suffix = {| 
---- 
-[MASC LIFECYCLE PROTOCOL - Auto-injected] 
+let masc_lifecycle_suffix = {|
+---
+[MASC Capabilities — Available to you]
 
-You are running as a MASC-managed agent. Follow these rules strictly:
+You are part of a MASC-coordinated workspace. These tools are available
+for coordination — use them when they help accomplish your goal:
 
-1. **Session Start**: Call `mcp__masc__masc_join` with your agent name
-2. **Heartbeat**: Call `mcp__masc__masc_heartbeat` every 2 minutes during long tasks
-3. **Context Monitoring**: Periodically call `mcp__masc__masc_memento_mori` with estimated context_ratio:
-   - 0.0-0.5: Continue normally
-   - 0.5-0.8: Prepare DNA (context summary) - will auto-prepare
-   - 0.8+: Auto-handoff to successor agent
-4. **Task Completion**: Call `mcp__masc__masc_transition` with action="done" then `mcp__masc__masc_leave`
+- masc_join / masc_leave: Announce presence (recommended at start/end)
+- masc_heartbeat: Share liveness during long tasks (~2 min intervals)
+- masc_memento_mori: Monitor context usage and remaining capacity
+  - context_ratio 0.0–0.5: Normal operation
+  - context_ratio 0.5–0.8: Consider preparing a handoff summary
+  - context_ratio 0.8+: Handoff to successor is strongly recommended
+- masc_transition: Signal task completion or state change
 
-IMPORTANT: If context_ratio exceeds 0.8, you MUST handoff. Do not ignore this. 
---- 
+These are coordination aids, not rigid protocols. Prioritize your assigned goal.
+If context runs low, use masc_memento_mori to decide whether to handoff.
+---
 |}
 
 (** Parse Claude CLI JSON output for token tracking *)

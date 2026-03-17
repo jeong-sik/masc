@@ -35,7 +35,8 @@
         test_metrics_rotation
         test_tool_tier
         test_tool_exposure
-        test_code_swarm)
+        test_code_swarm
+        test_autonomy_liberation)
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
           test_graphql_endpoint
@@ -51,7 +52,8 @@
           test_metrics_rotation
           test_tool_tier
           test_tool_exposure
-          test_code_swarm)
+          test_code_swarm
+          test_autonomy_liberation)
  (libraries masc_mcp alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix))
 

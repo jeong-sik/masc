@@ -2,8 +2,12 @@
 
     These prompts reflect the current agent_swarm tool wrappers:
     current_task binding and heartbeat remain explicit, while planner/worker
-    prompts can also use batch_add/claim_next/release/cancel flows. *)
+    prompts can also use batch_add/claim_next/release/cancel flows.
 
+    @since 3.0.0 — dynamic tool catalog support via build_tool_catalog. *)
+
+(** Static MASC instructions for backward compatibility.
+    Prefer [masc_instructions_for_role] when the role is known. *)
 let masc_instructions = {|
 You have access to MASC coordination tools:
 
@@ -32,6 +36,29 @@ Important semantics:
 - claiming a task does not bind current_task automatically
 - call masc_set_current_task immediately after claiming
 - send masc_heartbeat during longer work so visibility stays fresh|}
+
+(** Generate MASC instructions from a dynamic tool catalog.
+    [tool_names] is the list of available tools for this agent's role.
+    If the list is empty, falls back to static [masc_instructions]. *)
+let masc_instructions_for_role ~(role : string) () : string =
+  let tool_names = Agent_tool_surfaces.build_tool_catalog ~role () in
+  if tool_names = [] then masc_instructions
+  else
+    let tool_list =
+      tool_names
+      |> List.map (fun name -> "- " ^ name)
+      |> String.concat "\n"
+    in
+    Printf.sprintf
+      {|You have access to these MASC tools (use masc_tool_help for details on any tool):
+
+%s
+
+Key semantics:
+- claiming a task does not bind current_task automatically
+- call masc_set_current_task immediately after claiming
+- send masc_heartbeat during longer work so visibility stays fresh|}
+      tool_list
 
 let fleet_leader ~goal ~members =
   Printf.sprintf

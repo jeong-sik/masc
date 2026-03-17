@@ -166,6 +166,7 @@
    agent_swarm_tools
    safe_parse
    prompt_registry
+   prompt_composer
    chain_types
    chain_trace_types
    chain_category
@@ -310,6 +311,7 @@
    room_utils_ops
    room_worktree
    run_eio
+   team_context
    team_session_types
    team_session_store
    team_session_report

@@ -33,7 +33,7 @@ let test_set_room_failure () =
 let test_join_success () =
   let g = WG.next_steps ~tool_name:"masc_join" ~success:true in
   check_has_tool g.next_steps "masc_status";
-  check_has_tool g.next_steps "masc_claim";
+  check_has_tool g.next_steps "masc_transition";
   check bool "join has preconditions" true (List.length g.preconditions > 0)
 
 let test_join_failure () =
@@ -52,7 +52,7 @@ let test_plan_set_task_success () =
 let test_done_success () =
   let g = WG.next_steps ~tool_name:"masc_done" ~success:true in
   check_has_tool g.next_steps "masc_status";
-  check_has_tool g.next_steps "masc_claim"
+  check_has_tool g.next_steps "masc_transition"
 
 (* ── Golden Path 2: CPv2 ─────────────────────────────────────────── *)
 
@@ -131,7 +131,7 @@ let test_state_joined_no_task () =
     ~room_set:true ~joined:true ~task_claimed:false
     ~current_task_set:false ~worktree_active:false ~session_active:false
   in
-  check_has_tool g.next_steps "masc_claim"
+  check_has_tool g.next_steps "masc_transition"
 
 let test_state_task_claimed_no_current () =
   let g = WG.current_state_guidance

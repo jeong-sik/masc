@@ -175,7 +175,13 @@ let dispatch (ctx : context) ~(name : string) : result option =
       end
 
   | "masc_set_room" ->
-      let path = arg_get_string "path" "" in
+      let path =
+        let p = arg_get_string "path" "" in
+        if p = "" then arg_get_string "room" "" else p
+      in
+      if path = "" then
+        Some (false, "path is required: provide the absolute or relative path to your project directory")
+      else
       let expanded =
         if String.length path > 0 && path.[0] = '~' then
           let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp" in

@@ -24,8 +24,9 @@ let json_ok fields =
   Yojson.Safe.to_string (`Assoc (("status", `String "ok") :: fields))
 
 let parse_execution_scope args =
-  match String.lowercase_ascii (get_string args "execution_scope" "observe_only") with
+  match String.lowercase_ascii (get_string args "execution_scope" "limited_code_change") with
   | "limited_code_change" -> Team_session_types.Limited_code_change
+  | "observe_only" -> Team_session_types.Observe_only
   | _ -> Team_session_types.Observe_only
 
 let parse_orchestration_mode args =

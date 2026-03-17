@@ -1570,9 +1570,10 @@ let make_request_handler ~sw ~clock ~server_start_time =
                        H2.Body.Writer.write_string writer data;
                        H2.Body.Writer.flush writer ignore;
                        true
-                     with
-                     | Eio.Cancel.Cancelled _ as exn -> raise exn
-                     | exn ->
+                     with exn ->
+                       (* Cancelled included: in SSE streaming context, re-raising
+                          would hit the top-level handler which attempts a 500 response
+                          on an already-streaming connection. Graceful close instead. *)
                        Log.Sse.error "TRPG SSE send failed for room %s: %s"
                          room_id_trimmed (Printexc.to_string exn);
                        closed := true; false)

@@ -83,11 +83,11 @@ type model_spec = {
   cost_per_1k_output : float;
 }
 
-type role = System | User | Assistant | Tool
+type role = Agent_sdk.Types.role = System | User | Assistant | Tool
 
 type message = {
   role : role;
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   name : string option;
   tool_call_id : string option;
 }
@@ -122,12 +122,17 @@ type completion_request = {
 }
 
 type completion_response = {
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   tool_calls : tool_call list;
   usage : token_usage;
   model_used : string;
   latency_ms : int;
 }
+
+(** Extract text content from a completion_response.
+    Delegates to Agent_sdk.Types.text_of_content for rich content_block list. *)
+let text_of_response (resp : completion_response) : string =
+  Agent_sdk.Types.text_of_content resp.content
 
 let clamp_llama_max_tokens max_tokens =
   max 1 (min max_tokens Env_config.Llama.max_tokens)
@@ -152,11 +157,7 @@ let string_of_provider = function
   | OpenRouter -> "openrouter"
   | Custom s -> sprintf "custom(%s)" s
 
-let string_of_role = function
-  | System -> "system"
-  | User -> "user"
-  | Assistant -> "assistant"
-  | Tool -> "tool"
+let string_of_role = Agent_sdk.Types.role_to_string
 
 let sanitize_text_utf8 (s : string) : string =
   let len = String.length s in
@@ -176,10 +177,13 @@ let sanitize_text_utf8 (s : string) : string =
   loop 0;
   Buffer.contents buf
 
+let text_of_message (m : message) : string =
+  Agent_sdk.Types.text_of_content m.content
+
 let sanitize_message_utf8 (m : message) : message =
   {
     m with
-    content = sanitize_text_utf8 m.content;
+    content = [Agent_sdk.Types.Text (sanitize_text_utf8 (text_of_message m))];
     name = Option.map sanitize_text_utf8 m.name;
     tool_call_id = Option.map sanitize_text_utf8 m.tool_call_id;
   }
@@ -255,12 +259,17 @@ let gemini_pro = {
 (* Message Constructors                                             *)
 (* ================================================================ *)
 
-let system_msg content = { role = System; content; name = None; tool_call_id = None }
-let user_msg content = { role = User; content; name = None; tool_call_id = None }
-let assistant_msg content = { role = Assistant; content; name = None; tool_call_id = None }
+let system_msg text =
+  { role = System; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
+let user_msg text =
+  { role = User; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
+let assistant_msg text =
+  { role = Assistant; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
 
-let tool_msg ~name ~call_id content =
-  { role = Tool; content; name = Some name; tool_call_id = Some call_id }
+let tool_msg ~name ~call_id text =
+  { role = Tool;
+    content = [Agent_sdk.Types.ToolResult { tool_use_id = call_id; content = text; is_error = false }];
+    name = Some name; tool_call_id = Some call_id }
 
 (* ================================================================ *)
 (* Token Estimation                                                 *)
@@ -268,7 +277,7 @@ let tool_msg ~name ~call_id content =
 
 (** Heuristic: ~4 characters per token (conservative estimate). *)
 let estimate_tokens (msgs : message list) =
-  List.fold_left (fun acc (m : message) -> acc + (String.length m.content / 4) + 4) 0 msgs
+  List.fold_left (fun acc (m : message) -> acc + (String.length (text_of_message m) / 4) + 4) 0 msgs
 
 (* ================================================================ *)
 (* Response cache helpers                                            *)
@@ -289,7 +298,7 @@ let message_fingerprint_json (m : message) : Yojson.Safe.t =
   `Assoc
     [
       ("role", `String (string_of_role m.role));
-      ("content", `String m.content);
+      ("content", `String (text_of_message m));
       ("name", string_opt_to_json m.name);
       ("tool_call_id", string_opt_to_json m.tool_call_id);
     ]
@@ -364,7 +373,7 @@ let completion_response_to_cache_json (resp : completion_response) : Yojson.Safe
       ( "response",
         `Assoc
           [
-            ("content", `String resp.content);
+            ("content", `String (text_of_response resp));
             ("tool_calls", `List (List.map tool_call_to_json resp.tool_calls));
             ("usage", token_usage_to_json resp.usage);
             ("model_used", `String resp.model_used);
@@ -405,7 +414,7 @@ let completion_response_of_cache_json
         | Ok usage, Ok tool_calls ->
             Ok
               {
-                content = body |> member "content" |> to_string;
+                content = [Agent_sdk.Types.Text (body |> member "content" |> to_string)];
                 tool_calls;
                 usage;
                 model_used = body |> member "model_used" |> to_string;
@@ -416,7 +425,7 @@ let completion_response_of_cache_json
   with exn -> Error (Printexc.to_string exn)
 
 let prompt_char_count (req : completion_request) =
-  List.fold_left (fun acc (m : message) -> acc + String.length m.content) 0
+  List.fold_left (fun acc (m : message) -> acc + String.length (text_of_message m)) 0
     req.messages
 
 let request_has_tool_role_message (req : completion_request) =
@@ -448,7 +457,7 @@ let record_cache_bypass reason =
 let message_to_openai_json (m : message) : Yojson.Safe.t =
   let base = [
     ("role", `String (string_of_role m.role));
-    ("content", `String m.content);
+    ("content", `String (text_of_message m));
   ] in
   let with_name = match m.name with
     | Some n -> ("name", `String n) :: base
@@ -510,13 +519,13 @@ let build_claude_body (req : completion_request) : string =
   let sanitized_messages = sanitize_messages_utf8 req.messages in
   (* Claude uses separate system parameter *)
   let system_text = List.fold_left (fun acc m ->
-    match m.role with System -> acc ^ m.content ^ "\n" | _ -> acc
+    match m.role with System -> acc ^ text_of_message m ^ "\n" | _ -> acc
   ) "" sanitized_messages |> String.trim in
   let non_system = List.filter (fun m -> m.role <> System) sanitized_messages in
   let messages_json = List.map (fun m ->
     `Assoc [
       ("role", `String (string_of_role m.role));
-      ("content", `String m.content);
+      ("content", `String (text_of_message m));
     ]
   ) non_system in
   let base = [
@@ -648,7 +657,7 @@ let parse_openai_response (json_str : string) : (completion_response, string) re
     } in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
-    Ok { content; tool_calls; usage; model_used; latency_ms = 0 }
+    Ok { content = [Agent_sdk.Types.Text content]; tool_calls; usage; model_used; latency_ms = 0 }
   with
   | Failure msg -> Error msg
   | exn -> Error (sprintf "Parse error: %s" (Printexc.to_string exn))
@@ -696,7 +705,7 @@ let parse_claude_response (json_str : string) : (completion_response, string) re
     } in
     let model_used = json |> member "model" |> to_string_option
                      |> Option.value ~default:"unknown" in
-    Ok { content; tool_calls; usage; model_used; latency_ms = 0 }
+    Ok { content = [Agent_sdk.Types.Text content]; tool_calls; usage; model_used; latency_ms = 0 }
   with
   | Failure msg -> Error msg
   | exn -> Error (sprintf "Parse error: %s" (Printexc.to_string exn))

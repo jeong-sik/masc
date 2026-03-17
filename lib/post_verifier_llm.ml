@@ -110,7 +110,7 @@ let score_to_verdict ~(dim_name : string) (score : int) : verdict =
 
 (** Validate that an LLM response contains parseable G-Eval scores. *)
 let geval_response_is_valid (resp : Llm_client.completion_response) : bool =
-  match parse_geval_response resp.content with
+  match parse_geval_response (Llm_client.text_of_response resp) with
   | Ok _ -> true
   | Error _ -> false
 

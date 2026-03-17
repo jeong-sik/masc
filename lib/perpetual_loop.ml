@@ -215,7 +215,7 @@ let coding_turn ~config ~state =
     let progress =
       let blocks =
         List.concat_map
-          (fun (m : Llm_client.message) -> Context_manager.extract_state_blocks m.content)
+          (fun (m : Llm_client.message) -> Context_manager.extract_state_blocks (Llm_client.text_of_message m))
           (List.rev state.context.messages)
       in
       match blocks with
@@ -570,7 +570,7 @@ let run_turn ~config ~state =
         state.idle_turns <- state.idle_turns + 1;
 
       (* Add assistant response to context *)
-      let assistant_msg = Llm_client.assistant_msg resp.content in
+      let assistant_msg = Llm_client.assistant_msg (Llm_client.text_of_response resp) in
       state.context <- Context_manager.append state.context assistant_msg;
       Context_manager.persist_message state.session assistant_msg;
 
@@ -584,7 +584,7 @@ let run_turn ~config ~state =
         ) resp.tool_calls |> String.concat ", " in
         let vreq = Verifier.{
           action_description = action_desc;
-          action_result = resp.content;
+          action_result = Llm_client.text_of_response resp;
           goal = config.initial_goal;
           context_summary = sprintf "Turn %d, generation %d" turn state.generation;
         } in
@@ -701,14 +701,14 @@ let run_turn ~config ~state =
            P1-1: Skip when a task was just claimed this turn — resp.content
            predates the claim and may contain stale [TASK_DONE] signals. *)
         if not just_claimed then
-          check_task_completion ~config ~state ~emit resp.content;
+          check_task_completion ~config ~state ~emit (Llm_client.text_of_response resp);
 
         (* 8. Check termination conditions *)
-        if is_goal_complete resp.content then begin
+        if is_goal_complete (Llm_client.text_of_response resp) then begin
           emit (Terminated "Goal complete");
           state.running <- false;
           false
-        end else if is_stuck resp.content then begin
+        end else if is_stuck (Llm_client.text_of_response resp) then begin
           emit (Terminated "Agent stuck");
           state.running <- false;
           false

@@ -8,6 +8,8 @@
 
 open Printf
 
+let text_of_message = Llm_client.text_of_message
+
 (* ================================================================ *)
 (* Types                                                            *)
 (* ================================================================ *)
@@ -79,7 +81,7 @@ let build_progress_summary (msgs : Llm_client.message list) : string =
     let rec loop = function
       | [] -> None
       | (m : Llm_client.message) :: rest ->
-        let blocks = Context_manager.extract_state_blocks m.content in
+        let blocks = Context_manager.extract_state_blocks (text_of_message m) in
         (match last_opt blocks with
          | Some b -> Some b
          | None -> loop rest)
@@ -102,7 +104,7 @@ let build_progress_summary (msgs : Llm_client.message list) : string =
       | _ -> assistant_msgs
     in
     let parts = List.map (fun (m : Llm_client.message) ->
-      clip m.content 200
+      clip (text_of_message m) 200
     ) recent in
     String.concat "\n" parts
 
@@ -144,7 +146,7 @@ let extract_pending_actions (msgs : Llm_client.message list) : string list =
     let rec loop = function
       | [] -> None
       | (m : Llm_client.message) :: rest ->
-        let blocks = Context_manager.extract_state_blocks m.content in
+        let blocks = Context_manager.extract_state_blocks (text_of_message m) in
         (match last_opt blocks with
          | Some b -> Some b
          | None -> loop rest)
@@ -157,12 +159,12 @@ let extract_pending_actions (msgs : Llm_client.message list) : string list =
     if next <> [] then next else
       (match List.rev msgs with
        | [] -> []
-       | (last : Llm_client.message) :: _ when last.role = Llm_client.User -> [last.content]
+       | (last : Llm_client.message) :: _ when last.role = Llm_client.User -> [text_of_message last]
        | _ -> [])
   | None ->
     (match List.rev msgs with
      | [] -> []
-     | (last : Llm_client.message) :: _ when last.role = Llm_client.User -> [last.content]
+     | (last : Llm_client.message) :: _ when last.role = Llm_client.User -> [text_of_message last]
      | _ -> [])
 
 (** Extract key decisions from assistant messages containing decision markers. *)
@@ -203,7 +205,7 @@ let extract_key_decisions (msgs : Llm_client.message list) : string list =
     let rec loop = function
       | [] -> None
       | (m : Llm_client.message) :: rest ->
-        let blocks = Context_manager.extract_state_blocks m.content in
+        let blocks = Context_manager.extract_state_blocks (text_of_message m) in
         (match last_opt blocks with
          | Some b -> Some b
          | None -> loop rest)
@@ -220,7 +222,8 @@ let extract_key_decisions (msgs : Llm_client.message list) : string list =
     List.filter_map (fun (m : Llm_client.message) ->
       if m.role <> Llm_client.Assistant then None
       else
-        let lower = String.lowercase_ascii m.content in
+        let mc = text_of_message m in
+        let lower = String.lowercase_ascii mc in
         let has_marker = List.exists (fun marker ->
           try
             let _ = Str.search_forward (Str.regexp_string marker) lower 0 in
@@ -228,9 +231,9 @@ let extract_key_decisions (msgs : Llm_client.message list) : string list =
           with Not_found -> false
         ) decision_markers in
         if has_marker then
-          Some (if String.length m.content > 150
-                then String.sub m.content 0 150 ^ "..."
-                else m.content)
+          Some (if String.length mc > 150
+                then String.sub mc 0 150 ^ "..."
+                else mc)
         else None
     ) msgs
 
@@ -275,8 +278,8 @@ let normalize_for_model (msgs : Llm_client.message list)
         | Llm_client.Tool ->
           (* Convert tool messages to user messages for models without tool support *)
           { m with role = Llm_client.User;
-                   content = sprintf "[Tool result: %s]\n%s"
-                     (Option.value ~default:"unknown" m.name) m.content }
+                   content = [Agent_sdk.Types.Text (sprintf "[Tool result: %s]\n%s"
+                     (Option.value ~default:"unknown" m.name) (text_of_message m))] }
         | _ -> m
       ) msgs
     | Llm_client.Claude ->
@@ -287,7 +290,7 @@ let normalize_for_model (msgs : Llm_client.message list)
         | (m1 : Llm_client.message) :: ((m2 : Llm_client.message) :: rest as tail) ->
           if m1.role = m2.role && m1.role <> Llm_client.System then
             (* Merge consecutive same-role *)
-            let merged = { m1 with content = m1.content ^ "\n" ^ m2.content } in
+            let merged = { m1 with content = [Agent_sdk.Types.Text (text_of_message m1 ^ "\n" ^ text_of_message m2)] } in
             fix_alternation (merged :: rest)
           else
             m1 :: fix_alternation tail

@@ -576,29 +576,15 @@ let to_oas_message (m : message) : Agent_sdk.Types.message option =
   | Tool ->
     let tool_use_id = Option.value ~default:"masc-tool" m.tool_call_id in
     Some { Agent_sdk.Types.role = User;
-           content = [ToolResult { tool_use_id; content = m.content; is_error = false }] }
+           content = [ToolResult { tool_use_id; content = text_of_message m; is_error = false }] }
   | User ->
-    Some { Agent_sdk.Types.role = User; content = [Text m.content] }
+    Some { Agent_sdk.Types.role = User; content = [Text (text_of_message m)] }
   | Assistant ->
-    Some { Agent_sdk.Types.role = Assistant; content = [Text m.content] }
+    Some { Agent_sdk.Types.role = Assistant; content = [Text (text_of_message m)] }
 
 let of_oas_message (m : Agent_sdk.Types.message) : message =
-  let role = match m.role with
-    | Agent_sdk.Types.User -> User
-    | Agent_sdk.Types.Assistant -> Assistant
-    | Agent_sdk.Types.System -> System
-    | Agent_sdk.Types.Tool -> Tool
-  in
-  let content =
-    m.content
-    |> List.filter_map (fun (block : Agent_sdk.Types.content_block) ->
-         match block with
-         | Agent_sdk.Types.Text s -> Some s
-         | Agent_sdk.Types.ToolResult { content; _ } -> Some content
-         | _ -> None)
-    |> String.concat "\n"
-  in
-  { role; content; name = None; tool_call_id = None }
+  (* Role and content are now the same types -- pass through directly. *)
+  { role = m.role; content = m.content; name = None; tool_call_id = None }
 
 let of_oas_usage (u : Agent_sdk.Types.api_usage) : token_usage =
   {

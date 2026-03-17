@@ -175,7 +175,7 @@ let test_filter_empty_and_oversized () =
 
 let make_llm_response content =
   Llm_client.{
-    content;
+    content = [Agent_sdk.Types.Text content];
     tool_calls = [];
     usage = {
       input_tokens = 0; output_tokens = 0; total_tokens = 0;

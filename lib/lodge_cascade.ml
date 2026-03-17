@@ -207,7 +207,7 @@ let call ~cascade_name ~prompt
     | Ok resp ->
         Ok
           {
-            response = resp.Llm_client.content;
+            response = Llm_client.text_of_response resp;
             llm_used = resp.Llm_client.model_used;
             duration_ms = resp.Llm_client.latency_ms;
           }

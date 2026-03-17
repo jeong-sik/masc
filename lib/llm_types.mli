@@ -35,10 +35,12 @@ type model_spec = {
     Unified with {!Agent_sdk.Types.role} via {!Llm_provider.Types}. *)
 type role = Agent_sdk.Types.role = System | User | Assistant | Tool
 
-(** A single message in a conversation. *)
+(** A single message in a conversation.
+    [content] is a list of {!Agent_sdk.Types.content_block} for type convergence
+    with OAS message. Use {!text_of_message} to extract text. *)
 type message = {
   role : role;
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   name : string option;       (** For tool messages: tool name *)
   tool_call_id : string option; (** For tool result messages *)
 }
@@ -80,14 +82,20 @@ type completion_request = {
   response_format : [ `Text | `Json ];
 }
 
-(** Completion response. *)
+(** Completion response.
+    [content] is a list of {!Agent_sdk.Types.content_block} for type convergence
+    with OAS api_response. Use {!text_of_response} to extract text. *)
 type completion_response = {
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   tool_calls : tool_call list;
   usage : token_usage;
   model_used : string;
   latency_ms : int;
 }
+
+(** Extract text content from a completion_response.
+    Extracts [Text] blocks, concatenates with newlines. *)
+val text_of_response : completion_response -> string
 
 (** {1 Request Normalization} *)
 
@@ -125,6 +133,10 @@ val assistant_msg : string -> message
 
 (** Create a tool result message. *)
 val tool_msg : name:string -> call_id:string -> string -> message
+
+(** Extract text content from a message.
+    Use this instead of direct [.content] access for v0.48 type convergence. *)
+val text_of_message : message -> string
 
 (** {1 Token Estimation} *)
 

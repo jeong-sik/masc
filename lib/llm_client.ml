@@ -60,25 +60,17 @@ let to_oas_provider (spec : model_spec) : Agent_sdk.Provider.config option =
     }
   | Custom _ -> None
 
+(** Convert MASC message to OAS message.
+    After v0.48 type convergence, this is a thin projection (drop name/tool_call_id).
+    System messages are still dropped — they belong in Checkpoint.system_prompt. *)
 let to_oas_message (m : message) : Agent_sdk.Types.message option =
   match m.role with
-  | System ->
-    (* System messages belong in Checkpoint.system_prompt, not in messages.
-       Dropping here prevents duplication at the OAS boundary. *)
-    None
-  | Tool ->
-    let tool_use_id = Option.value ~default:"masc-tool" m.tool_call_id in
-    Some { Agent_sdk.Types.role = User;
-           content = [ToolResult { tool_use_id; content = m.content; is_error = false }] }
-  | User ->
-    Some { Agent_sdk.Types.role = User; content = [Text m.content] }
-  | Assistant ->
-    Some { Agent_sdk.Types.role = Assistant; content = [Text m.content] }
+  | System -> None
+  | _ -> Some { Agent_sdk.Types.role = m.role; content = m.content }
 
+(** Convert OAS message to MASC message. Near-identity after type convergence. *)
 let of_oas_message (m : Agent_sdk.Types.message) : message =
-  (* Role is now the same type -- no mapping needed *)
-  let content = Agent_sdk.Types.text_of_content m.content in
-  { role = m.role; content; name = None; tool_call_id = None }
+  { role = m.role; content = m.content; name = None; tool_call_id = None }
 
 let of_oas_usage (u : Agent_sdk.Types.api_usage) : token_usage =
   {

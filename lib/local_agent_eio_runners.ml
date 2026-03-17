@@ -584,13 +584,13 @@ let run_worker_legacy ~sw ~base_path ~worker_name
                 | Ok resp ->
                     let tool_calls =
                       match resp.tool_calls with
-                      | [] -> parse_text_tool_calls resp.content
+                      | [] -> parse_text_tool_calls (Llm_client.text_of_response resp)
                       | calls -> calls
                     in
                     let usage_acc = merge_usage usage_acc resp.usage in
                     if tool_calls = [] then
                       let output =
-                        let trimmed = String.trim resp.content in
+                        let trimmed = String.trim (Llm_client.text_of_response resp) in
                         if trimmed <> "" then trimmed
                         else if tools_used <> [] then
                           sprintf "(tools executed: %s)"
@@ -668,7 +668,7 @@ let run_worker_legacy ~sw ~base_path ~worker_name
                       in
                       let tools_used = tools_used @ round_tools in
                       let output =
-                        let trimmed = String.trim resp.content in
+                        let trimmed = String.trim (Llm_client.text_of_response resp) in
                         if trimmed <> "" then trimmed
                         else
                           sprintf "(tools executed: %s)"

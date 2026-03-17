@@ -347,11 +347,11 @@ let handle_keeper_msg ctx args : tool_result =
                 if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
                   (* Terminal: no more tool calls or hit round limit *)
                   let content =
-                    let c = String.trim last_resp.Llm_client.content in
+                    let c = String.trim (Llm_client.text_of_response last_resp) in
                     if c = "" && acc_tools_used <> [] then
                       Printf.sprintf "(tools executed: %s)"
                         (String.concat ", " acc_tools_used)
-                    else last_resp.Llm_client.content
+                    else Llm_client.text_of_response last_resp
                   in
                   ( content, acc_usage, last_resp.Llm_client.model_used,
                     acc_latency, acc_cost, acc_tools_used )
@@ -368,7 +368,7 @@ let handle_keeper_msg ctx args : tool_result =
                   let followup_prompt =
                     keeper_tool_followup_prompt
                       ~user_message:message
-                      ~draft_reply:last_resp.Llm_client.content
+                      ~draft_reply:(Llm_client.text_of_response last_resp)
                       ~tool_outputs
                       ~already_executed:all_tools_so_far
                   in
@@ -408,14 +408,14 @@ let handle_keeper_msg ctx args : tool_result =
                   match run_cascade followup_requests with
                   | Error _ ->
                     (* Cascade failed — return what we have *)
-                    ( last_resp.Llm_client.content, acc_usage,
+                    ( Llm_client.text_of_response last_resp, acc_usage,
                       last_resp.Llm_client.model_used, acc_latency,
                       acc_cost, acc_tools_used @ round_tools )
                   | Ok resp_next ->
                     Log.Trpg.info "Follow-up round %d resp: tool_calls=%d content_len=%d model=%s"
                       round
                       (List.length resp_next.Llm_client.tool_calls)
-                      (String.length resp_next.Llm_client.content)
+                      (String.length (Llm_client.text_of_response resp_next))
                       resp_next.Llm_client.model_used;
                     let used_model_next =
                       model_spec_for_used specs resp_next.model_used
@@ -496,12 +496,12 @@ let handle_keeper_msg ctx args : tool_result =
                     let eval1 =
                       evaluate_memory_recall
                         ~user_message:message
-                        ~assistant_reply:corr.content
+                        ~assistant_reply:(Llm_client.text_of_response corr)
                         ~candidates:recall_candidates
                     in
                     let evalf = { eval1 with initial_score = eval0.final_score } in
                     let merged_usage = merge_usage base_usage corr.usage in
-                    ( corr.content, merged_usage, corr.model_used,
+                    ( Llm_client.text_of_response corr, merged_usage, corr.model_used,
                       base_latency_ms + corr.latency_ms,
                       evalf, true, evalf.passed, false, base_cost_usd +. cost1,
                       tools_used )
@@ -561,8 +561,8 @@ let handle_keeper_msg ctx args : tool_result =
                       let merged_usage = merge_usage usage_after_correction forced.usage in
                       let merged_latency = latency_after_correction + forced.latency_ms in
                       let grounded_content =
-                        let c = String.trim forced.content in
-                        if c = "" then content_after_correction else forced.content
+                        let c = String.trim (Llm_client.text_of_response forced) in
+                        if c = "" then content_after_correction else Llm_client.text_of_response forced
                       in
                       let eval2 =
                         evaluate_memory_recall

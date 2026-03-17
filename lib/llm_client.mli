@@ -38,10 +38,11 @@ type model_spec = {
 (** Role in a conversation. *)
 type role = System | User | Assistant | Tool
 
-(** A single message in a conversation. *)
+(** A single message in a conversation.
+    [content] uses {!Agent_sdk.Types.content_block} list for OAS type convergence. *)
 type message = {
   role : role;
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   name : string option;       (** For tool messages: tool name *)
   tool_call_id : string option; (** For tool result messages *)
 }
@@ -83,14 +84,19 @@ type completion_request = {
   response_format : [ `Text | `Json ];
 }
 
-(** Completion response. *)
+(** Completion response.
+    [content] is a list of {!Agent_sdk.Types.content_block} for type convergence
+    with OAS api_response. Use {!text_of_response} to extract text. *)
 type completion_response = {
-  content : string;
+  content : Agent_sdk.Types.content_block list;
   tool_calls : tool_call list;
   usage : token_usage;
   model_used : string;
   latency_ms : int;
 }
+
+(** Extract text content from a completion response. *)
+val text_of_response : completion_response -> string
 
 (** {1 Core Functions} *)
 
@@ -163,6 +169,9 @@ val system_msg : string -> message
 val user_msg : string -> message
 val assistant_msg : string -> message
 val tool_msg : name:string -> call_id:string -> string -> message
+
+(** Extract text content from a message. *)
+val text_of_message : message -> string
 
 (** Repair malformed UTF-8 in arbitrary text. *)
 val sanitize_text_utf8 : string -> string

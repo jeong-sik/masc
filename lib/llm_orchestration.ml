@@ -60,7 +60,7 @@ let message_fingerprint_json (m : message) : Yojson.Safe.t =
   `Assoc
     [
       ("role", `String (string_of_role m.role));
-      ("content", `String m.content);
+      ("content", `String (text_of_message m));
       ("name", string_opt_to_json m.name);
       ("tool_call_id", string_opt_to_json m.tool_call_id);
     ]
@@ -135,7 +135,7 @@ let completion_response_to_cache_json (resp : completion_response) : Yojson.Safe
       ( "response",
         `Assoc
           [
-            ("content", `String resp.content);
+            ("content", `String (text_of_response resp));
             ("tool_calls", `List (List.map tool_call_to_json resp.tool_calls));
             ("usage", token_usage_to_json resp.usage);
             ("model_used", `String resp.model_used);
@@ -176,7 +176,7 @@ let completion_response_of_cache_json
         | Ok usage, Ok tool_calls ->
             Ok
               {
-                content = body |> member "content" |> to_string;
+                content = [Agent_sdk.Types.Text (body |> member "content" |> to_string)];
                 tool_calls;
                 usage;
                 model_used = body |> member "model_used" |> to_string;
@@ -187,7 +187,7 @@ let completion_response_of_cache_json
   with exn -> Error (Printexc.to_string exn)
 
 let prompt_char_count (req : completion_request) =
-  List.fold_left (fun acc (m : message) -> acc + String.length m.content) 0
+  List.fold_left (fun acc (m : message) -> acc + String.length (text_of_message m)) 0
     req.messages
 
 let request_has_tool_role_message (req : completion_request) =
@@ -255,10 +255,10 @@ let complete ?timeout_sec (req : completion_request) : (completion_response, str
     | None ->
       let upstream_result =
           match req.model.provider with
-          | Llama -> Llm_transport.call_openai_compatible ?timeout_sec req
-          | Claude -> Llm_transport.call_claude ?timeout_sec req
-          | Glm_cloud -> Llm_transport.call_glm_cloud_with_pool ?timeout_sec req
-          | OpenAI | Gemini | OpenRouter | Custom _ -> Llm_transport.call_openai_compatible ?timeout_sec req
+          | Glm_cloud ->
+              Llm_provider_bridge.call_glm_cloud_with_pool ?timeout_sec req
+          | _ ->
+              Llm_provider_bridge.call ?timeout_sec req
         in
         (match (cache_key, upstream_result) with
         | Some key, Ok resp -> (

@@ -155,3 +155,50 @@
   max-width: 400px;
 }
 
+/* ── Agent Timeline Section (Phase 3) ─────────────────────── */
+.agent-timeline-summary {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.agent-timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.agent-timeline-event {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+
+.agent-timeline-event:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.agent-timeline-type {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-strong, #e8ecf1);
+  flex-shrink: 0;
+  min-width: 80px;
+}
+
+.agent-timeline-detail {
+  color: var(--text-body, #b0bec5);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+

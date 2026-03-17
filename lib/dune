@@ -465,6 +465,7 @@
    tool_harness_health
    tool_inline_dispatch
    tool_inline_dispatch_extra
+   tool_convo
    tool_unified
    tool_help_registry
    tool_registry

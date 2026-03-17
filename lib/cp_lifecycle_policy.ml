@@ -605,11 +605,6 @@ let maybe_apply_best_first_assignment config ~actor units operations
           match candidates with
           | [] -> operation
           | best :: _ ->
-              let best =
-                match speculative_pick_candidate config operation candidates with
-                | Some candidate -> candidate
-                | None -> best
-              in
               let current =
                 candidates
                 |> List.find_opt (fun (candidate : Cp_search_fabric.scored_candidate) ->

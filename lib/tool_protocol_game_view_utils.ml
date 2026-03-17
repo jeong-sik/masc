@@ -69,8 +69,6 @@ let supported_client_topics =
     "trpg.events";
     "trpg.state";
     "trpg.world";
-    "experiment.events";
-    "experiment.state";
   ]
 
 let split_topics requested =
@@ -79,17 +77,8 @@ let split_topics requested =
   in
   (dedupe_keep_order accepted, dedupe_keep_order rejected)
 
-let sse_endpoints_for_topics topics =
-  let items = ref [] in
-  if List.mem "experiment.events" topics then
-    items :=
-      `Assoc
-        [
-          ("topic", `String "experiment.events");
-          ("url", `String "/sse?room=experiment");
-        ]
-      :: !items;
-  !items |> List.rev
+let sse_endpoints_for_topics _topics =
+  []
 
 let pull_fallback_for_topics topics =
   let fields = ref [] in
@@ -123,15 +112,6 @@ let pull_fallback_for_topics topics =
           [
             ("tool", `String "trpg.world.query");
             ("note", `String "requires session_id");
-          ] )
-      :: !fields;
-  if List.mem "experiment.state" topics then
-    fields :=
-      ( "experiment.state",
-        `Assoc
-          [
-            ("tool", `String "experiment.status");
-            ("note", `String "requires experiment_id");
           ] )
       :: !fields;
   `Assoc (List.rev !fields)
@@ -297,9 +277,6 @@ let trpg_context_of (ctx : context) : Tool_trpg.context =
     dm_voice_emit = ctx.trpg_dm_voice_emit;
   }
 
-let experiment_context_of (ctx : context) : Tool_experiment.context =
-  { config = ctx.config; agent_name = ctx.agent_name }
-
 let with_string_default args ~key ~value =
   match args with
   | `Assoc fields ->
@@ -309,11 +286,6 @@ let with_string_default args ~key ~value =
         let kept = List.filter (fun (k, _) -> k <> key) fields in
         `Assoc ((key, `String value) :: kept)
   | _ -> args
-
-let normalize_experiment_start_args args =
-  args
-  |> with_string_default ~key:"treatment_description" ~value:"protocol.treatment"
-  |> with_string_default ~key:"control_description" ~value:"protocol.control"
 
 let decision_payload (d : Game_view_state.decision) =
   let status = if d.finalized_at = None then "created" else "finalized" in
@@ -348,18 +320,6 @@ let client_input_payload (i : Game_view_state.client_input) =
       ("handled_by", Option.fold ~none:`Null ~some:(fun v -> `String v) i.handled_by);
       ("handled_at", Option.fold ~none:`Null ~some:(fun v -> `Float v) i.handled_at);
       ("reject_reason", Option.fold ~none:`Null ~some:(fun v -> `String v) i.reject_reason);
-    ]
-
-let experiment_summary_payload (e : Tool_experiment.experiment) =
-  `Assoc
-    [
-      ("experiment_id", `String e.id);
-      ("status", `String (Tool_experiment.status_to_string e.status));
-      ("created_at", `Float e.created_at);
-      ("metrics", `List (List.map (fun m -> `String m) e.metrics));
-      ("window_seconds", `Float e.window_seconds);
-      ("assignments", `Int (List.length e.assignments));
-      ("observations", `Int (List.length e.observations));
     ]
 
 let world_agent_payload (a : Trpg_world_projection.agent_state) =

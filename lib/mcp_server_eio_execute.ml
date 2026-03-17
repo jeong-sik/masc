@@ -429,7 +429,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     agent_name;
     room_config = Some config;
   } in
-  let simple_ctx_experiment : Tool_experiment.context = { config; agent_name } in
   let simple_ctx_a2a : Tool_a2a.context = { config; agent_name } in
   let handover_ctx : Tool_handover.context = {
     config; agent_name;
@@ -493,152 +492,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     proc_mgr = state.Mcp_server.proc_mgr;
     worker_runner = None;
     clock = Some clock;
-  } in
-  let autoresearch_planned_workers ~loop_id ~target_file =
-    let suffix =
-      if String.length loop_id > 3 then
-        String.sub loop_id 3 (min 6 (String.length loop_id - 3))
-      else loop_id
-    in
-    let driver_actor = Printf.sprintf "autoresearch-driver-%s" suffix in
-    let auditor_actor = Printf.sprintf "autoresearch-auditor-%s" suffix in
-    let mk_worker ~runtime_actor ~spawn_role ~worker_class ~control_domain
-        ~task_profile ~routing_reason =
-      {
-        Team_session_types.spawn_agent = "masc";
-        runtime_actor = Some runtime_actor;
-        spawn_role = Some spawn_role;
-        spawn_model = None;
-        execution_scope = Some Team_session_types.Observe_only;
-        worker_class = Some worker_class;
-        parent_actor = Some agent_name;
-        capsule_mode = Some Team_session_types.Capsule_inherit;
-        runtime_pool = None;
-        lane_id = Some loop_id;
-        controller_level = Some Team_session_types.Controller_worker;
-        control_domain = Some control_domain;
-        supervisor_actor = Some agent_name;
-        model_tier = None;
-        task_profile = Some task_profile;
-        risk_level = Some Team_session_types.Risk_medium;
-        routing_confidence = Some 0.9;
-        routing_reason = Some routing_reason;
-        thinking_enabled = None;
-        max_turns = None;
-        timeout_seconds = None;
-        routing_escalated = false;
-      }
-    in
-    [
-      mk_worker ~runtime_actor:driver_actor ~spawn_role:"research-driver"
-        ~worker_class:Team_session_types.Worker_executor
-        ~control_domain:Team_session_types.Domain_execution
-        ~task_profile:Team_session_types.Profile_normalize
-        ~routing_reason:
-          (Printf.sprintf "Drive autoresearch loop %s for %s" loop_id target_file);
-      mk_worker ~runtime_actor:auditor_actor ~spawn_role:"research-auditor"
-        ~worker_class:Team_session_types.Worker_metacog
-        ~control_domain:Team_session_types.Domain_quality
-        ~task_profile:Team_session_types.Profile_verify
-        ~routing_reason:
-          (Printf.sprintf
-             "Audit keep/discard evidence for autoresearch loop %s" loop_id);
-    ]
-  in
-  let start_autoresearch_operation ~goal ~target_file =
-    let objective =
-      Printf.sprintf "Autoresearch swarm: %s" goal
-    in
-    let args =
-      `Assoc
-        [
-          ("assigned_unit_id", `String "company-runtime");
-          ("objective", `String objective);
-          ("workload_template", `String "research_team");
-          ("workload_profile", `String "research_pipeline");
-          ("stage", `String "normalize");
-          ("search_strategy", `String "best_first_v1");
-          ("artifact_scope", `List [ `String target_file ]);
-          ("note", `String (Printf.sprintf "autoresearch target=%s" target_file));
-        ]
-    in
-    match Command_plane_v2.start_operation config ~actor:agent_name args with
-    | Ok operation -> Ok (Command_plane_v2.operation_to_json operation)
-    | Error message -> Error message
-  in
-  let start_autoresearch_team_session ~goal ~operation_id ~loop_id ~target_file
-      ~program_note =
-    match
-      Team_session_engine_eio.start_session ~sw ~clock ~config
-        ~created_by:agent_name ~goal ~duration_seconds:3600
-        ~execution_scope:Team_session_types.Observe_only
-        ~checkpoint_interval_sec:60 ~min_agents:1
-        ~scale_profile:Team_session_types.Scale_standard
-        ~control_profile:Team_session_types.Control_flat
-        ~orchestration_mode:Team_session_types.Assist
-        ~communication_mode:Team_session_types.Comm_hybrid ~model_cascade:[]
-        ~fallback_policy:Team_session_types.Fallback_none
-        ~instruction_profile:Team_session_types.Profile_strict
-        ~alert_channel:Team_session_types.Alert_both ~auto_resume:true
-        ~report_formats:
-          [ Team_session_types.Markdown; Team_session_types.Json ]
-        ~agent_names:[] ~operation_id
-    with
-    | Error message -> Error message
-    | Ok json -> (
-        match
-          Yojson.Safe.Util.(
-            json |> member "session_id" |> to_string_option |> Option.map String.trim)
-        with
-        | None | Some "" -> Error "team session did not return session_id"
-        | Some session_id ->
-            let planned_workers =
-              autoresearch_planned_workers ~loop_id ~target_file
-            in
-            ignore
-              (Team_session_store.update_session config session_id (fun session ->
-                   {
-                     session with
-                     planned_workers =
-                       Team_session_types.dedup_planned_workers
-                         (session.planned_workers @ planned_workers);
-                     updated_at_iso = Types.now_iso ();
-                   }));
-            Team_session_store.append_event config session_id
-              ~event_type:"linked_autoresearch_started"
-              ~detail:
-                (`Assoc
-                  [
-                    ("loop_id", `String loop_id);
-                    ("target_file", `String target_file);
-                    ( "program_note",
-                      match program_note with
-                      | Some value -> `String value
-                      | None -> `Null );
-                  ]);
-            ignore
-              (Team_session_engine_eio.record_turn ~config ~session_id
-                 ~actor:agent_name ~turn_kind:Team_session_types.Turn_note
-                 ~message:
-                   (Some
-                      (match program_note with
-                      | Some note ->
-                          Printf.sprintf
-                            "Linked autoresearch loop %s on %s.\nProgram note: %s"
-                            loop_id target_file note
-                      | None ->
-                          Printf.sprintf
-                            "Linked autoresearch loop %s on %s."
-                            loop_id target_file))
-                 ~target_agent:None ~task_title:None ~task_description:None
-                 ~task_priority:3);
-            Ok json)
-  in
-  let simple_ctx_autoresearch : Tool_autoresearch.context = {
-    base_path = config.base_path;
-    agent_name = Some agent_name;
-    start_operation = Some start_autoresearch_operation;
-    start_team_session = Some start_autoresearch_team_session;
   } in
   let simple_ctx_perpetual : Tool_perpetual.context = {
     agent_name;
@@ -766,8 +619,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         ~handler:(fun ~name ~args -> Tool_voice.dispatch simple_ctx_voice ~name ~args);
       reg ~schemas:Tool_protocol_game_view.schemas
         ~handler:(fun ~name ~args -> Tool_protocol_game_view.dispatch simple_ctx_protocol ~name ~args);
-      reg ~schemas:Tool_experiment.schemas
-        ~handler:(fun ~name ~args -> Tool_experiment.dispatch simple_ctx_experiment ~name ~args);
       reg ~schemas:Tool_goals.schemas
         ~handler:(fun ~name ~args -> Tool_goals.dispatch simple_ctx_goals ~name ~args);
       reg ~schemas:Tool_perpetual.schemas
@@ -778,10 +629,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         ~handler:(fun ~name ~args -> Tool_keeper.dispatch simple_ctx_keeper ~name ~args);
       reg ~schemas:Tool_trpg.schemas
         ~handler:(fun ~name ~args -> Tool_trpg.dispatch simple_ctx_trpg ~name ~args);
-      reg ~schemas:Tool_autoresearch.schemas
-        ~handler:(fun ~name ~args -> Tool_autoresearch.dispatch simple_ctx_autoresearch ~name ~args);
-      reg ~schemas:Tool_risc.schemas
-        ~handler:(fun ~name ~args -> Some (Tool_risc.dispatch name args));
       reg ~schemas:Tool_agent_timeline.schemas
         ~handler:(fun ~name ~args -> Tool_agent_timeline.dispatch simple_ctx_agent_timeline ~name ~args);
       (* B-0a: newly registered modules with domain schema files *)
@@ -854,9 +701,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   | Some result -> result
   | None ->
   match Tool_protocol_game_view.dispatch simple_ctx_protocol ~name ~args:arguments with
-  | Some result -> result
-  | None ->
-  match Tool_experiment.dispatch simple_ctx_experiment ~name ~args:arguments with
   | Some result -> result
   | None ->
   match Tool_a2a.dispatch simple_ctx_a2a ~name ~args:arguments with
@@ -933,9 +777,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match Tool_mdal.dispatch simple_ctx_mdal ~name ~args:arguments with
   | Some result -> result
   | None ->
-  match Tool_autoresearch.dispatch simple_ctx_autoresearch ~name ~args:arguments with
-  | Some result -> result
-  | None ->
   match Tool_trpg.dispatch simple_ctx_trpg ~name ~args:arguments with
   | Some result -> result
   | None ->
@@ -945,11 +786,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   (* Tool_gardener returns result directly, not option - wrap it *)
   if String.length name >= 14 && String.sub name 0 14 = "masc_gardener_" then
     Tool_gardener.dispatch () name arguments
-  else
-
-  (* SWARM-RISC Agent ISA tools — prefix guard like Tool_gardener *)
-  if Tool_risc.is_risc_tool name then
-    Tool_risc.dispatch name arguments
   else
 
   (* Delegate remaining inline tools to Tool_inline_dispatch *)

@@ -396,7 +396,7 @@ let orchestrate
         match lowered with
         | "stub" | "mock" -> Ok (Printf.sprintf "[stub]%s" prompt)
         | "codex" ->
-            exec_with_retry "codex" args
+            exec_with_retry "codex" (("model", `String Env_config_governance.OpenAI.default_model) :: args)
         | m when starts_with ~prefix:"gpt-" m ->
             exec_with_retry "codex" (("model", `String model) :: args)
         | "claude" | "claude-cli" | "opus" | "sonnet" | "haiku" ->
@@ -410,7 +410,7 @@ let orchestrate
         | m when is_gemini_model m ->
             exec_with_retry "gemini" (("model", `String model) :: args)
         | _ ->
-            let default_gemini = Env_config.Gemini.default_model in
+            let default_gemini = Env_config_governance.Gemini.default_model in
             let fallback_args =
               if default_gemini <> "" then ("model", `String default_gemini) :: args
               else args

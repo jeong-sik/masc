@@ -964,7 +964,9 @@ let handle_step (deps : step_deps) (ctx : _ context) args : result =
                                            prepared;
                                          Eio.Fiber.fork ~sw:sw_bg (fun () ->
                                              try ignore (execute_spawn 0 prepared)
-                                             with exn ->
+                                             with
+                                             | Eio.Cancel.Cancelled _ as exn -> raise exn
+                                             | exn ->
                                                Log.Spawn.error
                                                  "background spawn failed (worker_run_id=%s, agent=%s): %s"
                                                  prepared.worker_run_id

@@ -604,7 +604,6 @@ let maybe_apply_best_first_assignment config ~actor units operations
           match candidates with
           | [] -> operation
           | best :: _ ->
-              let best = best in
               let current =
                 candidates
                 |> List.find_opt (fun (candidate : Cp_search_fabric.scored_candidate) ->

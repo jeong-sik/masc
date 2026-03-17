@@ -89,6 +89,53 @@ let handle_handover_get ctx args =
        | Error e -> (false, Printf.sprintf "❌ Failed to load handover: %s" e))
   | None -> (false, "❌ Filesystem not available")
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_handover_claim";
+    description = "Claim a pending handover to continue the work. You become the successor agent. The handover DNA will be loaded into your context.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name (the successor)");
+        ]);
+        ("handover_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "ID of the handover to claim");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "handover_id"]);
+    ];
+  };
+  {
+    name = "masc_handover_claim_and_spawn";
+    description = "Claim a handover AND automatically spawn the successor agent with the DNA. The successor agent will receive the handover context as its initial prompt and begin work immediately.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("handover_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "ID of the handover to claim");
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to spawn (claude, gemini, codex, llama). Bare 'ollama' is unsupported; use 'default' in model fields for adapter-managed selection.");
+        ]);
+        ("additional_instructions", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional extra instructions for the successor agent");
+        ]);
+        ("timeout_seconds", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Timeout for the spawned agent (default: 300)");
+        ]);
+      ]);
+      ("required", `List [`String "handover_id"; `String "agent_name"]);
+    ];
+  };
+]
+
 (* Dispatch function - returns None if tool not handled *)
 let dispatch ctx ~name ~args : result option =
   match name with

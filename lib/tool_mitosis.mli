@@ -163,3 +163,5 @@ val handle_mitosis_handoff : context -> Yojson.Safe.t -> result
     @return [Some result] if [name] matches a mitosis tool
       (e.g., ["masc_mitosis_status"]), [None] otherwise. *)
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
+
+val schemas : Types.tool_schema list

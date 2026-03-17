@@ -82,6 +82,23 @@ let handle_walph_status ctx _args =
   let json = Room_walph_eio.walph_status_json ctx.config ~agent_name:ctx.agent_name in
   (true, Yojson.Safe.to_string json)
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_walph_status";
+    description = "Get detailed status for the current agent's Walph loop, including iterations, claimed/done counts, error counters, backoff settings, and last stop reason.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent requesting the status");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+]
+
 (* Dispatch handler *)
 let dispatch ctx ~name ~args =
   match name with

@@ -37,6 +37,65 @@ let handle_cost_report _ctx args =
                  |> (fun a -> if task_id = "" then a else a @ ["--task"; task_id]) in
   safe_exec cli_args
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_cost_log";
+    description = "Log token usage and cost for tracking multi-agent expenses. Call after significant API calls to track spending per agent and task.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent name (claude, gemini, codex)");
+        ]);
+        ("model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Model name (e.g., opus, sonnet, pro, flash)");
+        ]);
+        ("input_tokens", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of input tokens");
+        ]);
+        ("output_tokens", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of output tokens");
+        ]);
+        ("cost_usd", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Estimated cost in USD");
+        ]);
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional task ID for attribution");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "cost_usd"]);
+    ];
+  };
+  {
+    name = "masc_cost_report";
+    description = "Get cost report showing token usage and spending by agent. Use to monitor multi-agent collaboration expenses.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("period", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Time period: hourly, daily, weekly, monthly, all");
+          ("default", `String "daily");
+        ]);
+        ("agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by agent name (optional)");
+        ]);
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by task ID (optional)");
+        ]);
+      ]);
+    ];
+  };
+]
+
 (* Dispatch handler *)
 let dispatch ctx ~name ~args =
   match name with

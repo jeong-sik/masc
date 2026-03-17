@@ -15,3 +15,5 @@ val handle_relay_now : context -> Yojson.Safe.t -> result
 val handle_relay_smart_check : context -> Yojson.Safe.t -> result
 
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
+
+val schemas : Types.tool_schema list

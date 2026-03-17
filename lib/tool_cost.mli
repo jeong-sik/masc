@@ -12,3 +12,5 @@ val handle_cost_log : context -> Yojson.Safe.t -> bool * string
 
 (** Handle masc_cost_report *)
 val handle_cost_report : context -> Yojson.Safe.t -> bool * string
+
+val schemas : Types.tool_schema list

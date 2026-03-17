@@ -541,7 +541,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_cost.dispatch { Tool_cost.agent_name } ~name ~args:arguments
     | Mod_walph ->
         (match state.Mcp_server.net with
-         | None -> None  (* net unavailable: skip walph, let other modules handle *)
+         | None -> Some (false, "walph requires net context (unavailable in stdio/test setups)")
          | Some net ->
            let ctx : _ Tool_walph.context = { config; agent_name; net; clock } in
            Tool_walph.dispatch ctx ~name ~args:arguments)
@@ -630,14 +630,13 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match tag_result with
   | Some result -> result
   | None ->
-    (* Fallback: try tag-registered modules whose schemas may not include
-       all their handled tools (e.g. masc_init is in tool_schemas_core_01
-       but dispatched by Tool_room), then non-tag modules. *)
+    (* Fallback: tag registry should handle all known tools.
+       This chain only catches tools whose names are not in any module's
+       schema list (e.g. dynamically generated tool names, schema-gap fills
+       in Tool_tag_init, or truly unknown tools). *)
     let try_dispatch f = f () in
     let fallback_result =
-      (* Tag-registered modules with known schema gaps *)
-      try_dispatch (fun () -> Tool_plan.dispatch { Tool_plan.config } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
+      (* Schema-gap modules: tools dispatched but not in any schema list *)
       try_dispatch (fun () -> Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args:arguments)
       |> function Some r -> Some r | None ->
       try_dispatch (fun () -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:arguments)
@@ -646,77 +645,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       |> function Some r -> Some r | None ->
       try_dispatch (fun () -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args:arguments)
       |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      (* Non-tag modules *)
-      try_dispatch (fun () -> Tool_run.dispatch { Tool_run.config } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_cache.dispatch { Tool_cache.config } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_tempo.dispatch { Tool_tempo.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () ->
-        Tool_mitosis.dispatch
-          (Tool_mitosis.make_context_with_eio ~config ~sw ~proc_mgr:state.Mcp_server.proc_mgr ~clock)
-          ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_code.dispatch { Tool_code.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_vote.dispatch { Tool_vote.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_social.dispatch { Tool_social.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_council.dispatch { base_path = config.base_path; agent_name; room_config = Some config } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_handover.dispatch { Tool_handover.config; agent_name; fs = state.Mcp_server.fs; proc_mgr = state.Mcp_server.proc_mgr; sw = Some sw } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_relay.dispatch { Tool_relay.config; agent_name; sw; proc_mgr = state.Mcp_server.proc_mgr } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_heartbeat.dispatch { Tool_heartbeat.config; agent_name; sw; clock } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_encryption.dispatch { Tool_encryption.state } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_hat.dispatch { Tool_hat.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_audit.dispatch { Tool_audit.config } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_rate_limit.dispatch { Tool_rate_limit.config; agent_name; registry } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_cost.dispatch { Tool_cost.agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      if String.length name >= 11 && String.equal (String.sub name 0 11) "masc_walph_" then
-        (match state.Mcp_server.net with
-         | None -> Some (false, "walph requires net")
-         | Some net ->
-           Tool_walph.dispatch { config; agent_name; net; clock } ~name ~args:arguments)
-      else
-      try_dispatch (fun () -> Tool_task.dispatch { Tool_task.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      (* Tool_control and Tool_misc already tried above (lines 647-649) — duplicates removed *)
-      try_dispatch (fun () -> Tool_suspend.dispatch { Tool_suspend.config; caller_agent = Some agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
       try_dispatch (fun () -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args:arguments)
       |> function Some r -> Some r | None ->
-      (match Tool_notifications.dispatch state.Mcp_server.session_registry
-               ~agent_name ~name arguments with
-       | Some result -> Some result
-       | None ->
-         if String.length name >= 14 && String.sub name 0 14 = "masc_gardener_" then
-           Some (Tool_gardener.dispatch () name arguments)
-         else
-           let inline_ctx : Tool_inline_dispatch.context = {
-             config; agent_name; registry; state; sw; clock; arguments;
-             mcp_session_id; write_mcp_session_agent;
-             wait_for_message = (fun registry ~agent_name ~timeout ->
-               wait_for_message_eio ~clock registry ~agent_name ~timeout);
-             governance_defaults = Mcp_server_eio_governance.governance_defaults;
-             save_governance = Mcp_server_eio_governance.save_governance;
-             load_mcp_sessions = Mcp_server_eio_governance.load_mcp_sessions;
-             save_mcp_sessions = Mcp_server_eio_governance.save_mcp_sessions;
-           } in
-           Tool_inline_dispatch.dispatch inline_ctx ~name)
+      None
     in
     (match fallback_result with
      | Some result -> result

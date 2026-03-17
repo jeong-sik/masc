@@ -187,25 +187,11 @@ let with_registry_rw f =
   try Eio.Mutex.use_rw ~protect:true registry_mutex f
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Effect.Unhandled _ ->
-      Log.Social.warn "registry_rw: Eio effect unhandled, running unprotected";
-      f ()
-  | Eio.Mutex.Poisoned _ ->
-      (* Poisoned = Eio mutex used from non-Eio thread, same as Effect.Unhandled *)
-      Log.Social.error "registry_rw: mutex poisoned, running unprotected";
-      f ()
 
 let with_registry_ro f =
   try Eio.Mutex.use_ro registry_mutex f
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Effect.Unhandled _ ->
-      Log.Social.warn "registry_ro: Eio effect unhandled, running unprotected";
-      f ()
-  | Eio.Mutex.Poisoned _ ->
-      (* Poisoned = Eio mutex used from non-Eio thread, same as Effect.Unhandled *)
-      Log.Social.error "registry_ro: mutex poisoned, running unprotected";
-      f ()
 
 let client_matches (client : client) (value : event) =
   let room_ok =

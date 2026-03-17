@@ -65,12 +65,14 @@ let swarm_config
     ?(max_parallel = 4)
     ?convergence
     ?timeout_sec
+    ?(budget : ST.resource_budget =
+        { max_total_tokens = None; max_total_time_sec = None; max_total_api_calls = None })
     ()
   : ST.swarm_config =
   let entries = List.map (fun (name, role, spec) ->
     entry_of_masc_spec ~name ~role spec
   ) specs in
-  { ST.entries; mode; convergence; max_parallel; prompt; timeout_sec }
+  { ST.entries; mode; convergence; max_parallel; prompt; timeout_sec; budget }
 
 (* ── OAS → MASC conversion ──────────────────────────────────────── *)
 

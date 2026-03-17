@@ -11,7 +11,19 @@
 
     The single [Eio.Mutex] guards only [Hashtbl] access.  [compute] functions
     execute without holding the lock, so nested calls for different keys
-    proceed without blocking. *)
+    proceed without blocking.
+
+    When no stale data is available, waiters use a bounded poll-retry loop
+    instead of [Condition.await] inside [Mutex.use_rw ~protect:true] to
+    prevent the cancellation-immune deadlock: [protect:true] disables Eio
+    cancellation, so a waiter blocked on [Condition.await] inside that
+    section can never be timed out or cancelled.  The poll loop sleeps
+    outside the mutex, remaining cancellable.
+
+    Ownership: each compute action carries its [cond] as an ownership
+    token.  Before writing back, the fiber checks via physical equality
+    that the table still holds its [cond].  This prevents an evicted
+    fiber from clobbering a replacement slot. *)
 
 type entry = {
   value : Yojson.Safe.t;
@@ -21,7 +33,7 @@ type entry = {
 
 type slot =
   | Ready of entry
-  | Computing of { cond : Eio.Condition.t; stale : Yojson.Safe.t option }
+  | Computing of { cond : Eio.Condition.t; started_at : float; stale : Yojson.Safe.t option }
 
 let table : (string, slot) Hashtbl.t = Hashtbl.create 16
 let mu = Eio.Mutex.create ()
@@ -31,7 +43,15 @@ let eio_available = ref false
     stale-while-revalidate can fork background fibers. *)
 let _bg_sw : Eio.Switch.t option ref = ref None
 
-let enable_eio () = eio_available := true
+type any_clock = Clock : _ Eio.Time.clock -> any_clock
+
+let clock_ref : any_clock option ref = ref None
+
+let enable_eio ?clock () =
+  eio_available := true;
+  match clock with
+  | Some clk -> clock_ref := Some (Clock clk)
+  | None -> ()
 
 let set_sw sw = _bg_sw := Some sw
 
@@ -41,16 +61,30 @@ let now () = Time_compat.now ()
     seconds after expiry while recomputation runs in the background. *)
 let stale_factor = 3.0
 
+(** Maximum seconds a waiter will poll for a [Computing] slot before evicting
+    it and recomputing.  Bounds worst-case latency to
+    [max_wait_sec + compute_time] instead of infinity. *)
+let max_wait_sec = 30.0
+
 (** Eio path: per-key locking with stampede protection + stale-while-revalidate.
 
     Three cases on cache lookup:
     1. Fresh ([now < expires_at]) — return immediately.
     2. Stale ([expires_at <= now < stale_until]) — return stale value, kick off
        background recompute if not already running.
-    3. Expired ([now >= stale_until]) or absent — block on compute. *)
+    3. Expired ([now >= stale_until]) or absent — block on compute.
+
+    When no stale data is available (case 3 or [Computing { stale = None }]),
+    waiters use bounded poll-retry instead of [Condition.await] to avoid
+    the cancellation-immune deadlock.  If a [Computing] slot is stuck beyond
+    [max_wait_sec], waiters evict it and recompute.
+
+    Waiter budget is reset when the watched [Computing] slot is replaced
+    (detected via [cond] physical identity change), preventing cascading
+    eviction of fresh slots. *)
 let get_or_compute_eio key ~ttl compute =
   let stale_grace = ttl *. stale_factor in
-  let rec try_get () =
+  let rec try_get ~waited ~watching_cond =
     let action =
       Eio.Mutex.use_rw ~protect:true mu (fun () ->
         match Hashtbl.find_opt table key with
@@ -60,44 +94,80 @@ let get_or_compute_eio key ~ttl compute =
         | Some (Ready entry) when entry.stale_until > now () ->
           (* Case 2: stale but within grace — serve stale, trigger bg recompute *)
           let cond = Eio.Condition.create () in
-          Hashtbl.replace table key (Computing { cond; stale = Some entry.value });
+          Hashtbl.replace table key
+            (Computing { cond; started_at = now (); stale = Some entry.value });
           `Stale (entry.value, cond)
         | Some (Computing { stale = Some stale_value; _ }) ->
           (* Another fiber is already recomputing; return stale *)
           `Hit stale_value
-        | Some (Computing { cond; stale = None }) ->
-          (* Computing with no stale data — wait *)
-          Eio.Condition.await cond mu;
-          `Retry
+        | Some (Computing { cond; started_at; stale = None }) ->
+          (* Computing with no stale data — poll-retry with bounded wait.
+             Reset waiter budget when the slot was replaced (different cond)
+             to prevent cascading eviction of fresh slots. *)
+          let waited =
+            match watching_cond with
+            | Some c when c != cond -> 0.0
+            | _ -> waited
+          in
+          let elapsed = now () -. started_at in
+          if elapsed > max_wait_sec || waited > max_wait_sec then begin
+            Printf.eprintf
+              "[WARN] Dashboard cache: evicting stale Computing slot for %s (%.1fs elapsed)\n%!"
+              key elapsed;
+            Hashtbl.remove table key;
+            Eio.Condition.broadcast cond;
+            let new_cond = Eio.Condition.create () in
+            Hashtbl.replace table key
+              (Computing { cond = new_cond; started_at = now (); stale = None });
+            `Compute new_cond
+          end else
+            `Wait cond
         | _ ->
-          (* Case 3: expired or absent — must block *)
+          (* Case 3: expired or absent — must compute *)
           let cond = Eio.Condition.create () in
-          Hashtbl.replace table key (Computing { cond; stale = None });
+          Hashtbl.replace table key
+            (Computing { cond; started_at = now (); stale = None });
           `Compute cond)
     in
     match action with
     | `Hit v -> v
-    | `Retry -> try_get ()
+    | `Wait slot_cond ->
+      (* Sleep briefly outside the mutex — this IS cancellable since
+         Eio.Time.sleep is a cooperative suspension point. *)
+      (match !clock_ref with
+       | Some (Clock clk) -> Eio.Time.sleep clk 0.5
+       | None -> Eio.Fiber.yield ());
+      try_get ~waited:(waited +. 0.5) ~watching_cond:(Some slot_cond)
     | `Stale (stale_value, cond) ->
       let do_bg_compute () =
         match compute () with
         | value ->
           let ts = now () in
           Eio.Mutex.use_rw ~protect:true mu (fun () ->
-            Hashtbl.replace table key
-              (Ready { value; expires_at = ts +. ttl;
-                       stale_until = ts +. ttl +. stale_grace }));
+            (* Only write back if we still own the slot *)
+            match Hashtbl.find_opt table key with
+            | Some (Computing { cond = c; _ }) when c == cond ->
+              Hashtbl.replace table key
+                (Ready { value; expires_at = ts +. ttl;
+                         stale_until = ts +. ttl +. stale_grace })
+            | _ ->
+              Printf.eprintf
+                "[INFO] Dashboard cache: bg-revalidate discarded for %s (slot replaced)\n%!"
+                key);
           Eio.Condition.broadcast cond
         | exception exn ->
           Printf.eprintf "[WARN] Dashboard cache bg-revalidate failed (%s): %s\n%!"
             key (Printexc.to_string exn);
-          (* Restore stale entry so next request can still serve it *)
-          let ts = now () in
           Eio.Mutex.use_rw ~protect:true mu (fun () ->
-            Hashtbl.replace table key
-              (Ready { value = stale_value;
-                       expires_at = ts;
-                       stale_until = ts +. stale_grace }));
+            match Hashtbl.find_opt table key with
+            | Some (Computing { cond = c; _ }) when c == cond ->
+              (* Restore stale entry so next request can still serve it *)
+              let ts = now () in
+              Hashtbl.replace table key
+                (Ready { value = stale_value;
+                         expires_at = ts;
+                         stale_until = ts +. stale_grace })
+            | _ -> ());
           Eio.Condition.broadcast cond
       in
       (match !_bg_sw with
@@ -109,19 +179,30 @@ let get_or_compute_eio key ~ttl compute =
        | value ->
          let ts = now () in
          Eio.Mutex.use_rw ~protect:true mu (fun () ->
-           Hashtbl.replace table key
-             (Ready { value; expires_at = ts +. ttl;
-                      stale_until = ts +. ttl +. stale_grace }));
+           (* Only write back if we still own the slot *)
+           match Hashtbl.find_opt table key with
+           | Some (Computing { cond = c; _ }) when c == cond ->
+             Hashtbl.replace table key
+               (Ready { value; expires_at = ts +. ttl;
+                        stale_until = ts +. ttl +. stale_grace })
+           | _ ->
+             Printf.eprintf
+               "[INFO] Dashboard cache: compute result discarded for %s (slot replaced)\n%!"
+               key);
          Eio.Condition.broadcast cond;
          value
        | exception exn ->
          let bt = Printexc.get_raw_backtrace () in
          Eio.Mutex.use_rw ~protect:true mu (fun () ->
-           Hashtbl.remove table key);
+           (* Only remove if we still own the slot *)
+           match Hashtbl.find_opt table key with
+           | Some (Computing { cond = c; _ }) when c == cond ->
+             Hashtbl.remove table key
+           | _ -> ());
          Eio.Condition.broadcast cond;
          Printexc.raise_with_backtrace exn bt)
   in
-  try_get ()
+  try_get ~waited:0.0 ~watching_cond:None
 
 (** Non-Eio fallback: no mutex, no concurrency. *)
 let get_or_compute_simple key ~ttl compute =

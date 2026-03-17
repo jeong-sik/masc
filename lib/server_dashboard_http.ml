@@ -406,7 +406,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       (Option.value ~default:"" actor)
       (Option.value ~default:"" fixture)
   in
-  Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:3.0
+  Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:30.0
     ~clock ~timeout_sec:30.0 (fun () ->
     Dashboard_execution.json ?actor ?fixture
       ~config:state.Mcp_server.room_config ~sw ~clock

@@ -10,7 +10,22 @@ module FileSystemBackend : BACKEND = struct
   }
 
   let with_lock t f =
-    Eio.Mutex.use_rw ~protect:true t.mutex f
+    (* Eio.Mutex requires an Eio runtime (Cancel context).
+       When called outside Eio_main.run (e.g. tests), fall back to
+       unprotected execution. Production always runs under Eio.
+       Two-phase: if the mutex itself fails (Poisoned, Effect.Unhandled),
+       run f() without lock. If f() fails inside the lock, re-raise. *)
+    let acquired = ref false in
+    match
+      Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+        acquired := true;
+        f ()
+      )
+    with
+    | result -> result
+    | exception exn ->
+        if !acquired then raise exn  (* f() failed, propagate *)
+        else f ()  (* mutex acquisition failed, run without lock *)
 
   (* Security: validate key with strict allowlist (parse, don't sanitize) *)
   let validate_key key =

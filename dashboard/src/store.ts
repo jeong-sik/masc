@@ -69,6 +69,31 @@ export interface ShellCounts {
 
 export const shellCounts = signal<ShellCounts | null>(null)
 
+// --- Provider capacity ---
+
+export interface GlmModelStats {
+  model: string
+  in_flight: number
+  limit: number
+}
+
+export interface ProviderCapacity {
+  glm_pool: {
+    models: GlmModelStats[]
+    total_capacity: number
+    current_load: number
+    has_capacity: boolean
+  }
+  agent_capacity: {
+    gardener_enabled: boolean
+    min_agents: number
+    target_agents: number
+    max_agents: number
+  }
+}
+
+export const providerCapacity = signal<ProviderCapacity | null>(null)
+
 // --- Core state signals ---
 
 export const agents = signal<Agent[]>([])
@@ -327,6 +352,9 @@ export async function refreshShell(): Promise<void> {
         tasks: data.counts.tasks ?? 0,
         keepers: data.counts.keepers ?? 0,
       }
+    }
+    if (data.providers) {
+      providerCapacity.value = data.providers as ProviderCapacity
     }
   } catch (err) {
     console.error('Dashboard shell fetch error:', err)

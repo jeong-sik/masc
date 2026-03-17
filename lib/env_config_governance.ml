@@ -299,9 +299,10 @@ module Timeouts = struct
     get_float ~default:30.0 "MASC_GRAPHQL_TIMEOUT_SEC"
 
   (** Neo4j / zombie-cleanup interval (seconds).
-      Controls the zero-zombie Pulse rhythm in the orchestrator. *)
+      Controls the zero-zombie Pulse rhythm in the orchestrator.
+      Clamped to >= 1.0 to prevent tight-loop when misconfigured. *)
   let neo4j_timeout_sec =
-    get_float ~default:60.0 "MASC_NEO4J_TIMEOUT_SEC"
+    Float.max 1.0 (get_float ~default:60.0 "MASC_NEO4J_TIMEOUT_SEC")
 
   (** Agent crash-recovery timeout (seconds).
       Agents with no heartbeat beyond this threshold are considered crashed. *)
@@ -309,9 +310,10 @@ module Timeouts = struct
     get_float ~default:360.0 "MASC_AGENT_TIMEOUT_SEC"
 
   (** SSE keepalive interval (seconds).
-      Frequency of `: keepalive` frames on command-plane SSE streams. *)
+      Frequency of `: keepalive` frames on command-plane SSE streams.
+      Clamped to >= 1.0 to prevent tight-loop when misconfigured. *)
   let sse_keepalive_sec =
-    get_float ~default:30.0 "MASC_SSE_KEEPALIVE_SEC"
+    Float.max 1.0 (get_float ~default:30.0 "MASC_SSE_KEEPALIVE_SEC")
 
   (** A2A event buffer size per subscription.
       Caps the in-memory event list to prevent unbounded growth. *)

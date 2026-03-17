@@ -657,9 +657,10 @@ let validate_target_file ~workdir target_file =
     else
       let real_path = Unix.realpath abs in
       let real_workdir = Unix.realpath workdir in
-      let prefix_len = String.length real_workdir in
-      if String.length real_path >= prefix_len
-         && String.sub real_path 0 prefix_len = real_workdir then
+      let prefix = real_workdir ^ "/" in
+      if real_path = real_workdir
+         || (String.length real_path >= String.length prefix
+             && String.sub real_path 0 (String.length prefix) = prefix) then
         Result.ok real_path
       else
         Result.error (Printf.sprintf
@@ -935,7 +936,9 @@ let add_insight (state : loop_state) msg =
 let record_cycle (state : loop_state) ~hypothesis ~score_before ~score_after
     ~commit_hash ~elapsed_ms ~model_used =
   let delta = score_after -. score_before in
-  let decision = if score_after > score_before then Keep else Discard in
+  (* Compare against the maintained baseline, not score_before which can dip
+     below baseline due to metric noise — preventing ratchet-down regressions *)
+  let decision = if score_after > state.baseline then Keep else Discard in
   let record = {
     cycle = state.current_cycle;
     hypothesis;

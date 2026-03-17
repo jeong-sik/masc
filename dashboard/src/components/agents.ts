@@ -44,6 +44,12 @@ const selectedQueueId = signal<string | null>(null)
 const selectedSessionId = signal<string | null>(null)
 const selectedOperationId = signal<string | null>(null)
 
+const TERMINAL_STATUSES = new Set(['completed', 'interrupted', 'failed', 'cancelled'])
+
+function isTerminalStatus(status?: string | null): boolean {
+  return TERMINAL_STATUSES.has((status ?? '').trim().toLowerCase())
+}
+
 function toneClass(tone?: string | null): string {
   if (tone === 'bad' || tone === 'critical' || tone === 'offline') return 'bad'
   if (tone === 'warn' || tone === 'paused' || tone === 'blocked' || tone === 'interrupted') return 'warn'
@@ -64,8 +70,14 @@ function statusLabel(value?: string | null): string {
       return '일시정지'
     case 'blocked':
       return '막힘'
+    case 'completed':
+      return '완료'
     case 'interrupted':
       return '중단됨'
+    case 'failed':
+      return '실패'
+    case 'cancelled':
+      return '취소됨'
     case 'warn':
       return '주의'
     case 'bad':
@@ -234,9 +246,10 @@ function HandoffButtons({
 }
 
 function QueueCard({ item, selected }: { item: DashboardExecutionQueueItem; selected: boolean }) {
+  const terminal = isTerminalStatus(item.status)
   return html`
     <button
-      class="mission-card-select ${selected ? 'active' : ''}"
+      class="mission-card-select ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.queue-card"
       onClick=${() => {
         selectedQueueId.value = selected ? null : item.id
@@ -249,25 +262,56 @@ function QueueCard({ item, selected }: { item: DashboardExecutionQueueItem; sele
           <div class="mission-card-target">${item.kind === 'session' ? item.target_id : item.linked_session_id ?? item.target_id}</div>
           <div class="mission-card-title">${item.summary}</div>
         </div>
-        <span class="command-chip ${toneClass(item.severity)}">${statusLabel(item.status ?? item.severity)}</span>
+        <span class="command-chip ${terminal ? 'muted' : toneClass(item.severity)}">${statusLabel(item.status ?? item.severity)}</span>
       </div>
       <div class="mission-card-meta">
         <span>${queueKindLabel(item.kind)}</span>
         ${item.linked_operation_id ? html`<span>연결 작전 · ${item.linked_operation_id}</span>` : null}
         ${item.last_seen_at ? html`<span><${TimeAgo} timestamp=${item.last_seen_at} /></span>` : null}
       </div>
-      <${HandoffButtons} intervene=${item.intervene_handoff} command=${item.command_handoff} />
+      <${HandoffButtons}
+        intervene=${terminal ? null : item.intervene_handoff}
+        command=${item.command_handoff}
+      />
     </button>
   `
 }
 
+function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutionQueueItem[] }) {
+  const activeItems = queueRows.filter(item => !isTerminalStatus(item.status))
+  const terminalItems = queueRows.filter(item => isTerminalStatus(item.status))
+
+  return html`
+    <div class="monitor-section-head">
+      <h2 class="monitor-headline">개입이 필요한 실행</h2>
+      <p class="monitor-subheadline">진행 중인 세션과 작전 중 막힌 항목을 보여줍니다. 종료된 세션은 하단에 접혀 있습니다.</p>
+    </div>
+    <div class="monitor-alert-list">
+      ${activeItems.length === 0
+        ? html`<div class="empty-state">지금은 개입이 필요한 실행이 없습니다.</div>`
+        : activeItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)}
+    </div>
+    ${terminalItems.length > 0
+      ? html`
+          <details class="runtime-collapsible" data-testid="execution.queue-terminal">
+            <summary class="runtime-summary">종료된 세션 ${terminalItems.length}건</summary>
+            <div class="monitor-alert-list">
+              ${terminalItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)}
+            </div>
+          </details>
+        `
+      : null}
+  `
+}
+
 function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrief; selected: boolean }) {
+  const terminal = isTerminalStatus(brief.status)
   const liveCount = brief.active_count ?? 0
   const seenCount = brief.seen_count ?? liveCount
   const plannedCount = brief.planned_count ?? brief.member_names.length
   return html`
     <button
-      class="mission-card-select ${selected ? 'active' : ''}"
+      class="mission-card-select ${selected ? 'active' : ''} ${terminal ? 'terminated' : ''}"
       data-testid="execution.session-card"
       onClick=${() => {
         selectedSessionId.value = selected ? null : brief.session_id
@@ -279,7 +323,7 @@ function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrie
           <div class="mission-card-target">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           <div class="mission-card-title">${brief.goal}</div>
         </div>
-        <span class="command-chip ${toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
+        <span class="command-chip ${terminal ? 'muted' : toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
       </div>
       <div class="mission-card-meta">
         <span>건강도 · ${statusLabel(brief.health ?? 'ok')}</span>
@@ -295,8 +339,41 @@ function SessionCard({ brief, selected }: { brief: DashboardExecutionSessionBrie
       <div class="monitor-footnote">
         ${brief.worker_gap_summary ?? `관측 기준 · ${brief.counts_basis ?? 'recent_turns'}`}
       </div>
-      <${HandoffButtons} intervene=${brief.intervene_handoff} command=${brief.command_handoff} />
+      <${HandoffButtons}
+        intervene=${terminal ? null : brief.intervene_handoff}
+        command=${brief.command_handoff}
+      />
     </button>
+  `
+}
+
+function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecutionSessionBrief[] }) {
+  const activeSessions = sessionRows.filter(row => !isTerminalStatus(row.status))
+  const terminalSessions = sessionRows.filter(row => isTerminalStatus(row.status))
+
+  return html`
+    <div class="monitor-section-head">
+      <h2 class="monitor-headline">영향받는 세션</h2>
+      <p class="monitor-subheadline">대기열에서 고른 실행이 어떤 세션 목표와 실행 막힘을 갖는지 요약합니다.</p>
+    </div>
+    <div class="monitor-list">
+      ${activeSessions.length === 0 && terminalSessions.length === 0
+        ? html`<div class="empty-state">선택된 실행과 연결된 세션이 없습니다.</div>`
+        : activeSessions.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)}
+      ${activeSessions.length === 0 && terminalSessions.length > 0
+        ? html`<div class="empty-state">진행 중인 세션이 없습니다.</div>`
+        : null}
+    </div>
+    ${terminalSessions.length > 0
+      ? html`
+          <details class="runtime-collapsible" data-testid="execution.sessions-terminal">
+            <summary class="runtime-summary">종료된 세션 ${terminalSessions.length}건</summary>
+            <div class="monitor-list">
+              ${terminalSessions.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)}
+            </div>
+          </details>
+        `
+      : null}
   `
 }
 
@@ -561,15 +638,7 @@ export function Execution() {
         semanticId="execution.queue"
         testId="execution.queue"
       >
-        <div class="monitor-section-head">
-          <h2 class="monitor-headline">지금 막힌 실행과 다음 인계</h2>
-          <p class="monitor-subheadline">세션과 작전을 한 대기열로 보고, 어디를 먼저 개입 화면과 원인 화면으로 넘길지 판단합니다.</p>
-        </div>
-        <div class="monitor-alert-list">
-          ${queueRows.length === 0
-            ? html`<div class="empty-state">지금은 막힌 실행이 없습니다.</div>`
-            : queueRows.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)}
-        </div>
+        ${html`<${ExecutionQueueBody} queueRows=${queueRows} />`}
       <//>
 
       <div class="agents-workbench">
@@ -579,15 +648,7 @@ export function Execution() {
           semanticId="execution.sessions"
           testId="execution.session-briefs"
         >
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">영향받는 세션</h2>
-            <p class="monitor-subheadline">대기열에서 고른 실행이 어떤 세션 목표와 실행 막힘을 갖는지 요약합니다.</p>
-          </div>
-          <div class="monitor-list">
-            ${sessionRows.length === 0
-              ? html`<div class="empty-state">선택된 실행과 연결된 세션이 없습니다.</div>`
-              : sessionRows.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)}
-          </div>
+          ${html`<${SessionBriefsBody} sessionRows=${sessionRows} />`}
         <//>
 
         <${Card}

@@ -587,6 +587,14 @@ button.monitor-row.bad.state-quiet {
   cursor: pointer;
 }
 
+.mission-card-select.terminated {
+  opacity: 0.55;
+}
+
+.mission-card-select.terminated:hover {
+  opacity: 0.75;
+}
+
 .mission-card-disclosure {
   padding-top: 4px;
   border-top: 1px solid rgba(255,255,255,0.06);

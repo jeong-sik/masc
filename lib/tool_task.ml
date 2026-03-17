@@ -263,7 +263,7 @@ let handle_transition ctx args =
     if is_version_mismatch r && attempt < max_cas_retries then begin
       Log.Task.info "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
         task_id (attempt + 1) max_cas_retries (cas_retry_delay_s *. 1000.0);
-      Unix.sleepf cas_retry_delay_s;
+      Time_compat.sleep cas_retry_delay_s;
       try_transition (attempt + 1)
     end else
       r

@@ -110,7 +110,7 @@ let execute_with_retry_sync ~policy f =
       { value = Error last_error; attempts = attempt; total_delay_ms = total_delay; errors = List.rev errors }
     else
       let delay = calculate_delay policy attempt in
-      if delay > 0 then Unix.sleepf (float_of_int delay /. 1000.0);
+      if delay > 0 then Time_compat.sleep (float_of_int delay /. 1000.0);
       match f () with
       | Ok v ->
           { value = Ok v; attempts = attempt + 1; total_delay_ms = total_delay + delay; errors = List.rev errors }

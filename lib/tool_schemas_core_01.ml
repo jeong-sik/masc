@@ -623,4 +623,22 @@ Returns matched memories with relevance scores, sorted by relevance.|};
       ("required", `List [`String "query"]);
     ];
   };
+  {
+    name = "masc_discover_tools";
+    description = "Search the full MASC tool catalog by keyword. The default tools/list shows only tools for the current mode. Use this to find specialized tools (TRPG, gardener, perpetual, governance, etc.) that are not in the default list but still callable via tools/call.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Search keyword (matches tool name and description). Examples: 'trpg', 'gardener', 'perpetual', 'vote', 'encrypt'");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max results (default: 20)");
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
 ]

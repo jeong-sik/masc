@@ -423,7 +423,19 @@ let handle_request
                        match TP.requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
                        | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier; cursor } ->
-                           handle_list_tools_eio ~profile ?names ~include_hidden
+                           (* Default to room config mode instead of Full.
+                              Agents see only tools enabled for the current mode
+                              (e.g. ~80 in Coding). Use masc_discover_tools or
+                              mode=full param to access the full catalog. *)
+                           let list_profile =
+                             match mode with
+                             | Some _ -> profile  (* explicit mode param: respect it *)
+                             | None ->
+                               let room_path = Room.masc_dir state.Mcp_server.room_config in
+                               let config = Config.load room_path in
+                               Role_filtered config.Config.mode
+                           in
+                           handle_list_tools_eio ~profile:list_profile ?names ~include_hidden
                              ~include_deprecated ~include_usage ?mode ?tier ?cursor
                              state id)
                    | "tools/call" ->
@@ -431,7 +443,9 @@ let handle_request
                        | Some params ->
                            (try
                              let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
-                             if not (TP.tool_allowed_in_profile state profile name) then
+                             (* tools/call uses Full profile so that discovered tools
+                               (not in the default tools/list) remain callable. *)
+                            if not (TP.tool_allowed_in_profile state Full name) then
                                make_error ~id (-32601)
                                  (Printf.sprintf
                                     "Tool '%s' is not available on this MCP endpoint."

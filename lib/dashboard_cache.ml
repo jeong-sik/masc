@@ -67,9 +67,10 @@ let now () = Time_compat.now ()
 let stale_factor = 10.0
 
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
-    it and recomputing.  Bounds worst-case latency to
-    [max_wait_sec + compute_time] instead of infinity. *)
-let max_wait_sec = 30.0
+    it and recomputing.  Must exceed the longest endpoint timeout (currently
+    120s for /execution) to avoid evicting slots mid-compute.  Bounds
+    worst-case latency to [max_wait_sec + compute_time]. *)
+let max_wait_sec = 130.0
 
 (** Eio path: per-key locking with stampede protection + stale-while-revalidate.
 

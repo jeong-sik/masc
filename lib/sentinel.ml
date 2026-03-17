@@ -527,21 +527,24 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
         let petitions_created = ref 0 in
         (* Track titles already submitted to avoid duplicate petitions per sweep *)
         let submitted_keys : (string, unit) Hashtbl.t = Hashtbl.create 8 in
-        let submit ~title ~subject_type ~risk_class ?(source_refs=[]) () =
+        let submit ~title ~subject_type ~risk_class ?requested_action ?(source_refs=[]) () =
           (* Dedup within a single sweep: skip if we already submitted this title *)
           if Hashtbl.mem submitted_keys title then ()
           else begin
           Hashtbl.replace submitted_keys title ();
-          let default_action : Council.Governance_v2.action_request option =
-            match subject_type with
-            | "task" -> Some { action_type = "release_task"; target_type = Some "task"; target_id = None; payload = None }
-            | "keeper" -> Some { action_type = "restart_keeper"; target_type = Some "keeper"; target_id = None; payload = None }
-            | "board_post" -> Some { action_type = "flag_post"; target_type = Some "board_post"; target_id = None; payload = None }
-            | _ -> None
+          let action : Council.Governance_v2.action_request option =
+            match requested_action with
+            | Some _ -> requested_action
+            | None ->
+                match subject_type with
+                | "task" -> Some { action_type = "release_task"; target_type = Some "task"; target_id = None; payload = None }
+                | "keeper" -> Some { action_type = "restart_keeper"; target_type = Some "keeper"; target_id = None; payload = None }
+                | "board_post" -> Some { action_type = "flag_post"; target_type = Some "board_post"; target_id = None; payload = None }
+                | _ -> None
           in
           match Council.Governance_v2.submit_petition base_path
             ~title ~origin:"sentinel" ~subject_type ~risk_class
-            ~requested_action:default_action ~source_refs ~created_by:agent_name with
+            ~requested_action:action ~source_refs ~created_by:agent_name with
           | Ok result ->
               incr petitions_created;
               (* Auto-submit brief for new cases to unblock ruling pipeline *)
@@ -640,6 +643,44 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
               ~subject_type:"board_post" ~risk_class:Council.Governance_v2.Low
               ~source_refs:["post-" ^ Board.Post_id.to_string p.id] ()
         ) board_posts;
+
+        (* 4. Anomaly-driven parameter adjustment petitions.
+           When lodge automation posts exceed 80% of daily cap within the sweep
+           window, propose reducing max_posts_per_day via governance. *)
+        let current_max_posts =
+          Runtime_params.get Governance_registry.lodge_max_posts_per_day
+        in
+        let recent_automation_posts =
+          (try
+             let posts = Board_dispatch.list_posts
+               ~sort_by:Board_dispatch.Recent ~limit:200 () in
+             let one_day_ago = now_f -. 86400.0 in
+             List.filter (fun (p : Board.post) ->
+               p.post_kind = Board.Automation_post && p.created_at > one_day_ago
+             ) posts |> List.length
+           with _ -> 0)
+        in
+        if recent_automation_posts > 0
+           && current_max_posts > 0
+           && recent_automation_posts >= (current_max_posts * 80 / 100) then begin
+          let proposed = max 1 (current_max_posts * 70 / 100) in
+          submit
+            ~title:(sprintf
+              "Lodge automation post volume high (%d/%d daily cap). Propose reducing to %d."
+              recent_automation_posts current_max_posts proposed)
+            ~subject_type:"param_change"
+            ~risk_class:Council.Governance_v2.Low
+            ~requested_action:{
+              Council.Governance_v2.action_type = "set_param";
+              target_type = Some "runtime_param";
+              target_id = Some "lodge.max_posts_per_day";
+              payload = Some (`Assoc [
+                ("param_key", `String "lodge.max_posts_per_day");
+                ("value", `Int proposed);
+              ]);
+            }
+            ~source_refs:["anomaly-lodge-post-volume"] ()
+        end;
 
         (* BUG-007 FIX: Execute Ready_auto_execute cases via execute_action.
            Previous code only marked status = Auto_executed without running

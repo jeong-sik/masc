@@ -1019,6 +1019,86 @@ let handle_runtime_params _ctx _args =
   in
   (true, Yojson.Safe.pretty_to_string json)
 
+let handle_set_param ctx args =
+  let param_key = get_string args "param_key" "" |> String.trim in
+  let value_json =
+    match Yojson.Safe.Util.member "value" args with
+    | `Null -> None
+    | v -> Some v
+  in
+  let reason = get_string args "reason" "" in
+  if param_key = "" then (false, "param_key is required")
+  else
+    match value_json with
+    | None -> (false, "value is required")
+    | Some value ->
+        let risk =
+          Governance_registry.surfaces
+          |> List.find_opt (fun (s : Governance_registry.surface) ->
+               List.mem param_key s.param_keys)
+          |> Option.map (fun (s : Governance_registry.surface) -> s.risk)
+          |> Option.value ~default:"low"
+        in
+        if risk = "high" then
+          let title =
+            Printf.sprintf "Set %s = %s%s" param_key
+              (Yojson.Safe.to_string value)
+              (if reason <> "" then " (" ^ reason ^ ")" else "")
+          in
+          let petition_args =
+            `Assoc
+              [
+                ("title", `String title);
+                ("origin", `String "agent");
+                ("subject_type", `String "param_change");
+                ("risk_class", `String "high");
+                ( "requested_action",
+                  `Assoc
+                    [
+                      ("action_type", `String "set_param");
+                      ( "payload",
+                        `Assoc
+                          [
+                            ("param_key", `String param_key);
+                            ("value", value);
+                          ] );
+                    ] );
+                ("source_refs", `List [ `String param_key ]);
+              ]
+          in
+          let (ok, msg) = handle_petition_submit ctx petition_args in
+          if ok then
+            (true, Printf.sprintf "High-risk parameter. Governance petition created.\n%s" msg)
+          else
+            (false, Printf.sprintf "Failed to create governance petition: %s" msg)
+        else begin
+          let old_value =
+            match Runtime_params.registry ()
+                  |> List.find_opt (fun (k, _, _, _) -> k = param_key) with
+            | Some (_, current, _, _) -> current
+            | None -> `Null
+          in
+          match Runtime_params.set_by_key param_key value with
+          | Error msg -> (false, Printf.sprintf "set_param failed: %s" msg)
+          | Ok () ->
+              Runtime_params.persist ~base_path:ctx.base_path;
+              Runtime_params.record_audit ~base_path:ctx.base_path
+                ~key:param_key ~old_value ~new_value:value
+                ~actor:ctx.agent_name ();
+              Sse.broadcast
+                (`Assoc
+                   [
+                     ("type", `String "governance_param_changed");
+                     ("param_key", `String param_key);
+                     ("old_value", old_value);
+                     ("new_value", value);
+                     ("actor", `String ctx.agent_name);
+                   ]);
+              (true,
+               Printf.sprintf "Set %s = %s (low-risk, applied immediately)"
+                 param_key (Yojson.Safe.to_string value))
+        end
+
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_petition_submit" -> Some (handle_petition_submit ctx args)
@@ -1030,6 +1110,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_governance_status" -> Some (handle_governance_status ctx args)
   | "masc_governance_feed" -> Some (handle_governance_feed ctx args)
   | "masc_runtime_params" -> Some (handle_runtime_params ctx args)
+  | "masc_set_param" -> Some (handle_set_param ctx args)
   | "masc_route" -> Some (handle_route ctx args)
   | "masc_execute" -> Some (handle_execute ctx args)
   | "masc_execute_dry_run" -> Some (handle_execute_dry_run ctx args)

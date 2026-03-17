@@ -537,6 +537,7 @@
    procedural_memory
    oas_events
    oas_checkpoint_bridge
+   oas_swarm_bridge
    tool_schemas_plan
  tool_schemas_portal
  tool_schemas_worktree
@@ -793,6 +794,7 @@
    cohttp
    cohttp-eio
    agent_sdk
+   agent_sdk.swarm
    uri
    tls
    tls-eio

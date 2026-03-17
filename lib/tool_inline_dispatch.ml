@@ -25,8 +25,6 @@
     - masc_convo_*
 *)
 
-let schemas = Tool_schemas_inline.schemas
-
 type result = bool * string
 
 (** Context record capturing all bindings from execute_tool_eio

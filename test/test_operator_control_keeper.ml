@@ -398,6 +398,7 @@ let test_keeper_msg_auto_team_session_bridge () =
 
 
 let test_manual_lodge_tick_updates_observable_state () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)

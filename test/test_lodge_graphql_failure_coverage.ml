@@ -50,6 +50,7 @@ let () = test "load_lodge_agents_full_invalid_endpoint_errors_cleanly" (fun () -
       | Error msg -> assert (String.length msg > 0)))
 
 let () = test "tool_lodge_invalid_endpoint_uses_builtin_cache_fallback" (fun () ->
+  Eio_main.run @@ fun _env ->
   with_env "GRAPHQL_URL" (Some "http://127.0.0.1:9/graphql") (fun () ->
       Tool_lodge.load_agents_config ();
       let agents = Tool_lodge.get_all_agents () in

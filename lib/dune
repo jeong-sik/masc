@@ -20,10 +20,12 @@
    board_core
    board_votes
    board_pg
+   board_pg_queries
    board_dispatch
    board_listener
    capability_registry
    error
+   backend_core
    backend
    backend_eio
    backend_eio_compression
@@ -47,6 +49,7 @@
    cp_cleanup
    cp_lifecycle
    cp_lifecycle_swarm_live
+   cp_lifecycle_swarm_live_core
    cp_lifecycle_search
    cp_lifecycle_intents
    cp_lifecycle_policy
@@ -105,6 +108,7 @@
    server_h2_gateway_helpers
    server_h2_gateway_cp_write
    server_h2_gateway_routes_extra
+   server_h2_gateway_routes_cp
    server_runtime_bootstrap
    server_command_plane_http
    server_command_plane_http_support
@@ -113,6 +117,7 @@
    server_command_plane_http_help
    server_social_http
    server_mcp_transport_http
+   server_mcp_transport_http_protocol
    server_mcp_transport_http_types
    server_mcp_transport_http_session
    server_mcp_transport_http_headers
@@ -130,6 +135,7 @@
    encryption
    file_lock_eio
    federation
+   federation_types
    gcm_compat
    glm_pool
    graphql_client
@@ -401,6 +407,7 @@
    tool_team_session_routing
    tool_team_session_routing_workers
    tool_team_session_step
+   tool_team_session_step_types
    tool_team_session_schemas
    tool_heartbeat
    tool_encryption
@@ -421,6 +428,7 @@
    tool_misc
    tool_agent_timeline
    tool_llama
+   tool_llama_core
    tool_board
    tool_command_plane
    tool_command_plane_support
@@ -434,6 +442,7 @@
    tool_command_plane_schemas_02
    tool_lodge
    tool_mdal
+   tool_mdal_schemas
    lodge_daemon
    gardener_types
    gardener_state
@@ -452,6 +461,7 @@
    tool_metrics
    tool_harness_health
    tool_inline_dispatch
+   tool_inline_dispatch_extra
    tool_unified
    tool_help_registry
    tool_registry
@@ -488,6 +498,7 @@
    build_identity
   voice_config
   voice_bridge_eio
+  voice_bridge_eio_core
   voice_bridge
   voice_session_manager
   voice_stream
@@ -520,6 +531,7 @@
    keeper_exec_context
    keeper_exec_autonomy
    keeper_exec_proactive
+   keeper_exec_social
 
    keeper_exec_room
    keeper_prompt
@@ -607,6 +619,7 @@
    trpg_visibility
    trpg_rule
    trpg_rule_dnd5e_lite
+   trpg_rule_dnd5e_lite_core
    trpg_engine_replay
    trpg_slot
    trpg_slot_rule
@@ -748,6 +761,7 @@
   keeper_exec_persona
   keeper_exec_context
   keeper_exec_autonomy
+  keeper_exec_social
   keeper_exec_proactive
   keeper_exec_room
   keeper_turn_session

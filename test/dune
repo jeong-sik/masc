@@ -57,6 +57,12 @@
  (libraries masc_mcp alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))
 
+; Runtime params + governance registry tests (requires Eio.Mutex)
+(test
+ (name test_runtime_params)
+ (modules test_runtime_params)
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
+
 ; Room coverage tests (claim_next auto-release, batch ops, transitions)
 ; Requires eio_main because Room.init uses Eio.Mutex internally
 (test

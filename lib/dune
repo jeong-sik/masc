@@ -196,6 +196,7 @@
    langfuse
    chain_spawn_registry
    chain_executor_helpers
+   chain_executor_leaf
    chain_executor_eio
    chain_orchestrator_eio
    chain_run_store

@@ -76,22 +76,9 @@ let to_oas_message (m : message) : Agent_sdk.Types.message option =
     Some { Agent_sdk.Types.role = Assistant; content = [Text m.content] }
 
 let of_oas_message (m : Agent_sdk.Types.message) : message =
-  let role = match m.role with
-    | Agent_sdk.Types.User -> User
-    | Agent_sdk.Types.Assistant -> Assistant
-    | Agent_sdk.Types.System -> System
-    | Agent_sdk.Types.Tool -> Tool
-  in
-  let content =
-    m.content
-    |> List.filter_map (fun (block : Agent_sdk.Types.content_block) ->
-         match block with
-         | Agent_sdk.Types.Text s -> Some s
-         | Agent_sdk.Types.ToolResult { content; _ } -> Some content
-         | _ -> None)
-    |> String.concat "\n"
-  in
-  { role; content; name = None; tool_call_id = None }
+  (* Role is now the same type -- no mapping needed *)
+  let content = Agent_sdk.Types.text_of_content m.content in
+  { role = m.role; content; name = None; tool_call_id = None }
 
 let of_oas_usage (u : Agent_sdk.Types.api_usage) : token_usage =
   {

@@ -31,7 +31,7 @@ type model_spec = {
   cost_per_1k_output : float;
 }
 
-type role = System | User | Assistant | Tool
+type role = Agent_sdk.Types.role = System | User | Assistant | Tool
 
 type message = {
   role : role;
@@ -96,11 +96,7 @@ let string_of_provider = function
   | OpenRouter -> "openrouter"
   | Custom s -> sprintf "custom(%s)" s
 
-let string_of_role = function
-  | System -> "system"
-  | User -> "user"
-  | Assistant -> "assistant"
-  | Tool -> "tool"
+let string_of_role = Agent_sdk.Types.role_to_string
 
 let llama_default = {
   provider = Llama;

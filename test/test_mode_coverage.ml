@@ -27,7 +27,6 @@ let test_category_to_string () =
   check string "consensus" "consensus" (Mode.category_to_string Mode.Consensus);
   check string "ecosystem" "ecosystem" (Mode.category_to_string Mode.Ecosystem);
   check string "trpg" "trpg" (Mode.category_to_string Mode.TRPG);
-  check string "risc" "risc" (Mode.category_to_string Mode.RISC);
   check string "unknown" "unknown" (Mode.category_to_string Mode.Unknown)
 
 let test_category_of_string_valid () =
@@ -48,8 +47,7 @@ let test_category_of_string_valid () =
   check (option bool) "plan" (Some true) (Option.map (fun c -> c = Mode.Plan) (Mode.category_of_string "plan"));
   check (option bool) "consensus" (Some true) (Option.map (fun c -> c = Mode.Consensus) (Mode.category_of_string "consensus"));
   check (option bool) "ecosystem" (Some true) (Option.map (fun c -> c = Mode.Ecosystem) (Mode.category_of_string "ecosystem"));
-  check (option bool) "trpg" (Some true) (Option.map (fun c -> c = Mode.TRPG) (Mode.category_of_string "trpg"));
-  check (option bool) "risc" (Some true) (Option.map (fun c -> c = Mode.RISC) (Mode.category_of_string "risc"))
+  check (option bool) "trpg" (Some true) (Option.map (fun c -> c = Mode.TRPG) (Mode.category_of_string "trpg"))
 
 let test_category_of_string_invalid () =
   check (option bool) "invalid" None (Option.map (fun _ -> true) (Mode.category_of_string "invalid"));

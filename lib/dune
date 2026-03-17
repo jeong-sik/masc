@@ -445,7 +445,6 @@
    tool_protocol_game_view_utils
    tool_protocol_game_view_handlers
    tool_protocol_game_view
-   tool_experiment
    tool_suspend
    tool_notifications
    tool_voice
@@ -594,21 +593,7 @@
    json_util
    ;; Anti-Fake Test Quality Scoring (harness P2)
    anti_fake
-   ;; Autoresearch — Karpathy-inspired autonomous experiment loop
-   autoresearch
-   tool_autoresearch
-   ;; SWARM-RISC Agent ISA (Phase 1: types + pipeline + tools)
-   risc_types
-   risc_pipeline
-   tool_risc
-   ;; SWARM-RISC Phase 2: MESI cache coherence
-   cache_coherence
-   ;; SWARM-RISC Phase 3: OoO (Tomasulo) + Work-Stealing
-   reservation_station
-   work_stealing
-   ;; SWARM-RISC Phase 4: Speculative Execution + MCTS
-   mcts_tree
-   speculative_engine)
+)
 (private_modules
  gardener_state
  gardener_health

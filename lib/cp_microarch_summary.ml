@@ -33,22 +33,10 @@ let get_int_default json key default =
   | `Int v -> v
   | _ -> default
 
-let pipeline_json () =
-  let metrics =
-    Risc_pipeline.aggregate_metrics Tool_risc.global_registry
-  in
-  Risc_types.metrics_to_yojson metrics
-
-let cache_json () =
-  Cache_coherence.aggregate_metrics Tool_risc.global_coherence
-  |> Cache_coherence.metrics_to_yojson
-
-let ooo_json () =
-  Reservation_station.aggregate_metrics Tool_risc.global_scheduler
-
-let speculative_json () =
-  let status = Speculative_engine.status Tool_risc.global_spec_engine in
-  U.member "metrics" status
+let pipeline_json () = `Assoc []
+let cache_json () = `Assoc []
+let ooo_json () = `Assoc []
+let speculative_json () = `Assoc []
 
 let search_fabric_json (rows : search_row list) =
   let best_first_rows =

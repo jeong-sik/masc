@@ -95,7 +95,5 @@ let () =
           Alcotest.test_case
             "verify-trace-reports-summary-only-without-checkpoint" `Quick
             Test_tool_team_session_misc.test_verify_trace_reports_summary_only_without_checkpoint;
-          Alcotest.test_case "status-and-stop-linked-autoresearch" `Quick
-            Test_tool_team_session_misc.test_status_and_stop_linked_autoresearch;
         ] );
     ]

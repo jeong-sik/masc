@@ -883,48 +883,6 @@
  (modules test_tool_goals_coverage)
  (libraries masc_mcp alcotest yojson unix))
 
-; P3 Phase 6: Tool_experiment coverage tests
-(test
- (name test_tool_experiment_coverage)
- (modules test_tool_experiment_coverage)
- (libraries masc_mcp alcotest yojson str unix))
-
-; Autoresearch — Karpathy-inspired autonomous experiment loop
-(test
- (name test_autoresearch)
- (modules test_autoresearch)
- (libraries masc_mcp alcotest yojson unix mirage-crypto-rng mirage-crypto-rng.unix))
-
-; SWARM-RISC Agent ISA Phase 1 tests (pipeline, hazards, tools)
-(test
- (name test_risc)
- (modules test_risc)
- (libraries masc_mcp str yojson unix))
-
-; SWARM-RISC Phase 2: MESI cache coherence tests
-(test
- (name test_cache_coherence)
- (modules test_cache_coherence)
- (libraries masc_mcp yojson unix))
-
-; SWARM-RISC Phase 3: OoO (Tomasulo RS) + Work-Stealing tests
-(test
- (name test_reservation_station)
- (modules test_reservation_station)
- (libraries masc_mcp yojson unix))
-
-; SWARM-RISC Phase 4: MCTS tree (UCB1 selection + backpropagation)
-(test
- (name test_mcts)
- (modules test_mcts)
- (libraries masc_mcp yojson unix))
-
-; SWARM-RISC Phase 4: Speculative engine (fast/slow LLM + semantic guard)
-(test
- (name test_speculative)
- (modules test_speculative)
- (libraries masc_mcp yojson unix str))
-
 ; Proof criteria pure-function unit tests (no server required)
 (test
  (name test_proof_criteria)

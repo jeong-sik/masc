@@ -72,38 +72,6 @@ let handle_stop ctx args : result =
                ~reason ~generate_report
            with
           | Ok json ->
-              let linked_result =
-                match
-                  Autoresearch.load_swarm_link_by_session
-                    ~base_path:ctx.config.base_path session_id
-                with
-                | None -> None
-                | Some link ->
-                    Autoresearch.stop_loop ~base_path:ctx.config.base_path
-                      ~reason:(Printf.sprintf "team_session_stop:%s" reason)
-                      link.loop_id
-                    |> Option.map (fun (state : Autoresearch.loop_state) ->
-                           `Assoc
-                             [
-                               ("loop_id", `String state.loop_id);
-                               ( "status",
-                                 `String
-                                   (Autoresearch.status_to_string state.status) );
-                               ("current_cycle", `Int state.current_cycle);
-                               ("best_score", `Float state.best_score);
-                             ])
-              in
-              let json =
-                match json with
-                | `Assoc fields -> (
-                    match linked_result with
-                    | Some linked ->
-                        `Assoc
-                          (List.remove_assoc "linked_autoresearch" fields
-                          @ [ ("linked_autoresearch", linked) ])
-                    | None -> json)
-                | _ -> json
-              in
               (true, json_ok [ ("result", json) ])
           | Error e -> (false, json_error e)))
 

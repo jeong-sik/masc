@@ -2,24 +2,16 @@
 
     Canonical API (dot namespace):
     - decision.*
-    - experiment.*
     - trpg.*
     - client.*
 
     Legacy compatibility:
-    - experiment_* and masc_trpg_* are kept as aliases for a deprecation window.
+    - masc_trpg_* are kept as aliases for a deprecation window.
 *)
 
 include Tool_protocol_game_view_handlers
 
 let legacy_alias_to_canonical = function
-  | "experiment_start" -> Some "experiment.start"
-  | "experiment_assign" -> Some "experiment.assign"
-  | "experiment_observe" -> Some "experiment.observe"
-  | "experiment_checkpoint" -> Some "experiment.checkpoint"
-  | "experiment_conclude" -> Some "experiment.conclude"
-  | "experiment_list" -> Some "experiment.list"
-  | "experiment_status" -> Some "experiment.status"
   | "masc_trpg_dice_roll" -> Some "trpg.dice.roll"
   | "masc_trpg_turn_advance" -> Some "trpg.turn.advance"
   | "masc_trpg_stream" -> Some "trpg.stream.read"
@@ -46,27 +38,6 @@ let handle_legacy_alias (ctx : context) ~legacy_name ~canonical_tool args :
   broadcast_deprecated_alias ~agent_name:ctx.agent_name ~legacy_tool:legacy_name
     ~canonical_tool;
   match legacy_name with
-  | "experiment_start" -> (
-      match require_finalized_decision ctx ~canonical_tool args with
-      | Ok _ -> (
-          let args = normalize_experiment_start_args args in
-          match delegate_experiment ctx ~legacy_name ~args with
-          | Some r -> r
-          | None ->
-              ( false,
-                Printf.sprintf
-                  "legacy experiment dispatcher unavailable for %s"
-                  legacy_name ))
-      | Error (_, body) ->
-          ( false,
-            Printf.sprintf
-              "PRECONDITION_REQUIRED (legacy alias: %s): %s"
-              legacy_name body ))
-  | name when String.starts_with ~prefix:"experiment_" name -> (
-      match delegate_experiment ctx ~legacy_name:name ~args with
-      | Some r -> r
-      | None ->
-          (false, Printf.sprintf "legacy experiment dispatcher unavailable for %s" name))
   | name when String.starts_with ~prefix:"masc_trpg_" name -> (
       match delegate_trpg ctx ~legacy_name:name ~args with
       | Some r -> r
@@ -95,62 +66,6 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
   | "decision.status" ->
       Some
         (match handle_decision_status ctx ~canonical_tool:name args with
-        | Ok r -> r
-        | Error e -> e)
-  | "experiment.start" ->
-      Some
-        (match
-           handle_experiment_canonical ctx ~canonical_tool:name
-             ~legacy_name:"experiment_start" ~require_decision:true args
-         with
-        | Ok r -> r
-        | Error e -> e)
-  | "experiment.assign" ->
-      Some
-        (match
-           handle_experiment_canonical ctx ~canonical_tool:name
-             ~legacy_name:"experiment_assign" ~require_decision:false args
-         with
-        | Ok r -> r
-        | Error e -> e)
-  | "experiment.observe" ->
-      Some
-        (match
-           handle_experiment_canonical ctx ~canonical_tool:name
-             ~legacy_name:"experiment_observe" ~require_decision:false args
-         with
-        | Ok r -> r
-        | Error e -> e)
-  | "experiment.checkpoint" ->
-      Some
-        (match
-           handle_experiment_canonical ctx ~canonical_tool:name
-             ~legacy_name:"experiment_checkpoint" ~require_decision:false args
-         with
-        | Ok r -> r
-        | Error e -> e)
-  | "experiment.conclude" ->
-      Some
-        (match
-           handle_experiment_canonical ctx ~canonical_tool:name
-             ~legacy_name:"experiment_conclude" ~require_decision:false args
-         with
-        | Ok r -> r
-        | Error e -> e)
-  | "experiment.list" ->
-      Some
-        (match
-           handle_experiment_canonical ctx ~canonical_tool:name
-             ~legacy_name:"experiment_list" ~require_decision:false args
-         with
-        | Ok r -> r
-        | Error e -> e)
-  | "experiment.status" ->
-      Some
-        (match
-           handle_experiment_canonical ctx ~canonical_tool:name
-             ~legacy_name:"experiment_status" ~require_decision:false args
-         with
         | Ok r -> r
         | Error e -> e)
   | "trpg.action.submit" ->
@@ -333,56 +248,6 @@ let schemas : Types.tool_schema list =
       (object_schema
          ~required:[ "session_id" ]
          [ ("session_id", string_schema); ("decision_id", string_schema) ]);
-    schema "experiment.start"
-      "Start an experiment. Requires finalized decision for the same session."
-      (object_schema
-         ~required:[ "session_id"; "hypothesis" ]
-         [
-           ("session_id", string_schema);
-           ("decision_id", string_schema);
-           ("hypothesis", string_schema);
-           ("treatment_description", string_schema);
-           ("control_description", string_schema);
-           ("metrics", array_of string_schema);
-           ("window_seconds", number_schema);
-         ]);
-    schema "experiment.assign"
-      "Assign a subject to treatment/control."
-      (object_schema
-         ~required:[ "experiment_id"; "subject_id"; "group" ]
-         [
-           ("experiment_id", string_schema);
-           ("subject_id", string_schema);
-           ("group", string_schema);
-         ]);
-    schema "experiment.observe"
-      "Record observation for a metric."
-      (object_schema
-         ~required:[ "experiment_id"; "subject_id"; "metric_name"; "value" ]
-         [
-           ("experiment_id", string_schema);
-           ("subject_id", string_schema);
-           ("metric_name", string_schema);
-           ("value", number_schema);
-         ]);
-    schema "experiment.checkpoint"
-      "Compute checkpoint statistics."
-      (object_schema
-         ~required:[ "experiment_id" ]
-         [ ("experiment_id", string_schema); ("metric_name", string_schema) ]);
-    schema "experiment.conclude"
-      "Conclude experiment with final result."
-      (object_schema
-         ~required:[ "experiment_id" ]
-         [ ("experiment_id", string_schema) ]);
-    schema "experiment.list"
-      "List experiments."
-      (object_schema [ ("status", string_schema); ("limit", int_schema) ]);
-    schema "experiment.status"
-      "Get one experiment status."
-      (object_schema
-         ~required:[ "experiment_id" ]
-         [ ("experiment_id", string_schema) ]);
     schema "trpg.action.submit"
       "Submit TRPG action under decision gate and persist to TRPG event stream."
       (object_schema

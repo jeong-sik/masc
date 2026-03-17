@@ -187,11 +187,15 @@ let dispatch (ctx : context) ~(name : string) : result option =
       in
       if not (Sys.file_exists expanded && Sys.is_directory expanded) then
         Some (false, Printf.sprintf "Directory not found: %s" expanded)
-      else begin
-        state.Mcp_server.room_config <- Room.default_config expanded;
-        let status = if Room.is_initialized state.Mcp_server.room_config then "ok" else "(not initialized)" in
-        Some (true, Printf.sprintf "MASC room set to: %s\n   .masc/ status: %s" expanded status)
-      end
+      else
+        let masc_dir = Filename.concat expanded ".masc" in
+        if not (Sys.file_exists masc_dir && Sys.is_directory masc_dir) then
+          Some (false, Printf.sprintf "No .masc/ directory found in: %s\nRun masc_init to initialize, or choose a MASC-enabled directory." expanded)
+        else begin
+          state.Mcp_server.room_config <- Room.default_config expanded;
+          let status = if Room.is_initialized state.Mcp_server.room_config then "ok" else "(not initialized)" in
+          Some (true, Printf.sprintf "MASC room set to: %s\n   .masc/ status: %s" expanded status)
+        end
 
   | "masc_join" ->
       let caps = arg_get_string_list "capabilities" in

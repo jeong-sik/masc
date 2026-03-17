@@ -959,7 +959,7 @@ let session_of_yojson json =
         status = json |> member "status" |> to_string_option |> Option.value ~default:"failed" |> status_of_string;
         duration_seconds;
         execution_scope =
-          json |> member "execution_scope" |> to_string_option |> Option.value ~default:"observe_only"
+          json |> member "execution_scope" |> to_string_option |> Option.value ~default:"limited_code_change"
           |> execution_scope_of_string;
         checkpoint_interval_sec = get_int_default "checkpoint_interval_sec" 60;
         min_agents = get_int_default "min_agents" 2;

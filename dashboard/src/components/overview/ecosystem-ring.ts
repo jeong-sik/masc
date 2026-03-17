@@ -1,7 +1,7 @@
 // MASC Dashboard — Ecosystem Ring (circular agent layout with status indicators)
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
+import { useSignal } from '@preact/signals'
 import type { Agent } from '../../types'
 import { AgentAvatar } from './agent-avatar'
 
@@ -26,9 +26,8 @@ function categorizeStatus(s: string): 'active' | 'idle' | 'offline' {
   return 'offline'
 }
 
-const hoveredAgent = signal<string | null>(null)
-
 export function EcosystemRing({ agents, roomName, roomHealth, onAgentClick }: EcosystemRingProps) {
+  const hoveredAgent = useSignal<string | null>(null)
   const total = agents.length
   const radius = 42
 

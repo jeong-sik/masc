@@ -71,3 +71,134 @@
   display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px;
 }
 
+/* ── Agent Journal Stream (Phase 2) ───────────────────────── */
+.agent-journal-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.agent-journal-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+
+.agent-journal-entry:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.agent-journal-kind {
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  background: rgba(138, 163, 211, 0.12);
+  color: var(--text-muted);
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.agent-journal-type {
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  color: rgba(71, 184, 255, 0.7);
+  flex-shrink: 0;
+}
+
+.agent-journal-text {
+  color: var(--text-body, #b0bec5);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* ── Agent Worker Brief ───────────────────────────────────── */
+.agent-worker-brief {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.agent-worker-brief__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.agent-worker-brief__label {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.agent-worker-brief__preview {
+  color: var(--text-body, #b0bec5);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
+}
+
+/* ── Agent Timeline Section (Phase 3) ─────────────────────── */
+.agent-timeline-summary {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.agent-timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.agent-timeline-event {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+
+.agent-timeline-event:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.agent-timeline-type {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-strong, #e8ecf1);
+  flex-shrink: 0;
+  min-width: 80px;
+}
+
+.agent-timeline-detail {
+  color: var(--text-body, #b0bec5);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+

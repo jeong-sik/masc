@@ -13,8 +13,11 @@ import {
   keepers,
   tasks,
 } from '../store'
-import { fetchRoomMessages, fetchTaskHistory, sendBroadcast } from '../api'
+import { fetchRoomMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineEvent, type AgentTimelineResponse } from '../api'
+import { journal } from '../sse'
 import { missionSnapshot } from '../mission-store'
+import { executionWorkerSupportBriefs } from '../store'
+import type { JournalEntry } from '../types'
 import type {
   Agent,
   DashboardExecutionContinuityBrief,
@@ -35,6 +38,7 @@ const loading = signal(false)
 const detailError = signal('')
 const roomActivity = signal<string[]>([])
 const taskHistories = signal<TaskHistoryRow[]>([])
+const agentTimeline = signal<AgentTimelineResponse | null>(null)
 const mentionText = signal('')
 const sendingMention = signal(false)
 
@@ -48,6 +52,7 @@ export function closeAgentDetail(): void {
   detailError.value = ''
   roomActivity.value = []
   taskHistories.value = []
+  agentTimeline.value = null
   mentionText.value = ''
 }
 
@@ -89,12 +94,20 @@ async function refreshAgentDetail(): Promise<void> {
   detailError.value = ''
   roomActivity.value = []
   taskHistories.value = []
+  agentTimeline.value = null
 
   try {
-    const lines = await fetchRoomMessages(80)
+    // Fetch room messages, task histories, and timeline in parallel
+    const [lines, timelineResult] = await Promise.all([
+      fetchRoomMessages(80),
+      fetchAgentTimeline(agentName, 4, 20).catch(() => null),
+    ])
+
     roomActivity.value = lines
       .filter(line => line.includes(agentName))
       .slice(0, 20)
+
+    agentTimeline.value = timelineResult
 
     const ownedTasks = assignedTasks(agentName).slice(0, 6)
     if (ownedTasks.length === 0) return
@@ -137,6 +150,30 @@ async function submitMention(): Promise<void> {
   } finally {
     sendingMention.value = false
   }
+}
+
+function agentJournalEntries(agentName: string | null): JournalEntry[] {
+  if (!agentName) return []
+  const nameLower = agentName.toLowerCase()
+  return journal.value
+    .filter((entry: JournalEntry) => {
+      const text = entry.text.toLowerCase()
+      const agent = entry.agent.toLowerCase()
+      return agent === nameLower || text.includes(nameLower) || text.includes(`@${nameLower}`)
+    })
+    .slice(0, 15)
+}
+
+function workerBriefForAgent(agentName: string | null) {
+  if (!agentName) return null
+  return executionWorkerSupportBriefs.value.find(w => w.name === agentName) ?? null
+}
+
+function journalKindIcon(entry: JournalEntry): string {
+  if (entry.kind === 'board') return 'B'
+  if (entry.kind === 'tasks') return 'T'
+  if (entry.kind === 'keepers') return 'K'
+  return 'S'
 }
 
 function TaskSummary({ task }: { task: Task }) {
@@ -272,13 +309,17 @@ export function AgentDetailOverlay() {
           <${Card} title="Recent Activity">
             ${lines.length === 0
               ? html`<div class="empty-state">No recent room activity match</div>`
-              : html`<div class="agent-activity-list">${lines.map((line, idx) => html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
+              : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) => html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
           <//>
         </div>
+
+        <${AgentJournalStream} agentName=${agentName} />
+        <${AgentTimelineSection} />
+        <${AgentWorkerBrief} agentName=${agentName} />
         <${Card} title="Task History">
           ${taskHistories.value.length === 0
             ? html`<div class="empty-state">No task history loaded</div>`
-            : html`<div class="agent-history-list">${taskHistories.value.map(row => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`}
+            : html`<div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`}
         <//>
 
         <${Card} title="Direct Mention">
@@ -303,5 +344,127 @@ export function AgentDetailOverlay() {
         <//>
       </div>
     </div>
+  `
+}
+
+function AgentJournalStream({ agentName }: { agentName: string }) {
+  const entries = agentJournalEntries(agentName)
+
+  return html`
+    <${Card} title="실시간 활동 스트림">
+      ${entries.length === 0
+        ? html`<div class="empty-state">관련 이벤트 없음</div>`
+        : html`
+            <div class="agent-journal-stream">
+              ${entries.map((entry: JournalEntry, idx: number) => html`
+                <div class="agent-journal-entry" key=${idx}>
+                  <span class="agent-journal-kind">${journalKindIcon(entry)}</span>
+                  <span class="agent-journal-type">${entry.eventType}</span>
+                  <span class="agent-journal-text">${compactCopy(entry.text, 120) ?? ''}</span>
+                  ${entry.timestamp ? html`<${TimeAgo} timestamp=${entry.timestamp} />` : null}
+                </div>
+              `)}
+            </div>
+          `}
+    <//>
+  `
+}
+
+function timelineEventIcon(type: string): string {
+  if (type === 'joined') return 'J'
+  if (type.startsWith('task_')) return 'T'
+  if (type === 'broadcast') return 'M'
+  return 'E'
+}
+
+function timelineEventLabel(type: string): string {
+  switch (type) {
+    case 'joined': return '참가'
+    case 'task_claimed': return '태스크 수임'
+    case 'task_started': return '태스크 시작'
+    case 'task_completed': return '태스크 완료'
+    case 'task_cancelled': return '태스크 취소'
+    case 'broadcast': return '브로드캐스트'
+    default: return type
+  }
+}
+
+function AgentTimelineSection() {
+  const timeline = agentTimeline.value
+  if (!timeline) return null
+
+  const events = timeline.events ?? []
+  const summary = timeline.summary
+
+  return html`
+    <${Card} title="활동 타임라인 (${summary?.total_events ?? 0} events)">
+      ${summary ? html`
+        <div class="agent-timeline-summary">
+          ${summary.tasks_completed > 0 ? html`<span class="pill">완료 ${summary.tasks_completed}</span>` : null}
+          ${summary.tasks_claimed > 0 ? html`<span class="pill">수임 ${summary.tasks_claimed}</span>` : null}
+          ${summary.messages_sent > 0 ? html`<span class="pill">메시지 ${summary.messages_sent}</span>` : null}
+          ${summary.active_duration_minutes > 0 ? html`<span class="pill">${Math.round(summary.active_duration_minutes)}분 활동</span>` : null}
+        </div>
+      ` : null}
+      ${events.length === 0
+        ? html`<div class="empty-state">타임라인 이벤트 없음</div>`
+        : html`
+            <div class="agent-timeline-list">
+              ${events.map((evt: AgentTimelineEvent, idx: number) => {
+                const detail = evt.detail as Record<string, string | undefined>
+                const title = detail.title ?? detail.content ?? ''
+                return html`
+                  <div class="agent-timeline-event" key=${idx}>
+                    <span class="agent-journal-kind">${timelineEventIcon(evt.type)}</span>
+                    <span class="agent-timeline-type">${timelineEventLabel(evt.type)}</span>
+                    ${title ? html`<span class="agent-timeline-detail">${compactCopy(title, 80)}</span>` : null}
+                    ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
+                  </div>
+                `
+              })}
+            </div>
+          `}
+    <//>
+  `
+}
+
+function AgentWorkerBrief({ agentName }: { agentName: string }) {
+  const worker = workerBriefForAgent(agentName)
+  if (!worker) return null
+
+  return html`
+    <${Card} title="Worker Status">
+      <div class="agent-worker-brief">
+        <div class="agent-worker-brief__row">
+          <span class="agent-worker-brief__label">State</span>
+          <${StatusBadge} status=${worker.state} />
+        </div>
+        ${worker.focus ? html`
+          <div class="agent-worker-brief__row">
+            <span class="agent-worker-brief__label">Focus</span>
+            <span>${worker.focus}</span>
+          </div>
+        ` : null}
+        ${worker.recent_output_preview ? html`
+          <div class="agent-worker-brief__row">
+            <span class="agent-worker-brief__label">Output</span>
+            <span class="agent-worker-brief__preview">${compactCopy(worker.recent_output_preview, 200)}</span>
+          </div>
+        ` : null}
+        ${worker.related_session_id ? html`
+          <div class="agent-worker-brief__row">
+            <span class="agent-worker-brief__label">Session</span>
+            <span class="mono" style="font-size: 11px">${worker.related_session_id}</span>
+          </div>
+        ` : null}
+        ${worker.last_signal_at ? html`
+          <div class="agent-worker-brief__row">
+            <span class="agent-worker-brief__label">Signal</span>
+            <${TimeAgo} timestamp=${worker.last_signal_at} />
+            ${worker.signal_truth ? html`<span class="pill">${worker.signal_truth}</span>` : null}
+          </div>
+        ` : null}
+      </div>
+    <//>
   `
 }

@@ -56,7 +56,7 @@ let test_lodge_heartbeat_uses_tool_assignment_prompt () =
 let test_lodge_graphql_defaults_and_guards () =
   check bool "heartbeat GraphQL uses shared client"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "Graphql_client.request");
+    (file_contains_pattern "lib/lodge_heartbeat_state.ml" "Graphql_client.request");
   check bool "tool_lodge GraphQL uses shared endpoint helper"
     true
     (file_contains_pattern "lib/tool_lodge_config_http.ml"
@@ -80,7 +80,7 @@ let test_lodge_graphql_defaults_and_guards () =
        "endpoint returned HTML instead of JSON");
   check bool "null agents guard present in heartbeat"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "GraphQL agents is null");
+    (file_contains_pattern "lib/lodge_heartbeat_state.ml" "GraphQL agents is null");
   check bool "null agents guard present in tool_lodge"
     true
     (file_contains_pattern "lib/tool_lodge_config_http.ml" "GraphQL agents is null");
@@ -97,7 +97,7 @@ let test_lodge_heartbeat_updates_self_summary () =
 let test_lodge_heartbeat_uses_shared_prompt_cascade () =
   check bool "heartbeat uses shared prompt cascade"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_cascade.call")
+    (file_contains_pattern "lib/lodge_heartbeat_agents.ml" "Lodge_cascade.call")
 
 let test_lodge_heartbeat_uses_runtime_verifier_mode () =
   check bool "heartbeat uses verifier auto mode for posts"
@@ -112,15 +112,15 @@ let test_lodge_heartbeat_uses_runtime_verifier_mode () =
 let test_lodge_heartbeat_uses_tom_context () =
   check bool "ToM context used"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "Lodge_tom.predict_top_k")
+    (file_contains_pattern "lib/lodge_heartbeat_agents.ml" "Lodge_tom.predict_top_k")
 
 let test_lodge_heartbeat_no_heuristic_fallback_policy () =
   check bool "scheduled trigger can request post tool"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "| Scheduled | ManualTrigger -> true");
+    (file_contains_pattern "lib/lodge_heartbeat_agents.ml" "| Scheduled | ManualTrigger -> true");
   check bool "content alerts cannot request post tool"
     true
-    (file_contains_pattern "lib/lodge_heartbeat.ml" "| ContentAlert _ | Mentioned _ -> false");
+    (file_contains_pattern "lib/lodge_heartbeat_agents.ml" "| ContentAlert _ | Mentioned _ -> false");
   check bool "selection failures are explicit"
     true
     (file_contains_pattern "lib/lodge_heartbeat.ml"

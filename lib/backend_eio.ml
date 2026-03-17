@@ -242,6 +242,7 @@ module FileSystem = struct
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
               Error (NotFound key)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
               Error (IOError (Printexc.to_string exn))
     )
@@ -264,7 +265,9 @@ module FileSystem = struct
             (* Write file *)
             Eio.Path.save ~create:(`Or_truncate 0o644) path compressed;
             Ok ()
-          with exn ->
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
             Error (IOError (Printexc.to_string exn))
     )
 
@@ -291,6 +294,7 @@ module FileSystem = struct
           with
           | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
               Error (NotFound key)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
               Error (IOError (Printexc.to_string exn))
     )
@@ -312,6 +316,7 @@ module FileSystem = struct
         with
         | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
             Ok []  (* Directory doesn't exist = no keys *)
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
             Error (IOError (Printexc.to_string exn))
 
@@ -351,6 +356,7 @@ module FileSystem = struct
                    Ok true)
           | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
               Error (AlreadyExists key)
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
               Error (IOError (Printexc.to_string exn))
     )
@@ -770,7 +776,11 @@ module Postgres = struct
 
   let create ~sw ~env ~url config =
     let uri = Uri.of_string url in
-    let pool_config = Caqti_pool_config.create ~max_size:10 () in
+    let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
+      | Some s -> (try int_of_string s with _ -> 3)
+      | None -> 3
+    in
+    let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
     match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
     | Error err -> Error (caqti_error_to_masc err)
     | Ok pool ->

@@ -1211,6 +1211,84 @@ let test_cleanup_zombies_releases_tasks () =
       (str_contains tasks "Todo" || str_contains tasks "todo")
   )
 
+(* --- Rejoin Identity Preservation (BUG-003) --- *)
+
+let test_rejoin_preserves_identity () =
+  with_test_env (fun config ->
+    (* 1. Join: get a nickname *)
+    let join1 = Room.join config ~agent_name:"claude" ~capabilities:["code"] () in
+    Alcotest.(check bool) "first join success" true (contains_check join1);
+
+    (* Extract nickname from active_agents *)
+    let state1 = Room.read_state config in
+    let nick1 = List.find (fun name ->
+      String.length name > 6 && String.sub name 0 6 = "claude"
+    ) state1.active_agents in
+
+    (* 2. Leave *)
+    let leave_result = Room.leave config ~agent_name:"claude" in
+    Alcotest.(check bool) "leave success" true (contains_check leave_result);
+
+    (* Agent should be removed from active_agents but file preserved *)
+    let state2 = Room.read_state config in
+    let still_active = List.exists (fun name ->
+      String.length name > 6 && String.sub name 0 6 = "claude"
+    ) state2.active_agents in
+    Alcotest.(check bool) "not in active_agents after leave" false still_active;
+
+    (* 3. Re-join: should get the SAME nickname *)
+    let join2 = Room.join config ~agent_name:"claude" ~capabilities:["code"; "review"] () in
+    Alcotest.(check bool) "rejoin success" true (contains_check join2);
+
+    let state3 = Room.read_state config in
+    let nick2 = List.find (fun name ->
+      String.length name > 6 && String.sub name 0 6 = "claude"
+    ) state3.active_agents in
+
+    (* The key assertion: same nickname after rejoin *)
+    Alcotest.(check string) "same identity after rejoin" nick1 nick2
+  )
+
+let test_rejoin_restores_active_status () =
+  with_test_env (fun config ->
+    let _ = Room.join config ~agent_name:"gemini" ~capabilities:["search"] () in
+    let _ = Room.leave config ~agent_name:"gemini" in
+
+    (* Re-join *)
+    let result = Room.join config ~agent_name:"gemini" ~capabilities:["search"] () in
+    Alcotest.(check bool) "rejoin success" true (contains_check result);
+
+    (* Should be back in active_agents *)
+    let state = Room.read_state config in
+    let is_active = List.exists (fun name ->
+      String.length name > 6 && String.sub name 0 6 = "gemini"
+    ) state.active_agents in
+    Alcotest.(check bool) "back in active_agents" true is_active
+  )
+
+let test_multiple_rejoin_cycles () =
+  with_test_env (fun config ->
+    let _ = Room.join config ~agent_name:"codex" ~capabilities:["impl"] () in
+    let state1 = Room.read_state config in
+    let nick1 = List.find (fun name ->
+      String.length name > 5 && String.sub name 0 5 = "codex"
+    ) state1.active_agents in
+
+    (* Three leave/rejoin cycles *)
+    for _ = 1 to 3 do
+      let _ = Room.leave config ~agent_name:"codex" in
+      let _ = Room.join config ~agent_name:"codex" ~capabilities:["impl"] () in
+      ()
+    done;
+
+    let state_final = Room.read_state config in
+    let nick_final = List.find (fun name ->
+      String.length name > 5 && String.sub name 0 5 = "codex"
+    ) state_final.active_agents in
+
+    Alcotest.(check string) "identity stable across 3 cycles" nick1 nick_final
+  )
+
 let () =
   Random.init 42;
   Alcotest.run "Room" [
@@ -1224,6 +1302,11 @@ let () =
     ];
     "leave", [
       Alcotest.test_case "removes agent" `Quick test_leave_removes_agent;
+    ];
+    "rejoin", [
+      Alcotest.test_case "preserves identity" `Quick test_rejoin_preserves_identity;
+      Alcotest.test_case "restores active status" `Quick test_rejoin_restores_active_status;
+      Alcotest.test_case "stable across 3 cycles" `Quick test_multiple_rejoin_cycles;
     ];
     "tasks", [
       Alcotest.test_case "add and claim" `Quick test_add_and_claim_task;

@@ -232,7 +232,7 @@ let run_cmd host port base_path =
   Masc_mcp.Llm_response_cache.enable_eio ();
   Masc_mcp.Chain_telemetry.enable_eio ();
   Masc_mcp.Generational_metrics.enable_eio ();
-  Masc_mcp.Dashboard_cache.enable_eio ();
+  Masc_mcp.Dashboard_cache.enable_eio ~clock:(Eio.Stdenv.clock env) ();
 
   (* Set global clock for Time_compat (Eio-native timestamps) *)
   Masc_mcp.Time_compat.set_clock (Eio.Stdenv.clock env);

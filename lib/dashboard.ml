@@ -90,12 +90,13 @@ let parse_iso_timestamp (s : string) : float option =
         tm_wday = 0; tm_yday = 0; tm_isdst = false
       } in
       (* Unix.mktime interprets tm as local time, but ISO 8601 'Z' means UTC.
-         We need to adjust by the local timezone offset. *)
+         Adjust: local_t is too small by tz_offset, so add it back.
+         tz_offset = local_t - mktime(gmtime(local_t)) = seconds east of UTC. *)
       let (local_t, _) = Unix.mktime tm in
       let utc_tm = Unix.gmtime local_t in
       let (utc_as_local, _) = Unix.mktime utc_tm in
       let tz_offset = local_t -. utc_as_local in
-      Some (local_t -. tz_offset)
+      Some (local_t +. tz_offset)
     )
   with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
 

@@ -401,6 +401,14 @@ let orchestrate
             exec_with_retry "codex" (("model", `String model) :: args)
         | "claude" | "claude-cli" | "opus" | "sonnet" | "haiku" ->
             exec_with_retry "claude" (("model", `String model) :: args)
+        | m when starts_with ~prefix:"claude:" m ->
+            let model_id = String.sub m 7 (String.length m - 7) in
+            exec_with_retry "claude" (("model", `String model_id) :: args)
+        | "glm" | "zai" ->
+            exec_with_retry "glm" (("model", `String model) :: args)
+        | m when starts_with ~prefix:"glm:" m ->
+            let model_id = String.sub m 4 (String.length m - 4) in
+            exec_with_retry "glm" (("model", `String model_id) :: args)
         | "ollama" ->
             Error (Provider_adapter.bare_ollama_migration_message ())
         | "llama" ->

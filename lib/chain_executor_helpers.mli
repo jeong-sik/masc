@@ -130,8 +130,14 @@ val maybe_summarize_and_rotate : exec_fn:Chain_conversation.exec_fn -> Chain_con
 
 type exec_fn = Chain_conversation.exec_fn
 type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
+type execute_node_fn = exec_context -> sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> exec_fn:exec_fn -> tool_exec:tool_exec -> Chain_types.node -> (string, string) result
 
 (** {1 Prompt Helpers} *)
 
 val is_complex_prompt : string -> bool
 val is_glm_model : string -> bool
+
+(** {1 Backoff and Retry Helpers} *)
+
+val calculate_backoff_delay : Chain_types.backoff_strategy -> int -> float
+val should_retry : string list -> string -> bool

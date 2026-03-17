@@ -146,7 +146,7 @@ val plan_to_steps : execution_plan -> execution_step list
     and the 20-arm mutual recursion are hidden behind this single entry point. *)
 val execute :
   sw:Eio.Switch.t ->
-  clock:_ Eio.Time.clock ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   timeout:int ->
   trace:bool ->
   exec_fn:exec_fn ->

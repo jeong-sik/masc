@@ -177,6 +177,7 @@ jobs:
       - name: Run tests (quick suite)
         env:
           ME_ROOT: /tmp/me
+          DUNE_SOURCEROOT: ${{ github.workspace }}
           ALCOTEST_QUICK_TESTS: "1"
           CI_TEST_TIMEOUT_SEC: 1200
           CI_TEST_HEARTBEAT_SEC: 30

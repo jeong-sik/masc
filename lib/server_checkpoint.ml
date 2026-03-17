@@ -171,11 +171,11 @@ let of_json (json : Yojson.Safe.t) : checkpoint option =
 (** {1 File I/O} *)
 
 let checkpoint_path () =
-  let base = match Sys.getenv_opt "MASC_BASE_PATH" with
-    | Some p when String.trim p <> "" -> p
+  let masc_dir = match Sys.getenv_opt "MASC_BASE_PATH" with
+    | Some p when String.trim p <> "" -> Filename.concat p ".masc"
     | _ -> ".masc"
   in
-  Filename.concat base "server_checkpoint.json"
+  Filename.concat masc_dir "server_checkpoint.json"
 
 let save (c : checkpoint) : (unit, string) result =
   let path = checkpoint_path () in
@@ -186,8 +186,9 @@ let save (c : checkpoint) : (unit, string) result =
    with Unix.Unix_error _ | Sys_error _ -> ());
   try
     let json_str = Yojson.Safe.pretty_to_string (to_json c) in
-    (* Atomic write: write to tmp, then rename *)
-    let tmp_path = path ^ ".tmp" in
+    (* Atomic write: unique temp file per call to avoid concurrent save races *)
+    let tmp_path = Printf.sprintf "%s.%d-%Ld.tmp" path
+      (Unix.getpid ()) (Int64.of_float (Unix.gettimeofday () *. 1e6)) in
     Out_channel.with_open_text tmp_path (fun oc ->
       Out_channel.output_string oc json_str;
       Out_channel.output_string oc "\n");

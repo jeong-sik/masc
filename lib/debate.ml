@@ -143,20 +143,13 @@ let write_json path json =
   let dir = Filename.dirname path in
   let base = Filename.basename path in
   let tmp_path = Filename.concat dir (Printf.sprintf ".%s.tmp.%d" base (Unix.getpid ())) in
-  let oc = open_out tmp_path in
-  let closed = ref false in
-  Common.protect ~module_name:"debate" ~finally_label:"finalizer" ~finally:(fun () ->
-    if not !closed then (try close_out oc with exn ->
-      Log.Misc.error "[debate] close_out failed: %s" (Printexc.to_string exn));
-    if Sys.file_exists tmp_path then
-      Safe_ops.remove_file_logged ~context:"debate" tmp_path
-  ) (fun () ->
-    output_string oc content;
-    flush oc;
-    close_out oc;
-    closed := true;
-    Sys.rename tmp_path path
-  )
+  (try
+     Fs_compat.save_file tmp_path content;
+     Sys.rename tmp_path path
+   with exn ->
+     (if Sys.file_exists tmp_path then
+        Safe_ops.remove_file_logged ~context:"debate" tmp_path);
+     raise exn)
 
 (** Read JSON from file *)
 let read_json path =

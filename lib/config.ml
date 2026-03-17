@@ -70,9 +70,7 @@ let save room_path config =
   Room_utils.mkdir_p (Filename.dirname path);
   let json = to_json config in
   let content = Yojson.Safe.pretty_to_string json in
-  let oc = open_out path in
-  output_string oc content;
-  close_out oc
+  Fs_compat.save_file path content
 
 let audit_log_path room_path =
   Filename.concat room_path "audit.jsonl"

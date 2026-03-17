@@ -94,16 +94,6 @@ let metrics_dir () =
   let me_root = Env_config.me_root () in
   Filename.concat me_root ".masc/metrics"
 
-let ensure_dir dir =
-  let rec mkdir_p path =
-    let parent = Filename.dirname path in
-    if parent <> path && not (Sys.file_exists parent) then
-      mkdir_p parent;
-    if not (Sys.file_exists path) then
-      (try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-  in
-  mkdir_p dir
-
 let task_record_to_json (r : task_record) =
   `Assoc [
     ("type", `String "task");
@@ -129,47 +119,36 @@ let handoff_record_to_json (r : handoff_record) =
 
 let append_jsonl ~agent_name json_line =
   let dir = Filename.concat (metrics_dir ()) agent_name in
-  ensure_dir dir;
+  Fs_compat.mkdir_p dir;
   let path = Filename.concat dir "generations.jsonl" in
-  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-  output_string oc (Yojson.Safe.to_string json_line);
-  output_char oc '\n';
-  close_out oc
+  Fs_compat.append_jsonl path json_line
 
 (** Load task records from JSONL file for a given agent. *)
 let load_task_records_from_jsonl ~agent_name : task_record list =
   let dir = Filename.concat (metrics_dir ()) agent_name in
   let path = Filename.concat dir "generations.jsonl" in
-  if not (Sys.file_exists path) then []
-  else begin
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let records = ref [] in
-      (try while true do
-        let line = input_line ic in
-        if String.length line > 0 then begin
-          try
-            let json = Yojson.Safe.from_string line in
-            let open Yojson.Safe.Util in
-            if json |> member "type" |> to_string = "task" then
-              records := {
-                generation = json |> member "generation" |> to_int;
-                task_id = json |> member "task_id" |> to_string;
-                completed = json |> member "completed" |> to_bool;
-                duration_ms = json |> member "duration_ms" |> to_int;
-                error_count = json |> member "error_count" |> to_int;
-                input_tokens = json |> member "input_tokens" |> to_int;
-                output_tokens = json |> member "output_tokens" |> to_int;
-                timestamp = json |> member "timestamp" |> to_float;
-              } :: !records
-          with
-          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
-          | exn ->
-              Log.Metrics.warn "load_task_records parse: %s" (Printexc.to_string exn)
-        end
-      done with End_of_file -> ());
-      List.rev !records)
-  end
+  let jsons = Fs_compat.load_jsonl path in
+  List.filter_map (fun json ->
+    try
+      let open Yojson.Safe.Util in
+      if json |> member "type" |> to_string = "task" then
+        Some {
+          generation = json |> member "generation" |> to_int;
+          task_id = json |> member "task_id" |> to_string;
+          completed = json |> member "completed" |> to_bool;
+          duration_ms = json |> member "duration_ms" |> to_int;
+          error_count = json |> member "error_count" |> to_int;
+          input_tokens = json |> member "input_tokens" |> to_int;
+          output_tokens = json |> member "output_tokens" |> to_int;
+          timestamp = json |> member "timestamp" |> to_float;
+        }
+      else None
+    with
+    | Yojson.Safe.Util.Type_error _ -> None
+    | exn ->
+        Log.Metrics.warn "load_task_records parse: %s" (Printexc.to_string exn);
+        None
+  ) jsons
 
 (** Record a task completion *)
 let record_task ~generation ~task_id ~completed ~duration_ms ~error_count

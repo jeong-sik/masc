@@ -67,9 +67,8 @@ let load_key config : (GCM.key, encryption_error) result =
         Sys.getenv_opt var_name
     | `File path ->
         if Sys.file_exists path then
-          let ic = open_in path in
-          let content = Common.protect ~module_name:"encryption" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
-            really_input_string ic 64) in (* hex-encoded 32 bytes *)
+          let content = Fs_compat.load_file path in
+          let content = String.sub content 0 (min 64 (String.length content)) in (* hex-encoded 32 bytes *)
           (* Decode hex to bytes *)
           let bytes = ref "" in
           for i = 0 to 31 do
@@ -155,7 +154,7 @@ let is_encrypted_json json =
 
 (** Smart read: transparently decrypt if encrypted, pass through if plain *)
 let smart_read_json ~config ~adata path : (Yojson.Safe.t, encryption_error) result =
-  let content = In_channel.with_open_text path In_channel.input_all in
+  let content = Fs_compat.load_file path in
   let json = Yojson.Safe.from_string content in
   if is_encrypted_json json then
     match load_key config with
@@ -175,9 +174,7 @@ let smart_read_json ~config ~adata path : (Yojson.Safe.t, encryption_error) resu
 let smart_write_json ~config ~adata path json : (unit, encryption_error) result =
   if not config.enabled then begin
     let content = Yojson.Safe.pretty_to_string json in
-    Out_channel.with_open_text path (fun oc ->
-      Out_channel.output_string oc content
-    );
+    Fs_compat.save_file path content;
     Ok ()
   end else
     match load_key config with
@@ -187,9 +184,7 @@ let smart_write_json ~config ~adata path json : (unit, encryption_error) result 
         | Error e -> Error e
         | Ok envelope ->
             let content = Yojson.Safe.pretty_to_string (envelope_to_json envelope) in
-            Out_channel.with_open_text path (fun oc ->
-              Out_channel.output_string oc content
-            );
+            Fs_compat.save_file path content;
             Ok ()
 
 (** Generate a new random 32-byte key (hex encoded for storage) *)

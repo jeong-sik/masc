@@ -69,7 +69,10 @@ let test_llm_client () = group "LLM Client" (fun () ->
    | Ok m ->
      assert_equal "parse_model:claude_id" Masc_mcp.Env_config.Claude.default_model m.model_id;
      assert_true "parse_model:claude_provider"
-       (m.provider = Llm_client.Claude)
+       (m.provider = Llm_client.Claude);
+     (* Verify opus cost tier to distinguish from sonnet routing *)
+     assert_true "parse_model:claude_opus_cost"
+       (m.cost_per_1k_input > 0.01)
    | Error _ -> assert_true "parse_model:claude" false);
 
   (match Llm_client.model_spec_of_string "gemini:gemini-2.5-flash" with

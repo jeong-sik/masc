@@ -152,5 +152,6 @@ val digest_json :
   ?target_type:string ->
   ?target_id:string ->
   ?include_workers:bool ->
+  ?sessions:Team_session_types.session list ->
   'a Operator_pending_confirm.context ->
   (Yojson.Safe.t, string) result

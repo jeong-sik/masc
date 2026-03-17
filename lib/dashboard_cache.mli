@@ -32,16 +32,17 @@ val get_or_compute : string -> ttl:float -> (unit -> Yojson.Safe.t) -> Yojson.Sa
     one [f] runs; others wait for the result (stampede protection). *)
 
 exception Compute_timeout of string
-(** Raised by [get_or_compute_with_timeout] when the compute function
-    exceeds [timeout_sec].  Propagates through [get_or_compute_eio] which
-    removes the [Computing] slot and broadcasts waiters before re-raising. *)
+(** Raised internally when the compute function exceeds [timeout_sec].
+    Callers of [get_or_compute_with_timeout] do not need to handle this —
+    it is caught and converted to a timeout-error JSON response. *)
 
 val get_or_compute_with_timeout :
   string -> ttl:float -> clock:_ Eio.Time.clock -> timeout_sec:float ->
   (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 (** Like [get_or_compute] but wraps the compute function with an Eio timeout.
-    Returns a timeout-error JSON if computation exceeds [timeout_sec] and no
-    stale value is available. *)
+    On timeout in the stale-while-revalidate path, the stale value is
+    preserved (not overwritten by error JSON).  On timeout with no stale
+    data, returns a timeout-error JSON without caching it. *)
 
 val invalidate : string -> unit
 (** Remove a single cache entry.  If the key is currently being computed,

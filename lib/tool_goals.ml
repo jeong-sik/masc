@@ -395,18 +395,36 @@ let reply_preview body =
   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 let add_fallback_task ctx node err =
-  let title =
-    Printf.sprintf "[goal:%s][fallback] %s" node.Goal_orchestrator.goal_id
-      node.Goal_orchestrator.title
+  let goal_prefix =
+    Printf.sprintf "[goal:%s][fallback]" node.Goal_orchestrator.goal_id
   in
-  let desc =
-    Printf.sprintf "keeper dispatch failed at node=%s depth=%d error=%s"
-      node.Goal_orchestrator.node_id node.Goal_orchestrator.depth err
+  (* Idempotency: skip if a fallback task for this goal already exists *)
+  let backlog = Room.read_backlog ctx.config in
+  let already_exists =
+    List.exists
+      (fun (task : Types.task) ->
+        match task.task_status with
+        | Types.Done _ | Types.Cancelled _ -> false
+        | _ -> String.length task.title >= String.length goal_prefix
+               && String.sub task.title 0 (String.length goal_prefix) = goal_prefix)
+      backlog.tasks
   in
-  try Some (Room.add_task ctx.config ~title ~priority:2 ~description:desc)
-  with exn ->
-    Log.Misc.error "add_fallback_task failed: %s" (Printexc.to_string exn);
-    None
+  if already_exists then (
+    Log.Misc.info "add_fallback_task skipped (duplicate): goal=%s node=%s"
+      node.Goal_orchestrator.goal_id node.Goal_orchestrator.node_id;
+    None)
+  else
+    let title =
+      Printf.sprintf "%s %s" goal_prefix node.Goal_orchestrator.title
+    in
+    let desc =
+      Printf.sprintf "keeper dispatch failed at node=%s depth=%d error=%s"
+        node.Goal_orchestrator.node_id node.Goal_orchestrator.depth err
+    in
+    try Some (Room.add_task ctx.config ~title ~priority:2 ~description:desc)
+    with exn ->
+      Log.Misc.error "add_fallback_task failed: %s" (Printexc.to_string exn);
+      None
 
 let run_keeper_call ctx ~models ~keeper_prefix ?(fallback_to_task = true) node =
   let keeper_name =

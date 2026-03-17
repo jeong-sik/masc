@@ -101,6 +101,89 @@ let dispatch (ctx : context) ~(name : string) : result option =
   in
 
   match name with
+  (* ── Compound onboarding: masc_start ──────────────────────────── *)
+  | "masc_start" ->
+      let path =
+        let p = arg_get_string "path" "" in
+        if p = "" then arg_get_string "room" "" else p
+      in
+      let task_title = arg_get_string "task_title" "" in
+      (* Step 1: set_room *)
+      let room_result =
+        if path = "" then begin
+          (* Use current room if already set *)
+          if Room.is_initialized state.Mcp_server.room_config then
+            Ok config
+          else
+            Error "path is required when no room is set. Provide the project directory path."
+        end else begin
+          let expanded =
+            if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
+              let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp" in
+              Filename.concat home (String.sub path 2 (String.length path - 2))
+            else if String.length path = 1 && path.[0] = '~' then
+              (match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp")
+            else if Filename.is_relative path then
+              Filename.concat (Sys.getcwd ()) path
+            else
+              path
+          in
+          if not (Sys.file_exists expanded && Sys.is_directory expanded) then
+            Error (Printf.sprintf "Directory not found: %s" expanded)
+          else
+            let masc_dir = Filename.concat expanded ".masc" in
+            if not (Sys.file_exists masc_dir && Sys.is_directory masc_dir) then
+              Error (Printf.sprintf "No .masc/ directory in %s. Use masc_init first." expanded)
+            else begin
+              state.Mcp_server.room_config <- Room.default_config expanded;
+              Ok state.Mcp_server.room_config
+            end
+        end
+      in
+      begin match room_result with
+      | Error e -> Some (false, Printf.sprintf "masc_start failed at set_room: %s" e)
+      | Ok active_config ->
+        (* Step 2: join (idempotent — skip if already joined) *)
+        let join_result =
+          try
+            let _msg = Room.join active_config ~agent_name ~capabilities:[] () in
+            Ok ()
+          with exn ->
+            let msg = Printexc.to_string exn in
+            if String.length msg > 0 then Error msg else Error "join failed"
+        in
+        match join_result with
+        | Error e -> Some (false, Printf.sprintf "masc_start failed at join: %s\nHint: try masc_join separately." e)
+        | Ok () ->
+          (* Step 3: add_task + claim + plan_set_task (if task_title provided) *)
+          if task_title = "" then
+            Some (true, Printf.sprintf "masc_start complete (room set + joined as %s). No task created — use masc_add_task to create one." agent_name)
+          else begin
+            let add_result = Room_task.add_task active_config ~title:task_title ~priority:3 ~description:"" in
+            (* Extract task ID from result like "✅ Added task-001: title" *)
+            let task_id =
+              try
+                let prefix = "Added " in
+                let idx = ref 0 in
+                while !idx < String.length add_result - String.length prefix &&
+                      String.sub add_result !idx (String.length prefix) <> prefix do
+                  incr idx
+                done;
+                let start = !idx + String.length prefix in
+                let end_idx = try String.index_from add_result start ':' with Not_found -> String.length add_result in
+                String.sub add_result start (end_idx - start)
+              with _ -> ""
+            in
+            if task_id = "" then
+              Some (true, Printf.sprintf "masc_start partial: joined as %s, but task creation failed: %s" agent_name add_result)
+            else begin
+              let _claim_msg = Room_task.claim_task active_config ~agent_name ~task_id in
+              Planning_eio.set_current_task active_config ~task_id;
+              Some (true, Printf.sprintf "masc_start complete: room set, joined as %s, task %s created+claimed+set as current." agent_name task_id)
+            end
+          end
+      end
+
   | "masc_lock" ->
       let file = arg_get_string "file" "" in
       if file = "" then

@@ -432,12 +432,13 @@ let start_execution_refresh_loop ~state ~sw ~clock =
                cross-domain Switch crash in Caqti release. *)
             Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
               Eio.Switch.run @@ fun pool_sw ->
-              let domain_config =
-                match Room_utils_backend_setup.with_domain_local_pg_backend ~sw:pool_sw config with
-                | Some c -> c
-                | None -> config  (* fallback: use original, will crash on PG but FS is fine *)
-              in
-              Dashboard_execution.json ~config:domain_config ~sw:pool_sw ~clock ~proc_mgr ())
+              match Room_utils_backend_setup.with_domain_local_pg_backend ~sw:pool_sw config with
+              | Some domain_config ->
+                Dashboard_execution.json ~config:domain_config ~sw:pool_sw ~clock ~proc_mgr ()
+              | None ->
+                (* Cannot safely use main-domain PG pool in a different domain
+                   (Switch is domain-bound). Raise to trigger the outer catch. *)
+                failwith "domain-local PG backend creation failed; skipping pool refresh")
           | None ->
             Dashboard_execution.json ~config ~sw ~clock ~proc_mgr ()
         in

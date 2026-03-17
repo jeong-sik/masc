@@ -1,6 +1,6 @@
 (library
  (name council)
  (public_name masc_mcp.council)
- (modules router debate consensus balance archive executor conversation governance_v2 loop_guard thread_persist council)
+ (modules router debate consensus balance archive executor conversation governance_v2 governance_v2_types loop_guard thread_persist council)
  (libraries str yojson base64 unix eio caqti caqti-eio caqti-eio.unix caqti-driver-postgresql cohttp cohttp-eio uuidm time_compat)
  (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

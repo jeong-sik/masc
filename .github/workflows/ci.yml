@@ -180,6 +180,7 @@ jobs:
           ALCOTEST_QUICK_TESTS: "1"
           CI_TEST_TIMEOUT_SEC: 1200
           CI_TEST_HEARTBEAT_SEC: 30
+          MASC_LLAMA_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh

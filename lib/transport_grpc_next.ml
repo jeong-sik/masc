@@ -340,7 +340,7 @@ let get_messages_handler (room_config: Room.config) (data: string) : string =
           if !count >= req.limit then None
           else begin
             let path = Filename.concat msgs_path name in
-            match Yojson.Safe.from_file path with
+            match Safe_ops.read_json_eio path with
             | json ->
               (match Types.message_of_yojson json with
                | Ok msg when msg.seq > req.since_seq ->

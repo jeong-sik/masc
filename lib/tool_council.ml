@@ -461,7 +461,16 @@ let execute_action ctx (case_ : GV2.case_record) (order : GV2.execution_order) =
                "unsupported execution action_type for governance v2: %s"
                action_type))
 
+(* TODO(M-13): V1 governance tools (debate, consensus, sessions) are deprecated.
+   Full removal requires auditing all callers and cleaning up the Debate/Consensus
+   modules in lib/council/. For now, log a deprecation warning and return an error
+   directing callers to V2 equivalents.
+   V1 tools: masc_debate_start, masc_debate_argue, masc_debate_close,
+             masc_debate_status, masc_debates, masc_consensus_start,
+             masc_consensus_vote, masc_consensus_close, masc_consensus_result,
+             masc_sessions *)
 let removed_surface name =
+  Log.Governance.warn "DEPRECATED V1 tool called: %s — migrate to Governance V2" name;
   ( false,
     Printf.sprintf
       "%s removed in Governance V2. Use masc_petition_submit, masc_case_brief_submit, masc_cases, masc_case_status, masc_ruling_status, or masc_execution_orders."

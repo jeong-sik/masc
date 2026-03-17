@@ -1570,7 +1570,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
                        H2.Body.Writer.write_string writer data;
                        H2.Body.Writer.flush writer ignore;
                        true
-                     with exn ->
+                     with
+                     | Eio.Cancel.Cancelled _ as exn -> raise exn
+                     | exn ->
                        Log.Sse.error "TRPG SSE send failed for room %s: %s"
                          room_id_trimmed (Printexc.to_string exn);
                        closed := true; false)

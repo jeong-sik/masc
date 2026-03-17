@@ -226,16 +226,72 @@ let operator_digest_http_json ~state ~sw ~clock request =
   Operator_control.digest_json ?actor:(operator_actor_hint request)
     ?target_type ?target_id ?include_workers ctx
 
+(* --- Mission proactive refresh (same pattern as execution) ----------
+   A background fiber recomputes the mission snapshot every
+   [_mission_refresh_interval_s] seconds.  The HTTP handler returns the
+   cached ref immediately (0ms).  Actor-parameterized requests fall back
+   to on-demand compute with SWR cache. *)
+
+let _mission_json_ref : Yojson.Safe.t ref =
+  ref (`Assoc [
+    ("generated_at", `String (Types.now_iso ()));
+    ("summary", `Assoc [("room_health", `String "initializing")]);
+    ("incidents", `List []);
+    ("recommended_actions", `List []);
+    ("command_focus", `Assoc []);
+    ("operator_targets", `Assoc []);
+    ("attention_queue", `List []);
+    ("sessions", `List []);
+    ("session_briefs", `List []);
+    ("agent_briefs", `List []);
+    ("keeper_briefs", `List []);
+    ("internal_signals", `List []);
+  ])
+
+let _mission_refresh_interval_s = 120.0
+
+let start_mission_refresh_loop ~state ~sw ~clock =
+  let config = state.Mcp_server.room_config in
+  let proc_mgr = state.Mcp_server.proc_mgr in
+  Eio.Fiber.fork ~sw (fun () ->
+    Printf.eprintf "[INFO] Dashboard: starting mission proactive refresh loop.\n%!";
+    let rec loop () =
+      let t0 = Time_compat.now () in
+      (try
+        let json =
+          Dashboard_mission.json
+            ~config ~sw ~clock ~proc_mgr ()
+        in
+        _mission_json_ref := json;
+        let dt = Time_compat.now () -. t0 in
+        Printf.eprintf "[INFO] Dashboard: mission refreshed (%.0fB, %.1fs).\n%!"
+          (Float.of_int (String.length (Yojson.Safe.to_string json)))
+          dt
+      with exn ->
+        let dt = Time_compat.now () -. t0 in
+        Printf.eprintf "[WARN] Dashboard: mission refresh failed (%.1fs): %s\n%!"
+          dt (Printexc.to_string exn));
+      Eio.Time.sleep clock _mission_refresh_interval_s;
+      loop ()
+    in
+    loop ())
+
 let dashboard_mission_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
-  let cache_key =
-    Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
-  in
-  Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:3.0
-    ~clock ~timeout_sec:30.0 (fun () ->
-    Dashboard_mission.json ?actor
-      ~config:state.Mcp_server.room_config ~sw ~clock
-      ~proc_mgr:state.Mcp_server.proc_mgr ())
+  match actor with
+  | None ->
+    (* Default: return proactively cached value immediately (0ms). *)
+    !_mission_json_ref
+  | Some _ ->
+    (* Actor-parameterized: on-demand with SWR cache. *)
+    let cache_key =
+      Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
+    in
+    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
+      ~clock ~timeout_sec:30.0 (fun () ->
+      Dashboard_mission.json ?actor
+        ~config:state.Mcp_server.room_config ~sw ~clock
+        ~proc_mgr:state.Mcp_server.proc_mgr ())
 
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with

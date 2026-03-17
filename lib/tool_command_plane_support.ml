@@ -170,7 +170,7 @@ let wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid =
         else (
           (match clock_opt with
           | Some clock -> Eio.Time.sleep clock 0.2
-          | None -> Unix.sleepf 0.2);
+          | None -> Time_compat.sleep 0.2);
           loop ())
     | _, status -> `Exited status
   in
@@ -214,7 +214,7 @@ let run_process_with_timeout ~clock_opt ~timeout_sec ~prog ~argv ~env =
        | exn -> Log.CmdPlane.warn "sigterm pid %d: %s" pid (Printexc.to_string exn));
       (match clock_opt with
       | Some clock -> Eio.Time.sleep clock 1.0
-      | None -> Unix.sleepf 1.0);
+      | None -> Time_compat.sleep 1.0);
       let exit_code =
         match Unix.waitpid [ Unix.WNOHANG ] pid with
         | 0, _ ->

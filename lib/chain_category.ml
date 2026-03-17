@@ -247,7 +247,7 @@ end = struct
       match f x with
       | Ok y -> Ok y
       | Error _ when n > 0 ->
-        Unix.sleepf delay;
+        Time_compat.sleep delay;
         loop (n - 1)
       | Error e -> Error e
     in

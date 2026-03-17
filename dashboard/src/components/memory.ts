@@ -335,7 +335,7 @@ function PostDetail({ post }: { post: BoardPost }) {
       await votePost(post.id, dir)
       refreshBoard()
     } catch {
-      showToast('Failed to vote', 'error')
+      showToast('투표에 실패했습니다', 'error')
     }
   }
 

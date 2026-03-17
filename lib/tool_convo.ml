@@ -114,9 +114,13 @@ let handle_get ctx args =
     | None -> (false, Printf.sprintf "Thread not found: %s" thread_id)
   end
 
-let handle_list ctx _args =
+let handle_list ctx args =
   let cc = convo_config ctx.config in
-  let threads = Council.Conversation.list_active ~config:cc in
+  let include_all = Safe_ops.json_bool ~default:false "include_all" args in
+  let threads =
+    if include_all then Council.Conversation.list_all ~config:cc
+    else Council.Conversation.list_active ~config:cc
+  in
   let json = `List (List.map (fun th ->
     `Assoc [
       ("id", `String th.Council.Conversation.id);
@@ -126,8 +130,9 @@ let handle_list ctx _args =
       ("participants", `List (List.map (fun p -> `String p) th.Council.Conversation.participants));
     ]
   ) threads) in
-  (true, Printf.sprintf "Active threads: %d\n%s"
-    (List.length threads) (Yojson.Safe.pretty_to_string json))
+  let label = if include_all then "All" else "Active" in
+  (true, Printf.sprintf "%s threads: %d\n%s"
+    label (List.length threads) (Yojson.Safe.pretty_to_string json))
 
 (* Dispatch *)
 let dispatch ctx ~name ~args : result option =

@@ -93,6 +93,7 @@ let mode_snapshot_json ctx =
       ("mode", `String (Mode.mode_to_string cfg.mode));
       ("mode_description", `String (Mode.mode_description cfg.mode));
       ("enabled_tool_count", `Int (List.length (Config.enabled_tool_schemas cfg.enabled_categories)));
+      ("registered_tool_count", `Int (Tool_dispatch.registered_count ()));
       ("categories", `List categories);
       ("config_summary", Config.get_config_summary room_path);
     ]

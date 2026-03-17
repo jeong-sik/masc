@@ -161,7 +161,7 @@ let test_source_metrics_fd_unlock () =
 let test_source_llm_token_parse () =
   check bool "llm_transport.ml has token count parse logging"
     true (any_file_contains_pattern
-      ["lib/llm_transport.ml"; "lib/llm_client_core.ml"; "lib/llm_client.ml"; "lib/llm_client_providers.ml"]
+      ["lib/llm_transport.ml"; "lib/llm_client.ml"]
       {|token|})
 
 let test_source_keeper_proactive () =

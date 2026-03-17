@@ -140,6 +140,25 @@ let get_by_session session_key =
   | Ok reg -> Agent_identity.Registry.find_by_session reg session_key
   | Error _ -> None
 
+(** {1 Resolved Agent Name Cache}
+
+    Caches the final resolved agent_name per MCP session to skip
+    ~180 lines of identity resolution on 2nd+ calls. *)
+
+let resolved_names : (string, string) Hashtbl.t = Hashtbl.create 64
+let resolved_names_lock = Eio.Mutex.create ()
+
+(* Used by Mcp_server_eio_execute — same library, cross-file reference *)
+let get_resolved_name sid =
+  Eio.Mutex.use_rw ~protect:true resolved_names_lock (fun () ->
+    Hashtbl.find_opt resolved_names sid)
+  [@@warning "-32"]
+
+let set_resolved_name sid name =
+  Eio.Mutex.use_rw ~protect:true resolved_names_lock (fun () ->
+    Hashtbl.replace resolved_names sid name)
+  [@@warning "-32"]
+
 (** {1 Statistics} *)
 
 (** Get count of active agents *)

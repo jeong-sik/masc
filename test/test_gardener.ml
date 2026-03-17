@@ -900,6 +900,7 @@ let test_tick_opens_backlog_triage_session_for_orphans () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let config = Room.default_config dir in
+      Eio_main.run @@ fun env ->
       ignore (Room.init config ~agent_name:(Some "fixture-root"));
       ignore (Room.join config ~agent_name:"worker-a" ~capabilities:[ "executor" ] ());
       ignore (Room.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"needs owner");
@@ -913,7 +914,6 @@ let test_tick_opens_backlog_triage_session_for_orphans () =
           check_interval_sec = 1.0;
         }
       in
-      Eio_main.run @@ fun env ->
       (try
          Eio.Switch.run (fun sw ->
            Gardener.tick ~sw ~clock:(Eio.Stdenv.clock env)
@@ -946,6 +946,7 @@ let test_tick_reuses_existing_backlog_triage_session () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let config = Room.default_config dir in
+      Eio_main.run @@ fun env ->
       ignore (Room.init config ~agent_name:(Some "fixture-root"));
       ignore (Room.join config ~agent_name:"worker-a" ~capabilities:[ "executor" ] ());
       ignore (Room.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"needs owner");
@@ -959,7 +960,6 @@ let test_tick_reuses_existing_backlog_triage_session () =
           check_interval_sec = 1.0;
         }
       in
-      Eio_main.run @@ fun env ->
       (try
          Eio.Switch.run (fun sw ->
            Gardener.tick ~sw ~clock:(Eio.Stdenv.clock env)
@@ -983,6 +983,7 @@ let test_tick_opens_backlog_triage_session_with_inactive_joined_agent () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let config = Room.default_config dir in
+      Eio_main.run @@ fun env ->
       ignore (Room.init config ~agent_name:(Some "fixture-root"));
       ignore (Room.join config ~agent_name:"worker-a" ~capabilities:[ "executor" ] ());
       (* Mark only worker-a as inactive; fixture-root stays active so
@@ -1000,7 +1001,6 @@ let test_tick_opens_backlog_triage_session_with_inactive_joined_agent () =
           check_interval_sec = 1.0;
         }
       in
-      Eio_main.run @@ fun env ->
       (try
          Eio.Switch.run (fun sw ->
              Gardener.tick ~sw ~clock:(Eio.Stdenv.clock env)

@@ -70,6 +70,7 @@ let dummy_state () : Mdal.loop_state =
   }
 
 let test_round_trip () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));
@@ -93,6 +94,7 @@ let test_round_trip () =
   cleanup_dir base_dir
 
 let test_latest_pointer_and_listing () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   let config = Room.default_config base_dir in
   ignore (Room.init config ~agent_name:(Some "tester"));

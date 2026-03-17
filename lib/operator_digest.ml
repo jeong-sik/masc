@@ -325,57 +325,15 @@ let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
       | Some s -> s
       | None -> Team_session_store.list_sessions config
     in
-    (* Build Command Plane snapshot state ONCE, then derive both
-       snapshot_json and summary_json from it.  Previously each called
-       build_snapshot_state independently, tripling the filesystem scan. *)
-    let cp_state =
-      Command_plane_v2.build_snapshot_state ~sessions:tracked_sessions config
-    in
-    Eio.Fiber.yield ();
+    (* Pass pre-loaded sessions to avoid redundant list_sessions calls.
+       Each function still builds its own snapshot_state internally, but
+       skips the session filesystem scan since sessions are provided. *)
     let command_plane_snapshot_json =
-      let topology = Command_plane_v2.topology_json_from_state cp_state in
-      let intents = Command_plane_v2.intents_summary_json_from_state cp_state in
-      let operations = Command_plane_v2.list_operations_json_from_state cp_state in
-      let detachments = Command_plane_v2.list_detachments_json_from_state cp_state in
-      let alerts = Command_plane_v2.list_alerts_json_from_state config cp_state in
-      let decisions = Command_plane_v2.list_policy_decisions_json_from_state cp_state in
-      let capacity = Command_plane_v2.capacity_json_from_state cp_state in
-      `Assoc
-        [
-          ("version", `String "cp-v2");
-          ("generated_at", `String (Types.now_iso ()));
-          ("topology", topology);
-          ("intents", intents);
-          ("operations", operations);
-          ("detachments", detachments);
-          ("alerts", alerts);
-          ("decisions", decisions);
-          ("capacity", capacity);
-        ]
+      Command_plane_v2.snapshot_json ~sessions:tracked_sessions config
     in
     Eio.Fiber.yield ();
     let command_plane_digest_json =
-      let module U = Yojson.Safe.Util in
-      let alerts =
-        Command_plane_v2.list_alerts_json_from_state config cp_state
-        |> U.member "summary"
-      in
-      let decisions =
-        Command_plane_v2.list_policy_decisions_json_from_state cp_state
-        |> U.member "summary"
-      in
-      `Assoc
-        [
-          ("version", `String "cp-v2");
-          ("generated_at", `String (Types.now_iso ()));
-          ("topology", Command_plane_v2.topology_summary_json_from_state cp_state);
-          ("intents", Command_plane_v2.intents_summary_json_from_state cp_state);
-          ("operations", Command_plane_v2.operations_summary_json_from_state cp_state);
-          ("detachments", Command_plane_v2.detachments_summary_json_from_state cp_state);
-          ("alerts", `Assoc [ ("summary", alerts) ]);
-          ("decisions", `Assoc [ ("summary", decisions) ]);
-          ("swarm_proof", Command_plane_v2.swarm_proof_json config);
-        ]
+      Command_plane_v2.summary_json ~sessions:tracked_sessions config
     in
     let swarm_status_json =
       Swarm_status.build_json_from_snapshot config command_plane_snapshot_json

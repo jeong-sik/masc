@@ -44,6 +44,16 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           let last_proactive_ago_s =
             if m.last_proactive_ts <= 0.0 then 0.0 else now_ts -. m.last_proactive_ts
           in
+          (* C-3 fix: compute last_activity from the most recent activity timestamp
+             to avoid showing misleading staleness when agent is actually active *)
+          let last_activity_ts =
+            List.fold_left max 0.0
+              [ m.last_turn_ts; m.last_proactive_ts; m.last_handoff_ts;
+                m.last_compaction_ts; created_ts ]
+          in
+          let last_activity_ago_s =
+            if last_activity_ts <= 0.0 then 0.0 else now_ts -. last_activity_ts
+          in
           let trace_history_count = List.length m.trace_history in
           let active_model = Keeper_exec_status.active_model_of_meta m in
           let next_model_hint = Keeper_exec_status.next_model_hint_of_meta m in
@@ -338,6 +348,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("last_handoff_ago_s", `Float last_handoff_ago_s);
               ("last_compaction_ago_s", `Float last_compaction_ago_s);
               ("last_proactive_ago_s", `Float last_proactive_ago_s);
+              ("last_activity_ago_s", `Float last_activity_ago_s);
               ("handoff_count_total", `Int trace_history_count);
               ("total_turns", `Int m.total_turns);
               ("total_input_tokens", `Int m.total_input_tokens);
@@ -424,8 +435,20 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           Some summary
     ) names
   in
+  (* H-9 fix: include recent alerts so BAD alerts are visible on dashboard *)
+  let recent_alerts =
+    let alerts_path = Keeper_types.keeper_alerts_path config in
+    let lines =
+      Keeper_memory.read_file_tail_lines alerts_path ~max_bytes:50000 ~max_lines:10
+    in
+    List.filter_map (fun line ->
+      try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
+    ) lines
+  in
   `Assoc [
     ("keepers", `List summaries);
     ("total", `Int (List.length summaries));
+    ("recent_alerts", `List recent_alerts);
+    ("alert_count", `Int (List.length recent_alerts));
   ]
 

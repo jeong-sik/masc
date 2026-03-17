@@ -198,12 +198,16 @@ let build_json_from_inputs ~timeline_limit_override ~now
       ("provenance_summary", swarm_surface_contract_json);
       ("narrative", narrative_json lanes timeline recommendation);
       ( "overview",
+        let total_workers = List.fold_left (fun acc (lane : lane) -> acc + lane.workers) 0 present_lanes in
+        let has_bad_flags = List.exists lane_has_bad_flag present_lanes in
         `Assoc
           [
             ("active_lanes", `Int (List.length present_lanes));
             ("moving_lanes", `Int moving_lanes);
             ("stalled_lanes", `Int stalled_lanes);
             ("projected_lanes", `Int projected_lanes);
+            ("total_workers", `Int total_workers);
+            ("has_failure", `Bool has_bad_flags);
             ("last_movement_at", string_option_to_json last_movement_at);
             ("provenance", `String "derived");
           ] );
@@ -287,6 +291,8 @@ let empty_json =
             ("moving_lanes", `Int 0);
             ("stalled_lanes", `Int 0);
             ("projected_lanes", `Int 0);
+            ("total_workers", `Int 0);
+            ("has_failure", `Bool false);
             ("last_movement_at", `Null);
             ("provenance", `String "derived");
           ] );

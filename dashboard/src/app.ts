@@ -9,7 +9,7 @@ import {
   refreshDashboardSemantics,
 } from './store'
 import { refreshRoomTruth } from './room-truth-store'
-import { setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
+import { cancelPendingSSERefreshes, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshForTab } from './tab-refresh'
 import {
   BuildIdentityBadge,
@@ -50,6 +50,9 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    // Cancel any pending SSE-triggered refreshes from the previous tab
+    // to prevent stale fetch results arriving after navigation (C-4/M-12).
+    cancelPendingSSERefreshes()
     refreshForTab(route.value.tab)
   }, [route.value.tab])
 

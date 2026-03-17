@@ -679,12 +679,18 @@ Call masc_listen again to continue listening.
         let warning = if context_ratio = 0.0 then
           [("warning", `String "context_ratio is 0.0 - did you forget to provide it?")]
         else [] in
+        let status, message =
+          if context_ratio >= mitosis_config.prepare_threshold then
+            "warning", Printf.sprintf "Context at %.0f%% (above prepare threshold %.0f%%). Consider preparing." (context_ratio *. 100.0) (mitosis_config.prepare_threshold *. 100.0)
+          else
+            "continue", Printf.sprintf "Context healthy (%.0f%%). Continue working." (context_ratio *. 100.0)
+        in
         let response = `Assoc ([
-          ("status", `String "continue");
+          ("status", `String status);
           ("context_ratio", `Float context_ratio);
           ("threshold_prepare", `Float mitosis_config.prepare_threshold);
           ("threshold_handoff", `Float mitosis_config.handoff_threshold);
-          ("message", `String (Printf.sprintf "Context healthy (%.0f%%). Continue working." (context_ratio *. 100.0)));
+          ("message", `String message);
         ] @ warning) in
         Some (true, Yojson.Safe.pretty_to_string response)
       end

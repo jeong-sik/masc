@@ -62,8 +62,14 @@ let handle_note_add ctx args : result =
       (false, Printf.sprintf "❌ Failed to add note: %s" e)
 
 let handle_deliver ctx args : result =
-  let task_id = get_string args "task_id" "" in
+  let task_id_input = get_string args "task_id" "" in
+  match Planning_eio.resolve_task_id ctx.config ~task_id:task_id_input with
+  | Error e -> (false, Printf.sprintf "❌ %s" e)
+  | Ok task_id ->
   let content = get_string args "content" "" in
+  if String.trim content = "" then
+    (false, "❌ content is required for masc_deliver")
+  else
   let result = Planning_eio.set_deliverable ctx.config ~task_id ~content in
   match result with
   | Ok plan_ctx ->

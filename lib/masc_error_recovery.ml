@@ -1,6 +1,7 @@
 (** Error recovery hints — pattern-matches error messages to suggest next actions.
 
     Called from mcp_server_eio_call_tool.ml on tool failure to help agents
+    self-recover without human intervention.
     self-correct without human intervention. *)
 
 let contains s sub =

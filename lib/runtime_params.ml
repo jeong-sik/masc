@@ -59,8 +59,6 @@ let with_ro f =
 (* ── registration ────────────────────────────────────────────── *)
 
 let register ~key ~default ~validate ~serialize ~deserialize =
-  if Hashtbl.mem registry_tbl key then
-    invalid_arg (sprintf "Runtime_params: duplicate key %S" key);
   let entry = { key; default; validate; serialize; deserialize; override = None } in
   let erased =
     {
@@ -84,7 +82,13 @@ let register ~key ~default ~validate ~serialize ~deserialize =
       clear_override = (fun () -> entry.override <- None);
     }
   in
-  Hashtbl.replace registry_tbl key erased;
+  (* Check + insert under mutex to prevent TOCTOU race.
+     At module init time, Eio scheduler may be absent — with_rw falls
+     back to lock-free f() which is safe since init is single-threaded. *)
+  with_rw (fun () ->
+    if Hashtbl.mem registry_tbl key then
+      invalid_arg (sprintf "Runtime_params: duplicate key %S" key);
+    Hashtbl.replace registry_tbl key erased);
   entry
 
 (* ── read / write ────────────────────────────────────────────── *)
@@ -132,25 +136,29 @@ let ensure_dir path =
     try Sys.mkdir dir 0o755
     with Sys_error _ -> ())
 
-(** Atomic write via rename. *)
+(** Atomic write via rename.  Errors are logged but do not propagate
+    — callers should not fail just because persistence is unavailable. *)
 let persist ~base_path =
-  let path = params_file base_path in
-  ensure_dir path;
-  let overrides =
-    with_ro (fun () ->
-      Hashtbl.fold
-        (fun _key (erased : erased) acc ->
-          if erased.has_override () then (erased.key, erased.current_json ()) :: acc
-          else acc)
-        registry_tbl [])
-  in
-  let json = `Assoc overrides in
-  let tmp = path ^ ".tmp" in
-  let oc = open_out tmp in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc (Yojson.Safe.pretty_to_string json));
-  Sys.rename tmp path
+  try
+    let path = params_file base_path in
+    ensure_dir path;
+    let overrides =
+      with_ro (fun () ->
+        Hashtbl.fold
+          (fun _key (erased : erased) acc ->
+            if erased.has_override () then (erased.key, erased.current_json ()) :: acc
+            else acc)
+          registry_tbl [])
+    in
+    let json = `Assoc overrides in
+    let tmp = path ^ ".tmp" in
+    let oc = open_out tmp in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc (Yojson.Safe.pretty_to_string json));
+    Sys.rename tmp path
+  with exn ->
+    Printf.eprintf "Runtime_params.persist: %s\n%!" (Printexc.to_string exn)
 
 let restore ~base_path =
   let path = params_file base_path in

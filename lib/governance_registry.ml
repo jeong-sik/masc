@@ -32,7 +32,10 @@ let deserialize_float json =
 let deserialize_int json =
   match json with
   | `Int i -> Ok i
-  | `Float f -> Ok (int_of_float f)
+  | `Float f ->
+      let i = Float.to_int f in
+      if Float.equal (Float.of_int i) f then Ok i
+      else Error (Printf.sprintf "expected integer, got %g" f)
   | _ -> Error "expected integer"
 
 let deserialize_string json =

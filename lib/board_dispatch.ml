@@ -159,8 +159,18 @@ let list_posts ?(visibility_filter=None) ?hearth ?post_kind_filter ?(sort_by=Hot
         | Updated -> Board_pg.Updated
         | Discussed -> Board_pg.Discussed
       in
-      let posts = Board_pg.list_posts t ~visibility_filter ?hearth ~sort_by:pg_sort ~limit () in
-      apply_post_kind_filter posts
+      let needs_filter =
+        Option.is_some post_kind_filter || exclude_automation
+      in
+      (* Over-fetch when post-query filtering is needed to avoid short results *)
+      let fetch_limit = if needs_filter then max limit (limit * 3) else limit in
+      let posts = Board_pg.list_posts t ~visibility_filter ?hearth ~sort_by:pg_sort ~limit:fetch_limit () in
+      let filtered = apply_post_kind_filter posts in
+      let rec take n lst = match n, lst with
+        | 0, _ | _, [] -> []
+        | n, x :: xs -> x :: take (n - 1) xs
+      in
+      take limit filtered
 
 let get_comments ~post_id =
   match backend () with

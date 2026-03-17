@@ -578,10 +578,11 @@ let pick_failover_leader live_agents (detachment : detachment_record) =
   | [] -> None
   | [single] -> Some single
   | _ ->
-      (* Shuffle: pick a random eligible agent for load distribution *)
+      (* Pick based on hash of current time to distribute without needing Random.self_init *)
       let arr = Array.of_list eligible in
       let n = Array.length arr in
-      Some arr.(Random.int n)
+      let idx = abs (Hashtbl.hash (Unix.gettimeofday ())) mod n in
+      Some arr.(idx)
 
 let maybe_escalation_target units (detachment : detachment_record) =
   match lookup_unit units detachment.assigned_unit_id with

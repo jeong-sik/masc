@@ -41,47 +41,37 @@ let findings_path ~base_path ~team_session_id =
 let add_finding ~base_path ~team_session_id ~worker_name ~finding =
   let path = findings_path ~base_path ~team_session_id in
   let dir = Filename.dirname path in
-  (if not (Sys.file_exists dir) then
-     try Sys.mkdir dir 0o755 with Sys_error _ -> ());
+  Fs_compat.mkdir_p dir;
   let entry =
     Printf.sprintf {|{"worker":"%s","finding":"%s","ts":%.0f}|}
       (String.escaped worker_name)
       (String.escaped finding)
       (Time_compat.now ())
   in
-  let oc = open_out_gen [ Open_append; Open_creat; Open_wronly ] 0o644 path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      output_string oc entry;
-      output_char oc '\n')
+  Fs_compat.append_file path (entry ^ "\n")
 
 let load_findings ~base_path ~team_session_id : string list =
   let path = findings_path ~base_path ~team_session_id in
   if not (Sys.file_exists path) then []
   else
     try
-      let ic = open_in path in
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr ic)
-        (fun () ->
-          let lines = ref [] in
-          (try
-             while true do
-               let line = input_line ic in
-               (try
-                  let json = Yojson.Safe.from_string line in
-                  let open Yojson.Safe.Util in
-                  let worker = json |> member "worker" |> to_string_option
-                               |> Option.value ~default:"unknown" in
-                  let finding = json |> member "finding" |> to_string_option
-                                |> Option.value ~default:"" in
-                  if finding <> "" then
-                    lines := Printf.sprintf "[%s] %s" worker finding :: !lines
-                with Yojson.Json_error _ -> ())
-             done
-           with End_of_file -> ());
-          List.rev !lines)
+      let content = Fs_compat.load_file path in
+      let lines = String.split_on_char '\n' content in
+      List.filter_map (fun line ->
+        if String.trim line = "" then None
+        else
+          try
+            let json = Yojson.Safe.from_string line in
+            let open Yojson.Safe.Util in
+            let worker = json |> member "worker" |> to_string_option
+                         |> Option.value ~default:"unknown" in
+            let finding = json |> member "finding" |> to_string_option
+                          |> Option.value ~default:"" in
+            if finding <> "" then
+              Some (Printf.sprintf "[%s] %s" worker finding)
+            else None
+          with Yojson.Json_error _ -> None
+      ) lines
     with Sys_error _ -> []
 
 let build ~base_path ~team_session_id =

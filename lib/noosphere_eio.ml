@@ -386,13 +386,7 @@ let record_shared_belief_jsonl ~content ~supporters =
   ] in
   let path = noosphere_events_path () in
   (try
-    let dir = Filename.dirname path in
-    if not (Sys.file_exists dir) then
-      Unix.mkdir dir 0o755;
-    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-    output_string oc (Yojson.Safe.to_string json);
-    output_char oc '\n';
-    close_out oc
+    Fs_compat.append_jsonl path json
   with exn ->
     Log.Misc.error "JSONL write failed: %s" (Printexc.to_string exn));
   belief
@@ -415,10 +409,7 @@ let record_emergent_goal_jsonl ~description ~contributing_minds =
   ] in
   let path = noosphere_events_path () in
   (try
-    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-    output_string oc (Yojson.Safe.to_string json);
-    output_char oc '\n';
-    close_out oc
+    Fs_compat.append_jsonl path json
   with exn ->
     Log.Misc.error "JSONL write failed: %s" (Printexc.to_string exn));
   goal
@@ -431,30 +422,25 @@ let compute_social_atmosphere () : float =
   let path = noosphere_events_path () in
   if not (Sys.file_exists path) then 0.5  (* neutral default *)
   else begin
-    let ic = open_in path in
+    let events = Fs_compat.load_jsonl path in
     let beliefs = ref 0 in
     let goals = ref 0 in
     let now = Time_compat.now () in
     let recent_cutoff = now -. 86400.0 in  (* last 24h *)
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      (try while true do
-        let line = input_line ic in
-        if String.length line > 0 then begin
-          try
-            let json = Yojson.Safe.from_string line in
-            let open Yojson.Safe.Util in
-            let ts = (try json |> member "timestamp" |> to_float with Yojson.Safe.Util.Type_error _ -> 0.0) in
-            if ts >= recent_cutoff then begin
-              let typ = (try json |> member "type" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
-              if typ = "shared_belief" then incr beliefs;
-              if typ = "emergent_goal" then incr goals
-            end
-          with
-          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
-          | exn ->
-              Log.Noosphere.warn "atmosphere parse: %s" (Printexc.to_string exn)
+    List.iter (fun json ->
+      try
+        let open Yojson.Safe.Util in
+        let ts = (try json |> member "timestamp" |> to_float with Yojson.Safe.Util.Type_error _ -> 0.0) in
+        if ts >= recent_cutoff then begin
+          let typ = (try json |> member "type" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
+          if typ = "shared_belief" then incr beliefs;
+          if typ = "emergent_goal" then incr goals
         end
-      done with End_of_file -> ()));
+      with
+      | Yojson.Safe.Util.Type_error _ -> ()
+      | exn ->
+          Log.Noosphere.warn "atmosphere parse: %s" (Printexc.to_string exn)
+    ) events;
     (* Normalize: more recent beliefs/goals = higher atmosphere *)
     let signal = Float.of_int (!beliefs + !goals * 2) /. 10.0 in
     min 1.0 (0.3 +. signal)  (* floor at 0.3, cap at 1.0 *)

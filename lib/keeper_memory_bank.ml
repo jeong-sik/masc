@@ -187,17 +187,14 @@ let write_memory_bank_rows
     (rows : keeper_memory_row_raw list) : (unit, string) result =
   let tmp = path ^ ".tmp" in
   try
-    let oc = open_out tmp in
-    Common.protect
-      ~module_name:"tool_keeper"
-      ~finally_label:"close_out"
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () ->
-        List.iter
-          (fun (row : keeper_memory_row_raw) ->
-            output_string oc (utf8_repair_string (Yojson.Safe.to_string row.json));
-            output_char oc '\n')
-          rows);
+    let content =
+      rows
+      |> List.map (fun (row : keeper_memory_row_raw) ->
+             utf8_repair_string (Yojson.Safe.to_string row.json))
+      |> String.concat "\n"
+    in
+    let content = if content <> "" then content ^ "\n" else content in
+    Fs_compat.save_file tmp content;
     Sys.rename tmp path;
     Ok ()
   with exn ->

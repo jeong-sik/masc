@@ -17,9 +17,7 @@ let read_lodge_config () =
   | Some root ->
       let config_path = Filename.concat root ".masc/config.json" in
       try
-        let ic = open_in config_path in
-        let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
-          (fun () -> really_input_string ic (in_channel_length ic)) in
+        let content = Fs_compat.load_file config_path in
         let json = Yojson.Safe.from_string content in
         let lodge = Yojson.Safe.Util.(member "lodge" json) in
         let lang = Yojson.Safe.Util.(member "language" lodge |> to_string_option) in
@@ -177,10 +175,7 @@ let with_auth_header_file api_key f =
     Fun.protect
       ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
       (fun () ->
-         let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o600 in
-         let oc = Unix.out_channel_of_descr fd in
-         output_string oc ("Authorization: Bearer " ^ api_key ^ "\n");
-         close_out oc;
+         Fs_compat.save_file path ("Authorization: Bearer " ^ api_key ^ "\n");
          f (Some path))
 
 let with_body_file body f =
@@ -188,10 +183,7 @@ let with_body_file body f =
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
-       let oc = open_out_bin path in
-       Fun.protect
-         ~finally:(fun () -> close_out_noerr oc)
-         (fun () -> output_string oc body);
+       Fs_compat.save_file path body;
        f path)
 
 let run_argv_unix (argv : string list)

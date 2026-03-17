@@ -58,7 +58,7 @@ let link_worktree_to_task config ~task_id ~worktree_info =
   if not (Sys.file_exists backlog_file) then
     Error (IoError "Backlog not found")
   else begin
-    let content = In_channel.with_open_text backlog_file In_channel.input_all in
+    let content = Fs_compat.load_file backlog_file in
     match Yojson.Safe.from_string content |> backlog_of_yojson with
     | Error e -> Error (IoError e)
     | Ok backlog ->
@@ -73,9 +73,7 @@ let link_worktree_to_task config ~task_id ~worktree_info =
           Error (TaskNotFound task_id)
         else begin
           let new_backlog = { backlog with tasks = new_tasks; last_updated = now_iso () } in
-          let oc = open_out backlog_file in
-          output_string oc (Yojson.Safe.pretty_to_string (backlog_to_yojson new_backlog));
-          close_out oc;
+          Fs_compat.save_file backlog_file (Yojson.Safe.pretty_to_string (backlog_to_yojson new_backlog));
           Ok ()
         end
   end
@@ -112,13 +110,11 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
           let update_agent_current_task () =
             let agent_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
             if Sys.file_exists agent_file then begin
-              let content = In_channel.with_open_text agent_file In_channel.input_all in
+              let content = Fs_compat.load_file agent_file in
               match Yojson.Safe.from_string content |> agent_of_yojson with
               | Ok agent ->
                   let updated_agent = { agent with current_task = Some worktree_name } in
-                  let oc = open_out agent_file in
-                  output_string oc (Yojson.Safe.pretty_to_string (agent_to_yojson updated_agent));
-                  close_out oc
+                  Fs_compat.save_file agent_file (Yojson.Safe.pretty_to_string (agent_to_yojson updated_agent))
               | Error msg -> Log.Misc.info "agent state read: %s" msg
             end
           in

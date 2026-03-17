@@ -86,24 +86,15 @@ let read_all_events_from_path (file : string) : event_record list =
   if not (Sys.file_exists file) then
     []
   else
-    let ic = open_in file in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        let rec loop acc =
-          match input_line ic with
-          | line ->
-              let acc =
-                if String.trim line = "" then acc
-                else
-                  match event_record_of_yojson (Yojson.Safe.from_string line) with
-                  | Ok record -> record :: acc
-                  | Error _ -> acc
-              in
-              loop acc
-          | exception End_of_file -> List.rev acc
-        in
-        loop [])
+    let content = Fs_compat.load_file file in
+    String.split_on_char '\n' content
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.filter_map (fun line ->
+        try
+          match event_record_of_yojson (Yojson.Safe.from_string line) with
+          | Ok record -> Some record
+          | Error _ -> None
+        with Yojson.Json_error _ -> None)
 
 let ensure_masc_dir fs config =
   let dir = Room_utils.masc_dir config in

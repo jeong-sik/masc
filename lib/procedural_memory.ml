@@ -35,13 +35,7 @@ let procedures_path ~agent_name =
   sprintf "%s/procedures.jsonl" (procedures_dir ~agent_name)
 
 let ensure_dir path =
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
+  Fs_compat.mkdir_p path
 
 (* ================================================================ *)
 (* JSON Serialization                                               *)
@@ -90,41 +84,27 @@ let of_json (json : Yojson.Safe.t) : procedure option =
 
 let load_procedures ~agent_name : procedure list =
   let path = procedures_path ~agent_name in
-  if not (Sys.file_exists path) then []
-  else begin
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let procs = ref [] in
-      (try while true do
-        let line = input_line ic in
-        if String.length line > 0 then
-          match Yojson.Safe.from_string line |> of_json with
-          | Some p -> procs := p :: !procs
-          | None -> ()
-      done with End_of_file -> ());
-      List.rev !procs)
-  end
+  Fs_compat.load_jsonl path
+  |> List.filter_map of_json
 
 let save_procedure ~agent_name (p : procedure) =
   let dir = procedures_dir ~agent_name in
   ensure_dir dir;
   let path = procedures_path ~agent_name in
-  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-  output_string oc (Yojson.Safe.to_string (to_json p));
-  output_char oc '\n';
-  close_out oc
+  Fs_compat.append_jsonl path (to_json p)
 
 let rewrite_procedures ~agent_name (procs : procedure list) =
   let dir = procedures_dir ~agent_name in
   ensure_dir dir;
   let path = procedures_path ~agent_name in
+  let content =
+    procs
+    |> List.map (fun p -> Yojson.Safe.to_string (to_json p))
+    |> String.concat "\n"
+    |> fun s -> if s = "" then "" else s ^ "\n"
+  in
   let tmp = path ^ ".tmp" in
-  let oc = open_out tmp in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    List.iter (fun p ->
-      output_string oc (Yojson.Safe.to_string (to_json p));
-      output_char oc '\n'
-    ) procs);
+  Fs_compat.save_file tmp content;
   Sys.rename tmp path
 
 (* ================================================================ *)

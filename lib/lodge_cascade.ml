@@ -24,16 +24,10 @@ let load_json_file path =
     match Hashtbl.find_opt config_cache path with
     | Some (cached_mtime, json) when Float.equal cached_mtime mtime -> Ok json
     | _ ->
-        let ic = open_in path in
-        Fun.protect
-          ~finally:(fun () -> close_in_noerr ic)
-          (fun () ->
-            let n = in_channel_length ic in
-            let buf = Bytes.create n in
-            really_input ic buf 0 n;
-            let json = Yojson.Safe.from_string (Bytes.to_string buf) in
-            Hashtbl.replace config_cache path (mtime, json);
-            Ok json)
+        let content = Fs_compat.load_file path in
+        let json = Yojson.Safe.from_string content in
+        Hashtbl.replace config_cache path (mtime, json);
+        Ok json
   with
   | Sys_error msg -> Error msg
   | Unix.Unix_error (err, fn, arg) ->

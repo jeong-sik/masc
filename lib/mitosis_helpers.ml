@@ -113,9 +113,7 @@ let queue_episode ~base_path ~session_id ~agent_name ~generation
   ] in
   let file = Filename.concat dir (ep_id ^ ".json") in
   try
-    let oc = open_out file in
-    Common.protect ~module_name:"tool_mitosis" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc (Yojson.Safe.pretty_to_string json));
+    Fs_compat.save_file file (Yojson.Safe.pretty_to_string json);
     Printf.printf "[EPISODE/QUEUE] Queued episode %s (gen %d) → %s\n%!" ep_id generation file;
     Some ep_id
   with exn ->
@@ -132,7 +130,7 @@ let generate_saga_id () =
   Printf.sprintf "saga-%d-%05d" (int_of_float (ts *. 1000.0)) rand
 
 let ensure_dir dir =
-  try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+  Fs_compat.mkdir_p dir
 
 let write_saga_state ~base_path ~saga_id ~status ~payload : string option =
   let dir = mitosis_saga_dir base_path in
@@ -145,10 +143,7 @@ let write_saga_state ~base_path ~saga_id ~status ~payload : string option =
     ("payload", payload);
   ] in
   try
-    let oc = open_out file in
-    Common.protect ~module_name:"tool_mitosis" ~finally_label:"finalizer"
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc (Yojson.Safe.pretty_to_string json));
+    Fs_compat.save_file file (Yojson.Safe.pretty_to_string json);
     Some file
   with exn ->
     Log.Misc.error "mitosis saga write failed %s: %s" file (Printexc.to_string exn);

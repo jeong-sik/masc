@@ -120,12 +120,10 @@ let complete_metric metric ~success ?error_message ?handoff_to () =
 
 (** Read metrics from a file - synchronous *)
 let read_metrics_file file : task_metric list =
-  if not (Sys.file_exists file) then
+  if not (Fs_compat.file_exists file) then
     []
   else
-    let ic = open_in file in
-    let content = Common.protect ~module_name:"metrics_store_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      really_input_string ic (in_channel_length ic)) in
+    let content = Fs_compat.load_file file in
     let lines = String.split_on_char '\n' content
       |> List.filter (fun s -> String.trim s <> "") in
     List.filter_map (fun line ->

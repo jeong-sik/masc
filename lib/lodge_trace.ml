@@ -28,12 +28,7 @@ let ensure_trace_dir ~agent_name =
     | None -> Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp"
   in
   let trace_dir = Filename.concat me_root (Printf.sprintf ".masc/traces/%s" agent_name) in
-  if not (Sys.file_exists trace_dir) then begin
-    let parent = Filename.concat me_root ".masc/traces" in
-    if not (Sys.file_exists parent) then
-      Unix.mkdir parent 0o755;
-    Unix.mkdir trace_dir 0o755
-  end;
+  Fs_compat.mkdir_p trace_dir;
   trace_dir
 
 (** Save a trace entry to JSONL file *)
@@ -55,8 +50,5 @@ let save (entry : trace_entry) =
     ("duration_ms", `Int entry.duration_ms);
     ("timestamp", `Float entry.timestamp);
   ] in
-  let line = Yojson.Safe.to_string json ^ "\n" in
-  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 trace_file in
-  output_string oc line;
-  close_out oc;
+  Fs_compat.append_jsonl trace_file json;
   Printf.printf "   📝 [%s] Trace saved: %s (%dms, %s)\n%!" entry.agent_name trace_file entry.duration_ms entry.llm_used

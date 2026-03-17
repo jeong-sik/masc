@@ -153,10 +153,8 @@ let save_agents_to_file_cache () =
     try
       let path = agent_file_cache_path () in
       let dir = Filename.dirname path in
-      if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
-      let oc = open_out path in
-      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-        output_string oc (Yojson.Safe.pretty_to_string cache_json))
+      Fs_compat.mkdir_p dir;
+      Fs_compat.save_file path (Yojson.Safe.pretty_to_string cache_json)
     with e ->
       Log.Lodge.error "Failed to save agent cache: %s" (Printexc.to_string e)
   end
@@ -169,9 +167,7 @@ let load_agents_from_file_cache () : bool =
     false
   end else begin
     try
-      let ic = open_in path in
-      let content = Fun.protect ~finally:(fun () -> close_in_noerr ic)
-        (fun () -> really_input_string ic (in_channel_length ic)) in
+      let content = Fs_compat.load_file path in
       let json = Yojson.Safe.from_string content in
       let open Yojson.Safe.Util in
       let updated_at = json |> member "updated_at" |> to_float in

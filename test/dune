@@ -110,6 +110,11 @@
  (libraries masc_mcp alcotest yojson unix))
 
 (test
+ (name test_dashboard_labels)
+ (modules test_dashboard_labels)
+ (libraries masc_mcp alcotest str yojson unix))
+
+(test
  (name test_dashboard_room_truth)
  (modules test_dashboard_room_truth)
  (libraries masc_mcp alcotest eio eio_main yojson unix))

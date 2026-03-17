@@ -92,6 +92,9 @@ type completion_response = {
   latency_ms : int;
 }
 
+(** Extract text content from a completion response. *)
+val text_of_response : completion_response -> string
+
 (** {1 Core Functions} *)
 
 (** Call LLM with structured request.

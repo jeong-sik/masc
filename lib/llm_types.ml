@@ -77,6 +77,12 @@ type completion_response = {
   latency_ms : int;
 }
 
+(** Extract text content from a completion_response.
+    v0.47 migration bridge: consumers should use this instead of direct .content access.
+    When completion_response.content changes to content_block list (Phase B),
+    only this function needs updating — not the 55+ call sites. *)
+let text_of_response (resp : completion_response) : string = resp.content
+
 let clamp_llama_max_tokens max_tokens =
   max 1 (min max_tokens Env_config.Llama.max_tokens)
 

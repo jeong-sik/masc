@@ -723,7 +723,7 @@ let generate_code_change ~goal ~baseline ~history ~insights
     } in
     (match Llm_client.complete ~timeout_sec:120 req with
     | Result.Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
-    | Result.Ok resp -> parse_llm_code_response resp.content)
+    | Result.Ok resp -> parse_llm_code_response (Llm_client.text_of_response resp))
 
 (* ================================================================ *)
 (* Loop State Management                                            *)

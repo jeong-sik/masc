@@ -89,6 +89,10 @@ type completion_response = {
   latency_ms : int;
 }
 
+(** Extract text content from a completion_response.
+    v0.47 migration bridge: use this instead of direct [.content] access. *)
+val text_of_response : completion_response -> string
+
 (** {1 Request Normalization} *)
 
 (** Clamp max_tokens for Llama provider requests. *)

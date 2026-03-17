@@ -294,7 +294,7 @@ let parse_llm_intent (text : string) : (dm_intent, string) result =
 
 (** Validate that an LLM response contains a parseable non-Unknown intent. *)
 let llm_response_is_valid (resp : Llm_client.completion_response) : bool =
-  match parse_llm_intent resp.content with
+  match parse_llm_intent (Llm_client.text_of_response resp) with
   | Ok intent -> not (equal_intent_category intent.primary Unknown)
   | Error _ -> false
 

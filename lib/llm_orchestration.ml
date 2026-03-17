@@ -135,7 +135,7 @@ let completion_response_to_cache_json (resp : completion_response) : Yojson.Safe
       ( "response",
         `Assoc
           [
-            ("content", `String resp.content);
+            ("content", `String (text_of_response resp));
             ("tool_calls", `List (List.map tool_call_to_json resp.tool_calls));
             ("usage", token_usage_to_json resp.usage);
             ("model_used", `String resp.model_used);

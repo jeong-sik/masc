@@ -495,7 +495,7 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
       with
       | Ok response -> (
           try
-            Yojson.Safe.from_string response.content
+            Yojson.Safe.from_string (Llm_client.text_of_response response)
             |> parse_routing_decision_json
           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
       | Error _ -> None

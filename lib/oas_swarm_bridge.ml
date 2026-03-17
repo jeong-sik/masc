@@ -50,7 +50,7 @@ let entry_of_masc_spec
           Agent_sdk.Types.id = "masc-bridge";
           model = response.model_used;
           stop_reason = Agent_sdk.Types.EndTurn;
-          content = [Agent_sdk.Types.Text response.content];
+          content = [Agent_sdk.Types.Text (Llm_client_core.text_of_response response)];
           usage = Some usage;
         }
       | Error msg ->

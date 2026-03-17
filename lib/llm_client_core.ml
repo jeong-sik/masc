@@ -129,6 +129,10 @@ type completion_response = {
   latency_ms : int;
 }
 
+(** Extract text content from a completion_response.
+    Mirror of Llm_types.text_of_response for the local type. *)
+let text_of_response (resp : completion_response) : string = resp.content
+
 let clamp_llama_max_tokens max_tokens =
   max 1 (min max_tokens Env_config.Llama.max_tokens)
 
@@ -364,7 +368,7 @@ let completion_response_to_cache_json (resp : completion_response) : Yojson.Safe
       ( "response",
         `Assoc
           [
-            ("content", `String resp.content);
+            ("content", `String (text_of_response resp));
             ("tool_calls", `List (List.map tool_call_to_json resp.tool_calls));
             ("usage", token_usage_to_json resp.usage);
             ("model_used", `String resp.model_used);

@@ -171,7 +171,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
       let rec exec_loop ~round ~acc_cost ~acc_tools ~last_resp =
         if last_resp.Llm_client.tool_calls = [] || round > max_rounds then
           let content =
-            let c = String.trim last_resp.Llm_client.content in
+            let c = String.trim (Llm_client.text_of_response last_resp) in
             if c = "" && acc_tools <> [] then
               Printf.sprintf "(autonomous execution: %s)"
                 (String.concat ", " acc_tools)
@@ -188,7 +188,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
           let followup_prompt =
             keeper_tool_followup_prompt
               ~user_message:"Execute the next step of the plan."
-              ~draft_reply:last_resp.Llm_client.content
+              ~draft_reply:(Llm_client.text_of_response last_resp)
               ~tool_outputs
               ~already_executed:all_tools
           in
@@ -211,7 +211,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
           ) specs in
           match run_cascade followup_requests with
           | Error _ ->
-              (last_resp.Llm_client.content, acc_cost, all_tools)
+              (Llm_client.text_of_response last_resp, acc_cost, all_tools)
           | Ok next_resp ->
               let used_spec =
                 model_spec_for_used specs next_resp.model_used

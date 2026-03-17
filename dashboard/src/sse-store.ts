@@ -157,3 +157,17 @@ export function stopPeriodicRefresh(): void {
     _periodicId = null
   }
 }
+
+/** Cancel all pending SSE-triggered refresh timers.
+ *  Call on route change to prevent stale fetches from firing after the user
+ *  navigates to a different tab (fixes C-4/M-12 race condition). */
+export function cancelPendingSSERefreshes(): void {
+  for (const key of Object.keys(_debounceTimers)) {
+    clearTimeout(_debounceTimers[key])
+    delete _debounceTimers[key]
+  }
+  if (_fetchDebounce) {
+    clearTimeout(_fetchDebounce)
+    _fetchDebounce = null
+  }
+}

@@ -64,4 +64,18 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
       ("required", `List [`String "agent_name"]);
     ];
   };
+  {
+    name = "masc_portal_status";
+    description = "Get status of your portal connections and pending A2A tasks.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
 ]

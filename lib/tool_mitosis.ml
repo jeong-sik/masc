@@ -802,6 +802,17 @@ let handle_metrics_record _ctx args : result =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_mitosis_status";
+    description = "Get current agent cell status and stem pool state. Shows generation, task count, tool calls, and available reserve cells. Use to monitor lifecycle state.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+]
+
 (** {1 Dispatcher} *)
 
 let dispatch ctx ~name ~args : result option =

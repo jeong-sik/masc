@@ -7,6 +7,8 @@ type ('a, 'b) context = {
   clock: 'b Eio.Time.clock;
 }
 
+val schemas : Types.tool_schema list
+
 (** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
 val dispatch : ('a, 'b) context -> name:string -> args:Yojson.Safe.t -> (bool * string) option
 

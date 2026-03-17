@@ -14,3 +14,5 @@ val handle_rate_limit_status : context -> Yojson.Safe.t -> bool * string
 
 (** Handle masc_rate_limit_config *)
 val handle_rate_limit_config : context -> Yojson.Safe.t -> bool * string
+
+val schemas : Types.tool_schema list

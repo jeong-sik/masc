@@ -85,4 +85,88 @@ Auto-called on masc_leave.";
       ("required", `List []);
     ];
   };
+  {
+    name = "masc_note_add";
+    description = "Add a note/observation to the planning context. Notes are timestamped and appended.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID");
+        ]);
+        ("note", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Note content");
+        ]);
+      ]);
+      ("required", `List [`String "task_id"; `String "note"]);
+    ];
+  };
+  {
+    name = "masc_deliver";
+    description = "Attach final output/result to a task for handoff or review. \
+Use for: code diffs, PR URLs, analysis reports, generated files. \
+Deliverables persist with task and are visible to other agents. \
+Call before masc_transition(action='done'). \
+Example: masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pull/123'})";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID");
+        ]);
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Deliverable content");
+        ]);
+      ]);
+      ("required", `List [`String "task_id"; `String "content"]);
+    ];
+  };
+  {
+    name = "masc_error_add";
+    description = "Add an error/failure to the planning context (PDCA Check phase). Use to track failures, bugs, and issues encountered during task execution.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID");
+        ]);
+        ("error_type", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Type of error: build, test, runtime, logic, api, etc.");
+        ]);
+        ("message", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Error message or description");
+        ]);
+        ("context", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional context (file path, function name, etc.)");
+        ]);
+      ]);
+      ("required", `List [`String "task_id"; `String "error_type"; `String "message"]);
+    ];
+  };
+  {
+    name = "masc_error_resolve";
+    description = "Mark an error as resolved. Use when you've fixed an issue tracked in the planning context.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID");
+        ]);
+        ("error_index", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "0-based index of the error to mark as resolved");
+        ]);
+      ]);
+      ("required", `List [`String "task_id"; `String "error_index"]);
+    ];
+  };
 ]

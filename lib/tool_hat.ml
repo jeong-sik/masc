@@ -31,6 +31,23 @@ let handle_hat_status _ctx _args =
     (true, Buffer.contents buf)
   end
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_hat_status";
+    description = "Show current hat status for all agents. Displays which role each agent is currently using.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent requesting status");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+]
+
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_hat_wear" -> Some (handle_hat_wear ctx args)

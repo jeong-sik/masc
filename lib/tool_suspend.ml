@@ -150,6 +150,52 @@ let handle_circuit_status ctx args =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_suspend";
+    description = "Immediately suspend an agent (admin tool). \
+Forces the agent to leave all rooms, adds to blacklist for 1 hour, \
+and triggers circuit breaker. Use for: runaway agents, security incidents, \
+resource protection. The suspended agent cannot rejoin until cooldown expires. \
+Requires admin privileges or room owner status.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("target_agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent ID to suspend (e.g., 'claude-abc123')");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reason for suspension (logged for audit)");
+        ]);
+        ("duration_hours", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Suspension duration in hours (default: 1.0)");
+          ("default", `Float 1.0);
+        ]);
+      ]);
+      ("required", `List [`String "target_agent"; `String "reason"]);
+    ];
+  };
+  {
+    name = "masc_circuit_status";
+    description = "Check the circuit breaker status for an agent. \
+Shows if the agent is blocked due to repeated failures. \
+Circuit states: closed (normal), half_open (testing), open (blocked). \
+Open state includes remaining cooldown time.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent ID to check (optional, defaults to caller)");
+        ]);
+      ]);
+    ];
+  };
+]
+
 (** {1 Dispatch} *)
 
 let dispatch ctx ~name ~args =

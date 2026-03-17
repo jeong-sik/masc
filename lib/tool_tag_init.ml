@@ -1,11 +1,11 @@
-(** Tool_tag_init — Bulk name→tag registration for modules without schema exports.
+(** Tool_tag_init — Bulk name→tag registration for tools NOT in any module's schemas.
 
     Called once at startup (after schema-based registrations) to ensure
     every dispatched tool name has an O(1) tag lookup entry.
 
-    Modules that already export [schemas] and are registered via
-    [register_module_tag] in [mcp_server_eio.ml] are NOT listed here.
-    Only modules that rely on the fallback chain are included. *)
+    Tools that are already in a module's [schemas] list are registered via
+    [register_module_tag] in [mcp_server_eio.ml] and do NOT need entries here.
+    Only tools dispatched by a module but missing from its schema list are included. *)
 
 let register_all () =
   let open Tool_dispatch in
@@ -13,17 +13,14 @@ let register_all () =
     List.iter (fun name -> register_name_tag ~tool_name:name ~tag) names
   in
 
-  (* ── Mod_inline: Tool_inline_dispatch (67 tools) ─────────────── *)
+  (* ── Mod_inline: Tool_inline_dispatch ─────────────────────────── *)
+  (* 16 tools are in Tool_schemas_inline.schemas; only non-schema tools here *)
   reg Mod_inline [
-    "masc_lock"; "masc_unlock"; "masc_set_room";
-    "masc_join"; "masc_leave"; "masc_bounded_run";
-    "masc_broadcast"; "masc_messages"; "masc_listen"; "masc_who";
-    "masc_verify_request"; "masc_verify_submit"; "masc_verify_status";
+    "masc_bounded_run";
+    "masc_verify_request"; "masc_verify_submit";
     "masc_verify_pending"; "masc_verify_auto";
     "masc_mcp_session";
     "masc_cancellation"; "masc_subscription"; "masc_progress";
-    "masc_interrupt"; "masc_approve"; "masc_reject";
-    "masc_pending_interrupts"; "masc_branch";
     "masc_governance_set"; "masc_spawn"; "masc_memento_mori";
     "masc_episode_flush"; "masc_episode_list";
     "masc_self_introspect"; "masc_recall_search";
@@ -46,16 +43,13 @@ let register_all () =
     "masc_convo_get"; "masc_convo_list";
   ];
 
-  (* ── Mod_task: Tool_task ──────────────────────────────────────── *)
+  (* ── Mod_task: non-schema tools ─────────────────────────────── *)
   reg Mod_task [
-    "masc_add_task"; "masc_batch_add_tasks"; "masc_claim_next";
-    "masc_transition"; "masc_update_priority";
-    "masc_tasks"; "masc_task_history"; "masc_archive_view";
+    "masc_transition";
   ];
 
-  (* ── Mod_control: Tool_control ────────────────────────────────── *)
+  (* ── Mod_control: non-schema tools ──────────────────────────── *)
   reg Mod_control [
-    "masc_pause"; "masc_resume"; "masc_pause_status";
     "masc_switch_mode"; "masc_get_config";
   ];
 
@@ -71,15 +65,15 @@ let register_all () =
     "masc_cache_list"; "masc_cache_clear"; "masc_cache_stats";
   ];
 
-  (* ── Mod_tempo: Tool_tempo ────────────────────────────────────── *)
+  (* ── Mod_tempo: non-schema tools ────────────────────────────── *)
   reg Mod_tempo [
     "masc_tempo_get"; "masc_tempo_set"; "masc_tempo_adjust";
-    "masc_tempo_reset"; "masc_tempo";
+    "masc_tempo";
   ];
 
-  (* ── Mod_mitosis: Tool_mitosis ────────────────────────────────── *)
+  (* ── Mod_mitosis: non-schema tools ──────────────────────────── *)
   reg Mod_mitosis [
-    "masc_mitosis_status"; "masc_mitosis_all"; "masc_mitosis_pool";
+    "masc_mitosis_all"; "masc_mitosis_pool";
     "masc_mitosis_divide"; "masc_mitosis_check"; "masc_mitosis_record";
     "masc_mitosis_prepare"; "masc_mitosis_handoff";
     "masc_metrics_compare"; "masc_metrics_record";
@@ -101,11 +95,8 @@ let register_all () =
     "masc_comment_add"; "masc_comment_list"; "masc_vote";
   ];
 
-  (* ── Mod_council: Tool_council ────────────────────────────────── *)
+  (* ── Mod_council: non-schema tools ──────────────────────────── *)
   reg Mod_council [
-    "masc_petition_submit"; "masc_case_brief_submit";
-    "masc_cases"; "masc_case_status";
-    "masc_ruling_status"; "masc_execution_orders"; "masc_governance_status";
     "masc_route"; "masc_execute"; "masc_execute_dry_run";
     "masc_debate_start"; "masc_debate_argue";
     "masc_debate_close"; "masc_debate_status"; "masc_debates";
@@ -120,16 +111,15 @@ let register_all () =
     "masc_poll_events"; "masc_heartbeat_result";
   ];
 
-  (* ── Mod_handover: Tool_handover ──────────────────────────────── *)
+  (* ── Mod_handover: non-schema tools ─────────────────────────── *)
   reg Mod_handover [
     "masc_handover_create"; "masc_handover_list";
-    "masc_handover_claim"; "masc_handover_claim_and_spawn";
     "masc_handover_get";
   ];
 
-  (* ── Mod_relay: Tool_relay ────────────────────────────────────── *)
+  (* ── Mod_relay: non-schema tools ────────────────────────────── *)
   reg Mod_relay [
-    "masc_relay_status"; "masc_relay_checkpoint";
+    "masc_relay_checkpoint";
     "masc_relay_now"; "masc_relay_smart_check";
   ];
 
@@ -139,15 +129,14 @@ let register_all () =
     "masc_heartbeat_stop"; "masc_heartbeat_list";
   ];
 
-  (* ── Mod_encryption: Tool_encryption ──────────────────────────── *)
+  (* ── Mod_encryption: non-schema tools ───────────────────────── *)
   reg Mod_encryption [
-    "masc_encryption_status"; "masc_encryption_enable";
-    "masc_encryption_disable"; "masc_generate_key";
+    "masc_generate_key";
   ];
 
-  (* ── Mod_hat: Tool_hat ────────────────────────────────────────── *)
+  (* ── Mod_hat: non-schema tools ──────────────────────────────── *)
   reg Mod_hat [
-    "masc_hat_wear"; "masc_hat_status";
+    "masc_hat_wear";
   ];
 
   (* ── Mod_audit: Tool_audit ────────────────────────────────────── *)
@@ -155,25 +144,14 @@ let register_all () =
     "masc_audit_query"; "masc_audit_stats"; "masc_governance_report";
   ];
 
-  (* ── Mod_rate_limit: Tool_rate_limit ──────────────────────────── *)
-  reg Mod_rate_limit [
-    "masc_rate_limit_status"; "masc_rate_limit_config";
-  ];
+  (* Mod_cost and Mod_rate_limit: fully covered by schemas — no entries needed *)
 
-  (* ── Mod_cost: Tool_cost ──────────────────────────────────────── *)
-  reg Mod_cost [
-    "masc_cost_log"; "masc_cost_report";
-  ];
+  (* Mod_suspend: fully covered by schemas — no entries needed *)
 
-  (* ── Mod_suspend: Tool_suspend ────────────────────────────────── *)
-  reg Mod_suspend [
-    "masc_suspend"; "masc_circuit_status";
-  ];
-
-  (* ── Mod_walph: Tool_walph ───────────────────────────────────── *)
+  (* ── Mod_walph: non-schema tools ────────────────────────────── *)
   reg Mod_walph [
     "masc_walph_loop"; "masc_walph_control";
-    "masc_walph_natural"; "masc_walph_status";
+    "masc_walph_natural";
   ];
 
   (* ── Mod_library: Tool_library ────────────────────────────────── *)
@@ -182,12 +160,12 @@ let register_all () =
     "masc_library_promote"; "masc_library_search";
   ];
 
-  (* ── Mod_gardener: Tool_gardener ──────────────────────────────── *)
+  (* ── Mod_gardener: non-schema tools ─────────────────────────── *)
   reg Mod_gardener [
-    "masc_gardener_health"; "masc_gardener_status";
+    "masc_gardener_health";
     "masc_gardener_propose_spawn"; "masc_gardener_retire_agent";
     "masc_gardener_config"; "masc_gardener_execute_spawn";
-    "masc_gardener_execute_retire"; "masc_gardener_reset_circuit";
+    "masc_gardener_execute_retire";
   ];
 
   (* ── Mod_misc: Tool_misc ──────────────────────────────────────── *)
@@ -200,8 +178,6 @@ let register_all () =
   ];
 
   (* ── Schema-gap fills for modules with partial schema exports ── *)
-  (* These modules ARE registered via register_module_tag but their
-     schemas don't include all dispatched tools. *)
   reg Mod_room [
     "masc_workflow_guide"; "masc_check";
   ];

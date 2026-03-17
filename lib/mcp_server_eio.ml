@@ -163,9 +163,25 @@ let () =
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
   register_module_tag ~schemas:Tool_trpg.schemas ~tag:Mod_trpg;
   register_module_tag ~schemas:Tool_notifications.schemas ~tag:Mod_notifications;
+  (* God Schema decomposition: register modules that now own their schemas *)
+  register_module_tag ~schemas:Tool_task.schemas ~tag:Mod_task;
+  register_module_tag ~schemas:Tool_control.schemas ~tag:Mod_control;
+  register_module_tag ~schemas:Tool_suspend.schemas ~tag:Mod_suspend;
+  register_module_tag ~schemas:Tool_council.schemas ~tag:Mod_council;
+  register_module_tag ~schemas:Tool_cost.schemas ~tag:Mod_cost;
+  register_module_tag ~schemas:Tool_rate_limit.schemas ~tag:Mod_rate_limit;
+  register_module_tag ~schemas:Tool_encryption.schemas ~tag:Mod_encryption;
+  register_module_tag ~schemas:Tool_relay.schemas ~tag:Mod_relay;
+  register_module_tag ~schemas:Tool_mitosis.schemas ~tag:Mod_mitosis;
+  register_module_tag ~schemas:Tool_handover.schemas ~tag:Mod_handover;
+  register_module_tag ~schemas:Tool_tempo.schemas ~tag:Mod_tempo;
+  register_module_tag ~schemas:Tool_walph.schemas ~tag:Mod_walph;
+  register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
+  register_module_tag ~schemas:Tool_gardener.schemas ~tag:Mod_gardener;
+  register_module_tag ~schemas:Tool_inline_dispatch.schemas ~tag:Mod_inline;
   (* Fix 2: Register modules that lack schema exports.
-     Tool_tag_init uses register_name_tag for 25 modules (195+ tools)
-     that previously relied on the fallback chain. Called AFTER schema-based
+     Tool_tag_init uses register_name_tag for remaining modules
+     that still rely on name-based registration. Called AFTER schema-based
      registrations so it fills gaps without overwriting correct mappings. *)
   Tool_tag_init.register_all ();
   mark_tag_registry_initialized ();

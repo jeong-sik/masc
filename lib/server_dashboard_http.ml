@@ -406,11 +406,31 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       (Option.value ~default:"" actor)
       (Option.value ~default:"" fixture)
   in
-  Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:30.0
-    ~clock ~timeout_sec:30.0 (fun () ->
+  (* TTL 120s: execution data is expensive to compute (Eio wall-clock
+     inflation) but changes slowly.  With stale_factor=10, stale data is
+     served for 1200s (20 min) while background recompute runs.
+     Timeout 120s: generous budget for cold-start compute under heavy
+     fiber contention. *)
+  Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
+    ~clock ~timeout_sec:120.0 (fun () ->
     Dashboard_execution.json ?actor ?fixture
       ~config:state.Mcp_server.room_config ~sw ~clock
       ~proc_mgr:state.Mcp_server.proc_mgr ())
+
+(** Pre-warm the execution cache in a background fiber so the first
+    dashboard request receives a cached response instead of blocking
+    on a cold compute that takes 6s+ under Eio fiber contention. *)
+let warm_execution_cache ~state ~sw ~clock =
+  Printf.eprintf "[INFO] Dashboard: pre-warming execution cache...\n%!";
+  (try
+    let _json =
+      dashboard_execution_http_json ~state ~sw ~clock
+        (Httpun.Request.create `GET "/api/v1/dashboard/execution")
+    in
+    Printf.eprintf "[INFO] Dashboard: execution cache warmed.\n%!"
+  with exn ->
+    Printf.eprintf "[WARN] Dashboard: execution cache warm failed: %s\n%!"
+      (Printexc.to_string exn))
 
 let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_json ~top_queue =
   let recommendation_summary =

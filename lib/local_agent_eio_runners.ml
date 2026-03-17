@@ -86,7 +86,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
         let heartbeat_cbs =
           let interval = local_worker_heartbeat_interval_sec () in
           if interval > 0 then
-            [ { Oas.Agent.interval_sec = float_of_int interval;
+            [ { Oas.Agent_types.interval_sec = float_of_int interval;
                 callback = (fun () ->
                   match
                     call_masc_tool ~sw ~auth_token ~session_id:mcp_session_id
@@ -288,7 +288,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
           let heartbeat_cbs =
             let interval = local_worker_heartbeat_interval_sec () in
             if interval > 0 then
-              [ { Oas.Agent.interval_sec = float_of_int interval;
+              [ { Oas.Agent_types.interval_sec = float_of_int interval;
                   callback = (fun () ->
                     match
                       call_masc_tool ~sw ~auth_token

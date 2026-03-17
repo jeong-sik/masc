@@ -274,13 +274,23 @@ let get_worker_diff ~base_path (worker : worker_plan) =
       [ "git"; "-C"; worktree_path; "diff"; "--stat"; "HEAD~1..HEAD" ]
     in
     let stat =
-      try Process_eio.run_argv ~timeout_sec:15.0 argv with _ -> ""
+      try Process_eio.run_argv ~timeout_sec:15.0 argv
+      with
+      | Eio.Io _ | Unix.Unix_error _ | Failure _ as exn ->
+        Eio.traceln "code_swarm_plan: git diff --stat failed: %s"
+          (Printexc.to_string exn);
+        ""
     in
     let argv_full =
       [ "git"; "-C"; worktree_path; "diff"; "HEAD~1..HEAD" ]
     in
     let diff =
-      try Process_eio.run_argv ~timeout_sec:15.0 argv_full with _ -> ""
+      try Process_eio.run_argv ~timeout_sec:15.0 argv_full
+      with
+      | Eio.Io _ | Unix.Unix_error _ | Failure _ as exn ->
+        Eio.traceln "code_swarm_plan: git diff failed: %s"
+          (Printexc.to_string exn);
+        ""
     in
     let changed =
       stat |> String.split_on_char '\n'
@@ -491,7 +501,12 @@ let merge_workers ~base_path ~plan_id ~strategy ~auto_pr ~build_verify
                     try
                       String.trim
                         (Process_eio.run_argv ~timeout_sec:10.0 commit_argv)
-                    with _ -> worker.worktree_branch
+                    with
+                    | Eio.Io _ | Unix.Unix_error _ | Failure _ as exn ->
+                      Eio.traceln
+                        "code_swarm_plan: git rev-parse failed for %s: %s"
+                        worker.worker_id (Printexc.to_string exn);
+                      worker.worktree_branch
                   in
                   [ "git"; "-C"; base_path; "cherry-pick"; commit ]
             in

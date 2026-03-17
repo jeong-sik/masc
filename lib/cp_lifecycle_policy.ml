@@ -562,13 +562,26 @@ let stalled_or_quiet_detachment now (detachment : detachment_record) =
       |> Option.map (fun ts -> now -. ts > 1800.0)
       |> Option.value ~default:false
 
+(** Pick failover leader using shuffle to distribute load evenly.
+    BUG-006: List.find_opt always returned the first eligible agent,
+    causing failover to concentrate on a single keeper. *)
 let pick_failover_leader live_agents (detachment : detachment_record) =
-  detachment.roster
-  |> List.filter (fun agent_name -> List.mem agent_name live_agents)
-  |> List.find_opt (fun agent_name ->
-         match detachment.leader_id with
-         | Some current -> not (String.equal current agent_name)
-         | None -> true)
+  let eligible =
+    detachment.roster
+    |> List.filter (fun agent_name ->
+           List.mem agent_name live_agents
+           && (match detachment.leader_id with
+               | Some current -> not (String.equal current agent_name)
+               | None -> true))
+  in
+  match eligible with
+  | [] -> None
+  | [single] -> Some single
+  | _ ->
+      (* Shuffle: pick a random eligible agent for load distribution *)
+      let arr = Array.of_list eligible in
+      let n = Array.length arr in
+      Some arr.(Random.int n)
 
 let maybe_escalation_target units (detachment : detachment_record) =
   match lookup_unit units detachment.assigned_unit_id with

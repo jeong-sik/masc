@@ -407,12 +407,20 @@ let list_alerts_json_from_state config (state : snapshot_state) =
               match session.last_event_at with
               | Some last_event_at ->
                   let age_sec = max 0. (Unix.gettimeofday () -. last_event_at) in
-                  if age_sec > 1800. then
-                    push_alert ~severity:"warn" ~kind:"detachment_quiet"
+                  if age_sec > 1800. then begin
+                    (* BUG-005: Escalate severity based on duration instead of
+                       always using "warn". 6h+ = critical, 2h+ = bad. *)
+                    let severity =
+                      if age_sec > 21600. then "critical"      (* 6 hours *)
+                      else if age_sec > 7200. then "bad"       (* 2 hours *)
+                      else "warn"
+                    in
+                    push_alert ~severity ~kind:"detachment_quiet"
                       ~scope_type:"operation" ~scope_id:operation.operation_id
                       ~title:(operation.operation_id ^ " detachment went quiet")
                       ~detail:
-                        (Printf.sprintf "No detachment event for %.0fs" age_sec)
+                        (Printf.sprintf "No detachment event for %.0fs (%.1fh)" age_sec (age_sec /. 3600.))
+                  end
               | None -> ())
           | None -> ())
       | None -> ())

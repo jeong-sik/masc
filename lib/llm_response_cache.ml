@@ -10,7 +10,7 @@ type l1_stats = {
   max_entries : int;
 }
 
-let l1_table : (string, l1_entry) Hashtbl.t = Hashtbl.create 2048
+let l1_table : (string, l1_entry) Hashtbl.t = Hashtbl.create 512
 let l1_order : string list ref = ref []
 let l1_mutex = Eio.Mutex.create ()
 let eio_available = ref false

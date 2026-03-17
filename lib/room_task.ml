@@ -608,7 +608,7 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
           | Some created -> (now -. created) /. 3600.0
           | None -> 0.0
         in
-        let boost = int_of_float (age_hours /. 24.0) in
+        let boost = Float.to_int (Float.round (age_hours /. 24.0)) in
         max 1 (task.priority - boost)
       in
 

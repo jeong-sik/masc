@@ -214,11 +214,17 @@ let add_note (config : Room.config) ~task_id ~note : (planning_context, string) 
         Ok updated
   with e -> Error (Printexc.to_string e)
 
-(** Add error - PDCA Check phase *)
+(** Add error - PDCA Check phase. Auto-creates planning context if none exists. *)
 let add_error (config : Room.config) ~task_id ~error_type ~message ?context () : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
-    match load config ~task_id with
+    let ctx = match load config ~task_id with
+      | Ok ctx -> Ok ctx
+      | Error _ ->
+          (* Auto-init planning context so error_add works without prior plan_init *)
+          init config ~task_id
+    in
+    match ctx with
     | Error e -> Error e
     | Ok ctx ->
         let timestamp = now_iso () in

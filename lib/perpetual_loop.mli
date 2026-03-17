@@ -102,7 +102,7 @@ val run : config:loop_config -> state:loop_state -> unit
 val stop : loop_state -> unit
 
 (** Get current status as JSON. *)
-val status : loop_state -> Yojson.Safe.t
+val status : config:loop_config -> loop_state -> Yojson.Safe.t
 
 (** {1 Defaults} *)
 

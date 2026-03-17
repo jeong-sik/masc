@@ -505,7 +505,7 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
   assert_true "stop:not_running" (not state.running);
 
   (* 4. Status JSON *)
-  let status = Perpetual_loop.status state in
+  let status = Perpetual_loop.status ~config state in
   (match status with
    | `Assoc fields ->
      assert_true "status:has_trace"
@@ -674,11 +674,11 @@ let test_auto_claim () = group "Auto-Claim" (fun () ->
   in
   assert_true "completion:marker_found" has_marker;
   let content_without = "Still working on it.\n[STATE]\nGoal: wip\n[/STATE]" in
-  let no_marker =
+  let marker_found =
     try ignore (Str.search_forward (Str.regexp_string "[TASK_DONE]") content_without 0); true
     with Not_found -> false
   in
-  assert_true "completion:no_false_positive" (not no_marker);
+  assert_true "completion:no_false_positive" (not marker_found);
 
   (* 6. Event types exist and serialize *)
   let claimed_ev = Perpetual_loop.TaskClaimed {
@@ -704,7 +704,7 @@ let test_auto_claim () = group "Auto-Claim" (fun () ->
   (* Status JSON includes auto-claim fields *)
   let state4 = Perpetual_loop.create_state config in
   state4.current_task_id <- Some "task-042";
-  let status = Perpetual_loop.status state4 in
+  let status = Perpetual_loop.status ~config state4 in
   (match status with
    | `Assoc fields ->
      assert_true "status:has_current_task_id"

@@ -214,5 +214,5 @@ let () =
   Perpetual_loop.run ~config ~state;
 
   (* Print final status *)
-  let status_json = Perpetual_loop.status state in
+  let status_json = Perpetual_loop.status ~config state in
   printf "%s\n" (Yojson.Safe.pretty_to_string status_json)

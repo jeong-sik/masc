@@ -414,7 +414,7 @@ let try_auto_claim ~config ~state ~emit =
           emit (TaskClaimed { task_id; title; priority });
           true
         | Room_task.Claim_next_no_unclaimed ->
-          state.claim_failure_count <- state.claim_failure_count + 1;
+          (* Empty queue is not a failure — do not increment backoff counter *)
           emit (ClaimSkipped "no_unclaimed_tasks");
           false
         | Room_task.Claim_next_no_eligible _ ->
@@ -447,7 +447,10 @@ let check_task_completion ~config ~state ~emit content =
         | Error err ->
           eprintf "[perpetual] complete_task_r failed for %s: %s — will retry next turn\n%!"
             task_id (Types.masc_error_to_string err))
-     | None -> ())
+     | None ->
+       (* No room_config but task is held — clear to prevent deadlock *)
+       eprintf "[perpetual] check_task_completion: room_config is None, clearing orphaned task %s\n%!" task_id;
+       state.current_task_id <- None)
   | _ -> ()
 
 (* ================================================================ *)
@@ -831,7 +834,7 @@ let stop state =
 (* Status                                                           *)
 (* ================================================================ *)
 
-let status state : Yojson.Safe.t =
+let status ~config state : Yojson.Safe.t =
   let now_ts = Time_compat.now () in
   let age_s = if state.started_at <= 0.0 then 0.0 else now_ts -. state.started_at in
   let last_turn_ago_s = if state.last_turn_ts <= 0.0 then 0.0 else now_ts -. state.last_turn_ts in
@@ -968,5 +971,5 @@ let status state : Yojson.Safe.t =
     ("current_task_id", match state.current_task_id with
       | Some id -> `String id | None -> `Null);
     ("claim_failure_count", `Int state.claim_failure_count);
-    ("auto_claim_enabled", `Bool (Option.is_some state.current_task_id || state.claim_failure_count > 0));
+    ("auto_claim_enabled", `Bool (Option.is_some config.room_config));
   ]

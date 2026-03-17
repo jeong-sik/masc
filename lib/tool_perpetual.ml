@@ -151,6 +151,7 @@ let handle_start ctx args =
                      | Some s -> s
                      | None -> Provider_adapter.default_cli_agent_name () in
   let coding_timeout = Safe_ops.json_int ~default:Env_config.Spawn.coding_timeout_seconds "coding_timeout_sec" args in
+  let auto_claim_cooldown = Safe_ops.json_float ~default:60.0 "auto_claim_cooldown_sec" args in
   (* Parse model specs *)
   let models = List.filter_map (fun s ->
     match Llm_client.model_spec_of_string s with
@@ -172,6 +173,7 @@ let handle_start ctx args =
       coding_proc_mgr = ctx.proc_mgr;
       room_config = ctx.room_config;
       agent_name = ctx.agent_name;
+      auto_claim_cooldown_s = auto_claim_cooldown;
       on_event = (fun ev ->
         match ev with
         | Perpetual_loop.TurnStart n ->
@@ -216,7 +218,7 @@ let handle_status args =
     match Hashtbl.find_opt active_agents id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Agent %s not found" id))]
     | Some (state, config) ->
-      let base = Perpetual_loop.status state in
+      let base = Perpetual_loop.status ~config state in
       (match base with
        | `Assoc fields ->
          let models =

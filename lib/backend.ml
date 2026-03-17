@@ -412,18 +412,20 @@ module FileSystemBackend : BACKEND = struct
 
   let close _t = ()
 
+  (* Read operations are lock-free: writes use atomic rename, so a
+     concurrent read always sees either the old or new complete content.
+     Removing the Stdlib.Mutex here eliminates 1-6s of Eio scheduler
+     starvation when background init fibers hold the write lock. *)
   let get t ~key =
-    with_lock t (fun () ->
-      match safe_key_to_path t key with
-      | Error e -> Error e
-      | Ok path ->
-          if Sys.file_exists path then
-            match Safe_ops.read_file_safe path with
-            | Ok content -> Ok (Some content)
-            | Error _ -> Ok None
-          else
-            Ok None
-    )
+    match safe_key_to_path t key with
+    | Error e -> Error e
+    | Ok path ->
+        if Sys.file_exists path then
+          match Safe_ops.read_file_safe path with
+          | Ok content -> Ok (Some content)
+          | Error _ -> Ok None
+        else
+          Ok None
 
   let set t ~key ~value =
     with_lock t (fun () ->
@@ -432,9 +434,14 @@ module FileSystemBackend : BACKEND = struct
       | Ok path ->
           ensure_dir path;
           try
-            Out_channel.with_open_text path (fun oc ->
+            (* Atomic write: write to temp file, then rename.
+               Sys.rename is atomic on POSIX, so concurrent lock-free
+               reads always see complete file content. *)
+            let tmp_path = Printf.sprintf "%s.%d.tmp" path (Unix.getpid ()) in
+            Out_channel.with_open_text tmp_path (fun oc ->
               Out_channel.output_string oc value
             );
+            Sys.rename tmp_path path;
             Ok ()
           with e -> Error (OperationFailed (Printexc.to_string e))
     )
@@ -454,29 +461,25 @@ module FileSystemBackend : BACKEND = struct
     )
 
   let exists t ~key =
-    with_lock t (fun () ->
-      match safe_key_to_path t key with
-      | Error _ -> false
-      | Ok path -> Sys.file_exists path
-    )
+    match safe_key_to_path t key with
+    | Error _ -> false
+    | Ok path -> Sys.file_exists path
 
   let list_keys t ~prefix =
-    with_lock t (fun () ->
-      match safe_key_to_path t prefix with
-      | Error e -> Error e
-      | Ok prefix_path ->
-          let dir = Filename.dirname prefix_path in
-          if Sys.file_exists dir && Sys.is_directory dir then begin
-            let files = Sys.readdir dir |> Array.to_list in
-            let prefix_base = Filename.basename prefix_path in
-            let matching = List.filter (fun f ->
-              String.length f >= String.length prefix_base &&
-              String.sub f 0 (String.length prefix_base) = prefix_base
-            ) files in
-            Ok (List.map (fun f -> prefix ^ String.sub f (String.length prefix_base) (String.length f - String.length prefix_base)) matching)
-          end else
-            Ok []
-    )
+    match safe_key_to_path t prefix with
+    | Error e -> Error e
+    | Ok prefix_path ->
+        let dir = Filename.dirname prefix_path in
+        if Sys.file_exists dir && Sys.is_directory dir then begin
+          let files = Sys.readdir dir |> Array.to_list in
+          let prefix_base = Filename.basename prefix_path in
+          let matching = List.filter (fun f ->
+            String.length f >= String.length prefix_base &&
+            String.sub f 0 (String.length prefix_base) = prefix_base
+          ) files in
+          Ok (List.map (fun f -> prefix ^ String.sub f (String.length prefix_base) (String.length f - String.length prefix_base)) matching)
+        end else
+          Ok []
 
   let get_all t ~prefix =
     match list_keys t ~prefix with

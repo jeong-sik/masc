@@ -33,9 +33,14 @@ let get_int_default json key default =
   | `Int v -> v
   | _ -> default
 
-let pipeline_json () = `Assoc []
+let pipeline_json ~stalled_count = `Assoc [
+  ("stalled_cycles", `Int stalled_count);
+]
 let cache_json () = `Assoc []
-let ooo_json () = `Assoc []
+let ooo_json ~pending ~in_flight = `Assoc [
+  ("current_pending", `Int pending);
+  ("current_in_flight", `Int in_flight);
+]
 let speculative_json () = `Assoc []
 
 let search_fabric_json (rows : search_row list) =
@@ -267,10 +272,11 @@ let signals_json ~(pipeline : Yojson.Safe.t) ~(cache : Yojson.Safe.t)
     ]);
   ]
 
-let summary_json ~(search_rows : search_row list) =
-  let pipeline = pipeline_json () in
+let summary_json ?(pending_ops=0) ?(in_flight_ops=0) ?(stalled_count=0)
+    ~(search_rows : search_row list) () =
+  let pipeline = pipeline_json ~stalled_count in
   let cache = cache_json () in
-  let ooo = ooo_json () in
+  let ooo = ooo_json ~pending:pending_ops ~in_flight:in_flight_ops in
   let speculative = speculative_json () in
   let search_fabric = search_fabric_json search_rows in
   let signals =

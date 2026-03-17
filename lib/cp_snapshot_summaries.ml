@@ -440,7 +440,11 @@ let operations_summary_json_from_state (state : snapshot_state) =
                ("updated_at", `String op.updated_at);
              ])
   in
-  let microarch = Cp_microarch_summary.summary_json ~search_rows in
+  let microarch = Cp_microarch_summary.summary_json
+    ~pending_ops:(op_counts.planned_count + op_counts.paused_count)
+    ~in_flight_ops:op_counts.active_count
+    ~stalled_count:op_counts.failed_count
+    ~search_rows () in
   `Assoc
     [
       ("version", `String "cp-v2");

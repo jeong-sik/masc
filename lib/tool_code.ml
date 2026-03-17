@@ -182,43 +182,36 @@ let handle_code_symbols ctx args =
                 | [] -> List.rev acc
                 | line :: rest ->
                     let trimmed = String.trim line in
-                    let symbols = match String.index_opt trimmed ':' with
-                      | Some colon when colon > 0 ->
-                          let prefix = String.sub trimmed 0 colon in
-                          (* Check for common patterns *)
-                          if String.starts_with ~prefix:"let " prefix ||
-                             String.starts_with ~prefix:"and " prefix ||
-                             String.starts_with ~prefix:"type " prefix ||
-                             String.starts_with ~prefix:"exception " prefix ||
-                             String.starts_with ~prefix:"module " prefix ||
-                             String.starts_with ~prefix:"open " prefix ||
-                             String.starts_with ~prefix:"include " prefix ||
-                             String.starts_with ~prefix:"class " prefix ||
-                             String.starts_with ~prefix:"def " prefix ||
-                             String.starts_with ~prefix:"func " prefix ||
-                             String.starts_with ~prefix:"function " prefix ||
-                             String.starts_with ~prefix:"interface " prefix ||
-                             String.starts_with ~prefix:"struct " prefix ||
-                             String.starts_with ~prefix:"enum " prefix ||
-                             String.starts_with ~prefix:"impl " prefix ||
-                             String.starts_with ~prefix:"pub " prefix ||
-                             String.starts_with ~prefix:"const " prefix ||
-                             String.starts_with ~prefix:"var " prefix
-                          then
-                            let name = String.trim (String.sub trimmed (colon + 1) (String.length trimmed - colon - 1)) in
-                            if name <> "" && not (String.contains name ' ') then
-                              let kind_end = try
-                                String.index trimmed ' '
-                              with Not_found -> String.length trimmed
-                              in
-                              [Some (`Assoc [
-                                ("name", `String name);
-                                ("kind", `String (String.sub trimmed 0 kind_end));
-                                ("line", `Int line_num);
-                              ])]
-                            else []
-                          else []
-                      | Some _ -> [] (* colon <= 0, ignore *)
+                    (* Try to extract a symbol name from keyword-based patterns *)
+                    let try_keyword_extract keyword line =
+                      if String.starts_with ~prefix:(keyword ^ " ") line then
+                        let rest = String.trim (String.sub line (String.length keyword + 1)
+                                     (String.length line - String.length keyword - 1)) in
+                        (* Extract name: first identifier (alphanum + _) *)
+                        let name_end = ref 0 in
+                        while !name_end < String.length rest &&
+                              (let c = rest.[!name_end] in
+                               (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                               (c >= '0' && c <= '9') || c = '_' || c = '\'') do
+                          incr name_end
+                        done;
+                        if !name_end > 0 then
+                          Some (String.sub rest 0 !name_end, keyword)
+                        else None
+                      else None
+                    in
+                    let ocaml_keywords = ["let"; "and"; "type"; "exception"; "module"; "open"; "include"; "val"; "external"] in
+                    let py_keywords = ["def"; "class"; "async def"] in
+                    let other_keywords = ["func"; "function"; "interface"; "struct"; "enum"; "impl"; "pub fn"; "const"; "var"] in
+                    let all_keywords = ocaml_keywords @ py_keywords @ other_keywords in
+                    let symbols =
+                      match List.find_map (fun kw -> try_keyword_extract kw trimmed) all_keywords with
+                      | Some (name, kind) ->
+                          [Some (`Assoc [
+                            ("name", `String name);
+                            ("kind", `String kind);
+                            ("line", `Int line_num);
+                          ])]
                       | None -> []
                     in
                     extract_symbols (List.rev_append symbols acc) (line_num + 1) rest

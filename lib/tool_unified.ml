@@ -64,11 +64,15 @@ let summary_report () : Yojson.Safe.t =
   let top_20 = Tool_registry.get_top_n 20 in
   let all_names = Config.all_tool_names () in
   let never_called = Tool_registry.get_never_called all_names in
+  let essential_count = Tool_catalog.tier_tool_count Tool_catalog.Essential in
+  let standard_count = Tool_catalog.tier_tool_count Tool_catalog.Standard in
+  let full_count = List.length all_names in
   let tier_dist =
     `Assoc [
-      ("essential", `Int (Tool_catalog.tier_tool_count Tool_catalog.Essential));
-      ("standard", `Int (Tool_catalog.tier_tool_count Tool_catalog.Standard));
-      ("full", `Int (List.length all_names));
+      ("essential", `Int essential_count);
+      ("standard_only", `Int (standard_count - essential_count));
+      ("full_only", `Int (full_count - standard_count));
+      ("total", `Int full_count);
     ]
   in
   `Assoc [

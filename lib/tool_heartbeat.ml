@@ -18,7 +18,13 @@ let log_non_cancelled prefix = function
       Log.Keeper.info "%s: %s" prefix (Printexc.to_string exn)
 
 let handle_heartbeat ctx _args =
-  (true, Room.heartbeat ctx.config ~agent_name:ctx.agent_name)
+  let result = Room.heartbeat ctx.config ~agent_name:ctx.agent_name in
+  (* Room.heartbeat returns "⚠ ..." on failure (agent not found, invalid file) *)
+  let success = not (String.length result >= 3
+    && Char.code result.[0] = 0xe2
+    && Char.code result.[1] = 0x9a
+    && Char.code result.[2] = 0xa0) in
+  (success, result)
 
 let handle_heartbeat_start ctx args =
   let interval = get_int args "interval" 30 in

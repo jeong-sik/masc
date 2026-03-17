@@ -8,9 +8,11 @@ import {
   decideGovernanceExecutionOrder,
   fetchDashboardGovernance,
   fetchGovernanceCaseStatus,
+  fetchRuntimeParams,
   submitGovernanceCaseBrief,
   submitGovernancePetition,
 } from '../api'
+import type { RuntimeParam, RuntimeParamsSurface } from '../api'
 import { registerGovernanceRefresh } from '../sse-store'
 import type {
   DashboardGovernanceResponse,
@@ -629,9 +631,82 @@ function GovernanceFreshnessStrip() {
   `
 }
 
+// ── Runtime Params Panel ────────────────────────
+
+const runtimeParams = signal<RuntimeParam[]>([])
+const runtimeSurfaces = signal<RuntimeParamsSurface[]>([])
+const runtimeLoading = signal(false)
+
+async function loadRuntimeParams() {
+  runtimeLoading.value = true
+  try {
+    const data = await fetchRuntimeParams()
+    runtimeParams.value = data.parameters ?? []
+    runtimeSurfaces.value = data.surfaces ?? []
+  } catch {
+    // silent — params panel is optional
+  } finally {
+    runtimeLoading.value = false
+  }
+}
+
+function formatParamValue(value: unknown): string {
+  if (value === null || value === undefined) return '-'
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return JSON.stringify(value)
+}
+
+function RuntimeParamsPanel() {
+  const params = runtimeParams.value
+  const surfaces = runtimeSurfaces.value
+  if (params.length === 0 && !runtimeLoading.value) return null
+
+  return html`
+    <${Card} title="Runtime Parameters" class="section" semanticId="governance.params">
+      ${runtimeLoading.value
+        ? html`<div class="loading-indicator">파라미터 로딩 중...</div>`
+        : html`
+            <div class="governance-params-surfaces">
+              ${surfaces.map(surface => {
+                const surfaceParams = params.filter(p => surface.param_keys.includes(p.key))
+                return html`
+                  <div class="governance-surface-group">
+                    <div class="governance-surface-head">
+                      <strong>${surface.id}</strong>
+                      <span class="governance-chip ${surface.risk === 'high' ? 'warn' : ''}">${surface.risk}</span>
+                      <span class="council-sub">${surface.description}</span>
+                    </div>
+                    <div class="governance-params-table">
+                      ${surfaceParams.map(param => html`
+                        <div class="governance-param-row ${param.has_override ? 'overridden' : ''}">
+                          <span class="governance-param-key">${param.key}</span>
+                          <span class="governance-param-value">
+                            ${formatParamValue(param.current)}
+                            ${param.has_override
+                              ? html`<span class="governance-chip warn" style="margin-left:4px">override</span>`
+                              : null}
+                          </span>
+                          <span class="governance-param-default council-sub">
+                            기본: ${formatParamValue(param.default)}
+                          </span>
+                        </div>
+                      `)}
+                    </div>
+                  </div>
+                `
+              })}
+            </div>
+          `}
+    <//>
+  `
+}
+
 export function Governance() {
   useEffect(() => {
     void refreshGovernance()
+    void loadRuntimeParams()
   }, [])
 
   return html`
@@ -645,6 +720,7 @@ export function Governance() {
         <${GuardrailPane} />
       </div>
       <${ActivityRail} />
+      <${RuntimeParamsPanel} />
     </div>
   `
 }

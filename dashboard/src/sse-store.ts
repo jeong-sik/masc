@@ -112,8 +112,8 @@ export function setupSSEReaction(): () => void {
       scheduleRefresh('board', refreshBoard)
     }
 
-    // Governance events
-    if (event.type.startsWith('decision_')) {
+    // Governance events (including param changes from governance enforcement)
+    if (event.type.startsWith('decision_') || event.type === 'governance_param_changed') {
       scheduleRefresh('governance', () => _refreshGovernanceFn?.())
     }
 

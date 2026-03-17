@@ -74,6 +74,31 @@ let add_routes router =
          respond_json_with_cors ~status request reqd (Yojson.Safe.to_string json)
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/governance/feed" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = state.Mcp_server.room_config.base_path in
+         let filter = query_param req "filter" |> Option.value ~default:"decisions" in
+         let limit = int_query_param req "limit" ~default:20 |> clamp ~min_v:1 ~max_v:100 in
+         let ctx : Tool_council.context =
+           { base_path; agent_name = "http-api"; room_config = None }
+         in
+         let args = `Assoc [
+           ("filter", `String filter);
+           ("limit", `Int limit);
+         ] in
+         let (_ok, body) = Tool_council.handle_governance_feed ctx args in
+         Http.Response.json body reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/governance/params" (fun request reqd ->
+       with_public_read (fun _state _req reqd ->
+         let args = `Assoc [] in
+         let ctx : Tool_council.context =
+           { base_path = ""; agent_name = "http-api"; room_config = None }
+         in
+         let (_ok, body) = Tool_council.handle_runtime_params ctx args in
+         Http.Response.json body reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let hearth = query_param req "hearth" in

@@ -455,6 +455,58 @@ let execute_action ctx (case_ : GV2.case_record) (order : GV2.execution_order) =
                   actor = Some ctx.agent_name;
                 }
           | Error message -> Error message)
+      | "set_param" ->
+          let payload = request.GV2.payload |> Option.value ~default:(`Assoc []) in
+          let param_key =
+            payload |> member "param_key" |> to_string_option
+            |> Option.value ~default:""
+          in
+          let value = payload |> member "value" in
+          if String.trim param_key = "" then
+            Error "set_param requires param_key in payload"
+          else (
+            let old_value =
+              match Runtime_params.registry ()
+                    |> List.find_opt (fun (k, _, _, _) -> k = param_key) with
+              | Some (_, current, _, _) -> current
+              | None -> `Null
+            in
+            match Runtime_params.set_by_key param_key value with
+            | Ok () ->
+                (* Persist and audit *)
+                Runtime_params.persist ~base_path:ctx.base_path;
+                Runtime_params.record_audit ~base_path:ctx.base_path
+                  ~key:param_key ~old_value ~new_value:value
+                  ?case_id:(Some case_.GV2.id) ~actor:ctx.agent_name ();
+                (* SSE broadcast *)
+                Sse.broadcast
+                  (`Assoc
+                     [
+                       ("type", `String "governance_param_changed");
+                       ("param_key", `String param_key);
+                       ("old_value", old_value);
+                       ("new_value", value);
+                       ("case_id", `String case_.GV2.id);
+                       ("actor", `String ctx.agent_name);
+                     ]);
+                let result_msg =
+                  Printf.sprintf "Set %s = %s" param_key
+                    (Yojson.Safe.to_string value)
+                in
+                Ok
+                  {
+                    order with
+                    status =
+                      (match order.GV2.status with
+                      | GV2.Queued_auto -> GV2.Auto_executed
+                      | _ -> GV2.Done);
+                    updated_at = Time_compat.now ();
+                    execution_ref = Some param_key;
+                    result_summary = Some result_msg;
+                    actor = Some ctx.agent_name;
+                  }
+            | Error msg ->
+                Error (Printf.sprintf "set_param failed for %s: %s" param_key msg))
       | action_type ->
           Error
             (Printf.sprintf
@@ -902,6 +954,71 @@ let schemas : Types.tool_schema list = [
   };
 ]
 
+let handle_governance_feed ctx args =
+  let filter = get_string args "filter" "decisions" |> String.lowercase_ascii in
+  let limit = get_int args "limit" 20 in
+  let items = ref [] in
+  (* Parameter change audit trail *)
+  if filter = "decisions" || filter = "all" then begin
+    let audit = Runtime_params.recent_audit ~base_path:ctx.base_path limit in
+    List.iter (fun entry ->
+      items := `Assoc [ ("kind", `String "param_change"); ("data", entry) ] :: !items
+    ) audit
+  end;
+  (* Active governance cases *)
+  if filter = "decisions" || filter = "all" then begin
+    let cases = GV2.list_cases ctx.base_path in
+    let active = List.filter (fun (c : GV2.case_record) ->
+      match c.status with GV2.Closed -> false | _ -> true) cases in
+    List.iter (fun c ->
+      items := `Assoc [ ("kind", `String "case"); ("data", case_json c) ] :: !items
+    ) active
+  end;
+  (* Human board posts *)
+  if filter = "human_only" || filter = "all" then begin
+    let posts = Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit () in
+    let human = List.filter (fun (p : Board.post) ->
+      p.post_kind = Board.Human_post) posts in
+    List.iter (fun p ->
+      items := `Assoc [
+        ("kind", `String "human_post");
+        ("data", Board.post_to_yojson p);
+      ] :: !items
+    ) human
+  end;
+  (* Sort by time (most recent first) — items are already reverse-chronological *)
+  let rec take n = function
+    | [] -> []
+    | _ when n <= 0 -> []
+    | x :: rest -> x :: take (n - 1) rest
+  in
+  let result = take limit !items in
+  (true, Yojson.Safe.pretty_to_string (`List result))
+
+let handle_runtime_params _ctx _args =
+  let params = Runtime_params.registry () in
+  let items =
+    List.map
+      (fun (key, current, default, has_override) ->
+        `Assoc
+          [
+            ("key", `String key);
+            ("current", current);
+            ("default", default);
+            ("has_override", `Bool has_override);
+          ])
+      params
+  in
+  let surfaces = Governance_registry.surfaces_json () in
+  let json =
+    `Assoc
+      [
+        ("parameters", `List items);
+        ("surfaces", surfaces);
+      ]
+  in
+  (true, Yojson.Safe.pretty_to_string json)
+
 let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_petition_submit" -> Some (handle_petition_submit ctx args)
@@ -911,6 +1028,8 @@ let dispatch ctx ~name ~args : result option =
   | "masc_ruling_status" -> Some (handle_ruling_status ctx args)
   | "masc_execution_orders" -> Some (handle_execution_orders ctx args)
   | "masc_governance_status" -> Some (handle_governance_status ctx args)
+  | "masc_governance_feed" -> Some (handle_governance_feed ctx args)
+  | "masc_runtime_params" -> Some (handle_runtime_params ctx args)
   | "masc_route" -> Some (handle_route ctx args)
   | "masc_execute" -> Some (handle_execute ctx args)
   | "masc_execute_dry_run" -> Some (handle_execute_dry_run ctx args)

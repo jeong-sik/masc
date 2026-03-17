@@ -164,4 +164,26 @@ let definitions =
               ("required", `List [ `String "topic" ]);
             ] );
       ];
+    `Assoc
+      [
+        ("name", `String "masc_governance_feed");
+        ("description", `String "Get a timeline of governance decisions, parameter changes, and human board posts.");
+        ( "inputSchema",
+          `Assoc
+            [
+              ("type", `String "object");
+              ( "properties",
+                `Assoc
+                  [
+                    ("filter", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "decisions"; `String "human_only"; `String "all" ]); ("description", `String "Feed filter (default: decisions)") ]);
+                    ("limit", `Assoc [ ("type", `String "integer"); ("description", `String "Max items (default: 20)") ]);
+                  ] );
+            ] );
+      ];
+    `Assoc
+      [
+        ("name", `String "masc_runtime_params");
+        ("description", `String "List all governable runtime parameters with current values, defaults, and override status.");
+        ("inputSchema", `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ]);
+      ];
   ]

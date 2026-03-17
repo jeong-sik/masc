@@ -412,18 +412,21 @@ module FileSystemBackend : BACKEND = struct
 
   let close _t = ()
 
+  (* Read operations are lock-free: filesystem reads are atomic at the
+     file level, and worst-case a concurrent write yields a stale or
+     partial read that Safe_ops.parse_json_safe handles gracefully.
+     Removing the Stdlib.Mutex here eliminates 1-6s of Eio scheduler
+     starvation when background init fibers hold the write lock. *)
   let get t ~key =
-    with_lock t (fun () ->
-      match safe_key_to_path t key with
-      | Error e -> Error e
-      | Ok path ->
-          if Sys.file_exists path then
-            match Safe_ops.read_file_safe path with
-            | Ok content -> Ok (Some content)
-            | Error _ -> Ok None
-          else
-            Ok None
-    )
+    match safe_key_to_path t key with
+    | Error e -> Error e
+    | Ok path ->
+        if Sys.file_exists path then
+          match Safe_ops.read_file_safe path with
+          | Ok content -> Ok (Some content)
+          | Error _ -> Ok None
+        else
+          Ok None
 
   let set t ~key ~value =
     with_lock t (fun () ->
@@ -454,29 +457,25 @@ module FileSystemBackend : BACKEND = struct
     )
 
   let exists t ~key =
-    with_lock t (fun () ->
-      match safe_key_to_path t key with
-      | Error _ -> false
-      | Ok path -> Sys.file_exists path
-    )
+    match safe_key_to_path t key with
+    | Error _ -> false
+    | Ok path -> Sys.file_exists path
 
   let list_keys t ~prefix =
-    with_lock t (fun () ->
-      match safe_key_to_path t prefix with
-      | Error e -> Error e
-      | Ok prefix_path ->
-          let dir = Filename.dirname prefix_path in
-          if Sys.file_exists dir && Sys.is_directory dir then begin
-            let files = Sys.readdir dir |> Array.to_list in
-            let prefix_base = Filename.basename prefix_path in
-            let matching = List.filter (fun f ->
-              String.length f >= String.length prefix_base &&
-              String.sub f 0 (String.length prefix_base) = prefix_base
-            ) files in
-            Ok (List.map (fun f -> prefix ^ String.sub f (String.length prefix_base) (String.length f - String.length prefix_base)) matching)
-          end else
-            Ok []
-    )
+    match safe_key_to_path t prefix with
+    | Error e -> Error e
+    | Ok prefix_path ->
+        let dir = Filename.dirname prefix_path in
+        if Sys.file_exists dir && Sys.is_directory dir then begin
+          let files = Sys.readdir dir |> Array.to_list in
+          let prefix_base = Filename.basename prefix_path in
+          let matching = List.filter (fun f ->
+            String.length f >= String.length prefix_base &&
+            String.sub f 0 (String.length prefix_base) = prefix_base
+          ) files in
+          Ok (List.map (fun f -> prefix ^ String.sub f (String.length prefix_base) (String.length f - String.length prefix_base)) matching)
+        end else
+          Ok []
 
   let get_all t ~prefix =
     match list_keys t ~prefix with

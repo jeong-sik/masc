@@ -1,6 +1,7 @@
 val json :
   ?actor:string ->
   ?fixture:string ->
+  ?light:bool ->
   config:Room.config ->
   sw:Eio.Switch.t ->
   clock:'a Eio.Time.clock ->

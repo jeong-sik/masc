@@ -89,6 +89,13 @@ let string_field ?(default = "") key json =
   | `String value -> value
   | _ -> default
 
+let string_field_opt key json =
+  match member_assoc key json with
+  | `String value when String.trim value <> "" -> Some (String.trim value)
+  | _ -> None
+
+let take n lst = List.filteri (fun i _ -> i < n) lst
+
 let int_field ?(default = 0) key json =
   match member_assoc key json with
   | `Int value -> value

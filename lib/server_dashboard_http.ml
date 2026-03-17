@@ -434,13 +434,11 @@ let start_execution_refresh_loop ~state ~sw ~clock =
               Eio.Switch.run @@ fun pool_sw ->
               match Room_utils_backend_setup.with_domain_local_pg_backend ~sw:pool_sw config with
               | Some domain_config ->
-                Dashboard_execution.json ~config:domain_config ~sw:pool_sw ~clock ~proc_mgr ()
+                Dashboard_execution.json ~light:true ~config:domain_config ~sw:pool_sw ~clock ~proc_mgr ()
               | None ->
-                (* Cannot safely use main-domain PG pool in a different domain
-                   (Switch is domain-bound). Raise to trigger the outer catch. *)
                 failwith "domain-local PG backend creation failed; skipping pool refresh")
           | None ->
-            Dashboard_execution.json ~config ~sw ~clock ~proc_mgr ()
+            Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
         in
         _execution_json_ref := json;
         let dt = Time_compat.now () -. t0 in
@@ -460,21 +458,24 @@ let start_execution_refresh_loop ~state ~sw ~clock =
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let fixture = query_param request "fixture" in
   let actor = operator_actor_hint request in
-  match fixture, actor with
-  | None, None ->
-    (* Default: return proactively cached value immediately (0ms). *)
+  let full_mode = bool_query_param request "full" ~default:false in
+  let light = not full_mode in
+  match fixture, actor, full_mode with
+  | None, None, false ->
+    (* Default light mode: return proactively cached value immediately (0ms). *)
     !_execution_json_ref
   | _ ->
-    (* Parameterized requests (fixture/actor): on-demand with SWR cache.
-       These are rare (test fixtures, actor-specific views). *)
+    (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
+       These are rare (test fixtures, actor-specific views, full mode). *)
     let cache_key =
-      Printf.sprintf "execution:%s:%s"
+      Printf.sprintf "execution:%s:%s:%s"
         (Option.value ~default:"" actor)
         (Option.value ~default:"" fixture)
+        (if full_mode then "full" else "light")
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
       ~clock ~timeout_sec:120.0 (fun () ->
-      Dashboard_execution.json ?actor ?fixture
+      Dashboard_execution.json ?actor ?fixture ~light
         ~config:state.Mcp_server.room_config ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr ())
 

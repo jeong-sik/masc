@@ -93,7 +93,7 @@ let message_json (message : Types.message) =
     ]
 
 
-let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
+let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
   let effective_actor = Option.value ~default:"dashboard" actor in
   match dashboard_fixture_name ?fixture () with
   | Some "execution_smoke" -> execution_smoke_fixture_json ()
@@ -150,20 +150,23 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
           ctx
       in
       Eio.Fiber.yield ();
-      let digest_json =
-        match Operator_control.digest_json ~actor:effective_actor ~sessions ctx with
-        | Ok json -> json
-        | Error message ->
-            `Assoc
-              [
-                ("health", `String "warn");
-                ("attention_items", `List []);
-                ("recommended_actions", `List []);
-                ("session_cards", `List []);
-                ("error", `String message);
-              ]
+      let session_cards =
+        if light then []
+        else
+          let digest_json =
+            match Operator_control.digest_json ~actor:effective_actor ~sessions ctx with
+            | Ok json -> json
+            | Error _message ->
+                `Assoc
+                  [
+                    ("health", `String "warn");
+                    ("attention_items", `List []);
+                    ("recommended_actions", `List []);
+                    ("session_cards", `List []);
+                  ]
+          in
+          list_field "session_cards" digest_json
       in
-      let session_cards = list_field "session_cards" digest_json in
       let session_seeds =
         member_assoc "sessions" snapshot_json |> member_assoc "items"
         |> function
@@ -191,10 +194,10 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
         | _ -> []
       in
       Eio.Fiber.yield ();
-      (* Load tasks/agents/messages late — they are only needed for
-         worker_support_briefs and the final response payload.  Loading
-         them earlier blocked the Eio scheduler for 3-6s due to Stdlib
-         Mutex contention with background init fibers. *)
+      (* Load tasks/agents/messages — needed for worker_support_briefs.
+         In light mode, tasks and messages are NOT serialized in the
+         response payload (saves ~143KB) but are still loaded for
+         worker_support_briefs computation. *)
       let tasks = tasks_safe config in
       let agents = agents_safe config in
       let messages = messages_safe config in
@@ -217,7 +220,25 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
       let social_tick_summary =
         social_tick_json |> member_assoc "summary"
       in
-      `Assoc
+      (* --- Payload size reduction: filter + limit --- *)
+      (* Sessions: running/paused first, then by severity, max 15 *)
+      let sorted_sessions = List.sort (fun (a : session_context) (b : session_context) ->
+        let status_ord (s : session_context) = match string_field_opt "status" s.json with
+          | Some "running" -> 0 | Some "paused" -> 1 | _ -> 2 in
+        let cmp = compare (status_ord a) (status_ord b) in
+        if cmp <> 0 then cmp
+        else compare (severity_rank b.severity) (severity_rank a.severity)
+      ) session_contexts in
+      let limited_sessions = take 15 sorted_sessions in
+      (* Operations: only active/paused, max 20 *)
+      let active_ops = List.filter (fun (op : operation_context) ->
+        let status = string_field_opt "status" op.json in
+        status = Some "active" || status = Some "paused"
+      ) operation_contexts in
+      let limited_ops = take 20 active_ops in
+      (* Execution queue: top 10 priority items *)
+      let limited_queue = take 10 execution_queue in
+      let base_fields =
         [
           ("generated_at", `String (Types.now_iso ()));
           ("status", room_status_json config);
@@ -225,16 +246,33 @@ let json ?actor ?fixture ~config ~sw ~clock ~proc_mgr () =
           ("social_checkins", `List social_checkins);
           ("lodge_tick", social_tick_summary);
           ("lodge_checkins", `List social_checkins);
-          ("execution_queue", `List (List.map (fun (row : queue_context) -> row.json) execution_queue));
-          ("priority_queue", `List (List.map (fun (row : queue_context) -> row.json) execution_queue));
-          ("session_briefs", `List (List.map (fun (row : session_context) -> row.json) session_contexts));
-          ("operation_briefs", `List (List.map (fun (row : operation_context) -> row.json) operation_contexts));
+          ("execution_queue", `List (List.map (fun (row : queue_context) -> row.json) limited_queue));
+          ("session_briefs", `List (List.map (fun (row : session_context) -> row.json) limited_sessions));
+          ("operation_briefs", `List (List.map (fun (row : operation_context) -> row.json) limited_ops));
           ("worker_support_briefs", `List (List.map (fun (row : worker_context) -> row.json) worker_support_briefs));
-          ("worker_briefs", `List (List.map (fun (row : worker_context) -> row.json) worker_support_briefs));
           ("continuity_briefs", `List (List.map (fun (row : continuity_context) -> row.json) continuity_rows));
           ("offline_worker_briefs", `List (List.map (fun (row : worker_context) -> row.json) offline_worker_briefs));
           ("agents", `List (List.map agent_json agents));
-          ("tasks", `List (List.map task_json tasks));
-          ("messages", `List (List.map message_json messages));
           ("keepers", `List keepers);
         ]
+      in
+      if light then
+        `Assoc base_fields
+      else
+        (* Full mode: include tasks, task_counts, messages *)
+        let active_tasks = List.filter (fun (t : Types.task) ->
+          match t.task_status with
+          | Types.Done _ | Types.Cancelled _ -> false
+          | _ -> true
+        ) tasks in
+        let limited_tasks = take 50 active_tasks in
+        `Assoc
+          (base_fields @ [
+            ("tasks", `List (List.map task_json limited_tasks));
+            ("task_counts", `Assoc [
+              ("active", `Int (List.length active_tasks));
+              ("total", `Int (List.length tasks));
+              ("shown", `Int (List.length limited_tasks));
+            ]);
+            ("messages", `List (List.map message_json messages));
+          ])

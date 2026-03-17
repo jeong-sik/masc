@@ -125,6 +125,7 @@
    ;; WebRTC modules removed — use ocaml-webrtc library directly
    eio_context
    encryption
+   file_lock_eio
    federation
    gcm_compat
    glm_pool

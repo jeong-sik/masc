@@ -228,18 +228,9 @@ let read_json_opt config path =
 let with_file_lock config path f =
   match key_of_path config path with
   | None ->
-      let lock_path = path ^ ".lock" in
-      mkdir_p (Filename.dirname lock_path);
-      let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
-      Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
-        ~finally:(fun () ->
-          (try Unix.lockf fd Unix.F_ULOCK 0
-           with Unix.Unix_error (err, _, _) ->
-             Log.Misc.error "Failed to release flock: %s" (Unix.error_message err));
-          Unix.close fd)
-        (fun () ->
-          Unix.lockf fd Unix.F_LOCK 0;
-          f ())
+      (* Fix 2: Use cooperative Eio.Mutex instead of blocking Unix.lockf.
+         Single-process assumption (MASC runs as one process). *)
+      File_lock_eio.with_lock path f
   | Some key ->
       let owner = config.backend_config.node_id in
       let ttl_seconds = config.lock_expiry_minutes * 60 in
@@ -262,18 +253,8 @@ let with_file_lock config path f =
 let with_file_lock_r config path f : ('a, masc_error) result =
   match key_of_path config path with
   | None ->
-      let lock_path = path ^ ".lock" in
-      mkdir_p (Filename.dirname lock_path);
-      let fd = Unix.openfile lock_path [Unix.O_CREAT; Unix.O_WRONLY] 0o644 in
-      Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
-        ~finally:(fun () ->
-          (try Unix.lockf fd Unix.F_ULOCK 0
-           with Unix.Unix_error (err, _, _) ->
-             Log.Misc.error "Failed to release flock: %s" (Unix.error_message err));
-          Unix.close fd)
-        (fun () ->
-          Unix.lockf fd Unix.F_LOCK 0;
-          Ok (f ()))
+      (* Fix 2: Cooperative lock — same as with_file_lock *)
+      File_lock_eio.with_lock path (fun () -> Ok (f ()))
   | Some key ->
       let owner = config.backend_config.node_id in
       let ttl_seconds = config.lock_expiry_minutes * 60 in

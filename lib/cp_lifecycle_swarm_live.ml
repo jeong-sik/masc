@@ -362,8 +362,9 @@ let swarm_live_json config ?run_id ?operation_id () =
              else
                None
            in
+           let agent_is_active = match agent with Some a -> a.status = Types.Active | None -> false in
            let joined =
-             Option.is_some agent
+             agent_is_active
              || Option.is_some assigned_task
              || Option.is_some completed_task
              || Option.is_some last_message
@@ -420,7 +421,7 @@ let swarm_live_json config ?run_id ?operation_id () =
                ("role", `String (Agent_swarm_live_harness.string_of_worker_role plan.role));
                ("lane", `String (Agent_swarm_live_harness.string_of_fixture_lane plan.lane));
                ("joined", `Bool joined);
-               ("live_presence", `Bool (Option.is_some agent));
+               ("live_presence", `Bool (match agent with Some a -> a.status = Types.Active | None -> false));
                ("completed", `Bool completed);
                ( "status",
                  match agent with

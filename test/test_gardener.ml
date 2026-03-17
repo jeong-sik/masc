@@ -985,17 +985,11 @@ let test_tick_opens_backlog_triage_session_with_inactive_joined_agent () =
       let config = Room.default_config dir in
       ignore (Room.init config ~agent_name:(Some "fixture-root"));
       ignore (Room.join config ~agent_name:"worker-a" ~capabilities:[ "executor" ] ());
-      let joined_agents =
-        Room.get_agents_raw_in_room config (Room.current_room_id config)
-      in
-      List.iter
-        (fun (agent : Types.agent) ->
-          match
-            Room.update_agent_r config ~agent_name:agent.name ~status:"inactive" ()
-          with
-          | Ok _ -> ()
-          | Error _ -> Alcotest.fail "Expected inactive update to succeed")
-        joined_agents;
+      (* Mark only worker-a as inactive; fixture-root stays active so
+         gardener can still find an active agent for the triage session. *)
+      (match Room.update_agent_r config ~agent_name:"worker-a" ~status:"inactive" () with
+       | Ok _ -> ()
+       | Error _ -> Alcotest.fail "Expected inactive update to succeed");
       ignore
         (Room.add_task config ~title:"Dormant Worker Backlog" ~priority:1
            ~description:"joined but inactive worker should still be enrolled");

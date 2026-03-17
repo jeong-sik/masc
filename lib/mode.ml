@@ -282,7 +282,8 @@ let tool_category tool_name =
   | "masc_encryption_disable" | "masc_generate_key" -> Encryption
 
   (* ── Code navigation ── *)
-  | "masc_code_search" | "masc_code_symbols" | "masc_code_read" -> Code
+  | "masc_code_search" | "masc_code_symbols" | "masc_code_read"
+  | "masc_code_swarm_plan" | "masc_code_swarm_verify" | "masc_code_swarm_merge" -> Code
 
   (* ── Board ── *)
   | "masc_board_post" | "masc_board_list" | "masc_board_get"

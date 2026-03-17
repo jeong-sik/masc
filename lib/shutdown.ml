@@ -91,41 +91,47 @@ let sorted_hooks () =
 (** {1 Phase Execution} *)
 
 (** Execute notify phase: broadcast shutdown to clients. *)
-let phase_notify state ~notify_fn =
+let phase_notify state ~clock ~notify_fn =
   state.phase <- Notifying;
   Log.Server.info "[Shutdown] Phase 1/4: NOTIFY (reason=%s)" state.reason;
   notify_fn state.reason;
-  Unix.sleepf state.config.notify_delay_s
+  Eio.Time.sleep clock state.config.notify_delay_s
 
 (** Execute drain phase: wait for in-flight work. *)
-let phase_drain state ~drain_check =
+let phase_drain state ~clock ~drain_check =
   state.phase <- Draining;
   Log.Server.info "[Shutdown] Phase 2/4: DRAIN (timeout=%.1fs)" state.config.drain_timeout_s;
-  let deadline = Unix.gettimeofday () +. state.config.drain_timeout_s in
+  let deadline = Eio.Time.now clock +. state.config.drain_timeout_s in
   let rec wait () =
     if drain_check () then
       Log.Server.info "[Shutdown] drain complete (all work finished)"
-    else if Unix.gettimeofday () >= deadline then
+    else if Eio.Time.now clock >= deadline then
       Log.Server.warn "[Shutdown] drain timeout reached, proceeding"
     else begin
-      Unix.sleepf 0.1;
+      Eio.Time.sleep clock 0.1;
       wait ()
     end
   in
   wait ()
 
-(** Execute cleanup phase: run registered hooks in priority order. *)
-let phase_cleanup state =
+(** Execute cleanup phase: run registered hooks with timeout. *)
+let phase_cleanup state ~clock =
   state.phase <- Cleaning;
   let all_hooks = sorted_hooks () in
-  Log.Server.info "[Shutdown] Phase 3/4: CLEANUP (%d hooks)" (List.length all_hooks);
-  List.iter (fun hook ->
-    try
-      hook.action ();
-      Log.Server.debug "[Shutdown] hook '%s' completed" hook.name
-    with exn ->
-      Log.Server.warn "[Shutdown] hook '%s' failed: %s" hook.name (Printexc.to_string exn)
-  ) all_hooks
+  Log.Server.info "[Shutdown] Phase 3/4: CLEANUP (%d hooks, timeout=%.1fs)"
+    (List.length all_hooks) state.config.cleanup_timeout_s;
+  (try
+    Eio.Time.with_timeout_exn clock state.config.cleanup_timeout_s (fun () ->
+      List.iter (fun hook ->
+        try
+          hook.action ();
+          Log.Server.debug "[Shutdown] hook '%s' completed" hook.name
+        with exn ->
+          Log.Server.warn "[Shutdown] hook '%s' failed: %s" hook.name (Printexc.to_string exn)
+      ) all_hooks)
+  with Eio.Time.Timeout ->
+    Log.Server.warn "[Shutdown] cleanup timeout (%.1fs) exceeded, proceeding"
+      state.config.cleanup_timeout_s)
 
 (** Execute exit phase. *)
 let phase_exit state ~exit_fn =
@@ -142,27 +148,32 @@ let phase_exit state ~exit_fn =
     @param notify_fn Called with reason string to broadcast to clients
     @param drain_check Returns true when all in-flight work is complete
     @param exit_fn Called to terminate the process (e.g., Eio.Switch.fail) *)
-let initiate state ~reason ~notify_fn ~drain_check ~exit_fn =
+let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
   if state.phase <> Running then begin
     Log.Server.warn "[Shutdown] already in progress (phase=%s), ignoring"
       (phase_to_string state.phase);
   end else begin
-    state.started_at <- Unix.gettimeofday ();
+    state.started_at <- Eio.Time.now clock;
     state.reason <- reason;
     Log.Server.info "[Shutdown] initiated: %s" reason;
 
-    (* Start force-exit watchdog *)
+    (* Start force-exit watchdog (stdlib Thread — runs outside Eio domain).
+       Cancelled when shutdown completes normally via done_flag. *)
+    let done_flag = Atomic.make false in
     ignore (Thread.create (fun () ->
       Unix.sleepf state.config.force_timeout_s;
-      Printf.eprintf "[MASC] Shutdown exceeded %.0fs force timeout, forcing exit.\n%!"
-        state.config.force_timeout_s;
-      exit 1
+      if not (Atomic.get done_flag) then begin
+        Printf.eprintf "[MASC] Shutdown exceeded %.0fs force timeout, forcing exit.\n%!"
+          state.config.force_timeout_s;
+        exit 1
+      end
     ) ());
 
-    phase_notify state ~notify_fn;
-    phase_drain state ~drain_check;
-    phase_cleanup state;
+    phase_notify state ~clock ~notify_fn;
+    phase_drain state ~clock ~drain_check;
+    phase_cleanup state ~clock;
     phase_exit state ~exit_fn;
+    Atomic.set done_flag true
   end
 
 (** {1 Queries} *)

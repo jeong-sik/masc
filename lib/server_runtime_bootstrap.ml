@@ -331,10 +331,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         start_background_maintenance ~sw ~clock state
       in
       print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
-      (* Pre-warm heavy dashboard caches so the first browser request
-         hits warm data instead of blocking on a cold compute. *)
-      Eio.Fiber.fork ~sw (fun () ->
-        Server_dashboard_http.warm_execution_cache ~state ~sw ~clock);
+      (* Start proactive execution refresh so dashboard requests never
+         block on computation.  The loop runs in its own fiber. *)
+      Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock;
       start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
     with exn ->
       Log.Server.error "Background init failed (HTTP still serving): %s"

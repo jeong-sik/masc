@@ -871,7 +871,7 @@ let topology_units config =
   let agents =
     Room.get_agents_raw config
     |> List.filter (fun (agent : Types.agent) ->
-         try Room.is_agent_joined config ~agent_name:agent.name with _ -> false)
+         try Room.is_agent_joined config ~agent_name:agent.name with Sys_error _ | Not_found -> false)
   in
   let managed_units = read_units config in
   let normalized_units = augment_managed_units managed_units agents in

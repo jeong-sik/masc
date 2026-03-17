@@ -80,14 +80,16 @@ let default_agents : agent_spec list =
             cost_per_1k = 0.0 } ]
     | None -> []
   in
+  (* NOTE: model IDs here are defaults for the jiphyeon sub-library which cannot
+     access Env_config_governance. Update these when model generations change. *)
   tiny_agents @ [
-    { name = "sonnet"; model = "claude-3.5-sonnet"; tier = Medium;
+    { name = "sonnet"; model = "claude-sonnet-4-6"; tier = Medium;
       strengths = [Code; Analysis; Creative]; cost_per_1k = 0.003 };
-    { name = "gpt-4o-mini"; model = "gpt-4o-mini"; tier = Medium;
+    { name = "gpt-4o-mini"; model = "gpt-4.1-mini"; tier = Medium;
       strengths = [Conversation; Factual; Analysis]; cost_per_1k = 0.00015 };
-    { name = "opus"; model = "claude-opus-4"; tier = Large;
+    { name = "opus"; model = "claude-opus-4-6"; tier = Large;
       strengths = [Complex; Analysis; Creative; Code]; cost_per_1k = 0.015 };
-    { name = "gpt-4o"; model = "gpt-4o"; tier = Large;
+    { name = "gpt-4o"; model = "gpt-4.1"; tier = Large;
       strengths = [Complex; Analysis; Code]; cost_per_1k = 0.005 };
     { name = "o1"; model = "o1"; tier = Giant;
       strengths = [Complex; Analysis; Code]; cost_per_1k = 0.015 };

@@ -282,7 +282,7 @@ let add_routes router =
                  in
                  let model =
                    match json |> member "model" with
-                   | `String s -> s | _ -> "glm-4.7-flash:latest"
+                   | `String s -> s | _ -> Env_config_governance.Llm.flash_model ^ ":latest"
                  in
                  let personality_hint =
                    match json |> member "personalityHint" with

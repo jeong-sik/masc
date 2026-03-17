@@ -92,6 +92,7 @@
    dashboard_http_shell
    dashboard_http_mdal
    server_dashboard_http
+   server_dashboard_http_core
    server_routes_http
    server_routes_http_common
    server_routes_http_pages
@@ -651,6 +652,7 @@
    tool_council_schemas
    dashboard_http_shell
    keeper_status_bridge
+   server_dashboard_http_core
 )
 (private_modules
  gardener_state

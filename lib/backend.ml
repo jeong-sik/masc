@@ -1,24 +1,16 @@
 [@@@warning "-33"]
-(** Backend — storage abstraction for MASC (Memory/FileSystem/PostgreSQL). *)
+(** Backend Module - Storage abstraction for MASC (facade) *)
 
 include Backend_core
-
-
-(* ============================================ *)
-(* FileSystem Backend                           *)
-(* ============================================ *)
 
 module FileSystemBackend : BACKEND = struct
   type t = {
     base_path: string;
-    mutex: Mutex.t;
+    mutex: Eio.Mutex.t;
   }
 
   let with_lock t f =
-    Mutex.lock t.mutex;
-    let result = try f () with e -> Mutex.unlock t.mutex; raise e in
-    Mutex.unlock t.mutex;
-    result
+    Eio.Mutex.use_rw ~protect:true t.mutex f
 
   (* Security: validate key with strict allowlist (parse, don't sanitize) *)
   let validate_key key =
@@ -107,14 +99,13 @@ module FileSystemBackend : BACKEND = struct
         Unix.mkdir path 0o755
     with Unix.Unix_error (err, _, _) ->
       Log.Misc.error "Failed to mkdir %s: %s" path (Unix.error_message err));
-    Ok { base_path = path; mutex = Mutex.create () }
+    Ok { base_path = path; mutex = Eio.Mutex.create () }
 
   let close _t = ()
 
   (* Read operations are lock-free: writes use atomic rename, so a
      concurrent read always sees either the old or new complete content.
-     Removing the Stdlib.Mutex here eliminates 1-6s of Eio scheduler
-     starvation when background init fibers hold the write lock. *)
+     Eio.Mutex is cooperative and does not starve the scheduler. *)
   let get t ~key =
     match safe_key_to_path t key with
     | Error e -> Error e
@@ -419,6 +410,9 @@ module PostgresNative : sig
   (* create_eio requires Caqti-compatible Eio environment (net, clock, mono_clock) *)
   val create_eio : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> config -> (t, error) result
 
+  (** Lightweight pool for a different Eio domain (no schema init, max_size=1). *)
+  val create_eio_readonly : sw:Eio.Switch.t -> env:Caqti_eio.stdenv -> config -> (t, error) result
+
   (* Expose Caqti pool for Board_pg and other PG-backed modules *)
   val get_pool : t -> (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t
 
@@ -639,6 +633,22 @@ end = struct
             (match init_result with
              | Error err -> Error (caqti_error_to_masc err)
              | Ok () -> Ok { pool; namespace = cfg.cluster_name; _sw = sw })
+
+  (** Lightweight pool creation for use in a different Eio domain.
+      Skips schema initialization (assumed already done by the main pool).
+      Uses max_size=1 since this is for read-heavy dashboard compute.
+      The caller's [sw] is captured by Caqti, making this pool safe to
+      use from the domain that owns [sw]. *)
+  let[@warning "-32"] create_eio_readonly ~sw ~env (cfg : config) : (t, error) result =
+    match cfg.postgres_url with
+    | None -> Error (ConnectionFailed "PostgreSQL URL not configured")
+    | Some url ->
+        let uri = Uri.of_string url in
+        let pool_config = Caqti_pool_config.create ~max_size:1 () in
+        match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
+        | Error err -> Error (caqti_error_to_masc err)
+        | Ok pool ->
+            Ok { pool; namespace = cfg.cluster_name; _sw = sw }
 
   let close _t = ()
 

@@ -1,5 +1,3 @@
-(** Backend core — types, config, BACKEND sig, utilities, MemoryBackend. *)
-
 (** Backend Module - Storage abstraction for MASC (Memory/FileSystem/PostgreSQL) *)
 
 (* ============================================ *)
@@ -182,20 +180,17 @@ module MemoryBackend : BACKEND = struct
   type t = {
     data: (string, string) Hashtbl.t;
     locks: (string, lock_info) Hashtbl.t;
-    mutex: Mutex.t;
+    mutex: Eio.Mutex.t;
   }
 
   let with_lock t f =
-    Mutex.lock t.mutex;
-    let result = try f () with e -> Mutex.unlock t.mutex; raise e in
-    Mutex.unlock t.mutex;
-    result
+    Eio.Mutex.use_rw ~protect:true t.mutex f
 
   let create (_cfg : config) : (t, error) result =
     Ok {
       data = Hashtbl.create 1000;
       locks = Hashtbl.create 100;
-      mutex = Mutex.create ();
+      mutex = Eio.Mutex.create ();
     }
 
   let close _t = ()
@@ -306,3 +301,8 @@ module MemoryBackend : BACKEND = struct
 
   let health_check _t = Ok true
 end
+
+(* ============================================ *)
+(* FileSystem Backend                           *)
+(* ============================================ *)
+

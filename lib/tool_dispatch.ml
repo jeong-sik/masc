@@ -111,11 +111,12 @@ let dispatch_structured ~name ~args : Tool_result.t option =
        Some (run_post_hooks result)
      | None -> None)
 
-(** Feature flag: use the new dispatch path. *)
+(** Feature flag: use the new dispatch path.
+    Default ON since v2.102 — use MASC_DISPATCH_V2=0 to disable. *)
 let v2_enabled =
   match Sys.getenv_opt "MASC_DISPATCH_V2" with
-  | Some "1" | Some "true" | Some "TRUE" -> true
-  | _ -> false
+  | Some "0" | Some "false" | Some "FALSE" -> false
+  | _ -> true
 
 (** Number of registered tool names. *)
 let registered_count () = Hashtbl.length registry
@@ -136,3 +137,42 @@ let init_requires_join_set (names : string list) =
 
 let is_read_only name = Hashtbl.mem read_only_set name
 let is_join_required name = Hashtbl.mem requires_join_set name
+
+(** {2 Module Tag Dispatch — O(1) two-level dispatch}
+
+    Maps tool names to module tags at startup (once).
+    At call time, O(1) tag lookup determines which module's context
+    to create lazily. Eliminates per-call 40+ context creation and
+    ~210 Hashtbl.replace ops. *)
+
+type module_tag =
+  | Mod_plan | Mod_run | Mod_operator | Mod_command_plane
+  | Mod_llama | Mod_team_session | Mod_voice | Mod_cache
+  | Mod_tempo | Mod_mitosis | Mod_portal | Mod_worktree
+  | Mod_code_swarm | Mod_code | Mod_vote | Mod_social
+  | Mod_council | Mod_protocol | Mod_a2a | Mod_handover
+  | Mod_relay | Mod_goals | Mod_heartbeat | Mod_encryption
+  | Mod_auth | Mod_hat | Mod_audit | Mod_rate_limit
+  | Mod_cost | Mod_walph | Mod_agent | Mod_task | Mod_room
+  | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
+  | Mod_library | Mod_keeper | Mod_perpetual | Mod_mdal
+  | Mod_trpg | Mod_notifications | Mod_gardener | Mod_inline
+  | Mod_autoresearch
+
+let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
+let tag_registry_initialized = ref false
+
+let register_module_tag ~(schemas : Types.tool_schema list) ~tag =
+  List.iter (fun (s : Types.tool_schema) ->
+    Hashtbl.replace tag_registry s.name tag) schemas
+
+(** Register a single tool name with a tag (for modules without schema exports). *)
+let register_name_tag ~tool_name ~tag =
+  Hashtbl.replace tag_registry tool_name tag
+
+let lookup_tag name = Hashtbl.find_opt tag_registry name
+
+let tag_registry_count () = Hashtbl.length tag_registry
+
+let mark_tag_registry_initialized () = tag_registry_initialized := true
+let is_tag_registry_initialized () = !tag_registry_initialized

@@ -134,6 +134,34 @@ let requires_join_tools = [
 let () = Tool_dispatch.init_read_only_set read_only_tools
 let () = Tool_dispatch.init_requires_join_set requires_join_tools
 
+(* Fix 1: Populate tag registry once at module load time.
+   Maps tool names to module tags for O(1) dispatch. *)
+let () =
+  let open Tool_dispatch in
+  register_module_tag ~schemas:Tool_plan.schemas ~tag:Mod_plan;
+  register_module_tag ~schemas:Tool_operator.schemas ~tag:Mod_operator;
+  register_module_tag ~schemas:Tool_command_plane.schemas ~tag:Mod_command_plane;
+  register_module_tag ~schemas:Tool_llama.schemas ~tag:Mod_llama;
+  register_module_tag ~schemas:Tool_team_session.schemas ~tag:Mod_team_session;
+  register_module_tag ~schemas:Tool_voice.schemas ~tag:Mod_voice;
+  register_module_tag ~schemas:Tool_portal.schemas ~tag:Mod_portal;
+  register_module_tag ~schemas:Tool_worktree.schemas ~tag:Mod_worktree;
+  register_module_tag ~schemas:Tool_code_swarm.schemas ~tag:Mod_code_swarm;
+  register_module_tag ~schemas:Tool_goals.schemas ~tag:Mod_goals;
+  register_module_tag ~schemas:Tool_protocol_game_view.schemas ~tag:Mod_protocol;
+  register_module_tag ~schemas:Tool_auth.schemas ~tag:Mod_auth;
+  register_module_tag ~schemas:Tool_agent.schemas ~tag:Mod_agent;
+  register_module_tag ~schemas:Tool_room.schemas ~tag:Mod_room;
+  register_module_tag ~schemas:Tool_agent_timeline.schemas ~tag:Mod_agent_timeline;
+  register_module_tag ~schemas:Tool_keeper.schemas ~tag:Mod_keeper;
+  register_module_tag ~schemas:Tool_perpetual.schemas ~tag:Mod_perpetual;
+  register_module_tag ~schemas:Tool_mdal.schemas ~tag:Mod_mdal;
+  register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
+  register_module_tag ~schemas:Tool_trpg.schemas ~tag:Mod_trpg;
+  register_module_tag ~schemas:Tool_notifications.schemas ~tag:Mod_notifications;
+  mark_tag_registry_initialized ();
+  Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ())
+
 (** {1 execute_tool_eio -- included from Mcp_server_eio_execute} *)
 
 include Mcp_server_eio_execute

@@ -118,7 +118,7 @@
 (test
  (name test_dashboard_governance)
  (modules test_dashboard_governance)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
  (name test_dashboard_labels)
@@ -218,7 +218,7 @@
 (test
  (name test_mdal_store)
  (modules test_mdal_store)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
  (name test_agent_swarm_live_harness)
@@ -250,7 +250,7 @@
 (test
  (name test_chain_native_eio_bootstrap)
  (modules test_chain_native_eio_bootstrap)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
  (name test_metrics_store_eio)

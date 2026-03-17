@@ -315,6 +315,7 @@ let stop_session ~(config : Room.config) ~(session_id : string) ~(reason : strin
           | _ ->
               let final_status =
                 if reason = "timeout" || reason = "error" || reason = "kill"
+                   || reason = "keeper_down"
                 then Team_session_types.Interrupted
                 else Team_session_types.Completed
               in

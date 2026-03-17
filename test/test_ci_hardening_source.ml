@@ -56,13 +56,13 @@ let test_route_auth_contracts () =
     (file_contains_pattern "lib/server_routes_http_routes_dashboard.ml"
        {|with_tool_auth ~tool_name:"masc_keeper_msg"|});
   check bool "h2 gateway units use tool auth" true
-    (file_contains_pattern "lib/server_h2_gateway.ml"
+    (file_contains_pattern "lib/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_unit_define"|});
   check bool "h2 gateway dispatch tick uses tool auth" true
-    (file_contains_pattern "lib/server_h2_gateway.ml"
+    (file_contains_pattern "lib/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_dispatch_tick"|});
   check bool "h2 gateway operator confirm uses tool auth" true
-    (file_contains_pattern "lib/server_h2_gateway.ml"
+    (file_contains_pattern "lib/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_operator_confirm"|})
 
 let () =

@@ -153,9 +153,42 @@ let test_claim_next_alias () =
   let g = WG.next_steps ~tool_name:"masc_claim_next" ~success:true in
   check_has_tool g.next_steps "masc_plan_set_task"
 
-let test_complete_task_alias () =
+let test_complete_task_removed () =
+  (* masc_complete_task was a ghost tool — it no longer routes to guidance *)
   let g = WG.next_steps ~tool_name:"masc_complete_task" ~success:true in
-  check_has_tool g.next_steps "masc_status"
+  check (list string) "removed ghost returns empty" []
+    (List.map (fun (s : WG.step) -> s.tool) g.next_steps)
+
+let test_transition_routes_to_claim () =
+  let g = WG.next_steps ~tool_name:"masc_transition" ~success:true in
+  check_has_tool g.next_steps "masc_plan_set_task"
+
+(* Structural: all tool names in guidance output exist in Config.all_tool_schemas *)
+let all_schema_names =
+  List.map (fun (s : Masc_mcp.Types.tool_schema) -> s.name) Masc_mcp.Config.all_tool_schemas
+
+let check_tool_exists_in_schemas name =
+  if not (List.mem name all_schema_names) then
+    Alcotest.fail
+      (Printf.sprintf "Workflow_guide references tool '%s' not in Config.all_tool_schemas" name)
+
+let test_next_steps_reference_real_tools () =
+  let tools_to_check = [
+    "masc_set_room"; "masc_join"; "masc_status";
+    "masc_claim"; "masc_claim_next";
+    "masc_done"; "masc_transition";
+    "masc_add_task"; "masc_batch_add_tasks";
+    "masc_plan_set_task"; "masc_set_current_task";
+    "masc_heartbeat"; "masc_broadcast";
+    "masc_worktree_create"; "masc_init";
+    "masc_switch_mode"; "masc_operator_digest";
+  ] in
+  List.iter (fun tool_name ->
+    let g_ok = WG.next_steps ~tool_name ~success:true in
+    List.iter (fun (s : WG.step) -> check_tool_exists_in_schemas s.tool) g_ok.next_steps;
+    let g_fail = WG.next_steps ~tool_name ~success:false in
+    List.iter (fun (s : WG.step) -> check_tool_exists_in_schemas s.tool) g_fail.next_steps
+  ) tools_to_check
 
 (* ── Test runner ─────────────────────────────────────────────────── *)
 
@@ -181,7 +214,11 @@ let () =
     "edge_cases", [
       test_case "unknown tool" `Quick test_unknown_tool;
       test_case "claim_next alias" `Quick test_claim_next_alias;
-      test_case "complete_task alias" `Quick test_complete_task_alias;
+      test_case "complete_task removed" `Quick test_complete_task_removed;
+      test_case "transition routes to claim" `Quick test_transition_routes_to_claim;
+    ];
+    "structural", [
+      test_case "next_steps reference real tools" `Quick test_next_steps_reference_real_tools;
     ];
     "json", [
       test_case "null for empty" `Quick test_guidance_to_json_null_for_empty;

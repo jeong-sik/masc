@@ -25,6 +25,35 @@ type config = {
 (** Create a config targeting a different scope. Cheap record copy. *)
 let with_scope config scope = { config with scope }
 
+(** Create a config with a domain-local PostgresNative backend.
+    Use when running in a different Eio domain (e.g., Executor_pool)
+    where the main domain's Caqti pool would crash due to Switch
+    being domain-bound.  Skips schema init (already done by main pool).
+    Constructs [Caqti_eio.stdenv] from [Eio_context] globals (net/clock
+    are cross-domain safe, only Switch is domain-bound).
+    Returns [None] on failure. *)
+let with_domain_local_pg_backend ~sw config =
+  match config.backend with
+  | PostgresNative _ ->
+    let net = Eio_context.get_net () in
+    let clock = Eio_context.get_clock () in
+    let mono_clock = Eio_context.get_mono_clock () in
+    let env : Caqti_eio.stdenv =
+      object
+        method net = (net :> [`Generic] Eio.Net.ty Eio.Resource.t)
+        method clock = clock
+        method mono_clock = mono_clock
+      end
+    in
+    (match Backend.PostgresNative.create_eio_readonly ~sw ~env config.backend_config with
+    | Ok t -> Some { config with backend = PostgresNative t }
+    | Error err ->
+      Printf.eprintf "[WARN] Domain-local PG backend failed: %s\n%!"
+        (Backend.show_error err);
+      None)
+  | Memory _ | FileSystem _ ->
+    Some config
+
 (* ============================================ *)
 (* Git Root Detection (Worktree Support)        *)
 (* ============================================ *)

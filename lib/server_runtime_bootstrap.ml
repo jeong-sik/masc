@@ -25,6 +25,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_switch sw;
   Eio_context.set_net net;
   Eio_context.set_clock clock;
+  Eio_context.set_mono_clock mono_clock;
   Council.Thread_persist.set_eio_context ~clock
     ~https_connector:(Eio_context.get_https_connector ()) net;
   Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
@@ -331,8 +332,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         start_background_maintenance ~sw ~clock state
       in
       print_startup_banner ~config ~resolved_base ~base_path ~masc_dir;
-      (* Start proactive execution refresh so dashboard requests never
-         block on computation.  The loop runs in its own fiber. *)
+      (* Create Executor_pool for CPU-heavy dashboard compute.
+         Runs in separate OS domains, bypassing fiber contention. *)
+      let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in
+      Server_dashboard_http.set_executor_pool exec_pool;
+      Printf.eprintf "[INFO] Executor_pool created (2 domains) for dashboard.\n%!";
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock;
       start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
     with exn ->

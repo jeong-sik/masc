@@ -164,4 +164,44 @@ let definitions =
               ("required", `List [ `String "topic" ]);
             ] );
       ];
+    `Assoc
+      [
+        ("name", `String "masc_governance_feed");
+        ("description", `String "Get a timeline of governance decisions, parameter changes, and human board posts.");
+        ( "inputSchema",
+          `Assoc
+            [
+              ("type", `String "object");
+              ( "properties",
+                `Assoc
+                  [
+                    ("filter", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "decisions"; `String "human_only"; `String "all" ]); ("description", `String "Feed filter (default: decisions)") ]);
+                    ("limit", `Assoc [ ("type", `String "integer"); ("description", `String "Max items (default: 20)") ]);
+                  ] );
+            ] );
+      ];
+    `Assoc
+      [
+        ("name", `String "masc_runtime_params");
+        ("description", `String "List all governable runtime parameters with current values, defaults, and override status.");
+        ("inputSchema", `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ]);
+      ];
+    `Assoc
+      [
+        ("name", `String "masc_set_param");
+        ("description", `String "Set a runtime parameter. Low-risk params apply immediately; high-risk params create a governance petition requiring approval.");
+        ( "inputSchema",
+          `Assoc
+            [
+              ("type", `String "object");
+              ( "properties",
+                `Assoc
+                  [
+                    ("param_key", `Assoc [ ("type", `String "string"); ("description", `String "Parameter key (e.g. lodge.tick_interval_seconds). Use masc_runtime_params to list available keys.") ]);
+                    ("value", `Assoc [ ("description", `String "New value (number, string, or boolean depending on parameter type)") ]);
+                    ("reason", `Assoc [ ("type", `String "string"); ("description", `String "Why this change is needed (recorded in audit log)") ]);
+                  ] );
+              ("required", `List [ `String "param_key"; `String "value" ]);
+            ] );
+      ];
   ]

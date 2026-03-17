@@ -129,20 +129,28 @@ let get_post ~post_id =
   | Jsonl store -> Board.get_post store ~post_id
   | Postgres t -> Board_pg.get_post t ~post_id
 
-let list_posts ?(visibility_filter=None) ?hearth ?(sort_by=Hot) ?(limit=50) () =
+let list_posts ?(visibility_filter=None) ?hearth ?post_kind_filter ?(sort_by=Hot)
+    ?(exclude_automation=false) ?(limit=50) () =
+  let apply_post_kind_filter posts =
+    match (post_kind_filter, exclude_automation) with
+    | Some kind, _ ->
+        List.filter (fun (p : Board.post) -> p.post_kind = kind) posts
+    | None, true ->
+        List.filter (fun (p : Board.post) ->
+          p.post_kind <> Board.Automation_post) posts
+    | None, false -> posts
+  in
   match backend () with
   | Jsonl store ->
-      (* Fetch large pool, then sort by requested order, then take limit.
-         Board.list_posts sorts by score internally, so we fetch more
-         to avoid truncation before re-sorting. *)
       let fetch_limit = max limit 200 in
       let posts = Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit () in
       let sorted = sort_posts_in_memory ~sort_by posts in
+      let filtered = apply_post_kind_filter sorted in
       let rec take n lst = match n, lst with
         | 0, _ | _, [] -> []
         | n, x :: xs -> x :: take (n - 1) xs
       in
-      take limit sorted
+      take limit filtered
   | Postgres t ->
       let pg_sort = match sort_by with
         | Hot -> Board_pg.Hot
@@ -151,7 +159,18 @@ let list_posts ?(visibility_filter=None) ?hearth ?(sort_by=Hot) ?(limit=50) () =
         | Updated -> Board_pg.Updated
         | Discussed -> Board_pg.Discussed
       in
-      Board_pg.list_posts t ~visibility_filter ?hearth ~sort_by:pg_sort ~limit ()
+      let needs_filter =
+        Option.is_some post_kind_filter || exclude_automation
+      in
+      (* Over-fetch when post-query filtering is needed to avoid short results *)
+      let fetch_limit = if needs_filter then max limit (limit * 3) else limit in
+      let posts = Board_pg.list_posts t ~visibility_filter ?hearth ~sort_by:pg_sort ~limit:fetch_limit () in
+      let filtered = apply_post_kind_filter posts in
+      let rec take n lst = match n, lst with
+        | 0, _ | _, [] -> []
+        | n, x :: xs -> x :: take (n - 1) xs
+      in
+      take limit filtered
 
 let get_comments ~post_id =
   match backend () with

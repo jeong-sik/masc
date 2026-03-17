@@ -189,6 +189,7 @@ let handle_post_list args =
   let offset = get_int args "offset" 0 in
   let sort_by = get_string args "sort_by" "hot" |> sort_order_of_string in
   let exclude_system = get_bool args "exclude_system" false in
+  let exclude_automation = get_bool args "exclude_automation" false in
   let since = get_float_opt args "since" in
 
   let visibility_filter = match visibility_str with
@@ -197,6 +198,7 @@ let handle_post_list args =
   in
 
   let all_posts = Board_dispatch.list_posts ~visibility_filter ?hearth
+    ~exclude_automation
     ~sort_by:(dispatch_sort_of sort_by) ~limit:(limit + offset + 100) () in
 
   (* Filter out lodge-system posts when exclude_system is true *)
@@ -433,6 +435,7 @@ let tool_post_list : Types.tool_schema = {
       ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)")]);
       ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort order: hot (score+recency), trending (engagement/age), recent (newest first), updated (most recently active), discussed (most comments)")]);
       ("exclude_system", `Assoc [("type", `String "boolean"); ("description", `String "Exclude lodge-system posts like Activity Reports (default: false)")]);
+      ("exclude_automation", `Assoc [("type", `String "boolean"); ("description", `String "Exclude automation posts (heartbeat, probes, etc.) (default: false)")]);
       ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a 🔔 indicator")]);
     ]);
   ];

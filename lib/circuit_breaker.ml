@@ -278,6 +278,40 @@ let cleanup t ~older_than_seconds =
     List.length to_remove
   )
 
+(** {1 Wrap — Combined check + execute + record} *)
+
+(** Execute [f] with circuit breaker protection.
+    Returns [Error msg] if breaker is open.
+    Records success/failure automatically. *)
+let wrap t ~agent_id (f : unit -> ('a, string) result) : ('a, string) result =
+  match check t ~agent_id with
+  | Error msg -> Error msg
+  | Ok () ->
+      match f () with
+      | Ok _ as ok ->
+          record_success t ~agent_id;
+          ok
+      | Error msg as err ->
+          record_failure t ~agent_id ~reason:msg;
+          err
+
+(** Exception-catching variant of [wrap].
+    Re-raises [Eio.Cancel.Cancelled] to preserve cooperative cancellation. *)
+let wrap_exn t ~agent_id (f : unit -> 'a) : ('a, string) result =
+  match check t ~agent_id with
+  | Error msg -> Error msg
+  | Ok () ->
+      (try
+         let result = f () in
+         record_success t ~agent_id;
+         Ok result
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         let msg = Printexc.to_string exn in
+         record_failure t ~agent_id ~reason:msg;
+         Error msg)
+
 (** {1 Global Instance} *)
 
 let global = lazy (create_from_env ())

@@ -61,7 +61,7 @@ let () = test "dispatch_dashboard" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some (success, result) ->
       assert success;
-      assert (str_contains result "Scope: all");
+      assert (str_contains result "MASC Dashboard");
       assert (str_contains result "Room: default");
       assert (str_contains result "Room: second-room");
   | None -> failwith "dispatch returned None"
@@ -76,8 +76,8 @@ let () = test "dispatch_dashboard_compact" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some (success, result) ->
       assert success;
-      assert (str_contains result "Scope: all");
-      assert (str_contains result "Current:");
+      assert (str_contains result "MASC [");
+      assert (str_contains result "ATTENTION:");
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"

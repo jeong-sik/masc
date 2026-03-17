@@ -49,6 +49,22 @@ end
 
 type any_clock = Clock : _ Eio.Time.clock -> any_clock
 
+(** Consumer recovery configuration *)
+type recovery_config = {
+  max_consecutive_failures : int;   (** Disable consumer after this many consecutive failures *)
+}
+
+let default_recovery_config = {
+  max_consecutive_failures = 3;
+}
+
+let recovery_config_from_env () = {
+  max_consecutive_failures =
+    (match Sys.getenv_opt "MASC_PULSE_MAX_CONSUMER_FAILURES" with
+     | Some s -> (try max 1 (int_of_string s) with _ -> 3)
+     | None -> 3);
+}
+
 type t = {
   clock      : any_clock;
   rhythm     : rhythm;
@@ -65,6 +81,10 @@ type t = {
   mutable alive       : bool;
   mutable total_nudges: int;
   mutable start_ts    : float;
+  (* consumer recovery tracking *)
+  consumer_failures   : (string, int) Hashtbl.t;
+  mutable disabled_consumers : string list;
+  recovery             : recovery_config;
 }
 
 (* ── Defaults ────────────────────────────────────────────────── *)
@@ -115,16 +135,35 @@ let trigger_to_string = function
   | Nudge r   -> Printf.sprintf "nudge(%s)" r
   | Demand    -> "demand"
 
-let dispatch_consumers consumers beat =
+let dispatch_consumers_with_recovery t beat =
+  let to_disable = ref [] in
   List.iter (fun (module C : Consumer) ->
-    if C.should_act beat then begin
+    if List.mem C.name t.disabled_consumers then
+      ()  (* skip disabled consumers *)
+    else if C.should_act beat then begin
       match C.on_beat beat with
-      | Ok () -> ()
+      | Ok () ->
+          (* Reset consecutive failure count on success *)
+          Hashtbl.remove t.consumer_failures C.name
       | Error msg ->
-        Log.Pulse.warn "consumer %s error on beat #%d: %s"
-          C.name beat.seq msg
+          let prev = match Hashtbl.find_opt t.consumer_failures C.name with
+            | Some n -> n | None -> 0
+          in
+          let count = prev + 1 in
+          Hashtbl.replace t.consumer_failures C.name count;
+          Log.Pulse.warn "consumer %s error on beat #%d (%d/%d): %s"
+            C.name beat.seq count t.recovery.max_consecutive_failures msg;
+          if count >= t.recovery.max_consecutive_failures then
+            to_disable := C.name :: !to_disable
     end
-  ) consumers
+  ) t.consumers;
+  (* Disable consumers that exceeded failure threshold *)
+  List.iter (fun name ->
+    t.disabled_consumers <- name :: t.disabled_consumers;
+    Hashtbl.remove t.consumer_failures name;
+    Log.Pulse.error "consumer %s DISABLED after %d consecutive failures"
+      name t.recovery.max_consecutive_failures
+  ) !to_disable
 
 (* ── Core loop ───────────────────────────────────────────────── *)
 
@@ -145,7 +184,7 @@ let tick t trigger =
   t.last_beat_v <- Some beat;
   (match trigger with Nudge _ -> t.total_nudges <- t.total_nudges + 1 | _ -> ());
   Log.Pulse.debug "beat #%d trigger=%s" beat.seq (trigger_to_string trigger);
-  dispatch_consumers t.consumers beat;
+  dispatch_consumers_with_recovery t beat;
   (* Check bounded lifecycle *)
   (match t.lifecycle with
    | Perpetual -> ()
@@ -200,6 +239,7 @@ let loop t =
 (* ── Public API ──────────────────────────────────────────────── *)
 
 let create ~clock ~rhythm ~lifecycle ~consumers =
+  let recovery = recovery_config_from_env () in
   let ac = Clock clock in
   let (shutdown_p, shutdown_r) = Eio.Promise.create () in
   {
@@ -215,6 +255,9 @@ let create ~clock ~rhythm ~lifecycle ~consumers =
     alive       = false;
     total_nudges= 0;
     start_ts    = now ac;
+    consumer_failures = Hashtbl.create 8;
+    disabled_consumers = [];
+    recovery;
   }
 
 let run ~sw t =
@@ -260,6 +303,19 @@ let remove_consumer t name =
   let before = List.length t.consumers in
   t.consumers <- List.filter (fun (module C : Consumer) -> C.name <> name) t.consumers;
   List.length t.consumers < before
+
+(** List consumers that were disabled due to consecutive failures. *)
+let disabled_consumers t = t.disabled_consumers
+
+(** Re-enable a previously disabled consumer by name. *)
+let reenable_consumer t name =
+  if List.mem name t.disabled_consumers then begin
+    t.disabled_consumers <- List.filter (fun n -> n <> name) t.disabled_consumers;
+    Hashtbl.remove t.consumer_failures name;
+    Log.Pulse.info "consumer %s RE-ENABLED" name;
+    true
+  end else
+    false
 
 (* ── Testing helpers ───────────────────────────────────────────── *)
 

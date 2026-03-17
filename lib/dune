@@ -465,6 +465,7 @@
    types
    validation
    circuit_breaker
+   backoff
    audit_log
    build_identity
   voice_config

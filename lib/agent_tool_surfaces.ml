@@ -624,3 +624,14 @@ let build_tool_catalog ~(role : string) () : string list =
           all_names
   in
   unique_preserve_order filtered
+
+(** [local_worker_resolvable_tool_names ()] returns only the tool names
+    that [local_worker_tool_schemas] can actually resolve.  Use this to
+    intersect with [build_tool_catalog] output before passing to
+    [run_worker], so that the autonomous catalog does not include names
+    unknown to the local worker schema registry. *)
+let local_worker_resolvable_tool_names () : string list =
+  match local_worker_tool_schemas () with
+  | Ok schemas ->
+      List.map (fun (s : Types.tool_schema) -> s.name) schemas
+  | Error _ -> []

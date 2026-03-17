@@ -510,7 +510,11 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
              ~allowed_tools:
                (match execution_scope with
                | Some Team_session_types.Autonomous ->
+                   let resolvable =
+                     Agent_tool_surfaces.local_worker_resolvable_tool_names ()
+                   in
                    Agent_tool_surfaces.build_tool_catalog ~role:"autonomous" ()
+                   |> List.filter (fun name -> List.mem name resolvable)
                    |> Agent_tool_surfaces.prefixed_tool_names
                | Some Team_session_types.Limited_code_change ->
                    coding_worker_mcp_tools

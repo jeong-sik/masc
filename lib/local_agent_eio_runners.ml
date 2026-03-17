@@ -54,8 +54,12 @@ let run_worker_oas ~sw ~base_path ~worker_name
           in
           match execution_scope with
           | Team_session_types.Autonomous ->
+              let resolvable =
+                Agent_tool_surfaces.local_worker_resolvable_tool_names ()
+              in
               let tool_names =
                 Agent_tool_surfaces.build_tool_catalog ~role:"autonomous" ()
+                |> List.filter (fun name -> List.mem name resolvable)
               in
               let team_ctx =
                 match team_session_id with

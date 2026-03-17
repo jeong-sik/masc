@@ -84,8 +84,10 @@ let translate_agent_status ~(now : float) (status : Types.agent_status)
   | Types.Listening -> "idle"
   | Types.Inactive -> "offline"
 
-(** Classify an agent for grouping: Working, Stuck, or Idle *)
-type agent_group = Working | Stuck | Idle [@@deriving eq]
+(** Classify an agent for grouping: Working, Stuck, Idle, or Offline.
+    Offline agents (Inactive) are separated from Idle (Listening) so that
+    downstream capacity logic does not treat offline agents as available. *)
+type agent_group = Working | Stuck | Idle | Offline [@@deriving eq]
 
 let classify_agent ~(now : float) (agent : Types.agent) : agent_group =
   let elapsed_opt = parse_iso_timestamp agent.last_seen in
@@ -95,7 +97,8 @@ let classify_agent ~(now : float) (agent : Types.agent) : agent_group =
   match agent.status with
   | Types.Active | Types.Busy when elapsed_sec > stuck_threshold_sec -> Stuck
   | Types.Active | Types.Busy -> Working
-  | Types.Listening | Types.Inactive -> Idle
+  | Types.Listening -> Idle
+  | Types.Inactive -> Offline
 
 (* ===== Lane Status Translation ===== *)
 
@@ -140,26 +143,28 @@ let severity_icon (severity : string) : string =
 
 (* ===== Health Verdict ===== *)
 
-(** Produce a one-line health summary from lane summaries. *)
+(** Produce a one-line health summary from lane summaries.
+    A lane can be both stalled and blocked (lane_phase maps stalled motion
+    to "blocked" phase), so we count distinct lanes needing attention. *)
 let health_verdict (lanes : swarm_lane_summary list) : string =
-  let stalled =
-    List.filter (fun (l : swarm_lane_summary) ->
-      String.equal l.motion_state "stalled") lanes
-  in
-  let blocked =
-    List.filter (fun (l : swarm_lane_summary) ->
-      String.equal l.phase "awaiting_approval" || String.equal l.phase "blocked") lanes
+  let needs_attention (l : swarm_lane_summary) =
+    String.equal l.motion_state "stalled"
+    || String.equal l.phase "awaiting_approval"
+    || String.equal l.phase "blocked"
   in
   let moving =
     List.filter (fun (l : swarm_lane_summary) ->
       String.equal l.motion_state "moving") lanes
   in
+  let attention_count =
+    List.length (List.filter needs_attention lanes)
+  in
   let total = List.length lanes in
   if total = 0 then "No active lanes"
-  else if List.length stalled > 0 || List.length blocked > 0 then
+  else if attention_count > 0 then
     Printf.sprintf "%d lane%s active, %d needs attention"
       total (if total > 1 then "s" else "")
-      (List.length stalled + List.length blocked)
+      attention_count
   else
     Printf.sprintf "%d lane%s running (%d moving)"
       total (if total > 1 then "s" else "")

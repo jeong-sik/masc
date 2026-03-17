@@ -164,6 +164,65 @@ let test_health_with_stalled () =
        true
      with Not_found -> false)
 
+(** A lane that is both stalled (motion_state) and blocked (phase)
+    should only be counted once in the attention count. *)
+let test_health_stalled_blocked_no_double_count () =
+  let lanes =
+    [
+      Lib.Dashboard_labels.
+        {
+          label = "lane-1";
+          present = true;
+          phase = "blocked";
+          motion_state = "stalled";
+          age = "10m ago";
+          current_step = "step";
+          hard_flags = [];
+        };
+    ]
+  in
+  let result = Lib.Dashboard_labels.health_verdict lanes in
+  Alcotest.(check string) "1 lane, 1 needs attention"
+    "1 lane active, 1 needs attention" result
+
+(* ===== Agent Classification ===== *)
+
+let test_classify_inactive_is_offline () =
+  let now = Unix.gettimeofday () in
+  let agent : Lib.Types.agent =
+    {
+      name = "test-agent";
+      agent_type = "test";
+      status = Lib.Types.Inactive;
+      capabilities = [];
+      current_task = None;
+      joined_at = "2026-01-01T00:00:00Z";
+      last_seen = "2026-01-01T00:00:00Z";
+      meta = None;
+    }
+  in
+  let group = Lib.Dashboard_labels.classify_agent ~now agent in
+  Alcotest.(check bool) "inactive = Offline, not Idle" true
+    (Lib.Dashboard_labels.equal_agent_group group Lib.Dashboard_labels.Offline)
+
+let test_classify_listening_is_idle () =
+  let now = Unix.gettimeofday () in
+  let agent : Lib.Types.agent =
+    {
+      name = "test-agent";
+      agent_type = "test";
+      status = Lib.Types.Listening;
+      capabilities = [];
+      current_task = None;
+      joined_at = "2026-01-01T00:00:00Z";
+      last_seen = "2026-01-01T00:00:00Z";
+      meta = None;
+    }
+  in
+  let group = Lib.Dashboard_labels.classify_agent ~now agent in
+  Alcotest.(check bool) "listening = Idle" true
+    (Lib.Dashboard_labels.equal_agent_group group Lib.Dashboard_labels.Idle)
+
 (* ===== Attention Items ===== *)
 
 let test_attention_empty () =
@@ -208,6 +267,12 @@ let () =
           ("no lanes", `Quick, test_health_no_lanes);
           ("all moving", `Quick, test_health_all_moving);
           ("with stalled", `Quick, test_health_with_stalled);
+          ("stalled+blocked no double count", `Quick, test_health_stalled_blocked_no_double_count);
+        ] );
+      ( "Agent Classification",
+        [
+          ("inactive is Offline", `Quick, test_classify_inactive_is_offline);
+          ("listening is Idle", `Quick, test_classify_listening_is_idle);
         ] );
       ( "Attention",
         [

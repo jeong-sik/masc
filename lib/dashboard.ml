@@ -456,6 +456,12 @@ let agents_grouped_section now (agents : Types.agent list) : section =
         Dashboard_labels.classify_agent ~now a = Dashboard_labels.Idle)
       agents
   in
+  let offline =
+    List.filter
+      (fun a ->
+        Dashboard_labels.classify_agent ~now a = Dashboard_labels.Offline)
+      agents
+  in
   let content =
     (if working <> [] then
        add_group "Working" (List.map format_agent working) ""
@@ -465,6 +471,9 @@ let agents_grouped_section now (agents : Types.agent list) : section =
        else [])
     @ (if idle <> [] then
          add_group "Idle" (List.map format_agent idle) ""
+       else [])
+    @ (if offline <> [] then
+         add_group "Offline" (List.map format_agent offline) ""
        else [])
   in
   { title = "Agents"; content; empty_msg = "(no agents)" }
@@ -556,7 +565,15 @@ let generate_compact ?(scope = All) (config : Room_utils.config) : string =
          (fun a -> Dashboard_labels.classify_agent ~now a = Dashboard_labels.Stuck)
          all_agents)
   in
-  let idle_count = List.length all_agents - working_count - stuck_count in
+  let idle_count =
+    List.length
+      (List.filter
+         (fun a -> Dashboard_labels.classify_agent ~now a = Dashboard_labels.Idle)
+         all_agents)
+  in
+  let offline_count =
+    List.length all_agents - working_count - stuck_count - idle_count
+  in
   (* Swarm health *)
   let swarm = swarm_json config in
   let lanes = swarm_lane_summaries now swarm in
@@ -576,8 +593,8 @@ let generate_compact ?(scope = All) (config : Room_utils.config) : string =
         current_room (List.length all_agents)
         (List.length all_tasks);
       Printf.sprintf "ATTENTION: %s" attention_line;
-      Printf.sprintf "AGENTS: %d working / %d idle / %d stuck | TASKS: %d active / %d pending / %d blocked"
-        working_count idle_count stuck_count
+      Printf.sprintf "AGENTS: %d working / %d idle / %d stuck / %d offline | TASKS: %d active / %d pending / %d blocked"
+        working_count idle_count stuck_count offline_count
         (List.length active_tasks) (List.length pending_tasks)
         (List.length blocked_tasks);
       Printf.sprintf "HEALTH: %s | Next: %s" health next_tool;

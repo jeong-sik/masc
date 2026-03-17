@@ -866,6 +866,103 @@ let test_integration () = group "Integration" (fun () ->
 )
 
 (* ================================================================ *)
+(* 7. History Offload Tests                                         *)
+(* ================================================================ *)
+
+let test_history_offload () = group "History Offload" (fun () ->
+
+  (* 1. format_message_readable produces role: content format *)
+  let user_msg = Llm_client.user_msg "hello world" in
+  let formatted = Context_manager.format_message_readable user_msg in
+  assert_true "format:user" (formatted = "user: hello world");
+
+  let tool_msg = Llm_client.tool_msg ~name:"grep" ~call_id:"c1" "search results" in
+  let formatted_tool = Context_manager.format_message_readable tool_msg in
+  assert_true "format:tool_with_name"
+    (String.length formatted_tool > 0
+     && String.sub formatted_tool 0 4 = "tool");
+
+  (* 2. offload_messages creates file in correct location *)
+  let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
+    (sprintf "masc-offload-test-%d" (int_of_float (Unix.gettimeofday () *. 1000.0))) in
+  let messages = [
+    Llm_client.user_msg "question 1";
+    Llm_client.assistant_msg "answer 1";
+    Llm_client.user_msg "question 2";
+  ] in
+  let result = Context_manager.offload_messages
+    ~session_dir:tmp_dir ~compaction_count:0 messages in
+  assert_true "offload:returns_some" (Option.is_some result);
+  let path = Option.get result in
+  assert_true "offload:file_exists" (Sys.file_exists path);
+  assert_true "offload:correct_filename"
+    (Filename.basename path = "0.md");
+  assert_true "offload:in_offloaded_dir"
+    (Filename.basename (Filename.dirname path) = "offloaded");
+
+  (* 3. offload file contains readable content *)
+  let ic = open_in path in
+  let n = in_channel_length ic in
+  let buf = Bytes.create n in
+  really_input ic buf 0 n;
+  close_in ic;
+  let content = Bytes.to_string buf in
+  assert_true "offload:has_header"
+    (let len = String.length "## Compacted at" in
+     String.length content >= len
+     && String.sub content 0 len = "## Compacted at");
+  assert_true "offload:has_user_msg"
+    (try let _ = Str.search_forward (Str.regexp_string "user: question 1") content 0 in true
+     with Not_found -> false);
+  assert_true "offload:has_assistant_msg"
+    (try let _ = Str.search_forward (Str.regexp_string "assistant: answer 1") content 0 in true
+     with Not_found -> false);
+
+  (* 4. offload with invalid path returns None (fail-safe) *)
+  let bad_result = Context_manager.offload_messages
+    ~session_dir:"/nonexistent/path/that/cannot/exist" ~compaction_count:0 messages in
+  assert_true "offload:failsafe" (Option.is_none bad_result);
+
+  (* 5. compact_with_offload returns both context and offload path *)
+  let session = Context_manager.create_session
+    ~session_id:"offload-test"
+    ~base_dir:(Filename.get_temp_dir_name ()) in
+  let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:100000 in
+  let ctx = Context_manager.append_many ctx
+    (List.init 20 (fun i ->
+      if i mod 2 = 0
+      then Llm_client.user_msg (sprintf "question %d with detail: %s" i (String.make 200 'x'))
+      else Llm_client.assistant_msg (sprintf "answer %d: %s" i (String.make 300 'y')))) in
+  let result = Context_manager.compact_with_offload
+    ~session_ctx:session ~compaction_count:1
+    ctx [Context_manager.PruneToolOutputs; Context_manager.MergeContiguous;
+         Context_manager.SummarizeOld] in
+  assert_true "compact_offload:has_path" (Option.is_some result.offloaded_path);
+  assert_true "compact_offload:context_reduced"
+    (result.context.token_count < ctx.token_count);
+  assert_true "compact_offload:file_exists"
+    (Sys.file_exists (Option.get result.offloaded_path));
+
+  (* 6. Summary message contains offload path annotation *)
+  let has_annotation = List.exists (fun (m : Llm_client.message) ->
+    let text = Llm_client.text_of_message m in
+    try let _ = Str.search_forward
+      (Str.regexp_string "[Full conversation history saved to") text 0 in true
+    with Not_found -> false
+  ) result.context.messages in
+  assert_true "compact_offload:has_annotation" has_annotation;
+
+  (* 7. compact (original) still works unchanged *)
+  let orig = Context_manager.compact ctx
+    [Context_manager.PruneToolOutputs; Context_manager.SummarizeOld] in
+  assert_true "compact:original_unchanged"
+    (orig.token_count < ctx.token_count);
+
+  (* Cleanup temp dirs *)
+  (try Sys.remove path with _ -> ());
+)
+
+(* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
 
@@ -880,6 +977,7 @@ let () =
   test_perpetual_loop ();
   test_auto_claim ();
   test_integration ();
+  test_history_offload ();
 
   printf "\n====================================\n%!";
   printf "Results: %d/%d passed (%d failed)\n%!"

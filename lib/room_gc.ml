@@ -120,7 +120,8 @@ let cleanup_zombies config =
               (* Stop heartbeats owned by this zombie agent *)
               let _stopped = Heartbeat.stop_by_agent ~agent_name:agent.name in
               (* Remove agent file *)
-              (try Sys.remove path with Sys_error _ -> ())
+              (try Sys.remove path with Sys_error msg ->
+                Log.Gc.warn "failed to remove zombie agent file %s: %s" path msg)
           | _ -> ()
         end
       )

@@ -69,7 +69,8 @@ let parse_tool_call_detail (detail_opt : string option)
           | Some ("timeout", v) ->
               timeout := bool_of_tag_value v
           | Some ("duration_ms", v) ->
-              (try duration_ms := Some (max 0 (int_of_string v)) with _ -> ())
+              (try duration_ms := Some (max 0 (int_of_string v)) with _ ->
+                Log.Dashboard.warn "invalid duration_ms value: %s" v)
           | _ -> ())
         tags;
       (tool_name, !timeout, !duration_ms)

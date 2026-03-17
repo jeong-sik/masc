@@ -198,8 +198,10 @@ let run_process_with_timeout ~clock_opt ~timeout_sec ~prog ~argv ~env =
   let finalize exit_code =
     let stdout = In_channel.with_open_bin stdout_path In_channel.input_all in
     let stderr = In_channel.with_open_bin stderr_path In_channel.input_all in
-    (try Sys.remove stdout_path with _ -> ());
-    (try Sys.remove stderr_path with _ -> ());
+    (try Sys.remove stdout_path with exn ->
+      Log.CmdPlane.warn "failed to remove stdout tmpfile %s: %s" stdout_path (Printexc.to_string exn));
+    (try Sys.remove stderr_path with exn ->
+      Log.CmdPlane.warn "failed to remove stderr tmpfile %s: %s" stderr_path (Printexc.to_string exn));
     { exit_code; stdout; stderr }
   in
   match wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid with

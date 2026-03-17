@@ -326,7 +326,9 @@ let handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd =
                  ignore (send_raw_data (trpg_event_to_sse ev));
                  last_seq := max !last_seq ev.Trpg_engine_event.seq
                end) events
-         | Error _ -> ());
+         | Error err ->
+             Log.Trpg.warn "SSE initial event read failed for room %s: %s"
+               room_id err);
 
         (* Start polling fiber for new events + keepalive *)
         (match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with

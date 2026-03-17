@@ -88,15 +88,12 @@ let start_cp_summary_refresh_loop ~state ~sw ~clock =
     in
     loop ())
 
-let command_plane_summary_http_json ~state =
-  let cached = !_cp_summary_ref in
-  match cached with
-  | `Assoc fields when List.mem_assoc "status" fields &&
-      (match List.assoc "status" fields with `String "initializing" -> true | _ -> false) ->
-    let result = compute_cp_summary ~state in
-    _cp_summary_ref := result;
-    result
-  | _ -> cached
+let command_plane_summary_http_json ~state:_ =
+  (* Always return the proactively cached ref.  Never compute synchronously —
+     compute_cp_summary can hang when Swarm_status.build_json blocks on
+     filesystem I/O, causing room-truth and /command-plane/summary to time out.
+     The background refresh loop populates the ref within one interval (120s). *)
+  !_cp_summary_ref
 
 let command_plane_snapshot_http_json ~state =
   let config = state.Mcp_server.room_config in

@@ -2,8 +2,9 @@
 // 4-Layer information architecture: Situation -> Anomaly -> Entity Grid -> Timeline
 
 import { html } from 'htm/preact'
-import { agents, keepers, tasks, shellCounts } from '../../store'
+import { keepers, tasks, shellCounts } from '../../store'
 import { missionSnapshot } from '../../mission-store'
+import { observatoryGroups } from '../../observatory-store'
 import { journal } from '../../sse'
 import { navigate } from '../../router'
 import { formatDuration } from '../mission-utils'
@@ -34,19 +35,23 @@ function keeperHealthClass(status?: string): string {
 
 export function Overview() {
   const snap = missionSnapshot.value
-  const agentList = agents.value
   const keeperList = keepers.value
   const taskList = tasks.value
   const counts = shellCounts.value
 
-  const activeAgents = agentList.filter((a: { status: string }) =>
-    a.status === 'active' || a.status === 'busy' || a.status === 'listening'
-  )
   const activeTasks = taskList.filter((t: { status: string }) =>
     t.status === 'in_progress' || t.status === 'claimed'
   )
 
-  const agentCount = activeAgents.length > 0 ? activeAgents.length : (counts?.agents ?? 0)
+  // Use observatory groups for honest agent counting:
+  // only count agents with fresh signal (working/watching), not stale ones.
+  const obsGroups = observatoryGroups.value
+  const allObsAgents = obsGroups.flatMap(g => g.agents)
+  const freshAgentCount = allObsAgents.filter(a => a.state === 'working' || a.state === 'watching').length
+  const staleAgentCount = allObsAgents.filter(a => a.state === 'quiet' || a.state === 'offline').length
+  const totalAgentCount = allObsAgents.length
+
+  const agentCount = totalAgentCount > 0 ? freshAgentCount : (counts?.agents ?? 0)
   const taskCount = activeTasks.length > 0 ? activeTasks.length : (counts?.tasks ?? 0)
   const taskSource: TaskSource = activeTasks.length > 0 ? 'store' : 'cache'
   const keeperCount = keeperList.length > 0 ? keeperList.length : (counts?.keepers ?? 0)
@@ -70,6 +75,8 @@ export function Overview() {
 
       <${QuickStats}
         agentCount=${agentCount}
+        staleAgentCount=${staleAgentCount}
+        totalAgentCount=${totalAgentCount}
         activeTaskCount=${taskCount}
         keeperCount=${keeperCount}
         attentionCount=${attentionCount}

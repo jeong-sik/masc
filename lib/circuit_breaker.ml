@@ -295,7 +295,8 @@ let wrap t ~agent_id (f : unit -> ('a, string) result) : ('a, string) result =
           record_failure t ~agent_id ~reason:msg;
           err
 
-(** Exception-catching variant of [wrap]. *)
+(** Exception-catching variant of [wrap].
+    Re-raises [Eio.Cancel.Cancelled] to preserve cooperative cancellation. *)
 let wrap_exn t ~agent_id (f : unit -> 'a) : ('a, string) result =
   match check t ~agent_id with
   | Error msg -> Error msg
@@ -304,7 +305,9 @@ let wrap_exn t ~agent_id (f : unit -> 'a) : ('a, string) result =
          let result = f () in
          record_success t ~agent_id;
          Ok result
-       with exn ->
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
          let msg = Printexc.to_string exn in
          record_failure t ~agent_id ~reason:msg;
          Error msg)

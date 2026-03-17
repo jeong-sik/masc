@@ -38,6 +38,8 @@ import {
   fetchDashboardShell,
   fetchMessagesList,
   fetchTrpgState,
+  fetchAgentActivity,
+  type AgentActivityEntry,
 } from './api'
 import { journal } from './sse'
 import {
@@ -68,6 +70,7 @@ export interface ShellCounts {
 }
 
 export const shellCounts = signal<ShellCounts | null>(null)
+export const agentActivity = signal<AgentActivityEntry[]>([])
 
 // --- Provider capacity ---
 
@@ -358,6 +361,15 @@ export async function refreshShell(): Promise<void> {
     }
   } catch (err) {
     console.error('Dashboard shell fetch error:', err)
+  }
+}
+
+export async function refreshAgentActivity(): Promise<void> {
+  try {
+    const data = await fetchAgentActivity(24)
+    agentActivity.value = data.agents ?? []
+  } catch (err) {
+    console.error('Agent activity fetch error:', err)
   }
 }
 

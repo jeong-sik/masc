@@ -172,6 +172,52 @@ let summarize_tool_usage ?fs config : tool_usage_summary =
     stats_by_tool;
   }
 
+(** Agent activity summary from telemetry, filtered by time window. *)
+type agent_activity = {
+  agent_id: string;
+  tool_calls: int;
+  success_count: int;
+  failure_count: int;
+  first_seen: float;
+  last_seen: float;
+}
+
+let summarize_agent_activity ?fs config ~since : agent_activity list =
+  let records =
+    match fs with
+    | Some fs -> read_all_events ~fs config
+    | None -> read_all_events_from_path (telemetry_file config)
+  in
+  let by_agent : (string, agent_activity) Hashtbl.t = Hashtbl.create 16 in
+  List.iter (fun (record : event_record) ->
+    if record.timestamp >= since then
+      match record.event with
+      | Tool_called { agent_id = Some aid; success; _ } ->
+          let current =
+            match Hashtbl.find_opt by_agent aid with
+            | Some a -> a
+            | None -> { agent_id = aid; tool_calls = 0; success_count = 0;
+                        failure_count = 0; first_seen = record.timestamp;
+                        last_seen = record.timestamp }
+          in
+          Hashtbl.replace by_agent aid
+            { current with
+              tool_calls = current.tool_calls + 1;
+              success_count = current.success_count + (if success then 1 else 0);
+              failure_count = current.failure_count + (if success then 0 else 1);
+              first_seen = min current.first_seen record.timestamp;
+              last_seen = max current.last_seen record.timestamp;
+            }
+      | Agent_joined { agent_id; _ } ->
+          if not (Hashtbl.mem by_agent agent_id) then
+            Hashtbl.replace by_agent agent_id
+              { agent_id; tool_calls = 0; success_count = 0; failure_count = 0;
+                first_seen = record.timestamp; last_seen = record.timestamp }
+      | _ -> ()
+  ) records;
+  Hashtbl.fold (fun _ v acc -> v :: acc) by_agent []
+  |> List.sort (fun a b -> compare b.tool_calls a.tool_calls)
+
 let tool_usage_fields summary tool_name =
   let stats =
     match Hashtbl.find_opt summary.stats_by_tool tool_name with

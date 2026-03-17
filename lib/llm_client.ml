@@ -4,15 +4,13 @@
     normalized to an internal message format and results are parsed into
     structured completion_response records.
 
-    This module re-exports {!Llm_types}, {!Llm_transport}, and
-    {!Llm_orchestration} so that existing callers can continue using
-    [Llm_client.X] without changes.
+    This module re-exports {!Llm_types} and {!Llm_orchestration} so that
+    existing callers can continue using [Llm_client.X] without changes.
 
     @since 2.61.0 *)
 
 (* Re-export sub-modules for backward compatibility *)
 include Llm_types
-include Llm_transport
 include Llm_orchestration
 
 (* ================================================================ *)

@@ -138,6 +138,18 @@ val tool_msg : name:string -> call_id:string -> string -> message
     Use this instead of direct [.content] access for v0.48 type convergence. *)
 val text_of_message : message -> string
 
+(** {1 UTF-8 Sanitization} *)
+
+(** Repair malformed UTF-8 in arbitrary text. *)
+val sanitize_text_utf8 : string -> string
+
+(** Repair malformed UTF-8 in a single message before request serialization.
+    Sanitizes each content block individually (Text, ToolResult). *)
+val sanitize_message_utf8 : message -> message
+
+(** Repair malformed UTF-8 across a message list before request serialization. *)
+val sanitize_messages_utf8 : message list -> message list
+
 (** {1 Token Estimation} *)
 
 (** Estimate token count for a message list (heuristic: ~4 chars per token). *)

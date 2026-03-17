@@ -562,7 +562,6 @@
    ;; Perpetual Agent Runtime (infinite context system)
    llm_types
    llm_eio_env
-   llm_transport
    llm_provider_bridge
    llm_orchestration
    llm_client

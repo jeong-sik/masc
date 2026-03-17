@@ -931,5 +931,4 @@ Call masc_listen again to continue listening.
       ] in
       Some (true, Yojson.Safe.pretty_to_string response)
 
-
   | _ -> Tool_inline_dispatch_extra.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name

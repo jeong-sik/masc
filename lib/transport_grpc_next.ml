@@ -406,7 +406,7 @@ let plan_path config task_id =
 let read_plan config task_id =
   let path = plan_path config task_id in
   if Sys.file_exists path then
-    match Yojson.Safe.from_file path with
+    match Safe_ops.read_json_eio path with
     | json -> Some json
     | exception e ->
       Eio.traceln "[WARN] Failed to read plan %s: %s" path (Printexc.to_string e);

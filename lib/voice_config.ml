@@ -295,7 +295,7 @@ let load () =
     Error (Printf.sprintf "voice config missing at %s" path)
   else
     try
-      let json = Yojson.Safe.from_file path in
+      let json = Safe_ops.read_json_eio path in
       let open Result in
       let* tts = parse_tts json in
       let* stt = parse_stt json in

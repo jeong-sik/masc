@@ -144,7 +144,7 @@ let load_store path : stats_store =
     default_store
   else
     try
-      match Yojson.Safe.from_file path with
+      match Safe_ops.read_json_eio path with
       | `Assoc fields -> (
           match List.assoc_opt "entries" fields with
           | Some (`List rows) -> List.filter_map stats_entry_of_json rows

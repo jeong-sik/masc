@@ -19,42 +19,27 @@ open Tool_args
 
 (** Blacklist entry: agent_id -> until timestamp *)
 let blacklist : (string, float * string) Hashtbl.t = Hashtbl.create 32
-let blacklist_lock = Mutex.create ()
+let blacklist_lock = Eio.Mutex.create ()
 
 let add_to_blacklist ~agent_id ~until ~reason =
-  Mutex.lock blacklist_lock;
-  Common.protect
-    ~module_name:"tool_suspend"
-    ~finally_label:"blacklist_add"
-    ~finally:(fun () -> Mutex.unlock blacklist_lock)
-    (fun () -> Hashtbl.replace blacklist agent_id (until, reason))
+  Eio.Mutex.use_rw ~protect:true blacklist_lock (fun () ->
+    Hashtbl.replace blacklist agent_id (until, reason))
 
 let check_blacklist ~agent_id =
-  Mutex.lock blacklist_lock;
-  Common.protect
-    ~module_name:"tool_suspend"
-    ~finally_label:"blacklist_check"
-    ~finally:(fun () -> Mutex.unlock blacklist_lock)
-    (fun () ->
-      match Hashtbl.find_opt blacklist agent_id with
-      | None -> None
-      | Some (until, reason) ->
-          let now = Time_compat.now () in
-          if now >= until then begin
-            (* Expired - remove from blacklist *)
-            Hashtbl.remove blacklist agent_id;
-            None
-          end else
-            Some (until, reason)
-    )
+  Eio.Mutex.use_rw ~protect:true blacklist_lock (fun () ->
+    match Hashtbl.find_opt blacklist agent_id with
+    | None -> None
+    | Some (until, reason) ->
+        let now = Time_compat.now () in
+        if now >= until then begin
+          Hashtbl.remove blacklist agent_id;
+          None
+        end else
+          Some (until, reason))
 
 let remove_from_blacklist ~agent_id =
-  Mutex.lock blacklist_lock;
-  Common.protect
-    ~module_name:"tool_suspend"
-    ~finally_label:"blacklist_remove"
-    ~finally:(fun () -> Mutex.unlock blacklist_lock)
-    (fun () -> Hashtbl.remove blacklist agent_id)
+  Eio.Mutex.use_rw ~protect:true blacklist_lock (fun () ->
+    Hashtbl.remove blacklist agent_id)
 
 (** {1 Room Operations} *)
 

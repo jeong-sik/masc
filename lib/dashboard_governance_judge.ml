@@ -11,7 +11,7 @@ type runtime_snapshot = {
 }
 
 type state = {
-  mutex : Mutex.t;
+  mutex : Eio.Mutex.t;
   mutable started : bool;
   mutable refreshing : bool;
   mutable judge_online : bool;
@@ -33,8 +33,7 @@ let judgments_path base_path =
 let states : (string, state) Hashtbl.t = Hashtbl.create 4
 
 let with_lock (st : state) f =
-  Mutex.lock st.mutex;
-  Fun.protect f ~finally:(fun () -> Mutex.unlock st.mutex)
+  Eio.Mutex.use_rw ~protect:true st.mutex f
 
 let rec ensure_dir path =
   if not (Sys.file_exists path) then (
@@ -72,7 +71,7 @@ let get_state base_path =
   | None ->
       let st =
         {
-          mutex = Mutex.create ();
+          mutex = Eio.Mutex.create ();
           started = false;
           refreshing = false;
           judge_online = false;

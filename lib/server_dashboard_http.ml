@@ -411,7 +411,7 @@ let _execution_json_ref : Yojson.Safe.t ref =
     ("message", `String "Execution data is being computed. Refresh in a few seconds.");
   ])
 
-let _execution_refresh_interval_s = 120.0
+let _execution_refresh_interval_s = 60.0
 
 (** Start the proactive execution refresh loop.  When an Executor_pool
     is available, each refresh runs in a pool domain with a domain-local
@@ -436,8 +436,6 @@ let start_execution_refresh_loop ~state ~sw ~clock =
               | Some domain_config ->
                 Dashboard_execution.json ~light:true ~config:domain_config ~sw:pool_sw ~clock ~proc_mgr ()
               | None ->
-                (* Cannot safely use main-domain PG pool in a different domain
-                   (Switch is domain-bound). Raise to trigger the outer catch. *)
                 failwith "domain-local PG backend creation failed; skipping pool refresh")
           | None ->
             Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()

@@ -139,7 +139,7 @@
 (test
  (name test_social_motion)
  (modules test_social_motion)
- (libraries masc_mcp alcotest unix yojson))
+ (libraries masc_mcp alcotest unix yojson eio eio_main))
 
 (test
  (name test_ci_hardening_source)
@@ -416,7 +416,7 @@
 (test
  (name test_tool_trpg_coverage)
  (modules test_tool_trpg_coverage)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 ; Narrative Intelligence tests (inventory, relationships, dedup, JSON recovery)
 (test
@@ -947,7 +947,7 @@
 (test
  (name test_tool_registry)
  (modules test_tool_registry)
- (libraries masc_mcp alcotest yojson))
+ (libraries masc_mcp alcotest yojson eio eio_main))
 
 ; Tool Dispatch — O(1) Hashtbl central dispatch registry (P4 Phase 4.3)
 (test
@@ -1007,7 +1007,7 @@
 (test
  (name test_tool_unified)
  (modules test_tool_unified)
- (libraries masc_mcp alcotest yojson))
+ (libraries masc_mcp alcotest yojson eio eio_main))
 
 ; Mode Tool Count — end-to-end Config.enabled_tool_schemas per mode
 (test

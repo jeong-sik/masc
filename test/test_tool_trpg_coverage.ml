@@ -3178,6 +3178,7 @@ let test_round_run_dm_persona_override_in_prompt_and_summary () =
   cleanup_dir base_dir
 
 let () =
+  Eio_main.run @@ fun _env ->
   Alcotest.run "Tool_trpg coverage"
     [
       ( "preset",

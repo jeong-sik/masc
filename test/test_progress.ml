@@ -186,6 +186,7 @@ let test_validate_progress_negative () =
   check bool "error mentions range" true (String.length msg > 0)
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "progress"
     [
       ("notify", [

@@ -555,6 +555,8 @@
    keeper_persona
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
+   ;; LLM Pool (provider-based concurrency)
+   llm_pool
    ;; Perpetual Agent Runtime (infinite context system)
    llm_types
    llm_transport

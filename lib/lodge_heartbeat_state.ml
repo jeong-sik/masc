@@ -49,10 +49,11 @@ let generate_agent_uuid () =
     (String.sub (Digest.to_hex (Digest.string (string_of_float (Time_compat.now ())))) 0 8)
     (Random.int 0xFFFFFF)
 
-(** Crash recovery timeout: 360s (3x the heartbeat interval of 120s).
+(** Crash recovery timeout (default 360s = 3x the heartbeat interval of 120s).
     Previous value (120s = 1x interval) caused race conditions where agents
-    were removed between heartbeat ticks. 3x provides adequate margin. *)
-let agent_crash_timeout = 360.0
+    were removed between heartbeat ticks. 3x provides adequate margin.
+    Configurable via MASC_AGENT_TIMEOUT_SEC. *)
+let agent_crash_timeout = Env_config_governance.Timeouts.agent_timeout_sec
 
 (** Check if agent is currently active (with crash recovery timeout).
     Internal — must be called under [with_lodge_lock]. *)

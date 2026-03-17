@@ -79,7 +79,7 @@ let stream_native_chain_events_http ~deps ~request reqd =
        Eio.Fiber.fork ~sw:(deps.get_switch ()) (fun () ->
            try
              while not !closed do
-               Eio.Time.sleep (deps.get_clock ()) 30.0;
+               Eio.Time.sleep (deps.get_clock ()) Env_config_governance.Timeouts.sse_keepalive_sec;
                if not (send_raw ": keepalive\n\n") then close_stream ()
              done
            with exn ->
@@ -183,7 +183,7 @@ let stream_native_chain_events_h2 ~deps ~request h2_reqd =
        Eio.Fiber.fork ~sw:(deps.get_switch ()) (fun () ->
            try
              while not !closed do
-               Eio.Time.sleep (deps.get_clock ()) 30.0;
+               Eio.Time.sleep (deps.get_clock ()) Env_config_governance.Timeouts.sse_keepalive_sec;
                if not (send_raw ": keepalive\n\n") then close_stream ()
              done
            with exn ->

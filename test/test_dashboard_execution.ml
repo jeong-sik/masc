@@ -136,6 +136,7 @@ let test_dashboard_execution_current_room_status () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let config = Lib.Room_utils.default_config dir in
+      Eio_main.run @@ fun env ->
       ignore (Lib.Room.init config ~agent_name:None);
       ignore (Lib.Room.room_create config ~name:"Focus Room" ~description:None);
       let enter_result =
@@ -146,7 +147,6 @@ let test_dashboard_execution_current_room_status () =
         (enter_result |> member "current_room" |> to_string);
       check (option string) "room state current_room" (Some "focus-room")
         (Lib.Room.read_current_room config);
-      Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_execution.json
@@ -168,6 +168,7 @@ let test_dashboard_shell_current_room_status () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      Eio_main.run @@ fun _env ->
       let config = Lib.Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:None);
       ignore (Lib.Room.room_create config ~name:"Focus Room" ~description:None);
@@ -186,9 +187,9 @@ let test_dashboard_execution_fresh_join_not_marked_stale () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let config = Lib.Room_utils.default_config dir in
+      Eio_main.run @@ fun env ->
       ignore (Lib.Room.init config ~agent_name:None);
       ignore (Lib.Room.join config ~agent_name:"sentinel-kind-fox" ~capabilities:["sentinel"; "housekeeping"] ());
-      Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =
           Lib.Dashboard_execution.json

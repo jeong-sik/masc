@@ -236,6 +236,65 @@ let test_select_model_preferring_non_pool () =
   check string "non-pool model passed through" "gpt-4" model
 
 (* ============================================================
+   config loading (parse_model_json, hardcoded_models)
+   ============================================================ *)
+
+let test_parse_model_json_valid () =
+  let json = `Assoc [
+    ("model_id", `String "test-model");
+    ("concurrency_limit", `Int 5);
+    ("description", `String "test")
+  ] in
+  match Glm_pool.parse_model_json json with
+  | Some m ->
+      check string "model_id" "test-model" m.model_id;
+      check int "concurrency_limit" 5 m.concurrency_limit;
+      check string "description" "test" m.description
+  | None -> fail "expected Some"
+
+let test_parse_model_json_missing_fields () =
+  let json = `Assoc [("model_id", `String "x")] in
+  check bool "missing limit returns None" true
+    (Glm_pool.parse_model_json json = None)
+
+let test_parse_model_json_invalid_limit () =
+  let json = `Assoc [
+    ("model_id", `String "x");
+    ("concurrency_limit", `Int 0)
+  ] in
+  check bool "zero limit returns None" true
+    (Glm_pool.parse_model_json json = None)
+
+let test_parse_model_json_no_description () =
+  let json = `Assoc [
+    ("model_id", `String "x");
+    ("concurrency_limit", `Int 3)
+  ] in
+  match Glm_pool.parse_model_json json with
+  | Some m -> check string "default empty description" "" m.description
+  | None -> fail "expected Some"
+
+let test_parse_model_json_float_limit () =
+  let json = `Assoc [
+    ("model_id", `String "x");
+    ("concurrency_limit", `Float 5.0)
+  ] in
+  match Glm_pool.parse_model_json json with
+  | Some m -> check int "float parsed as int" 5 m.concurrency_limit
+  | None -> fail "expected Some for float limit"
+
+let test_hardcoded_models_count () =
+  check int "hardcoded has 7 models" 7
+    (Array.length Glm_pool.hardcoded_models)
+
+let test_hardcoded_models_total_capacity () =
+  let cap = Array.fold_left
+    (fun acc (m : Glm_pool.glm_model) -> acc + m.concurrency_limit) 0
+    Glm_pool.hardcoded_models
+  in
+  check int "hardcoded total is 39" 39 cap
+
+(* ============================================================
    Test Runner
    ============================================================ *)
 
@@ -288,5 +347,14 @@ let () =
       test_case "uses preferred" `Quick test_select_model_preferring_available;
       test_case "fallback at capacity" `Quick test_select_model_preferring_at_capacity;
       test_case "non-pool passthrough" `Quick test_select_model_preferring_non_pool;
+    ];
+    "config_loading", [
+      test_case "parse valid JSON model" `Quick test_parse_model_json_valid;
+      test_case "parse missing fields" `Quick test_parse_model_json_missing_fields;
+      test_case "parse invalid limit" `Quick test_parse_model_json_invalid_limit;
+      test_case "parse no description" `Quick test_parse_model_json_no_description;
+      test_case "hardcoded model count" `Quick test_hardcoded_models_count;
+      test_case "hardcoded total capacity" `Quick test_hardcoded_models_total_capacity;
+      test_case "parse float limit" `Quick test_parse_model_json_float_limit;
     ];
   ]

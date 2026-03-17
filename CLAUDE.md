@@ -93,6 +93,8 @@ curl http://127.0.0.1:8935/health
 - `MASC_ORCHESTRATOR_ENABLED=0` — Orchestrator 비활성화 (EADDRINUSE 방지)
 - `ME_ROOT` — repo 루트. 미지정 시 `$HOME/me`를 우선 사용
 - `MASC_DASHBOARD_PROXY_TARGET` — dashboard dev server가 프록시할 API origin
+- `MASC_BOARD_BACKEND` — Board 백엔드 선택 (`pg` default, `jsonl` for file-based)
+- `MASC_GLM_POOL_LIMIT_<MODEL>` — GLM 모델별 concurrency limit 오버라이드
 
 ### 로그
 script-based 실행에서는 표준 출력/표준 오류를 현재 셸 또는 호출 스크립트에서 직접 관리한다.
@@ -161,14 +163,15 @@ cd dashboard && npm run build  # Production build → ../assets/dashboard/
 
 ## Board System
 
-- Posts: `.masc/board_posts.jsonl` (JSONL mode)
-- Comments: `.masc/board_comments.jsonl` (JSONL mode)
+- Posts: `.masc/board_posts.jsonl` (JSONL mode) or `masc_board_posts` table (PG mode)
+- Comments: `.masc/board_comments.jsonl` (JSONL mode) or `masc_board_comments` table (PG mode)
 - Sort: Hot / Trending / Recent / Updated / Discussed
 - `updated_at` 필드: vote, comment 시 자동 갱신
 
-### PostgreSQL Mode (Optional)
+### PostgreSQL Mode (Primary)
 
-Board는 JSONL (기본) 또는 PostgreSQL 백엔드를 지원.
+Board는 PostgreSQL (primary) 또는 JSONL (fallback) 백엔드를 지원.
+`MASC_POSTGRES_URL` 설정 시 PG가 자동 선택됨. `MASC_BOARD_BACKEND=jsonl`로 강제 전환 가능.
 
 **설정 방법 (~/.zshenv):**
 ```bash

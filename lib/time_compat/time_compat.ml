@@ -51,11 +51,18 @@ let now_us () =
 
 (** Sleep for given duration (Eio-native when available)
 
+    When clock is not set, logs a warning and uses Unix.sleepf.
+    Callers in Eio contexts MUST ensure [set_clock] was called first,
+    otherwise Unix.sleepf blocks the entire Eio domain (all fibers freeze).
+
     @param seconds Duration to sleep *)
 let sleep seconds =
   match !global_clock with
   | Some clock -> Eio.Time.sleep clock seconds
-  | None -> Unix.sleepf seconds
+  | None ->
+      if seconds > 0.01 then
+        Printf.eprintf "[WARN] [Time_compat] sleep %.3fs with Unix.sleepf (no Eio clock set)\n%!" seconds;
+      Unix.sleepf seconds
 
 (** Measure execution time of a function
 

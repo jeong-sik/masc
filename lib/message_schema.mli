@@ -21,3 +21,18 @@ val message_type_string : structured_message -> string
 val is_targeted_at : string -> structured_message -> bool
 val json_schema : Yojson.Safe.t
 val roundtrip : structured_message -> (structured_message, string) result
+
+(** {1 Swarm Message Envelope} *)
+
+type swarm_envelope = {
+  sender : string;
+  timestamp : float;
+  sequence : int;
+  channel : string;
+  message : structured_message;
+}
+
+val envelope_to_json : swarm_envelope -> Yojson.Safe.t
+val envelope_of_json : Yojson.Safe.t -> (swarm_envelope, string) result
+val validate_envelope : ?mode:validation_mode -> string -> (swarm_envelope, string) result
+val roundtrip_envelope : swarm_envelope -> (swarm_envelope, string) result

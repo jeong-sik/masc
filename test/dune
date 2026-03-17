@@ -1017,3 +1017,9 @@
  (name test_lifecycle)
  (modules test_lifecycle)
  (libraries masc_mcp eio eio_main yojson unix))
+
+; Phase 5: Validation + SDK tests
+(test
+ (name test_phase5_validation)
+ (modules test_phase5_validation)
+ (libraries masc_mcp eio eio_main str yojson))

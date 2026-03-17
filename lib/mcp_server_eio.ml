@@ -164,6 +164,12 @@ let () =
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
   register_module_tag ~schemas:Tool_trpg.schemas ~tag:Mod_trpg;
   register_module_tag ~schemas:Tool_notifications.schemas ~tag:Mod_notifications;
+  (* Core schema tools dispatched by tag-only modules (not in fallback chain)
+     need explicit name registration. These have schemas in Tool_schemas_core
+     but dispatch via modules only reachable through the tag system. *)
+  register_name_tag ~tool_name:"masc_init" ~tag:Mod_room;
+  register_name_tag ~tool_name:"masc_register_capabilities" ~tag:Mod_agent;
+  register_name_tag ~tool_name:"masc_find_by_capability" ~tag:Mod_agent;
   mark_tag_registry_initialized ();
   Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ())
 

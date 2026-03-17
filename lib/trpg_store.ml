@@ -43,7 +43,7 @@ let load_world_contracts_from_dir ~base_dir : Yojson.Safe.t =
   let path = world_contracts_path ~base_dir in
   if not (Sys.file_exists path) then `Null
   else
-    match Yojson.Safe.from_file path with
+    match Safe_ops.read_json_eio path with
     | exception _ -> `Null
     | json -> json
 

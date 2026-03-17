@@ -428,12 +428,16 @@ let handle_request
                               (e.g. ~80 in Coding). Use masc_discover_tools or
                               mode=full param to access the full catalog. *)
                            let list_profile =
-                             match mode with
-                             | Some _ -> profile  (* explicit mode param: respect it *)
-                             | None ->
-                               let room_path = Room.masc_dir state.Mcp_server.room_config in
-                               let config = Config.load room_path in
-                               Role_filtered config.Config.mode
+                             match profile with
+                             | Managed_agent | Operator_remote ->
+                               profile  (* preserve non-Full profiles unconditionally *)
+                             | Full | Role_filtered _ ->
+                               (match mode with
+                                | Some _ -> profile  (* explicit mode param: respect it *)
+                                | None ->
+                                  let room_path = Room.masc_dir state.Mcp_server.room_config in
+                                  let config = Config.load room_path in
+                                  Role_filtered config.Config.mode)
                            in
                            handle_list_tools_eio ~profile:list_profile ?names ~include_hidden
                              ~include_deprecated ~include_usage ?mode ?tier ?cursor
@@ -443,9 +447,13 @@ let handle_request
                        | Some params ->
                            (try
                              let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
-                             (* tools/call uses Full profile so that discovered tools
-                               (not in the default tools/list) remain callable. *)
-                            if not (TP.tool_allowed_in_profile state Full name) then
+                             (* tools/call: allow discovered tools for local profiles,
+                                but preserve restrictions for remote/operator profiles. *)
+                             let call_profile = match profile with
+                               | Operator_remote -> profile
+                               | _ -> Full
+                             in
+                            if not (TP.tool_allowed_in_profile state call_profile name) then
                                make_error ~id (-32601)
                                  (Printf.sprintf
                                     "Tool '%s' is not available on this MCP endpoint."

@@ -9,8 +9,9 @@ import {
   refreshDashboardSemantics,
 } from './store'
 import { refreshRoomTruth } from './room-truth-store'
-import { cancelPendingSSERefreshes, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
+import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshForTab } from './tab-refresh'
+import { refreshMissionSnapshot } from './mission-store'
 import {
   BuildIdentityBadge,
   ConnectionStatus,
@@ -35,6 +36,10 @@ export function App() {
     // that caused 5 concurrent API calls (server computes same data 3-6x).
     refreshRoomTruth()
     refreshDashboardSemantics()
+
+    // Register mission refresh for periodic recovery from transient failures.
+    // Uses registration pattern to avoid circular imports.
+    registerMissionRefresh(() => void refreshMissionSnapshot())
 
     // Setup SSE -> store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()

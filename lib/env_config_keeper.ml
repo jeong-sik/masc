@@ -2,8 +2,7 @@ open Env_config_core
 
 module Endpoints = struct
   (** @deprecated LLM-MCP server URL - no longer used.
-      Use {!Llm_orchestration.run_prompt_cascade} with {!Llm_cascade.get_cascade}
-      instead. Kept for backward compatibility; will be removed in v3.0. *)
+      Use {!Llm_cascade.call} instead. *)
   let llm_mcp_url =
     get_string ~default:"" "LLM_MCP_URL"  (* Default empty - not used *)
 

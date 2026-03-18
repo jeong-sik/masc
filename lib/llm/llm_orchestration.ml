@@ -99,10 +99,9 @@ let record_cache_bypass reason =
 (* Core: complete                                                   *)
 (* ================================================================ *)
 
-(** Single completion with MASC-level cache check/write (OAS serialization format)
-    and OAS metrics. Cache key uses MASC's temperature-aware fingerprint.
-    Cache values use OAS api_response JSON format via {!Llm_provider.Cache}.
-    Returns OAS api_response directly — no MASC wrapper. *)
+(** @deprecated Use {!Llm_cascade.call} or {!Llm_cascade.call_raw} instead.
+    Single completion with MASC-level cache check/write.
+    Bypasses OAS Cascade_config health filtering and metrics. *)
 let complete ?timeout_sec (req : completion_request)
     : (Llm_provider.Types.api_response, string) result =
   let req = normalize_request req in
@@ -199,6 +198,7 @@ let filter_by_provider_health (requests : completion_request list)
 (* Cascade: try models in order                                     *)
 (* ================================================================ *)
 
+(** @deprecated Use {!Llm_cascade.call_with_tools} instead. *)
 let cascade ?(accept = fun _ -> true) ?timeout_sec
     (requests : completion_request list)
     : (Llm_provider.Types.api_response, string) result =
@@ -256,6 +256,7 @@ let cascade ?(accept = fun _ -> true) ?timeout_sec
 (* run_prompt_cascade                                                *)
 (* ================================================================ *)
 
+(** @deprecated Use {!Llm_cascade.call} instead. *)
 let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec
     ?(accept = fun _ -> true) ?system ~model_specs ~max_tokens ~prompt () =
   let msgs =
@@ -283,14 +284,8 @@ let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec
 (* Streaming completion                                             *)
 (* ================================================================ *)
 
-(** Execute a streaming LLM completion using OAS provider path.
-    Each SSE event (token deltas) is delivered to [on_event] as it arrives.
-    Returns the final assembled response after the stream ends.
-
-    Streaming bypasses cache: SSE events are incremental and not cacheable.
-    No retry logic — a single attempt is made.
-    Falls back to batch completion (synthesising a single delta event)
-    when provider config is unavailable or streaming fails. *)
+(** @deprecated Streaming now handled at the keeper_oas_adapter level
+    with batch fallback via {!Llm_cascade}. *)
 let call_provider_stream ?timeout_sec (req : completion_request)
     ~(on_event : Llm_provider.Types.sse_event -> unit)
     : (Llm_provider.Types.api_response, string) result =

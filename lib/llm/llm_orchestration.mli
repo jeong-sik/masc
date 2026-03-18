@@ -1,8 +1,12 @@
-(** Llm_orchestration — Concurrency control, response caching, and cascade logic for LLM calls.
+(** Llm_orchestration — Concurrency diagnostics and response caching.
 
-    All functions return OAS {!Llm_provider.Types.api_response} directly.
-    Use {!Llm_types.text_of_response}, {!Llm_types.tool_calls_of_response},
-    {!Llm_types.usage_of_response} for field access. *)
+    Inference functions ([complete], [cascade], [run_prompt_cascade],
+    [call_provider_stream]) are deprecated. Use {!Llm_cascade} instead,
+    which routes all calls through OAS Cascade_config.complete_named.
+
+    Retained: concurrency counters, cache helpers, health filtering. *)
+
+(** {1 Concurrency Diagnostics (not deprecated)} *)
 
 val max_concurrent_llm : int
 
@@ -10,7 +14,11 @@ val llm_semaphore_available : unit -> int
 
 val llm_permits_in_use : unit -> int
 
+(** {1 Cache (not deprecated)} *)
+
 val cache_key_of_request : Llm_types.completion_request -> string
+
+(** {1 Health Filtering (not deprecated)} *)
 
 (** Filter cascade requests by provider health.
     Removes local (Llama) providers when all local endpoints are unhealthy,
@@ -19,17 +27,22 @@ val cache_key_of_request : Llm_types.completion_request -> string
 val filter_by_provider_health :
   Llm_types.completion_request list -> Llm_types.completion_request list
 
+(** {1 Deprecated Inference Functions} *)
+
+(** @deprecated Use {!Llm_cascade.call} or {!Llm_cascade.call_raw}. *)
 val complete :
   ?timeout_sec:int ->
   Llm_types.completion_request ->
   (Llm_types.api_response, string) result
 
+(** @deprecated Use {!Llm_cascade.call_with_tools}. *)
 val cascade :
   ?accept:(Llm_types.api_response -> bool) ->
   ?timeout_sec:int ->
   Llm_types.completion_request list ->
   (Llm_types.api_response, string) result
 
+(** @deprecated Use {!Llm_cascade.call}. *)
 val run_prompt_cascade :
   ?temperature:float ->
   ?timeout_sec:int ->
@@ -41,11 +54,7 @@ val run_prompt_cascade :
   unit ->
   (Llm_types.api_response, string) result
 
-(** Streaming completion for a single request.
-    Calls the provider in streaming mode and invokes [on_event] for each SSE
-    event as it arrives. Returns the assembled final response.
-
-    @since 2.110.0 *)
+(** @deprecated Streaming handled at adapter level with batch fallback. *)
 val call_provider_stream :
   ?timeout_sec:float ->
   Llm_types.completion_request ->

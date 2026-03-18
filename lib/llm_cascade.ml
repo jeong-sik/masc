@@ -114,9 +114,8 @@ let default_model_strings ~cascade_name =
   (* unregistered cascade: llama + glm as safety net *)
   | _ -> llama_glm
 
-(** Backward compat: return MASC model_spec list for callers that need
-    to pass specs to Llm_orchestration directly. Uses OAS Cascade_config
-    for config loading, then maps back to Llm_types. *)
+(** Backward compat: return MASC model_spec list.
+    Prefer {!call}, {!call_raw}, or {!call_with_tools} instead. *)
 let get_cascade ?(config_path = "") ~cascade_name () :
     Llm_types.model_spec list =
   let defaults = default_model_strings ~cascade_name in

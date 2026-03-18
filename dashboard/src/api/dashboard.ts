@@ -86,6 +86,31 @@ export function fetchAgentTimeline(
   return get(`/api/v1/agent-timeline?agent_name=${encodeURIComponent(agentName)}&since_hours=${sinceHours}&limit=${limit}`)
 }
 
+export type AgentCollaborator = {
+  name: string
+  collaborations: number
+  last_collab: string | null
+}
+
+export type AgentRelation = {
+  type: string
+  category: string | null
+  confidence: number | null
+  note: string | null
+  participants: { kind: string; display_name: string | null; role: string | null }[]
+}
+
+export type AgentRelationsResponse = {
+  agent_name: string
+  collaborators: AgentCollaborator[]
+  interests: string[]
+  relations: AgentRelation[]
+}
+
+export function fetchAgentRelations(agentName: string): Promise<AgentRelationsResponse> {
+  return get(`/api/v1/agent-relations?agent_name=${encodeURIComponent(agentName)}`)
+}
+
 export function fetchDashboardRoomTruth(): Promise<DashboardRoomTruthResponse> {
   return get('/api/v1/dashboard/room-truth', { timeoutMs: ROOM_TRUTH_GET_TIMEOUT_MS })
 }

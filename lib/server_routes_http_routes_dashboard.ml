@@ -211,6 +211,23 @@ let add_routes ~sw ~clock router =
              (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  (* Agent relations — collaboration network + trust edges from Neo4j *)
+  |> Http.Router.get "/api/v1/agent-relations" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let agent_name =
+           match Server_utils.query_param req "agent_name" with
+           | Some n when String.trim n <> "" -> String.trim n
+           | _ -> ""
+         in
+         if agent_name = "" then
+           Http.Response.json ~status:`Bad_request
+             {|{"error":"agent_name query parameter is required"}|} reqd
+         else
+           let json = Dashboard_agent_relations.json ~agent_name () in
+           Http.Response.json ~compress:true ~request:req
+             (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/mdal/loops" (fun request reqd ->
        with_public_read (fun state req reqd ->
          match mdal_loops_json ~config:state.Mcp_server.room_config req with

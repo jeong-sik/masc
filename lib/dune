@@ -57,6 +57,7 @@
    context_router
    dashboard
    dashboard_labels
+   dashboard_agent_relations
    dashboard_attention
    dashboard_cache
    dashboard_governance

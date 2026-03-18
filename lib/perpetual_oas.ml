@@ -10,8 +10,6 @@
     - Phase 4: Verifier_oas (guardrails/hooks)
     - Phase 5: Worker_oas (Agent.run adapter)
 
-    Enabled via [MASC_USE_OAS_PERPETUAL=true] environment variable.
-
     Key mappings:
     - perpetual_loop thresholds -> OAS BeforeTurn hook (threshold checking)
     - idle detection -> OAS OnIdle hook
@@ -25,17 +23,6 @@
 open Printf
 
 module Oas = Agent_sdk
-
-(* ================================================================ *)
-(* Feature Flag                                                      *)
-(* ================================================================ *)
-
-let use_oas_perpetual () =
-  match Sys.getenv_opt "MASC_USE_OAS_PERPETUAL" with
-  | Some v ->
-    let v = String.lowercase_ascii (String.trim v) in
-    v = "true" || v = "1" || v = "yes"
-  | None -> false
 
 (* ================================================================ *)
 (* Perpetual State — mutable tracking for hook closures              *)
@@ -550,20 +537,14 @@ let run_perpetual_via_oas
     emit (Error (sprintf "OAS perpetual loop error: %s" detail)))
 
 (* ================================================================ *)
-(* Unified entry point — dispatch based on feature flag              *)
+(* Entry point                                                       *)
 (* ================================================================ *)
 
-(** Run the perpetual loop, dispatching to OAS or legacy path.
-
-    If [MASC_USE_OAS_PERPETUAL=true], uses {!run_perpetual_via_oas}.
-    Otherwise, delegates to {!Perpetual_loop.run}. *)
+(** Run the perpetual loop via OAS Agent lifecycle hooks. *)
 let run
     ~(sw : Eio.Switch.t)
     ~(config : Perpetual_loop.loop_config)
     ~(state : Perpetual_loop.loop_state)
   : unit =
-  if use_oas_perpetual () then
-    (try run_perpetual_via_oas ~sw ~config ~state
-     with Exit -> ())
-  else
-    Perpetual_loop.run ~config ~state
+  (try run_perpetual_via_oas ~sw ~config ~state
+   with Exit -> ())

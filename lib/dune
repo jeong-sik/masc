@@ -511,6 +511,7 @@
    keeper_alerting
    keeper_alerting_path
    keeper_exec_tools
+   keeper_voice_local
    keeper_exec_status
    keeper_exec_persona
    keeper_exec_context

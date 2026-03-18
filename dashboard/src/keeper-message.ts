@@ -14,7 +14,7 @@ function extractStateBlock(text: string): string | null {
   return state || null
 }
 
-function stripStateBlocks(text: string): string {
+export function stripStateBlocks(text: string): string {
   let next = text
   for (;;) {
     const start = next.indexOf(STATE_START)

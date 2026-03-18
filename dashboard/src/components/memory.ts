@@ -4,6 +4,7 @@ import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
+import { stripStateBlocks } from '../keeper-message'
 import {
   boardPosts,
   boardSortMode,
@@ -280,7 +281,7 @@ function PostCard({ post }: { post: BoardPost }) {
             <span>투표 ${post.votes ?? 0}</span>
           </div>
         </div>
-        <div class="post-snippet">${previewText(post.body)}</div>
+        <div class="post-snippet">${previewText(stripStateBlocks(post.body))}</div>
       </div>
     </div>
   `
@@ -345,7 +346,7 @@ function PostDetail({ post }: { post: BoardPost }) {
       <${Card} title=${post.title} semanticId="memory.feed">
         <div class="board-detail">
           <div class="post-body">
-            <${Markdown} text=${post.body} />
+            <${Markdown} text=${stripStateBlocks(post.body)} />
           </div>
           <div class="post-meta" style="margin-top:12px;">
             <span>${post.author}</span>

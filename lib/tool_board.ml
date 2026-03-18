@@ -122,8 +122,9 @@ let format_comment_tree ?(max_depth=5) (comments : Board.comment list) =
 
 let handle_post_create args =
   let title = get_string_opt args "title" in
-  let body = get_string_opt args "body" in
-  let content = match body with Some value -> value | None -> get_string args "content" "" in
+  let body = get_string_opt args "body" |> Option.map Keeper_prompt.strip_state_blocks_text in
+  let raw_content = match body with Some value -> value | None -> get_string args "content" "" in
+  let content = Keeper_prompt.strip_state_blocks_text raw_content in
   let author = get_string args "author" "anonymous" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
   let visibility_str = get_string args "visibility" "internal" in

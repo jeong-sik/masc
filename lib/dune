@@ -11,7 +11,6 @@
    agent_identity
    agent_tool_surfaces
    agent_neo4j
-   agent_permanence
    agent_registry_eio
    auto_recall
    auto_responder
@@ -89,7 +88,6 @@
    dashboard_http_keeper_metrics
    dashboard_http_keeper_detail
    dashboard_http_keeper
-   dashboard_http_shell
    dashboard_http_mdal
    server_dashboard_http
    server_dashboard_http_core
@@ -107,7 +105,6 @@
    server_routes_http_routes_social
    server_h2_gateway
    server_h2_gateway_helpers
-   server_h2_gateway_cp_write
    server_h2_gateway_routes_extra
    server_h2_gateway_routes_cp
    server_runtime_bootstrap
@@ -124,8 +121,6 @@
    server_mcp_transport_http_headers
    server_mcp_transport_http_sse
    server_mcp_transport_http_mcp_handlers
-   server_mcp_transport_http_admin
-   server_mcp_transport_http_ag_ui
    web_dashboard
    credits_dashboard
    cp_microarch_summary
@@ -158,8 +153,6 @@
    level4_config
    local_runtime_pool
    agent_swarm_contract
-   worker_container
-   worker_mcp_transport
    worker_oas
    local_agent_eio
    local_agent_eio_types
@@ -209,7 +202,6 @@
    run_log_eio
    langfuse
    chain_spawn_registry
-   chain_executor_config
    chain_executor_helpers
    chain_executor_leaf
    chain_executor_complex
@@ -239,10 +231,7 @@
    lodge_topic
    lodge_tom
    lodge_selection
-   knowledge_graph
-   memory_consolidation
    memory_stream
-   norm_detector
    agent_planner
    reflection
    relation_materializer
@@ -351,7 +340,6 @@
    async_spawn
    tool_async_spawn
    sse
-   sse_client
    streamable_http
    subscriptions
    swarm_status
@@ -431,6 +419,7 @@
    tool_agent_timeline
    tool_llama
    tool_llama_core
+   tool_llm_catalog
    tool_board
    tool_command_plane
    tool_command_plane_support
@@ -466,11 +455,9 @@
    tool_inline_dispatch
    tool_inline_dispatch_episode
    tool_inline_dispatch_extra
-   tool_convo
    tool_unified
    tool_help_registry
    tool_registry
-   library_bridge
    tool_council
    tool_council_json
    tool_council_schemas
@@ -486,7 +473,6 @@
    debate
    mention_inbox
    agent_reputation
-   reputation_evolution
    activity_feed
    social
    tool_social
@@ -539,7 +525,6 @@
    keeper_exec_proactive
    keeper_exec_social
 
-   keeper_exec_room
    keeper_prompt
    keeper_coordination
    keeper_execution
@@ -569,6 +554,7 @@
    llm_client
    llm_provider_oas
    llm_response_cache
+   context_scoring
    context_manager
    context_compact_oas
    verifier
@@ -581,7 +567,6 @@
    procedural_memory
    oas_events
    oas_checkpoint_bridge
-   oas_swarm_bridge
    tool_schemas_plan
  tool_schemas_portal
  tool_schemas_worktree
@@ -639,11 +624,6 @@
    trpg_rule_dnd5e_lite_core
    trpg_engine_replay
    trpg_slot
-   trpg_slot_rule
-   trpg_slot_narrative
-   trpg_slot_world
-   trpg_slot_metrics
-   trpg_plugin_loader
    trpg_dm_intent
    trpg_bdi
    trpg_harness
@@ -664,7 +644,6 @@
    tool_schemas_inline
    ;; godsplit-phase1: file split sub-modules
    tool_council_schemas
-   dashboard_http_shell
    keeper_status_bridge
    server_dashboard_http_core
 )
@@ -733,8 +712,6 @@
  server_mcp_transport_http_headers
  server_mcp_transport_http_sse
  server_mcp_transport_http_mcp_handlers
- server_mcp_transport_http_admin
- server_mcp_transport_http_ag_ui
  server_command_plane_http_support
  server_command_plane_http_stream
  server_command_plane_http_mutations
@@ -779,7 +756,6 @@
   keeper_exec_autonomy
   keeper_exec_social
   keeper_exec_proactive
-  keeper_exec_room
   keeper_turn_session
   keeper_turn_response
   keeper_turn_setup
@@ -828,7 +804,6 @@
   tool_schemas_room_extra
   tool_council_schemas
   tool_council_json
-  dashboard_http_shell
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules
   autoresearch_types
@@ -860,8 +835,6 @@
    cstruct
    digestif
    ocaml-protoc-plugin
-   pbrt
-   pbrt_services
    ;; grpc grpc-lwt - disabled (h2 version conflict with httpun-eio)
    ;; grpc-direct (native Eio gRPC from lib/grpc-direct) - enabled for Transport_grpc_next
    grpc-direct
@@ -872,7 +845,6 @@
    ;; OCaml 5.x Eio concurrency (required for *_eio.ml modules)
    eio
    eio_main
-   eio_posix
    httpun-eio
    gluten-eio
    ipaddr
@@ -901,7 +873,6 @@
    ;; Jiphyeon - Episode storage for Agent Being Protocol
    jiphyeon
    ;; Neo4j Bolt native driver (OCaml 5.x Eio)
-   neo4j_bolt_eio
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

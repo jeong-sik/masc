@@ -159,6 +159,7 @@ type module_tag =
   | Mod_trpg | Mod_notifications | Mod_gardener | Mod_inline
   | Mod_async_spawn
   | Mod_autoresearch
+  | Mod_llm_catalog
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
 let tag_registry_initialized = ref false

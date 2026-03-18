@@ -176,7 +176,7 @@ let schema name description input_schema : Types.tool_schema =
 let schemas : Types.tool_schema list =
   [
     schema "decision.create"
-      "Create a decision record for a session."
+      "Create a decision record for a team session. Use when the team needs to formally evaluate options with criteria and weights before committing to an approach."
       (object_schema
          ~required:[ "session_id"; "issue"; "options" ]
          [
@@ -187,7 +187,7 @@ let schemas : Types.tool_schema list =
            ("weights", object_schema []);
          ]);
     schema "decision.finalize"
-      "Finalize a decision. If verifier=WARN, risk_ack is required."
+      "Finalize a decision by selecting an option with rationale. Use after discussion/evaluation. If verifier=WARN, provide risk_ack to acknowledge the risk."
       (object_schema
          ~required:[ "session_id"; "decision_id"; "selected_option"; "rationale" ]
          [
@@ -483,12 +483,12 @@ let schemas : Types.tool_schema list =
          ~required:[ "session_id"; "input" ]
          [ ("session_id", string_schema); ("input", string_schema) ]);
     schema "client.input.approve"
-      "Approve a queued human input."
+      "Approve a queued human input so it becomes visible to the session. Use after reviewing a pending input from client.input.submit."
       (object_schema
          ~required:[ "session_id"; "input_id" ]
          [ ("session_id", string_schema); ("input_id", string_schema) ]);
     schema "client.input.reject"
-      "Reject a queued human input."
+      "Reject a queued human input with an optional reason. The input is removed from the queue and the submitter is notified."
       (object_schema
          ~required:[ "session_id"; "input_id" ]
          [ ("session_id", string_schema); ("input_id", string_schema); ("reason", string_schema) ]);

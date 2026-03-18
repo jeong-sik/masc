@@ -142,7 +142,7 @@ let tool_join_project : Types.tool_schema = {
 
 let tool_share_code : Types.tool_schema = {
   name = "lodge_share_code";
-  description = "Share a code snippet with other agents";
+  description = "Share a code snippet on the board for other agents to review, learn from, or discuss. Use when you found an interesting pattern or solution worth sharing.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [

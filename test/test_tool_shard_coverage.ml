@@ -52,7 +52,7 @@ let test_shard_voice_exists () =
   match Tool_shard.get_shard "voice" with
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
-    Alcotest.(check bool) "has 1 tool" true (List.length s.Tool_shard.tools = 1)
+    Alcotest.(check bool) "has 5 tools" true (List.length s.Tool_shard.tools = 5)
   | None -> Alcotest.fail "voice shard not found"
 
 let test_shard_unknown () =
@@ -98,8 +98,8 @@ let test_tools_of_shards_unknown_ignored () =
 
 let test_keeper_llm_tools_count () =
   let tools = Tool_shard.keeper_llm_tools in
-  (* base=3 + board=4 + filesystem=2 + shell=3 + weather=1 + voice=1 = 14 *)
-  Alcotest.(check int) "14 total tools" 14 (List.length tools)
+  (* base=3 + board=4 + filesystem=2 + shell=3 + weather=1 + voice=5 = 18 *)
+  Alcotest.(check int) "18 total tools" 18 (List.length tools)
 
 (* ============================================================
    grant_shard tests
@@ -283,6 +283,54 @@ let test_board_tools_names () =
   Alcotest.(check bool) "has board_vote" true (List.mem "keeper_board_vote" names)
 
 (* ============================================================
+   Voice tools content tests (#3: all 5 voice tools present)
+   ============================================================ *)
+
+let test_voice_tools_names () =
+  let voice_shard = match Tool_shard.get_shard "voice" with
+    | Some s -> s | None -> Alcotest.failf "voice shard missing" in
+  let names = List.map (fun (t : Masc_mcp.Llm_types.tool_def) -> t.tool_name)
+    voice_shard.Tool_shard.tools in
+  Alcotest.(check bool) "has voice_speak" true (List.mem "keeper_voice_speak" names);
+  Alcotest.(check bool) "has voice_agent" true (List.mem "keeper_voice_agent" names);
+  Alcotest.(check bool) "has voice_sessions" true (List.mem "keeper_voice_sessions" names);
+  Alcotest.(check bool) "has voice_session_start" true (List.mem "keeper_voice_session_start" names);
+  Alcotest.(check bool) "has voice_session_end" true (List.mem "keeper_voice_session_end" names)
+
+let test_keeper_llm_has_voice_tools () =
+  let names = List.map (fun (t : Masc_mcp.Llm_types.tool_def) -> t.tool_name)
+    Tool_shard.keeper_llm_tools in
+  Alcotest.(check bool) "keeper_llm has voice_speak" true (List.mem "keeper_voice_speak" names);
+  Alcotest.(check bool) "keeper_llm has voice_agent" true (List.mem "keeper_voice_agent" names);
+  Alcotest.(check bool) "keeper_llm has voice_sessions" true (List.mem "keeper_voice_sessions" names);
+  Alcotest.(check bool) "keeper_llm has voice_session_start" true (List.mem "keeper_voice_session_start" names);
+  Alcotest.(check bool) "keeper_llm has voice_session_end" true (List.mem "keeper_voice_session_end" names)
+
+(* ============================================================
+   Shard revoke voice (#6: revoke removes all 5 voice tools)
+   ============================================================ *)
+
+let test_revoke_voice_removes_all_tools () =
+  let all_shards = Tool_shard.default_shard_names in
+  let tools_before = Tool_shard.tools_of_shards all_shards in
+  let voice_before = List.filter (fun (t : Masc_mcp.Llm_types.tool_def) ->
+    let n = t.tool_name in
+    String.length n >= 13 && String.sub n 0 13 = "keeper_voice_") tools_before in
+  Alcotest.(check int) "5 voice tools before revoke" 5 (List.length voice_before);
+  match Tool_shard.revoke_shard all_shards "voice" with
+  | Ok shards_after ->
+    let tools_after = Tool_shard.tools_of_shards shards_after in
+    let voice_after = List.filter (fun (t : Masc_mcp.Llm_types.tool_def) ->
+      let n = t.tool_name in
+      String.length n >= 13 && String.sub n 0 13 = "keeper_voice_") tools_after in
+    Alcotest.(check int) "0 voice tools after revoke" 0 (List.length voice_after)
+  | Error msg -> Alcotest.fail ("revoke should succeed: " ^ msg)
+
+(* Heartbeat voice integration (#4, #5) verified in
+   test_tool_heartbeat_coverage.ml which has Eio context and
+   direct access to Lodge_heartbeat internals. *)
+
+(* ============================================================
    Test runner
    ============================================================ *)
 
@@ -339,5 +387,10 @@ let () =
     ("tool_content", [
       Alcotest.test_case "base tools" `Quick test_base_tools_names;
       Alcotest.test_case "board tools" `Quick test_board_tools_names;
+      Alcotest.test_case "voice tools" `Quick test_voice_tools_names;
+      Alcotest.test_case "keeper_llm has voice" `Quick test_keeper_llm_has_voice_tools;
+    ]);
+    ("voice_shard_revoke", [
+      Alcotest.test_case "revoke removes all voice tools" `Quick test_revoke_voice_removes_all_tools;
     ]);
   ]

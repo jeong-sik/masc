@@ -185,6 +185,40 @@ let voice_tools : Llm_types.tool_def list = [
       ("required", `List [`String "message"]);
     ];
   };
+  {
+    tool_name = "keeper_voice_agent";
+    tool_description = "Get your own voice configuration (assigned voice, available voices). No network required.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    tool_name = "keeper_voice_sessions";
+    tool_description = "List active voice sessions from the voice bridge.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    tool_name = "keeper_voice_session_start";
+    tool_description = "Start a voice session for this keeper using the configured voice bridge.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("session_name", `Assoc [("type", `String "string"); ("description", `String "Optional session name")]);
+      ]);
+    ];
+  };
+  {
+    tool_name = "keeper_voice_session_end";
+    tool_description = "End the active voice session for this keeper and release bridge resources.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
 ]
 
 let weather_tools : Llm_types.tool_def list = [

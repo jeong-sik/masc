@@ -329,8 +329,12 @@ let event_summary event_json =
   | None, None, None -> String.map (fun ch -> if ch = '_' then ' ' else ch) event_type
 
 let session_severity ~health ~status ~runtime_blocker =
-  if List.mem health [ "bad"; "critical" ]
-     || List.mem status [ "failed"; "cancelled"; "interrupted" ]
+  if status = "completed" then
+    if List.mem health [ "bad"; "critical" ] then "warn"
+    else if List.mem health [ "warn"; "degraded" ] then "warn"
+    else "ok"
+  else if List.mem health [ "bad"; "critical" ]
+          || List.mem status [ "failed"; "cancelled"; "interrupted" ]
   then
     "bad"
   else if List.mem health [ "warn"; "degraded" ]
@@ -619,10 +623,17 @@ let build_session_contexts seeds operation_contexts : session_context list =
            session_severity ~health:seed.health ~status:seed.status
              ~runtime_blocker:seed.runtime_blocker
          in
+         let intervene_label =
+           match seed.status with
+           | "completed" -> "세션 결과 보기"
+           | "interrupted" -> "중단 원인 보기"
+           | "failed" | "cancelled" -> "실패 원인 보기"
+           | _ -> "세션 개입 열기"
+         in
          let intervene_handoff =
            handoff_json
              ~surface:"intervene"
-             ~label:"세션 개입 열기"
+             ~label:intervene_label
              ~target_type:"team_session"
              ~target_id:seed.session_id
              ~focus_kind:"team_session"

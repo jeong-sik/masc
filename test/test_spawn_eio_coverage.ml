@@ -191,7 +191,7 @@ let test_resolve_model_spec_claude () =
   match Spawn_eio.resolve_model_spec "claude" with
   | Ok spec ->
       check bool "provider is Claude" true
-        (spec.Masc_mcp.Llm_client.provider = Masc_mcp.Llm_client.Claude)
+        (spec.Masc_mcp.Llm_types.provider = Masc_mcp.Llm_types.Claude)
   | Error _ ->
       (* May fail if ANTHROPIC_API_KEY not set — that is acceptable *)
       ()
@@ -200,7 +200,7 @@ let test_resolve_model_spec_glm () =
   match Spawn_eio.resolve_model_spec "glm" with
   | Ok spec ->
       check bool "provider is Glm_cloud" true
-        (spec.Masc_mcp.Llm_client.provider = Masc_mcp.Llm_client.Glm_cloud)
+        (spec.Masc_mcp.Llm_types.provider = Masc_mcp.Llm_types.Glm_cloud)
   | Error _ ->
       (* May fail if ZAI_API_KEY not set *)
       ()
@@ -209,7 +209,7 @@ let test_resolve_model_spec_gemini () =
   match Spawn_eio.resolve_model_spec "gemini" with
   | Ok spec ->
       check bool "provider is Gemini" true
-        (spec.Masc_mcp.Llm_client.provider = Masc_mcp.Llm_client.Gemini)
+        (spec.Masc_mcp.Llm_types.provider = Masc_mcp.Llm_types.Gemini)
   | Error _ -> ()
 
 (* ============================================================

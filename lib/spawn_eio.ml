@@ -130,7 +130,7 @@ let resolve_model_spec agent_name =
       let label_result =
         Provider_adapter.default_model_label_for_family adapter.provider_family
       in
-      Result.bind label_result Llm_client.model_spec_of_string
+      Result.bind label_result Llm_types.model_spec_of_string
 
 (** Build a spawn error result. Reduces boilerplate in spawn routing. *)
 let make_error_result ~agent_name ~start_time ~exit_code ~output ~timeout_seconds =

@@ -256,7 +256,7 @@ let proactive_prompt_for_keeper
 
 type proactive_generation_result = {
   reply: string;
-  usage: Llm_client.token_usage;
+  usage: Agent_sdk.Types.api_usage;
   model_used: string;
   latency_ms: int;
   attempts: int;

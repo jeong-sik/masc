@@ -170,7 +170,7 @@ let parse_tom_response (text : string)
                     (String.sub s 0 (min 100 (String.length s)))))
 
 (** Validate that an LLM ToM response is parseable and non-trivial. *)
-let tom_response_is_valid (resp : Llm_client.completion_response) : bool =
+let tom_response_is_valid (resp : Llm_types.completion_response) : bool =
   match parse_tom_response (Llm_types.text_of_response resp) with
   | Ok _ -> true
   | Error _ -> false

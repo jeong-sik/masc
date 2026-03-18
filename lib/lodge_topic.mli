@@ -72,7 +72,7 @@ val find_array_bounds : string -> (int * int) option
 (** Find the start and end positions of the outermost JSON array in a string.
     Uses depth tracking to handle nested brackets correctly. *)
 
-val topics_response_is_valid : Llm_client.completion_response -> bool
+val topics_response_is_valid : Llm_types.completion_response -> bool
 (** Validate an LLM completion response. Used as [~accept] predicate so
     the cascade retries with the next model on garbage/empty responses. *)
 

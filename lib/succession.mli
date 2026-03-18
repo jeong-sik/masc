@@ -36,7 +36,7 @@ type succession_dna = {
 
 (** Successor specification — what model the next agent uses. *)
 type successor_spec = {
-  model : Llm_client.model_spec;
+  model : Llm_types.model_spec;
   inherit_tools : bool;          (** Pass tool definitions to successor *)
   context_budget : float;        (** 0.0-1.0: how much context to transfer *)
 }
@@ -67,9 +67,9 @@ val hydrate :
     Handles provider-specific quirks (system message placement,
     tool format differences, token limit trimming). *)
 val normalize_for_model :
-  Llm_client.message list ->
-  Llm_client.model_spec ->
-  Llm_client.message list
+  Agent_sdk.Types.message list ->
+  Llm_types.model_spec ->
+  Agent_sdk.Types.message list
 
 (** {1 Serialization} *)
 

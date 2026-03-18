@@ -1,8 +1,7 @@
-(** Perpetual_oas — Adapter bridging MASC perpetual_loop to OAS Agent.t.
+(** Perpetual_oas — OAS Agent.t-based perpetual loop.
 
-    Demonstrates the complete migration path from MASC's bespoke perpetual
-    loop (think -> act -> observe -> verify -> compact -> heartbeat -> loop)
-    to OAS Agent.t with lifecycle hooks. Ties together all previous phases:
+    Runs the MASC perpetual loop via OAS Agent.t with lifecycle hooks.
+    Ties together all OAS integration phases:
 
     - Phase 1: Context_compact_oas (context reduction)
     - Phase 2: Succession_oas / Oas_checkpoint_bridge (checkpoint/DNA)
@@ -10,9 +9,7 @@
     - Phase 4: Verifier_oas (guardrails/hooks)
     - Phase 5: Worker_oas (Agent.run adapter)
 
-    Enabled via [MASC_USE_OAS_PERPETUAL=true] environment variable.
-
-    Split into sub-modules (H2):
+    Split into sub-modules:
     - {!Perpetual_oas_state}: mutable state + mutex ops
     - {!Perpetual_oas_hooks}: 4 lifecycle hooks + periodic callback
     - {!Perpetual_oas_build}: OAS Agent.t builder
@@ -22,17 +19,6 @@
 open Printf
 
 module Oas = Agent_sdk
-
-(* ================================================================ *)
-(* Feature Flag                                                      *)
-(* ================================================================ *)
-
-let use_oas_perpetual () =
-  match Sys.getenv_opt "MASC_USE_OAS_PERPETUAL" with
-  | Some v ->
-    let v = String.lowercase_ascii (String.trim v) in
-    v = "true" || v = "1" || v = "yes"
-  | None -> false
 
 (* ================================================================ *)
 (* Run perpetual loop via OAS Agent.run                              *)
@@ -213,21 +199,16 @@ let run_perpetual_via_oas
   Ok ()
 
 (* ================================================================ *)
-(* Unified entry point — dispatch based on feature flag              *)
+(* Unified entry point                                               *)
 (* ================================================================ *)
 
-(** Run the perpetual loop, dispatching to OAS or legacy path.
-
-    If [MASC_USE_OAS_PERPETUAL=true], uses {!run_perpetual_via_oas}.
-    Otherwise, delegates to {!Perpetual_loop.run}. *)
+(** Run the perpetual loop via OAS Agent.run.
+    Wraps {!run_perpetual_via_oas} and logs errors to stderr. *)
 let run
     ~(sw : Eio.Switch.t)
     ~(config : Perpetual_loop.loop_config)
     ~(state : Perpetual_loop.loop_state)
   : unit =
-  if use_oas_perpetual () then
-    run_perpetual_via_oas ~sw ~config ~state
-    |> Result.iter_error (fun e ->
-      eprintf "[perpetual_oas] OAS path aborted: %s\n%!" e)
-  else
-    Perpetual_loop.run ~config ~state
+  run_perpetual_via_oas ~sw ~config ~state
+  |> Result.iter_error (fun e ->
+    eprintf "[perpetual_oas] OAS path aborted: %s\n%!" e)

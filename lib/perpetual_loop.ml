@@ -672,19 +672,54 @@ let run_turn ~config ~state =
         let ckpt = Context_manager.create_checkpoint
           state.context ~generation:state.generation in
         Context_manager.save_checkpoint state.session ckpt;
-        (* OAS Checkpoint bridge: portable state snapshot *)
+        (* OAS Checkpoint: portable state snapshot (inlined from deleted bridge) *)
         (try
-          let oas_ckpt = Oas_checkpoint_bridge.to_oas_checkpoint
-            ~state:
-              {
-                Oas_checkpoint_bridge.session_id = state.session.session_id;
-                generation = state.generation;
-                turn_count = state.turn_count;
-                total_tokens = state.total_tokens;
-                total_cost = state.total_cost;
-                trace_id = state.trace_id;
-              }
-            ~ctx:state.context ~goal:config.initial_goal () in
+          let oas_ctx = Agent_sdk.Context.copy state.context.oas_context in
+          Agent_sdk.Context.set_scoped oas_ctx Agent_sdk.Context.Session
+            "goal" (`String config.initial_goal);
+          Agent_sdk.Context.set_scoped oas_ctx Agent_sdk.Context.Session
+            "generation" (`Int state.generation);
+          Agent_sdk.Context.set_scoped oas_ctx Agent_sdk.Context.Session
+            "turn_count" (`Int state.turn_count);
+          Agent_sdk.Context.set_scoped oas_ctx Agent_sdk.Context.Session
+            "trace_id" (`String state.trace_id);
+          Agent_sdk.Context.set_scoped oas_ctx Agent_sdk.Context.App
+            "masc_version" (`String Version.version);
+          let messages = List.filter_map Llm_client.to_oas_message
+            state.context.messages in
+          let oas_ckpt : Agent_sdk.Checkpoint.t = {
+            version = 3;
+            session_id = state.session.session_id;
+            agent_name = "perpetual";
+            model = Agent_sdk.Types.Custom "masc-perpetual";
+            system_prompt = Some state.context.system_prompt;
+            messages;
+            usage = {
+              Agent_sdk.Types.total_input_tokens = state.total_tokens;
+              total_output_tokens = 0;
+              total_cache_creation_input_tokens = 0;
+              total_cache_read_input_tokens = 0;
+              api_calls = state.turn_count;
+              estimated_cost_usd = state.total_cost;
+            };
+            turn_count = state.turn_count;
+            created_at = Time_compat.now ();
+            tools = [];
+            tool_choice = None;
+            temperature = None;
+            top_p = None;
+            top_k = None;
+            min_p = None;
+            enable_thinking = None;
+            response_format_json = false;
+            thinking_budget = None;
+            cache_system_prompt = false;
+            max_input_tokens = Some state.context.max_tokens;
+            max_total_tokens = None;
+            disable_parallel_tool_use = false;
+            context = oas_ctx;
+            mcp_sessions = [];
+          } in
           let checkpoint_path =
             Filename.concat config.session_base_dir (state.trace_id ^ ".json")
           in

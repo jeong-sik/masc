@@ -123,7 +123,7 @@ let test_llm_client_sanitize_message_utf8_repairs_invalid_fields () =
     { Agent_sdk.Types.role = User;
       content = [Agent_sdk.Types.Text "hello\x80.world"] }
   in
-  let sanitized = Masc_mcp.Llm_client.sanitize_message_utf8 raw in
+  let sanitized = Masc_mcp.Llm_types.sanitize_message_utf8 raw in
   check bool "role preserved" true (sanitized.role = raw.role);
   let sanitized_text = Agent_sdk.Types.text_of_message sanitized in
   let raw_text = Agent_sdk.Types.text_of_message raw in
@@ -137,7 +137,7 @@ let test_llm_client_sanitize_messages_utf8_preserves_message_count () =
       Agent_sdk.Types.assistant_msg "fine\xFF";
     ]
   in
-  let sanitized = Masc_mcp.Llm_client.sanitize_messages_utf8 msgs in
+  let sanitized = Masc_mcp.Llm_types.sanitize_messages_utf8 msgs in
   check int "count preserved" 2 (List.length sanitized);
   check bool "all valid utf8" true
     (List.for_all

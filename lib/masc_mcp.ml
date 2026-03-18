@@ -329,7 +329,9 @@ module Tool_library = Tool_library
 
 (* Perpetual Agent Runtime — Infinite Context System *)
 module Llm_eio_env = Llm_eio_env
-module Llm_client = Llm_client
+module Llm_types = Llm_types
+module Llm_orchestration = Llm_orchestration
+module Llm_provider_dispatch = Llm_provider_dispatch
 module Context_scoring = Context_scoring
 module Context_compact_oas = Context_compact_oas
 module Context_manager = Context_manager

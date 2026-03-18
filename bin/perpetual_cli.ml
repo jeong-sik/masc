@@ -22,10 +22,11 @@ let log_event = function
     eprintf "[turn %d] Starting...\n%!" n
   | Perpetual_loop.TurnEnd { turn; tokens_used; cost } ->
     eprintf "[turn %d] Done: %d tokens, $%.4f\n%!" turn tokens_used cost
-  | Perpetual_loop.Compacted { before_tokens; after_tokens } ->
-    eprintf "[compact] %d → %d tokens (%.0f%% reduction)\n%!"
+  | Perpetual_loop.Compacted { before_tokens; after_tokens; offloaded_path } ->
+    eprintf "[compact] %d → %d tokens (%.0f%% reduction)%s\n%!"
       before_tokens after_tokens
       (100.0 *. (1.0 -. float_of_int after_tokens /. float_of_int (max 1 before_tokens)))
+      (match offloaded_path with Some p -> " [offloaded: " ^ p ^ "]" | None -> "")
   | Perpetual_loop.Prepared { dna_size } ->
     eprintf "[prepare] DNA extracted: %d bytes\n%!" dna_size
   | Perpetual_loop.Handoff { to_model; generation } ->

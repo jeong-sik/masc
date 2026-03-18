@@ -5,7 +5,7 @@
 type event =
   | TurnStart of int
   | TurnEnd of { turn : int; tokens_used : int; cost : float }
-  | Compacted of { before_tokens : int; after_tokens : int }
+  | Compacted of { before_tokens : int; after_tokens : int; offloaded_path : string option }
   | Prepared of { dna_size : int }
   | Handoff of { to_model : string; generation : int }
   | Verified of { action : string; verdict : string }

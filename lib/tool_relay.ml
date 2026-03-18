@@ -111,6 +111,13 @@ let handle_relay_now ctx args =
         ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds
         ~room_config:ctx.config ()
       in
+      (* Log structured termination reason when available *)
+      (match result.Spawn_eio.termination with
+       | Some t ->
+         Log.Spawn.info "relay termination: %s (agent=%s, elapsed=%dms, tools=%d)"
+           (Spawn_eio.termination_reason_to_string t.reason)
+           t.agent_name t.elapsed_ms t.tool_call_count
+       | None -> ());
       let output_preview =
         if String.length result.Spawn_eio.output > 500 then
           String.sub result.Spawn_eio.output 0 500

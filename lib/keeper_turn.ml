@@ -804,6 +804,11 @@ let handle_keeper_msg ctx args : tool_result =
 	              in
 	              let (do_handoff, auto_rules) = handoff_eval in
 
+              (* Log prioritized action for observability — does not change existing branching *)
+              let _prio_action = prioritized_action auto_rules in
+              Log.Keeper.info "prioritized_action for %s: %s"
+                meta_turn.name (prioritized_action_to_string _prio_action);
+
               let interesting_alert =
                 if policy_mode_learned then
                   {

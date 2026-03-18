@@ -19,6 +19,16 @@ import {
   persistWorkflowContext,
   workflowTargetLabel,
 } from '../workflow-context'
+import { relativeTime as relativeTimeBase, formatDuration } from '../lib/format-time'
+import { trimText } from '../lib/truncate'
+import { toneClass } from '../lib/tone'
+import { statusLabel } from '../lib/status-label'
+
+export { formatDuration, trimText, toneClass, statusLabel }
+
+export function relativeTime(iso?: string | null): string {
+  return relativeTimeBase(iso, '방금')
+}
 
 export type EnrichedKeeperRow = {
   brief: DashboardMissionKeeperBrief
@@ -46,89 +56,6 @@ export type EnrichedAgentRow = {
 
 export const selectedAttentionId = signal<string | null>(null)
 export const selectedSessionId = signal<string | null>(null)
-
-export function trimText(value: string | null | undefined, max = 120): string | null {
-  const text = (value ?? '').replace(/\s+/g, ' ').trim()
-  if (!text) return null
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text
-}
-
-export function toneClass(tone?: string | null): string {
-  if (tone === 'bad' || tone === 'offline' || tone === 'critical' || tone === 'risk') return 'bad'
-  if (tone === 'warn' || tone === 'pending' || tone === 'degraded' || tone === 'interrupted' || tone === 'watch') return 'warn'
-  return 'ok'
-}
-
-export function relativeTime(iso?: string | null): string {
-  if (!iso) return '방금'
-  const ts = Date.parse(iso)
-  if (Number.isNaN(ts)) return iso
-  const deltaSec = Math.max(0, Math.round((Date.now() - ts) / 1000))
-  if (deltaSec < 60) return `${deltaSec}초 전`
-  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 전`
-  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}시간 전`
-  return `${Math.round(deltaSec / 86400)}일 전`
-}
-
-export function formatDuration(seconds?: number | null): string {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '확인 필요'
-  if (seconds < 60) return `${Math.round(seconds)}초`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}분`
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}시간`
-  return `${Math.round(seconds / 86400)}일`
-}
-
-export function statusLabel(value?: string | null): string {
-  const normalized = (value ?? '').trim().toLowerCase()
-  switch (normalized) {
-    case 'ok':
-    case 'healthy':
-    case 'green':
-      return '안정'
-    case 'active':
-    case 'running':
-      return '진행 중'
-    case 'pending':
-      return '대기 중'
-    case 'paused':
-      return '일시정지'
-    case 'blocked':
-      return '차단됨'
-    case 'interrupted':
-      return '중단됨'
-    case 'warn':
-    case 'watch':
-      return '주의'
-    case 'bad':
-    case 'critical':
-    case 'risk':
-      return '위험'
-    case 'degraded':
-      return '저하'
-    case 'offline':
-      return '오프라인'
-    case 'idle':
-    case 'quiet':
-      return '대기'
-    case 'loading':
-      return '불러오는 중'
-    case 'error':
-      return '오류'
-    case 'unavailable':
-      return '사용 불가'
-    case 'stale':
-      return '오래됨'
-    case 'refreshing':
-      return '갱신 중'
-    case 'cached':
-      return '캐시됨'
-    case 'unknown':
-    case '':
-      return '확인 필요'
-    default:
-      return value?.trim() || '확인 필요'
-  }
-}
 
 export function missionTargetTypeLabel(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {

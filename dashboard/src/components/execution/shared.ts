@@ -10,6 +10,8 @@ import {
   workflowInterveneParams,
   persistWorkflowContext,
 } from '../../workflow-context'
+import { toneClass } from '../../lib/tone'
+import { statusLabel } from '../../lib/status-label'
 import type {
   DashboardExecutionHandoff,
   DashboardExecutionWorkerSupportBrief,
@@ -38,51 +40,7 @@ export function partitionByTerminal<T>(items: T[], getStatus: (item: T) => strin
   return [active, terminal]
 }
 
-export function toneClass(tone?: string | null): string {
-  if (tone === 'bad' || tone === 'critical' || tone === 'offline') return 'bad'
-  if (tone === 'warn' || tone === 'paused' || tone === 'blocked' || tone === 'interrupted') return 'warn'
-  return 'ok'
-}
-
-export function statusLabel(value?: string | null): string {
-  const normalized = (value ?? '').trim().toLowerCase()
-  switch (normalized) {
-    case 'ok':
-    case 'healthy':
-    case 'green':
-      return '안정'
-    case 'active':
-    case 'running':
-      return '진행 중'
-    case 'paused':
-      return '일시정지'
-    case 'blocked':
-      return '막힘'
-    case 'completed':
-      return '완료'
-    case 'interrupted':
-      return '중단됨'
-    case 'failed':
-      return '실패'
-    case 'cancelled':
-      return '취소됨'
-    case 'warn':
-      return '주의'
-    case 'bad':
-    case 'critical':
-      return '위험'
-    case 'offline':
-      return '오프라인'
-    case 'idle':
-    case 'quiet':
-      return '대기'
-    case 'unknown':
-    case '':
-      return '확인 필요'
-    default:
-      return value?.trim() || '확인 필요'
-  }
-}
+export { toneClass, statusLabel }
 
 export function queueKindLabel(kind: DashboardExecutionQueueItem['kind']): string {
   return kind === 'session' ? '세션' : '작전'

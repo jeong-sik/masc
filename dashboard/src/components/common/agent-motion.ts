@@ -1,4 +1,5 @@
 import type { Message, Task, JournalEntry, BoardPost, Keeper } from '../../types'
+import { trimText as trimTextBase } from '../../lib/truncate'
 
 export interface AgentMotionSnapshot {
   activeAssignedCount: number
@@ -26,9 +27,7 @@ function toEpoch(value: string | number): number {
 }
 
 function trimText(value: string, max = 88): string {
-  const normalized = value.replace(/\s+/g, ' ').trim()
-  if (!normalized) return normalized
-  return normalized.length > max ? `${normalized.slice(0, max - 3)}...` : normalized
+  return trimTextBase(value, max) ?? ''
 }
 
 function timestampFromAgeSeconds(ageSeconds: number | null | undefined): string | null {

@@ -12,6 +12,10 @@ type keepalive_entry = {
 (** Per-keeper last known agent count for detecting changes. *)
 let last_agent_counts : (string, int) Hashtbl.t = Hashtbl.create 8
 
+(* OAS Event_bus ref — set via bootstrap *)
+let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
+let set_bus bus = bus_ref := Some bus
+
 let keepalives : (string, keepalive_entry) Hashtbl.t = Hashtbl.create 8
 
 let running_keepers () = Hashtbl.length keepalives
@@ -215,7 +219,16 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
                             ])
                       with exn ->
                         Log.Keeper.error "heartbeat SSE broadcast failed: %s"
-                          (Printexc.to_string exn)))
+                          (Printexc.to_string exn));
+                     (* OAS: publish keeper snapshot event *)
+                     (match !bus_ref with
+                      | Some bus ->
+                          Oas_events.publish_keeper_snapshot bus
+                            ~keeper_name:meta_current.name
+                            ~generation:meta_current.generation
+                            ~context_ratio:(Context_manager.context_ratio c)
+                            ~message_count:(List.length c.messages)
+                      | None -> ()))
                with exn ->
                  Log.Keeper.error "heartbeat snapshot write failed: %s"
                    (Printexc.to_string exn));

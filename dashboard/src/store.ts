@@ -133,6 +133,54 @@ export const trpgRoom = signal<string>('')
 export const goals = signal<Goal[]>([])
 export const goalsLoading = signal(false)
 
+// --- OAS monitoring state ---
+
+import type { OasAgentEvent, OasKeeperSnapshot } from './types/oas'
+
+const OAS_AGENT_EVENT_BUFFER = 50
+const OAS_KEEPER_SNAPSHOT_MAX = 20
+
+export const oasAgentEvents = signal<OasAgentEvent[]>([])
+export const oasKeeperSnapshots = signal<Map<string, OasKeeperSnapshot>>(new Map())
+export const oasLastGardenerTick = signal<number | null>(null)
+export const oasTotalEvents = signal(0)
+
+export function pushOasAgentEvent(event: OasAgentEvent): void {
+  oasAgentEvents.value = [event, ...oasAgentEvents.value].slice(0, OAS_AGENT_EVENT_BUFFER)
+  oasTotalEvents.value++
+}
+
+export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
+  const next = new Map<string, OasKeeperSnapshot>(oasKeeperSnapshots.value)
+  next.set(snapshot.keeper_name, snapshot)
+  // Prune oldest if exceeding max
+  if (next.size > OAS_KEEPER_SNAPSHOT_MAX) {
+    let oldest: string | null = null
+    let oldestTs = Infinity
+    for (const [name, snap] of next) {
+      if (snap.timestamp < oldestTs) {
+        oldest = name
+        oldestTs = snap.timestamp
+      }
+    }
+    if (oldest) next.delete(oldest)
+  }
+  oasKeeperSnapshots.value = next
+  oasTotalEvents.value++
+}
+
+export const oasHealthSummary: ReadonlySignal<{
+  agentEventsCount: number
+  keeperSnapshotsCount: number
+  lastGardenerTick: number | null
+  totalEvents: number
+}> = computed(() => ({
+  agentEventsCount: oasAgentEvents.value.length,
+  keeperSnapshotsCount: oasKeeperSnapshots.value.size,
+  lastGardenerTick: oasLastGardenerTick.value,
+  totalEvents: oasTotalEvents.value,
+}))
+
 // --- MDAL state ---
 
 export const mdalLoops = signal<Map<string, MdalLoop>>(new Map())

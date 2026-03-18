@@ -61,9 +61,9 @@ val should_auto_execute :
   proposed_action ->
   bool
 
-(** Generate a concrete action plan using LLM, given a goal. *)
+(** Generate a concrete action plan using LLM, given a goal.
+    Routes through Llm_cascade "keeper_autonomy" profile. *)
 val generate_action_plan :
-  model:Llm_types.model_spec ->
   goal:Goal_store.goal ->
   keeper_context:string ->
   (string, string) result

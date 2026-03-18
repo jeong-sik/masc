@@ -89,7 +89,6 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
   let base_url = match provider_cfg.provider with
     | Provider.Local { base_url } -> base_url
     | Provider.Anthropic -> Api.default_base_url
-    | Provider.Ollama { base_url; _ } -> base_url
     | Provider.OpenAICompat { base_url; _ } -> base_url
     | Provider.Custom_registered { name } ->
       (match Provider.find_provider name with

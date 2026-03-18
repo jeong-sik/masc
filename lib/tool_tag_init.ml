@@ -180,9 +180,11 @@ let register_all () =
   (* ── Schema-gap fills for modules with partial schema exports ── *)
   reg Mod_room [
     "masc_workflow_guide"; "masc_check";
+    "masc_init";
   ];
   reg Mod_agent [
     "masc_register_capabilities"; "masc_find_by_capability";
+    "masc_collaboration_graph"; "masc_consolidate_learning"; "masc_get_metrics";
   ];
 
   ()

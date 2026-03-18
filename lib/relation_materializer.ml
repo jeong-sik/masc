@@ -1,9 +1,9 @@
 (** Relation Materializer — automatically records agent relationships
     to Neo4j via GraphQL when MASC lifecycle events occur.
 
-    All calls run in a detached Eio fiber: failures are logged but never
-    block the caller.  This ensures the main MASC event loop is not
-    affected by GraphQL latency or downtime.
+    Uses GraphQL alias batching to send ALL collaboration pairs in a
+    single HTTP request.  Runs in a detached Eio fiber so the caller
+    is never blocked.
 
     @since 2.112.0
 *)
@@ -13,36 +13,47 @@
 let log_err tag msg =
   Printf.eprintf "[relation-materializer] %s failed: %s\n%!" tag msg
 
-let collab_mutation = {|
-  mutation($a1: String!, $a2: String!, $ctx: String!) {
-    recordCollaborationByName(agent1Name: $a1, agent2Name: $a2, context: $ctx) {
-      success message
-    }
-  }
-|}
+(** Build a single batched GraphQL mutation using aliases.
+    20 peers → 1 HTTP request with 20 aliased fields.
 
-(** Record collaboration for a single pair. Synchronous, logs errors. *)
-let record_one ~tag ~context ~agent ~peer =
-  let variables = `Assoc [
-    ("a1", `String agent); ("a2", `String peer);
-    ("ctx", `String context);
-  ] in
-  match Graphql_client.mutate ~timeout_sec:5.0 ~mutation:collab_mutation ~variables () with
-  | Ok _ -> ()
-  | Error msg -> log_err tag msg
+    Example output:
+    {[
+      mutation {
+        c0: recordCollaborationByName(agent1Name: "a", agent2Name: "b", context: "ctx") { success }
+        c1: recordCollaborationByName(agent1Name: "a", agent2Name: "c", context: "ctx") { success }
+      }
+    ]}
+*)
+let build_batch_mutation ~agent ~peers ~context =
+  let escape s =
+    (* Minimal escape for GraphQL string literals *)
+    let parts = String.split_on_char '"' s in
+    String.concat "\\\"" parts
+  in
+  let fields = List.mapi (fun i peer ->
+    Printf.sprintf
+      "c%d: recordCollaborationByName(agent1Name: \"%s\", agent2Name: \"%s\", context: \"%s\") { success }"
+      i (escape agent) (escape peer) (escape context)
+  ) peers in
+  "mutation { " ^ String.concat " " fields ^ " }"
 
-(** Send collaboration mutations in a detached Eio fiber when possible.
-    Each pair gets its own GraphQL call (the server does MERGE, so
-    duplicates are safe). Returns immediately when Eio switch is available. *)
+(** Send all collaboration pairs in one batched HTTP request.
+    Detaches to an Eio fiber when runtime is available. *)
 let record_collaborations_async ~tag ~context ~agent ~peers =
+  let do_batch () =
+    let mutation = build_batch_mutation ~agent ~peers ~context in
+    match Graphql_client.mutate ~timeout_sec:10.0 ~mutation () with
+    | Ok _ -> ()
+    | Error msg -> log_err tag msg
+  in
   match Eio_context.get_switch_opt () with
   | None ->
     (* No Eio runtime — synchronous best-effort *)
-    List.iter (fun peer -> record_one ~tag ~context ~agent ~peer) peers
+    do_batch ()
   | Some sw ->
     (* Detach into an Eio fiber — returns immediately *)
     Eio.Fiber.fork_daemon ~sw (fun () ->
-      List.iter (fun peer -> record_one ~tag ~context ~agent ~peer) peers;
+      do_batch ();
       `Stop_daemon
     )
 
@@ -50,7 +61,8 @@ let record_collaborations_async ~tag ~context ~agent ~peers =
 
 (** When an agent leaves a room, record [COLLABORATED_WITH] edges
     between the departing agent and every other active agent.
-    Runs asynchronously — returns immediately. *)
+    Runs asynchronously — returns immediately.
+    20 peers = 1 HTTP request (alias batching). *)
 let on_agent_leave ~leaving_agent ~active_agents =
   let peers = List.filter (fun name -> name <> leaving_agent) active_agents in
   if peers <> [] then
@@ -63,8 +75,7 @@ let on_agent_leave ~leaving_agent ~active_agents =
 
 (** When a task is completed, record collaboration between the
     assignee and all active agents in the room.
-    Skipped if the assignee already appeared in a recent leave event
-    (since leave also records co-presence). *)
+    20 peers = 1 HTTP request (alias batching). *)
 let on_task_done ~assignee ~active_agents =
   let peers = List.filter (fun name -> name <> assignee) active_agents in
   if peers <> [] then

@@ -197,12 +197,13 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                           meta.name msg;
                         meta
                     | Ok response ->
+                        let response_usage = Llm_types.usage_of_response response in
                         let turn_cost =
                           let inp =
-                            float_of_int response.usage.input_tokens /. 1000.0
+                            float_of_int response_usage.input_tokens /. 1000.0
                           in
                           let outp =
-                            float_of_int response.usage.output_tokens /. 1000.0
+                            float_of_int response_usage.output_tokens /. 1000.0
                           in
                           let primary =
                             match model_specs with
@@ -474,24 +475,24 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                  total_turns = meta.total_turns + 1;
                                  total_input_tokens =
                                    meta.total_input_tokens
-                                   + response.usage.input_tokens;
+                                   + response_usage.input_tokens;
                                  total_output_tokens =
                                    meta.total_output_tokens
-                                   + response.usage.output_tokens;
+                                   + response_usage.output_tokens;
                                  total_tokens =
                                    meta.total_tokens
-                                   + Llm_types.total_tokens response.usage;
+                                   + Llm_types.total_tokens response_usage;
                                  total_cost_usd =
                                    meta.total_cost_usd +. turn_cost;
                                  last_turn_ts = now_ts;
-                                 last_model_used = response.model_used;
+                                 last_model_used = response.Llm_provider.Types.model;
                                  last_input_tokens =
-                                   response.usage.input_tokens;
+                                   response_usage.input_tokens;
                                  last_output_tokens =
-                                   response.usage.output_tokens;
+                                   response_usage.output_tokens;
                                  last_total_tokens =
-                                   Llm_types.total_tokens response.usage;
-                                 last_latency_ms = response.latency_ms;
+                                   Llm_types.total_tokens response_usage;
+                                 last_latency_ms = 0;
                                  last_proactive_ts = now_ts;
                                  last_proactive_reason =
                                    Printf.sprintf

@@ -305,9 +305,9 @@ let compute_judgments ~base_path:_ ~factual_json =
             items
             |> List.filter_map
                  (parse_item_judgment ~generated_at ~expires_at
-                    ~model_used:response.model_used)
+                    ~model_used:response.Llm_provider.Types.model)
           in
-          Ok (response.model_used, generated_at, expires_at, judgments)
+          Ok (response.Llm_provider.Types.model, generated_at, expires_at, judgments)
         with
         | Yojson.Json_error msg ->
             Error (Printf.sprintf "Governance judge returned invalid JSON: %s" msg)

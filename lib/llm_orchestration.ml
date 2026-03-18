@@ -101,9 +101,10 @@ let record_cache_bypass reason =
 
 (** Single completion with MASC-level cache check/write (OAS serialization format)
     and OAS metrics. Cache key uses MASC's temperature-aware fingerprint.
-    Cache values use OAS api_response JSON format via {!Llm_provider.Cache}. *)
-let complete ?timeout_sec (req : completion_request) : (completion_response, string) result =
-  let t0 = Time_compat.now () in
+    Cache values use OAS api_response JSON format via {!Llm_provider.Cache}.
+    Returns OAS api_response directly — no MASC wrapper. *)
+let complete ?timeout_sec (req : completion_request)
+    : (Llm_provider.Types.api_response, string) result =
   let req = normalize_request req in
   let cache_key =
     match cache_bypass_reason req with
@@ -121,7 +122,7 @@ let complete ?timeout_sec (req : completion_request) : (completion_response, str
             match Llm_provider.Cache.response_of_json cached_json with
             | Some api_resp ->
                 Prometheus.inc_counter "masc_llm_cache_hits_total" ();
-                Some (Ok (Llm_provider_dispatch.completion_response_of_api_response api_resp))
+                Some (Ok api_resp)
             | None ->
                 Prometheus.inc_counter "masc_llm_cache_errors_total" ();
                 let _ = Llm_response_cache.delete ~key in
@@ -136,38 +137,31 @@ let complete ?timeout_sec (req : completion_request) : (completion_response, str
             None)
   in
   let metrics_opt = Some (Llm_oas_adapters.metrics_adapter ()) in
-  let result =
-    match cached_result with
-    | Some cached -> cached
-    | None ->
-        let upstream_result =
-          match req.model.provider with
-          | Glm_cloud ->
-              Llm_provider_dispatch.call_glm_cloud_with_pool
-                ?timeout_sec ?metrics:metrics_opt req
-          | _ ->
-              Llm_provider_dispatch.call_provider
-                ?timeout_sec ?metrics:metrics_opt req
-        in
-        (match (cache_key, upstream_result) with
-        | Some key, Ok resp -> (
-            let api_resp =
-              Llm_provider_dispatch.api_response_of_completion_response resp
-            in
-            match
-              Llm_response_cache.set_json ~key
-                ~ttl_seconds:Env_config.Llm.cache_ttl_seconds
-                (Llm_provider.Cache.response_to_json api_resp)
-            with
-            | Ok () -> Prometheus.inc_counter "masc_llm_cache_writes_total" ()
-            | Error e ->
-                Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-                Log.LlmClient.warn "cache write error: %s" e);
-            Ok resp
-        | _ -> upstream_result)
-  in
-  let elapsed_ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
-  Result.map (fun resp -> { resp with latency_ms = elapsed_ms }) result
+  match cached_result with
+  | Some cached -> cached
+  | None ->
+      let upstream_result =
+        match req.model.provider with
+        | Glm_cloud ->
+            Llm_provider_dispatch.call_glm_cloud_with_pool
+              ?timeout_sec ?metrics:metrics_opt req
+        | _ ->
+            Llm_provider_dispatch.call_provider
+              ?timeout_sec ?metrics:metrics_opt req
+      in
+      (match (cache_key, upstream_result) with
+      | Some key, Ok resp -> (
+          match
+            Llm_response_cache.set_json ~key
+              ~ttl_seconds:Env_config.Llm.cache_ttl_seconds
+              (Llm_provider.Cache.response_to_json resp)
+          with
+          | Ok () -> Prometheus.inc_counter "masc_llm_cache_writes_total" ()
+          | Error e ->
+              Prometheus.inc_counter "masc_llm_cache_errors_total" ();
+              Log.LlmClient.warn "cache write error: %s" e);
+          Ok resp
+      | _ -> upstream_result)
 
 (* ================================================================ *)
 (* Provider-aware capacity check                                    *)
@@ -206,7 +200,8 @@ let filter_by_provider_health (requests : completion_request list)
 (* ================================================================ *)
 
 let cascade ?(accept = fun _ -> true) ?timeout_sec
-    (requests : completion_request list) : (completion_response, string) result =
+    (requests : completion_request list)
+    : (Llm_provider.Types.api_response, string) result =
   let requests = filter_by_provider_health requests in
   with_inflight_tracking (fun () ->
     Log.LlmClient.debug "cascade: inflight=%d" (Atomic.get inflight);
@@ -242,13 +237,13 @@ let cascade ?(accept = fun _ -> true) ?timeout_sec
         match attempt_result with
         | Ok resp ->
           if accept resp then (
-            Log.LlmClient.info "cascade: success with %s (%dms)"
-              resp.model_used resp.latency_ms;
+            Log.LlmClient.info "cascade: success with %s"
+              resp.Llm_provider.Types.model;
             Ok resp)
           else (
             Log.LlmClient.warn
               "cascade: %s rejected by validator, continuing"
-              resp.model_used;
+              resp.Llm_provider.Types.model;
             try_next ("response rejected by validator" :: errors) rest)
         | Error e ->
           Log.LlmClient.warn "cascade: %s failed: %s"
@@ -298,7 +293,7 @@ let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec
     when provider config is unavailable or streaming fails. *)
 let call_provider_stream ?timeout_sec (req : completion_request)
     ~(on_event : Llm_provider.Types.sse_event -> unit)
-    : (completion_response, string) result =
+    : (Llm_provider.Types.api_response, string) result =
   let req = normalize_request req in
   (* Try real streaming first *)
   let stream_result =
@@ -324,12 +319,11 @@ let call_provider_stream ?timeout_sec (req : completion_request)
         in
         (match result with
          | Ok resp ->
-             let masc_resp = Llm_provider_dispatch.completion_response_of_api_response resp in
-             let text = text_of_response masc_resp in
-             if String.trim text = "" && masc_resp.tool_calls = [] then
+             let text = Agent_sdk.Types.text_of_content resp.content in
+             if String.trim text = "" && not (has_tool_calls resp) then
                None  (* empty response, try batch *)
              else
-               Some (Ok masc_resp)
+               Some (Ok resp)
          | Error http_err ->
              Log.LlmClient.warn "stream: provider error: %s"
                (Llm_provider_dispatch.string_of_http_error http_err);
@@ -350,7 +344,7 @@ let call_provider_stream ?timeout_sec (req : completion_request)
            let text = text_of_response resp in
            on_event (MessageStart {
              id = "batch-" ^ req.model.model_id;
-             model = resp.model_used;
+             model = resp.Llm_provider.Types.model;
              usage = None;
            });
            if text <> "" then

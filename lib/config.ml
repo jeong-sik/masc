@@ -145,6 +145,7 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_voice.schemas
     @ Tool_protocol_game_view.schemas
     @ Tool_trpg.schemas
+    @ Tool_compact.schemas
     (* Tool_code_swarm: 0 calls in 6-day audit *)
     )
 

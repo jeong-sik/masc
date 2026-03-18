@@ -35,3 +35,33 @@ val load_jsonl : string -> Yojson.Safe.t list
 
 val append_jsonl : string -> Yojson.Safe.t -> unit
 (** Append JSON value as line to JSONL file. *)
+
+(** {1 Storage Backend Abstraction}
+
+    Types for future migration to composite backends (local + remote).
+    Existing functions continue to operate on the local filesystem.
+    New code can use [backend] to select storage targets.
+
+    @since 2.95.0 — Issue #1442 *)
+
+type backend_kind =
+  | Local            (** Local filesystem (Eio or Unix fallback) *)
+  | Remote of string (** Remote endpoint URL *)
+
+type backend = {
+  kind : backend_kind;
+  base_path : string;  (** Root directory for this backend *)
+}
+
+val create_backend : ?kind:backend_kind -> base_path:string -> unit -> backend
+(** Create a backend descriptor.
+    Defaults to [Local] when [kind] is omitted. *)
+
+val backend_base_path : backend -> string
+(** Return the base_path of a backend. *)
+
+val backend_kind_to_string : backend_kind -> string
+(** Serialize backend_kind for logging/diagnostics. *)
+
+val default_backend : base_path:string -> backend
+(** Convenience: create a [Local] backend with the given base_path. *)

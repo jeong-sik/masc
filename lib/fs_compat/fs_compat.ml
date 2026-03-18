@@ -116,3 +116,29 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   mkdir_p dir;
   let line = Yojson.Safe.to_string json ^ "\n" in
   append_file path line
+
+(* ================================================================ *)
+(* Storage Backend Abstraction                                      *)
+(* ================================================================ *)
+
+type backend_kind =
+  | Local
+  | Remote of string
+
+type backend = {
+  kind : backend_kind;
+  base_path : string;
+}
+
+let create_backend ?(kind = Local) ~base_path () =
+  { kind; base_path }
+
+let backend_base_path (b : backend) =
+  b.base_path
+
+let backend_kind_to_string = function
+  | Local -> "local"
+  | Remote url -> Printf.sprintf "remote(%s)" url
+
+let default_backend ~base_path =
+  { kind = Local; base_path }

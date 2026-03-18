@@ -331,6 +331,7 @@ module Verifier = Verifier
 module Succession = Succession
 module Perpetual_loop = Perpetual_loop
 module Tool_perpetual = Tool_perpetual
+module Tool_compact = Tool_compact
 module Tool_keeper = Tool_keeper
 
 (* Keeper Agent Harness — trajectory + eval gates + scenarios *)

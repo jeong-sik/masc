@@ -221,7 +221,20 @@ let handle_cancel_task ctx args =
        Log.Task.error "metrics record failed: %s" (Types.masc_error_to_string err));
   result_to_response result
 
+let transition_known_args =
+  ["task_id"; "action"; "notes"; "reason"; "expected_version"]
+
 let handle_transition ctx args =
+  let unknown = match args with
+    | `Assoc kvs ->
+      List.filter (fun (k, _) -> not (List.mem k transition_known_args)) kvs
+    | _ -> []
+  in
+  if unknown <> [] then
+    let names = String.concat ", " (List.map fst unknown) in
+    (false, Printf.sprintf "Unknown argument(s): %s. Valid: %s"
+      names (String.concat ", " transition_known_args))
+  else
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
   | Error e -> result_to_response (Error e)

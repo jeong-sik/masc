@@ -507,6 +507,19 @@ let load_lodge_agents_full () =
                  ])
                with Yojson.Safe.Util.Type_error (_, _) -> None
              ) edges in
+             (* Deduplicate agents by case-insensitive name, keeping first occurrence *)
+             let seen = Hashtbl.create 16 in
+             let agents = List.filter (fun agent ->
+               let name = match agent with
+                 | `Assoc kvs ->
+                   (match List.assoc_opt "name" kvs with
+                    | Some (`String s) -> String.lowercase_ascii s
+                    | _ -> "")
+                 | _ -> ""
+               in
+               if Hashtbl.mem seen name then false
+               else (Hashtbl.add seen name true; true)
+             ) agents in
              Ok (`Assoc [("agents", `List agents)]))
       with e ->
         Error (Printf.sprintf "Failed to load agents: %s" (Printexc.to_string e))

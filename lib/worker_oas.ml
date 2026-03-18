@@ -142,11 +142,22 @@ let build_agent
     ~(hooks : Oas.Hooks.hooks)
     ~(raw_trace : Oas.Raw_trace.t)
     ~(heartbeat_callbacks : Oas.Agent.periodic_callback list)
+    ?(gate_config : Eval_gate.gate_config option)
     () : (Oas.Agent.t, string) result =
   let config = agent_config_of_worker_meta meta ~system_prompt in
   let provider = oas_provider_of_model model in
   let tool_names =
     List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
+  in
+  let guardrails =
+    match gate_config with
+    | Some gate ->
+        Verifier_oas.eval_gate_to_oas_guardrails gate
+    | None ->
+        {
+          Oas.Guardrails.tool_filter = AllowList tool_names;
+          max_tool_calls_per_turn = Some 12;
+        }
   in
   let builder =
     Oas.Builder.create ~net ~model:config.model
@@ -164,11 +175,7 @@ let build_agent
     |> Oas.Builder.with_provider provider
     |> Oas.Builder.with_tools tools
     |> Oas.Builder.with_hooks hooks
-    |> Oas.Builder.with_guardrails
-         {
-           Oas.Guardrails.tool_filter = AllowList tool_names;
-           max_tool_calls_per_turn = Some 12;
-         }
+    |> Oas.Builder.with_guardrails guardrails
     |> Oas.Builder.with_raw_trace raw_trace
     |> Oas.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Oas.Builder.with_description (description_of_meta meta)

@@ -529,11 +529,11 @@ let rewrite_posts store =
     ensure_masc_dir ();
     let path = persist_path () in
     let tmp_path = path ^ ".tmp" in
-    let oc = open_out tmp_path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      Hashtbl.iter (fun _ (pst : post) ->
-        output_string oc (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
-      ) store.posts);
+    let buf = Buffer.create 4096 in
+    Hashtbl.iter (fun _ (pst : post) ->
+      Buffer.add_string buf (Yojson.Safe.to_string (post_to_yojson pst) ^ "\n")
+    ) store.posts;
+    Fs_compat.save_file tmp_path (Buffer.contents buf);
     Sys.rename tmp_path path
   with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_posts): %s" msg
 
@@ -542,11 +542,11 @@ let rewrite_comments store =
     ensure_masc_dir ();
     let path = comments_path () in
     let tmp_path = path ^ ".tmp" in
-    let oc = open_out tmp_path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      Hashtbl.iter (fun _ (cmt : comment) ->
-        output_string oc (Yojson.Safe.to_string (comment_to_yojson cmt) ^ "\n")
-      ) store.comments);
+    let buf = Buffer.create 4096 in
+    Hashtbl.iter (fun _ (cmt : comment) ->
+      Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt) ^ "\n")
+    ) store.comments;
+    Fs_compat.save_file tmp_path (Buffer.contents buf);
     Sys.rename tmp_path path
   with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_comments): %s" msg
 
@@ -556,9 +556,7 @@ let append_post (p : post) =
   try
     ensure_masc_dir ();
     let path = persist_path () in
-    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc (Yojson.Safe.to_string (post_to_yojson p) ^ "\n"));
+    Fs_compat.append_file path (Yojson.Safe.to_string (post_to_yojson p) ^ "\n");
     rotate_if_needed path
   with Sys_error msg -> Log.BoardLog.error "persist error (append_post): %s" msg
 
@@ -566,9 +564,7 @@ let append_comment (c : comment) =
   try
     ensure_masc_dir ();
     let path = comments_path () in
-    let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n"));
+    Fs_compat.append_file path (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
     rotate_if_needed path
   with Sys_error msg -> Log.BoardLog.error "persist error (append_comment): %s" msg
 

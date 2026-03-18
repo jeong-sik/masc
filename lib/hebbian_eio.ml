@@ -161,9 +161,7 @@ let load_graph config : synapse_graph =
     { synapses = []; last_consolidation = 0.0 }
   else
     try
-      let ic = open_in file in
-      let content = really_input_string ic (in_channel_length ic) in
-      close_in ic;
+      let content = Fs_compat.load_file file in
       let json = Yojson.Safe.from_string content in
       graph_of_json json
     with exn ->
@@ -176,10 +174,7 @@ let save_graph config (graph : synapse_graph) : unit =
   let file = synapses_file config in
   let json = graph_to_json graph in
   let content = Yojson.Safe.pretty_to_string json in
-  (* Security: 0o600 - only owner can read/write synapse data *)
-  let oc = open_out_gen [Open_wronly; Open_creat; Open_trunc] 0o600 file in
-  output_string oc content;
-  close_out oc
+  Fs_compat.save_file file content
 
 (** Find synapse between two agents - pure *)
 let find_synapse graph ~from_agent ~to_agent : synapse option =

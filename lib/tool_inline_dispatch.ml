@@ -391,9 +391,9 @@ let dispatch (ctx : context) ~(name : string) : result option =
       let constraints = Bounded.constraints_of_json constraints_json in
       let goal = Bounded.goal_of_json goal_json in
       (match state.Mcp_server.proc_mgr with
-       | Some pm ->
+       | Some _pm ->
            let spawn_fn agent_name prompt =
-             Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name ~prompt
+             Spawn_eio.spawn ~sw ~agent_name ~prompt
                ~timeout_seconds:Env_config.Spawn.timeout_seconds
                ~room_config:state.Mcp_server.room_config ()
            in
@@ -649,9 +649,9 @@ Call masc_listen again to continue listening.
        | Error e -> Some (false, e)
        | Ok runtime_model ->
            (match state.Mcp_server.proc_mgr with
-            | Some pm ->
+            | Some _pm ->
                 let result =
-                  Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name:spawn_agent_name
+                  Spawn_eio.spawn ~sw ~agent_name:spawn_agent_name
                     ~prompt ~timeout_seconds ?working_dir ?execution_scope
                     ~room_config:state.Mcp_server.room_config
                     ~runtime_model ()
@@ -733,9 +733,9 @@ Call masc_listen again to continue listening.
           match state.Mcp_server.proc_mgr with
           | None ->
               Some (false, "Process manager not available for mitosis spawn")
-          | Some pm ->
+          | Some _pm ->
               let spawn_fn ~prompt =
-                let result = Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name:target_agent
+                let result = Spawn_eio.spawn ~sw ~agent_name:target_agent
                   ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds
                   ~room_config:state.Mcp_server.room_config ()
                 in

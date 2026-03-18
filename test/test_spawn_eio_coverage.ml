@@ -1,7 +1,6 @@
 (** Spawn Eio Module Coverage Tests
 
     Tests for spawn types, constants, and Provider_adapter routing:
-    - spawn_config type (backward compat)
     - spawn_result type
     - masc_mcp_tools constant
     - resolve_model_spec (Provider_adapter → model_spec)
@@ -11,44 +10,6 @@
 open Alcotest
 
 module Spawn_eio = Masc_mcp.Spawn_eio
-
-(* ============================================================
-   spawn_config Type Tests (backward compat — type still exists)
-   ============================================================ *)
-
-let test_spawn_config_type () =
-  let cfg : Spawn_eio.spawn_config = {
-    agent_name = "claude";
-    command = "claude --print";
-    timeout_seconds = 300;
-    working_dir = Some "/tmp/test";
-    mcp_tools = ["masc_status"; "masc_broadcast"];
-  } in
-  check string "agent_name" "claude" cfg.agent_name;
-  check string "command" "claude --print" cfg.command;
-  check int "timeout_seconds" 300 cfg.timeout_seconds
-
-let test_spawn_config_no_working_dir () =
-  let cfg : Spawn_eio.spawn_config = {
-    agent_name = "codex";
-    command = "codex";
-    timeout_seconds = 60;
-    working_dir = None;
-    mcp_tools = [];
-  } in
-  match cfg.working_dir with
-  | None -> ()
-  | Some _ -> fail "expected None"
-
-let test_spawn_config_mcp_tools () =
-  let cfg : Spawn_eio.spawn_config = {
-    agent_name = "test";
-    command = "test";
-    timeout_seconds = 30;
-    working_dir = None;
-    mcp_tools = ["tool1"; "tool2"; "tool3"];
-  } in
-  check int "mcp_tools count" 3 (List.length cfg.mcp_tools)
 
 (* ============================================================
    spawn_result Type Tests
@@ -256,10 +217,10 @@ let test_resolve_model_spec_gemini () =
    ============================================================ *)
 
 let test_spawn_bare_ollama_rejected () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let result =
-    Spawn_eio.spawn ~sw ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    Spawn_eio.spawn ~sw
       ~agent_name:"ollama" ~prompt:"hello" ()
   in
   check bool "spawn fails" false result.success;
@@ -275,10 +236,10 @@ let test_spawn_bare_ollama_rejected () =
      with Not_found -> false)
 
 let test_spawn_unknown_agent_fails () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   let result =
-    Spawn_eio.spawn ~sw ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    Spawn_eio.spawn ~sw
       ~agent_name:"totally_unknown_agent_xyz" ~prompt:"hello" ()
   in
   check bool "spawn fails" false result.success;
@@ -338,11 +299,6 @@ let test_state_isolation_notice_contains_focus () =
 
 let () =
   run "Spawn Eio Coverage" [
-    "spawn_config", [
-      test_case "type" `Quick test_spawn_config_type;
-      test_case "no working_dir" `Quick test_spawn_config_no_working_dir;
-      test_case "mcp_tools" `Quick test_spawn_config_mcp_tools;
-    ];
     "spawn_result", [
       test_case "success" `Quick test_spawn_result_success;
       test_case "failure" `Quick test_spawn_result_failure;

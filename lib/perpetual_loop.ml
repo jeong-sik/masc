@@ -208,7 +208,7 @@ let calculate_cost (usage : Llm_client.token_usage) (model : Llm_client.model_sp
     Returns the spawn result for the caller to interpret. *)
 let coding_turn ~config ~state =
   match config.coding_sw, config.coding_proc_mgr with
-  | Some sw, Some proc_mgr ->
+  | Some sw, Some _proc_mgr ->
     let goal = config.initial_goal in
     let turn = state.turn_count in
     (* Extract latest state block from context messages for progress tracking *)
@@ -236,7 +236,7 @@ let coding_turn ~config ~state =
     in
     let prompt_with_lifecycle = prompt ^ Spawn_eio.masc_lifecycle_suffix in
     let result = Spawn_eio.spawn
-      ~sw ~proc_mgr
+      ~sw
       ~agent_name:config.coding_agent
       ~prompt:prompt_with_lifecycle
       ~timeout_seconds:config.coding_timeout_s

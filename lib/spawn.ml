@@ -210,7 +210,7 @@ let default_configs = [
 (** Get spawn config for agent *)
 let get_config agent_name =
   let canonical =
-    match Provider_adapter.resolve_cli_canonical_name agent_name with
+    match Provider_adapter.resolve_direct_canonical_name agent_name with
     | Some value -> value
     | None -> agent_name
   in
@@ -220,7 +220,7 @@ let get_config agent_name =
 let build_mcp_args agent_name tools =
   if tools = [] then []
   else
-    match Provider_adapter.resolve_cli_canonical_name agent_name |> Option.value ~default:agent_name with
+    match Provider_adapter.resolve_direct_canonical_name agent_name |> Option.value ~default:agent_name with
   | "claude" ->
     (* Claude: --allowedTools "tool1,tool2,..." *)
     let tools_str = String.concat "," tools in
@@ -236,7 +236,7 @@ let build_mcp_args agent_name tools =
   | _ -> []
 
 let build_prompt_args agent_name prompt =
-  match Provider_adapter.resolve_cli_canonical_name agent_name |> Option.value ~default:agent_name with
+  match Provider_adapter.resolve_direct_canonical_name agent_name |> Option.value ~default:agent_name with
   | "gemini" -> ["-p"; prompt]
   | _ -> []
 

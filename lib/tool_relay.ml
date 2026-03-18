@@ -106,8 +106,8 @@ let handle_relay_now ctx args =
   (* Use Eio-native spawn to avoid blocking HTTP server *)
   match ctx.proc_mgr with
   | None -> (false, "❌ Process manager not available for relay spawn")
-  | Some pm ->
-      let result = Spawn_eio.spawn ~sw:ctx.sw ~proc_mgr:pm ~agent_name:target_agent
+  | Some _pm ->
+      let result = Spawn_eio.spawn ~sw:ctx.sw ~agent_name:target_agent
         ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds
         ~room_config:ctx.config ()
       in

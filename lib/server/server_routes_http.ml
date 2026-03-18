@@ -11,7 +11,6 @@ let make_routes ~port ~host ~sw ~clock =
   Http.Router.empty
   |> Server_routes_http_routes_frontend.add_routes ~port ~host
   |> Server_routes_http_routes_room.add_routes
-  (* TRPG routes moved to sublibrary (#1668) *)
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
   |> Server_routes_http_routes_command_plane_read.add_routes
   |> Server_routes_http_routes_command_plane_write.add_routes ~sw ~clock

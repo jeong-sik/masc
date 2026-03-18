@@ -341,7 +341,7 @@ function PostDetail({ post }: { post: BoardPost }) {
 
   return html`
     <div>
-      <button class="back-btn" onClick=${() => navigate('memory')}>← 메모리로 돌아가기</button>
+      <button class="back-btn" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
       <${Card} title=${post.title} semanticId="memory.feed">
         <div class="board-detail">
           <div class="post-body">
@@ -413,7 +413,7 @@ export function Memory() {
       : html`
           <div>
             <${MemorySummary} />
-            <button class="back-btn" onClick=${() => navigate('memory')}>← 메모리로 돌아가기</button>
+            <button class="back-btn" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
             ${detailLoading.value
               ? html`<div class="loading-indicator">글 불러오는 중...</div>`
               : html`<div class="empty-state">글을 찾지 못했습니다</div>`}

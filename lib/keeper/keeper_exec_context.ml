@@ -638,7 +638,9 @@ let run_proactive_generation
               : Llm_types.completion_request))
           specs
       in
-      match run_cascade requests with
+      let (cascade_result0, latency0) = Llm_types.timed (fun () ->
+          run_cascade requests) in
+      match cascade_result0 with
       | Error _ -> None
       | Ok resp0 ->
           let used_model0 =
@@ -708,7 +710,9 @@ let run_proactive_generation
                        : Llm_types.completion_request))
                   specs
               in
-              match run_cascade followup_requests with
+              let (followup_result, round_latency) = Llm_types.timed (fun () ->
+                  run_cascade followup_requests) in
+              match followup_result with
               | Error _ ->
                   ( Llm_types.text_of_response last_resp,
                     acc_usage,
@@ -726,7 +730,7 @@ let run_proactive_generation
                   tool_loop
                     ~round:(round + 1)
                     ~acc_usage:(merge_usage acc_usage resp_next_usage)
-                    ~acc_latency
+                    ~acc_latency:(acc_latency + round_latency)
                     ~acc_cost:(acc_cost +. cost_next)
                     ~acc_tools_used:(acc_tools_used @ round_tools)
                     ~last_resp:resp_next
@@ -736,7 +740,7 @@ let run_proactive_generation
             tool_loop
               ~round:1
               ~acc_usage:(Llm_types.usage_of_response resp0)
-              ~acc_latency:0
+              ~acc_latency:latency0
               ~acc_cost:cost0
               ~acc_tools_used:[]
               ~last_resp:resp0

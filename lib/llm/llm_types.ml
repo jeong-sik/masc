@@ -84,6 +84,14 @@ let usage_of_response (resp : api_response) : token_usage =
 let text_of_response (resp : api_response) : string =
   Agent_sdk.Types.text_of_content resp.content
 
+(** Measure wall-clock latency of a thunk in milliseconds.
+    Use at call sites that need per-call timing (keeper tool loops, etc.). *)
+let timed (f : unit -> 'a) : 'a * int =
+  let t0 = Time_compat.now () in
+  let result = f () in
+  let ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+  (result, ms)
+
 (** Extract tool calls from content blocks. *)
 let tool_calls_of_content (blocks : Agent_sdk.Types.content_block list)
     : tool_call list =

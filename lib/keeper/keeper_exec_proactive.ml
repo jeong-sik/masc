@@ -181,7 +181,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                     let model_specs =
                       Llm_types.available_model_specs_of_strings meta.models
                     in
-                    let result =
+                    let (result, delib_latency) = Llm_types.timed (fun () ->
                       Llm_orchestration.run_prompt_cascade
                         ~temperature:0.3
                         ~model_specs
@@ -189,8 +189,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                         ~prompt
                         ~system:("You are " ^ meta.name
                                  ^ ", a keeper agent. Respond with JSON only.")
-                        ()
-                    in
+                        ()) in
                     match result with
                     | Error msg ->
                         Log.KeeperExec.error "%s LLM call failed: %s"
@@ -492,7 +491,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                    response_usage.output_tokens;
                                  last_total_tokens =
                                    Llm_types.total_tokens response_usage;
-                                 last_latency_ms = 0;
+                                 last_latency_ms = delib_latency;
                                  last_proactive_ts = now_ts;
                                  last_proactive_reason =
                                    Printf.sprintf

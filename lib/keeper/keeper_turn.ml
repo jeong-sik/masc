@@ -303,7 +303,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               | _ -> run_cascade_batch requests
             in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
-            match run_cascade requests with
+            let (cascade_result0, latency0) = Llm_types.timed (fun () ->
+                run_cascade requests) in
+            match cascade_result0 with
             | Error e ->
               (try ignore (Trajectory.finalize trajectory_acc (Trajectory.Failed e))
                with exn -> log_keeper_exn ~label:"trajectory finalize (error path) failed" exn);
@@ -437,7 +439,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       } : Llm_types.completion_request)
                     ) specs
                   in
-                  match run_cascade_batch followup_requests with
+                  let (followup_result, round_latency) = Llm_types.timed (fun () ->
+                      run_cascade_batch followup_requests) in
+                  match followup_result with
                   | Error _ ->
                     (* Cascade failed — return what we have *)
                     ( Llm_types.text_of_response last_resp, acc_usage,
@@ -459,7 +463,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     tool_loop
                       ~round:(round + 1)
                       ~acc_usage:(merge_usage acc_usage resp_next_usage)
-                      ~acc_latency
+                      ~acc_latency:(acc_latency + round_latency)
                       ~acc_cost:(acc_cost +. cost_next)
                       ~acc_tools_used:(acc_tools_used @ round_tools)
                       ~last_resp:resp_next
@@ -470,7 +474,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               let (base_content, base_usage, base_model_used, base_latency_ms,
                    base_cost_usd, tools_used) =
                 tool_loop ~round:1 ~acc_usage:(Llm_types.usage_of_response resp0)
-                  ~acc_latency:0 ~acc_cost:cost0
+                  ~acc_latency:latency0 ~acc_cost:cost0
                   ~acc_tools_used:[] ~last_resp:resp0
               in
               let eval0 =
@@ -517,7 +521,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       } : Llm_types.completion_request)
                     ) specs
                   in
-                  match run_cascade_batch correction_requests with
+                  let (corr_result, corr_latency) = Llm_types.timed (fun () ->
+                      run_cascade_batch correction_requests) in
+                  match corr_result with
                   | Error _ ->
                     ( base_content, base_usage, base_model_used, base_latency_ms,
                       eval0, true, false, false, base_cost_usd, tools_used )
@@ -537,7 +543,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     let evalf = { eval1 with initial_score = eval0.final_score } in
                     let merged_usage = merge_usage base_usage corr_usage in
                     ( Llm_types.text_of_response corr, merged_usage, corr.Llm_provider.Types.model,
-                      base_latency_ms,
+                      base_latency_ms + corr_latency,
                       evalf, true, evalf.passed, false, base_cost_usd +. cost1,
                       tools_used )
               in
@@ -582,7 +588,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       } : Llm_types.completion_request)
                     ) specs
                   in
-                  match run_cascade_batch forced_requests with
+                  let (forced_result, forced_latency) = Llm_types.timed (fun () ->
+                      run_cascade_batch forced_requests) in
+                  match forced_result with
                   | Error _ ->
                       ( content_after_correction, usage_after_correction,
                         model_after_correction, latency_after_correction,
@@ -595,7 +603,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       let forced_usage = Llm_types.usage_of_response forced in
                       let cost2 = cost_usd_of_usage forced_usage used_model2 in
                       let merged_usage = merge_usage usage_after_correction forced_usage in
-                      let merged_latency = latency_after_correction in
+                      let merged_latency = latency_after_correction + forced_latency in
                       let grounded_content =
                         let c = String.trim (Llm_types.text_of_response forced) in
                         if c = "" then content_after_correction else Llm_types.text_of_response forced

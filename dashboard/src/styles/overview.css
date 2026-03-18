@@ -1193,3 +1193,156 @@
 .obs-summary__stale {
   color: rgba(251, 191, 36, 0.6);
 }
+
+/* ── Phase 1: Home Command Center ───────────── */
+
+.overview-surface--home {
+  display: grid;
+  gap: var(--space-md, 16px);
+}
+
+.home-body {
+  display: grid;
+  gap: var(--space-md, 16px);
+}
+
+.home-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-xs, 4px);
+}
+
+.home-section-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.home-section-link {
+  font-size: 11px;
+  color: var(--accent, #60a5fa);
+  cursor: pointer;
+  text-decoration: none;
+}
+.home-section-link:hover { text-decoration: underline; }
+
+/* Hot Sessions */
+.hot-sessions__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-sm, 8px);
+}
+
+.hot-session-card {
+  background: var(--card-bg, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.hot-session-card:hover {
+  border-color: var(--accent, #60a5fa);
+}
+.hot-session-card--critical {
+  border-color: var(--danger, #ef4444);
+  background: rgba(239, 68, 68, 0.06);
+}
+.hot-session-card__goal {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #e2e8f0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hot-session-card__meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.hot-session-card__blocker {
+  font-size: 11px;
+  color: var(--danger, #ef4444);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Agent Pulse */
+.agent-pulse__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-xs, 4px);
+}
+
+.agent-pulse-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.agent-pulse-card:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.agent-pulse-card--working {
+  border-left: 2px solid var(--success, #22c55e);
+}
+.agent-pulse-card--watching {
+  border-left: 2px solid var(--accent, #60a5fa);
+}
+.agent-pulse-card--quiet {
+  border-left: 2px solid var(--text-muted, #64748b);
+  opacity: 0.7;
+}
+.agent-pulse-card--offline {
+  border-left: 2px solid var(--text-muted, #64748b);
+  opacity: 0.4;
+}
+.agent-pulse-card__info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.agent-pulse-card__name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #e2e8f0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-pulse-card__status {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Narrative Timeline load more */
+.narrative-timeline__load-more {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  margin-top: 4px;
+  background: none;
+  border: 1px dashed var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: center;
+}
+.narrative-timeline__load-more:hover {
+  border-color: var(--accent, #60a5fa);
+  color: var(--accent, #60a5fa);
+}

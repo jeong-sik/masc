@@ -4,7 +4,17 @@
 
 open Keeper_types
 open Keeper_memory
-open Keeper_alerting
+open Keeper_skill_routing
+
+(** Case-insensitive substring check. Local copy to break
+    Keeper_prompt -> Keeper_alerting -> Keeper_prompt cycle. *)
+let contains_ci (haystack : string) (needle : string) : bool =
+  let h = String.lowercase_ascii haystack in
+  let n = String.lowercase_ascii needle in
+  if n = "" then false
+  else
+    try ignore (Str.search_forward (Str.regexp_string n) h 0); true
+    with Not_found -> false
 
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =

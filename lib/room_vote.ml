@@ -24,10 +24,16 @@ let vote_status_to_string = function
 let vote_create config ~proposer ~topic ~options ~required_votes =
   ensure_initialized config;
 
+  if required_votes < 1 then
+    Printf.sprintf "❌ required_votes must be at least 1 (got %d)" required_votes
+  else if options = [] then
+    "❌ options list cannot be empty"
+  else begin
+
   mkdir_p (votes_dir config);
 
   let vote_id = Printf.sprintf "vote-%s-%d" (String.sub (now_iso ()) 0 10)
-    (Random.int 10000) in
+    (Random.int 1_000_000) in
   let vote_path = Filename.concat (votes_dir config) (vote_id ^ ".json") in
 
   let vote_json = `Assoc [
@@ -56,6 +62,8 @@ let vote_create config ~proposer ~topic ~options ~required_votes =
   Printf.sprintf "🗳️ Vote created: %s\n  Topic: %s\n  Options: %s\n  Required: %d votes"
     vote_id topic (String.concat ", " options) required_votes
 
+  end
+
 (** Cast a vote *)
 let vote_cast config ~agent_name ~vote_id ~choice =
   ensure_initialized config;
@@ -82,9 +90,12 @@ let vote_cast config ~agent_name ~vote_id ~choice =
             | _ -> []
           in
 
-          (* Add/update vote *)
-          let new_votes = (agent_name, `String choice) ::
-            (List.filter (fun (k, _) -> k <> agent_name) current_votes) in
+          (* Reject duplicate vote *)
+          if List.exists (fun (k, _) -> k = agent_name) current_votes then
+            Printf.sprintf "⚠ %s has already voted on %s" agent_name vote_id
+          else
+
+          let new_votes = (agent_name, `String choice) :: current_votes in
 
           let required = json |> member "required_votes" |> to_int in
           let vote_count = List.length new_votes in

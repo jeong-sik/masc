@@ -133,6 +133,17 @@ let test_vote_dedup () =
       | Error (Board.Already_voted _) -> ()
       | Error e -> Alcotest.fail (Board.show_board_error e)
 
+let test_vote_flip () =
+  match Board_dispatch.create_post ~author:"flip-test" ~content:"flip vote" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      ignore (Board_dispatch.vote ~voter:"flipper" ~post_id:pid ~direction:Board.Up);
+      match Board_dispatch.vote ~voter:"flipper" ~post_id:pid ~direction:Board.Down with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok score ->
+          Alcotest.(check int) "score after flip" (-1) score
+
 (** {1 Stats / Search / Hearth} *)
 
 let test_stats () =
@@ -229,6 +240,7 @@ let () =
     "votes", [
       Alcotest.test_case "upvote" `Quick (with_eio test_vote_post);
       Alcotest.test_case "dedup" `Quick (with_eio test_vote_dedup);
+      Alcotest.test_case "flip" `Quick (with_eio test_vote_flip);
     ];
     "misc", [
       Alcotest.test_case "stats" `Quick (with_eio test_stats);

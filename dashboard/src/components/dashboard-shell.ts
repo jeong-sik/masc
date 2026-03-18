@@ -5,19 +5,12 @@ import { connected } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
 import { missionSnapshot } from '../mission-store'
 import { Mission } from './mission'
-import { Proof } from './proof'
-import { Command } from './command'
-import { Ops } from './ops'
-import { Memory } from './memory'
-import { Execution } from './agents'
-import { Tools } from './tools'
-import { Planning } from './goals'
-import { Governance } from './governance'
-import { Social } from './social'
-import { Lab } from './lab'
-import { Live } from './live'
 import { Overview } from './overview/overview'
-import { AgentRoster } from './agent-roster'
+import { AgentsUnified } from './agents-unified'
+import { Activity } from './activity'
+import { Work } from './work'
+import { Control } from './control'
+import { LabUnified } from './lab-unified'
 import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
 import {
@@ -188,34 +181,18 @@ export function TabContent() {
   switch (tab) {
     case 'home':
       return html`<${Overview} />`
-    case 'mission':
+    case 'situation':
       return html`<${Mission} />`
-    case 'proof':
-      return html`<${Proof} />`
-    case 'agent-roster':
-      return html`<${AgentRoster} />`
-    case 'keeper-roster':
-      return html`<${AgentRoster} />`
-    case 'execution':
-      return html`<${Execution} />`
-    case 'tools':
-      return html`<${Tools} />`
-    case 'live':
-      return html`<${Live} />`
-    case 'memory':
-      return html`<${Memory} />`
-    case 'governance':
-      return html`<${Governance} />`
-    case 'social':
-      return html`<${Social} />`
-    case 'planning':
-      return html`<${Planning} />`
-    case 'intervene':
-      return html`<${Ops} />`
-    case 'command':
-      return html`<${Command} />`
+    case 'agents':
+      return html`<${AgentsUnified} />`
+    case 'activity':
+      return html`<${Activity} />`
+    case 'work':
+      return html`<${Work} />`
+    case 'control':
+      return html`<${Control} />`
     case 'lab':
-      return html`<${Lab} />`
+      return html`<${LabUnified} />`
     default:
       return html`<${Overview} />`
   }

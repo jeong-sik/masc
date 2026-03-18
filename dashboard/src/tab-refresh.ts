@@ -22,51 +22,68 @@ export function refreshForTab(tab: string) {
     refreshMissionSnapshot()
   }
 
-  if (tab === 'command') {
-    refreshRoomTruth()
-    refreshCommandPlaneCurrentSurface()
-    refreshCommandPlaneChainSummary()
-    if (
-      commandPlaneSurface.value === 'swarm'
-      || commandPlaneSurface.value === 'warroom'
-      || commandPlaneSurface.value === 'orchestra'
-    ) {
-      refreshCommandPlaneSwarm()
-    }
-    if (commandPlaneSurface.value === 'orchestra') {
-      refreshCommandPlaneOrchestra()
-    }
-    if (commandPlaneSurface.value === 'warroom') {
-      refreshOperatorSnapshot()
-    }
-  }
-
-  if (tab === 'mission') {
+  if (tab === 'situation') {
     refreshRoomTruth()
     refreshMissionSnapshot()
     refreshMissionBriefing()
   }
 
-  if (tab === 'proof') {
-    refreshProofSnapshot(route.value.params.session_id, route.value.params.operation_id)
-  }
-
-  if (tab === 'execution') {
+  if (tab === 'agents') {
     refreshRoomTruth()
     refreshExecution()
+    refreshMissionSnapshot()
   }
 
-  if (tab === 'intervene') {
-    refreshRoomTruth()
-    refreshOperatorSnapshot()
-    refreshOperatorRoomDigest()
+  if (tab === 'activity') {
+    refreshExecution()
+    refreshSocial()
   }
 
-  if (tab === 'memory') refreshBoard()
-  if (tab === 'planning') refreshGoals()
-  if (tab === 'lab') refreshTrpg()
-  if (tab === 'governance') refreshGovernance()
-  if (tab === 'live') refreshExecution()
-  if (tab === 'tools') refreshTools()
-  if (tab === 'social') refreshSocial()
+  if (tab === 'work') {
+    const section = route.value.params.section
+    if (section === 'evidence') {
+      refreshProofSnapshot(route.value.params.session_id, route.value.params.operation_id)
+    } else if (section === 'governance') {
+      refreshGovernance()
+    } else if (section === 'planning') {
+      refreshGoals()
+    } else {
+      refreshBoard()
+    }
+  }
+
+  if (tab === 'control') {
+    const section = route.value.params.section
+    if (section === 'tools') {
+      refreshTools()
+    } else {
+      refreshRoomTruth()
+      refreshOperatorSnapshot()
+      refreshOperatorRoomDigest()
+    }
+  }
+
+  if (tab === 'lab') {
+    const surface = route.value.params.surface
+    if (surface === 'trpg') {
+      refreshTrpg()
+    } else {
+      refreshRoomTruth()
+      refreshCommandPlaneCurrentSurface()
+      refreshCommandPlaneChainSummary()
+      if (
+        commandPlaneSurface.value === 'swarm'
+        || commandPlaneSurface.value === 'warroom'
+        || commandPlaneSurface.value === 'orchestra'
+      ) {
+        refreshCommandPlaneSwarm()
+      }
+      if (commandPlaneSurface.value === 'orchestra') {
+        refreshCommandPlaneOrchestra()
+      }
+      if (commandPlaneSurface.value === 'warroom') {
+        refreshOperatorSnapshot()
+      }
+    }
+  }
 }

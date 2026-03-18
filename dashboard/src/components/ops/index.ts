@@ -46,7 +46,7 @@ import { OpsKeeperColumn } from './ops-keeper-column'
 
 export function Ops() {
   const snapshot = operatorSnapshot.value
-  const workflowContext = route.value.tab === 'intervene' ? workflowContextForRoute(route.value) : null
+  const workflowContext = route.value.tab === 'control' ? workflowContextForRoute(route.value) : null
   const roomDigest = operatorRoomDigest.value
   const room = snapshot?.room ?? {}
   const sessions = snapshot?.sessions ?? []
@@ -69,7 +69,7 @@ export function Ops() {
   }, [])
 
   useEffect(() => {
-    if (route.value.tab !== 'intervene') {
+    if (route.value.tab !== 'control') {
       hydratedWorkflowId.value = null
       return
     }

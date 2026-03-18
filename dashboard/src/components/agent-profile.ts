@@ -1,6 +1,5 @@
-// Agent Profile — full-page view for a single agent.
-// Reuses data-fetching from agent-detail and renders as a dedicated page
-// instead of an overlay modal.
+// Agent Profile — FF Character Sheet style full-page view.
+// Layout: character plate (portrait + identity + stats) -> detail grid -> history
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -147,7 +146,7 @@ async function submitMention(target: string): Promise<void> {
   try {
     await sendBroadcast(sender, `@${target} ${text}`)
     mentionText.value = ''
-    showToast(`Mention sent to ${target}`, 'success')
+    showToast(`${target}에게 전송`, 'success')
     void loadProfile(target)
   } catch (err) {
     showToast(err instanceof Error ? err.message : 'Failed', 'error')
@@ -156,30 +155,22 @@ async function submitMention(target: string): Promise<void> {
   }
 }
 
-function pressureClass(ratio: number | null | undefined): string {
+function ctxBarClass(ratio: number | null | undefined): string {
   if (ratio == null) return ''
   const pct = ratio * 100
-  if (pct < 50) return 'pressure--ok'
-  if (pct < 70) return 'pressure--amber'
-  if (pct < 85) return 'pressure--orange'
-  return 'pressure--red'
-}
-
-function timelineEventIcon(type: string): string {
-  if (type === 'joined') return 'J'
-  if (type.startsWith('task_')) return 'T'
-  if (type === 'broadcast') return 'M'
-  return 'E'
+  if (pct < 50) return ''
+  if (pct < 70) return 'warn'
+  return 'bad'
 }
 
 function timelineEventLabel(type: string): string {
   switch (type) {
     case 'joined': return '참가'
-    case 'task_claimed': return '태스크 수임'
-    case 'task_started': return '태스크 시작'
-    case 'task_completed': return '태스크 완료'
-    case 'task_cancelled': return '태스크 취소'
-    case 'broadcast': return '브로드캐스트'
+    case 'task_claimed': return '수임'
+    case 'task_started': return '시작'
+    case 'task_completed': return '완료'
+    case 'task_cancelled': return '취소'
+    case 'broadcast': return '방송'
     default: return type
   }
 }
@@ -191,103 +182,158 @@ function journalKindIcon(entry: JournalEntry): string {
   return 'S'
 }
 
-export function AgentProfile({ name }: { name: string }) {
-  useEffect(() => {
-    void loadProfile(name)
-  }, [name])
+// --- FF Character Plate ---
 
+function CharacterPlate({ name }: { name: string }) {
   const agent = findAgent(name)
   const keeper = findKeeper(name)
   const brief = missionBrief(name)
   const contBrief = continuityBrief(name)
   const worker = workerBrief(name)
-  const owned = assignedTasks(name)
-  const lines = roomActivity.value
-  const timeline = agentTimeline.value
 
   const displayName = brief?.display_name ?? keeper?.name ?? name
-  const secondaryLabel = displayName !== name ? name : null
-  const headerStatus = agent?.status ?? brief?.status ?? 'unknown'
-  const lastSeenAt = agent?.last_seen ?? brief?.last_activity_at ?? null
-  const agentEmoji = agent?.emoji ?? keeper?.emoji
   const koreanName = agent?.koreanName ?? keeper?.koreanName
+  const headerStatus = agent?.status ?? brief?.status ?? 'unknown'
+  const agentEmoji = agent?.emoji ?? keeper?.emoji
   const currentWork = keeper?.current_work ?? brief?.current_work ?? agent?.current_task ?? null
+  const lastSeenAt = agent?.last_seen ?? brief?.last_activity_at ?? null
+  const lastActivity = keeper?.last_turn_ago_s ?? brief?.last_turn_ago_s ?? null
   const ctxRatio = keeper?.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
+  const generation = keeper?.generation
+  const autonomy = keeper?.autonomy_level
+  const model = agent?.model ?? brief?.model ?? keeper?.model
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
+  const signalTruth = brief?.signal_truth
   const continuitySummary =
     compactCopy(contBrief?.continuity_summary)
     ?? compactCopy(contBrief?.skill_route_summary)
     ?? null
-  const lastActivity = keeper?.last_turn_ago_s ?? brief?.last_turn_ago_s ?? null
+  const isKeeper = keeper != null
+  const workerState = worker?.state
+  const workerFocus = worker?.focus
 
+  const timeline = agentTimeline.value
+  const summary = timeline?.summary
+
+  return html`
+    <div class="ff-plate">
+      <div class="ff-plate__portrait">
+        <${AgentAvatar}
+          name=${name}
+          status=${headerStatus}
+          traits=${agent?.traits}
+          size="xl"
+          currentWork=${currentWork}
+          activityAge=${lastActivity}
+          signalTruth=${signalTruth}
+        />
+        ${isKeeper ? html`<div class="ff-plate__class-tag">KEEPER</div>` : null}
+      </div>
+
+      <div class="ff-plate__info">
+        <div class="ff-plate__name-row">
+          <h2 class="ff-plate__name">
+            ${agentEmoji ? html`<span class="ff-plate__emoji">${agentEmoji}</span>` : ''}
+            ${displayName}
+          </h2>
+          ${koreanName ? html`<span class="ff-plate__sub">(${koreanName})</span>` : ''}
+          ${generation != null ? html`<span class="ff-plate__level">Lv.${generation}</span>` : null}
+        </div>
+
+        <div class="ff-plate__badges">
+          <${StatusBadge} status=${headerStatus} />
+          ${model ? html`<span class="ff-plate__model">${model}</span>` : null}
+          ${autonomy ? html`<span class="ff-plate__autonomy">${autonomy}</span>` : null}
+          ${signalTruth ? html`<span class="ff-plate__signal ff-plate__signal--${signalTruth}">${signalTruth}</span>` : null}
+        </div>
+
+        ${ctxPct != null ? html`
+          <div class="ff-plate__bar-row">
+            <span class="ff-plate__bar-label">CTX</span>
+            <div class="ctx-bar" style="flex:1">
+              <div class="ctx-fill ${ctxBarClass(ctxRatio)}" style=${{ width: `${ctxPct}%` }}></div>
+            </div>
+            <span class="ff-plate__bar-value">${ctxPct}%</span>
+          </div>
+        ` : null}
+
+        <div class="ff-plate__status-line">
+          ${currentWork
+            ? html`<span class="ff-plate__work">${currentWork}</span>`
+            : html`<span class="ff-plate__work ff-plate__work--idle">대기 중</span>`
+          }
+          ${workerState ? html`<span class="ff-plate__worker-state">${workerState}</span>` : null}
+          ${workerFocus ? html`<span class="ff-plate__worker-focus">${workerFocus}</span>` : null}
+        </div>
+
+        ${lastSeenAt || lastActivity != null ? html`
+          <div class="ff-plate__meta-line">
+            ${lastSeenAt ? html`<span>마지막 확인: <${TimeAgo} timestamp=${lastSeenAt} /></span>` : null}
+            ${lastActivity != null ? html`<span>${formatDuration(lastActivity)} 전 활동</span>` : null}
+          </div>
+        ` : null}
+
+        ${keeperIdent || continuitySummary || brief?.related_session_id ? html`
+          <div class="ff-plate__meta-line">
+            ${keeperIdent ? html`<span>${keeperIdent}</span>` : null}
+            ${brief?.related_session_id ? html`<span>세션 ${brief.related_session_id}</span>` : null}
+            ${continuitySummary ? html`<span>${continuitySummary}</span>` : null}
+          </div>
+        ` : null}
+      </div>
+
+      ${summary ? html`
+        <div class="ff-plate__stats">
+          <div class="ff-stat">
+            <span class="ff-stat__value">${summary.tasks_completed}</span>
+            <span class="ff-stat__label">완료</span>
+          </div>
+          <div class="ff-stat">
+            <span class="ff-stat__value">${summary.tasks_claimed}</span>
+            <span class="ff-stat__label">수임</span>
+          </div>
+          <div class="ff-stat">
+            <span class="ff-stat__value">${summary.messages_sent}</span>
+            <span class="ff-stat__label">메시지</span>
+          </div>
+          <div class="ff-stat">
+            <span class="ff-stat__value">${summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : '0m'}</span>
+            <span class="ff-stat__label">활동</span>
+          </div>
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
+// --- Main Profile ---
+
+export function AgentProfile({ name }: { name: string }) {
+  useEffect(() => {
+    void loadProfile(name)
+  }, [name])
+
+  const owned = assignedTasks(name)
+  const lines = roomActivity.value
+  const timeline = agentTimeline.value
   const journalEntries = agentJournalEntries(name)
 
   return html`
-    <div class="agent-profile">
-      <div class="agent-profile__back">
-        <button class="control-btn ghost" onClick=${() => navigate('agents')}>
-          ← 목록으로
-        </button>
-        <button
-          class="control-btn ghost"
-          onClick=${() => { void loadProfile(name) }}
-          disabled=${loading.value}
-        >
-          ${loading.value ? '새로고침 중...' : '새로고침'}
+    <div class="ff-profile">
+      <div class="ff-profile__toolbar">
+        <button class="control-btn ghost" onClick=${() => navigate('agents')}>← 목록</button>
+        <button class="control-btn ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
+          ${loading.value ? '...' : '새로고침'}
         </button>
       </div>
 
       ${profileError.value ? html`<div class="council-error">${profileError.value}</div>` : null}
 
-      <div class="agent-profile__header">
-        <div class="agent-profile__avatar">
-          <${AgentAvatar}
-            name=${name}
-            status=${headerStatus}
-            traits=${agent?.traits}
-            size="xl"
-            currentWork=${currentWork}
-            activityAge=${lastActivity}
-          />
-        </div>
-        <div class="agent-profile__identity">
-          <h2 class="agent-profile__name">
-            ${agentEmoji ? html`<span style="font-size:1.5em;margin-right:8px">${agentEmoji}</span>` : ''}
-            ${displayName}
-            ${koreanName ? html`<span class="agent-profile__korean">(${koreanName})</span>` : ''}
-            ${secondaryLabel ? html`<span class="mono agent-profile__secondary">${secondaryLabel}</span>` : ''}
-          </h2>
-          <div class="agent-profile__badges">
-            <${StatusBadge} status=${headerStatus} />
-            ${keeper ? html`<span class="pill">keeper</span>` : null}
-            ${keeper?.generation != null ? html`<span class="pill">G${keeper.generation}</span>` : null}
-            ${agent?.model ? html`<span class="mono pill">${agent.model}</span>` : ''}
-            ${brief?.signal_truth ? html`<span class="pill">signal · ${brief.signal_truth}</span>` : null}
-          </div>
-          <div class="agent-profile__meta">
-            ${currentWork ? html`<span>작업: ${currentWork}</span>` : html`<span class="text-muted">작업 없음</span>`}
-            ${lastSeenAt ? html`<span>마지막: <${TimeAgo} timestamp=${lastSeenAt} /></span>` : null}
-            ${lastActivity != null ? html`<span>${formatDuration(lastActivity)} 전 활동</span>` : null}
-          </div>
-          ${keeper && keeperIdent ? html`<div class="agent-profile__meta"><span>Keeper: ${keeper.name}${keeperIdent ? ` · ${keeperIdent}` : ''}</span></div>` : null}
-          ${continuitySummary ? html`<div class="agent-profile__meta"><span>${continuitySummary}</span></div>` : null}
-          ${brief?.related_session_id ? html`<div class="agent-profile__meta"><span>Session: ${brief.related_session_id}</span></div>` : null}
-        </div>
-      </div>
+      <${CharacterPlate} name=${name} />
 
-      ${keeper && ctxPct != null ? html`
-        <div class="agent-profile__ctx-section">
-          <div class="agent-profile__ctx-label">Context ${ctxPct}%</div>
-          <div class="roster-card__gauge-track" style="max-width:400px">
-            <div class="roster-card__gauge-bar ${pressureClass(ctxRatio)}" style=${{ width: `${ctxPct}%` }} />
-          </div>
-          ${keeper?.autonomy_level ? html`<span class="pill">autonomy: ${keeper.autonomy_level}</span>` : null}
-        </div>
-      ` : null}
-
-      <div class="agent-profile__grid">
-        <${Card} title="할당된 태스크 (${owned.length})">
+      <div class="ff-profile__grid">
+        <${Card} title="태스크 (${owned.length})" class="ff-card">
           ${owned.length === 0
             ? html`<div class="empty-state">할당된 태스크 없음</div>`
             : html`<div class="agent-detail-task-list">${owned.map(t => html`
@@ -299,39 +345,25 @@ export function AgentProfile({ name }: { name: string }) {
               `)}</div>`}
         <//>
 
-        ${worker ? html`
-          <${Card} title="Worker 상태">
-            <div class="agent-worker-brief">
-              <div class="agent-worker-brief__row">
-                <span class="agent-worker-brief__label">State</span>
-                <${StatusBadge} status=${worker.state} />
-              </div>
-              ${worker.focus ? html`
-                <div class="agent-worker-brief__row">
-                  <span class="agent-worker-brief__label">Focus</span>
-                  <span>${worker.focus}</span>
-                </div>
-              ` : null}
-              ${worker.recent_output_preview ? html`
-                <div class="agent-worker-brief__row">
-                  <span class="agent-worker-brief__label">Output</span>
-                  <span class="mono">${compactCopy(worker.recent_output_preview, 120)}</span>
-                </div>
-              ` : null}
-            </div>
-          <//>
-        ` : null}
-
-        <${Card} title="최근 Room 활동">
-          ${lines.length === 0
-            ? html`<div class="empty-state">관련 활동 없음</div>`
-            : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) =>
-                html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
+        <${Card} title="타임라인" class="ff-card">
+          ${!timeline || (timeline.events ?? []).length === 0
+            ? html`<div class="empty-state">이벤트 없음</div>`
+            : html`<div class="agent-timeline-list">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
+                const detail = evt.detail as Record<string, string | undefined>
+                const title = detail.title ?? detail.content ?? ''
+                return html`
+                  <div class="agent-timeline-event" key=${idx}>
+                    <span class="ff-event-type">${timelineEventLabel(evt.type)}</span>
+                    ${title ? html`<span class="ff-event-detail">${compactCopy(title, 80)}</span>` : null}
+                    ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
+                  </div>
+                `
+              })}</div>`}
         <//>
 
-        <${Card} title="실시간 이벤트 (${journalEntries.length})">
+        <${Card} title="실시간 (${journalEntries.length})" class="ff-card">
           ${journalEntries.length === 0
-            ? html`<div class="empty-state">관련 이벤트 없음</div>`
+            ? html`<div class="empty-state">이벤트 없음</div>`
             : html`<div class="agent-journal-stream">${journalEntries.map((entry: JournalEntry, idx: number) => html`
                 <div class="agent-journal-entry" key=${idx}>
                   <span class="agent-journal-kind">${journalKindIcon(entry)}</span>
@@ -342,64 +374,43 @@ export function AgentProfile({ name }: { name: string }) {
               `)}</div>`}
         <//>
 
-        ${timeline ? html`
-          <${Card} title="타임라인 (${timeline.summary?.total_events ?? 0})">
-            ${timeline.summary ? html`
-              <div class="agent-timeline-summary">
-                ${timeline.summary.tasks_completed > 0 ? html`<span class="pill">완료 ${timeline.summary.tasks_completed}</span>` : null}
-                ${timeline.summary.tasks_claimed > 0 ? html`<span class="pill">수임 ${timeline.summary.tasks_claimed}</span>` : null}
-                ${timeline.summary.messages_sent > 0 ? html`<span class="pill">메시지 ${timeline.summary.messages_sent}</span>` : null}
-                ${timeline.summary.active_duration_minutes > 0 ? html`<span class="pill">${Math.round(timeline.summary.active_duration_minutes)}분 활동</span>` : null}
+        <${Card} title="Room 활동" class="ff-card">
+          ${lines.length === 0
+            ? html`<div class="empty-state">관련 활동 없음</div>`
+            : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) =>
+                html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
+        <//>
+
+        ${taskHistories.value.length > 0 ? html`
+          <${Card} title="태스크 이력" class="ff-card ff-card--wide">
+            <div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`
+              <div class="agent-history-row" key=${row.taskId}>
+                <div class="agent-history-head"><span class="pill">${row.taskId}</span></div>
+                <pre class="agent-history-pre">${row.text || 'No history yet'}</pre>
               </div>
-            ` : null}
-            ${(timeline.events ?? []).length === 0
-              ? html`<div class="empty-state">타임라인 이벤트 없음</div>`
-              : html`<div class="agent-timeline-list">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
-                  const detail = evt.detail as Record<string, string | undefined>
-                  const title = detail.title ?? detail.content ?? ''
-                  return html`
-                    <div class="agent-timeline-event" key=${idx}>
-                      <span class="agent-journal-kind">${timelineEventIcon(evt.type)}</span>
-                      <span class="agent-timeline-type">${timelineEventLabel(evt.type)}</span>
-                      ${title ? html`<span class="agent-timeline-detail">${compactCopy(title, 80)}</span>` : null}
-                      ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
-                    </div>
-                  `
-                })}</div>`}
+            `)}</div>
           <//>
         ` : null}
+      </div>
 
-        <${Card} title="태스크 이력">
-          ${taskHistories.value.length === 0
-            ? html`<div class="empty-state">태스크 이력 없음</div>`
-            : html`<div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`
-                <div class="agent-history-row" key=${row.taskId}>
-                  <div class="agent-history-head"><span class="pill">${row.taskId}</span></div>
-                  <pre class="agent-history-pre">${row.text || 'No history yet'}</pre>
-                </div>
-              `)}</div>`}
-        <//>
-
-        <${Card} title="@mention 보내기">
-          <div class="agent-mention-row">
-            <input
-              class="control-input"
-              type="text"
-              placeholder="메시지 입력..."
-              value=${mentionText.value}
-              onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
-              onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention(name) }}
-              disabled=${sendingMention.value}
-            />
-            <button
-              class="control-btn"
-              onClick=${() => { void submitMention(name) }}
-              disabled=${sendingMention.value || mentionText.value.trim() === ''}
-            >
-              ${sendingMention.value ? '전송 중...' : '전송'}
-            </button>
-          </div>
-        <//>
+      <div class="ff-profile__mention">
+        <span class="ff-profile__mention-label">@${name}</span>
+        <input
+          class="control-input"
+          type="text"
+          placeholder="메시지 입력..."
+          value=${mentionText.value}
+          onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
+          onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention(name) }}
+          disabled=${sendingMention.value}
+        />
+        <button
+          class="control-btn"
+          onClick=${() => { void submitMention(name) }}
+          disabled=${sendingMention.value || mentionText.value.trim() === ''}
+        >
+          ${sendingMention.value ? '...' : '전송'}
+        </button>
       </div>
     </div>
   `

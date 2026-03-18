@@ -1,6 +1,4 @@
 // Unified time formatting utilities.
-// Consolidates relativeTime, formatElapsed, formatDuration, formatTimeAgo
-// from helpers.ts, mission-utils.ts, time-ago.ts, keeper-summary-card.ts, etc.
 
 /** Relative time from ISO string — "3분 전", "2시간 전" etc. */
 export function relativeTime(iso?: string | null, fallback = '정보 없음'): string {

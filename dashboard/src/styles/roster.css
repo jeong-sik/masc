@@ -406,12 +406,6 @@
   opacity: 1;
 }
 
-.overview-stat__source {
-  font-size: 10px;
-  color: rgba(212, 169, 75, 0.35);
-  margin-left: 4px;
-}
-
 /* Attention badge — gold warning */
 .attention-badge {
   background: rgba(212, 169, 75, 0.15);

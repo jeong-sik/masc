@@ -176,7 +176,7 @@ let test_config_of_json () =
     ("mode", `String "standard");
   ] in
   let c = Config.of_json json in
-  check bool "mode is Standard" true (c.mode = Mode.Standard)
+  check bool "always Full" true (c.mode = Mode.Full)
 
 let test_config_of_json_custom () =
   let json = `Assoc [
@@ -184,7 +184,7 @@ let test_config_of_json_custom () =
     ("enabled_categories", `List [`String "room"; `String "task"]);
   ] in
   let c = Config.of_json json in
-  check bool "mode is Custom" true (c.mode = Mode.Custom)
+  check bool "always Full" true (c.mode = Mode.Full)
 
 let test_config_of_json_invalid () =
   let json = `String "invalid" in

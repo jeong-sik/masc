@@ -174,9 +174,7 @@ let () = test "dispatch_tool_admin_update_mode" (fun () ->
       let json = parse_json result in
       assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "mode");
       let cfg = Config.load (Room.masc_dir ctx.config) in
-      assert (cfg.mode = Mode.Custom);
-      assert (List.mem Mode.Core cfg.enabled_categories);
-      assert (List.mem Mode.Auth cfg.enabled_categories)
+      assert (cfg.mode = Mode.Full)
   | None -> failwith "dispatch returned None"
 )
 

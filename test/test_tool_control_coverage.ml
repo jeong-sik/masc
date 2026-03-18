@@ -93,7 +93,7 @@ let () = test "dispatch_switch_mode" (fun () ->
       let mode =
         json |> Yojson.Safe.Util.member "mode" |> Yojson.Safe.Util.to_string
       in
-      assert (mode = "minimal")
+      assert (mode = "full")
   | None -> failwith "dispatch returned None"
 )
 

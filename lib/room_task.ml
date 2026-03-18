@@ -606,7 +606,10 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
               let tm = { Unix.tm_sec = 0; tm_min = mi; tm_hour = h;
                          tm_mday = d; tm_mon = mo - 1; tm_year = y - 1900;
                          tm_wday = 0; tm_yday = 0; tm_isdst = false } in
-              Some (fst (Unix.mktime tm)))
+              let local_epoch, _ = Unix.mktime tm in
+              let utc_as_local, _ = Unix.mktime (Unix.gmtime local_epoch) in
+              let tz_offset = local_epoch -. utc_as_local in
+              Some (local_epoch +. tz_offset))
         with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
       in
       let effective_priority (task : Types.task) =

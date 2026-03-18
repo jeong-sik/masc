@@ -51,6 +51,7 @@ and agent_action =
   | ActionPost of string
   | ActionComment of string * string
   | ActionUpvote of string
+  | ActionVoice of string
   | ActionSkip
 
 type heartbeat_result = {

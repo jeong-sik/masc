@@ -464,8 +464,15 @@ let heartbeat_read_tools =
     "lodge_research";
   ]
 
-let heartbeat_allowed_tools ~agent_name ~trigger ~recent_posts =
+let heartbeat_voice_read_tools =
+  [ "masc_voice_agent"; "masc_voice_sessions" ]
+
+let heartbeat_allowed_tools ~agent_name ~trigger ~recent_posts ?(voice_enabled = false) () =
   let tools = ref heartbeat_read_tools in
+  if voice_enabled then
+    tools := !tools @ heartbeat_voice_read_tools;
+  if voice_enabled && check_rate_limit ~agent_name `Voice then
+    tools := !tools @ [ "masc_voice_speak" ];
   if recent_posts <> [] then tools := !tools @ [ "masc_board_vote" ];
   if recent_posts <> [] && check_rate_limit ~agent_name `Comment then
     tools := !tools @ [ "masc_board_comment" ];
@@ -477,6 +484,7 @@ let classify_completion_action (completion : Lodge_worker.completion) =
   if List.mem "masc_board_post" completion.tool_names then `Post
   else if List.mem "masc_board_comment" completion.tool_names then `Comment
   else if List.mem "masc_board_vote" completion.tool_names then `Vote
+  else if List.mem "masc_voice_speak" completion.tool_names then `Voice
   else `Skip
 
 let checkin_result_of_completion ~agent_name (completion : Lodge_worker.completion) =
@@ -484,6 +492,7 @@ let checkin_result_of_completion ~agent_name (completion : Lodge_worker.completi
    | `Post -> record_rate_action ~agent_name `Post
    | `Comment -> record_rate_action ~agent_name `Comment
    | `Vote -> record_rate_action ~agent_name `Vote
+   | `Voice -> record_rate_action ~agent_name `Voice
    | `Skip -> ());
   record_agent_activity ~name:agent_name;
   match completion.status with
@@ -493,6 +502,7 @@ let checkin_result_of_completion ~agent_name (completion : Lodge_worker.completi
         | `Post -> ActionPost completion.summary
         | `Comment -> ActionComment ("tool-loop", completion.summary)
         | `Vote -> ActionUpvote "tool-loop"
+        | `Voice -> ActionVoice completion.summary
         | `Skip -> ActionSkip
       in
       Acted { action; summary = completion.summary }

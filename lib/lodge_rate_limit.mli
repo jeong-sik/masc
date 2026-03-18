@@ -37,10 +37,10 @@ val max_posts_per_day : unit -> int
 val max_comments_per_day : int
 
 (** Check if agent can perform the given action type. *)
-val check_rate_limit : agent_name:string -> [< `Post | `Comment | `Vote ] -> bool
+val check_rate_limit : agent_name:string -> [< `Post | `Comment | `Vote | `Voice ] -> bool
 
 (** Record that agent performed an action (update rate state). *)
-val record_rate_action : agent_name:string -> [< `Post | `Comment | `Vote ] -> unit
+val record_rate_action : agent_name:string -> [< `Post | `Comment | `Vote | `Voice ] -> unit
 
 (** {1 Per-agent-per-post Comment Tracking} *)
 

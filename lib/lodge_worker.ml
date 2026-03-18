@@ -130,7 +130,8 @@ let parse_completion_json (text : string) : (completion, string) result =
     }
 
 let action_tool_names =
-  [ "masc_board_post"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote" ]
+  [ "masc_board_post"; "masc_board_comment"; "masc_board_vote"; "masc_board_comment_vote";
+    "masc_voice_speak" ]
 
 let acted_by_tools tool_names =
   List.exists (fun name -> List.mem name action_tool_names) tool_names

@@ -32,7 +32,9 @@ let keeper_read_tool_names =
 let keeper_board_tool_names =
   [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list" ]
 
-let keeper_voice_tool_names = [ "keeper_voice_speak" ]
+let keeper_voice_tool_names =
+  [ "keeper_voice_speak"; "keeper_voice_agent"; "keeper_voice_sessions";
+    "keeper_voice_session_start"; "keeper_voice_session_end" ]
 
 let keeper_shell_readonly_tool_names = [ "keeper_shell_readonly" ]
 
@@ -466,6 +468,88 @@ let execute_keeper_tool_call
         | _ ->
             Yojson.Safe.to_string
               (keeper_text_fallback_json ~agent_id:meta.name ~message))
+  | "keeper_voice_agent" ->
+      (* No net required — reads local voice config *)
+      (match Voice_bridge.get_agent_voice ~agent_id:meta.name with
+      | Ok json -> Yojson.Safe.to_string json
+      | Error err ->
+          Yojson.Safe.to_string
+            (`Assoc
+              [ ("status", `String "error");
+                ("agent_id", `String meta.name);
+                ("message", `String err) ]))
+  | "keeper_voice_sessions" ->
+      (match
+         ( Eio_context.get_switch_opt (),
+           Eio_context.get_clock_opt (),
+           Eio_context.get_net_opt () )
+       with
+      | Some sw, Some clock, Some net -> (
+          match Voice_bridge.list_voice_sessions ~sw ~clock ~net with
+          | Ok json -> Yojson.Safe.to_string json
+          | Error err ->
+              Yojson.Safe.to_string
+                (`Assoc
+                  [ ("status", `String "error");
+                    ("message", `String err) ]))
+      | _ ->
+          Yojson.Safe.to_string
+            (`Assoc
+              [ ("status", `String "error");
+                ("message", `String "net_unavailable") ]))
+  | "keeper_voice_session_start" ->
+      let session_name =
+        Safe_ops.json_string_opt "session_name" args
+        |> Option.map String.trim
+        |> function
+        | Some s when s <> "" -> Some s
+        | _ -> None
+      in
+      (match
+         ( Eio_context.get_switch_opt (),
+           Eio_context.get_clock_opt (),
+           Eio_context.get_net_opt () )
+       with
+      | Some sw, Some clock, Some net -> (
+          match
+            Voice_bridge.start_voice_session ~sw ~clock ~net
+              ~agent_id:meta.name ?session_name ()
+          with
+          | Ok json -> Yojson.Safe.to_string json
+          | Error err ->
+              Yojson.Safe.to_string
+                (`Assoc
+                  [ ("status", `String "error");
+                    ("agent_id", `String meta.name);
+                    ("message", `String err) ]))
+      | _ ->
+          Yojson.Safe.to_string
+            (`Assoc
+              [ ("status", `String "error");
+                ("message", `String "net_unavailable") ]))
+  | "keeper_voice_session_end" ->
+      (match
+         ( Eio_context.get_switch_opt (),
+           Eio_context.get_clock_opt (),
+           Eio_context.get_net_opt () )
+       with
+      | Some sw, Some clock, Some net -> (
+          match
+            Voice_bridge.end_voice_session ~sw ~clock ~net
+              ~agent_id:meta.name
+          with
+          | Ok json -> Yojson.Safe.to_string json
+          | Error err ->
+              Yojson.Safe.to_string
+                (`Assoc
+                  [ ("status", `String "error");
+                    ("agent_id", `String meta.name);
+                    ("message", `String err) ]))
+      | _ ->
+          Yojson.Safe.to_string
+            (`Assoc
+              [ ("status", `String "error");
+                ("message", `String "net_unavailable") ]))
   | "keeper_github" ->
       let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
       let gh_args = Safe_ops.json_string_list "args" args in
@@ -624,6 +708,9 @@ let keeper_tool_followup_prompt
         "keeper_task_force_release";
         "keeper_task_force_done";
         "keeper_broadcast";
+        "keeper_voice_speak";
+        "keeper_voice_session_start";
+        "keeper_voice_session_end";
       ]
   in
   let has_write = List.exists is_write_tool already_executed in

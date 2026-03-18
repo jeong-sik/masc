@@ -526,6 +526,7 @@ and agent_action =
   | ActionPost of string           (** content *)
   | ActionComment of string * string  (** post_id, content *)
   | ActionUpvote of string         (** post_id *)
+  | ActionVoice of string          (** message spoken *)
   | ActionSkip
 
 type llm_decision_outcome = {

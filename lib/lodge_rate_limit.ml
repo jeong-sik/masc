@@ -17,12 +17,14 @@ let round_robin_idx = ref 0
 
 (** {1 Per-agent Rate State} *)
 
-(** Per-agent rate state for posts/comments *)
+(** Per-agent rate state for posts/comments/voice *)
 type rate_state = {
   mutable last_post: float;
   mutable last_comment: float;
+  mutable last_voice: float;
   mutable posts_today: int;
   mutable comments_today: int;
+  mutable voice_today: int;
   mutable day_reset: float;      (** Start of current day (for daily counters) *)
 }
 
@@ -44,12 +46,14 @@ let get_rate_state ~agent_name =
     if now -. rs.day_reset > 86400.0 then begin
       rs.posts_today <- 0;
       rs.comments_today <- 0;
+      rs.voice_today <- 0;
       rs.day_reset <- day_start
     end;
     rs
   | None ->
-    let rs = { last_post = 0.0; last_comment = 0.0;
-               posts_today = 0; comments_today = 0; day_reset = day_start } in
+    let rs = { last_post = 0.0; last_comment = 0.0; last_voice = 0.0;
+               posts_today = 0; comments_today = 0; voice_today = 0;
+               day_reset = day_start } in
     Hashtbl.replace rate_states agent_name rs;
     rs
 
@@ -63,6 +67,9 @@ let check_rate_limit ~agent_name action_type =
   | `Comment ->
     now -. rs.last_comment >= min_comment_gap && rs.comments_today < max_comments_per_day
   | `Vote -> true  (* Votes are always allowed *)
+  | `Voice ->
+    (* Voice: 1 speak per heartbeat cycle, same gap as comment *)
+    now -. rs.last_voice >= min_comment_gap && rs.voice_today < max_comments_per_day
 
 (** Record that agent performed an action (update rate state) *)
 let record_rate_action ~agent_name action_type =
@@ -72,6 +79,7 @@ let record_rate_action ~agent_name action_type =
   | `Post -> rs.last_post <- now; rs.posts_today <- rs.posts_today + 1
   | `Comment -> rs.last_comment <- now; rs.comments_today <- rs.comments_today + 1
   | `Vote -> ()
+  | `Voice -> rs.last_voice <- now; rs.voice_today <- rs.voice_today + 1
 
 (** Record a check-in timestamp *)
 let record_checkin ~agent_name =

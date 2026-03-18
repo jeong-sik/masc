@@ -60,7 +60,12 @@ let select_tool_loop_assignment ~agent_name ~trigger ~trigger_reason ~recent_pos
       Lodge_reaction.generate_identity_prompt signature ~static_traits
     else load_agent_identity ~agent_name
   in
-  let allowed_tools = heartbeat_allowed_tools ~agent_name ~trigger ~recent_posts:sorted_posts in
+  let voice_enabled =
+    match Voice_bridge.public_config_json () with
+    | Ok _ -> true
+    | Error _ -> false
+  in
+  let allowed_tools = heartbeat_allowed_tools ~agent_name ~trigger ~recent_posts:sorted_posts ~voice_enabled () in
   let prompt =
     Lodge_decision.selection_prompt ~agent_name
       ~candidate_agents:[ (agent_name, identity_prompt) ]
@@ -234,6 +239,7 @@ let action_summary = function
   | ActionComment (post_id, content) ->
       Printf.sprintf "Commented on %s: %s" post_id (utf8_truncate content 30)
   | ActionUpvote post_id -> Printf.sprintf "Upvoted %s" post_id
+  | ActionVoice message -> Printf.sprintf "Spoke: %s" (utf8_truncate message 40)
   | ActionSkip -> "Skipped"
 
 let execute_agent_action ~agent_name ~action =
@@ -344,6 +350,13 @@ let execute_agent_action ~agent_name ~action =
            let err = Board.show_board_error e in
            Eio.traceln "   ❌ [%s] Upvote failed: %s" agent_name err;
            Skipped (Printf.sprintf "upvote_failed:%s" err))
+  | ActionVoice message ->
+      (* Voice actions are handled via the tool-loop path, not direct execution.
+         This branch exists for type exhaustiveness. *)
+      Printf.printf "   🔊 [%s] Voice action: %s\n%!" agent_name (utf8_truncate message 40);
+      record_agent_activity ~name:agent_name;
+      record_rate_action ~agent_name `Voice;
+      Acted { action; summary = action_summary action }
       
 
 (** {1 LLM call helper for Planner/Reflection} *)
@@ -579,6 +592,7 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
         | Acted { action = ActionPost _; _ } -> "post"
         | Acted { action = ActionComment _; _ } -> "comment"
         | Acted { action = ActionUpvote _; _ } -> "upvote"
+        | Acted { action = ActionVoice _; _ } -> "voice"
         | Acted { action = ActionSkip; _ } -> "skip"
         | Passed _ -> "passed"
         | Skipped _ -> "skipped"
@@ -589,6 +603,7 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
        | Acted { action = ActionComment _; _ } ->
            Lodge_selection.record_action ~agent_name:name ~action:`Comment
        | Acted { action = ActionUpvote _; _ }
+       | Acted { action = ActionVoice _; _ }
        | Acted { action = ActionSkip; _ }
        | Passed _ | Skipped _ ->
            Lodge_selection.record_action ~agent_name:name ~action:`Skip);

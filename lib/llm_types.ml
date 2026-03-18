@@ -289,16 +289,6 @@ let rec model_spec_of_string s =
           Error (sprintf "Cannot parse model spec: %s (unsupported direct adapter '%s')" s provider)
         | None ->
           match provider with
-        | "mlx" ->
-          Ok {
-            provider = Custom "mlx";
-            model_id;
-            max_context = 128000;
-            api_url = Env_config_runtime.Mlx.server_url;
-            api_key_env = None;
-            cost_per_1k_input = 0.0;
-            cost_per_1k_output = 0.0;
-          }
         | "custom" ->
           (* Format: custom:model@http://host:port or custom:model *)
           let actual_model, url =
@@ -321,7 +311,7 @@ let rec model_spec_of_string s =
         | _ ->
           Error
             (sprintf
-               "Cannot parse model spec: %s (unsupported provider '%s'; supported: llama, claude, gemini, glm, openrouter, mlx, custom)"
+               "Cannot parse model spec: %s (unsupported provider '%s'; supported: llama, claude, gemini, glm, openrouter, custom)"
                s provider)
 
 let configured_default_model_label () =

@@ -54,6 +54,34 @@ let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
   | Unix.WSTOPPED sig_num ->
       `Assoc [("kind", `String "stopped"); ("signal", `Int sig_num)]
 
+let strip_state_blocks_text (s : string) : string =
+  let start_marker = "[STATE]" in
+  let end_marker = "[/STATE]" in
+  let start_re = Str.regexp_string start_marker in
+  let end_re = Str.regexp_string end_marker in
+  let len = String.length s in
+  let rec loop from (buf : Buffer.t) =
+    if from >= len then ()
+    else
+      try
+        let i = Str.search_forward start_re s from in
+        if i > from then Buffer.add_substring buf s from (i - from);
+        let block_start = i + String.length start_marker in
+        let next_from =
+          try
+            let j = Str.search_forward end_re s block_start in
+            j + String.length end_marker
+          with Not_found ->
+            len
+        in
+        loop next_from buf
+      with Not_found ->
+        Buffer.add_substring buf s from (len - from)
+  in
+  let buf = Buffer.create len in
+  loop 0 buf;
+  Buffer.contents buf
+
 let is_weather_text (s : string) : bool =
   let h = String.lowercase_ascii s in
   let n = String.lowercase_ascii "weather" in

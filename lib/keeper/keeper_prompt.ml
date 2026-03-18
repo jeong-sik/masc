@@ -290,33 +290,10 @@ let proactive_temperature attempt =
   else if attempt = 2 then Keeper_config.keeper_proactive_temperature_mid ()
   else Keeper_config.keeper_proactive_temperature_high ()
 
-let strip_state_blocks_text (s : string) : string =
-  let start_marker = "[STATE]" in
-  let end_marker = "[/STATE]" in
-  let start_re = Str.regexp_string start_marker in
-  let end_re = Str.regexp_string end_marker in
-  let len = String.length s in
-  let rec loop from (buf : Buffer.t) =
-    if from >= len then ()
-    else
-      try
-        let i = Str.search_forward start_re s from in
-        if i > from then Buffer.add_substring buf s from (i - from);
-        let block_start = i + String.length start_marker in
-        let next_from =
-          try
-            let j = Str.search_forward end_re s block_start in
-            j + String.length end_marker
-          with Not_found ->
-            len
-        in
-        loop next_from buf
-      with Not_found ->
-        Buffer.add_substring buf s from (len - from)
-  in
-  let buf = Buffer.create len in
-  loop 0 buf;
-  Buffer.contents buf
+(* strip_state_blocks_text moved to Keeper_alerting_path to break
+   Keeper_prompt → Keeper_alerting → Tool_board → Keeper_prompt cycle.
+   Re-exported here via open Keeper_alerting (which includes Keeper_alerting_path). *)
+let strip_state_blocks_text = strip_state_blocks_text
 
 let trim_to_option (s : string) : string option =
   let trimmed = String.trim s in

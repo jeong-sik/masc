@@ -72,13 +72,8 @@ let handle_post_mcp ~(deps : deps) ?(profile = Mcp_eio.Full) request reqd =
           | Error msg ->
               Server_mcp_transport_http_headers.respond_mcp_auth_error ~deps
                 request reqd ~session_id ~protocol_version msg
-          | Ok () -> (
-              match Http.Request.read_body_sync reqd with
-              | Error msg ->
-                  Server_mcp_transport_http_headers.respond_mcp_internal_error
-                    ~deps request reqd ~session_id ~protocol_version
-                    (Printf.sprintf "Body read error: %s" msg)
-              | Ok body_str ->
+          | Ok () ->
+              Http.Request.read_body_async reqd (fun body_str ->
                   let accept_mode =
                     Server_mcp_transport_http_headers.classify_mcp_accept_for_body
                       request body_str
@@ -113,16 +108,17 @@ let handle_post_mcp ~(deps : deps) ?(profile = Mcp_eio.Full) request reqd =
                         Server_mcp_transport_http_headers.legacy_accept_warning_headers
                           accept_mode
                       in
-                      try
-                        match
-                          Server_mcp_transport_http_headers.request_runtime_result
-                            deps
-                        with
-                        | Error msg ->
-                            Server_mcp_transport_http_headers
-                            .respond_mcp_internal_error ~deps request reqd
-                              ~session_id ~protocol_version msg
-                        | Ok (state, sw, clock) ->
+                      match
+                        Server_mcp_transport_http_headers.request_runtime_result
+                          deps
+                      with
+                      | Error msg ->
+                          Server_mcp_transport_http_headers
+                          .respond_mcp_internal_error ~deps request reqd
+                            ~session_id ~protocol_version msg
+                      | Ok (state, sw, clock) ->
+                          Eio.Fiber.fork ~sw (fun () ->
+                          try
                             let response_json =
                               Mcp_eio.handle_request ~clock ~sw ~profile
                                 ~mcp_session_id:session_id ?auth_token state
@@ -235,7 +231,7 @@ let handle_post_mcp ~(deps : deps) ?(profile = Mcp_eio.Full) request reqd =
                         in
                         Server_mcp_transport_http_headers.respond_mcp_internal_error
                           ~deps request reqd ~session_id ~protocol_version
-                          ("Internal error: " ^ Printexc.to_string exn))))
+                          ("Internal error: " ^ Printexc.to_string exn)))))
 
 let handle_get_mcp ~(deps : deps) ?legacy_messages_endpoint
     ?(profile = Mcp_eio.Full)

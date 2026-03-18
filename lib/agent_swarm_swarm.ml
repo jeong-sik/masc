@@ -340,23 +340,32 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
                   []
               in
               let all_tools = spec.tools @ masc_tools @ extra_tools in
-              let config = {
-                Types.default_config with
-                name = spec.name;
-                model = spec.provider.model_id;
-                system_prompt = Some spec.system_prompt;
-                max_tokens =
-                  Option.value spec.max_tokens
-                    ~default:Types.default_config.max_tokens;
-                max_turns = spec.max_turns;
-                temperature = spec.temperature;
-              } in
-              let agent =
-                Agent.create ~net ~config ~tools:all_tools
-                  ~options:{ Agent.default_options with
-                             provider = Some spec.provider } ()
+              let tool_names =
+                List.map (fun (tool : Tool.t) -> tool.schema.name) all_tools
               in
-              Agent.run ~sw:inner_sw agent goal
+              let builder =
+                Builder.create ~net ~model:spec.provider.model_id
+                |> Builder.with_name spec.name
+                |> Builder.with_system_prompt spec.system_prompt
+                |> Builder.with_max_tokens
+                     (Option.value spec.max_tokens
+                        ~default:Types.default_config.max_tokens)
+                |> Builder.with_max_turns spec.max_turns
+                |> (fun b ->
+                     match spec.temperature with
+                     | Some t -> Builder.with_temperature t b
+                     | None -> b)
+                |> Builder.with_provider spec.provider
+                |> Builder.with_tools all_tools
+                |> Builder.with_guardrails
+                     {
+                       Guardrails.tool_filter = AllowList tool_names;
+                       max_tool_calls_per_turn = Some 12;
+                     }
+              in
+              match Builder.build_safe builder with
+              | Error err -> Error err
+              | Ok agent -> Agent.run ~sw:inner_sw agent goal
             )
           in
           let result =

@@ -24,6 +24,7 @@ let all_schemas_with_perpetual =
   @ Tool_operator.schemas @ Tool_llama.schemas @ Tool_command_plane.schemas @ Tool_goals.schemas
   @ Tool_team_session.schemas @ Tool_voice.schemas @ Tool_shard.schemas
   @ Tool_autoresearch.schemas
+  @ Tool_compact.schemas
   (* Removed from surface (0 calls in 6-day audit):
      Tool_perpetual, Tool_code_swarm, Tool_notifications, Tool_agent_timeline *)
 

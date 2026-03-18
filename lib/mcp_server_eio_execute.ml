@@ -554,6 +554,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           sw = Some sw; proc_mgr = state.Mcp_server.proc_mgr;
           room_config = Some config } in
         Tool_perpetual.dispatch ctx ~name ~args:arguments
+    | Mod_compact ->
+        Tool_compact.dispatch ~name ~args:arguments
     | Mod_mdal ->
         let ctx : Tool_mdal.context = { agent_name; config = Some config;
           sw = Some sw; proc_mgr = state.Mcp_server.proc_mgr;

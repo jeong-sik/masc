@@ -53,3 +53,18 @@ val load_findings :
 
 (** Empty context for when no session is active. *)
 val empty : team_context
+
+(** {1 OAS Collaboration bridge}
+
+    Lossy projection from MASC team session (47 fields) to
+    OAS {!Agent_sdk.Collaboration.t} (12 fields).
+    MASC votes/artifacts are not in the session record, so those
+    fields are empty in the result.  [shared_context] is populated
+    from shared findings.
+
+    @since 2.114.0 *)
+
+val collaboration_of_session :
+  base_path:string ->
+  Team_session_types.session ->
+  Agent_sdk.Collaboration.t

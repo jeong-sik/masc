@@ -390,18 +390,7 @@ let tool_category tool_name =
   | "masc_spawn"
   | "masc_async_spawn" | "masc_job_status" | "masc_job_list" -> Ecosystem
 
-  (* ── TRPG ── *)
-  | "masc_trpg_session_start" | "masc_trpg_round_run"
-  | "masc_trpg_turn_advance" | "masc_trpg_dice_roll"
-  | "masc_trpg_actor_spawn" | "masc_trpg_actor_update"
-  | "masc_trpg_actor_delete" | "masc_trpg_actor_claim"
-  | "masc_trpg_actor_release" | "masc_trpg_actor_match"
-  | "masc_trpg_pool_generate" | "masc_trpg_party_select"
-  | "masc_trpg_preset_list" | "masc_trpg_stream"
-  | "masc_trpg_join_eligibility" | "masc_trpg_mid_join_request"
-  | "masc_trpg_intervention_submit"
-  | "masc_trpg_scene_transition" | "masc_trpg_quest_update"
-  | "masc_trpg_world_event"
+  (* ── TRPG (canonical names only) ── *)
   | "trpg_roleplay" -> TRPG
 
   (* ── Deprecated/archived tools (hidden via tool_catalog, excluded from presets) ── *)

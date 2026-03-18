@@ -47,7 +47,7 @@ end
 module Gardener = struct
   (** Master switch for Gardener Agent *)
   let enabled =
-    get_bool ~default:false "MASC_GARDENER_ENABLED"
+    get_bool ~default:true "MASC_GARDENER_ENABLED"
 
   (** Minimum agent population (never retire below this) *)
   let min_agents =

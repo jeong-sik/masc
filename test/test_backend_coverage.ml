@@ -178,35 +178,75 @@ let test_filesystem_health_check () =
 (* Backend.ml - Memory Pub/Sub (BackendNotSupported)             *)
 (* ============================================================ *)
 
-let test_memory_pubsub_not_supported () =
+let test_memory_pubsub () =
   let cfg = Backend.{ default_config with backend_type = Memory } in
   match Backend.MemoryBackend.create cfg with
   | Error _ -> fail "Failed to create"
   | Ok backend ->
-      (* Publish should return BackendNotSupported *)
-      (match Backend.MemoryBackend.publish backend ~channel:"test" ~message:"msg" with
-      | Error (Backend.BackendNotSupported _) -> ()
-      | _ -> fail "publish should return BackendNotSupported");
+      let received = ref "" in
+      (match Backend.MemoryBackend.subscribe backend
+          ~channel:"test" ~callback:(fun msg -> received := msg) with
+       | Ok () -> ()
+       | Error e -> fail (Backend.show_error e));
+      (match Backend.MemoryBackend.publish backend
+          ~channel:"test" ~message:"hello" with
+       | Ok count -> check int "1 subscriber" 1 count
+       | Error e -> fail (Backend.show_error e));
+      check string "received message" "hello" !received
 
-      (* Subscribe should return BackendNotSupported *)
-      match Backend.MemoryBackend.subscribe backend ~channel:"test" ~callback:(fun _ -> ()) with
-      | Error (Backend.BackendNotSupported _) -> ()
-      | _ -> fail "subscribe should return BackendNotSupported"
-
-let test_filesystem_pubsub_not_supported () =
+let test_filesystem_pubsub () =
   let cfg = { Backend.default_config with base_path = make_test_dir "masc_ps_test" } in
   match Backend.FileSystemBackend.create cfg with
   | Error _ -> fail "Failed to create"
   | Ok backend ->
-      (* Publish should return BackendNotSupported *)
-      (match Backend.FileSystemBackend.publish backend ~channel:"test" ~message:"msg" with
-      | Error (Backend.BackendNotSupported _) -> ()
-      | _ -> fail "publish should return BackendNotSupported");
+      let received = ref "" in
+      (match Backend.FileSystemBackend.subscribe backend
+          ~channel:"test" ~callback:(fun msg -> received := msg) with
+       | Ok () -> ()
+       | Error e -> fail (Backend.show_error e));
+      (match Backend.FileSystemBackend.publish backend
+          ~channel:"test" ~message:"hello" with
+       | Ok count -> check int "1 subscriber" 1 count
+       | Error e -> fail (Backend.show_error e));
+      check string "received message" "hello" !received
 
-      (* Subscribe should return BackendNotSupported *)
-      match Backend.FileSystemBackend.subscribe backend ~channel:"test" ~callback:(fun _ -> ()) with
-      | Error (Backend.BackendNotSupported _) -> ()
-      | _ -> fail "subscribe should return BackendNotSupported"
+let test_pubsub_no_subscribers () =
+  let cfg = Backend.{ default_config with backend_type = Memory } in
+  match Backend.MemoryBackend.create cfg with
+  | Error _ -> fail "Failed to create"
+  | Ok backend ->
+      (match Backend.MemoryBackend.publish backend ~channel:"empty" ~message:"msg" with
+       | Ok count -> check int "0 subscribers" 0 count
+       | Error e -> fail (Backend.show_error e))
+
+let test_pubsub_multi_subscribers () =
+  let cfg = Backend.{ default_config with backend_type = Memory } in
+  match Backend.MemoryBackend.create cfg with
+  | Error _ -> fail "Failed to create"
+  | Ok backend ->
+      let count_a = ref 0 in
+      let count_b = ref 0 in
+      ignore (Backend.MemoryBackend.subscribe backend
+          ~channel:"ch" ~callback:(fun _ -> incr count_a));
+      ignore (Backend.MemoryBackend.subscribe backend
+          ~channel:"ch" ~callback:(fun _ -> incr count_b));
+      (match Backend.MemoryBackend.publish backend ~channel:"ch" ~message:"x" with
+       | Ok count -> check int "2 subscribers" 2 count
+       | Error e -> fail (Backend.show_error e));
+      check int "a received" 1 !count_a;
+      check int "b received" 1 !count_b
+
+let test_pubsub_channel_isolation () =
+  let cfg = Backend.{ default_config with backend_type = Memory } in
+  match Backend.MemoryBackend.create cfg with
+  | Error _ -> fail "Failed to create"
+  | Ok backend ->
+      let received = ref false in
+      ignore (Backend.MemoryBackend.subscribe backend
+          ~channel:"alpha" ~callback:(fun _ -> received := true));
+      ignore (Backend.MemoryBackend.publish backend
+          ~channel:"beta" ~message:"msg");
+      check bool "alpha not triggered by beta" false !received
 
 (* ============================================================ *)
 (* Backend.ml - Lock Edge Cases                                  *)
@@ -765,8 +805,11 @@ let () =
       test_case "health_check" `Quick test_filesystem_health_check;
     ];
     "pubsub", [
-      test_case "memory not supported" `Quick test_memory_pubsub_not_supported;
-      test_case "filesystem not supported" `Quick test_filesystem_pubsub_not_supported;
+      test_case "memory publish and subscribe" `Quick test_memory_pubsub;
+      test_case "filesystem publish and subscribe" `Quick test_filesystem_pubsub;
+      test_case "no subscribers returns 0" `Quick test_pubsub_no_subscribers;
+      test_case "multi subscribers all receive" `Quick test_pubsub_multi_subscribers;
+      test_case "channel isolation" `Quick test_pubsub_channel_isolation;
     ];
     "lock_edge_cases", [
       test_case "nonowner release" `Quick test_lock_nonowner_release;

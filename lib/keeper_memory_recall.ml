@@ -440,6 +440,45 @@ let evaluate_keeper_auto_rules
     reasons = List.rev reasons;
   }
 
+(** Deterministic priority stack for auto-rule evaluation results.
+    Given a keeper_auto_rule_eval where multiple rules may fire simultaneously,
+    returns the single highest-priority action. Priority order (first match wins):
+    1. guardrail_stop — safety-critical, 4-way AND gate
+    2. reflect — repetition prevention
+    3. plan — goal drift correction
+    4. compact — context cleanup
+    5. handoff — generation succession
+    6. none — no rule fired *)
+type prioritized_action =
+  | Act_guardrail_stop of string
+  | Act_reflect
+  | Act_plan
+  | Act_compact
+  | Act_handoff
+  | Act_none
+
+let prioritized_action (eval : keeper_auto_rule_eval) : prioritized_action =
+  if eval.guardrail_stop then
+    Act_guardrail_stop (Option.value eval.guardrail_reason ~default:"guardrail_stop")
+  else if eval.reflect then
+    Act_reflect
+  else if eval.plan then
+    Act_plan
+  else if eval.compact then
+    Act_compact
+  else if eval.handoff then
+    Act_handoff
+  else
+    Act_none
+
+let prioritized_action_to_string = function
+  | Act_guardrail_stop reason -> Printf.sprintf "guardrail_stop(%s)" reason
+  | Act_reflect -> "reflect"
+  | Act_plan -> "plan"
+  | Act_compact -> "compact"
+  | Act_handoff -> "handoff"
+  | Act_none -> "none"
+
 let learned_policy_auto_rules
     ~(meta : keeper_meta)
     ~(context_ratio : float)

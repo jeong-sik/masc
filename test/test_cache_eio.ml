@@ -166,7 +166,78 @@ let test_expired_cleanup () =
     | Ok None -> ()  (* Auto-cleanup worked *)
     | _ -> failwith "Expected expired entry to be cleaned up"
   );
-  print_endline "✓ test_expired_cleanup passed"
+  print_endline "  test_expired_cleanup passed"
+
+let test_evict_expired_batch () =
+  with_temp_masc_dir (fun config ->
+    (* Create several expired entries *)
+    let _ = Cache_eio.set config ~key:"exp-1" ~value:"v1" ~ttl_seconds:(-1) () in
+    let _ = Cache_eio.set config ~key:"exp-2" ~value:"v2" ~ttl_seconds:(-1) () in
+    let _ = Cache_eio.set config ~key:"exp-3" ~value:"v3" ~ttl_seconds:(-1) () in
+    (* Create a valid entry *)
+    let _ = Cache_eio.set config ~key:"valid-1" ~value:"keep" ~ttl_seconds:3600 () in
+
+    (* Evict expired entries *)
+    let evicted = Cache_eio.evict_expired config in
+    assert (evicted = 3);
+
+    (* Valid entry should still exist *)
+    (match Cache_eio.get config ~key:"valid-1" with
+     | Ok (Some entry) -> assert (entry.Cache_eio.value = "keep")
+     | _ -> failwith "Expected valid entry to survive eviction");
+
+    (* Expired entries should be gone *)
+    let count = Cache_eio.count_entries config in
+    assert (count = 1)
+  );
+  print_endline "  test_evict_expired_batch passed"
+
+let test_maybe_evict_expired_triggers_when_ratio_high () =
+  with_temp_masc_dir (fun config ->
+    (* Reset last_batch_eviction to allow immediate trigger *)
+    Cache_eio.last_batch_eviction := 0.0;
+
+    (* Create 8 expired + 2 valid = 80% expired ratio > 50% threshold *)
+    for i = 1 to 8 do
+      let _ = Cache_eio.set config
+        ~key:(Printf.sprintf "exp-%d" i)
+        ~value:"expired"
+        ~ttl_seconds:(-1) () in
+      ()
+    done;
+    let _ = Cache_eio.set config ~key:"valid-a" ~value:"keep-a" ~ttl_seconds:3600 () in
+    let _ = Cache_eio.set config ~key:"valid-b" ~value:"keep-b" ~ttl_seconds:3600 () in
+
+    (* Verify we start with 10 entries *)
+    assert (Cache_eio.count_entries config = 10);
+
+    (* Access via get triggers maybe_evict_expired *)
+    let _ = Cache_eio.get config ~key:"valid-a" in
+
+    (* After batch eviction, only valid entries should remain *)
+    let remaining = Cache_eio.count_entries config in
+    assert (remaining = 2)
+  );
+  print_endline "  test_maybe_evict_expired_triggers_when_ratio_high passed"
+
+let test_maybe_evict_expired_throttled () =
+  with_temp_masc_dir (fun config ->
+    (* Set last_batch_eviction to now (prevents re-run within interval) *)
+    Cache_eio.last_batch_eviction := Unix.gettimeofday ();
+
+    (* Create expired entries *)
+    let _ = Cache_eio.set config ~key:"exp-1" ~value:"v1" ~ttl_seconds:(-1) () in
+    let _ = Cache_eio.set config ~key:"exp-2" ~value:"v2" ~ttl_seconds:(-1) () in
+
+    (* maybe_evict should be throttled (returns 0) *)
+    let evicted = Cache_eio.maybe_evict_expired config in
+    assert (evicted = 0);
+
+    (* Expired entries should still exist on disk (not evicted by batch) *)
+    (* Note: individual get will still remove the specific expired entry *)
+    assert (Cache_eio.count_entries config = 2)
+  );
+  print_endline "  test_maybe_evict_expired_throttled passed"
 
 let () =
   print_endline "\n=== Cache_eio Tests (Pure Sync) ===\n";
@@ -179,4 +250,7 @@ let () =
   test_clear ();
   test_stats ();
   test_expired_cleanup ();
-  print_endline "\n✅ All 9 Cache_eio tests passed!\n"
+  test_evict_expired_batch ();
+  test_maybe_evict_expired_triggers_when_ratio_high ();
+  test_maybe_evict_expired_throttled ();
+  print_endline "\n=== All 12 Cache_eio tests passed ===\n"

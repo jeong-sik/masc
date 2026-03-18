@@ -542,11 +542,10 @@
    ;; Perpetual Agent Runtime (infinite context system)
    llm_types
    llm_eio_env
-   llm_provider_bridge
    llm_discovery_cache
+   llm_oas_adapters
    llm_orchestration
    llm_client
-   llm_provider_oas
    llm_response_cache
    context_scoring
    compaction_types

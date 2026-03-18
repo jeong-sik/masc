@@ -163,17 +163,17 @@ let execute_team_turn ~ctx ~request ~session_id ~turn_kind ~message ~target_agen
         ("operator_override", `Bool operator_override);
       ])
 
-let execute_action (ctx : 'a context) (request : action_request) :
-    (Yojson.Safe.t, string) result =
+(** {1 Domain-specific action handlers} *)
+
+let execute_room_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "broadcast" ->
       let* () = validate_target_type "room" request in
-      let message =
+      let* message =
         match get_string_opt request.payload "message" with
         | Some value -> Ok value
         | None -> Error "payload.message is required"
       in
-      let* message = message in
       let result = Room.broadcast ctx.config ~from_agent:request.actor ~content:message in
       Ok
         (`Assoc
@@ -240,6 +240,28 @@ let execute_action (ctx : 'a context) (request : action_request) :
                 merge_json_objects summary_json
                   (`Assoc [ ("checkins", `List rows) ]) );
             ])
+  | "task_inject" ->
+      let* () = validate_target_type "room" request in
+      let* title =
+        match get_string_opt request.payload "title" with
+        | Some value -> Ok value
+        | None -> Error "payload.title is required"
+      in
+      let priority = get_int request.payload "priority" 2 in
+      let description =
+        get_string request.payload "description" "Injected by operator control plane"
+      in
+      let result = Room.add_task ctx.config ~title ~priority ~description in
+      Ok
+        (`Assoc
+          [
+            ("delegated_tool", `String "masc_add_task");
+            ("result", `String result);
+          ])
+  | _ -> Error (Printf.sprintf "not a room action: %s" request.action_type)
+
+let execute_team_action (ctx : 'a context) (request : action_request) =
+  match request.action_type with
   | "team_turn" ->
       let* () = validate_target_type "team_session" request in
       let* session_id = require_target_id request in
@@ -282,12 +304,11 @@ let execute_action (ctx : 'a context) (request : action_request) :
   | "team_task_inject" ->
       let* () = validate_target_type "team_session" request in
       let* session_id = require_target_id request in
-      let task_title =
+      let* task_title =
         match get_string_opt request.payload "task_title" with
         | Some value -> Ok value
         | None -> require_payload_field request.payload "title" "payload.task_title or payload.title is required"
       in
-      let* task_title = task_title in
       let task_description =
         match get_string_opt request.payload "task_description" with
         | Some value -> Some value
@@ -302,13 +323,12 @@ let execute_action (ctx : 'a context) (request : action_request) :
   | "team_worker_spawn_batch" ->
       let* () = validate_target_type "team_session" request in
       let* session_id = require_target_id request in
-      let spawn_batch =
+      let* spawn_batch =
         match U.member "spawn_batch" request.payload with
         | `List [] -> Error "payload.spawn_batch must contain at least one item"
         | `List _ as xs -> Ok xs
         | _ -> Error "payload.spawn_batch is required"
       in
-      let* spawn_batch = spawn_batch in
       let args =
         `Assoc
           [
@@ -344,6 +364,10 @@ let execute_action (ctx : 'a context) (request : action_request) :
             ("delegated_tool", `String "masc_team_session_stop");
             ("result", result);
           ])
+  | _ -> Error (Printf.sprintf "not a team action: %s" request.action_type)
+
+let execute_keeper_action (ctx : 'a context) (request : action_request) =
+  match request.action_type with
   | "keeper_probe" ->
       let* () = validate_target_type "keeper" request in
       let* name = require_target_id request in
@@ -460,12 +484,11 @@ let execute_action (ctx : 'a context) (request : action_request) :
   | "keeper_message" ->
       let* () = validate_target_type "keeper" request in
       let* name = require_target_id request in
-      let message =
+      let* message =
         match get_string_opt request.payload "message" with
         | Some value -> Ok value
         | None -> Error "payload.message is required"
       in
-      let* message = message in
       let models =
         match request.payload |> U.member "models" with
         | `List items ->
@@ -507,10 +530,13 @@ let execute_action (ctx : 'a context) (request : action_request) :
             ("delegated_tool", `String "masc_keeper_msg");
             ("result", json_of_dispatch_output body);
           ])
+  | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)
+
+let execute_swarm_action (ctx : 'a context) (request : action_request) =
+  match request.action_type with
   | "swarm_run_continue" ->
       let* () = validate_target_type "swarm_run" request in
-      let swarm_json = swarm_run_json_for_request ctx request in
-      let* swarm_json = swarm_json in
+      let* swarm_json = swarm_run_json_for_request ctx request in
       let operation_id = swarm_run_operation_id swarm_json in
       let detachment_id = swarm_run_detachment_id swarm_json in
       let pending_decisions =
@@ -579,8 +605,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
               ])
   | "swarm_run_rerun" ->
       let* () = validate_target_type "swarm_run" request in
-      let swarm_json = swarm_run_json_for_request ctx request in
-      let* swarm_json = swarm_json in
+      let* swarm_json = swarm_run_json_for_request ctx request in
       let run_id = Option.value ~default:"swarm-live" request.target_id in
       let args = `Assoc [ ("run_id", `String run_id) ] in
       let* rerun_result =
@@ -606,8 +631,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
           ])
   | "swarm_run_abandon" ->
       let* () = validate_target_type "swarm_run" request in
-      let swarm_json = swarm_run_json_for_request ctx request in
-      let* swarm_json = swarm_json in
+      let* swarm_json = swarm_run_json_for_request ctx request in
       let run_id = Option.value ~default:"swarm-live" request.target_id in
       let resolution =
         Command_plane_v2.record_swarm_run_resolution_json ctx.config ~run_id
@@ -628,25 +652,20 @@ let execute_action (ctx : 'a context) (request : action_request) :
             ("result", `Assoc [ ("recorded", `Bool true) ]);
             ("resolution", resolution);
           ])
-  | "task_inject" ->
-      let* () = validate_target_type "room" request in
-      let title =
-        match get_string_opt request.payload "title" with
-        | Some value -> Ok value
-        | None -> Error "payload.title is required"
-      in
-      let* title = title in
-      let priority = get_int request.payload "priority" 2 in
-      let description =
-        get_string request.payload "description" "Injected by operator control plane"
-      in
-      let result = Room.add_task ctx.config ~title ~priority ~description in
-      Ok
-        (`Assoc
-          [
-            ("delegated_tool", `String "masc_add_task");
-            ("result", `String result);
-          ])
+  | _ -> Error (Printf.sprintf "not a swarm action: %s" request.action_type)
+
+let execute_action (ctx : 'a context) (request : action_request) :
+    (Yojson.Safe.t, string) result =
+  match request.action_type with
+  | "broadcast" | "room_pause" | "room_resume" | "social_sweep" | "task_inject" ->
+      execute_room_action ctx request
+  | "team_turn" | "team_note" | "team_broadcast" | "team_task_inject"
+  | "team_worker_spawn_batch" | "team_stop" ->
+      execute_team_action ctx request
+  | "keeper_probe" | "keeper_recover" | "keeper_message" ->
+      execute_keeper_action ctx request
+  | "swarm_run_continue" | "swarm_run_rerun" | "swarm_run_abandon" ->
+      execute_swarm_action ctx request
   | "" -> Error "action_type is required"
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 

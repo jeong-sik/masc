@@ -117,7 +117,7 @@ export function Execution() {
     <div class="agents-monitor">
       <${RoomTruthStrip} />
       <${Card}
-        title="실행 대기열"
+        title="주의 항목"
         class="section"
         semanticId="execution.queue"
         testId="execution.queue"
@@ -125,7 +125,7 @@ export function Execution() {
         ${allClear
           ? html`
               <div class="empty-state ok" data-testid="execution.all-clear">
-                모든 실행이 정상입니다. 개입이 필요한 항목이 없습니다.
+                정상 운영 중. 주의가 필요한 항목이 없습니다.
               </div>
             `
           : html`<${ExecutionQueueBody} queueRows=${queueRows} />`}
@@ -133,7 +133,7 @@ export function Execution() {
 
       <div class="agents-workbench">
         <${Card}
-          title="영향받는 세션"
+          title="관련 세션"
           class="section"
           semanticId="execution.sessions"
           testId="execution.session-briefs"
@@ -142,7 +142,7 @@ export function Execution() {
         <//>
 
         <${Card}
-          title="영향받는 작전"
+          title="관련 작업"
           class="section"
           semanticId="execution.operations"
           testId="execution.operation-briefs"
@@ -151,70 +151,54 @@ export function Execution() {
         <//>
 
         <${Card}
-          title="Social Activity"
+          title="키퍼 활동"
           class="section"
           semanticId="execution.lodge"
           testId="execution.lodge-checkins"
         >
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">Social Activity</h2>
-            <p class="monitor-subheadline">최근 public-square 이벤트에서 어떤 keeper가 행동했고, 어떤 keeper가 판단상 패스했으며, 어떤 경우가 시스템에 의해 스킵됐는지 먼저 보여줍니다.</p>
-          </div>
           <${LodgeTickCard} tick=${lodgeTick} />
           <div class="monitor-list">
             ${lodgeCheckins.length === 0
-              ? html`<div class="empty-state">최근 social activity 기록이 없습니다.</div>`
+              ? html`<div class="empty-state">최근 키퍼 활동 기록이 없습니다.</div>`
               : lodgeCheckins.map(row => html`<${LodgeCheckinRow} key=${`${row.agent_name}-${row.checked_at ?? row.outcome}`} row=${row} />`)}
           </div>
         <//>
 
         <${Card}
-          title="작업 인력"
+          title="참여 에이전트"
           class="section"
           semanticId="execution.worker_support"
           testId="execution.worker-support"
         >
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">지원 작업자</h2>
-            <p class="monitor-subheadline">선택된 세션이나 작전에 연결된 작업자만 보이고, 전체 작업자 벽은 첫 화면을 차지하지 않게 합니다.</p>
-          </div>
           <div class="monitor-list">
             ${workerSupportRows.length === 0
-              ? html`<div class="empty-state">연결된 작업자가 없습니다.</div>`
+              ? html`<div class="empty-state">참여 에이전트가 없습니다.</div>`
               : workerSupportRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.worker-card" />`)}
           </div>
         <//>
 
         <${Card}
-          title="연속성"
+          title="키퍼 연속성"
           class="section"
           semanticId="execution.continuity"
           testId="execution.continuity"
         >
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">키퍼 연속성 요약</h2>
-            <p class="monitor-subheadline">카드 제목은 keeper 이름이고, keeper-*-agent 형태의 runtime agent는 보조 라벨로만 표시합니다.</p>
-          </div>
           <div class="monitor-list">
             ${continuityRows.length === 0
-              ? html`<div class="empty-state">지금은 연속성 경고가 없습니다.</div>`
+              ? html`<div class="empty-state">연속성 경고 없음</div>`
               : continuityRows.map(row => html`<${ContinuityRow} key=${row.name} row=${row} />`)}
           </div>
         <//>
 
         <${Card}
-          title="오프라인 인력"
+          title="오프라인 에이전트"
           class="section"
           semanticId="execution.offline"
           testId="execution.offline-workers"
         >
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">오프라인 작업자</h2>
-            <p class="monitor-subheadline">빠진 작업자는 하단 보조 면으로 분리해 활성 실행 판단을 방해하지 않게 유지합니다.</p>
-          </div>
           <div class="monitor-list">
             ${offlineRows.length === 0
-              ? html`<div class="empty-state">지금은 오프라인 작업자가 없습니다.</div>`
+              ? html`<div class="empty-state">오프라인 에이전트 없음</div>`
               : offlineRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.offline-worker-card" />`)}
           </div>
         <//>

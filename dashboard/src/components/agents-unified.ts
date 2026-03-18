@@ -9,7 +9,6 @@ import { missionSnapshot } from '../mission-store'
 import { AgentRoster } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 import { Execution } from './agents'
-import { openAgentDetail, closeAgentDetail, selectedAgentName } from './agent-detail'
 
 type AgentsView = 'all' | 'agents' | 'keepers' | 'sessions'
 
@@ -59,14 +58,6 @@ export function AgentsUnified() {
     activeView.value = 'keepers'
   } else if (viewParam === 'agents' && activeView.value !== 'agents') {
     activeView.value = 'agents'
-  }
-
-  // Sync agent detail overlay from route param (deep-link / Overview navigation)
-  const agentParam = route.value.params.agent as string | undefined
-  if (agentParam && selectedAgentName.value !== agentParam) {
-    openAgentDetail(agentParam)
-  } else if (!agentParam && selectedAgentName.value) {
-    closeAgentDetail()
   }
 
   // Compute counts for chip badges

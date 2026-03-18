@@ -128,7 +128,7 @@ let test_compact_small_list_unchanged () =
     (List.length msgs) (List.length compacted.messages)
 
 (* ================================================================ *)
-(* Restore messages via Oas_checkpoint_bridge                       *)
+(* Restore messages (direct Llm_client.of_oas_message)              *)
 (* ================================================================ *)
 
 let test_restore_messages_all_roles () =
@@ -138,7 +138,7 @@ let test_restore_messages_all_roles () =
     { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
       content = [Agent_sdk.Types.Text "assistant answer"] };
   ] in
-  let masc_msgs = Oas_checkpoint_bridge.restore_messages oas_msgs in
+  let masc_msgs = List.map Llm_client.of_oas_message oas_msgs in
   Alcotest.(check int) "2 messages restored" 2 (List.length masc_msgs);
   let first = List.hd masc_msgs in
   Alcotest.(check string) "first is user" "user"
@@ -175,7 +175,7 @@ let () =
       Alcotest.test_case "SummarizeOld small list unchanged" `Quick
         test_compact_small_list_unchanged;
     ];
-    "oas_checkpoint_bridge", [
+    "message_restore", [
       Alcotest.test_case "restore messages all roles" `Quick
         test_restore_messages_all_roles;
     ];

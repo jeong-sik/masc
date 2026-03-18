@@ -1,4 +1,4 @@
-(** Tests for OAS integration modules: oas_events, oas_checkpoint_bridge. *)
+(** Tests for OAS integration modules: oas_events, message conversion. *)
 
 open Agent_sdk
 open Masc_mcp
@@ -48,7 +48,7 @@ let test_event_bus_task_transition () =
   | _ -> Alcotest.fail "expected Custom masc:task_transition event"
 
 (* ================================================================ *)
-(* Oas_checkpoint_bridge tests                                       *)
+(* Message conversion tests (formerly oas_checkpoint_bridge)         *)
 (* ================================================================ *)
 
 let test_message_roundtrip () =
@@ -81,7 +81,7 @@ let test_restore_messages () =
     { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
       content = [Agent_sdk.Types.Text "world"] };
   ] in
-  let masc_msgs = Oas_checkpoint_bridge.restore_messages oas_msgs in
+  let masc_msgs = List.map Llm_client.of_oas_message oas_msgs in
   Alcotest.(check int) "2 messages" 2 (List.length masc_msgs);
   Alcotest.(check string) "first content" "hello"
     (Llm_client.text_of_message (List.hd masc_msgs))
@@ -125,7 +125,7 @@ let () =
       Alcotest.test_case "task transition event" `Quick
         test_event_bus_task_transition;
     ];
-    "oas_checkpoint_bridge", [
+    "message_conversion", [
       Alcotest.test_case "message roundtrip" `Quick test_message_roundtrip;
       Alcotest.test_case "system role dropped" `Quick
         test_system_role_dropped;

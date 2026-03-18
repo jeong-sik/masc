@@ -4,7 +4,7 @@
     Ties together all OAS integration phases:
 
     - Phase 1: Context_compact_oas (context reduction)
-    - Phase 2: Succession_oas / Oas_checkpoint_bridge (checkpoint/DNA)
+    - Phase 2: Succession_oas (checkpoint/DNA)
     - Phase 3: Llm_provider_oas (LLM cascade)
     - Phase 4: Verifier_oas (guardrails/hooks)
     - Phase 5: Worker_oas (Agent.run adapter)
@@ -112,18 +112,55 @@ let run_perpetual_via_oas
   with exn ->
     eprintf "[perpetual_oas] Checkpoint save failed: %s\n%!"
       (Printexc.to_string exn));
-  (* Also save MASC-format checkpoint for cross-compatibility *)
+  (* Also save MASC-format checkpoint for cross-compatibility
+     (inlined from deleted oas_checkpoint_bridge) *)
   (try
-    let masc_ckpt_state : Oas_checkpoint_bridge.checkpoint_state = {
+    let ctx = !ctx_ref in
+    let oas_ctx = Oas.Context.copy ctx.Context_manager.oas_context in
+    Oas.Context.set_scoped oas_ctx Oas.Context.Session
+      "goal" (`String config.initial_goal);
+    Oas.Context.set_scoped oas_ctx Oas.Context.Session
+      "generation" (`Int pstate.generation);
+    Oas.Context.set_scoped oas_ctx Oas.Context.Session
+      "turn_count" (`Int pstate.turn_count);
+    Oas.Context.set_scoped oas_ctx Oas.Context.Session
+      "trace_id" (`String trace_id);
+    Oas.Context.set_scoped oas_ctx Oas.Context.App
+      "masc_version" (`String Version.version);
+    let messages = List.filter_map Llm_client.to_oas_message ctx.messages in
+    let masc_oas_ckpt : Oas.Checkpoint.t = {
+      version = 3;
       session_id = trace_id;
-      generation = pstate.generation;
+      agent_name = "perpetual";
+      model = Oas.Types.Custom "masc-perpetual";
+      system_prompt = Some ctx.system_prompt;
+      messages;
+      usage = {
+        Oas.Types.total_input_tokens = pstate.total_tokens;
+        total_output_tokens = 0;
+        total_cache_creation_input_tokens = 0;
+        total_cache_read_input_tokens = 0;
+        api_calls = pstate.turn_count;
+        estimated_cost_usd = pstate.total_cost;
+      };
       turn_count = pstate.turn_count;
-      total_tokens = pstate.total_tokens;
-      total_cost = pstate.total_cost;
-      trace_id;
+      created_at = Time_compat.now ();
+      tools = [];
+      tool_choice = None;
+      temperature = None;
+      top_p = None;
+      top_k = None;
+      min_p = None;
+      enable_thinking = None;
+      response_format_json = false;
+      thinking_budget = None;
+      cache_system_prompt = false;
+      max_input_tokens = Some ctx.max_tokens;
+      max_total_tokens = None;
+      disable_parallel_tool_use = false;
+      context = oas_ctx;
+      mcp_sessions = [];
     } in
-    let masc_oas_ckpt = Oas_checkpoint_bridge.to_oas_checkpoint
-      ~state:masc_ckpt_state ~ctx:!ctx_ref ~goal:config.initial_goal () in
     let ckpt_path2 =
       Filename.concat config.session_base_dir
         (trace_id ^ "-masc.json")

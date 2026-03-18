@@ -226,6 +226,135 @@ let keeper_stream_send_raw writer mutex closed data =
 let keeper_stream_send_event writer mutex closed event =
   keeper_stream_send_raw writer mutex closed (Ag_ui.event_to_sse event)
 
+(** Execute keeper dispatch with real-time streaming.
+    Calls [dispatch_stream] which forwards LLM text deltas to [on_text_delta].
+    Returns the same [(bool, string)] result as the batch path.
+    Includes timeout, audit, and telemetry — same bookkeeping as the batch path. *)
+let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
+    ~agent_name ~arguments ~on_text_delta =
+  let timeout_sec = keeper_stream_timeout_sec arguments in
+  let start_time = Eio.Time.now clock in
+  let timeout_hit = ref false in
+  let success, body =
+    try
+      Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
+          let keeper_ctx : _ Tool_keeper.context =
+            {
+              config = state.Mcp_server.room_config;
+              agent_name;
+              sw;
+              clock;
+              proc_mgr = state.Mcp_server.proc_mgr;
+            }
+          in
+          match
+            Tool_keeper.dispatch_stream ~on_text_delta keeper_ctx
+              ~name:"masc_keeper_msg" ~args:arguments
+          with
+          | Some result -> result
+          | None -> (false, "masc_keeper_msg stream dispatch unavailable"))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Eio.Time.Timeout ->
+        timeout_hit := true;
+        Log.Mcp.error "tools/call timeout: masc_keeper_msg (stream) after %.0fs"
+          timeout_sec;
+        ( false,
+          Printf.sprintf
+            "Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
+            timeout_sec "masc_keeper_msg" )
+    | exn ->
+        let err = Printexc.to_string exn in
+        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
+          (false, Types.masc_error_to_string Types.NotInitialized)
+        else (
+          Log.Mcp.error "tools/call crashed (stream): %s" err;
+          (false, Printf.sprintf "Internal error: %s" err))
+  in
+  let end_time = Eio.Time.now clock in
+  let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+  let error_msg =
+    if success then None
+    else
+      Some
+        (Printf.sprintf "timeout=%d|duration_ms=%d"
+           (if !timeout_hit then 1 else 0)
+           duration_ms)
+  in
+  Audit_log.log_tool_call state.Mcp_server.room_config ~agent_id:agent_name
+    ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
+  let telemetry_enabled =
+    match Sys.getenv_opt "MASC_TELEMETRY_ENABLED" with
+    | Some "false" | Some "0" -> false
+    | _ -> true
+  in
+  if telemetry_enabled then (
+    match state.Mcp_server.fs with
+    | Some fs ->
+        (try
+           Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
+             ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
+             ~duration_ms ()
+         with exn ->
+           Log.Misc.error "telemetry tracking failed: %s"
+             (Printexc.to_string exn))
+    | None -> ());
+  Tool_registry.record_call_if_known ~tool_name:"masc_keeper_msg" ~success
+    ~duration_ms;
+  (success, body)
+
+(** Send a Run_error AG-UI event with the given message. *)
+let send_keeper_error writer mutex closed ~thread_id ~run_id err =
+  ignore
+    (keeper_stream_send_event writer mutex closed
+       Ag_ui.(
+         make_event ~thread_id ~run_id:(Some run_id)
+           ~custom_name:(Some "KEEPER_CHAT_ERROR")
+           ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
+           Run_error))
+
+(** Send Text_message_end + Run_finished sequence to complete the stream. *)
+let send_keeper_stream_finish writer mutex closed ~thread_id ~run_id
+    ~message_id =
+  ignore
+    (keeper_stream_send_event writer mutex closed
+       Ag_ui.(
+         make_event ~thread_id ~run_id:(Some run_id)
+           ~message_id:(Some message_id) Text_message_end));
+  ignore
+    (keeper_stream_send_event writer mutex closed
+       Ag_ui.(make_event ~thread_id ~run_id:(Some run_id) Run_finished))
+
+(** Extract visible reply from the keeper pipeline result body.
+    Parses JSON if possible and strips internal markers. *)
+let extract_visible_reply body =
+  let payload_json_opt =
+    try Some (Yojson.Safe.from_string body)
+    with Yojson.Json_error _ -> None
+  in
+  let visible_reply =
+    match payload_json_opt with
+    | Some payload_json ->
+        let reply_raw =
+          payload_json
+          |> Yojson.Safe.Util.member "reply"
+          |> Yojson.Safe.Util.to_string_option
+          |> Option.value ~default:""
+        in
+        let visible =
+          if String.trim reply_raw = "" then String.trim body
+          else strip_keeper_visible_reply reply_raw
+        in
+        if visible = "" then
+          Option.value ~default:"(empty reply)"
+            (Yojson.Safe.Util.to_string_option payload_json)
+        else visible
+    | None ->
+        let visible = strip_keeper_visible_reply body in
+        if visible = "" then "(empty reply)" else visible
+  in
+  (payload_json_opt, visible_reply)
+
 let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let origin = get_origin request in
   let headers =
@@ -246,20 +375,19 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
     if not !closed then begin
       closed := true;
       (try Httpun.Body.Writer.close writer
-       with exn -> Log.Misc.warn "keeper_stream writer close: %s" (Printexc.to_string exn))
+       with exn ->
+         Log.Misc.warn "keeper_stream writer close: %s"
+           (Printexc.to_string exn))
     end
   in
-  let now_id () =
-    int_of_float (Time_compat.now () *. 1000.0)
-  in
+  let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
   let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
   let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
   ignore (keeper_stream_send_raw writer mutex closed "retry: 1500\n\n");
   Eio.Fiber.fork ~sw (fun () ->
-      Fun.protect
-        ~finally:close_stream
-        (fun () ->
+      Fun.protect ~finally:close_stream (fun () ->
+          (* --- 1. Lifecycle: Run_started + Text_message_start --- *)
           ignore
             (keeper_stream_send_event writer mutex closed
                Ag_ui.(
@@ -268,85 +396,87 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             (keeper_stream_send_event writer mutex closed
                Ag_ui.(
                  make_event ~thread_id ~run_id:(Some run_id)
-                   ~message_id:(Some message_id) ~role:(Some Assistant)
-                   Text_message_start));
+                   ~message_id:(Some message_id)
+                   ~role:(Some Assistant) Text_message_start));
           let args =
             `Assoc
-              ([
-                 ("name", `String payload.name);
-                 ("message", `String payload.message);
-               ]
+              ([ ("name", `String payload.name);
+                 ("message", `String payload.message) ]
               @
-              if payload.models = [] then []
-              else [ ("models", `List (List.map (fun model -> `String model) payload.models)) ])
+              (if payload.models = [] then []
+               else
+                 [ ("models",
+                    `List
+                      (List.map
+                         (fun model -> `String model)
+                         payload.models)) ]))
           in
           let agent_name =
             match agent_from_request request with
             | Some raw when String.trim raw <> "" -> String.trim raw
             | _ -> "unknown"
           in
+          (* Track whether any text deltas were streamed to the client.
+             When streaming is active, the LLM text is sent token-by-token
+             during the call; we only need to send the final batch chunks
+             if no deltas were emitted (fallback path). *)
+          let deltas_sent = ref false in
+          let on_text_delta text =
+            if String.length text > 0 then begin
+              deltas_sent := true;
+              ignore
+                (keeper_stream_send_event writer mutex closed
+                   Ag_ui.(
+                     make_event ~thread_id ~run_id:(Some run_id)
+                       ~message_id:(Some message_id)
+                       ~delta:(Some text) Text_message_content))
+            end
+          in
+
+          (* --- 2. Try real streaming path first --- *)
           let dispatch_result =
             try
               Ok
-                (execute_keeper_stream_tool ~sw ~clock
+                (execute_keeper_stream_tool_streaming ~sw ~clock
                    ?auth_token:(auth_token_from_request request)
-                   state ~agent_name ~arguments:args)
-            with exn -> Error (Printexc.to_string exn)
+                   state ~agent_name ~arguments:args ~on_text_delta)
+            with exn ->
+              Log.Keeper.warn
+                "keeper_stream: streaming dispatch raised: %s"
+                (Printexc.to_string exn);
+              (* --- 3. Fallback to batch on exception --- *)
+              (try
+                 Ok
+                   (execute_keeper_stream_tool ~sw ~clock
+                      ?auth_token:(auth_token_from_request request)
+                      state ~agent_name ~arguments:args)
+               with exn2 -> Error (Printexc.to_string exn2))
           in
           match dispatch_result with
           | Error err ->
-              ignore
-                (keeper_stream_send_event writer mutex closed
-                   Ag_ui.(
-                     make_event ~thread_id ~run_id:(Some run_id)
-                       ~custom_name:(Some "KEEPER_CHAT_ERROR")
-                       ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
-                       Run_error))
+              send_keeper_error writer mutex closed ~thread_id ~run_id err
           | Ok (false, err) ->
-              ignore
-                (keeper_stream_send_event writer mutex closed
-                   Ag_ui.(
-                     make_event ~thread_id ~run_id:(Some run_id)
-                       ~custom_name:(Some "KEEPER_CHAT_ERROR")
-                       ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
-                       Run_error))
+              send_keeper_error writer mutex closed ~thread_id ~run_id err
           | Ok (true, body) -> (
               try
-                let payload_json_opt =
-                  try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
+                let payload_json_opt, visible_reply =
+                  extract_visible_reply body
                 in
-                let visible_reply =
-                  match payload_json_opt with
-                  | Some payload_json ->
-                      let reply_raw =
-                        payload_json |> Yojson.Safe.Util.member "reply"
-                        |> Yojson.Safe.Util.to_string_option
-                        |> Option.value ~default:""
-                      in
-                      let visible_reply =
-                        if String.trim reply_raw = "" then
-                          String.trim body
-                        else
-                          strip_keeper_visible_reply reply_raw
-                      in
-                      if visible_reply = "" then
-                        Option.value ~default:"(empty reply)"
-                          (Yojson.Safe.Util.to_string_option payload_json)
-                      else
-                        visible_reply
-                  | None ->
-                      let visible_reply = strip_keeper_visible_reply body in
-                      if visible_reply = "" then "(empty reply)" else visible_reply
-                in
-                split_keeper_reply_chunks visible_reply
-                |> List.iter (fun chunk ->
-                       ignore
-                         (keeper_stream_send_event writer mutex closed
-                            Ag_ui.(
-                              make_event ~thread_id ~run_id:(Some run_id)
-                                ~message_id:(Some message_id)
-                                ~delta:(Some chunk)
-                                Text_message_content)));
+                (* If no deltas were streamed during the LLM call
+                   (batch fallback or tool-call-only response),
+                   send the visible reply as chunked content now. *)
+                if not !deltas_sent then
+                  split_keeper_reply_chunks visible_reply
+                  |> List.iter (fun chunk ->
+                         ignore
+                           (keeper_stream_send_event writer mutex closed
+                              Ag_ui.(
+                                make_event ~thread_id
+                                  ~run_id:(Some run_id)
+                                  ~message_id:(Some message_id)
+                                  ~delta:(Some chunk)
+                                  Text_message_content)));
+                (* Always send the structured reply details *)
                 (match payload_json_opt with
                  | Some payload_json ->
                      ignore
@@ -354,27 +484,12 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                           Ag_ui.(
                             make_event ~thread_id ~run_id:(Some run_id)
                               ~custom_name:(Some "KEEPER_REPLY_DETAILS")
-                              ~custom_value:(Some payload_json)
-                              Custom))
+                              ~custom_value:(Some payload_json) Custom))
                  | None -> ());
-                ignore
-                  (keeper_stream_send_event writer mutex closed
-                     Ag_ui.(
-                       make_event ~thread_id ~run_id:(Some run_id)
-                         ~message_id:(Some message_id)
-                         Text_message_end));
-                ignore
-                  (keeper_stream_send_event writer mutex closed
-                     Ag_ui.(
-                       make_event ~thread_id ~run_id:(Some run_id) Run_finished))
+                send_keeper_stream_finish writer mutex closed ~thread_id
+                  ~run_id ~message_id
               with exn ->
-                ignore
-                  (keeper_stream_send_event writer mutex closed
-                     Ag_ui.(
-                       make_event ~thread_id ~run_id:(Some run_id)
-                         ~custom_name:(Some "KEEPER_CHAT_ERROR")
-                         ~custom_value:(Some (`Assoc [ ("message", `String (Printexc.to_string exn)) ]))
-                         Run_error))));
-        )
+                send_keeper_error writer mutex closed ~thread_id ~run_id
+                  (Printexc.to_string exn))))
 
 (** Build routes for MCP server *)

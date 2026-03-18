@@ -156,6 +156,35 @@ let handle_resident_keeper_msg ctx args : tool_result =
               ~resident_registered:true json))
       end
 
+let handle_resident_keeper_msg_stream ~on_text_delta ctx args : tool_result =
+  let name = get_string args "name" "" in
+  if validate_name name then maybe_promote_live_legacy_keeper ctx.config name;
+  let ensure_result =
+    match read_resident_keeper ctx.config name with
+    | Ok (Some _) -> Ok ()
+    | _ ->
+        let ok, body = handle_resident_keeper_up ctx args in
+        if ok then Ok () else Error body
+  in
+  match ensure_result with
+  | Error err -> (false, err)
+  | Ok _ ->
+      let ok, body = Turn.handle_keeper_msg ~on_text_delta ctx args in
+      if not ok then (ok, body)
+      else begin
+        (match read_meta ctx.config name with
+        | Ok (Some meta) ->
+            ignore (register_resident_keeper_from_meta ctx.config meta)
+        | _ -> ());
+        let json =
+          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+        in
+        (true,
+         Yojson.Safe.pretty_to_string
+           (annotate_keeper_json ~runtime_class:"resident_keeper" ~desired:true
+              ~resident_registered:true json))
+      end
+
 let handle_resident_keeper_down ctx args : tool_result =
   let name = get_string args "name" "" in
   if validate_name name then remove_resident_keeper ctx.config name;
@@ -364,4 +393,15 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_persistent_agent_goals" -> Some (Policy.handle_keeper_goals ctx args)
   | "masc_persistent_agent_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
   | "masc_persistent_agent_eval" -> Some (Status.handle_keeper_eval ctx args)
+  | _ -> None
+
+(** Streaming dispatch: only handles keeper_msg with text delta forwarding.
+    Returns None for all other tool names.
+    Called from server_routes_http_keeper_stream. *)
+let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
+  (try start_existing_keepalives ctx with exn ->
+    Log.Keeper.error "start_existing_keepalives failed: %s" (Printexc.to_string exn));
+  match name with
+  | "masc_keeper_msg" ->
+      Some (handle_resident_keeper_msg_stream ~on_text_delta ctx args)
   | _ -> None

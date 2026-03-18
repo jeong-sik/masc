@@ -14,3 +14,12 @@ val schemas : Types.tool_schema list
 
 val dispatch :
   _ context -> name:string -> args:Yojson.Safe.t -> tool_result option
+
+(** Streaming dispatch: handles keeper_msg with real-time text delta callback.
+    The [on_text_delta] callback receives each text fragment from the LLM
+    as it arrives. Returns [None] for tool names other than [masc_keeper_msg].
+
+    @since 2.110.0 *)
+val dispatch_stream :
+  on_text_delta:(string -> unit) ->
+  _ context -> name:string -> args:Yojson.Safe.t -> tool_result option

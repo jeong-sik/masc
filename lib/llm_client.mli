@@ -56,16 +56,11 @@ type tool_call = {
   call_arguments : string;     (** JSON string of arguments *)
 }
 
-(** Token usage from a completion.
-    [cache_creation_input_tokens] and [cache_read_input_tokens] track
-    Anthropic prompt caching metrics (0 for non-Anthropic providers). *)
-type token_usage = {
-  input_tokens : int;
-  output_tokens : int;
-  total_tokens : int;
-  cache_creation_input_tokens : int;
-  cache_read_input_tokens : int;
-}
+(** Token usage — unified with OAS api_usage. *)
+type token_usage = Agent_sdk.Types.api_usage
+
+(** Compute total tokens (input + output). *)
+val total_tokens : token_usage -> int
 
 (** {1 Request/Response} *)
 

@@ -9,15 +9,12 @@ let keeper_llm_tools = Tool_shard.keeper_llm_tools
 let merge_usage
     (a : Llm_client.token_usage)
     (b : Llm_client.token_usage) : Llm_client.token_usage =
-  {
-    Llm_client.input_tokens = a.input_tokens + b.input_tokens;
+  { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
-    total_tokens = a.total_tokens + b.total_tokens;
     cache_creation_input_tokens =
       a.cache_creation_input_tokens + b.cache_creation_input_tokens;
     cache_read_input_tokens =
-      a.cache_read_input_tokens + b.cache_read_input_tokens;
-  }
+      a.cache_read_input_tokens + b.cache_read_input_tokens }
 
 let contains_ci (haystack : string) (needle : string) : bool =
   let h = String.lowercase_ascii haystack in

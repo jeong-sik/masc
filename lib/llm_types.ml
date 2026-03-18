@@ -48,13 +48,12 @@ type tool_call = {
   call_arguments : string;
 }
 
-type token_usage = {
-  input_tokens : int;
-  output_tokens : int;
-  total_tokens : int;
-  cache_creation_input_tokens : int;
-  cache_read_input_tokens : int;
-}
+(** Token usage — now unified with OAS api_usage. Use [total_tokens] function
+    instead of the removed field. *)
+type token_usage = Agent_sdk.Types.api_usage
+
+(** Compute total tokens (was a record field, now derived). *)
+let total_tokens (u : token_usage) = u.input_tokens + u.output_tokens
 
 type completion_request = {
   model : model_spec;

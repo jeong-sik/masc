@@ -111,7 +111,7 @@ let create_state config =
     ~session_id:trace_id
     ~base_dir:config.session_base_dir in
   let zero_usage : Llm_client.token_usage = {
-    input_tokens = 0; output_tokens = 0; total_tokens = 0;
+    Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
     cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
   } in
   let now_ts = Time_compat.now () in
@@ -581,7 +581,7 @@ let run_turn ~config ~state =
       in
       let cost = calculate_cost resp.usage used_model in
       state.total_cost <- state.total_cost +. cost;
-      state.total_tokens <- state.total_tokens + resp.usage.total_tokens;
+      state.total_tokens <- state.total_tokens + Llm_client.total_tokens resp.usage;
 
       (* Track activity: tool calls = active, text only = potentially idle *)
       if resp.tool_calls <> [] then
@@ -748,7 +748,7 @@ let run_turn ~config ~state =
         end else begin
           emit (TurnEnd {
             turn;
-            tokens_used = resp.usage.total_tokens;
+            tokens_used = Llm_client.total_tokens resp.usage;
             cost;
           });
           true  (* Continue *)
@@ -904,7 +904,7 @@ let status ~config state : Yojson.Safe.t =
     ("last_usage", `Assoc [
       ("input_tokens", `Int state.last_usage.input_tokens);
       ("output_tokens", `Int state.last_usage.output_tokens);
-      ("total_tokens", `Int state.last_usage.total_tokens);
+      ("total_tokens", `Int (Llm_client.total_tokens state.last_usage));
     ]);
     ("last_latency_ms", `Int state.last_latency_ms);
     ("last_heartbeat_ts", `Float state.last_heartbeat);

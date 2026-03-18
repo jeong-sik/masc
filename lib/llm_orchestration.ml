@@ -83,7 +83,7 @@ let token_usage_to_json (u : token_usage) : Yojson.Safe.t =
     [
       ("input_tokens", `Int u.input_tokens);
       ("output_tokens", `Int u.output_tokens);
-      ("total_tokens", `Int u.total_tokens);
+      ("total_tokens", `Int (Llm_types.total_tokens u));
       ("cache_creation_input_tokens", `Int u.cache_creation_input_tokens);
       ("cache_read_input_tokens", `Int u.cache_read_input_tokens);
     ]
@@ -92,10 +92,8 @@ let token_usage_of_json (json : Yojson.Safe.t) : (token_usage, string) result =
   let open Yojson.Safe.Util in
   try
     Ok
-      {
-        input_tokens = json |> member "input_tokens" |> to_int;
+      { Agent_sdk.Types.input_tokens = json |> member "input_tokens" |> to_int;
         output_tokens = json |> member "output_tokens" |> to_int;
-        total_tokens = json |> member "total_tokens" |> to_int;
         cache_creation_input_tokens =
           json |> member "cache_creation_input_tokens" |> to_int;
         cache_read_input_tokens = json |> member "cache_read_input_tokens" |> to_int;

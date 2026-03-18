@@ -705,13 +705,13 @@ let handle_keeper_msg ctx args : tool_result =
                 continuity_summary = continuity_summary_from_reply;
                 last_continuity_update_ts;
                 total_output_tokens = meta.total_output_tokens + final_usage.output_tokens;
-                total_tokens = meta.total_tokens + final_usage.total_tokens;
+                total_tokens = meta.total_tokens + Llm_client.total_tokens final_usage;
                 total_cost_usd = meta.total_cost_usd +. total_cost_usd_turn;
                 last_turn_ts = now_ts;
                 last_model_used = final_model_used;
                 last_input_tokens = final_usage.input_tokens;
                 last_output_tokens = final_usage.output_tokens;
-                last_total_tokens = final_usage.total_tokens;
+                last_total_tokens = Llm_client.total_tokens final_usage;
                 last_latency_ms = final_latency_ms;
                 compaction_count = meta.compaction_count + (if compacted then 1 else 0);
                 last_compaction_ts = (if compacted then now_ts else meta.last_compaction_ts);

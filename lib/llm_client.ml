@@ -70,19 +70,6 @@ let to_oas_message (m : message) : Agent_sdk.Types.message option =
 let of_oas_message (m : Agent_sdk.Types.message) : message =
   m
 
-let of_oas_usage (u : Agent_sdk.Types.api_usage) : token_usage =
-  {
-    input_tokens = u.input_tokens;
-    output_tokens = u.output_tokens;
-    total_tokens = u.input_tokens + u.output_tokens;
-    cache_creation_input_tokens = u.cache_creation_input_tokens;
-    cache_read_input_tokens = u.cache_read_input_tokens;
-  }
-
-let to_oas_usage (u : token_usage) : Agent_sdk.Types.api_usage =
-  {
-    Agent_sdk.Types.input_tokens = u.input_tokens;
-    output_tokens = u.output_tokens;
-    cache_creation_input_tokens = u.cache_creation_input_tokens;
-    cache_read_input_tokens = u.cache_read_input_tokens;
-  }
+(** Identity after type unification. *)
+let of_oas_usage (u : Agent_sdk.Types.api_usage) : token_usage = u
+let to_oas_usage (u : token_usage) : Agent_sdk.Types.api_usage = u

@@ -840,7 +840,7 @@ let test_integration () = group "Integration" (fun () ->
      assert_true "oas_adapter:msg_roundtrip" (Llm_client.text_of_message back_m = "test"));
 
   let test_usage : Llm_client.token_usage =
-    { input_tokens = 100; output_tokens = 50; total_tokens = 150;
+    { Agent_sdk.Types.input_tokens = 100; output_tokens = 50;
       cache_creation_input_tokens = 10; cache_read_input_tokens = 20 } in
   let oas_u = Llm_client.to_oas_usage test_usage in
   let back_u = Llm_client.of_oas_usage oas_u in

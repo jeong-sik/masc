@@ -4,7 +4,22 @@
 
 open Keeper_types
 open Keeper_memory
-open Keeper_alerting
+
+(* Inlined from Keeper_skill_routing to break dependency cycle *)
+let contains_ci (haystack : string) (needle : string) : bool =
+  let h = String.lowercase_ascii haystack in
+  let n = String.lowercase_ascii needle in
+  if n = "" then false
+  else
+    let nl = String.length n in
+    let hl = String.length h in
+    if nl > hl then false
+    else
+      let found = ref false in
+      for i = 0 to hl - nl do
+        if not !found && String.sub h i nl = n then found := true
+      done;
+      !found
 
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
@@ -321,7 +336,7 @@ let state_snapshot_reply_fallback (snapshot : keeper_state_snapshot option) :
 
 let strip_internal_reply_markup (raw : string) : string =
   raw
-  |> strip_skill_route_lines
+  |> Keeper_skill_routing.strip_skill_route_lines
   |> strip_state_blocks_text
   |> String.trim
 

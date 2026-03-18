@@ -6,9 +6,17 @@ let write_checkpoint (config : Room.config) (session : Team_session_types.sessio
   let participant_agents = match active_agents with [] -> session.agent_names | a -> a in
   let backlog = Room.read_backlog config in
   let current_done = Team_session_types.done_counts_from_backlog backlog in
+  (* Include backlog assignee names to handle nickname vs raw-name mismatches.
+     See compute_live_done_delta for rationale. *)
+  let agents =
+    Team_session_types.dedup_strings
+      (participant_agents
+       @ List.map fst current_done
+       @ List.map fst session.baseline_done_counts)
+  in
   let deltas =
     Team_session_types.done_delta_by_agent ~baseline:session.baseline_done_counts
-      ~current:current_done ~agents:participant_agents
+      ~current:current_done ~agents
   in
   let done_total = List.fold_left (fun acc (_, n) -> acc + n) 0 deltas in
   let elapsed = max 0.0 (now -. session.started_at) in

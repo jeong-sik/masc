@@ -298,16 +298,21 @@ let llm_response_is_valid (resp : Llm_client.completion_response) : bool =
   | Ok intent -> not (equal_intent_category intent.primary Unknown)
   | Error _ -> false
 
-(** LLM-based intent extraction. Returns Error on failure. *)
+(** LLM-based intent extraction. Returns Error on failure.
+    Catches exceptions (e.g. Llm_eio_env not initialized in test)
+    so callers can fall back to keyword extraction. *)
 let extract_with_llm (text : string) : (dm_intent, string) result =
   let prompt = build_classification_prompt text in
-  match
-    Lodge_cascade.call ~cascade_name:"trpg_intent" ~prompt
-      ~temperature:0.1 ~timeout_sec:15 ~max_tokens:200
-      ~accept:llm_response_is_valid ()
-  with
-  | Ok r -> parse_llm_intent r.response
-  | Error err -> Error err
+  try
+    match
+      Lodge_cascade.call ~cascade_name:"trpg_intent" ~prompt
+        ~temperature:0.1 ~timeout_sec:15 ~max_tokens:200
+        ~accept:llm_response_is_valid ()
+    with
+    | Ok r -> parse_llm_intent r.response
+    | Error err -> Error err
+  with exn ->
+    Error (Printf.sprintf "extract_with_llm exception: %s" (Printexc.to_string exn))
 
 (* ── Public API ─────────────────────────────────────────────────────── *)
 

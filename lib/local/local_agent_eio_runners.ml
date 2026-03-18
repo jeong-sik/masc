@@ -200,26 +200,10 @@ let run_worker_oas ~sw ~base_path ~worker_name
                     | _ -> Oas.Hooks.Continue);
             }
           in
-          let max_turn_cap =
-            match execution_scope with
-            | Team_session_types.Limited_code_change -> 20
-            | Team_session_types.Observe_only -> 12
-            | Team_session_types.Autonomous -> 30
+          let* agent =
+            Worker_oas.build_agent ~net ~meta ~model ~system_prompt ~tools
+              ~hooks ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ()
           in
-          let max_turns =
-            match max_turns with
-            | Some value -> max 1 (min max_turn_cap value)
-            | None -> max 2 (min max_turn_cap (max 2 (timeout_sec / 20)))
-          in
-          let thinking_enabled =
-            Option.value ~default:false thinking_enabled
-          in
-          let config, options =
-            build_oas_agent ~worker_name ~model ~system_prompt ~tools
-              ~max_turns ~thinking_enabled ~hooks ~raw_trace
-              ~periodic_callbacks:heartbeat_cbs ()
-          in
-          let agent = Oas.Agent.create ~net ~config ~tools ~options () in
           let result =
             Oas.Agent.run ~sw agent prompt
           in

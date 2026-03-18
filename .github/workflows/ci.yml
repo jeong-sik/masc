@@ -38,7 +38,7 @@ jobs:
         uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: 5.4.x
-          dune-cache: true
+          dune-cache: false
 
       - name: Pin external dependencies
         run: |
@@ -148,7 +148,7 @@ jobs:
         uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: 5.4.x
-          dune-cache: true
+          dune-cache: false
 
       - name: Pin external dependencies
         run: |
@@ -230,7 +230,7 @@ jobs:
         uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: 5.4.x
-          dune-cache: true
+          dune-cache: false
 
       - name: Pin external dependencies
         run: |
@@ -297,7 +297,7 @@ jobs:
         uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: 5.4.x
-          dune-cache: true
+          dune-cache: false
 
       - name: Pin external dependencies
         run: |
@@ -339,7 +339,7 @@ jobs:
         uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: 5.4.x
-          dune-cache: true
+          dune-cache: false
 
       - name: Pin external dependencies
         run: |

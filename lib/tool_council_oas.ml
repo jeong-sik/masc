@@ -273,23 +273,56 @@ let handle_execute _ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
-    (* Executor.execute_decision requires a Consensus.result.
-       Without an actual voting result, return a placeholder. *)
-    json_ok (`Assoc [
-      ("topic", `String topic);
-      ("note", `String "execute requires a Consensus voting result; use the full council cycle");
-    ])
+    let model_spec = Llm_types.default_local_model_spec () in
+    let system_prompt =
+      "You are a governance deliberation agent for the MASC multi-agent system. \
+       Evaluate the following topic and produce a structured decision. \
+       Include: (1) your reasoning, (2) identified risks, (3) recommended action. \
+       Be concise and actionable." in
+    let config = Oas_worker.default_config
+      ~name:"council-deliberation"
+      ~model_spec ~system_prompt ~tools:[] in
+    match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+    | Some sw, Some net ->
+      (match Oas_worker.run ~sw ~net ~config topic with
+       | Ok result ->
+         json_ok (`Assoc [
+           ("topic", `String topic);
+           ("deliberation", `String (Llm_types.text_of_response result.response));
+           ("turns", `Int result.turns);
+           ("session_id", `String result.session_id);
+           ("runtime", `String "oas");
+         ])
+       | Error e -> json_err (Printf.sprintf "Deliberation failed: %s" e))
+    | _ -> json_err "Eio context (switch/net) not available for OAS execution"
 
 let handle_execute_dry_run _ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
-    (* Executor.dry_run requires a Consensus.result.
-       Without an actual voting result, return a placeholder. *)
-    json_ok (`Assoc [
-      ("topic", `String topic);
-      ("note", `String "dry_run requires a Consensus voting result; use the full council cycle");
-    ])
+    let model_spec = Llm_types.default_local_model_spec () in
+    let system_prompt =
+      "You are a governance analysis agent for the MASC multi-agent system (DRY RUN mode). \
+       Analyze the following topic WITHOUT committing any changes. \
+       Produce: (1) impact analysis, (2) risks and mitigations, (3) what WOULD happen if executed. \
+       This is analysis only — no actions will be taken." in
+    let config = Oas_worker.default_config
+      ~name:"council-dry-run"
+      ~model_spec ~system_prompt ~tools:[] in
+    match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+    | Some sw, Some net ->
+      (match Oas_worker.run ~sw ~net ~config topic with
+       | Ok result ->
+         json_ok (`Assoc [
+           ("topic", `String topic);
+           ("analysis", `String (Llm_types.text_of_response result.response));
+           ("turns", `Int result.turns);
+           ("session_id", `String result.session_id);
+           ("dry_run", `Bool true);
+           ("runtime", `String "oas");
+         ])
+       | Error e -> json_err (Printf.sprintf "Dry-run analysis failed: %s" e))
+    | _ -> json_err "Eio context (switch/net) not available for OAS execution"
 
 (* ================================================================ *)
 (* Schemas — reuse from legacy Tool_council                          *)

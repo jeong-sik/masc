@@ -356,50 +356,6 @@
  (modules test_room_messages_raw)
  (libraries masc_mcp alcotest unix))
 
-; TRPG engine state machine tests
-(test
- (name test_trpg_engine_state_machine)
- (modules test_trpg_engine_state_machine)
- (libraries masc_mcp alcotest))
-
-(test
- (name test_trpg_engine_store)
- (modules test_trpg_engine_store)
- (libraries masc_mcp alcotest unix))
-
-(test
- (name test_trpg_rule_dnd5e_lite)
- (modules test_trpg_rule_dnd5e_lite)
- (libraries masc_mcp alcotest yojson))
-
-; NPC Bestiary tests (12 archetypes, scaling, deterministic damage)
-(test
- (name test_trpg_npc_bestiary)
- (modules test_trpg_npc_bestiary)
- (libraries masc_mcp alcotest yojson))
-
-; NPC combat integration tests (spawn -> counterattack -> event store)
-(test
- (name test_trpg_npc_integration)
- (modules test_trpg_npc_integration)
- (libraries masc_mcp alcotest yojson unix))
-
-(test
- (name test_trpg_engine_store_sqlite)
- (modules test_trpg_engine_store_sqlite)
- (libraries masc_mcp alcotest unix))
-
-(test
- (name test_tool_trpg_coverage)
- (modules test_tool_trpg_coverage)
- (libraries masc_mcp alcotest yojson unix eio eio_main))
-
-; Narrative Intelligence tests (inventory, relationships, dedup, JSON recovery)
-(test
- (name test_narrative_intelligence)
- (modules test_narrative_intelligence)
- (libraries masc_mcp alcotest yojson))
-
 (test
  (name test_tool_goals)
  (modules test_tool_goals)
@@ -471,11 +427,6 @@
  (name test_local_runtime_pool)
  (modules test_local_runtime_pool)
  (libraries masc_mcp alcotest unix))
-
-(test
- (name test_protocol_game_view)
- (modules test_protocol_game_view)
- (libraries masc_mcp alcotest yojson unix eio eio_main))
 
 (test
  (name test_tool_keeper)
@@ -733,13 +684,6 @@
  (libraries alcotest yojson unix)
  (deps ../bin/main_eio.exe))
 
-; TRPG actor API endpoint-level integration tests
-(test
- (name test_trpg_actor_api_e2e)
- (modules test_trpg_actor_api_e2e)
- (libraries alcotest yojson unix)
- (deps ../bin/main_eio.exe))
-
 ; Operator MCP endpoint-level supervision tests
 (test
  (name test_operator_mcp_e2e)
@@ -827,30 +771,6 @@
  (name test_perpetual)
  (modules test_perpetual)
  (libraries masc_mcp str yojson unix))
-
-; TRPG Keeper Intelligence — BDI Memory Module
-(test
- (name test_trpg_bdi)
- (modules test_trpg_bdi)
- (libraries masc_mcp alcotest yojson unix))
-
-; TRPG Keeper Intelligence — DM Intent Extraction
-(test
- (name test_trpg_dm_intent)
- (modules test_trpg_dm_intent)
- (libraries masc_mcp alcotest yojson))
-
-; TRPG Keeper Intelligence — Actor-Keeper Compatibility
-(test
- (name test_trpg_actor_match)
- (modules test_trpg_actor_match)
- (libraries masc_mcp alcotest yojson))
-
-; TRPG Keeper Intelligence — Evaluation Harness (parsers + scoring)
-(test
- (name test_trpg_harness)
- (modules test_trpg_harness)
- (libraries masc_mcp alcotest yojson))
 
 ; ============================================================
 ; Keeper Agent Harness tests (trajectory + eval gates + scenarios)

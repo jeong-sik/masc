@@ -96,17 +96,17 @@ let string_of_role = function
   | Llm_client.Tool -> "tool"
 
 let strategies_of_string = function
-  | "prune_tool_outputs" -> [Context_manager.PruneToolOutputs]
-  | "merge_contiguous" -> [Context_manager.MergeContiguous]
-  | "drop_low_importance" -> [Context_manager.DropLowImportance]
-  | "summarize_old" -> [Context_manager.SummarizeOld]
-  | "all" -> [
+  | "prune_tool_outputs" -> Ok [Context_manager.PruneToolOutputs]
+  | "merge_contiguous" -> Ok [Context_manager.MergeContiguous]
+  | "drop_low_importance" -> Ok [Context_manager.DropLowImportance]
+  | "summarize_old" -> Ok [Context_manager.SummarizeOld]
+  | "all" -> Ok [
       Context_manager.PruneToolOutputs;
       Context_manager.MergeContiguous;
       Context_manager.DropLowImportance;
       Context_manager.SummarizeOld;
     ]
-  | s -> failwith (Printf.sprintf "Unknown strategy: %s" s)
+  | s -> Error (Printf.sprintf "Unknown strategy: %s. Valid: prune_tool_outputs, merge_contiguous, drop_low_importance, summarize_old, all" s)
 
 (** Parse a JSON message object into an Llm_client.message. *)
 let parse_message (json : Yojson.Safe.t) : Llm_client.message =
@@ -140,7 +140,10 @@ let handle_compact args : result =
     let system_prompt =
       (try args |> member "system_prompt" |> to_string
        with _ -> "") in
-    let strategies = strategies_of_string strategy_str in
+    let strategies = match strategies_of_string strategy_str with
+      | Ok s -> s
+      | Error msg -> raise (Invalid_argument msg)
+    in
     let messages = List.map parse_message messages_json in
     (* Build a working_context from the input *)
     let ctx = Context_manager.create ~system_prompt ~max_tokens in

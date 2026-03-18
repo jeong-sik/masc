@@ -330,9 +330,9 @@ let sync_oas_context (ctx : working_context) : working_context =
   ctx
 
 (** Feature flag: route compaction through OAS Context_reducer adapter.
-    Set MASC_USE_OAS_REDUCER=true to enable A/B testing. *)
+    Set MASC_USE_OAS_REDUCER=false to disable. Enabled by default since v2.113. *)
 let use_oas_reducer =
-  try Sys.getenv "MASC_USE_OAS_REDUCER" = "true" with Not_found -> false
+  try Sys.getenv "MASC_USE_OAS_REDUCER" = "false" |> not with Not_found -> true
 
 (** Map MASC compaction_strategy to the adapter's local strategy type. *)
 let oas_adapter_strategy_of = function

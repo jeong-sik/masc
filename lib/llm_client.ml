@@ -56,7 +56,18 @@ let to_oas_provider (spec : model_spec) : Agent_sdk.Provider.config option =
       model_id = spec.model_id;
       api_key_env = Option.value ~default:"GEMINI_API_KEY" spec.api_key_env;
     }
-  | Custom _ -> None
+  | Custom _ ->
+    Some {
+      Agent_sdk.Provider.provider =
+        Agent_sdk.Provider.OpenAICompat {
+          base_url = spec.api_url;
+          auth_header = None;
+          path = "/v1/chat/completions";
+          static_token = None;
+        };
+      model_id = spec.model_id;
+      api_key_env = Option.value ~default:"" spec.api_key_env;
+    }
 
 (** Convert MASC message to OAS message.
     After v0.48 type convergence, this is a thin projection (drop name/tool_call_id).

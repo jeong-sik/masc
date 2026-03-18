@@ -82,6 +82,12 @@ let is_expired entry =
   | None -> false
   | Some exp -> Time_compat.now () > exp
 
+(** Timestamp of last batch eviction, used to throttle periodic checks. *)
+let last_batch_eviction = ref 0.0
+
+(** Minimum interval between batch evictions (seconds). *)
+let batch_eviction_interval = 60.0
+
 (** Evict all expired cache entries. Returns count of evicted entries. *)
 let evict_expired config =
   let dir = cache_dir config in
@@ -104,6 +110,47 @@ let evict_expired config =
             | _ -> count
       else count
     ) 0 entries
+
+(** Check expired ratio and evict if > 50% are expired.
+    Throttled to run at most once per [batch_eviction_interval] seconds.
+    Returns number of evicted entries (0 if skipped). *)
+let maybe_evict_expired config =
+  let now = Time_compat.now () in
+  if now -. !last_batch_eviction < batch_eviction_interval then 0
+  else begin
+    let dir = cache_dir config in
+    if not (Sys.file_exists dir) then 0
+    else
+      let files = Sys.readdir dir |> Array.to_list
+        |> List.filter (fun f -> Filename.check_suffix f ".json") in
+      let total = List.length files in
+      if total = 0 then 0
+      else begin
+        (* Sample up to 10 entries to estimate expired ratio *)
+        let sample_size = min 10 total in
+        let sample = List.filteri (fun i _ -> i < sample_size) files in
+        let expired_count = List.fold_left (fun acc filename ->
+          let path = Filename.concat dir filename in
+          match Safe_ops.read_file_safe path with
+          | Error _ -> acc
+          | Ok content ->
+            match Safe_ops.parse_json_safe ~context:"cache_maybe_evict" content with
+            | Error _ -> acc
+            | Ok json ->
+              match entry_of_json json with
+              | Some entry when is_expired entry -> acc + 1
+              | _ -> acc
+        ) 0 sample in
+        let ratio = float_of_int expired_count /. float_of_int sample_size in
+        if ratio > 0.5 then begin
+          last_batch_eviction := now;
+          evict_expired config
+        end else begin
+          last_batch_eviction := now;
+          0
+        end
+      end
+  end
 
 (** Count current number of cache entries *)
 let count_entries config =
@@ -159,11 +206,15 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
     end
   end
 
-(** Get cache entry - synchronous *)
+(** Get cache entry - synchronous.
+    Also triggers batch eviction when expired ratio > 50% (throttled). *)
 let get config ~key : (cache_entry option, string) result =
   let path = cache_file config key in
-  if not (Sys.file_exists path) then
+  if not (Sys.file_exists path) then begin
+    (* Trigger batch eviction check even on miss *)
+    let _evicted = maybe_evict_expired config in
     Ok None
+  end
   else
     try
       let content = Fs_compat.load_file path in
@@ -173,9 +224,12 @@ let get config ~key : (cache_entry option, string) result =
         if is_expired entry then begin
           (* Auto-delete expired entries *)
           Sys.remove path;
+          let _evicted = maybe_evict_expired config in
           Ok None
-        end else
+        end else begin
+          let _evicted = maybe_evict_expired config in
           Ok (Some entry)
+        end
       | None -> Ok None
     with e ->
       Error (Printexc.to_string e)

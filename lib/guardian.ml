@@ -191,14 +191,17 @@ let make_gc_consumer config : (module Pulse.Consumer) =
     let on_beat _beat =
       try
         let result = Room.gc config ~days:gc_days () in
+        (* Periodic cache eviction — piggyback on GC cycle *)
+        let cache_evicted = Cache_eio.evict_expired config in
         last_gc_result := Some result;
         set_last last_gc;
-        log_debug (sprintf "gc: %s" result);
+        log_debug (sprintf "gc: %s (cache evicted: %d)" result cache_evicted);
         publish_event "masc:guardian:gc"
           (`Assoc [
             ("agent_name", `String "guardian");
             ("result", `String result);
             ("gc_days", `Int gc_days);
+            ("cache_evicted", `Int cache_evicted);
             ("timestamp", `Float (Time_compat.now ()));
           ]);
         Ok ()

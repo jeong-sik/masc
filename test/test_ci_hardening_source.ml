@@ -65,6 +65,25 @@ let test_route_auth_contracts () =
     (file_contains_pattern "lib/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_operator_confirm"|})
 
+let test_input_validation_contracts () =
+  (* Bug #1602: broadcast must reject empty messages *)
+  check bool "broadcast validates empty message" true
+    (file_contains_pattern "lib/tool_inline_dispatch.ml"
+       {|"Broadcast message cannot be empty"|});
+  check bool "broadcast trims whitespace before check" true
+    (file_contains_pattern "lib/tool_inline_dispatch.ml"
+       {|String.trim message|});
+  (* Bug #1609: cache must have automatic eviction *)
+  check bool "cache has maybe_evict_expired function" true
+    (file_contains_pattern "lib/cache_eio.ml"
+       "let maybe_evict_expired config");
+  check bool "cache get triggers batch eviction" true
+    (file_contains_pattern "lib/cache_eio.ml"
+       "maybe_evict_expired config");
+  check bool "guardian GC runs cache eviction" true
+    (file_contains_pattern "lib/guardian.ml"
+       "Cache_eio.evict_expired config")
+
 let () =
   run "ci_hardening_source"
     [
@@ -72,5 +91,6 @@ let () =
            test_case "sync and asset contracts" `Quick test_ci_sync_and_asset_contracts;
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
+           test_case "input validation contracts" `Quick test_input_validation_contracts;
          ]);
     ]

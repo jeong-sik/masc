@@ -1,0 +1,215 @@
+(** Oas_worker — Unified entry point for OAS-based MASC tool modules.
+
+    Generalizes the build/run/checkpoint/events pattern from [perpetual_oas.ml]
+    into a reusable template.  Any MASC module that needs to run an OAS Agent
+    uses this instead of duplicating boilerplate.
+
+    Phases:
+    1. Build  — construct [Agent.t] via [Agent_sdk.Builder]
+    2. Run    — execute [Agent.run ~sw agent goal]
+    3. Checkpoint — persist [Agent.checkpoint] + optional MASC context
+    4. Events — bridge lifecycle events to [Event_bus]
+
+    @since Phase 1 — MASC→OAS migration *)
+
+module Oas = Agent_sdk
+
+(* ================================================================ *)
+(* Configuration                                                     *)
+(* ================================================================ *)
+
+type config = {
+  name : string;
+  model_spec : Llm_types.model_spec;
+  system_prompt : string;
+  tools : Oas.Tool.t list;
+  max_turns : int;
+  max_tokens : int;
+  temperature : float;
+  hooks : Oas.Hooks.hooks option;
+  guardrails : Oas.Guardrails.t option;
+  event_bus : Oas.Event_bus.t option;
+  checkpoint_dir : string option;
+  session_id : string option;
+  description : string option;
+}
+
+let default_config ~name ~model_spec ~system_prompt ~tools : config =
+  { name; model_spec; system_prompt; tools;
+    max_turns = 20;
+    max_tokens = 4096;
+    temperature = 0.7;
+    hooks = None;
+    guardrails = None;
+    event_bus = None;
+    checkpoint_dir = None;
+    session_id = None;
+    description = None;
+  }
+
+(* ================================================================ *)
+(* Result type                                                       *)
+(* ================================================================ *)
+
+type run_result = {
+  response : Oas.Types.api_response;
+  checkpoint : Oas.Checkpoint.t option;
+  session_id : string;
+  turns : int;
+}
+
+(* ================================================================ *)
+(* Internal: resolve provider                                        *)
+(* ================================================================ *)
+
+let resolve_provider (spec : Llm_types.model_spec) : Oas.Provider.config =
+  match Llm_provider_dispatch.to_oas_provider spec with
+  | Some cfg -> cfg
+  | None ->
+    { Oas.Provider.provider =
+        Oas.Provider.OpenAICompat {
+          base_url = spec.api_url;
+          auth_header = None;
+          path = "/v1/chat/completions";
+          static_token = None;
+        };
+      model_id = spec.model_id;
+      api_key_env = Option.value ~default:"" spec.api_key_env;
+    }
+
+(* ================================================================ *)
+(* Internal: event publishing                                        *)
+(* ================================================================ *)
+
+let publish_lifecycle bus ~name ~event ~detail =
+  Oas.Event_bus.publish bus
+    (Oas.Event_bus.Custom
+      (Printf.sprintf "masc:oas_worker:%s" event,
+       `Assoc [
+         ("agent", `String name);
+         ("detail", `String detail);
+         ("timestamp", `Float (Time_compat.now ()));
+       ]))
+
+(* ================================================================ *)
+(* Internal: checkpoint persistence                                  *)
+(* ================================================================ *)
+
+let persist_checkpoint ~dir ~session_id (ckpt : Oas.Checkpoint.t) =
+  let path = Filename.concat dir (session_id ^ ".json") in
+  Fs_compat.mkdir_p dir;
+  Fs_compat.save_file path (Oas.Checkpoint.to_string ckpt)
+
+(* ================================================================ *)
+(* Build                                                             *)
+(* ================================================================ *)
+
+let build
+    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ~(config : config)
+  : (Oas.Agent.t, string) result =
+  let provider = resolve_provider config.model_spec in
+  let tool_names =
+    List.map (fun (t : Oas.Tool.t) -> t.schema.name) config.tools in
+  let guardrails = match config.guardrails with
+    | Some g -> g
+    | None ->
+      { Oas.Guardrails.default with
+        tool_filter =
+          if tool_names <> [] then Oas.Guardrails.AllowList tool_names
+          else Oas.Guardrails.AllowAll }
+  in
+  let builder =
+    Oas.Builder.create ~net ~model:config.model_spec.model_id
+    |> Oas.Builder.with_name config.name
+    |> Oas.Builder.with_system_prompt config.system_prompt
+    |> Oas.Builder.with_max_tokens config.max_tokens
+    |> Oas.Builder.with_max_turns config.max_turns
+    |> Oas.Builder.with_temperature config.temperature
+    |> Oas.Builder.with_provider provider
+    |> Oas.Builder.with_tools config.tools
+    |> Oas.Builder.with_guardrails guardrails
+  in
+  let builder = match config.hooks with
+    | Some h -> Oas.Builder.with_hooks h builder
+    | None -> builder
+  in
+  let builder = match config.description with
+    | Some d -> Oas.Builder.with_description d builder
+    | None -> builder
+  in
+  Oas.Builder.build_safe builder
+  |> Result.map_error Oas.Error.to_string
+
+(* ================================================================ *)
+(* Run                                                               *)
+(* ================================================================ *)
+
+let run
+    ~(sw : Eio.Switch.t)
+    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ~(config : config)
+    (goal : string)
+  : (run_result, string) result =
+  let session_id = match config.session_id with
+    | Some id -> id
+    | None ->
+      Printf.sprintf "%s-%d-%06d"
+        config.name
+        (int_of_float (Time_compat.now () *. 1000.0))
+        (Random.int 1_000_000)
+  in
+  Option.iter (fun bus ->
+    publish_lifecycle bus ~name:config.name ~event:"build" ~detail:goal
+  ) config.event_bus;
+  match build ~net ~config with
+  | Error e ->
+    Option.iter (fun bus ->
+      publish_lifecycle bus ~name:config.name ~event:"build_error" ~detail:e
+    ) config.event_bus;
+    Error (Printf.sprintf "Agent build failed: %s" e)
+  | Ok agent ->
+  let result = Oas.Agent.run ~sw agent goal in
+  let checkpoint = match config.checkpoint_dir with
+    | Some dir ->
+      let ckpt = Oas.Agent.checkpoint ~session_id agent in
+      (try persist_checkpoint ~dir ~session_id ckpt
+       with exn ->
+         Printf.eprintf "[oas_worker] Checkpoint save failed: %s\n%!"
+           (Printexc.to_string exn));
+      Some ckpt
+    | None -> None
+  in
+  Option.iter (fun bus ->
+    let status = match result with Ok _ -> "completed" | Error _ -> "failed" in
+    publish_lifecycle bus ~name:config.name ~event:status
+      ~detail:(Printf.sprintf "session=%s" session_id)
+  ) config.event_bus;
+  let turns = (Oas.Agent.state agent).turn_count in
+  Oas.Agent.close agent;
+  match result with
+  | Ok response -> Ok { response; checkpoint; session_id; turns }
+  | Error err ->
+    Error (Printf.sprintf "Agent run failed: %s" (Oas.Error.to_string err))
+
+(* ================================================================ *)
+(* Convenience: run_with_masc_tools                                  *)
+(* ================================================================ *)
+
+let run_with_masc_tools
+    ~(sw : Eio.Switch.t)
+    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ~(config : config)
+    ~(masc_tools : Llm_types.tool_def list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    (goal : string)
+  : (run_result, string) result =
+  let oas_tools = List.map (fun (td : Llm_types.tool_def) ->
+    Tool_bridge.oas_tool_of_masc
+      ~name:td.tool_name
+      ~description:td.tool_description
+      ~input_schema:td.parameters
+      (fun input -> dispatch ~name:td.tool_name ~args:input)
+  ) masc_tools in
+  let config = { config with tools = oas_tools @ config.tools } in
+  run ~sw ~net ~config goal

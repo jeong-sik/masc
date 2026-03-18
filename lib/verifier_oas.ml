@@ -288,3 +288,41 @@ let guardrails_with_read_only_tag
     guardrails pipelines for conditional verification bypass. *)
 let read_only_predicate (schema : Agent_sdk.Types.tool_schema) : bool =
   should_skip ~action_description:schema.name
+
+(* ================================================================ *)
+(* Eval_gate -> OAS Guardrails bridge                               *)
+(* ================================================================ *)
+
+(** Convert Eval_gate.gate_config to OAS Guardrails.t.
+
+    Maps the static tool-filtering portion of the gate config:
+    - [allowlist_enabled] + [allowed_tools] -> AllowList
+    - [denied_tools] only -> DenyList
+    - Both enabled -> AllowList (stricter; deny is redundant)
+    - Neither -> AllowAll
+
+    Dynamic runtime checks (cost budget, entropy, destructive patterns)
+    remain in Eval_gate. OAS Guardrails handles static pre-filtering;
+    Eval_gate handles stateful per-call checks. Together they form
+    defense-in-depth.
+
+    @since Phase 6 — OAS Guardrails bridge *)
+let eval_gate_to_oas_guardrails (gate : Eval_gate.gate_config) :
+    Agent_sdk.Guardrails.t =
+  let tool_filter =
+    match (gate.allowlist_enabled, gate.allowed_tools, gate.denied_tools) with
+    | true, (_ :: _ as allowed), _ ->
+        (* AllowList is the stricter filter; deny is handled at runtime *)
+        Agent_sdk.Guardrails.AllowList allowed
+    | true, [], _ ->
+        (* Allowlist enabled but empty = deny all tools *)
+        Agent_sdk.Guardrails.AllowList []
+    | false, _, (_ :: _ as denied) ->
+        Agent_sdk.Guardrails.DenyList denied
+    | false, _, [] ->
+        Agent_sdk.Guardrails.AllowAll
+  in
+  {
+    Agent_sdk.Guardrails.tool_filter;
+    max_tool_calls_per_turn = Some gate.max_tool_calls_per_turn;
+  }

@@ -118,6 +118,89 @@ let build ~base_path ~team_session_id =
         task_tree;
       }
 
+(* ── OAS Collaboration.t bridge ──────────────────────────────────
+   Lossy projection: MASC team_session (47 fields) → OAS Collaboration.t (12 fields).
+   MASC session_status has no Bootstrapping; planned_worker (16 fields) →
+   Collaboration.participant (6 fields).
+
+   New code should prefer Collaboration.t for cross-system interop.
+   Existing team_session consumers remain unaffected. *)
+
+let session_status_to_phase
+    (s : Team_session_types.session_status)
+    : Agent_sdk.Collaboration.phase =
+  match s with
+  | Running -> Active
+  | Paused -> Waiting_on_participants
+  | Completed -> Completed
+  | Interrupted -> Failed
+  | Failed -> Failed
+  | Cancelled -> Cancelled
+
+let execution_scope_to_participant_state
+    (scope : Team_session_types.execution_scope option)
+    : Agent_sdk.Collaboration.participant_state =
+  match scope with
+  | None -> Planned
+  | Some Observe_only -> Joined
+  | Some Limited_code_change -> Working
+  | Some Autonomous -> Working
+
+let planned_worker_to_participant
+    (pw : Team_session_types.planned_worker)
+    : Agent_sdk.Collaboration.participant =
+  {
+    name = pw.spawn_agent;
+    role = pw.spawn_role;
+    state = execution_scope_to_participant_state pw.execution_scope;
+    joined_at = None;
+    finished_at = None;
+    summary = None;
+  }
+
+(** Project a MASC team session into an OAS {!Agent_sdk.Collaboration.t}.
+
+    This is a lossy projection: planned_worker (16 fields) compresses to
+    participant (6 fields).  MASC has no explicit votes or artifacts list
+    in the session record, so those are empty.
+
+    [shared_context] is populated from [shared_findings] if available. *)
+let collaboration_of_session
+    ~base_path
+    (session : Team_session_types.session)
+    : Agent_sdk.Collaboration.t =
+  let ctx = Agent_sdk.Context.create () in
+  (* Inject shared findings into context *)
+  let findings =
+    load_findings ~base_path ~team_session_id:session.session_id
+  in
+  List.iteri (fun i f ->
+    Agent_sdk.Context.set ctx
+      (Printf.sprintf "finding_%d" i) (`String f)
+  ) findings;
+  {
+    id = session.session_id;
+    goal = session.goal;
+    phase = session_status_to_phase session.status;
+    participants =
+      List.map planned_worker_to_participant session.planned_workers;
+    artifacts = [];
+    votes = [];
+    shared_context = ctx;
+    created_at = session.started_at;
+    updated_at =
+      (match session.last_event_at with
+       | Some t -> t
+       | None -> session.started_at);
+    outcome = session.stop_reason;
+    max_participants = None;
+    metadata =
+      [("room_id", `String session.room_id);
+       ("orchestration_mode",
+        `String (Team_session_types.orchestration_mode_to_string
+                   session.orchestration_mode))];
+  }
+
 let truncate_list n lst =
   List.filteri (fun i _ -> i < n) lst
 

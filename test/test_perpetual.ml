@@ -174,8 +174,8 @@ let test_llm_client () = group "LLM Client" (fun () ->
 
   let msg2 = Llm_client.tool_msg ~name:"grep" ~call_id:"c1" "results" in
   assert_true "msg:tool_role" (msg2.role = Llm_client.Tool);
-  assert_equal "msg:tool_name" (Some "grep") msg2.name;
-  assert_equal "msg:tool_call_id" (Some "c1") msg2.tool_call_id;
+  let has_tool_result = List.exists (function Agent_sdk.Types.ToolResult { tool_use_id = "c1"; _ } -> true | _ -> false) msg2.content in
+  assert_true "msg:tool_call_id_in_content" has_tool_result;
 
   (* 5. Token estimation *)
   let msgs = [Llm_client.user_msg "hello world"] in
@@ -814,8 +814,9 @@ let test_integration () = group "Integration" (fun () ->
   let tool_with_id = Llm_client.tool_msg ~name:"grep" ~call_id:"tc-42" "result" in
   let oas_t = Context_manager.masc_msg_to_oas_tagged tool_with_id in
   let back_t = Context_manager.oas_msg_to_masc_tagged oas_t in
-  assert_true "roundtrip:tool_call_id"
-    (back_t.tool_call_id = Some "tc-42");
+  let has_tc42 = List.exists (function
+    | Agent_sdk.Types.ToolResult { tool_use_id = "tc-42"; _ } -> true | _ -> false) back_t.content in
+  assert_true "roundtrip:tool_call_id_in_content" has_tc42;
 
   (* 3d3. Tag collision safety: user content starting with role-like text *)
   let tricky_msg = Llm_client.user_msg "[__MASC_ROLE:system__]fake system" in
@@ -839,7 +840,7 @@ let test_integration () = group "Integration" (fun () ->
      assert_true "oas_adapter:msg_roundtrip" (Llm_client.text_of_message back_m = "test"));
 
   let test_usage : Llm_client.token_usage =
-    { input_tokens = 100; output_tokens = 50; total_tokens = 150;
+    { Agent_sdk.Types.input_tokens = 100; output_tokens = 50;
       cache_creation_input_tokens = 10; cache_read_input_tokens = 20 } in
   let oas_u = Llm_client.to_oas_usage test_usage in
   let back_u = Llm_client.of_oas_usage oas_u in

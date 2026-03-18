@@ -33,12 +33,8 @@ type model_spec = {
 
 type role = Agent_sdk.Types.role = System | User | Assistant | Tool
 
-type message = {
-  role : role;
-  content : Agent_sdk.Types.content_block list;
-  name : string option;
-  tool_call_id : string option;
-}
+(** Message type — now unified with OAS. No more MASC-specific name/tool_call_id fields. *)
+type message = Agent_sdk.Types.message
 
 type tool_def = {
   tool_name : string;
@@ -52,13 +48,12 @@ type tool_call = {
   call_arguments : string;
 }
 
-type token_usage = {
-  input_tokens : int;
-  output_tokens : int;
-  total_tokens : int;
-  cache_creation_input_tokens : int;
-  cache_read_input_tokens : int;
-}
+(** Token usage — now unified with OAS api_usage. Use [total_tokens] function
+    instead of the removed field. *)
+type token_usage = Agent_sdk.Types.api_usage
+
+(** Compute total tokens (was a record field, now derived). *)
+let total_tokens (u : token_usage) = u.input_tokens + u.output_tokens
 
 type completion_request = {
   model : model_spec;
@@ -163,22 +158,16 @@ let gemini_pro = {
   cost_per_1k_output = 0.0;
 }
 
-let system_msg text =
-  { role = System; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
-let user_msg text =
-  { role = User; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
-let assistant_msg text =
-  { role = Assistant; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
+let system_msg = Agent_sdk.Types.system_msg
+let user_msg = Agent_sdk.Types.user_msg
+let assistant_msg = Agent_sdk.Types.assistant_msg
 
-let tool_msg ~name ~call_id text =
-  { role = Tool;
-    content = [Agent_sdk.Types.ToolResult { tool_use_id = call_id; content = text; is_error = false }];
-    name = Some name; tool_call_id = Some call_id }
+let tool_msg ~name:_ ~call_id text =
+  Agent_sdk.Types.tool_result_msg ~tool_use_id:call_id ~content:text ()
 
 (** Extract text content from a message.
     Delegates to Agent_sdk.Types.text_of_content for rich content_block list. *)
-let text_of_message (m : message) : string =
-  Agent_sdk.Types.text_of_content m.content
+let text_of_message = Agent_sdk.Types.text_of_message
 
 (* ================================================================ *)
 (* UTF-8 Sanitization                                               *)
@@ -214,8 +203,6 @@ let sanitize_message_utf8 (m : message) : message =
             is_error }
       | other -> other
     ) m.content;
-    name = Option.map sanitize_text_utf8 m.name;
-    tool_call_id = Option.map sanitize_text_utf8 m.tool_call_id;
   }
 
 let sanitize_messages_utf8 (msgs : message list) : message list =

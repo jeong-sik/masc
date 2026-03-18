@@ -52,12 +52,9 @@ let test_event_bus_task_transition () =
 (* ================================================================ *)
 
 let test_message_roundtrip () =
-  let masc_msg : Llm_client.message = {
-    role = Llm_client.Assistant;
-    content = [Agent_sdk.Types.Text "test content"];
-    name = None;
-    tool_call_id = None;
-  } in
+  let masc_msg : Llm_client.message =
+    Llm_client.assistant_msg "test content"
+  in
   let oas_msg = Llm_client.to_oas_message masc_msg in
   (match oas_msg with
    | None -> Alcotest.fail "Assistant message should not be dropped"
@@ -70,12 +67,9 @@ let test_message_roundtrip () =
        "test content" (Llm_client.text_of_message roundtrip))
 
 let test_system_role_dropped () =
-  let masc_msg : Llm_client.message = {
-    role = Llm_client.System;
-    content = [Agent_sdk.Types.Text "system prompt"];
-    name = None;
-    tool_call_id = None;
-  } in
+  let masc_msg : Llm_client.message =
+    Llm_client.system_msg "system prompt"
+  in
   let oas_msg = Llm_client.to_oas_message masc_msg in
   Alcotest.(check bool) "system message dropped (belongs in system_prompt)"
     true (Option.is_none oas_msg)

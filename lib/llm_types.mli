@@ -38,13 +38,7 @@ type role = Agent_sdk.Types.role = System | User | Assistant | Tool
 (** A single message in a conversation.
     [content] is a list of {!Agent_sdk.Types.content_block} for type convergence
     with OAS message. Use {!text_of_message} to extract text. *)
-type message = {
-  role : role;
-  content : Agent_sdk.Types.content_block list;
-  name : string option;       (** For tool messages: tool name *)
-  tool_call_id : string option; (** For tool result messages *)
-}
-
+type message = Agent_sdk.Types.message
 (** Tool/function definition for function calling. *)
 type tool_def = {
   tool_name : string;
@@ -62,13 +56,9 @@ type tool_call = {
 (** Token usage from a completion.
     [cache_creation_input_tokens] and [cache_read_input_tokens] track
     Anthropic prompt caching metrics (0 for non-Anthropic providers). *)
-type token_usage = {
-  input_tokens : int;
-  output_tokens : int;
-  total_tokens : int;
-  cache_creation_input_tokens : int;
-  cache_read_input_tokens : int;
-}
+type token_usage = Agent_sdk.Types.api_usage
+
+val total_tokens : token_usage -> int
 
 (** {1 Request/Response} *)
 

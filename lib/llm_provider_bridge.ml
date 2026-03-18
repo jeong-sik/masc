@@ -335,24 +335,14 @@ let tool_calls_of_content (blocks : Llm_provider.Types.content_block list)
 let completion_response_of_api_response
     (resp : Llm_provider.Types.api_response) : completion_response =
   let tool_calls = tool_calls_of_content resp.content in
-  let usage =
+  let usage : Llm_types.token_usage =
     match resp.usage with
-    | Some u ->
-        {
-          input_tokens = u.input_tokens;
-          output_tokens = u.output_tokens;
-          total_tokens = u.input_tokens + u.output_tokens;
-          cache_creation_input_tokens = u.cache_creation_input_tokens;
-          cache_read_input_tokens = u.cache_read_input_tokens;
-        }
+    | Some u -> u
     | None ->
-        {
-          input_tokens = 0;
+        { Agent_sdk.Types.input_tokens = 0;
           output_tokens = 0;
-          total_tokens = 0;
           cache_creation_input_tokens = 0;
-          cache_read_input_tokens = 0;
-        }
+          cache_read_input_tokens = 0 }
   in
   {
     content = resp.content;

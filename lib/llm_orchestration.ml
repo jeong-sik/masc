@@ -51,18 +51,12 @@ let response_format_to_string = function
   | `Text -> "text"
   | `Json -> "json"
 
-let string_opt_to_json = function
-  | Some v -> `String v
-  | None -> `Null
-
 let message_fingerprint_json (m : message) : Yojson.Safe.t =
   let m = sanitize_message_utf8 m in
   `Assoc
     [
       ("role", `String (string_of_role m.role));
       ("content", `String (text_of_message m));
-      ("name", string_opt_to_json m.name);
-      ("tool_call_id", string_opt_to_json m.tool_call_id);
     ]
 
 let completion_request_fingerprint_json (req : completion_request) : Yojson.Safe.t =
@@ -89,7 +83,7 @@ let token_usage_to_json (u : token_usage) : Yojson.Safe.t =
     [
       ("input_tokens", `Int u.input_tokens);
       ("output_tokens", `Int u.output_tokens);
-      ("total_tokens", `Int u.total_tokens);
+      ("total_tokens", `Int (Llm_types.total_tokens u));
       ("cache_creation_input_tokens", `Int u.cache_creation_input_tokens);
       ("cache_read_input_tokens", `Int u.cache_read_input_tokens);
     ]
@@ -98,10 +92,8 @@ let token_usage_of_json (json : Yojson.Safe.t) : (token_usage, string) result =
   let open Yojson.Safe.Util in
   try
     Ok
-      {
-        input_tokens = json |> member "input_tokens" |> to_int;
+      { Agent_sdk.Types.input_tokens = json |> member "input_tokens" |> to_int;
         output_tokens = json |> member "output_tokens" |> to_int;
-        total_tokens = json |> member "total_tokens" |> to_int;
         cache_creation_input_tokens =
           json |> member "cache_creation_input_tokens" |> to_int;
         cache_read_input_tokens = json |> member "cache_read_input_tokens" |> to_int;

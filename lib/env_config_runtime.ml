@@ -133,10 +133,9 @@ end
 
 (** {1 Local LLM Server Configuration} *)
 
-(** Local LLM runtime config.  Module kept as [Llama] for env-var
-    backward compatibility (LLAMA_SERVER_URL, LLAMA_DEFAULT_MODEL, etc.).
-    Rename to [Local_runtime] deferred to avoid breaking external consumers. *)
-module Llama = struct
+(** Local LLM runtime config (llama-server / any OpenAI-compatible backend).
+    Environment variables retain the LLAMA_ prefix for backward compatibility. *)
+module Local_runtime = struct
   (** OpenAI-compatible local LLM server URL *)
   let server_url =
     get_string ~default:"http://127.0.0.1:8085" "LLAMA_SERVER_URL"
@@ -150,6 +149,10 @@ module Llama = struct
   let max_tokens =
     get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
 end
+
+(** Backward-compatible alias so existing [Env_config.Llama] references
+    continue to compile without changes. *)
+module Llama = Local_runtime
 
 (** {1 Federation Configuration} *)
 
@@ -203,12 +206,6 @@ module Voice = struct
 end
 
 (** {1 LLM Provider Defaults} *)
-
-module Mlx = struct
-  (** MLX local server URL *)
-  let server_url =
-    get_string ~default:"http://127.0.0.1:8091" "MLX_SERVER_URL"
-end
 
 module Custom_llm = struct
   (** Default URL for custom OpenAI-compatible server *)

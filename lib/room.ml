@@ -304,10 +304,12 @@ let leave config ~agent_name =
       "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
       actual_name (now_iso ()));
 
-    (* Record co-presence relationships to Neo4j (fire-and-forget) *)
+    (* Record co-presence relationships to Neo4j (async, non-blocking) *)
     (try Relation_materializer.on_agent_leave
            ~leaving_agent:actual_name ~active_agents:peers_before_leave
-     with _ -> ());
+     with exn ->
+       Printf.eprintf "[relation-materializer] leave hook error: %s\n%!"
+         (Printexc.to_string exn));
 
     Printf.sprintf "✅ %s left the room" actual_name
   end else

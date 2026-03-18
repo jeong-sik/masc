@@ -406,11 +406,13 @@ let complete_task config ~agent_name ~task_id ~notes =
               agent_name task_id
               (if notes = "" then "null" else Printf.sprintf "\"%s\"" notes)
               (now_iso ()));
-            (* Record task collaboration to Neo4j (fire-and-forget) *)
+            (* Record task collaboration to Neo4j (async, non-blocking) *)
             (try
                let active = (Room_state.read_state config).active_agents in
                Relation_materializer.on_task_done ~assignee:agent_name ~active_agents:active
-             with _ -> ());
+             with exn ->
+               Printf.eprintf "[relation-materializer] task hook error: %s\n%!"
+                 (Printexc.to_string exn));
             Printf.sprintf "✅ %s completed %s" agent_name task_id
           end
     with e ->

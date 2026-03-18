@@ -5,15 +5,10 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_mitosis_handoff";
-    description = {|2-Phase Proactive Context Management - THE CORE MITOSIS TOOL
-
-Call this periodically with your estimated context_ratio. It handles the full lifecycle:
-- <50%: Returns "none" - continue working normally
-- 50-80%: Returns "prepared" - DNA extracted, ready for handoff
-- >80%: Returns "handoff" - spawns successor agent with DNA
-
-Unlike masc_mitosis_divide (manual), this auto-detects phase and takes appropriate action.
-Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
+    description = "Automated 2-phase context lifecycle manager. Call periodically with your estimated context_ratio. \
+<50%: continue, 50-80%: DNA extracted (prepared), >80%: spawns successor (handoff). \
+Use when you want automatic lifecycle management instead of manual masc_mitosis_check + prepare + divide. \
+Pair with masc_memento_mori for the all-in-one convenience wrapper.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -97,16 +92,9 @@ Embodies proactive mitosis: prepare early at 50%, handoff at 80%.|};
 
   {
     name = "masc_metrics_compare";
-    description = {|Compare generational performance metrics.
-
-Evidence for "Are successors better than predecessors?"
-Compares two generations across:
-- Task completion rate
-- Error rate
-- Duration (speed)
-- Token efficiency
-
-Returns verdict: "improved" / "degraded" / "neutral"|};
+    description = "Compare performance metrics between two agent generations (completion rate, errors, speed, tokens). \
+Use when evaluating whether successor agents are improving over predecessors. \
+Returns verdict: improved/degraded/neutral. Pair with masc_metrics_record to collect data first.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -125,9 +113,9 @@ Returns verdict: "improved" / "degraded" / "neutral"|};
 
   {
     name = "masc_metrics_record";
-    description = {|Record a task completion for generational metrics.
-
-Call after completing a task to track performance across generations.|};
+    description = "Record a task completion event (duration, errors, tokens) for generational performance tracking. \
+Use when finishing a task to feed data into the metrics system. \
+Pair with masc_metrics_compare to evaluate generational improvement.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -162,15 +150,10 @@ Call after completing a task to track performance across generations.|};
 
   {
     name = "masc_memento_mori";
-    description = {|Memento Mori - Agent self-awareness of mortality.
-A convenience tool combining mitosis check + prepare + divide in one call.
-Call this periodically to check your context health and auto-handle lifecycle:
-- <50%: Returns "continue" - keep working
-- 50-80%: Auto-prepares DNA, returns "prepared" - ready for handoff when needed
-- >80%: Auto-divides and spawns successor, returns handoff result
-
-This embodies the philosophical concept of "memento mori" - agents should be aware
-of their context limits and gracefully hand over work to successors.|};
+    description = "All-in-one context health check combining mitosis check + prepare + divide in a single call. \
+Use when you want a simple periodic lifecycle check without managing individual mitosis steps. \
+<50%: continue, 50-80%: auto-prepare DNA, >80%: auto-divide and spawn successor. \
+Pair with masc_mitosis_status to see cell state, or masc_mitosis_handoff for async saga variant.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -205,17 +188,9 @@ of their context limits and gracefully hand over work to successors.|};
 
   {
     name = "masc_episode_flush";
-    description = {|Flush pending episodes to Neo4j and PostgreSQL.
-
-Episodes are queued locally during mitosis handoff (file-based queue for reliability).
-This tool flushes them to persistent storage (Neo4j for graph relationships, PostgreSQL for queries).
-
-Part of the Agent Being Protocol - agents are "beings" with memory continuity across generations.
-
-Returns:
-- flushed: Number of episodes successfully saved to DB
-- failed: Number of episodes that failed (kept in queue for retry)
-- pending: Remaining episodes in queue|};
+    description = "Flush locally queued episodes to Neo4j (graph) and PostgreSQL (relational) persistent storage. \
+Use when episodes have been queued during mitosis handoff and need to be persisted. \
+Returns flushed/failed/pending counts. Pair with masc_episode_list to verify stored episodes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -233,12 +208,9 @@ Returns:
 
   {
     name = "masc_episode_list";
-    description = {|List recent episodes from PostgreSQL.
-
-Query agent episodes with optional filters. Returns episode metadata for debugging
-and understanding agent lineage.
-
-Part of the Agent Being Protocol - agents can reflect on their history.|};
+    description = "List recent agent episodes from PostgreSQL with optional filters by agent_name and generation. \
+Use when debugging agent lineage, reviewing past actions, or understanding generational history. \
+Pair with masc_episode_flush to ensure episodes are persisted before querying.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -260,16 +232,9 @@ Part of the Agent Being Protocol - agents can reflect on their history.|};
 
   {
     name = "masc_self_introspect";
-    description = {|Agent self-awareness introspection.
-
-Returns the agent's current lifecycle state:
-- generation: Current generation number (how many mitosis events in lineage)
-- context_used: Estimated context usage percentage
-- siblings: Other agents of the same generation in the room
-- parent_episode: Episode ID of the parent (if known)
-- estimated_lifespan: Tokens/turns remaining before mitosis needed
-
-Part of the Agent Being Protocol - agents should know their place in the lifecycle.|};
+    description = "Agent self-awareness introspection: generation, context usage, siblings, parent episode, estimated lifespan. \
+Use when you need to understand your place in the agent lifecycle or check remaining capacity. \
+Pair with masc_mitosis_check for threshold-based action, or masc_recall_search for memory queries.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -278,12 +243,9 @@ Part of the Agent Being Protocol - agents should know their place in the lifecyc
 
   {
     name = "masc_recall_search";
-    description = {|Semantic memory search using local memory sources.
-
-Searches the agent's episodic memories using relevance scoring.
-Part of the Agent Being Protocol - agents can recall relevant past experiences.
-
-Returns matched memories with relevance scores, sorted by relevance.|};
+    description = "Semantic memory search across the agent's episodic memories using relevance scoring. \
+Use when you need to recall past experiences, decisions, or context from previous generations. \
+Returns matched memories sorted by relevance. Pair with masc_episode_list for structured queries.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -306,7 +268,9 @@ Returns matched memories with relevance scores, sorted by relevance.|};
 
   {
     name = "masc_a2a_discover";
-    description = "Discover available A2A agents. Returns agent cards with capabilities, skills, and protocol bindings. Use for local room discovery or remote endpoint fetching.";
+    description = "Discover available A2A agents with capabilities, skills, and protocol bindings. \
+Use when looking for agents to delegate tasks to, or checking what skills are available in the room. \
+Pair with masc_a2a_delegate to send work, or masc_a2a_query_skill for skill details.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -324,7 +288,9 @@ Returns matched memories with relevance scores, sorted by relevance.|};
 
   {
     name = "masc_a2a_query_skill";
-    description = "Query detailed information about an agent's skill, including input/output modes and examples. Use to understand what a skill can do before delegating.";
+    description = "Query detailed information about an agent's skill: input/output modes and usage examples. \
+Use when you want to understand a skill's capabilities before delegating work via masc_a2a_delegate. \
+Call masc_a2a_discover first to find available agents and skill IDs.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -343,7 +309,9 @@ Returns matched memories with relevance scores, sorted by relevance.|};
 
   {
     name = "masc_a2a_delegate";
-    description = "Delegate a task to another A2A agent. Opens portal, sends task, returns task ID. Use sync for waiting, async for fire-and-forget, stream for real-time updates.";
+    description = "Delegate a task to another A2A agent via portal. Returns task ID. \
+Use when you want another agent to handle a subtask. Modes: sync (wait), async (fire-and-forget), stream (real-time). \
+Call masc_a2a_discover first to find capable agents. Pair with masc_a2a_subscribe for async results.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -385,7 +353,9 @@ Returns matched memories with relevance scores, sorted by relevance.|};
 
   {
     name = "masc_a2a_subscribe";
-    description = "Subscribe to events from agents (task updates, broadcasts, completions). Connect to SSE endpoint to receive events.";
+    description = "Subscribe to events from agents (task_update, broadcast, completion, error) via SSE. \
+Use when monitoring delegated tasks or wanting real-time updates from other agents. \
+Pair with masc_poll_events to read buffered events, and masc_a2a_unsubscribe to clean up.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -427,7 +397,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
 
   {
     name = "masc_poll_events";
-    description = "Poll buffered events for a subscription. Use this for background subscription workflow: subscribe → do work → poll_events periodically. Returns and clears buffered events.";
+    description = "Poll buffered events for a subscription and optionally clear the buffer. \
+Use when checking for async task updates or broadcast events between work steps. \
+Workflow: masc_a2a_subscribe -> do work -> masc_poll_events periodically -> masc_a2a_unsubscribe.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

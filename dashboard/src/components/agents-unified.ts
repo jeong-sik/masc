@@ -7,6 +7,7 @@ import { route } from '../router'
 import { agents, keepers } from '../store'
 import { missionSnapshot } from '../mission-store'
 import { AgentRoster } from './agent-roster'
+import { AgentProfile } from './agent-profile'
 import { Execution } from './agents'
 
 type AgentsView = 'all' | 'agents' | 'keepers' | 'sessions'
@@ -43,6 +44,12 @@ const CHIPS: { id: AgentsView; label: string }[] = [
 ]
 
 export function AgentsUnified() {
+  // If an agent name is in the route params, show the profile page
+  const agentParam = route.value.params.agent as string | undefined
+  if (agentParam) {
+    return html`<${AgentProfile} name=${agentParam} />`
+  }
+
   // Sync from route params if present
   const viewParam = route.value.params.view as string | undefined
   if (viewParam === 'sessions' && activeView.value !== 'sessions') {

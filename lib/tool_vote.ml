@@ -15,19 +15,24 @@ type result = bool * string
 
 (* Individual handlers *)
 let handle_vote_create ctx args =
+  let ( let*! ) = Tool_args.( let*! ) in
   let proposer = get_string args "proposer" ctx.agent_name in
-  let topic = get_string args "topic" "" in
+  let*! topic = get_string_required args "topic" in
   let options = get_string_list args "options" in
+  if options = [] then error_result "options must have at least one entry"
+  else
   let required_votes = get_int args "required_votes" 2 in
   (true, Room.vote_create ctx.config ~proposer ~topic ~options ~required_votes)
 
 let handle_vote_cast ctx args =
-  let vote_id = get_string args "vote_id" "" in
-  let choice = get_string args "choice" "" in
+  let ( let*! ) = Tool_args.( let*! ) in
+  let*! vote_id = get_string_required args "vote_id" in
+  let*! choice = get_string_required args "choice" in
   (true, Room.vote_cast ctx.config ~agent_name:ctx.agent_name ~vote_id ~choice)
 
 let handle_vote_status ctx args =
-  let vote_id = get_string args "vote_id" "" in
+  let ( let*! ) = Tool_args.( let*! ) in
+  let*! vote_id = get_string_required args "vote_id" in
   let json = Room.vote_status ctx.config ~vote_id in
   (true, Yojson.Safe.pretty_to_string json)
 

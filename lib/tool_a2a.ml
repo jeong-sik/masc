@@ -19,18 +19,20 @@ let handle_a2a_discover ctx args =
   | Error e -> (false, Printf.sprintf "❌ Discovery failed: %s" e)
 
 let handle_a2a_query_skill ctx args =
-  let skill_agent_name = get_string args "agent_name" "" in
-  let skill_id = get_string args "skill_id" "" in
+  let ( let*! ) = Tool_args.( let*! ) in
+  let*! skill_agent_name = get_string_required args "agent_name" in
+  let*! skill_id = get_string_required args "skill_id" in
   match A2a_tools.query_skill ctx.config ~schemas:Config.raw_all_tool_schemas ~agent_name:skill_agent_name ~skill_id with
   | Ok json -> (true, Yojson.Safe.pretty_to_string json)
   | Error e -> (false, Printf.sprintf "❌ Query skill failed: %s" e)
 
 let handle_a2a_delegate ctx args =
+  let ( let*! ) = Tool_args.( let*! ) in
   (* Always use the authenticated caller's identity for the portal,
      not a user-supplied override. The caller cannot impersonate another agent. *)
   let delegate_agent_name = ctx.agent_name in
-  let target = get_string args "target_agent" "" in
-  let message = get_string args "message" "" in
+  let*! target = get_string_required args "target_agent" in
+  let*! message = get_string_required args "message" in
   let task_type_str = get_string args "task_type" "async" in
   let timeout = get_int args "timeout" 300 in
   let artifacts = match Yojson.Safe.Util.member "artifacts" args with

@@ -167,42 +167,44 @@ let handle_voice_speak (ctx : 'a context) args : result =
           (Voice_bridge.agent_speak ~sw:ctx.sw ~clock:ctx.clock ~net ~agent_id
              ~message ?provider ~priority ())
 
-let handle_voice_session_start (ctx : 'a context) args : result =
+let handle_voice_session_start (_ctx : 'a context) args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in
-  let session_name = get_string_opt args "session_name" |> Option.map String.trim in
-  let session_name =
-    match session_name with
+  let voice = get_string_opt args "session_name" |> Option.map String.trim in
+  let voice =
+    match voice with
     | Some name when name <> "" -> Some name
     | _ -> None
   in
   if agent_id = "" then
     (false, "Error: agent_id is required")
   else
-    match require_net_or_error ctx with
-    | Error message -> (false, message)
-    | Ok net ->
-        json_string_of_result
-          (Voice_bridge.start_voice_session ~sw:ctx.sw ~clock:ctx.clock ~net
-             ~agent_id ?session_name ())
+    let mgr = Keeper_voice_local.get_session_manager () in
+    let session =
+      Voice_session_manager.start_session mgr ~agent_id ?voice ()
+    in
+    (true, Yojson.Safe.to_string
+      (Voice_session_manager.session_to_json session))
 
-let handle_voice_session_end (ctx : 'a context) args : result =
+let handle_voice_session_end (_ctx : 'a context) args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in
   if agent_id = "" then
     (false, "Error: agent_id is required")
   else
-    match require_net_or_error ctx with
-    | Error message -> (false, message)
-    | Ok net ->
-        json_string_of_result
-          (Voice_bridge.end_voice_session ~sw:ctx.sw ~clock:ctx.clock ~net
-             ~agent_id)
+    let mgr = Keeper_voice_local.get_session_manager () in
+    let ended = Voice_session_manager.end_session mgr ~agent_id in
+    (true, Yojson.Safe.to_string
+      (`Assoc
+        [ ("status", `String (if ended then "ended" else "no_active_session"));
+          ("agent_id", `String agent_id) ]))
 
-let handle_voice_sessions (ctx : 'a context) _args : result =
-  match require_net_or_error ctx with
-  | Error message -> (false, message)
-  | Ok net ->
-      json_string_of_result
-        (Voice_bridge.list_voice_sessions ~sw:ctx.sw ~clock:ctx.clock ~net)
+let handle_voice_sessions (_ctx : 'a context) _args : result =
+  let mgr = Keeper_voice_local.get_session_manager () in
+  let sessions = Voice_session_manager.list_sessions mgr in
+  (true, Yojson.Safe.to_string
+    (`Assoc
+      [ ("session_count", `Int (List.length sessions));
+        ("sessions",
+          `List (List.map Voice_session_manager.session_to_json sessions)) ]))
 
 let handle_voice_agent _ctx args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in
@@ -211,36 +213,14 @@ let handle_voice_agent _ctx args : result =
   else
     json_string_of_result (Voice_bridge.get_agent_voice ~agent_id)
 
-let handle_voice_transcript (ctx : 'a context) _args : result =
-  match require_net_or_error ctx with
-  | Error message -> (false, message)
-  | Ok net ->
-      json_string_of_result
-        (Voice_bridge.get_transcript ~sw:ctx.sw ~clock:ctx.clock ~net ())
+let handle_voice_transcript (_ctx : 'a context) _args : result =
+  (* Transcript requires an external STT service — not yet integrated locally *)
+  (false, Yojson.Safe.to_string
+    (`Assoc
+      [ ("status", `String "not_available");
+        ("message", `String "transcript requires STT service integration") ]))
 
-let handle_voice_conference_start (ctx : 'a context) args : result =
-  let agent_ids =
-    get_string_list args "agent_ids"
-    |> List.map String.trim
-    |> List.filter (fun item -> item <> "")
-  in
-  let conference_name = get_string_opt args "conference_name" |> Option.map String.trim in
-  let conference_name =
-    match conference_name with
-    | Some name when name <> "" -> Some name
-    | _ -> None
-  in
-  if agent_ids = [] then
-    (false, "Error: agent_ids must include at least one agent")
-  else
-    match require_net_or_error ctx with
-    | Error message -> (false, message)
-    | Ok net ->
-        json_string_of_result
-          (Voice_bridge.start_conference ~sw:ctx.sw ~clock:ctx.clock ~net
-             ~agent_ids ?conference_name ())
-
-let handle_voice_conference_end (ctx : 'a context) args : result =
+let handle_voice_conference_start (_ctx : 'a context) args : result =
   let agent_ids =
     get_string_list args "agent_ids"
     |> List.map String.trim
@@ -249,12 +229,37 @@ let handle_voice_conference_end (ctx : 'a context) args : result =
   if agent_ids = [] then
     (false, "Error: agent_ids must include at least one agent")
   else
-    match require_net_or_error ctx with
-    | Error message -> (false, message)
-    | Ok net ->
-        json_string_of_result
-          (Voice_bridge.end_conference ~sw:ctx.sw ~clock:ctx.clock ~net
-             ~agent_ids ())
+    let mgr = Keeper_voice_local.get_session_manager () in
+    let sessions = List.map (fun agent_id ->
+      let session =
+        Voice_session_manager.start_session mgr ~agent_id ()
+      in
+      Voice_session_manager.session_to_json session
+    ) agent_ids in
+    (true, Yojson.Safe.to_string
+      (`Assoc
+        [ ("status", `String "started");
+          ("participant_count", `Int (List.length agent_ids));
+          ("sessions", `List sessions) ]))
+
+let handle_voice_conference_end (_ctx : 'a context) args : result =
+  let agent_ids =
+    get_string_list args "agent_ids"
+    |> List.map String.trim
+    |> List.filter (fun item -> item <> "")
+  in
+  if agent_ids = [] then
+    (false, "Error: agent_ids must include at least one agent")
+  else
+    let mgr = Keeper_voice_local.get_session_manager () in
+    let ended = List.fold_left (fun count agent_id ->
+      if Voice_session_manager.end_session mgr ~agent_id then count + 1
+      else count
+    ) 0 agent_ids in
+    (true, Yojson.Safe.to_string
+      (`Assoc
+        [ ("ended", `Int ended);
+          ("total", `Int (List.length agent_ids)) ]))
 
 let dispatch (ctx : 'a context) ~name ~args : result option =
   match name with

@@ -1,6 +1,6 @@
-(** Lodge Selection — Thompson Sampling with Fairness Guarantees
+(** Thompson Sampling — Agent Selection with Fairness Guarantees
 
-    Implements agent selection for Lodge Heartbeat using Thompson Sampling
+    Implements agent selection using Thompson Sampling
     for quality-based selection with starvation prevention.
 
     Algorithm based on:
@@ -35,7 +35,7 @@ type agent_stats = {
   mutable updated_at : float;
 }
 
-(** Selection trigger types (mirrors lodge_heartbeat.checkin_trigger) *)
+(** Selection trigger types *)
 type selection_trigger =
   | Mentioned of string    (** Mentioned by another agent *)
   | ContentAlert of string (** Content requires attention *)
@@ -120,7 +120,7 @@ val record_quality_signal :
 
 (** {1 Persistence} *)
 
-(** Load stats from persistent storage (.masc/lodge_stats.jsonl) *)
+(** Load stats from persistent storage (.masc/lodge_stats.jsonl for backward compat) *)
 val load_stats : unit -> unit
 
 (** Save stats to persistent storage *)

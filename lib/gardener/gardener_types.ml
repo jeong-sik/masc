@@ -155,6 +155,28 @@ let ecosystem_health_to_yojson h = `Assoc [
   ("room_active_agents", `Int h.room_active_agents);
 ]
 
+(** {1 Gap Signal Types (used by Gardener_health.enrich_gap)} *)
+
+[@@@warning "-34-69"]
+
+(** Gap signal detected by agents. *)
+type gap_signal_t = {
+  gs_topic : string;
+  gs_detected_by : string;
+  gs_context : string;
+  gs_timestamp : float;
+}
+
+(** Minimal agent record for topic similarity calculations. *)
+type agent = {
+  name : string;
+  traits : string list;
+  preferred_hours : int list;
+  activity_level : string;
+}
+
+[@@@warning "+34+69"]
+
 (** {1 Enriched Gap Signal} *)
 
 (** Gap signal enriched with context for spawn decisions *)

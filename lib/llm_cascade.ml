@@ -1,4 +1,4 @@
-(** Lodge Cascade — thin wrapper over OAS Cascade_config.
+(** LLM Cascade — thin wrapper over OAS Cascade_config.
 
     MASC defines cascade name -> model list policy (default_model_strings).
     OAS handles config loading, model parsing, health filtering, and execution.

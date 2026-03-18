@@ -94,12 +94,6 @@ if [ "$REPO_ENV_ROOT" != "$SCRIPT_DIR" ]; then
     load_env_file "$SCRIPT_DIR/.env.local"
 fi
 
-# Load Lodge heartbeat configuration (env vars override plist defaults)
-LODGE_ENV="$SCRIPT_DIR/config/lodge.env"
-if [ -f "$LODGE_ENV" ]; then
-    set -a; source "$LODGE_ENV"; set +a
-fi
-
 # Default: enable internal guardian unless explicitly disabled
 if [ -z "$MASC_GUARDIAN_ENABLED" ]; then
     export MASC_GUARDIAN_ENABLED=true

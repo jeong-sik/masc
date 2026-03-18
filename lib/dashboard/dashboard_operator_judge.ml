@@ -286,7 +286,7 @@ let parse_session_judgment ~config ~generated_at ~generated_at_unix ~model_used 
   | _ -> None
 
 let compute_judgments ~facts_json =
-  let specs = Lodge_cascade.get_cascade ~cascade_name:"operator_judge" () in
+  let specs = Llm_cascade.get_cascade ~cascade_name:"operator_judge" () in
   if specs = [] then Error "No operator_judge model is available."
   else
     let timeout_sec = Env_config.Llm.operator_judge_timeout_seconds in

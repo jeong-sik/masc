@@ -159,7 +159,7 @@ module RateLimit = struct
     get_float ~default:3600.0 "MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC"
 end
 
-(** {1 Lodge Heartbeat v2 — Generative Agent Configuration} *)
+(** {1 Agent Autonomy Configuration (env vars retain MASC_LODGE_* prefix for backward compat)} *)
 
 module LodgeV2 = struct
   (** Tick interval: 45 min default (configurable via MASC_LODGE_TICK_INTERVAL_SEC) *)
@@ -256,7 +256,7 @@ module SocialRuntime = struct
     | Hybrid -> "hybrid"
 end
 
-(** {1 Lodge Selection — Thompson Sampling Configuration} *)
+(** {1 Thompson Sampling Configuration (env vars retain MASC_LODGE_* prefix for backward compat)} *)
 
 module LodgeSelection = struct
   (** Max ticks without selection before forced inclusion (starvation rescue).

@@ -201,11 +201,11 @@ let handle_post_list args =
     ~exclude_automation
     ~sort_by:(dispatch_sort_of sort_by) ~limit:(limit + offset + 100) () in
 
-  (* Filter out lodge-system posts when exclude_system is true *)
+  (* Filter out system posts when exclude_system is true *)
   let all_posts = if exclude_system then
     List.filter (fun (p : Board.post) ->
       Board.classify_post_kind p <> Board.System_post
-      && Board.Agent_id.to_string p.author <> "lodge-system"
+      && Board.Agent_id.to_string p.author <> "system"
     ) all_posts
   else all_posts
   in
@@ -293,12 +293,12 @@ let handle_comment_add args =
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
-(** Check if an agent name looks like a Lodge agent (not a human user) *)
-let is_lodge_agent name =
-  (* Lodge agents don't contain spaces and are lowercase *)
+(** Check if a name looks like an agent (not a human user) *)
+let is_agent name =
+  (* Agent names don't contain spaces and are lowercase *)
   name <> "" && not (String.contains name ' ') && String.lowercase_ascii name = name
 
-(** SOUL Evolution callback - registered by Tool_lodge at startup to break dependency cycle *)
+(** SOUL Evolution callback - registered at startup to break dependency cycle *)
 type evolution_callback = {
   get_primary_value: string -> string option;
   record_feedback: name:string -> dimension:string -> is_positive:bool -> unit;
@@ -325,13 +325,13 @@ let handle_vote args =
       (* SOUL Evolution via callback (breaks compile-time dependency cycle) *)
       let evolution_msg =
         match !evolution_hook with
-        | None -> ""  (* Lodge not initialized yet *)
+        | None -> ""  (* Not initialized yet *)
         | Some cb ->
             match Board_dispatch.get_post ~post_id with
             | Ok post ->
                 let author = Board.Agent_id.to_string post.author in
                 (* Agent-only evolution: 에이전트끼리만 서로 진화시킴 *)
-                if is_lodge_agent voter && is_lodge_agent author then begin
+                if is_agent voter && is_agent author then begin
                   let dimension = match cb.get_primary_value author with
                     | Some pv -> pv
                     | None -> "Creativity"
@@ -434,7 +434,7 @@ let tool_post_list : Types.tool_schema = {
       ("random", `Assoc [("type", `String "boolean"); ("description", `String "Shuffle posts randomly (default: false)")]);
       ("offset", `Assoc [("type", `String "integer"); ("description", `String "Skip first N posts (default: 0)")]);
       ("sort_by", `Assoc [("type", `String "string"); ("description", `String "Sort order: hot (score+recency), trending (engagement/age), recent (newest first), updated (most recently active), discussed (most comments)")]);
-      ("exclude_system", `Assoc [("type", `String "boolean"); ("description", `String "Exclude lodge-system posts like Activity Reports (default: false)")]);
+      ("exclude_system", `Assoc [("type", `String "boolean"); ("description", `String "Exclude system posts like Activity Reports (default: false)")]);
       ("exclude_automation", `Assoc [("type", `String "boolean"); ("description", `String "Exclude automation posts (heartbeat, probes, etc.) (default: false)")]);
       ("since", `Assoc [("type", `String "number"); ("description", `String "Unix timestamp. Posts with activity after this time show a 🔔 indicator")]);
     ]);

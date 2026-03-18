@@ -1,6 +1,6 @@
-(** Lodge Selection — Thompson Sampling with Fairness Guarantees
+(** Thompson Sampling — Agent Selection with Fairness Guarantees
 
-    Implements agent selection for Lodge Heartbeat using Thompson Sampling
+    Implements agent selection using Thompson Sampling
     for quality-based selection with starvation prevention.
 
     Algorithm based on:
@@ -262,12 +262,12 @@ let load_stats () =
         | Some s ->
             Hashtbl.replace stats_table s.name s
         | None ->
-            Log.Lodge.error "Failed to parse stats line"
+            Log.Thompson.error "Failed to parse stats line"
       ) entries;
-      Printf.printf "[lodge_selection] Loaded stats for %d agents\n%!"
+      Printf.printf "[thompson_sampling] Loaded stats for %d agents\n%!"
         (Hashtbl.length stats_table)
     with e ->
-      Log.Lodge.error "Error loading stats: %s"
+      Log.Thompson.error "Error loading stats: %s"
         (Printexc.to_string e)
   end
 
@@ -280,10 +280,10 @@ let save_stats () =
       ) stats_table ""
     in
     Fs_compat.save_file path content;
-    Printf.printf "[lodge_selection] Saved stats for %d agents\n%!"
+    Printf.printf "[thompson_sampling] Saved stats for %d agents\n%!"
       (Hashtbl.length stats_table)
   with e ->
-    Log.Lodge.error "Error saving stats: %s"
+    Log.Thompson.error "Error saving stats: %s"
       (Printexc.to_string e)
 
 (** {1 Feedback Updates} *)
@@ -425,7 +425,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
       if List.mem name !selected_names then None
       else if not (is_trigger_eligible ~agent_name:name Thompson) then begin
         (* Unhealthy agents excluded from Thompson selection *)
-        Printf.printf "[lodge_selection] Skipping %s (unhealthy) from Thompson pool\n%!" name;
+        Printf.printf "[thompson_sampling] Skipping %s (unhealthy) from Thompson pool\n%!" name;
         None
       end
       else begin

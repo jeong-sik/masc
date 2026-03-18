@@ -77,14 +77,14 @@ let calculate_health ~config ~room_config : ecosystem_health =
         let room_id = Room.current_room_id rc in
         List.length (Room.get_agents_raw_in_room rc room_id)
     | None ->
-        (* Fallback to Lodge when no room_config available *)
-        List.length (Lodge_heartbeat.get_agents ())
+        (* No room_config available, assume 0 agents *)
+        0
   in
-  let all_stats = Lodge_selection.get_all_stats () in
+  let all_stats = Thompson_sampling.get_all_stats () in
   let now = Time_compat.now () in
   let idle_threshold_sec = config.idle_threshold_hours *. 3600.0 in
 
-  let active_agents, idle_agents = List.fold_left (fun (active, idle) (s : Lodge_selection.agent_stats) ->
+  let active_agents, idle_agents = List.fold_left (fun (active, idle) (s : Thompson_sampling.agent_stats) ->
     let time_since = now -. s.last_selected_at in
     if time_since < 86400.0 then (active + 1, idle)
     else if time_since > idle_threshold_sec then (active, idle + 1)
@@ -644,7 +644,7 @@ let propose_retire ~agent_name : retirement_decision =
   let health = calculate_health ~config ~room_config:!room_config_ref in
 
   (* Get stats for the agent *)
-  let ls = Lodge_selection.get_stats agent_name in
+  let ls = Thompson_sampling.get_stats agent_name in
   let stats = convert_stats ls in
 
   decide_retire ~config ~health ~agent_stats:stats

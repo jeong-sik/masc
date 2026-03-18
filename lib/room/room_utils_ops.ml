@@ -53,14 +53,14 @@ let sanitize_message = sanitize_html
 let safe_filename name =
   let buf = Buffer.create (String.length name * 3) in
   String.iter (fun c ->
+    let c_lower = Char.lowercase_ascii c in
     let valid =
-      (c >= 'a' && c <= 'z') ||
-      (c >= 'A' && c <= 'Z') ||
-      (c >= '0' && c <= '9') ||
-      c = '.' || c = '_' || c = '-'
+      (c_lower >= 'a' && c_lower <= 'z') ||
+      (c_lower >= '0' && c_lower <= '9') ||
+      c_lower = '.' || c_lower = '_' || c_lower = '-'
     in
     if valid then
-      Buffer.add_char buf c
+      Buffer.add_char buf c_lower
     else
       Buffer.add_string buf (Printf.sprintf "_%02x" (Char.code c))
   ) name;

@@ -229,7 +229,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   Printf.sprintf "%s\n\n--- Turn-specific instructions ---\n%s"
                     turn_system_prompt ti
             in
-	            let user_msg = Llm_client.user_msg message in
+	            let user_msg = Agent_sdk.Types.user_msg message in
 	            let ctx_work = Context_manager.append ctx_work user_msg in
 	            Context_manager.persist_message session user_msg;
             let turn_max_tokens = keeper_turn_max_tokens () in
@@ -253,7 +253,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             let requests =
 	              List.map (fun (model : Llm_client.model_spec) ->
 	                let msgs =
-	                  (Llm_client.system_msg turn_system_prompt) :: ctx_work.messages
+	                  (Agent_sdk.Types.system_msg turn_system_prompt) :: ctx_work.messages
 	                in
 	                ({
                   Llm_client.model;
@@ -378,11 +378,11 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
                   (* Terminal: no more tool calls or hit round limit *)
                   let content =
-                    let c = String.trim (Llm_client.text_of_response last_resp) in
+                    let c = String.trim (Llm_types.text_of_response last_resp) in
                     if c = "" && acc_tools_used <> [] then
                       Printf.sprintf "(tools executed: %s)"
                         (String.concat ", " acc_tools_used)
-                    else Llm_client.text_of_response last_resp
+                    else Llm_types.text_of_response last_resp
                   in
                   ( content, acc_usage, last_resp.Llm_client.model_used,
                     acc_latency, acc_cost, acc_tools_used )
@@ -399,7 +399,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   let followup_prompt =
                     keeper_tool_followup_prompt
                       ~user_message:message
-                      ~draft_reply:(Llm_client.text_of_response last_resp)
+                      ~draft_reply:(Llm_types.text_of_response last_resp)
                       ~tool_outputs
                       ~already_executed:all_tools_so_far
                   in
@@ -425,9 +425,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       ({
                         Llm_client.model;
                         messages = [
-                          Llm_client.system_msg (keeper_tool_loop_system_prompt
+                          Agent_sdk.Types.system_msg (keeper_tool_loop_system_prompt
                             ~character_context:ctx_work.system_prompt);
-                          Llm_client.user_msg followup_prompt;
+                          Agent_sdk.Types.user_msg followup_prompt;
                         ];
                         temperature = 0.3;
                         max_tokens = followup_max_tokens;
@@ -439,14 +439,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   match run_cascade_batch followup_requests with
                   | Error _ ->
                     (* Cascade failed — return what we have *)
-                    ( Llm_client.text_of_response last_resp, acc_usage,
+                    ( Llm_types.text_of_response last_resp, acc_usage,
                       last_resp.Llm_client.model_used, acc_latency,
                       acc_cost, acc_tools_used @ round_tools )
                   | Ok resp_next ->
                     Log.Trpg.info "Follow-up round %d resp: tool_calls=%d content_len=%d model=%s"
                       round
                       (List.length resp_next.Llm_client.tool_calls)
-                      (String.length (Llm_client.text_of_response resp_next))
+                      (String.length (Llm_types.text_of_response resp_next))
                       resp_next.Llm_client.model_used;
                     let used_model_next =
                       model_spec_for_used specs resp_next.model_used
@@ -504,8 +504,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
 	                      ({
 	                        Llm_client.model;
 	                        messages = [
-	                          Llm_client.system_msg turn_system_prompt;
-	                          Llm_client.user_msg correction_prompt;
+	                          Agent_sdk.Types.system_msg turn_system_prompt;
+	                          Agent_sdk.Types.user_msg correction_prompt;
 	                        ];
                         temperature = 0.2;
                         max_tokens = correction_max_tokens;
@@ -527,12 +527,12 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     let eval1 =
                       evaluate_memory_recall
                         ~user_message:message
-                        ~assistant_reply:(Llm_client.text_of_response corr)
+                        ~assistant_reply:(Llm_types.text_of_response corr)
                         ~candidates:recall_candidates
                     in
                     let evalf = { eval1 with initial_score = eval0.final_score } in
                     let merged_usage = merge_usage base_usage corr.usage in
-                    ( Llm_client.text_of_response corr, merged_usage, corr.model_used,
+                    ( Llm_types.text_of_response corr, merged_usage, corr.model_used,
                       base_latency_ms + corr.latency_ms,
                       evalf, true, evalf.passed, false, base_cost_usd +. cost1,
                       tools_used )
@@ -568,8 +568,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
 	                      ({
 	                        Llm_client.model;
 	                        messages = [
-	                          Llm_client.system_msg turn_system_prompt;
-	                          Llm_client.user_msg forced_prompt;
+	                          Agent_sdk.Types.system_msg turn_system_prompt;
+	                          Agent_sdk.Types.user_msg forced_prompt;
 	                        ];
                         temperature = 0.0;
                         max_tokens = correction_max_tokens;
@@ -592,8 +592,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       let merged_usage = merge_usage usage_after_correction forced.usage in
                       let merged_latency = latency_after_correction + forced.latency_ms in
                       let grounded_content =
-                        let c = String.trim (Llm_client.text_of_response forced) in
-                        if c = "" then content_after_correction else Llm_client.text_of_response forced
+                        let c = String.trim (Llm_types.text_of_response forced) in
+                        if c = "" then content_after_correction else Llm_types.text_of_response forced
                       in
                       let eval2 =
                         evaluate_memory_recall
@@ -693,7 +693,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
 	              in
               let response_alignment = jaccard_similarity message safe_reply in
 
-		              let assistant_msg = Llm_client.assistant_msg safe_reply in
+		              let assistant_msg = Agent_sdk.Types.assistant_msg safe_reply in
 	              let ctx_work = Context_manager.append ctx_work assistant_msg in
               Context_manager.persist_message session assistant_msg;
               let now_ts = Time_compat.now () in
@@ -736,13 +736,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 continuity_summary = continuity_summary_from_reply;
                 last_continuity_update_ts;
                 total_output_tokens = meta.total_output_tokens + final_usage.output_tokens;
-                total_tokens = meta.total_tokens + Llm_client.total_tokens final_usage;
+                total_tokens = meta.total_tokens + Llm_types.total_tokens final_usage;
                 total_cost_usd = meta.total_cost_usd +. total_cost_usd_turn;
                 last_turn_ts = now_ts;
                 last_model_used = final_model_used;
                 last_input_tokens = final_usage.input_tokens;
                 last_output_tokens = final_usage.output_tokens;
-                last_total_tokens = Llm_client.total_tokens final_usage;
+                last_total_tokens = Llm_types.total_tokens final_usage;
                 last_latency_ms = final_latency_ms;
                 compaction_count = meta.compaction_count + (if compacted then 1 else 0);
                 last_compaction_ts = (if compacted then now_ts else meta.last_compaction_ts);

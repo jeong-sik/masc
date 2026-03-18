@@ -574,6 +574,45 @@ Tip: Look for status='todo' tasks to claim.";
       ("required", `List [`String "task_id"; `String "priority"]);
     ];
   };
+
+  (* masc_transition *)
+  {
+    name = "masc_transition";
+    description = "Move a task through its lifecycle: claim, start, done, cancel, or release. \
+Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
+After masc_add_task or masc_claim_next; pair with masc_deliver before action='done'.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID (e.g., 'task-001')");
+        ]);
+        ("action", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Transition action: claim | start | done | cancel | release");
+        ]);
+        ("expected_version", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Optional CAS guard (current backlog.version). Transition fails if mismatched");
+        ]);
+        ("notes", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Completion notes (used with action='done')");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Cancellation reason (used with action='cancel')");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "task_id"; `String "action"]);
+    ];
+  };
+
 ]
 
 (* Dispatch function *)

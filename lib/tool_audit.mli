@@ -55,3 +55,6 @@ val governance_summary : ?since:string -> ?until_time:string -> Audit_log.audit_
 (** Convert governance report to JSON *)
 val report_to_json : governance_report -> Yojson.Safe.t
 
+(** Tool schemas for MCP tools/list *)
+val schemas : Types.tool_schema list
+

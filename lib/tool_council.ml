@@ -824,6 +824,74 @@ let schemas : Types.tool_schema list = [
       ("properties", `Assoc []);
     ];
   };
+
+  (* masc_route *)
+  {
+    name = "masc_route";
+    description = "Route a query to the best-fit agents using MoE-style selection, returning selected agents and estimated cost. \
+Use when you have a task and need to identify which agents should handle it. \
+Pair with masc_dispatch_assign to actually assign work to the selected agents.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The query to route");
+        ]);
+        ("max_agents", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max agents to select (default: 3)");
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
+
+  (* masc_execute *)
+  {
+    name = "masc_execute";
+    description = "Execute an action based on a governance decision by matching the topic pattern to a handler. \
+Use when a governance ruling has been made and the resulting action needs to run (e.g., 'Merge PR #123'). \
+Call masc_execute_dry_run first to preview. Pair with masc_execution_orders for the order context.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The decision topic (e.g., 'Merge PR #456')");
+        ]);
+        ("result", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "unanimous"; `String "majority"; `String "deadlock"]);
+          ("description", `String "Voting result (default: majority)");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
+  (* masc_execute_dry_run *)
+  {
+    name = "masc_execute_dry_run";
+    description = "Preview what action a governance execution would take without actually running it. \
+Use when you want to verify the matched handler and parameters before committing to masc_execute. \
+Pair with masc_execute to run the action after confirming the dry-run output.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The decision topic");
+        ]);
+        ("result", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Voting result");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
 ]
 
 let handle_governance_feed ctx args =

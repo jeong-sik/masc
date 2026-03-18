@@ -293,3 +293,90 @@ let dispatch ctx ~name ~args : result option =
   | "masc_code_symbols" -> Some (handle_code_symbols ctx args)
   | "masc_code_read" -> Some (handle_code_read ctx args)
   | _ -> None
+
+let schemas : Types.tool_schema list = [
+  (* masc_code_search *)
+  {
+    name = "masc_code_search";
+    description = "Search code using ripgrep with regex support, returning structured results (file, line, content). \
+Use when finding function names, patterns, or text across the codebase from within MASC. \
+Pair with masc_code_symbols for file-level symbol outlines or masc_code_read for targeted line ranges.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Search pattern (supports regex)");
+        ]);
+        ("path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Search path (default: current directory)");
+          ("default", `String ".");
+        ]);
+        ("file_pattern", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Glob pattern to filter files (e.g., '*.ml', '*.py')");
+          ("default", `String "");
+        ]);
+        ("case_insensitive", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Case-insensitive search (default: true)");
+          ("default", `Bool true);
+        ]);
+        ("max_results", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Maximum number of results (default: 50)");
+          ("default", `Int 50);
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
+
+  (* masc_code_symbols *)
+  {
+    name = "masc_code_symbols";
+    description = "Extract symbols (functions, types, classes) from a file as a token-efficient outline (~70% savings vs full read). \
+Use when you need to understand a file's structure without reading all content. \
+Pair with masc_code_read to then read specific line ranges of interest.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "File path to extract symbols from");
+        ]);
+      ]);
+      ("required", `List [`String "path"]);
+    ];
+  };
+
+  (* masc_code_read *)
+  {
+    name = "masc_code_read";
+    description = "Read a file with offset/limit pagination for token-efficient access to specific sections. \
+Use when you know the line range you need, especially for large files. \
+After masc_code_symbols identifies the relevant line numbers.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "File path to read");
+        ]);
+        ("offset", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Starting line number (0-indexed, default: 0)");
+          ("default", `Int 0);
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Maximum lines to read (default: 100)");
+          ("default", `Int 100);
+        ]);
+      ]);
+      ("required", `List [`String "path"]);
+    ];
+  };
+
+]

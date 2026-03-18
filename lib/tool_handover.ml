@@ -134,6 +134,119 @@ let schemas : Types.tool_schema list = [
       ("required", `List [`String "handover_id"; `String "agent_name"]);
     ];
   };
+
+  (* masc_handover_create *)
+  {
+    name = "masc_handover_create";
+    description = "Write a structured handover record (goal, progress, decisions, warnings) before context limit or session end. \\nCall when approaching context capacity, hitting a timeout, or completing a task phase. \\nSuccessor claims it via masc_handover_claim or masc_handover_claim_and_spawn.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name (the dying agent)");
+        ]);
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task being worked on");
+        ]);
+        ("session_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Current session identifier");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "context_limit"; `String "timeout"; `String "explicit"; `String "error"; `String "complete"]);
+          ("description", `String "Why handover is triggered");
+        ]);
+        ("goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Current goal being pursued");
+        ]);
+        ("progress", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Summary of progress made");
+        ]);
+        ("completed_steps", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Steps already completed");
+        ]);
+        ("pending_steps", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Steps remaining to do");
+        ]);
+        ("decisions", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Key decisions made and why (implicit knowledge transfer)");
+        ]);
+        ("assumptions", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "What we're assuming is true");
+        ]);
+        ("warnings", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Gotchas and things to watch out for");
+        ]);
+        ("errors", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Unresolved errors from PDCA loop");
+        ]);
+        ("files", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Files modified during this session");
+        ]);
+        ("context_pct", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Context usage percentage when handover triggered");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "task_id"; `String "reason"; `String "goal"]);
+    ];
+  };
+
+  (* masc_handover_list *)
+  {
+    name = "masc_handover_list";
+    description = "List handover records, optionally filtered to pending (unclaimed) only. \
+Use when starting a session to find abandoned work waiting to be continued. \
+After finding a handover, call masc_handover_get for details, then masc_handover_claim to take it.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("pending_only", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true, only show unclaimed handovers");
+          ("default", `Bool false);
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_handover_get *)
+  {
+    name = "masc_handover_get";
+    description = "Retrieve a handover record as formatted markdown showing goal, progress, decisions, and warnings. \
+Use when reviewing a handover before deciding to claim it via masc_handover_claim. \
+Pair with masc_handover_list to browse available handovers first.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("handover_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "ID of the handover to retrieve");
+        ]);
+      ]);
+      ("required", `List [`String "handover_id"]);
+    ];
+  };
+
 ]
 
 (* Dispatch function - returns None if tool not handled *)

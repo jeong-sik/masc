@@ -181,6 +181,17 @@ let () =
   register_module_tag ~schemas:Tool_hat.schemas ~tag:Mod_hat;
   register_module_tag ~schemas:Tool_gardener.schemas ~tag:Mod_gardener;
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
+  (* Monolithic schema decomposition: modules that now export their own schemas *)
+  register_module_tag ~schemas:Tool_cache.schemas ~tag:Mod_cache;
+  register_module_tag ~schemas:Tool_run.schemas ~tag:Mod_run;
+  register_module_tag ~schemas:Tool_social.schemas ~tag:Mod_social;
+  register_module_tag ~schemas:Tool_vote.schemas ~tag:Mod_vote;
+  register_module_tag ~schemas:Tool_code.schemas ~tag:Mod_code;
+  register_module_tag ~schemas:Tool_library.schemas ~tag:Mod_library;
+  register_module_tag ~schemas:Tool_audit.schemas ~tag:Mod_audit;
+  register_module_tag ~schemas:Tool_a2a.schemas ~tag:Mod_a2a;
+  register_module_tag ~schemas:Tool_heartbeat.schemas ~tag:Mod_heartbeat;
+  register_module_tag ~schemas:Tool_misc.schemas ~tag:Mod_misc;
   (* Fix 2: Register modules that lack schema exports.
      Tool_tag_init uses register_name_tag for remaining modules
      that still rely on name-based registration. Called AFTER schema-based

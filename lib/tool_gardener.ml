@@ -301,6 +301,123 @@ let schemas : Types.tool_schema list = [
       ("properties", `Assoc []);
     ];
   };
+
+  (* masc_gardener_health *)
+  {
+    name = "masc_gardener_health";
+    description = "Return ecosystem health metrics: agent population, activity counts, homeostatic score, and intervention recommendations. \
+Use when checking whether the agent ecosystem needs spawning or retirement. \
+Pair with masc_gardener_propose_spawn or masc_gardener_retire_agent based on the health assessment.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  (* masc_gardener_propose_spawn *)
+  {
+    name = "masc_gardener_propose_spawn";
+    description = "Evaluate whether a new agent should be spawned for a given topic, returning approval/deferral/rejection with reasons. \
+Use when a gap in ecosystem coverage is detected (e.g., no security agent). \
+Before masc_gardener_execute_spawn which performs the actual creation.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The role/topic for the new agent (e.g., 'security', 'UX', 'performance')");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Why this agent is needed");
+        ]);
+        ("urgency", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "low"; `String "medium"; `String "high"; `String "critical"]);
+          ("description", `String "How urgent the need is (default: medium)");
+          ("default", `String "medium");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
+  (* masc_gardener_retire_agent *)
+  {
+    name = "masc_gardener_retire_agent";
+    description = "Evaluate whether an idle agent should be retired, checking population minimums and recent contributions. \
+Use when an agent appears inactive and the ecosystem may be overpopulated. \
+Before masc_gardener_execute_retire which initiates the grace period.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Name of the agent to consider for retirement");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
+  (* masc_gardener_config *)
+  {
+    name = "masc_gardener_config";
+    description = "Return current Gardener configuration: population bounds, daily budgets, cooldowns, and circuit breaker state. \
+Use when diagnosing why a spawn or retirement was rejected, or verifying environment settings. \
+Pair with masc_gardener_health for runtime metrics and masc_gardener_reset_circuit to clear a tripped breaker.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  (* masc_gardener_execute_spawn *)
+  {
+    name = "masc_gardener_execute_spawn";
+    description = "Create a new agent in Neo4j and post an announcement after spawn approval. \
+Call when masc_gardener_propose_spawn returned approval. \
+After propose_spawn approval; consumes daily spawn budget and resets the cooldown timer.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The topic/role that was approved for spawn");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Spawn reason (for audit)");
+        ]);
+        ("urgency", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "low"; `String "medium"; `String "high"; `String "critical"]);
+          ("description", `String "Urgency level");
+          ("default", `String "medium");
+        ]);
+      ]);
+      ("required", `List [`String "topic"]);
+    ];
+  };
+
+  (* masc_gardener_execute_retire *)
+  {
+    name = "masc_gardener_execute_retire";
+    description = "Initiate grace period for an agent retirement after approval, posting a warning (not immediate removal). \
+Call when masc_gardener_retire_agent returned approval. \
+After retire_agent approval; the agent has a grace period to increase activity before final removal.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Name of the agent to retire");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
 ]
 
 (** {1 Tool Dispatcher} *)

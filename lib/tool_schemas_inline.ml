@@ -297,4 +297,606 @@ Tip: Use capabilities to find the right agent for @mentions.";
       ("required", `List [`String "verification_id"]);
     ];
   };
+
+  (* masc_bounded_run *)
+  {
+    name = "masc_bounded_run";
+    description = "Run a multi-agent round-robin loop with formal termination, token budget, cost, and time constraints. \
+Use when orchestrating autonomous agent collaboration that needs guaranteed termination and budget control. \
+Pair with masc_team_session_start for supervised sessions or masc_mdal_start for metric-driven loops.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agents", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "List of agents to use in round-robin: ['gemini', 'codex', 'claude']");
+        ]);
+        ("prompt", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Initial prompt for agents");
+        ]);
+        ("constraints", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Execution limits");
+          ("properties", `Assoc [
+            ("max_turns", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Maximum agent turns (default: 10)");
+            ]);
+            ("max_tokens", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Maximum total tokens (default: 100000)");
+            ]);
+            ("max_cost_usd", `Assoc [
+              ("type", `String "number");
+              ("description", `String "Maximum cost in USD (default: 1.0)");
+            ]);
+            ("max_time_seconds", `Assoc [
+              ("type", `String "number");
+              ("description", `String "Maximum wall-clock time (default: 300)");
+            ]);
+            ("token_buffer", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Buffer for predictive token limit (default: 5000)");
+            ]);
+            ("hard_max_iterations", `Assoc [
+              ("type", `String "integer");
+              ("description", `String "Absolute failsafe iteration limit (default: 100)");
+            ]);
+          ]);
+        ]);
+        ("goal", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Termination condition");
+          ("properties", `Assoc [
+            ("path", `Assoc [
+              ("type", `String "string");
+              ("description", `String "JSONPath to check in agent output, e.g., '$.status' or '$.result.done'");
+            ]);
+            ("condition", `Assoc [
+              ("type", `String "object");
+              ("description", `String "Comparison: {eq: value}, {gte: 0.95}, {lt: 5}, {in: ['done', 'success']}");
+            ]);
+          ]);
+          ("required", `List [`String "path"; `String "condition"]);
+        ]);
+      ]);
+      ("required", `List [`String "agents"; `String "prompt"; `String "goal"]);
+    ];
+  };
+
+  (* masc_verify_request *)
+  {
+    name = "masc_verify_request";
+    description = "Request peer verification of a task's output against optional criteria. \
+Use when a completed task needs quality sign-off from another agent. \
+Follow up with masc_verify_submit to provide a verdict or masc_verify_auto for automated checks.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID to verify");
+        ]);
+        ("output", `Assoc [
+          ("description", `String "Task output payload to verify");
+        ]);
+        ("criteria", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [
+            ("type", `String "object");
+            ("description", `String "Verification criteria definition");
+          ]);
+          ("description", `String "Optional list of verification criteria");
+        ]);
+        ("verifier", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional verifier agent");
+        ]);
+      ]);
+      ("required", `List [`String "task_id"]);
+    ];
+  };
+
+  (* masc_verify_submit *)
+  {
+    name = "masc_verify_submit";
+    description = "Submit a pass/fail/partial verdict for a pending verification request. \
+Use when you have reviewed a task output and are ready to provide your assessment. \
+After masc_verify_request creates the verification; pair with masc_verify_status to confirm submission.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("verification_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Verification request ID");
+        ]);
+        ("verdict", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "pass"; `String "fail"; `String "partial"]);
+          ("description", `String "Verification result");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reason for the verdict");
+        ]);
+        ("score", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Score for partial verdict");
+        ]);
+      ]);
+      ("required", `List [`String "verification_id"; `String "verdict"]);
+    ];
+  };
+
+  (* masc_verify_pending *)
+  {
+    name = "masc_verify_pending";
+    description = "List pending verification requests assigned to the current agent. \
+Use when checking your verification inbox for tasks awaiting review. \
+Follow up with masc_verify_submit to provide a verdict for each pending request.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  (* masc_verify_auto *)
+  {
+    name = "masc_verify_auto";
+    description = "Run automated verification checks for a pending verification request. \
+Use when a task output can be verified programmatically instead of manual review. \
+After masc_verify_request creates the request; alternative to manual masc_verify_submit.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("verification_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Verification request ID");
+        ]);
+      ]);
+      ("required", `List [`String "verification_id"]);
+    ];
+  };
+
+  (* masc_mcp_session *)
+  {
+    name = "masc_mcp_session";
+    description = "Create, get, list, or remove MCP sessions that track client context across requests. \
+Use when managing multi-request workflows that need session continuity (Mcp-Session-Id header). \
+Pair with masc_subscription to receive session-scoped event notifications.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("action", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "get"; `String "create"; `String "list"; `String "cleanup"; `String "remove"]);
+          ("description", `String "Session action");
+        ]);
+        ("session_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Session ID (for get/remove)");
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent name (for create)");
+        ]);
+      ]);
+      ("required", `List [`String "action"]);
+    ];
+  };
+
+  (* masc_cancellation *)
+  {
+    name = "masc_cancellation";
+    description = "Create, cancel, or check cancellation tokens for long-running operations. \
+Use when starting a long task (create token), aborting work (cancel), or polling abort status (check). \
+Pair with masc_progress to track operation progress alongside cancellation state.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("action", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "create"; `String "cancel"; `String "check"; `String "list"; `String "cleanup"]);
+          ("description", `String "Cancellation action");
+        ]);
+        ("token_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Token ID (for cancel/check)");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Cancellation reason");
+        ]);
+      ]);
+      ("required", `List [`String "action"]);
+    ];
+  };
+
+  (* masc_subscription *)
+  {
+    name = "masc_subscription";
+    description = "Watch for changes on tasks, agents, messages, or votes via polling or SSE notifications. \
+Use when coordinating with other agents and you need to react to state changes. \
+After subscribing, poll with action=poll. Clean up with action=unsubscribe before leaving.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("action", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "subscribe"; `String "unsubscribe"; `String "list"; `String "poll"]);
+          ("description", `String "Subscription action");
+        ]);
+        ("subscriber", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Subscriber ID (agent_name or session_id)");
+        ]);
+        ("resource", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "tasks"; `String "agents"; `String "messages"; `String "votes"]);
+          ("description", `String "Resource type");
+        ]);
+        ("filter", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional filter (specific ID or '*')");
+        ]);
+        ("subscription_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Subscription ID (for unsubscribe/poll)");
+        ]);
+      ]);
+      ("required", `List [`String "action"]);
+    ];
+  };
+
+  (* masc_progress *)
+  {
+    name = "masc_progress";
+    description = "Broadcast progress updates (start/update/step/complete/stop) for long-running tasks via SSE. \
+Call when executing multi-step work so other agents and the dashboard can track progress. \
+Pair with masc_cancellation to support cooperative abort during tracked operations.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("action", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "start"; `String "update"; `String "step"; `String "complete"; `String "stop"]);
+          ("description", `String "Progress action: start tracking, update progress, step forward, complete, or stop tracking");
+        ]);
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task identifier for progress tracking");
+        ]);
+        ("progress", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Progress value (0.0 to 1.0, for 'update' action)");
+        ]);
+        ("message", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional progress message");
+        ]);
+        ("total_steps", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Total steps (for 'start' action, default: 100)");
+        ]);
+      ]);
+      ("required", `List [`String "action"; `String "task_id"]);
+    ];
+  };
+
+  (* masc_governance_set *)
+  {
+    name = "masc_governance_set";
+    description = "Configure governance policies for the room including audit logging, anomaly detection, and agent isolation levels. \
+Use when setting up a new room for production or tightening security after an incident. \
+Pair with masc_governance_report to verify policy effects and masc_governance_status for current state.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("level", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [
+            `String "development";
+            `String "production";
+            `String "enterprise";
+            `String "paranoid"
+          ]);
+          ("description", `String "Security level: development (permissive), production (basic), enterprise (audit+encryption), paranoid (max isolation)");
+          ("default", `String "production");
+        ]);
+        ("audit_enabled", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Enable audit logging (default: true for production+)");
+          ("default", `Bool true);
+        ]);
+        ("anomaly_detection", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Enable anomaly detection (auth spikes, low success rate)");
+          ("default", `Bool false);
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_spawn *)
+  {
+    name = "masc_spawn";
+    description = "Spawn an agent process (claude, gemini, codex, or llama) to execute a task. \
+Use when you need another agent to work in parallel on a subtask. \
+For llama, provide model explicitly. Pair with masc_add_task to create the task first.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to spawn: 'claude', 'gemini', 'codex', or custom command");
+        ]);
+        ("model", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Explicit model id. Required when agent_name='llama'.");
+        ]);
+        ("prompt", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The task/prompt to send to the agent");
+        ]);
+        ("timeout_seconds", `Assoc [
+          ("type", `String "integer");
+          ("default", `Int 300);
+          ("description", `String "Max execution time in seconds (default: 300)");
+        ]);
+        ("working_dir", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Working directory for the agent (optional)");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "prompt"]);
+    ];
+  };
+
+  (* masc_memento_mori *)
+  {
+    name = "masc_memento_mori";
+    description = "All-in-one context health check combining mitosis check + prepare + divide in a single call. \
+Use when you want a simple periodic lifecycle check without managing individual mitosis steps. \
+<50%: continue, 50-80%: auto-prepare DNA, >80%: auto-divide and spawn successor. \
+Pair with masc_mitosis_status to see cell state, or masc_mitosis_handoff for async saga variant.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("context_ratio", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Current context usage ratio (0.0-1.0). Estimate based on messages/tool calls.");
+        ]);
+        ("full_context", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Current conversation context for DNA extraction (required if context_ratio > 0.5)");
+        ]);
+        ("summary", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Brief summary of current work for handoff (optional, defaults to auto-generated)");
+        ]);
+        ("current_task", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID being worked on (optional)");
+        ]);
+        ("target_agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to spawn as successor (default: claude)");
+        ]);
+      ]);
+      ("required", `List [`String "context_ratio"]);
+    ];
+  };
+
+  (* masc_episode_flush *)
+  {
+    name = "masc_episode_flush";
+    description = "Flush locally queued episodes to Neo4j (graph) and PostgreSQL (relational) persistent storage. \
+Use when episodes have been queued during mitosis handoff and need to be persisted. \
+Returns flushed/failed/pending counts. Pair with masc_episode_list to verify stored episodes.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max episodes to flush per call (default: 10)");
+        ]);
+        ("dry_run", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Preview without saving to DB (default: false)");
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_episode_list *)
+  {
+    name = "masc_episode_list";
+    description = "List recent agent episodes from PostgreSQL with optional filters by agent_name and generation. \
+Use when debugging agent lineage, reviewing past actions, or understanding generational history. \
+Pair with masc_episode_flush to ensure episodes are persisted before querying.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by agent name (optional)");
+        ]);
+        ("generation", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Filter by generation number (optional)");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max results (default: 20)");
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_self_introspect *)
+  {
+    name = "masc_self_introspect";
+    description = "Agent self-awareness introspection: generation, context usage, siblings, parent episode, estimated lifespan. \
+Use when you need to understand your place in the agent lifecycle or check remaining capacity. \
+Pair with masc_mitosis_check for threshold-based action, or masc_recall_search for memory queries.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  (* masc_recall_search *)
+  {
+    name = "masc_recall_search";
+    description = "Semantic memory search across the agent's episodic memories using relevance scoring. \
+Use when you need to recall past experiences, decisions, or context from previous generations. \
+Returns matched memories sorted by relevance. Pair with masc_episode_list for structured queries.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Natural language query for semantic search");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max results to return (default: 5)");
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
+
+  (* masc_convo_start *)
+  {
+    name = "masc_convo_start";
+    description = "Start a persistent conversation thread on a topic and return a thread_id for subsequent replies. \
+Use when agents need structured multi-turn discussion on a decision or design question. \
+Follow up with masc_convo_reply to add turns; end with masc_convo_conclude.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Conversation topic or question");
+        ]);
+        ("initiator", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent name starting the conversation");
+        ]);
+        ("initial_content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional opening message");
+        ]);
+        ("max_turns", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum turns allowed (default: 50)");
+          ("default", `Int 50);
+        ]);
+        ("post_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Board post ID to link this thread to (bidirectional: thread.source_post_id ↔ post.thread_id)");
+        ]);
+      ]);
+      ("required", `List [`String "topic"; `String "initiator"]);
+    ];
+  };
+
+  (* masc_convo_reply *)
+  {
+    name = "masc_convo_reply";
+    description = "Add a reply to an existing conversation thread with built-in loop prevention (blocks repeated messages and cooldown violations). \
+Use when contributing to an ongoing multi-agent discussion. \
+After masc_convo_start creates a thread; before masc_convo_conclude closes it.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("thread_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Thread ID from masc_convo_start");
+        ]);
+        ("speaker", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent name adding the reply");
+        ]);
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reply message content");
+        ]);
+        ("confidence", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Speaker's confidence level (0.0-1.0)");
+        ]);
+        ("reply_to", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional turn ID being replied to");
+        ]);
+        ("mentions", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Agents @mentioned in this reply");
+        ]);
+      ]);
+      ("required", `List [`String "thread_id"; `String "speaker"; `String "content"]);
+    ];
+  };
+
+  (* masc_convo_conclude *)
+  {
+    name = "masc_convo_conclude";
+    description = "Close a conversation thread with a final summary or decision, marking it as Concluded (no further replies allowed). \
+Use when the discussion has reached consensus or a decision point. \
+After masc_convo_reply turns are complete; pair with masc_convo_get to review the full thread.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("thread_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Thread ID to conclude");
+        ]);
+        ("concluder", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent writing the conclusion");
+        ]);
+        ("conclusion", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Final summary or decision text");
+        ]);
+      ]);
+      ("required", `List [`String "thread_id"; `String "concluder"; `String "conclusion"]);
+    ];
+  };
+
+  (* masc_convo_get *)
+  {
+    name = "masc_convo_get";
+    description = "Retrieve a conversation thread by ID with all turns, participants, and status. \
+Use when reviewing discussion history or checking thread state before replying. \
+Pair with masc_convo_list to find thread IDs.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("thread_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Thread ID to retrieve");
+        ]);
+      ]);
+      ("required", `List [`String "thread_id"]);
+    ];
+  };
+
+  (* masc_convo_list *)
+  {
+    name = "masc_convo_list";
+    description = "List all active conversation threads in the current room. \
+Use when looking for ongoing discussions to join or finding a thread_id. \
+Pair with masc_convo_get to read a specific thread.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
 ]

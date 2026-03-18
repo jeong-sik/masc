@@ -24,4 +24,7 @@ val handle_cache_stats : context -> Yojson.Safe.t -> result
 (** {1 Dispatcher} *)
 
 (** Dispatch cache tool by name. Returns None if not a cache tool. *)
+(** Tool schemas for MCP tools/list *)
+val schemas : Types.tool_schema list
+
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option

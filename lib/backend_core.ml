@@ -168,6 +168,34 @@ let release_flock fd =
     Log.Misc.error "Failed to release flock: %s" (Unix.error_message err)
 
 (* ============================================ *)
+(* In-Memory Pub/Sub (shared by Memory + FS)    *)
+(* ============================================ *)
+
+module Pubsub_mem = struct
+  type t = {
+    subscribers: (string, (string -> unit) list) Hashtbl.t;
+  }
+
+  let create () = { subscribers = Hashtbl.create 16 }
+
+  let publish t ~channel ~message =
+    match Hashtbl.find_opt t.subscribers channel with
+    | None -> Ok 0
+    | Some callbacks ->
+        List.iter (fun cb ->
+          try cb message with _ -> ()
+        ) callbacks;
+        Ok (List.length callbacks)
+
+  let subscribe t ~channel ~callback =
+    let existing = match Hashtbl.find_opt t.subscribers channel with
+      | Some cbs -> cbs | None -> []
+    in
+    Hashtbl.replace t.subscribers channel (callback :: existing);
+    Ok ()
+end
+
+(* ============================================ *)
 (* Memory Backend (In-Process)                  *)
 (* ============================================ *)
 
@@ -180,6 +208,7 @@ module MemoryBackend : BACKEND = struct
   type t = {
     data: (string, string) Hashtbl.t;
     locks: (string, lock_info) Hashtbl.t;
+    pubsub: Pubsub_mem.t;
     mutex: Eio.Mutex.t;
   }
 
@@ -190,6 +219,7 @@ module MemoryBackend : BACKEND = struct
     Ok {
       data = Hashtbl.create 1000;
       locks = Hashtbl.create 100;
+      pubsub = Pubsub_mem.create ();
       mutex = Eio.Mutex.create ();
     }
 
@@ -293,11 +323,11 @@ module MemoryBackend : BACKEND = struct
           Ok false
     )
 
-  let publish _t ~channel:_ ~message:_ =
-    Error (BackendNotSupported "Memory backend does not support pub/sub")
+  let publish t ~channel ~message =
+    with_lock t (fun () -> Pubsub_mem.publish t.pubsub ~channel ~message)
 
-  let subscribe _t ~channel:_ ~callback:_ =
-    Error (BackendNotSupported "Memory backend does not support pub/sub")
+  let subscribe t ~channel ~callback =
+    with_lock t (fun () -> Pubsub_mem.subscribe t.pubsub ~channel ~callback)
 
   let health_check _t = Ok true
 end

@@ -1290,6 +1290,7 @@ let test_multiple_rejoin_cycles () =
   )
 
 let () =
+  Eio_main.run @@ fun _env ->
   Random.init 42;
   Alcotest.run "Room" [
     (* === Happy Path Tests === *)

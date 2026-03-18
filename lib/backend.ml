@@ -6,6 +6,7 @@ include Backend_core
 module FileSystemBackend : BACKEND = struct
   type t = {
     base_path: string;
+    pubsub: Backend_core.Pubsub_mem.t;
     mutex: Eio.Mutex.t;
   }
 
@@ -115,7 +116,7 @@ module FileSystemBackend : BACKEND = struct
       Fs_compat.mkdir_p path
     with Unix.Unix_error (err, _, _) ->
       Log.Misc.error "Failed to mkdir %s: %s" path (Unix.error_message err));
-    Ok { base_path = path; mutex = Eio.Mutex.create () }
+    Ok { base_path = path; pubsub = Backend_core.Pubsub_mem.create (); mutex = Eio.Mutex.create () }
 
   let close _t = ()
 
@@ -376,11 +377,11 @@ module FileSystemBackend : BACKEND = struct
     | Invalid_argument msg -> Error (InvalidKey msg)
     | exn -> Error (OperationFailed (Printexc.to_string exn))
 
-  let publish _t ~channel:_ ~message:_ =
-    Error (BackendNotSupported "FileSystem backend does not support pub/sub")
+  let publish t ~channel ~message =
+    with_lock t (fun () -> Backend_core.Pubsub_mem.publish t.pubsub ~channel ~message)
 
-  let subscribe _t ~channel:_ ~callback:_ =
-    Error (BackendNotSupported "FileSystem backend does not support pub/sub")
+  let subscribe t ~channel ~callback =
+    with_lock t (fun () -> Backend_core.Pubsub_mem.subscribe t.pubsub ~channel ~callback)
 
   let health_check t =
     try

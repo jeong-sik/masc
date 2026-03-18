@@ -1,16 +1,8 @@
 (** OAS LLM Provider adapter — bridges MASC LLM types to OAS Provider layer.
 
-    NOTE: Not yet wired into production code paths. These adapters will
-    replace existing implementations when feature flags are enabled.
-    Currently available for direct testing only.
-
-    Provides an alternative code path for LLM calls using OAS
+    Provides the code path for LLM calls using OAS
     {!Agent_sdk.Provider.config} and {!Agent_sdk.Provider.cascade} types
     instead of the raw {!Llm_provider_bridge} direct HTTP path.
-
-    Enabled via [MASC_USE_OAS_LLM=true] environment variable.
-    When disabled, callers fall through to the existing
-    {!Llm_orchestration.complete} / {!Llm_orchestration.cascade} path.
 
     All types used here are from {!Llm_types} (the canonical type source
     shared by {!Llm_orchestration} and {!Llm_provider_bridge}).
@@ -19,17 +11,6 @@
 
 open Printf
 open Llm_types
-
-(* ================================================================ *)
-(* Feature flag                                                      *)
-(* ================================================================ *)
-
-let use_oas_llm () =
-  match Sys.getenv_opt "MASC_USE_OAS_LLM" with
-  | Some v ->
-      let v = String.lowercase_ascii (String.trim v) in
-      v = "true" || v = "1" || v = "yes"
-  | None -> false
 
 (* ================================================================ *)
 (* model_spec → Agent_sdk.Provider.config                           *)
@@ -221,54 +202,38 @@ let cascade_complete ?(accept = fun _ -> true) ?timeout_sec
   try_next [] requests
 
 (* ================================================================ *)
-(* Unified entry points — dispatch based on feature flag            *)
+(* Unified entry points                                             *)
 (* ================================================================ *)
 
-(** Single completion with automatic dispatch.
-    If [MASC_USE_OAS_LLM=true], uses {!complete_via_oas}.
-    Otherwise, falls through to {!Llm_orchestration.complete}. *)
+(** Single completion via OAS provider path. *)
 let complete ?timeout_sec (req : completion_request)
     : (completion_response, string) result =
-  if use_oas_llm () then
-    complete_via_oas ?timeout_sec req
-  else
-    Llm_orchestration.complete ?timeout_sec req
+  complete_via_oas ?timeout_sec req
 
-(** Cascade completion with automatic dispatch.
-    If [MASC_USE_OAS_LLM=true], uses {!cascade_complete}.
-    Otherwise, falls through to {!Llm_orchestration.cascade}. *)
+(** Cascade completion via OAS provider path. *)
 let cascade ?(accept = fun _ -> true) ?timeout_sec
     (requests : completion_request list)
     : (completion_response, string) result =
-  if use_oas_llm () then
-    cascade_complete ~accept ?timeout_sec requests
-  else
-    Llm_orchestration.cascade ~accept ?timeout_sec requests
+  cascade_complete ~accept ?timeout_sec requests
 
-(** Convenience: cascade from model_specs + prompt.
-    If [MASC_USE_OAS_LLM=true], builds requests and runs via OAS cascade.
-    Otherwise, falls through to {!Llm_orchestration.run_prompt_cascade}. *)
+(** Convenience: cascade from model_specs + prompt via OAS. *)
 let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec
     ?(accept = fun _ -> true) ?system ~model_specs ~max_tokens
     ~prompt () : (completion_response, string) result =
-  if use_oas_llm () then begin
-    let msgs =
-      match system with
-      | Some s -> [ system_msg s; user_msg prompt ]
-      | None -> [ user_msg prompt ]
-    in
-    let requests =
-      List.map
-        (fun (model : model_spec) ->
-          ({ model; messages = msgs; temperature;
-             max_tokens; tools = []; response_format = `Text }
-            : completion_request))
-        model_specs
-    in
-    cascade_complete ~accept ?timeout_sec requests
-  end else
-    Llm_orchestration.run_prompt_cascade ~temperature ?timeout_sec
-      ~accept ?system ~model_specs ~max_tokens ~prompt ()
+  let msgs =
+    match system with
+    | Some s -> [ system_msg s; user_msg prompt ]
+    | None -> [ user_msg prompt ]
+  in
+  let requests =
+    List.map
+      (fun (model : model_spec) ->
+        ({ model; messages = msgs; temperature;
+           max_tokens; tools = []; response_format = `Text }
+          : completion_request))
+      model_specs
+  in
+  cascade_complete ~accept ?timeout_sec requests
 
 (** Summary of OAS-convertible model specs for diagnostics. *)
 let supported_providers_summary () : string =

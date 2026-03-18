@@ -10,8 +10,6 @@
     - Phase 4: Verifier_oas (guardrails/hooks)
     - Phase 5: Worker_oas (Agent.run adapter)
 
-    Enabled via [MASC_USE_OAS_PERPETUAL=true] environment variable.
-
     Split into sub-modules (H2):
     - {!Perpetual_oas_state}: mutable state + mutex ops
     - {!Perpetual_oas_hooks}: 4 lifecycle hooks + periodic callback
@@ -22,17 +20,6 @@
 open Printf
 
 module Oas = Agent_sdk
-
-(* ================================================================ *)
-(* Feature Flag                                                      *)
-(* ================================================================ *)
-
-let use_oas_perpetual () =
-  match Sys.getenv_opt "MASC_USE_OAS_PERPETUAL" with
-  | Some v ->
-    let v = String.lowercase_ascii (String.trim v) in
-    v = "true" || v = "1" || v = "yes"
-  | None -> false
 
 (* ================================================================ *)
 (* Run perpetual loop via OAS Agent.run                              *)
@@ -213,21 +200,15 @@ let run_perpetual_via_oas
   Ok ()
 
 (* ================================================================ *)
-(* Unified entry point — dispatch based on feature flag              *)
+(* Unified entry point                                               *)
 (* ================================================================ *)
 
-(** Run the perpetual loop, dispatching to OAS or legacy path.
-
-    If [MASC_USE_OAS_PERPETUAL=true], uses {!run_perpetual_via_oas}.
-    Otherwise, delegates to {!Perpetual_loop.run}. *)
+(** Run the perpetual loop via OAS Agent.run. *)
 let run
     ~(sw : Eio.Switch.t)
     ~(config : Perpetual_loop.loop_config)
     ~(state : Perpetual_loop.loop_state)
   : unit =
-  if use_oas_perpetual () then
-    run_perpetual_via_oas ~sw ~config ~state
-    |> Result.iter_error (fun e ->
-      eprintf "[perpetual_oas] OAS path aborted: %s\n%!" e)
-  else
-    Perpetual_loop.run ~config ~state
+  run_perpetual_via_oas ~sw ~config ~state
+  |> Result.iter_error (fun e ->
+    eprintf "[perpetual_oas] OAS path aborted: %s\n%!" e)

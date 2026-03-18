@@ -19,15 +19,6 @@
 open Printf
 
 (* ================================================================ *)
-(* Feature Flag                                                      *)
-(* ================================================================ *)
-
-let use_oas_checkpoint () =
-  match Sys.getenv_opt "MASC_USE_OAS_CHECKPOINT" with
-  | Some v -> String.lowercase_ascii (String.trim v) = "true"
-  | None -> false
-
-(* ================================================================ *)
 (* DNA Scope — Custom scope for succession metadata in Context.t     *)
 (* ================================================================ *)
 
@@ -199,9 +190,6 @@ let dna_of_checkpoint (ckpt : Agent_sdk.Checkpoint.t)
     Wraps [Succession.extract_dna] and converts the result to an OAS
     [Checkpoint.t]. The caller can then use [Checkpoint.to_string] for
     persistence instead of [Succession.dna_to_json].
-
-    When [MASC_USE_OAS_CHECKPOINT] is not set, falls back to returning
-    the checkpoint alongside the original DNA for comparison.
 
     @return [(dna, checkpoint)] — the original DNA and its OAS checkpoint form. *)
 let extract_dna_via_checkpoint

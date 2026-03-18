@@ -608,6 +608,11 @@
  (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
 
 (test
+ (name test_room_vote)
+ (modules test_room_vote)
+ (libraries masc_mcp alcotest eio eio_main unix yojson mirage-crypto-rng mirage-crypto-rng.unix))
+
+(test
  (name test_task_dispatch)
  (modules test_task_dispatch)
  (libraries masc_mcp alcotest unix))

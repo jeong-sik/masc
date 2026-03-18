@@ -10,6 +10,10 @@ let protocol_version_by_session : (string, string) Hashtbl.t =
 let mcp_profile_by_session : (string, Mcp_eio.tool_profile) Hashtbl.t =
   Hashtbl.create 128
 
+(** Eio-cooperative mutex protecting both Hashtbl tables above.
+    Concurrent HTTP request fibers can race on Hashtbl read/write. *)
+let session_mutex = Eio.Mutex.create ()
+
 let default_base_path () =
   match Sys.getenv_opt "ME_ROOT" with
   | Some path -> path
@@ -20,14 +24,17 @@ let is_valid_protocol_version version =
 
 let remember_protocol_version session_id version =
   if is_valid_protocol_version version then
-    Hashtbl.replace protocol_version_by_session session_id version
+    Eio.Mutex.use_rw ~protect:true session_mutex (fun () ->
+        Hashtbl.replace protocol_version_by_session session_id version)
 
 let remember_mcp_profile session_id profile =
-  Hashtbl.replace mcp_profile_by_session session_id profile
+  Eio.Mutex.use_rw ~protect:true session_mutex (fun () ->
+      Hashtbl.replace mcp_profile_by_session session_id profile)
 
 let forget_mcp_session session_id =
-  Hashtbl.remove protocol_version_by_session session_id;
-  Hashtbl.remove mcp_profile_by_session session_id
+  Eio.Mutex.use_rw ~protect:true session_mutex (fun () ->
+      Hashtbl.remove protocol_version_by_session session_id;
+      Hashtbl.remove mcp_profile_by_session session_id)
 
 let profile_label = function
   | Mcp_eio.Full -> "/mcp"
@@ -36,27 +43,29 @@ let profile_label = function
   | Mcp_eio.Role_filtered mode -> Printf.sprintf "/mcp/role/%s" (Mode.mode_to_string mode)
 
 let validate_mcp_session_profile ~profile session_id =
-  match Hashtbl.find_opt mcp_profile_by_session session_id with
-  | None -> Ok ()
-  | Some existing when existing = profile -> Ok ()
-  | Some existing ->
-      Error
-        (Printf.sprintf "Session %s belongs to %s, not %s." session_id
-           (profile_label existing) (profile_label profile))
-
-let validate_mcp_session_delete_profile ~profile session_id =
-  match profile with
-  | Mcp_eio.Operator_remote -> (
+  Eio.Mutex.use_ro session_mutex (fun () ->
       match Hashtbl.find_opt mcp_profile_by_session session_id with
-      | Some Mcp_eio.Operator_remote -> Ok ()
+      | None -> Ok ()
+      | Some existing when existing = profile -> Ok ()
       | Some existing ->
           Error
             (Printf.sprintf "Session %s belongs to %s, not %s." session_id
-               (profile_label existing) (profile_label profile))
-      | None ->
-          Error
-            (Printf.sprintf "Session %s is not registered on %s." session_id
-               (profile_label profile)))
+               (profile_label existing) (profile_label profile)))
+
+let validate_mcp_session_delete_profile ~profile session_id =
+  match profile with
+  | Mcp_eio.Operator_remote ->
+      Eio.Mutex.use_ro session_mutex (fun () ->
+          match Hashtbl.find_opt mcp_profile_by_session session_id with
+          | Some Mcp_eio.Operator_remote -> Ok ()
+          | Some existing ->
+              Error
+                (Printf.sprintf "Session %s belongs to %s, not %s." session_id
+                   (profile_label existing) (profile_label profile))
+          | None ->
+              Error
+                (Printf.sprintf "Session %s is not registered on %s." session_id
+                   (profile_label profile)))
   | Mcp_eio.Full | Mcp_eio.Managed_agent | Mcp_eio.Role_filtered _ ->
       validate_mcp_session_profile ~profile session_id
 
@@ -165,34 +174,34 @@ let validate_protocol_version_continuity ~session_id request =
       Error (Printf.sprintf "Unsupported MCP-Protocol-Version: %s" version)
   in
   let provided = get_protocol_version_header_opt request in
-  match Hashtbl.find_opt protocol_version_by_session session_id with
-  | Some expected -> (
-      let ( let* ) = Result.bind in
-      match provided with
-      (* When the session already negotiated a protocol version, tolerate
-         omitted follow-up headers and continue with the remembered version.
-         Explicit mismatches still fail hard. *)
-      | None -> Ok ()
-      | Some version ->
-          let* () = validate_supported version in
-          if String.equal version expected then
-            Ok ()
-          else
-            Error
-              (Printf.sprintf
-                 "MCP-Protocol-Version mismatch for session %s: expected %s, got %s."
-                 session_id expected version))
-  | None -> (
-      match provided with
-      | Some version -> validate_supported version
-      | None -> Ok ())
+  Eio.Mutex.use_ro session_mutex (fun () ->
+      match Hashtbl.find_opt protocol_version_by_session session_id with
+      | Some expected -> (
+          let ( let* ) = Result.bind in
+          match provided with
+          | None -> Ok ()
+          | Some version ->
+              let* () = validate_supported version in
+              if String.equal version expected then
+                Ok ()
+              else
+                Error
+                  (Printf.sprintf
+                     "MCP-Protocol-Version mismatch for session %s: expected %s, \
+                      got %s."
+                     session_id expected version))
+      | None -> (
+          match provided with
+          | Some version -> validate_supported version
+          | None -> Ok ()))
 
 let get_protocol_version_for_session ?session_id request =
   match session_id with
-  | Some id -> (
-      match Hashtbl.find_opt protocol_version_by_session id with
-      | Some v -> v
-      | None -> get_protocol_version request)
+  | Some id ->
+      Eio.Mutex.use_ro session_mutex (fun () ->
+          match Hashtbl.find_opt protocol_version_by_session id with
+          | Some v -> v
+          | None -> get_protocol_version request)
   | None -> get_protocol_version request
 
 let query_param request key =

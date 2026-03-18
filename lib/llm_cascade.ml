@@ -144,7 +144,6 @@ let get_cascade ?(config_path = "") ~cascade_name () :
 let call ~cascade_name ~prompt
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
     ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
-  ignore timeout_sec;
   let env = Llm_eio_env.get () in
   let defaults = default_model_strings ~cascade_name in
   let config_path_opt =
@@ -163,7 +162,7 @@ let call ~cascade_name ~prompt
       ~sw:env.sw ~net:env.net ?clock:env.clock
       ?config_path:config_path_opt
       ~name:cascade_name ~defaults ~messages
-      ~temperature ~max_tokens ~accept ()
+      ~temperature ~max_tokens ~accept ~timeout_sec ()
   with
   | Ok resp ->
     let t1 = Time_compat.now () in

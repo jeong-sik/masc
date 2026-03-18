@@ -41,7 +41,7 @@ let handle_keeper_status ctx args : tool_result =
       (match model_specs_of_strings models with
        | Error e -> (false, "❌ " ^ e)
        | Ok specs ->
-         let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.default_local_model_spec () in
+         let primary = match specs with m0 :: _ -> m0 | [] -> Llm_types.default_local_model_spec () in
          let base_dir = session_base_dir ctx.config in
          let ctx_opt =
            if include_context then
@@ -97,9 +97,9 @@ let handle_keeper_status ctx args : tool_result =
            compaction_policy_of_keeper m
          in
 
-         let models_resolved = `List (List.map (fun (s : Llm_client.model_spec) ->
+         let models_resolved = `List (List.map (fun (s : Llm_types.model_spec) ->
            `Assoc [
-             ("provider", `String (Llm_client.string_of_provider s.provider));
+             ("provider", `String (Llm_types.string_of_provider s.provider));
              ("model_id", `String s.model_id);
              ("max_context", `Int s.max_context);
              ("api_key_env", match s.api_key_env with None -> `Null | Some k -> `String k);
@@ -375,7 +375,7 @@ let handle_keeper_status ctx args : tool_result =
              (`List tail, total)
         in
         let all_internal_tools =
-          keeper_llm_tools |> List.map (fun tool -> tool.Llm_client.tool_name)
+          keeper_llm_tools |> List.map (fun tool -> tool.Llm_types.tool_name)
         in
         let allowed_tools = keeper_allowed_tool_names m in
         let blocked_internal_tools =

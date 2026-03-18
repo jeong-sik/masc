@@ -127,28 +127,8 @@ let resolve_model_spec agent_name =
         "Unknown agent '%s': not registered in Provider_adapter.direct_adapters"
         agent_name)
   | Some adapter ->
-      let label_result = match adapter.provider_family with
-        | Provider_adapter.Claude_family ->
-            let m = Env_config.Claude.default_model in
-            if m = "" then Error "No Claude model configured (MASC_CLAUDE_DEFAULT_MODEL)"
-            else Ok ("claude:" ^ m)
-        | Provider_adapter.Gemini_family ->
-            let m = Env_config.Gemini.default_model in
-            if m = "" then Error "No Gemini model configured (MASC_GEMINI_DEFAULT_MODEL)"
-            else Ok ("gemini:" ^ m)
-        | Provider_adapter.OpenAI_family ->
-            let m = Env_config.OpenAI.default_model in
-            if m = "" then Error "No OpenAI model configured (MASC_OPENAI_DEFAULT_MODEL)"
-            else Ok ("openai:" ^ m)
-        | Provider_adapter.Glm_family ->
-            let m = Env_config.Llm.default_model in
-            Ok ("glm:" ^ (if m = "" then "auto" else m))
-        | Provider_adapter.Llama_family ->
-            Provider_adapter.explicit_llama_model_label_result ()
-        | Provider_adapter.OpenRouter_family ->
-            Error "OpenRouter requires explicit runtime_model"
-        | Provider_adapter.Custom_family _ ->
-            Error "Custom provider requires explicit runtime_model"
+      let label_result =
+        Provider_adapter.default_model_label_for_family adapter.provider_family
       in
       Result.bind label_result Llm_client.model_spec_of_string
 

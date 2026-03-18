@@ -26,7 +26,7 @@ let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
-let handle_keeper_msg ctx args : tool_result =
+let handle_keeper_msg ?on_text_delta ctx args : tool_result =
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
   if not (validate_name name) then
@@ -265,11 +265,42 @@ let handle_keeper_msg ctx args : tool_result =
                 } : Llm_client.completion_request)
               ) specs
             in
-            let run_cascade requests =
+            let run_cascade_batch requests =
               match timeout_sec_opt with
               | Some timeout_sec ->
                   Llm_client.cascade ~timeout_sec requests
               | None -> Llm_client.cascade requests
+            in
+            (* Streaming-aware cascade: when on_text_delta is provided,
+               try streaming the first request. Text deltas are forwarded
+               to the callback in real time. If streaming fails or is
+               unavailable, fall back to the standard batch cascade. *)
+            let run_cascade requests =
+              match on_text_delta, requests with
+              | Some delta_cb, first_req :: _rest ->
+                  let timeout_f =
+                    Option.map float_of_int timeout_sec_opt
+                  in
+                  let stream_on_event (ev : Llm_provider.Types.sse_event) =
+                    match ev with
+                    | ContentBlockDelta { delta = TextDelta text; _ } ->
+                        delta_cb text
+                    | _ -> ()
+                  in
+                  (match
+                     Llm_client.call_provider_stream
+                       ?timeout_sec:timeout_f
+                       first_req
+                       ~on_event:stream_on_event
+                   with
+                   | Ok _ as ok -> ok
+                   | Error e ->
+                       Log.Keeper.warn
+                         "keeper stream: streaming failed (%s), \
+                          falling back to batch"
+                         e;
+                       run_cascade_batch requests)
+              | _ -> run_cascade_batch requests
             in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
             match run_cascade requests with
@@ -405,7 +436,7 @@ let handle_keeper_msg ctx args : tool_result =
                       } : Llm_client.completion_request)
                     ) specs
                   in
-                  match run_cascade followup_requests with
+                  match run_cascade_batch followup_requests with
                   | Error _ ->
                     (* Cascade failed — return what we have *)
                     ( Llm_client.text_of_response last_resp, acc_usage,
@@ -483,7 +514,7 @@ let handle_keeper_msg ctx args : tool_result =
                       } : Llm_client.completion_request)
                     ) specs
                   in
-                  match run_cascade correction_requests with
+                  match run_cascade_batch correction_requests with
                   | Error _ ->
                     ( base_content, base_usage, base_model_used, base_latency_ms,
                       eval0, true, false, false, base_cost_usd, tools_used )
@@ -547,7 +578,7 @@ let handle_keeper_msg ctx args : tool_result =
                       } : Llm_client.completion_request)
                     ) specs
                   in
-                  match run_cascade forced_requests with
+                  match run_cascade_batch forced_requests with
                   | Error _ ->
                       ( content_after_correction, usage_after_correction,
                         model_after_correction, latency_after_correction,

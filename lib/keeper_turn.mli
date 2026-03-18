@@ -12,8 +12,17 @@ type tool_result = Keeper_types.tool_result
 (** Start or reconfigure a keeper agent. *)
 val handle_keeper_up : _ Keeper_types.context -> Yojson.Safe.t -> tool_result
 
-(** Send a message to a running keeper agent. *)
-val handle_keeper_msg : _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+(** Send a message to a running keeper agent.
+
+    When [on_text_delta] is provided, the initial LLM call uses streaming
+    and forwards text deltas through the callback in real time. Follow-up
+    calls (tool loops, corrections, prompt fallback) run in batch mode.
+    If streaming fails, the function falls back to batch automatically.
+
+    @since 2.110.0 *)
+val handle_keeper_msg :
+  ?on_text_delta:(string -> unit) ->
+  _ Keeper_types.context -> Yojson.Safe.t -> tool_result
 
 (** Set the active model for a keeper agent. *)
 val handle_keeper_model_set : _ Keeper_types.context -> Yojson.Safe.t -> tool_result

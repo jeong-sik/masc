@@ -36,3 +36,19 @@ val run_prompt_cascade :
   prompt:string ->
   unit ->
   (Llm_types.completion_response, string) result
+
+(** Streaming completion for a single request.
+    Calls the provider in streaming mode and invokes [on_event] for each SSE
+    event as it arrives. Returns the assembled final response.
+    Uses the same concurrency permit as {!complete}.
+
+    Stub: until the real streaming implementation lands, this calls {!complete}
+    in batch mode and synthesises a single ContentBlockDelta event with the
+    full text.
+
+    @since 2.110.0 *)
+val call_provider_stream :
+  ?timeout_sec:float ->
+  Llm_types.completion_request ->
+  on_event:(Llm_provider.Types.sse_event -> unit) ->
+  (Llm_types.completion_response, string) result

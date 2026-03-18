@@ -775,3 +775,81 @@ let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec
       model_specs
   in
   cascade ?timeout_sec ~accept requests
+
+(* ================================================================ *)
+(* Streaming completion                                             *)
+(* ================================================================ *)
+
+(** Execute a streaming LLM completion using OAS provider path.
+    Each SSE event (token deltas) is delivered to [on_event] as it arrives.
+    Returns the final assembled response after the stream ends.
+
+    Streaming bypasses cache: SSE events are incremental and not cacheable.
+    No retry logic — a single attempt is made.
+    Falls back to batch completion (synthesising a single delta event)
+    when provider config is unavailable or streaming fails. *)
+let call_provider_stream ?timeout_sec (req : completion_request)
+    ~(on_event : Llm_provider.Types.sse_event -> unit)
+    : (completion_response, string) result =
+  let req = normalize_request req in
+  (* Try real streaming first *)
+  let stream_result =
+    match provider_config_of_request req with
+    | Error _ -> None  (* fall through to batch *)
+    | Ok (config, messages, tools) ->
+        let env = Llm_eio_env.get () in
+        Log.LlmClient.debug
+          "provider stream req: model=%s provider=%s max_tokens=%d tools=%d"
+          req.model.model_id
+          (string_of_provider req.model.provider)
+          req.max_tokens (List.length req.tools);
+        let result =
+          try
+            Llm_provider.Complete.complete_stream
+              ~sw:env.sw ~net:env.net ~config
+              ~messages
+              ?tools:(if tools = [] then None else Some tools)
+              ~on_event ()
+          with exn ->
+            Error (Llm_provider.Http_client.NetworkError
+                     { message = Printexc.to_string exn })
+        in
+        (match result with
+         | Ok resp ->
+             let masc_resp = completion_response_of_api_response resp in
+             let text = text_of_response masc_resp in
+             if String.trim text = "" && masc_resp.tool_calls = [] then
+               None  (* empty response, try batch *)
+             else
+               Some (Ok masc_resp)
+         | Error http_err ->
+             Log.LlmClient.warn "stream: provider error: %s"
+               (string_of_http_error http_err);
+             None  (* fall through to batch *))
+  in
+  match stream_result with
+  | Some result -> result
+  | None ->
+      (* Fallback: batch call, then synthesise SSE events *)
+      Log.LlmClient.info
+        "stream: falling back to batch for %s" req.model.model_id;
+      let timeout_sec_int =
+        Option.map (fun f -> max 1 (int_of_float (Float.ceil f))) timeout_sec
+      in
+      let batch_result = complete ?timeout_sec:timeout_sec_int req in
+      (match batch_result with
+       | Ok resp ->
+           let text = text_of_response resp in
+           on_event (MessageStart {
+             id = "batch-" ^ req.model.model_id;
+             model = resp.model_used;
+             usage = None;
+           });
+           if text <> "" then
+             on_event (ContentBlockDelta {
+               index = 0;
+               delta = TextDelta text;
+             });
+           on_event MessageStop;
+           Ok resp
+       | Error _ as e -> e)

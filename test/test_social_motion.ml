@@ -117,6 +117,7 @@ let test_graph_json_summarizes_relationships () =
         (List.length (json |> member "timeline" |> to_list)))
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "Social Motion"
     [
       ( "core",

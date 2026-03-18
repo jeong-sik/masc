@@ -25,10 +25,10 @@ module FileSystemBackend : BACKEND = struct
       Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> f ())
     with
     | result -> result
-    | exception Effect.Unhandled _ ->
+    | exception Effect.Unhandled _ | exception Eio__Eio_mutex.Poisoned _ ->
         (* No Eio runtime (e.g. tests) — fall back to Stdlib.Mutex.
-           Only catches Effect.Unhandled; Eio exceptions (Cancel, etc.)
-           propagate normally to avoid blocking the scheduler. *)
+           Effect.Unhandled: first attempt without Eio context.
+           Eio_mutex.Poisoned: mutex poisoned by a prior failed attempt. *)
         Stdlib.Mutex.lock stdlib_mutex;
         Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock stdlib_mutex) f
 

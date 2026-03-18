@@ -101,7 +101,7 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
     Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir:config.workdir ()
   in
   let agent_config = { Types.default_config with
-    model = Types.Custom provider_cfg.model_id;
+    model = provider_cfg.model_id;
     max_turns = config.max_turns;
     system_prompt = Some (Agent_swarm_prompts.solo_developer ~goal:config.goal);
   } in

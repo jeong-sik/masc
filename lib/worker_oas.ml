@@ -25,7 +25,7 @@ module Oas = Agent_sdk
     MASC workers use local Ollama/llama-server models, so all model IDs
     go through Custom. *)
 let oas_model_of_effective_model (model_id : string) : Oas.Types.model =
-  Oas.Types.Custom model_id
+  model_id
 
 (* ================================================================ *)
 (* worker_container_meta -> OAS Types.agent_config                   *)

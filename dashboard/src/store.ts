@@ -16,10 +16,8 @@ import type {
   KeeperLifecycleState,
   Goal,
   MdalLoop,
-  MdalIterationRecord,
   DashboardSemanticsResponse,
   DashboardSemanticPanel,
-  DashboardExecutionHandoff,
   DashboardExecutionSummary,
   DashboardExecutionQueueItem,
   DashboardExecutionSessionBrief,
@@ -27,7 +25,6 @@ import type {
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionLodgeTick,
   DashboardExecutionLodgeCheckin,
-  SocialRuntimeStatus,
   DashboardExecutionContinuityBrief,
 } from './types'
 import {
@@ -51,14 +48,14 @@ import { buildAgentMotion, type AgentMotionSnapshot } from './components/common/
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
-  normalizeExecutionSummary, normalizeExecutionHandoff,
+  normalizeExecutionSummary,
   normalizeExecutionQueueItem, normalizeExecutionSessionBrief,
   normalizeExecutionOperationBrief, normalizeExecutionWorkerSupportBrief,
   normalizeExecutionLodgeTick, normalizeExecutionLodgeCheckin,
   normalizeExecutionContinuityBrief,
-  messageSortKey, mergeMessages,
+  mergeMessages,
   normalizeServerStatus, mergeServerStatus,
-  normalizeMdalLoop, normalizeBuildIdentity,
+  normalizeMdalLoop,
 } from './store-normalizers'
 
 // --- Shell counts (lightweight fallback from /dashboard/shell) ---

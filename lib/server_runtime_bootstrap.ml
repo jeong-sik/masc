@@ -109,6 +109,11 @@ let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         Log.Server.error "subsystem %s crashed: %s" name
           (Printexc.to_string exn))
   in
+  (* OAS Event_bus → SSE bridge: relay masc:* events to dashboard *)
+  Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
+  (* Inject Event_bus into Lodge and Keeper for lifecycle event publishing *)
+  Lodge_heartbeat.set_bus event_bus;
+  Keeper_keepalive.set_bus event_bus;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
     let cancel_orchestrator =

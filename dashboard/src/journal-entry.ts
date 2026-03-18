@@ -1,6 +1,6 @@
 import type { JournalEntry, JournalEventType } from './types'
 
-export function classifyJournalKind(entry: JournalEntry): 'board' | 'tasks' | 'keepers' | 'system' {
+export function classifyJournalKind(entry: JournalEntry): 'board' | 'tasks' | 'keepers' | 'system' | 'oas' {
   if (entry.kind) return entry.kind
 
   switch (entry.eventType) {

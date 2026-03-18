@@ -562,6 +562,7 @@
    perpetual_oas
    procedural_memory
    oas_events
+   oas_sse_bridge
    tool_schemas_plan
  tool_schemas_portal
  tool_schemas_worktree

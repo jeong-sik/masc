@@ -31,6 +31,7 @@ import './styles/tools.css'
 import './styles/chat.css'
 import './styles/roster.css'
 import './styles/ff-theme.css'
+import './styles/oas-pipeline.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

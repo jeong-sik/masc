@@ -55,6 +55,64 @@ let publish_heartbeat_recovered (bus : Agent_sdk.Event_bus.t) ~agent_name ~previ
   ] in
   Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:heartbeat_recovered", payload))
 
+(** {1 Lodge Agent Lifecycle Events} *)
+
+(** Publish an agent selection event (Thompson Sampling result).
+    Emitted after [select_agents_with_thompson] in lodge_heartbeat. *)
+let publish_agent_selected (bus : Agent_sdk.Event_bus.t) ~agent_name ~trigger
+    ~thompson_score ~final_score =
+  let payload = `Assoc [
+    ("agent_name", `String agent_name);
+    ("trigger", `String trigger);
+    ("thompson_score", `Float thompson_score);
+    ("final_score", `Float final_score);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.Custom ("masc:lodge:agent_selected", payload))
+
+(** Publish an agent action decision event (LLM decision result).
+    Emitted after LLM decides post/comment/upvote/skip. *)
+let publish_agent_decision (bus : Agent_sdk.Event_bus.t) ~agent_name ~action
+    ~trigger_reason =
+  let payload = `Assoc [
+    ("agent_name", `String agent_name);
+    ("action", `String action);
+    ("trigger_reason", `String trigger_reason);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.Custom ("masc:lodge:agent_decision", payload))
+
+(** Publish an action execution result event.
+    Emitted after an agent's action (post/comment/upvote) completes. *)
+let publish_agent_action_executed (bus : Agent_sdk.Event_bus.t) ~agent_name
+    ~action ~success =
+  let payload = `Assoc [
+    ("agent_name", `String agent_name);
+    ("action", `String action);
+    ("success", `Bool success);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.Custom ("masc:lodge:agent_action_executed", payload))
+
+(** {1 Keeper Snapshot Events} *)
+
+(** Publish a keeper snapshot event to the OAS Event_bus.
+    Emitted alongside SSE broadcast in keeper_keepalive. *)
+let publish_keeper_snapshot (bus : Agent_sdk.Event_bus.t) ~keeper_name
+    ~generation ~context_ratio ~message_count =
+  let payload = `Assoc [
+    ("keeper_name", `String keeper_name);
+    ("generation", `Int generation);
+    ("context_ratio", `Float context_ratio);
+    ("message_count", `Int message_count);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.Custom ("masc:keeper:snapshot", payload))
+
 (** {1 Phase 4: Social Events} *)
 
 (** Publish a trust score update between two agents. *)

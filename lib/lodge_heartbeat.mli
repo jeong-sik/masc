@@ -110,7 +110,10 @@ val tick :
 
 (** {1 Daemon} *)
 
-val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> Room.config -> unit
+(** Inject the OAS Event_bus for lifecycle event publishing. *)
+val set_bus : Agent_sdk.Event_bus.t -> unit
+
+val start : ?bus:Agent_sdk.Event_bus.t -> sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> Room.config -> unit
 
 (** {1 Manual Trigger} *)
 

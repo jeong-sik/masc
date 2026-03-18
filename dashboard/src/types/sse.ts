@@ -23,6 +23,12 @@ export type SSEEventType =
   | 'mdal_completed'
   | 'mdal_stopped'
   | 'governance_param_changed'
+  // OAS bridge events (relayed from Event_bus via oas_sse_bridge)
+  | 'oas:masc:lodge:agent_selected'
+  | 'oas:masc:lodge:agent_decision'
+  | 'oas:masc:lodge:agent_action_executed'
+  | 'oas:masc:keeper:snapshot'
+  | 'oas:masc:gardener:tick'
 
 export interface SSEEvent {
   type: SSEEventType
@@ -49,6 +55,8 @@ export interface SSEEvent {
   saved_tokens?: number
   trigger?: string
   reason?: string
+  // OAS bridge payload (generic container for Event_bus events)
+  payload?: Record<string, unknown>
   // MDAL event fields
   loop_id?: string
   profile?: string
@@ -75,13 +83,17 @@ export type JournalEventType =
   | 'keeper_handoff'
   | 'keeper_compaction'
   | 'keeper_guardrail'
+  | 'oas_agent_selected'
+  | 'oas_agent_decision'
+  | 'oas_agent_action'
+  | 'oas_keeper_snapshot'
   | 'unknown'
 
 export interface JournalEntry {
   agent: string
   text: string
   timestamp: number
-  kind?: 'board' | 'tasks' | 'keepers' | 'system'
+  kind?: 'board' | 'tasks' | 'keepers' | 'system' | 'oas'
   eventType?: JournalEventType
   author?: string
   preview?: string

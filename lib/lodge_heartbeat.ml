@@ -9,6 +9,18 @@ include Lodge_heartbeat_agents
 
 [@@@warning "-32-69"]
 
+(* OAS Event_bus ref — set via [start ?bus] *)
+let bus_ref : Agent_sdk.Event_bus.t option ref = ref None
+
+let set_bus bus = bus_ref := Some bus
+
+let publish_oas name payload =
+  match !bus_ref with
+  | Some bus ->
+      Agent_sdk.Event_bus.publish bus
+        (Agent_sdk.Event_bus.Custom (name, payload))
+  | None -> ()
+
 let fallback_tool_loop_assignment
     ~agent_name
     ~trigger_reason
@@ -512,6 +524,15 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
     Lodge_selection.record_selection ~agent_name:name
   ) selected;
 
+  (* OAS: publish agent selection events *)
+  List.iter (fun (name, trigger) ->
+    publish_oas "masc:lodge:agent_selected" (`Assoc [
+      ("agent_name", `String name);
+      ("trigger", `String (string_of_trigger trigger));
+      ("timestamp", `Float (Time_compat.now ()));
+    ])
+  ) selected;
+
   (* Record board state as observations for selected agents *)
   let store = Board.global () in
   let recent_posts = Board.list_posts store ~limit:10 () in
@@ -554,6 +575,14 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
       record_checkin ~agent_name:name;
       record_checkin ~agent_name:name;
       (* Record action for Thompson Sampling *)
+      let action_str = match result with
+        | Acted { action = ActionPost _; _ } -> "post"
+        | Acted { action = ActionComment _; _ } -> "comment"
+        | Acted { action = ActionUpvote _; _ } -> "upvote"
+        | Acted { action = ActionSkip; _ } -> "skip"
+        | Passed _ -> "passed"
+        | Skipped _ -> "skipped"
+      in
       (match result with
        | Acted { action = ActionPost _; _ } ->
            Lodge_selection.record_action ~agent_name:name ~action:`Post
@@ -563,6 +592,20 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
        | Acted { action = ActionSkip; _ }
        | Passed _ | Skipped _ ->
            Lodge_selection.record_action ~agent_name:name ~action:`Skip);
+      (* OAS: publish decision + execution events *)
+      let success = match result with Acted _ -> true | _ -> false in
+      publish_oas "masc:lodge:agent_decision" (`Assoc [
+        ("agent_name", `String name);
+        ("action", `String action_str);
+        ("trigger_reason", `String trigger_reason);
+        ("timestamp", `Float (Time_compat.now ()));
+      ]);
+      publish_oas "masc:lodge:agent_action_executed" (`Assoc [
+        ("agent_name", `String name);
+        ("action", `String action_str);
+        ("success", `Bool success);
+        ("timestamp", `Float (Time_compat.now ()));
+      ]);
       (name, trigger, result)
     end
   ) selected in
@@ -689,7 +732,8 @@ let make_lodge_tick_consumer ~config ~last_tick_time ~sw ~clock ~room_config
   end)
 
 (** Start heartbeat daemon fiber — Generative Agent Architecture *)
-let start ~sw ~clock room_config =
+let start ?bus ~sw ~clock room_config =
+  bus_ref := bus;
   Printf.printf "+Lodge Heartbeat v2 (Generative Agent): initializing...\n%!";
   lodge_init_lock ();
   let config = load_config () in

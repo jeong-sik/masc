@@ -3,6 +3,8 @@
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
+import { pushOasAgentEvent, updateOasKeeperSnapshot, oasLastGardenerTick, oasTotalEvents } from './store'
+import type { OasKeeperSnapshot } from './types/oas'
 
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
 const RECONNECT_BASE_MS = 1000
@@ -221,6 +223,64 @@ function handleEvent(event: SSEEvent): void {
         'keeper_guardrail',
       )
       break
+    // OAS bridge events
+    case 'oas:masc:lodge:agent_selected': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentName = (p.agent_name as string) ?? agent
+      pushOasAgentEvent({
+        type: 'selected',
+        agent_name: agentName,
+        trigger: p.trigger as string | undefined,
+        timestamp: (p.timestamp as number) ?? Date.now() / 1000,
+      })
+      addTypedJournalEntry(agentName, `Selected (${p.trigger ?? '?'})`, 'oas', 'oas_agent_selected')
+      break
+    }
+    case 'oas:masc:lodge:agent_decision': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentName = (p.agent_name as string) ?? agent
+      pushOasAgentEvent({
+        type: 'decision',
+        agent_name: agentName,
+        action: p.action as string | undefined,
+        trigger_reason: p.trigger_reason as string | undefined,
+        timestamp: (p.timestamp as number) ?? Date.now() / 1000,
+      })
+      addTypedJournalEntry(agentName, `Decision: ${p.action ?? '?'}`, 'oas', 'oas_agent_decision')
+      break
+    }
+    case 'oas:masc:lodge:agent_action_executed': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentName = (p.agent_name as string) ?? agent
+      pushOasAgentEvent({
+        type: 'action_executed',
+        agent_name: agentName,
+        action: p.action as string | undefined,
+        success: p.success as boolean | undefined,
+        timestamp: (p.timestamp as number) ?? Date.now() / 1000,
+      })
+      const ok = p.success ? 'ok' : 'fail'
+      addTypedJournalEntry(agentName, `Action: ${p.action ?? '?'} [${ok}]`, 'oas', 'oas_agent_action')
+      break
+    }
+    case 'oas:masc:keeper:snapshot': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const snap: OasKeeperSnapshot = {
+        keeper_name: (p.keeper_name as string) ?? '',
+        generation: (p.generation as number) ?? 0,
+        context_ratio: (p.context_ratio as number) ?? 0,
+        message_count: (p.message_count as number) ?? 0,
+        timestamp: (p.timestamp as number) ?? Date.now() / 1000,
+      }
+      updateOasKeeperSnapshot(snap)
+      addTypedJournalEntry(snap.keeper_name, `Keeper snapshot gen=${snap.generation} ctx=${Math.round(snap.context_ratio * 100)}%`, 'oas', 'oas_keeper_snapshot')
+      break
+    }
+    case 'oas:masc:gardener:tick': {
+      oasLastGardenerTick.value = Date.now()
+      oasTotalEvents.value++
+      break
+    }
     default:
       addTypedJournalEntry(agent, type, 'system', 'unknown')
   }

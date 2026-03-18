@@ -40,14 +40,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Some sid ->
         let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
         try
-          let ic = open_in file in
-          let name =
-            Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
-              ~finally:(fun () -> close_in_noerr ic)
-              (fun () -> input_line ic)
-          in
+          let name = Fs_compat.load_file file |> String.trim in
           if name = "" then None else Some name
-        with Sys_error _ | End_of_file -> None
+        with Sys_error _ | Eio.Io _ -> None
   in
 
   (* Legacy helper - write to file for backward compat with non-identity-aware tools *)
@@ -56,13 +51,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> ()
     | Some sid ->
         let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
-        try
-          let oc = open_out file in
-          Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
-            ~finally:(fun () -> close_out_noerr oc)
-            (fun () -> output_string oc agent_name)
-        with Sys_error msg ->
-          Log.Misc.warn "write_mcp_session_agent: %s" msg
+        (try
+          Fs_compat.save_file file agent_name
+        with
+        | Sys_error msg -> Log.Misc.warn "write_mcp_session_agent: %s" msg
+        | Eio.Io _ as exn -> Log.Misc.warn "write_mcp_session_agent: %s" (Printexc.to_string exn))
   in
 
   (* Helper to get values from JSON arguments - delegates to Safe_ops *)
@@ -104,14 +97,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
             let term_session_id = Option.value ~default:"" (Sys.getenv_opt "TERM_SESSION_ID") in
             let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
             (try
-              let ic = open_in term_file in
-              let name =
-                Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
-                  ~finally:(fun () -> close_in_noerr ic)
-                  (fun () -> input_line ic)
-              in
+              let name = Fs_compat.load_file term_file |> String.trim in
               if name <> "" then name else raise Not_found
-            with Sys_error _ | End_of_file | Not_found ->
+            with Sys_error _ | Not_found ->
               generated_fallback_agent_name)
   in
 
@@ -143,14 +131,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       | Some sid ->
           let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
           try
-            let ic = open_in file in
-            let name =
-              Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
-                ~finally:(fun () -> close_in_noerr ic)
-                (fun () -> input_line ic)
-            in
+            let name = Fs_compat.load_file file |> String.trim in
             if name = "" then None else Some name
-          with Sys_error _ | End_of_file -> None
+          with Sys_error _ -> None
   in
 
   let persisted_agent_name () =
@@ -254,10 +237,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       | Some sid ->
           let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
           (try
-            let oc = open_out file in
-            Common.protect ~module_name:"mcp_server_eio" ~finally_label:"finalizer"
-              ~finally:(fun () -> close_out_noerr oc)
-              (fun () -> output_string oc nickname)
+            Fs_compat.save_file file nickname
           with e ->
             Log.Misc.error "Failed to write agent file %s: %s"
               file (Printexc.to_string e))

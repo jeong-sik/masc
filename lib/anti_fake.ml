@@ -165,10 +165,8 @@ let score_content ~(file_path : string) (content : string) : score_result =
 
 (** Score a test file by reading it from disk. *)
 let score_file (file_path : string) : score_result =
-  let ic = open_in file_path in
-  Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
-    let content = In_channel.input_all ic in
-    score_content ~file_path content)
+  let content = Fs_compat.load_file file_path in
+  score_content ~file_path content
 
 (** Aggregate multiple [score_result]s into a summary. *)
 let summarize (results : score_result list) : audit_summary =

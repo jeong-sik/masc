@@ -122,35 +122,6 @@ button.agent:hover,
 button.agent-card:hover {
   background: var(--white-8);
 }
-
-.agent .agent-status {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.agent .agent-status.active {
-  background: var(--ok);
-}
-
-.agent .agent-status.busy {
-  background: var(--warn);
-}
-
-.agent .agent-status.listening {
-  background: #38bdf8;
-}
-
-.agent .agent-status.idle {
-  background: #7f9ccc;
-}
-
-.agent .agent-status.offline,
-.agent .agent-status.inactive {
-  background: #63789f;
-}
-
 .agent .agent-task {
   grid-column: 1 / -1;
   color: #89a3cf;
@@ -162,39 +133,6 @@ button.agent-card:hover {
   flex-direction: column;
   gap: 8px;
 }
-
-.live-agent-main {
-  width: 100%;
-}
-
-.live-agent-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
-}
-
-.live-agent-name {
-  color: var(--text-strong);
-  font-weight: 600;
-}
-
-.live-agent-sub {
-  color: #87a2d0;
-  font-size: 12px;
-  margin-top: 2px;
-}
-
-.live-agent-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-  color: #9db4de;
-  font-size: 12px;
-}
-
 /* Agents */
 
 .agent-card-header {
@@ -203,13 +141,6 @@ button.agent-card:hover {
   align-items: center;
   gap: 10px;
 }
-
-.agent-card-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .room-truth-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -372,25 +303,21 @@ button.monitor-row.bad {
   padding: 12px 14px;
 }
 
-.execution-alert,
-.execution-task-row {
+.execution-alert {
   border: 1px solid rgba(138, 163, 211, 0.18);
   background: var(--white-4);
   border-radius: 12px;
 }
 
-.execution-alert.ok,
-.execution-task-row.ok {
+.execution-alert.ok {
   border-color: rgba(74, 222, 128, 0.18);
 }
 
-.execution-alert.warn,
-.execution-task-row.warn {
+.execution-alert.warn {
   border-color: rgba(251, 191, 36, 0.28);
 }
 
-.execution-alert.bad,
-.execution-task-row.bad {
+.execution-alert.bad {
   border-color: rgba(248, 113, 113, 0.34);
 }
 
@@ -401,27 +328,6 @@ button.monitor-row.bad {
   gap: 14px;
   padding: 12px 14px;
 }
-
-.execution-task-row {
-  padding: 14px;
-}
-
-.monitor-alert-main {
-  min-width: 0;
-}
-
-.monitor-alert-title {
-  color: #f5f7ff;
-  font-weight: 600;
-}
-
-.monitor-alert-subtitle {
-  margin-top: 4px;
-  color: #a9badb;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
 .monitor-alert-meta {
   display: flex;
   align-items: center;

@@ -23,58 +23,10 @@
   padding: 24px;
   position: relative;
 }
-.keeper-detail-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
-}
-.keeper-detail-title { font-size: 22px; font-weight: bold; }
-.keeper-detail-sub { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
-.keeper-detail-close {
-  background: var(--white-10);
-  border: none;
-  color: #ccc;
-  font-size: 20px;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.keeper-detail-close:hover { background: rgba(255,255,255,0.2); }
 
 /* Keeper Toolbar */
-.keeper-toolbar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-.keeper-toolbar button {
-  padding: 6px 14px;
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 8px;
-  background: var(--white-5);
-  color: #ccc;
-  cursor: pointer;
-  font-size: 12px;
-}
-.keeper-toolbar button:hover { background: var(--white-10); }
-.keeper-toolbar button.active {
-  background: rgba(74,222,128,0.15);
-  color: var(--ok);
-  border-color: rgba(74,222,128,0.3);
-}
 
 /* Keeper Detail Grid */
-.keeper-detail-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
 
 /* Keeper KPIs */
 .keeper-kpis {
@@ -95,16 +47,6 @@
 .keeper-kpi-hint { font-size: 10px; color: #666; margin-top: 2px; }
 
 /* Keeper Chart */
-.keeper-chart-card {
-  background: var(--white-3);
-  border-radius: 10px;
-  padding: 14px;
-  border: 1px solid var(--white-6);
-}
-.keeper-chart-container { height: 180px; position: relative; }
-.keeper-chart-meta { font-size: 11px; color: var(--text-dim); margin-top: 8px; }
-.keeper-chart-meta .warn { color: var(--warn); }
-.keeper-chart-meta .bad { color: var(--bad); }
 
 /* Keeper Field Dictionary */
 .keeper-field-dict {
@@ -149,24 +91,6 @@
   font-size: 12px;
 }
 
-.keeper-metric-row {
-  align-items: flex-start;
-}
-
-.keeper-metric-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  max-width: 70%;
-}
-
-.keeper-metric-source {
-  color: #8db0dd;
-  font-size: 10px;
-  line-height: 1.25;
-  word-break: break-all;
-}
-
 .keeper-signal-row strong {
   color: #d9ebff;
   font-variant-numeric: tabular-nums;
@@ -185,32 +109,8 @@
 }
 
 /* Keeper Handoff Timeline */
-.keeper-handoff-list {
-  max-height: 220px;
-  overflow-y: auto;
-}
-.keeper-handoff-controls { margin-bottom: 10px; }
-.keeper-handoff-row {
-  border-left: 3px solid var(--warn);
-  padding: 8px 12px;
-  margin-bottom: 8px;
-  background: var(--white-3);
-  border-radius: 0 8px 8px 0;
-}
-.keeper-handoff-row summary { cursor: pointer; font-size: 13px; }
-.keeper-handoff-gen { font-size: 11px; color: var(--cyan); }
-.keeper-handoff-time { font-size: 11px; color: var(--text-dim); }
-.keeper-handoff-meta { font-size: 12px; color: #aaa; margin-top: 6px; }
-.keeper-handoff-trace { font-family: monospace; font-size: 11px; color: #666; }
 
 /* Keeper Events */
-.keeper-events-list {
-  max-height: 180px;
-  overflow-y: auto;
-}
-.keeper-event { padding: 4px 8px; font-size: 12px; border-radius: 4px; margin-bottom: 4px; }
-.keeper-event.handoff { background: rgba(251,191,36,0.08); border-left: 2px solid var(--warn); }
-.keeper-event.compaction { background: rgba(74,222,128,0.08); border-left: 2px solid var(--ok); }
 
 /* Keeper Equipment */
 .keeper-equipment-list { display: flex; flex-direction: column; gap: 6px; }
@@ -225,14 +125,6 @@
 
 /* Keeper Memory */
 .keeper-memory-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
-.keeper-memory-item {
-  padding: 8px 10px;
-  background: var(--white-3);
-  border-radius: 6px;
-}
-.keeper-memory-kind { font-size: 10px; text-transform: uppercase; color: var(--cyan); letter-spacing: 1px; }
-.keeper-memory-text { font-size: 13px; margin-top: 4px; }
-.keeper-memory-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 
 /* Keeper Conversations */
 .keeper-conversation-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
@@ -256,13 +148,6 @@
 
 /* Keeper K2K */
 .keeper-k2k-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-.keeper-k2k-chip {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(251,191,36,0.15);
-  color: var(--warn);
-}
 .keeper-k2k-route { font-family: monospace; font-size: 11px; color: var(--text-dim); }
 
 /* Keeper Mentions */
@@ -273,4 +158,3 @@
   background: rgba(74,222,128,0.12);
   color: var(--ok);
 }
-

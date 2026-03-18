@@ -325,6 +325,7 @@ module Tool_gardener = Tool_gardener
 module Tool_library = Tool_library
 
 (* Perpetual Agent Runtime — Infinite Context System *)
+module Llm_eio_env = Llm_eio_env
 module Llm_client = Llm_client
 module Context_manager = Context_manager
 module Verifier = Verifier

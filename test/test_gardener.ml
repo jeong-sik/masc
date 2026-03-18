@@ -259,7 +259,9 @@ let test_homeostatic_score_at_maximum () =
 
 (** Test spawn decision returns valid result — requires Eio runtime *)
 let test_spawn_decision_returns_valid () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Llm_eio_env.init ~sw ~net:(Eio.Stdenv.net env);
   (* Use propose_spawn which internally calculates health from real data *)
   let decision = Gardener.propose_spawn ~topic:"test-topic" ~reason:"test" ~urgency:High in
   (* Verify decision is one of the valid ADT variants *)

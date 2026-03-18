@@ -212,7 +212,8 @@ let () =
   Process_eio.init ~cwd_default:cwd ~proc_mgr ~clock;
 
   let state = Perpetual_loop.create_state config in
-  Perpetual_loop.run ~config ~state;
+  Eio.Switch.run (fun sw ->
+    Perpetual_oas.run ~sw ~config ~state);
 
   (* Print final status *)
   let status_json = Perpetual_loop.status ~config state in

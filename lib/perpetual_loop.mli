@@ -1,10 +1,7 @@
-(** Perpetual_loop — Autonomous agent loop with infinite context.
+(** Perpetual_loop — Types, configuration, and state for the perpetual agent.
 
-    The core runtime for a perpetual agent.  Each turn follows:
-    think → act → observe → verify → compact → heartbeat → loop
-
-    Handles context compaction, succession to new agents, and
-    feedback verification via a cheap model.  Runs as an Eio fiber.
+    The loop runtime has moved to {!Perpetual_oas}.  This module retains
+    type definitions, construction helpers, and status queries.
 
     @since 2.61.0 *)
 
@@ -90,19 +87,17 @@ type loop_state = {
 (** Create initial loop state from configuration. *)
 val create_state : loop_config -> loop_state
 
-(** Run one turn of the loop.
-    Returns true to continue, false to stop. *)
-val run_turn : config:loop_config -> state:loop_state -> bool
-
-(** Run the perpetual loop until stopped or goal complete.
-    Blocks the calling fiber. *)
-val run : config:loop_config -> state:loop_state -> unit
-
 (** Stop the loop gracefully.  Sets running=false. *)
 val stop : loop_state -> unit
 
 (** Get current status as JSON. *)
 val status : config:loop_config -> loop_state -> Yojson.Safe.t
+
+(** Record an event into the state's event log (capped at 200). *)
+val record_event : loop_state -> event -> unit
+
+(** Publish an event to an OAS Event_bus. *)
+val publish_to_event_bus : Agent_sdk.Event_bus.t -> event -> unit
 
 (** {1 Defaults} *)
 

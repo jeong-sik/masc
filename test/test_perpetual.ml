@@ -520,13 +520,19 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
        (List.mem_assoc "context_ratio" fields);
    | _ -> assert_true "status:is_object" false);
 
-  (* 5. Run turn on stopped state returns false *)
+  (* 5. Stopped state is reflected in status *)
   let fresh_config = Perpetual_loop.default_config
     ~goal:"test" ~models:[Llm_client.llama_default] () in
   let fresh_state = Perpetual_loop.create_state fresh_config in
-  fresh_state.running <- false;
-  let should_continue = Perpetual_loop.run_turn ~config:fresh_config ~state:fresh_state in
-  assert_true "run_turn:stopped" (not should_continue);
+  Perpetual_loop.stop fresh_state;
+  assert_true "stop:running_false" (not fresh_state.running);
+  let s = Perpetual_loop.status ~config:fresh_config fresh_state in
+  (match s with
+   | `Assoc fields ->
+     (match List.assoc "running" fields with
+      | `Bool b -> assert_true "stop:status_running_false" (not b)
+      | _ -> assert_true "stop:running_is_bool" false)
+   | _ -> assert_true "stop:is_object" false);
 
   (* 6. Event types exist *)
   let events_ok = [
@@ -603,23 +609,12 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
   assert_equal "coding_config:agent" "gemini" coding_config.coding_agent;
   assert_equal "coding_config:timeout" 1800 coding_config.coding_timeout_s;
 
-  (* 17. Coding mode turn with no sw/proc_mgr fails gracefully *)
-  let coding_state = Perpetual_loop.create_state coding_config in
-  let events_captured = ref [] in
-  let coding_config_with_events = { coding_config with
-    on_event = (fun ev -> events_captured := ev :: !events_captured);
-  } in
-  let should_continue = Perpetual_loop.run_turn
-    ~config:coding_config_with_events ~state:coding_state in
-  assert_true "coding_turn:stops_on_missing_deps" (not should_continue);
-  assert_true "coding_turn:state_stopped" (not coding_state.running);
-  (* Should have emitted Error + Terminated events *)
-  let has_error = List.exists (function
-    | Perpetual_loop.Error _ -> true | _ -> false) !events_captured in
-  let has_terminated = List.exists (function
-    | Perpetual_loop.Terminated _ -> true | _ -> false) !events_captured in
-  assert_true "coding_turn:emitted_error" has_error;
-  assert_true "coding_turn:emitted_terminated" has_terminated;
+  (* 17. record_event caps at 200 entries *)
+  let ev_state = Perpetual_loop.create_state coding_config in
+  for i = 1 to 210 do
+    Perpetual_loop.record_event ev_state (Perpetual_loop.TurnStart i)
+  done;
+  assert_true "record_event:capped_at_200" (List.length ev_state.events <= 200);
 )
 
 (* ================================================================ *)

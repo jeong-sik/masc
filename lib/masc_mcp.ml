@@ -336,6 +336,7 @@ module Context_manager = Context_manager
 module Verifier = Verifier
 module Succession = Succession
 module Perpetual_loop = Perpetual_loop
+module Perpetual_oas = Perpetual_oas
 module Tool_perpetual = Tool_perpetual
 module Tool_compact = Tool_compact
 module Tool_keeper = Tool_keeper

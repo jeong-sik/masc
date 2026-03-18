@@ -70,7 +70,9 @@ function findKeeper(agentName: string, keeperList: any[], keeperBriefs: any[]): 
   return null
 }
 
-export function AgentRoster() {
+export type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
+
+export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFilterMode } = {}) {
   const [filter, setFilter] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
 
@@ -86,6 +88,12 @@ export function AgentRoster() {
     .filter((a: { name: string; status: string }) => {
       if (filter !== 'all' && statusCategory(a.status) !== filter) return false
       if (search && !a.name.toLowerCase().includes(search.toLowerCase())) return false
+      // Keeper filter from parent chip
+      if (keeperFilter !== 'all') {
+        const isKeeper = findKeeper(a.name, keeperList, keeperBriefs) != null
+        if (keeperFilter === 'keeper-only' && !isKeeper) return false
+        if (keeperFilter === 'agent-only' && isKeeper) return false
+      }
       return true
     })
     .sort((a: { status: string; name: string }, b: { status: string; name: string }) => {
@@ -106,8 +114,8 @@ export function AgentRoster() {
   return html`
     <div class="roster-page agent-page">
       <div class="roster-header">
-        <h2 class="roster-title">에이전트 (${agentList.length})</h2>
-        <p class="agent-page__subtitle">등록된 에이전트 — keeper 런타임이 있으면 컨텍스트 게이지 표시</p>
+        <h2 class="roster-title">${keeperFilter === 'keeper-only' ? '키퍼' : keeperFilter === 'agent-only' ? '에이전트' : '에이전트'} (${filtered.length})</h2>
+        <p class="agent-page__subtitle">${keeperFilter === 'keeper-only' ? '키퍼 런타임이 있는 에이전트' : keeperFilter === 'agent-only' ? '키퍼 런타임이 없는 에이전트' : '등록된 에이전트 — keeper 런타임이 있으면 컨텍스트 게이지 표시'}</p>
         <div class="roster-controls">
           <input
             type="text"

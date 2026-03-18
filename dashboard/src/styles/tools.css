@@ -226,3 +226,54 @@
     max-height: calc(100vh - 480px);
   }
 }
+
+/* --- Tool Summary View --- */
+.tool-summary {
+  padding: 8px 0;
+}
+
+.tool-summary-section {
+  margin-top: 20px;
+}
+
+.tool-summary-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0 0 10px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.tool-summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.tool-summary-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e2e8f0;
+  min-width: 180px;
+  flex-shrink: 0;
+}
+
+.tool-summary-desc {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

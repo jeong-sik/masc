@@ -232,4 +232,18 @@
   border-color: var(--accent, #60a5fa);
   color: #fff;
 }
+.agents-chip-count {
+  display: inline-block;
+  font-size: 10px;
+  min-width: 18px;
+  text-align: center;
+  padding: 1px 5px;
+  margin-left: 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+}
+.agents-chip--active .agents-chip-count {
+  background: rgba(255, 255, 255, 0.25);
+}
 

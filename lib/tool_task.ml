@@ -68,6 +68,8 @@ let handle_claim ctx args =
   (* Notification harness: push claim event to all active sessions *)
   (match result with
    | Ok _ ->
+       (* Auto-set current_task so planning tools pick it up immediately *)
+       Planning_eio.set_current_task ctx.config ~task_id;
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_claimed");
          ("task_id", `String task_id);
@@ -85,7 +87,17 @@ let handle_claim_next ctx _args =
   if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
     (false, Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
   else
-  (true, Room.claim_next ctx.config ~agent_name:ctx.agent_name)
+  let result = Room.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
+  let message = match result with
+    | Room_task.Claim_next_claimed { task_id; message; _ } ->
+        (* Auto-set current_task so planning tools pick it up immediately *)
+        Planning_eio.set_current_task ctx.config ~task_id;
+        message
+    | Room_task.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
+    | Room_task.Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
+    | Room_task.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
+  in
+  (true, message)
 
 let handle_release ctx args =
   let task_id = get_string args "task_id" "" in

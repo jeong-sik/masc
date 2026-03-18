@@ -19,6 +19,13 @@ import {
   persistWorkflowContext,
   workflowTargetLabel,
 } from '../workflow-context'
+import { relativeTime as relativeTimeBase, formatDuration } from '../lib/format-time'
+
+export { formatDuration }
+
+export function relativeTime(iso?: string | null): string {
+  return relativeTimeBase(iso, '방금')
+}
 
 export type EnrichedKeeperRow = {
   brief: DashboardMissionKeeperBrief
@@ -57,25 +64,6 @@ export function toneClass(tone?: string | null): string {
   if (tone === 'bad' || tone === 'offline' || tone === 'critical' || tone === 'risk') return 'bad'
   if (tone === 'warn' || tone === 'pending' || tone === 'degraded' || tone === 'interrupted' || tone === 'watch') return 'warn'
   return 'ok'
-}
-
-export function relativeTime(iso?: string | null): string {
-  if (!iso) return '방금'
-  const ts = Date.parse(iso)
-  if (Number.isNaN(ts)) return iso
-  const deltaSec = Math.max(0, Math.round((Date.now() - ts) / 1000))
-  if (deltaSec < 60) return `${deltaSec}초 전`
-  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 전`
-  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}시간 전`
-  return `${Math.round(deltaSec / 86400)}일 전`
-}
-
-export function formatDuration(seconds?: number | null): string {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '확인 필요'
-  if (seconds < 60) return `${Math.round(seconds)}초`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}분`
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}시간`
-  return `${Math.round(seconds / 86400)}일`
 }
 
 export function statusLabel(value?: string | null): string {

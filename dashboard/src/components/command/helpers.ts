@@ -18,8 +18,11 @@ import {
 import { operatorSnapshot } from '../../operator-store'
 import { route } from '../../router'
 import type { DashboardWorkflowContext } from '../../workflow-context'
+import { relativeTime, formatElapsed } from '../../lib/format-time'
 
 // ── Pure helpers ──────────────────────────────
+
+export { relativeTime, formatElapsed }
 
 export function prettyJson(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -29,17 +32,6 @@ export function prettyJson(value: unknown): string {
   } catch {
     return String(value)
   }
-}
-
-export function relativeTime(iso?: string | null): string {
-  if (!iso) return '정보 없음'
-  const ts = Date.parse(iso)
-  if (Number.isNaN(ts)) return iso
-  const deltaSec = Math.max(0, Math.round((Date.now() - ts) / 1000))
-  if (deltaSec < 60) return `${deltaSec}초 전`
-  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 전`
-  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}시간 전`
-  return `${Math.round(deltaSec / 86400)}일 전`
 }
 
 export function expiryTone(iso?: string | null): string {
@@ -118,13 +110,6 @@ export function chainStatusTone(status?: string | null): string {
 export function formatPercent(value?: number | null): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '정보 없음'
   return `${Math.round(value * 100)}%`
-}
-
-export function formatElapsed(value?: number | null): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '정보 없음'
-  if (value < 60) return `${Math.round(value)}초`
-  if (value < 3600) return `${Math.round(value / 60)}분`
-  return `${Math.round(value / 3600)}시간`
 }
 
 export function clampPercent(value?: number | null): number {

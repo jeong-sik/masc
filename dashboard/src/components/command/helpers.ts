@@ -20,20 +20,11 @@ import { route } from '../../router'
 import type { DashboardWorkflowContext } from '../../workflow-context'
 import { relativeTime, formatElapsed } from '../../lib/format-time'
 import { toneClass, chainStatusTone, sessionStatusTone, expiryTone } from '../../lib/tone'
+import { prettyJson, displayStatus } from '../../lib/status-label'
 
 // ── Pure helpers ──────────────────────────────
 
-export { relativeTime, formatElapsed, toneClass, chainStatusTone, sessionStatusTone, expiryTone }
-
-export function prettyJson(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
+export { relativeTime, formatElapsed, toneClass, chainStatusTone, sessionStatusTone, expiryTone, prettyJson, displayStatus }
 
 export function deadlineLabel(iso?: string | null): string {
   if (!iso) return '정보 없음'
@@ -422,16 +413,6 @@ export async function fire(action: () => Promise<void>) {
 
 export function normalizedStatus(value?: string | null): string {
   return value?.trim().toLowerCase() ?? ''
-}
-
-export function displayStatus(status?: string | null): string {
-  const normalized = normalizedStatus(status)
-  if (!normalized) return '확인 필요'
-  if (normalized === 'active' || normalized === 'running') return '진행 중'
-  if (normalized === 'paused') return '일시정지'
-  if (normalized === 'done' || normalized === 'ended' || normalized === 'completed') return '완료'
-  if (normalized === 'failed' || normalized === 'error' || normalized === 'stopped') return '문제'
-  return status?.trim() || '확인 필요'
 }
 
 export function hasSwarmActivity(): boolean {

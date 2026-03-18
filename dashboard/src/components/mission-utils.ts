@@ -22,8 +22,9 @@ import {
 import { relativeTime as relativeTimeBase, formatDuration } from '../lib/format-time'
 import { trimText } from '../lib/truncate'
 import { toneClass } from '../lib/tone'
+import { statusLabel } from '../lib/status-label'
 
-export { formatDuration, trimText, toneClass }
+export { formatDuration, trimText, toneClass, statusLabel }
 
 export function relativeTime(iso?: string | null): string {
   return relativeTimeBase(iso, '방금')
@@ -55,58 +56,6 @@ export type EnrichedAgentRow = {
 
 export const selectedAttentionId = signal<string | null>(null)
 export const selectedSessionId = signal<string | null>(null)
-
-export function statusLabel(value?: string | null): string {
-  const normalized = (value ?? '').trim().toLowerCase()
-  switch (normalized) {
-    case 'ok':
-    case 'healthy':
-    case 'green':
-      return '안정'
-    case 'active':
-    case 'running':
-      return '진행 중'
-    case 'pending':
-      return '대기 중'
-    case 'paused':
-      return '일시정지'
-    case 'blocked':
-      return '차단됨'
-    case 'interrupted':
-      return '중단됨'
-    case 'warn':
-    case 'watch':
-      return '주의'
-    case 'bad':
-    case 'critical':
-    case 'risk':
-      return '위험'
-    case 'degraded':
-      return '저하'
-    case 'offline':
-      return '오프라인'
-    case 'idle':
-    case 'quiet':
-      return '대기'
-    case 'loading':
-      return '불러오는 중'
-    case 'error':
-      return '오류'
-    case 'unavailable':
-      return '사용 불가'
-    case 'stale':
-      return '오래됨'
-    case 'refreshing':
-      return '갱신 중'
-    case 'cached':
-      return '캐시됨'
-    case 'unknown':
-    case '':
-      return '확인 필요'
-    default:
-      return value?.trim() || '확인 필요'
-  }
-}
 
 export function missionTargetTypeLabel(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {

@@ -8,6 +8,13 @@ val llm_permits_in_use : unit -> int
 
 val cache_key_of_request : Llm_types.completion_request -> string
 
+(** Filter cascade requests by provider health.
+    Removes local (Llama) providers when all local endpoints are unhealthy,
+    allowing cloud providers to serve as fallback.
+    Cloud providers always pass through. *)
+val filter_by_provider_health :
+  Llm_types.completion_request list -> Llm_types.completion_request list
+
 val complete :
   ?timeout_sec:int ->
   Llm_types.completion_request ->

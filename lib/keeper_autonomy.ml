@@ -239,12 +239,12 @@ let generate_action_plan ~model ~goal ~keeper_context =
   let prompt = build_plan_prompt goal ~keeper_context in
   let req : Llm_client.completion_request = {
     model;
-    messages = [Llm_client.user_msg prompt];
+    messages = [Agent_sdk.Types.user_msg prompt];
     temperature = 0.3;
     max_tokens = 500;
     tools = [];
     response_format = `Text;
   } in
   match Llm_client.complete req with
-  | Ok resp -> Ok (Llm_client.text_of_response resp)
+  | Ok resp -> Ok (Llm_types.text_of_response resp)
   | Error e -> Error (sprintf "plan generation failed: %s" e)

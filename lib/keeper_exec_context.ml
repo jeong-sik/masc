@@ -343,7 +343,7 @@ let proactive_prompt_for_keeper
 
 type proactive_generation_result = {
   reply: string;
-  usage: Llm_client.token_usage;
+  usage: Agent_sdk.Types.api_usage;
   model_used: string;
   latency_ms: int;
   attempts: int;
@@ -556,7 +556,7 @@ let run_proactive_generation
   let base_prompt =
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
   in
-  let zero_usage : Llm_client.token_usage =
+  let zero_usage : Agent_sdk.Types.api_usage =
     { Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
       cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
   in
@@ -627,8 +627,8 @@ let run_proactive_generation
             ({
                Llm_client.model;
                messages =
-                 (Llm_client.system_msg turn_system_prompt)
-                 :: (ctx_work.messages @ [ Llm_client.user_msg prompt ]);
+                 (Agent_sdk.Types.system_msg turn_system_prompt)
+                 :: (ctx_work.messages @ [ Agent_sdk.Types.user_msg prompt ]);
                temperature = proactive_temperature attempt;
                max_tokens = 1024; (* increased from 220 to allow tool calls *)
                tools = keeper_allowed_llm_tools meta;
@@ -649,11 +649,11 @@ let run_proactive_generation
               ~acc_tools_used ~last_resp =
             if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
               let content =
-                let c = String.trim (Llm_client.text_of_response last_resp) in
+                let c = String.trim (Llm_types.text_of_response last_resp) in
                 if c = "" && acc_tools_used <> [] then
                   Printf.sprintf "(tools executed: %s)"
                     (String.concat ", " acc_tools_used)
-                else Llm_client.text_of_response last_resp
+                else Llm_types.text_of_response last_resp
               in
               ( content,
                 acc_usage,
@@ -674,7 +674,7 @@ let run_proactive_generation
               let followup_prompt =
                 keeper_tool_followup_prompt
                   ~user_message:prompt
-                  ~draft_reply:(Llm_client.text_of_response last_resp)
+                  ~draft_reply:(Llm_types.text_of_response last_resp)
                   ~tool_outputs
                   ~already_executed:all_tools_so_far
               in
@@ -693,10 +693,10 @@ let run_proactive_generation
                      ({
                         Llm_client.model;
                         messages = [
-                          Llm_client.system_msg
+                          Agent_sdk.Types.system_msg
                             (keeper_tool_loop_system_prompt
                                ~character_context:turn_system_prompt);
-                          Llm_client.user_msg followup_prompt;
+                          Agent_sdk.Types.user_msg followup_prompt;
                         ];
                         temperature = 0.3;
                         max_tokens = 1024; (* increased from 220 to allow tool calls *)
@@ -708,7 +708,7 @@ let run_proactive_generation
               in
               match run_cascade followup_requests with
               | Error _ ->
-                  ( Llm_client.text_of_response last_resp,
+                  ( Llm_types.text_of_response last_resp,
                     acc_usage,
                     last_resp.Llm_client.model_used,
                     acc_latency,

@@ -45,18 +45,7 @@ let history_file () =
 (** Append a JSON record to history file (thread-safe via OS) *)
 let append_history (json : Yojson.Safe.t) =
   try
-    let oc =
-      open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 (history_file ())
-    in
-    Common.protect
-      ~module_name:"chain_telemetry"
-      ~finally_label:"close_out"
-      ~finally:(fun () -> close_out oc)
-      (fun () ->
-        output_string oc (Yojson.Safe.to_string json);
-        output_char oc '\n';
-        flush oc
-      )
+    Fs_compat.append_jsonl (history_file ()) json
   with exn ->
     (* Log telemetry write errors for debugging - non-critical *)
     Log.Telemetry.error "Write error to %s: %s" (history_file ())

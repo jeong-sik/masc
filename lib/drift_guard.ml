@@ -234,21 +234,10 @@ let drift_log_file (config : Room.config) =
   Filename.concat (Room.masc_dir config) "drift_guard.jsonl"
 
 let ensure_dir path =
-  let rec loop current =
-    if Sys.file_exists current then ()
-    else
-      let parent = Filename.dirname current in
-      if not (String.equal parent current) then loop parent;
-      try Unix.mkdir current 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  in
-  loop path
+  Fs_compat.mkdir_p path
 
 let append_json_line path json =
-  let oc = open_out_gen [ Open_creat; Open_wronly; Open_append; Open_text ] 0o644 path in
-  Common.protect ~module_name:"drift_guard" ~finally_label:"close_out"
-    ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc (Yojson.Safe.to_string json);
-      output_char oc '\n')
+  Fs_compat.append_jsonl path json
 
 let verify_and_log config ~from_agent ~to_agent ~task_id ~original ~received
     ?threshold () =
@@ -275,43 +264,37 @@ let get_drift_stats config ~days =
     let cutoff =
       Time_compat.now () -. (float_of_int (max 0 days) *. 24.0 *. 3600.0)
     in
-    let ic = open_in path in
-    Common.protect ~module_name:"drift_guard" ~finally_label:"close_in"
-      ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        let total = ref 0 in
-        let drift_count = ref 0 in
-        let similarity_sum = ref 0.0 in
-        (try
-           while true do
-             let line = input_line ic in
-             match Yojson.Safe.from_string line with
-             | `Assoc fields -> (
-                 let timestamp =
-                   match List.assoc_opt "timestamp" fields with
-                   | Some (`Float value) -> value
-                   | Some (`Int value) -> float_of_int value
-                   | _ -> 0.0
-                 in
-                 if timestamp >= cutoff then (
-                   match List.assoc_opt "result" fields with
-                   | Some (`Assoc result_fields) ->
-                       let similarity =
-                         match List.assoc_opt "similarity" result_fields with
-                         | Some (`Float value) -> value
-                         | Some (`Int value) -> float_of_int value
-                         | _ -> 0.0
-                       in
-                       incr total;
-                       similarity_sum := !similarity_sum +. similarity;
-                       (match List.assoc_opt "passed" result_fields with
-                       | Some (`Bool false) -> incr drift_count
-                       | _ -> ())
-                   | _ -> ()))
-             | _ -> ()
-           done
-         with
-        | End_of_file -> ());
-        let avg_similarity =
-          if !total = 0 then 0.0 else !similarity_sum /. float_of_int !total
-        in
-        (!total, !drift_count, avg_similarity))
+    let rows = Fs_compat.load_jsonl path in
+    let total = ref 0 in
+    let drift_count = ref 0 in
+    let similarity_sum = ref 0.0 in
+    List.iter (fun row ->
+      match row with
+      | `Assoc fields -> (
+          let timestamp =
+            match List.assoc_opt "timestamp" fields with
+            | Some (`Float value) -> value
+            | Some (`Int value) -> float_of_int value
+            | _ -> 0.0
+          in
+          if timestamp >= cutoff then (
+            match List.assoc_opt "result" fields with
+            | Some (`Assoc result_fields) ->
+                let similarity =
+                  match List.assoc_opt "similarity" result_fields with
+                  | Some (`Float value) -> value
+                  | Some (`Int value) -> float_of_int value
+                  | _ -> 0.0
+                in
+                incr total;
+                similarity_sum := !similarity_sum +. similarity;
+                (match List.assoc_opt "passed" result_fields with
+                | Some (`Bool false) -> incr drift_count
+                | _ -> ())
+            | _ -> ()))
+      | _ -> ()
+    ) rows;
+    let avg_similarity =
+      if !total = 0 then 0.0 else !similarity_sum /. float_of_int !total
+    in
+    (!total, !drift_count, avg_similarity)

@@ -48,9 +48,7 @@ let append_event ~base_dir ~(event : Trpg_engine_event.t) =
       | Ok path ->
           let line = Yojson.Safe.to_string (Trpg_engine_event.to_yojson event) ^ "\n" in
           try
-            let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
-            output_string oc line;
-            close_out oc;
+            Fs_compat.append_file path line;
             Ok ()
           with e -> Error (Printf.sprintf "append_event failed: %s" (Printexc.to_string e)))
 
@@ -58,15 +56,10 @@ let read_event_lines (path : string) : (string list, string) result =
   if not (Sys.file_exists path) then Ok []
   else
     try
-      let ic = open_in path in
-      let rec loop acc =
-        match input_line ic with
-        | line -> loop (line :: acc)
-        | exception End_of_file ->
-            close_in ic;
-            Ok (List.rev acc)
-      in
-      loop []
+      let content = Fs_compat.load_file path in
+      let lines = String.split_on_char '\n' content
+                  |> List.filter (fun line -> String.length line > 0) in
+      Ok lines
     with e -> Error (Printf.sprintf "read_event_lines failed: %s" (Printexc.to_string e))
 
 let parse_events_from_lines (lines : string list) : (Trpg_engine_event.t list, string) result =
@@ -121,9 +114,7 @@ let write_snapshot ~base_dir ~room_id ~last_seq ~ts ~state =
               ]
           in
           try
-            let oc = open_out path in
-            Yojson.Safe.pretty_to_channel oc json;
-            close_out oc;
+            Fs_compat.save_file path (Yojson.Safe.pretty_to_string json);
             Ok ()
           with e -> Error (Printf.sprintf "write_snapshot failed: %s" (Printexc.to_string e)))
 

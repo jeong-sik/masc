@@ -5,7 +5,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_set_room";
-    description = "Set the working directory for MASC operations. Use this to work with .masc/ in a different project.";
+    description = "Point MASC at a different project's .masc/ directory. \
+Use when you need to operate on a repo other than the current working directory. \
+Pair with masc_init if the target project has no .masc/ yet.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -20,7 +22,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_init";
-    description = "Initialize MASC room for multi-agent collaboration. Creates .masc/ folder in current project. Call this ONCE at the start of a multi-agent session. If .masc/ already exists, you'll auto-join. Workflow: init → join → (claim tasks / broadcast / portal) → leave";
+    description = "Create the .masc/ folder to bootstrap a new MASC room in this project. \
+Call once per project when no .masc/ exists yet; if it already exists you auto-join. \
+After init, call masc_join to register your presence, then masc_add_task or masc_claim_next.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -34,7 +38,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_join";
-    description = "Join the MASC room/cluster to collaborate with other AI agents. A 'room' is defined by shared .masc/ folder (FS mode) or same PostgreSQL + MASC_CLUSTER_NAME (distributed mode). Call at session start. Your presence will be visible to other agents (gemini, codex, etc). They can @mention you for help. Check masc_status after joining to see active agents and available tasks.";
+    description = "Join the MASC room to collaborate with other AI agents. \
+Call at session start before any task work. Your presence becomes visible to other agents \
+who can @mention you. After joining, call masc_status to see active agents and tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -54,11 +60,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_leave";
-    description = "Leave the MASC room and mark yourself as offline. \
-Call when: (1) session ends, (2) switching rooms, (3) work complete. \
-Side effects: releases all your locks, sets presence to offline. \
-Other agents will see you've left via SSE. \
-Example: masc_leave({agent_name: 'claude-xyz'})";
+    description = "Leave the MASC room and go offline, releasing all your locks. \
+Call when your session ends, you switch rooms, or your work is complete. \
+Pair with masc_join at session start; other agents see your departure via SSE.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -73,7 +77,9 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
 
   {
     name = "masc_status";
-    description = "Get current room/cluster status: active agents with capabilities, task queue, recent broadcasts, and cluster info. Shows cluster name (from MASC_CLUSTER_NAME or basename of ME_ROOT) and storage backend (fs or postgres).";
+    description = "Return the current room snapshot: active agents, task queue, recent broadcasts, and cluster info. \
+Call when you need situational awareness after masc_join or before claiming work. \
+Pair with masc_agents for per-agent detail or masc_tasks for the full backlog.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -82,7 +88,9 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
 
   {
     name = "masc_pause";
-    description = "Pause the MASC room. Stops orchestrator from spawning new agents. Broadcasts notification to all agents. Use when you need to stop automated work temporarily.";
+    description = "Pause the MASC room, blocking the orchestrator from spawning new agents. \
+Use when you need to halt automated work temporarily (e.g., review needed, incident). \
+Pair with masc_resume to lift the pause; check masc_pause_status for current state.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -97,7 +105,9 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
 
   {
     name = "masc_resume";
-    description = "Resume the MASC room after pause. Allows orchestrator to spawn agents again. Broadcasts notification to all agents.";
+    description = "Resume a paused MASC room, allowing the orchestrator to spawn agents again. \
+Call when the pause reason is resolved (review done, incident cleared). \
+After masc_pause; broadcasts resume notification to all agents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -106,7 +116,9 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
 
   {
     name = "masc_pause_status";
-    description = "Check if the room is currently paused and get pause details.";
+    description = "Check whether the room is currently paused and get pause reason and timestamp. \
+Use when an operation fails unexpectedly to see if the room is paused. \
+Pair with masc_pause to pause or masc_resume to lift.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -115,11 +127,9 @@ Example: masc_leave({agent_name: 'claude-xyz'})";
 
   {
     name = "masc_suspend";
-    description = "Immediately suspend an agent (admin tool). \
-Forces the agent to leave all rooms, adds to blacklist for 1 hour, \
-and triggers circuit breaker. Use for: runaway agents, security incidents, \
-resource protection. The suspended agent cannot rejoin until cooldown expires. \
-Requires admin privileges or room owner status.";
+    description = "Admin tool: immediately suspend a misbehaving agent, blacklisting it for a cooldown period. \
+Trigger: runaway agent, security incident, or resource abuse. \
+The target is forced offline and cannot rejoin until expiry. Check masc_circuit_status afterward.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -143,10 +153,9 @@ Requires admin privileges or room owner status.";
 
   {
     name = "masc_circuit_status";
-    description = "Check the circuit breaker status for an agent. \
-Shows if the agent is blocked due to repeated failures. \
-Circuit states: closed (normal), half_open (testing), open (blocked). \
-Open state includes remaining cooldown time.";
+    description = "Check the circuit breaker state for an agent: closed (normal), half_open (testing), or open (blocked). \
+Use when an agent cannot join or act and you suspect repeated failures triggered the breaker. \
+Pair with masc_suspend to force-open or masc_gardener_reset_circuit to clear.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -160,11 +169,9 @@ Open state includes remaining cooldown time.";
 
   {
     name = "masc_add_task";
-    description = "Add a new task to the backlog for agents to claim. \
-Tasks have status flow: todo → claimed → done/cancelled. \
-Priority 1=urgent, 5=low (default 3). \
-Returns task-XXX ID for tracking. \
-Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users cannot login with SSO'})";
+    description = "Add a single task to the backlog (status: todo, priority 1-5, default 3). \
+Use when you identify new work that any agent can pick up. Returns a task-XXX ID. \
+After adding, agents claim via masc_claim_next or masc_transition(action='claim').";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -188,10 +195,9 @@ Example: masc_add_task({title: 'Fix login bug', priority: 1, description: 'Users
 
   {
     name = "masc_batch_add_tasks";
-    description = "Add multiple tasks in one call (more efficient than repeated masc_add_task). \
-Use when: loading sprint backlog, importing from JIRA, creating related tasks. \
-Each task gets unique ID (task-XXX). Atomic: all succeed or all fail. \
-Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: 'Task B'}]})";
+    description = "Add multiple tasks atomically in one call, more efficient than repeated masc_add_task. \
+Use when loading a sprint backlog, importing from JIRA, or creating a batch of related tasks. \
+Each task gets a unique task-XXX ID. Pair with masc_tasks to verify they landed.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -225,7 +231,9 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
 
   {
     name = "masc_transition";
-    description = "Unified task state transition (single entrypoint). Actions: claim, start, done, cancel, release. Supports CAS via expected_version (backlog.version). Use notes for done, reason for cancel.";
+    description = "Move a task through its lifecycle: claim, start, done, cancel, or release. \
+Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
+After masc_add_task or masc_claim_next; pair with masc_deliver before action='done'.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -260,7 +268,9 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
 
   {
     name = "masc_task_history";
-    description = "Fetch recent task transition history from event logs. Useful for audits or debugging transitions.";
+    description = "Fetch the transition event log for a task (who claimed, started, completed it and when). \
+Use when debugging a stuck task or auditing task lifecycle after an incident. \
+Pair with masc_transition to drive state changes or masc_tasks to see current states.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -279,11 +289,9 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
   };
   {
     name = "masc_tasks";
-    description = "List tasks in backlog with their status and assignee. \
-Defaults to active tasks (todo/claimed/in_progress). \
-Use include_done/include_cancelled or status to filter. \
-Output includes task ID, title, priority, assignee, timestamps. \
-Tip: Look for status='todo' tasks to claim.";
+    description = "List tasks in the backlog with status, assignee, and priority. Defaults to active tasks only. \
+Use when you want to see available work (status='todo') or check what others are doing. \
+Pair with masc_claim_next to grab the top task or masc_transition to change a task state.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -306,7 +314,9 @@ Tip: Look for status='todo' tasks to claim.";
   };
   {
     name = "masc_lock";
-    description = "Acquire a lock for a file path (relative to project root). Use masc_unlock to release.";
+    description = "Acquire an exclusive lock on a file path to prevent concurrent edits by other agents. \
+Use when you are about to modify a shared file and other agents are active in the room. \
+Pair with masc_unlock when done. Locks auto-release on masc_leave.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -324,7 +334,9 @@ Tip: Look for status='todo' tasks to claim.";
   };
   {
     name = "masc_unlock";
-    description = "Release a lock for a file path (relative to project root).";
+    description = "Release an exclusive file lock you previously acquired. \
+Call when you finish editing a locked file. After masc_lock; \
+also released automatically on masc_leave or masc_cleanup_zombies.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -343,7 +355,9 @@ Tip: Look for status='todo' tasks to claim.";
 
   {
     name = "masc_archive_view";
-    description = "View archived tasks from tasks-archive.json. Shows tasks that were completed and cleaned up by gc.";
+    description = "View tasks that were completed and moved to the archive by masc_gc. \
+Use when you need to reference past work or audit completed deliverables. \
+Pair with masc_gc to control archival or masc_tasks for active work.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -357,7 +371,9 @@ Tip: Look for status='todo' tasks to claim.";
 
   {
     name = "masc_workflow_guide";
-    description = "Get personalized workflow guidance based on your current state. Returns what you should do next: which tool to call, why, and common mistakes to avoid. Call this when you are unsure what to do next or want to verify you are on the right track.";
+    description = "Get personalized next-step guidance based on your current agent state. \
+Call when you are unsure which MASC tool to use next or want to verify your workflow. \
+Pair with masc_check to assert specific prerequisites before acting.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -366,7 +382,9 @@ Tip: Look for status='todo' tasks to claim.";
 
   {
     name = "masc_check";
-    description = "Verify your current agent state against a list of assertions. Returns pass/fail for each assertion with fix hints. Use this to confirm prerequisites before starting work.";
+    description = "Assert preconditions on your agent state (joined, task claimed, worktree active, etc). \
+Call when you want to confirm prerequisites before starting work; returns pass/fail with fix hints. \
+Pair with masc_workflow_guide for next-step recommendations.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

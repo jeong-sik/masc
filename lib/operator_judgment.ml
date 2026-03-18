@@ -41,11 +41,8 @@ let option_to_yojson f = function
   | Some value -> f value
   | None -> `Null
 
-let rec ensure_dir path =
-  if not (Sys.file_exists path) then (
-    let parent = Filename.dirname path in
-    if parent <> path && not (Sys.file_exists parent) then ensure_dir parent;
-    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+let ensure_dir path =
+  Fs_compat.mkdir_p path
 
 let operator_dir config =
   Filename.concat (Room.masc_dir config) "operator"
@@ -164,38 +161,23 @@ let is_fresh ?(now = Unix.gettimeofday ()) value =
 
 let load_all config =
   let path = judgments_path config in
-  if not (Sys.file_exists path) then []
-  else
-    In_channel.with_open_text path In_channel.input_lines
-    |> List.filter_map (fun line ->
-           let trimmed = String.trim line in
-           if trimmed = "" then None
-           else
-             try
-               let json = Yojson.Safe.from_string trimmed in
-               match of_yojson json with
-               | Ok value -> Some value
-               | Error _ -> None
-             with
-             | Yojson.Json_error _ -> None
-             | exn ->
-                 Log.Governance.warn "operator judgment parse: %s" (Printexc.to_string exn);
-                 None)
+  Fs_compat.load_jsonl path
+  |> List.filter_map (fun json ->
+         try
+           match of_yojson json with
+           | Ok value -> Some value
+           | Error _ -> None
+         with exn ->
+           Log.Governance.warn "operator judgment parse: %s" (Printexc.to_string exn);
+           None)
 
 let append config values =
   ensure_dir (operator_dir config);
-  let oc =
-    open_out_gen [ Open_creat; Open_text; Open_append ] 0o644
-      (judgments_path config)
-  in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      List.iter
-        (fun value ->
-          output_string oc (Yojson.Safe.to_string (to_yojson value));
-          output_char oc '\n')
-        values)
+  let path = judgments_path config in
+  List.iter
+    (fun value ->
+      Fs_compat.append_jsonl path (to_yojson value))
+    values
 
 let latest_by_key config =
   let table = Hashtbl.create 16 in

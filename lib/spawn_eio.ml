@@ -16,6 +16,26 @@ type spawn_config = {
   mcp_tools: string list;
 }
 
+(** Structured termination reason for subagent lifecycle tracking *)
+type termination_reason =
+  | Task_completed
+  | Error_budget_exceeded of { errors: int; max_errors: int }
+  | Timeout of { elapsed_ms: int; limit_ms: int }
+  | User_interrupt
+  | Resource_limit of string
+  | Unknown_failure of { exit_code: int; message: string }
+
+(** Termination record capturing why and how an agent finished *)
+type termination_record = {
+  reason: termination_reason;
+  agent_name: string;
+  elapsed_ms: int;
+  tool_call_count: int;
+  input_tokens: int option;
+  output_tokens: int option;
+  cost_usd: float option;
+}
+
 (** Spawn result with token tracking *)
 type spawn_result = {
   success: bool;
@@ -30,7 +50,34 @@ type spawn_result = {
   cache_read_tokens: int option;
   cost_usd: float option;
   raw_trace_run: Oas.Raw_trace.run_ref option;
+  termination: termination_record option;
 }
+
+let termination_reason_to_string = function
+  | Task_completed -> "task_completed"
+  | Error_budget_exceeded { errors; max_errors } ->
+      Printf.sprintf "error_budget_exceeded (errors=%d, max=%d)" errors max_errors
+  | Timeout { elapsed_ms; limit_ms } ->
+      Printf.sprintf "timeout (elapsed=%dms, limit=%dms)" elapsed_ms limit_ms
+  | User_interrupt -> "user_interrupt"
+  | Resource_limit msg -> Printf.sprintf "resource_limit: %s" msg
+  | Unknown_failure { exit_code; message } ->
+      Printf.sprintf "unknown_failure (exit=%d): %s" exit_code message
+
+(** Build a termination record from a completed spawn result *)
+let make_termination ~agent_name ~exit_code ~elapsed_ms ~tool_call_count
+    ~input_tokens ~output_tokens ~cost_usd ~output ~timeout_seconds
+    : termination_record =
+  let limit_ms = timeout_seconds * 1000 in
+  let reason = match exit_code with
+    | 0 -> Task_completed
+    | 124 -> Timeout { elapsed_ms; limit_ms }
+    | -1 -> User_interrupt
+    | 2 -> Resource_limit (Provider_adapter.bare_ollama_migration_message ())
+    | code -> Unknown_failure { exit_code = code; message = output }
+  in
+  { reason; agent_name; elapsed_ms; tool_call_count;
+    input_tokens; output_tokens; cost_usd }
 
 (** MASC MCP tools available for spawned agents *)
 let masc_mcp_tools = Agent_tool_surfaces.spawned_agent_prefixed_tools
@@ -39,6 +86,25 @@ let llama_mcp_tools = Agent_tool_surfaces.llama_worker_prefixed_tools
 
 let coding_worker_mcp_tools =
   [ "mcp__masc__masc_heartbeat"; "mcp__masc__masc_memento_mori" ]
+
+(** State isolation: keys excluded from parent context when spawning subagents.
+    Spawned agents receive only their explicit task prompt, institution memory,
+    and MASC lifecycle suffix. Parent's working context is excluded.
+    This follows Deep Agents' _EXCLUDED_STATE_KEYS pattern. *)
+let excluded_state_keys = [
+  "messages";
+  "full_history";
+  "todos";
+  "skills_metadata";
+  "memory_contents";
+]
+
+let state_isolation_notice = {|
+[State Isolation Notice]
+You are running in an isolated context. You do not have access to the parent agent's
+conversation history or working state. Focus on your assigned task and return results
+when complete.
+|}
 
 let masc_lifecycle_suffix = {|
 ---
@@ -298,11 +364,13 @@ let add_default_model_arg agent_name argv =
 let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
   let model_specs = Lodge_cascade.get_cascade ~cascade_name:"spawn_glm" () in
   if model_specs = [] then
+    let elapsed = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
+    let output = "GLM cascade: no models available (check ZAI_API_KEY and config/llm_cascade.json)" in
     {
       success = false;
-      output = "GLM cascade: no models available (check ZAI_API_KEY and config/llm_cascade.json)";
+      output;
       exit_code = 1;
-      elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+      elapsed_ms = elapsed;
       tool_call_count = 0;
       tool_names = [];
       input_tokens = None;
@@ -311,6 +379,9 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
       cache_read_tokens = None;
       cost_usd = None;
       raw_trace_run = None;
+      termination = Some { reason = Unknown_failure { exit_code = 1; message = output };
+        agent_name = "glm"; elapsed_ms = elapsed; tool_call_count = 0;
+        input_tokens = None; output_tokens = None; cost_usd = None };
     }
   else
     match
@@ -318,15 +389,18 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
         ~timeout_sec:timeout ~model_specs ~max_tokens:4096 ~prompt ()
     with
     | Ok resp ->
+        let elapsed = resp.Llm_client.latency_ms in
+        let inp = Some resp.Llm_client.usage.Llm_client.input_tokens in
+        let out = Some resp.Llm_client.usage.Llm_client.output_tokens in
         {
           success = true;
           output = Llm_client.text_of_response resp;
           exit_code = 0;
-          elapsed_ms = resp.Llm_client.latency_ms;
+          elapsed_ms = elapsed;
           tool_call_count = 0;
           tool_names = [];
-          input_tokens = Some resp.Llm_client.usage.Llm_client.input_tokens;
-          output_tokens = Some resp.Llm_client.usage.Llm_client.output_tokens;
+          input_tokens = inp;
+          output_tokens = out;
           cache_creation_tokens =
             (let v = resp.Llm_client.usage.Llm_client.cache_creation_input_tokens in
              if v > 0 then Some v else None);
@@ -335,13 +409,18 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
              if v > 0 then Some v else None);
           cost_usd = None;
           raw_trace_run = None;
+          termination = Some { reason = Task_completed; agent_name = "glm";
+            elapsed_ms = elapsed; tool_call_count = 0;
+            input_tokens = inp; output_tokens = out; cost_usd = None };
         }
     | Error e ->
+        let elapsed = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
+        let output = Printf.sprintf "GLM cascade failed: %s" e in
         {
           success = false;
-          output = Printf.sprintf "GLM cascade failed: %s" e;
+          output;
           exit_code = 1;
-          elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+          elapsed_ms = elapsed;
           tool_call_count = 0;
           tool_names = [];
           input_tokens = None;
@@ -350,6 +429,9 @@ let spawn_glm_via_client ~prompt ~timeout ~start_time : spawn_result =
           cache_read_tokens = None;
           cost_usd = None;
           raw_trace_run = None;
+          termination = Some { reason = Unknown_failure { exit_code = 1; message = output };
+            agent_name = "glm"; elapsed_ms = elapsed; tool_call_count = 0;
+            input_tokens = None; output_tokens = None; cost_usd = None };
         }
 
 
@@ -367,11 +449,13 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
   let start_time = Time_compat.now () in
   let normalized_agent = String.lowercase_ascii (String.trim agent_name) in
   if Provider_adapter.is_bare_ollama_label normalized_agent then
+    let elapsed = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
+    let output = Provider_adapter.bare_ollama_migration_message () in
     {
       success = false;
-      output = Provider_adapter.bare_ollama_migration_message ();
+      output;
       exit_code = 2;
-      elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+      elapsed_ms = elapsed;
       tool_call_count = 0;
       tool_names = [];
       input_tokens = None;
@@ -380,6 +464,9 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
       cache_read_tokens = None;
       cost_usd = None;
       raw_trace_run = None;
+      termination = Some (make_termination ~agent_name ~exit_code:2 ~elapsed_ms:elapsed
+        ~tool_call_count:0 ~input_tokens:None ~output_tokens:None ~cost_usd:None
+        ~output ~timeout_seconds:(Option.value timeout_seconds ~default:Env_config.Spawn.timeout_seconds));
     }
   else
 
@@ -405,9 +492,7 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
       let inst_file = Filename.concat (Filename.concat base_path ".masc") "institution.json" in
       if Sys.file_exists inst_file then
         try
-          let ic = open_in inst_file in
-          let content = Common.protect ~module_name:"spawn_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic)
-            (fun () -> really_input_string ic (in_channel_length ic)) in
+          let content = Fs_compat.load_file inst_file in
           let json = Yojson.Safe.from_string content in
           let inst = Institution_eio.institution_of_json json in
           Institution_eio.format_for_injection inst
@@ -430,8 +515,17 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
         "\n" ^ Agent_swarm_prompts.masc_instructions_for_role ~role:"autonomous" ()
     | _ -> ""
   in
+  (* State isolation: spawned agents receive only:
+     - Their explicit task prompt
+     - Institution memory (cultural inheritance)
+     - MASC lifecycle suffix
+     - State isolation notice
+     Parent's working context, full history, todos, and skills are excluded.
+     This follows Deep Agents' _EXCLUDED_STATE_KEYS pattern.
+     See excluded_state_keys for the full exclusion list. *)
   let augmented_prompt =
     prompt ^ institution_memory ^ masc_lifecycle_suffix ^ role_instructions
+    ^ state_isolation_notice
   in
 
   (* GLM agents use Llm_client cascade (no chdir needed — direct HTTP).
@@ -467,12 +561,13 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
     in
     (match runtime_model with
      | None ->
+         let elapsed = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
+         let output = "Spawn error (local worker): explicit runtime_model is required for local workers" in
          {
            success = false;
-           output =
-             "Spawn error (local worker): explicit runtime_model is required for local workers";
+           output;
            exit_code = 1;
-           elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+           elapsed_ms = elapsed;
            tool_call_count = 0;
            tool_names = [];
            input_tokens = None;
@@ -481,14 +576,18 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
            cache_read_tokens = None;
            cost_usd = None;
            raw_trace_run = None;
+           termination = Some { reason = Unknown_failure { exit_code = 1; message = output };
+             agent_name; elapsed_ms = elapsed; tool_call_count = 0;
+             input_tokens = None; output_tokens = None; cost_usd = None };
          }
      | Some model when model.Llm_client.provider <> Llm_client.Llama ->
+         let elapsed = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
+         let output = "Spawn error (local worker): runtime_model provider must be llama" in
          {
            success = false;
-           output =
-             "Spawn error (local worker): runtime_model provider must be llama";
+           output;
            exit_code = 1;
-           elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+           elapsed_ms = elapsed;
            tool_call_count = 0;
            tool_names = [];
            input_tokens = None;
@@ -497,6 +596,9 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
            cache_read_tokens = None;
            cost_usd = None;
            raw_trace_run = None;
+           termination = Some { reason = Unknown_failure { exit_code = 1; message = output };
+             agent_name; elapsed_ms = elapsed; tool_call_count = 0;
+             input_tokens = None; output_tokens = None; cost_usd = None };
          }
      | Some model ->
          match
@@ -522,11 +624,12 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
              ~timeout_sec:timeout ()
          with
          | Ok result ->
+             let elapsed = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
              {
                success = true;
                output = result.output;
                exit_code = 0;
-               elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+               elapsed_ms = elapsed;
                tool_call_count = result.tool_call_count;
                tool_names = result.tool_names;
                input_tokens = result.input_tokens;
@@ -535,13 +638,19 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
                cache_read_tokens = None;
                cost_usd = result.cost_usd;
                raw_trace_run = result.raw_trace_run;
+               termination = Some { reason = Task_completed; agent_name;
+                 elapsed_ms = elapsed; tool_call_count = result.tool_call_count;
+                 input_tokens = result.input_tokens; output_tokens = result.output_tokens;
+                 cost_usd = result.cost_usd };
              }
          | Error e ->
+             let elapsed = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
+             let output = Printf.sprintf "Spawn error (local worker): %s" e in
              {
                success = false;
-               output = Printf.sprintf "Spawn error (local worker): %s" e;
+               output;
                exit_code = 1;
-               elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+               elapsed_ms = elapsed;
                tool_call_count = 0;
                tool_names = [];
                input_tokens = None;
@@ -550,6 +659,9 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
                cache_read_tokens = None;
                cost_usd = None;
                raw_trace_run = None;
+               termination = Some { reason = Unknown_failure { exit_code = 1; message = output };
+                 agent_name; elapsed_ms = elapsed; tool_call_count = 0;
+                 input_tokens = None; output_tokens = None; cost_usd = None };
              })
   else
     (* Build command arguments outside the chdir critical section *)
@@ -607,11 +719,12 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
           | _ -> (raw_output, None, None, None, None, None)
         in
 
+        let elapsed = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
         {
           success = (exit_code = 0);
           output;
           exit_code;
-          elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+          elapsed_ms = elapsed;
           tool_call_count = 0;
           tool_names = [];
           input_tokens;
@@ -620,13 +733,18 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
           cache_read_tokens = cache_read;
           cost_usd;
           raw_trace_run = None;
+          termination = Some (make_termination ~agent_name ~exit_code ~elapsed_ms:elapsed
+            ~tool_call_count:0 ~input_tokens ~output_tokens ~cost_usd ~output
+            ~timeout_seconds:timeout);
         }
       with e ->
+        let elapsed = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
+        let output = Printf.sprintf "Spawn error (Eio): %s" (Printexc.to_string e) in
         {
           success = false;
-          output = Printf.sprintf "Spawn error (Eio): %s" (Printexc.to_string e);
+          output;
           exit_code = -99;
-          elapsed_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0);
+          elapsed_ms = elapsed;
           tool_call_count = 0;
           tool_names = [];
           input_tokens = None;
@@ -635,24 +753,32 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
           cache_read_tokens = None;
           cost_usd = None;
           raw_trace_run = None;
+          termination = Some { reason = Unknown_failure { exit_code = -99; message = output };
+            agent_name; elapsed_ms = elapsed; tool_call_count = 0;
+            input_tokens = None; output_tokens = None; cost_usd = None };
         }
     in
     result
 
-let result_to_human_string (result : spawn_result) = 
-  let token_info = 
-    match result.input_tokens, result.output_tokens, result.cost_usd with 
-    | Some inp, Some out, Some cost -> 
-      let cache = match result.cache_creation_tokens, result.cache_read_tokens with 
+let result_to_human_string (result : spawn_result) =
+  let token_info =
+    match result.input_tokens, result.output_tokens, result.cost_usd with
+    | Some inp, Some out, Some cost ->
+      let cache = match result.cache_creation_tokens, result.cache_read_tokens with
         | Some cc, Some cr when cc > 0 || cr > 0 -> Printf.sprintf " (cache: +%d, %d)" cc cr
         | _ -> ""
-      in 
+      in
       Printf.sprintf "\n📊 Tokens: %d in / %d out%s | Cost: $%.4f" inp out cache cost
     | _ -> ""
-  in 
-  if result.success then 
-    Printf.sprintf "✅ Agent completed in %dms%s\n\n%s"
-      result.elapsed_ms token_info result.output
-  else 
-    Printf.sprintf "❌ Agent failed (exit %d) in %dms%s\n\n%s"
-      result.exit_code result.elapsed_ms token_info result.output
+  in
+  let termination_info =
+    match result.termination with
+    | Some t -> Printf.sprintf "\n🔚 Termination: %s" (termination_reason_to_string t.reason)
+    | None -> ""
+  in
+  if result.success then
+    Printf.sprintf "✅ Agent completed in %dms%s%s\n\n%s"
+      result.elapsed_ms token_info termination_info result.output
+  else
+    Printf.sprintf "❌ Agent failed (exit %d) in %dms%s%s\n\n%s"
+      result.exit_code result.elapsed_ms token_info termination_info result.output

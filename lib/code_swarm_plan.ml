@@ -62,11 +62,7 @@ type merge_result = {
 
 let plans_dir base_path =
   let d = Filename.concat base_path ".masc/code_swarm_plans" in
-  if not (Sys.file_exists d) then (
-    try Unix.mkdir (Filename.concat base_path ".masc") 0o755
-    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  (try Unix.mkdir d 0o755
-   with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fs_compat.mkdir_p d;
   d
 
 (** Validate plan_id: alphanumeric + dash only, no path separators. *)
@@ -113,9 +109,7 @@ let save_plan (plan : swarm_plan) =
       ]
   in
   let path = plan_file plan.base_path plan.plan_id in
-  let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    output_string oc (Yojson.Safe.pretty_to_string json))
+  Fs_compat.save_file path (Yojson.Safe.pretty_to_string json)
 
 let load_plan base_path plan_id : (swarm_plan, string) result =
   let path = plan_file base_path plan_id in

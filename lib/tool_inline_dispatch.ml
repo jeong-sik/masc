@@ -314,10 +314,7 @@ let dispatch (ctx : context) ~(name : string) : result option =
         let term_session_id = Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID") in
         let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
         (try
-          let oc = open_out agent_file in
-          Common.protect ~module_name:"tool_inline_dispatch" ~finally_label:"finalizer"
-            ~finally:(fun () -> close_out_noerr oc)
-            (fun () -> output_string oc nickname)
+          Fs_compat.save_file agent_file nickname
         with e ->
           Log.Misc.error "Failed to write agent file %s: %s" agent_file (Printexc.to_string e))
       end;
@@ -827,19 +824,7 @@ Call masc_listen again to continue listening.
         List.iter (fun file ->
           let file_path = Filename.concat pending_dir file in
           try
-            let ic = open_in file_path in
-            let content =
-              Common.protect ~module_name:"tool_inline_dispatch" ~finally_label:"finalizer"
-                ~finally:(fun () -> close_in_noerr ic)
-                (fun () ->
-                  let buf = Buffer.create 4096 in
-                  (try
-                    while true do
-                      Buffer.add_channel buf ic 1024
-                    done
-                  with End_of_file -> ());
-                  Buffer.contents buf)
-            in
+            let content = Fs_compat.load_file file_path in
             let json = Yojson.Safe.from_string content in
             let module U = Yojson.Safe.Util in
             let ep_id = match Json_util.get_string json "ep_id" with Some v -> v | None -> raise Not_found in
@@ -871,7 +856,7 @@ Call masc_listen again to continue listening.
             );
 
             let processed_dir = Filename.concat base_path ".masc/processed_episodes" in
-            (try Unix.mkdir processed_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+            Fs_compat.mkdir_p processed_dir;
             let new_path = Filename.concat processed_dir file in
             Sys.rename file_path new_path;
             Printf.printf "[EPISODE/FLUSH] Processed episode %s -> %s\n%!" ep_id new_path;
@@ -916,15 +901,7 @@ Call masc_listen again to continue listening.
           |> List.filter_map (fun file ->
               try
                 let path = Filename.concat processed_dir file in
-                let ic = open_in path in
-                let content =
-                  Common.protect ~module_name:"tool_inline_dispatch" ~finally_label:"finalizer"
-                    ~finally:(fun () -> close_in_noerr ic)
-                    (fun () ->
-                      let buf = Buffer.create 4096 in
-                      (try while true do Buffer.add_channel buf ic 1024 done with End_of_file -> ());
-                      Buffer.contents buf)
-                in
+                let content = Fs_compat.load_file path in
                 let json = Yojson.Safe.from_string content in
                 let ep_agent = U.(json |> member "agent_name" |> to_string) in
                 let ep_gen = U.(json |> member "generation" |> to_int) in
@@ -979,5 +956,3 @@ Call masc_listen again to continue listening.
         ]))
 
   | _ -> Tool_inline_dispatch_extra.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name
-
-let schemas = Tool_schemas_inline.schemas

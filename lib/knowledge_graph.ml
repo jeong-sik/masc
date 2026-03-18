@@ -111,13 +111,7 @@ let knowledge_dir () =
   Filename.concat me_root ".masc/knowledge"
 
 let ensure_dir path =
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
+  Fs_compat.mkdir_p path
 
 let entry_to_json (k : knowledge_entry) : Yojson.Safe.t =
   `Assoc [
@@ -137,10 +131,7 @@ let cache_locally (k : knowledge_entry) =
   let dir = knowledge_dir () in
   ensure_dir dir;
   let path = Filename.concat dir (k.agent_name ^ ".jsonl") in
-  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-  output_string oc (Yojson.Safe.to_string (entry_to_json k));
-  output_char oc '\n';
-  close_out oc
+  Fs_compat.append_jsonl path (entry_to_json k)
 
 (** Create a knowledge entry with auto-generated ID. *)
 let create ~agent_name ~content ~confidence ~source ~category ?supersedes () =

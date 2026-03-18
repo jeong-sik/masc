@@ -3,7 +3,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_a2a_discover";
-    description = "Discover available A2A agents. Returns agent cards with capabilities, skills, and protocol bindings. Use for local room discovery or remote endpoint fetching.";
+    description = "Discover available A2A (Agent-to-Agent) agents and return their cards with capabilities, skills, and protocol bindings. \
+Use when you need to find collaborators in the local room or at a remote endpoint before delegating work. \
+Pair with masc_a2a_query_skill for detail on a specific skill, then masc_a2a_delegate to dispatch tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -20,7 +22,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_a2a_query_skill";
-    description = "Query detailed information about an agent's skill, including input/output modes and examples. Use to understand what a skill can do before delegating.";
+    description = "Query detailed information about an agent's specific skill, including input/output modes and usage examples. \
+Use when you found an agent via masc_a2a_discover and need to understand a skill's interface before delegating. \
+After reviewing the skill details, call masc_a2a_delegate to send the actual task.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -38,7 +42,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_a2a_delegate";
-    description = "Delegate a task to another A2A agent. Opens portal, sends task, returns task ID. Use sync for waiting, async for fire-and-forget, stream for real-time updates.";
+    description = "Delegate a task to another A2A agent by opening a portal and sending a message. Returns a task ID for tracking. \
+Use when you have identified a target agent (via masc_a2a_discover or masc_route) and want to dispatch work. \
+Modes: sync (wait for result), async (fire-and-forget), stream (real-time updates). Pair with masc_a2a_subscribe for async monitoring.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -79,7 +85,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_a2a_subscribe";
-    description = "Subscribe to events from agents (task updates, broadcasts, completions). Connect to SSE endpoint to receive events.";
+    description = "Subscribe to SSE events from agents: task_update, broadcast, completion, or error. Returns a subscription_id for polling. \
+Use when monitoring delegated tasks or observing room activity in the background. \
+After subscribing, call masc_poll_events to read buffered events. Call masc_a2a_unsubscribe when done to free resources.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -101,11 +109,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_a2a_unsubscribe";
-    description = "Stop receiving events from a background subscription. \
-Call when: (1) done monitoring, (2) switching to different events, (3) cleanup before leave. \
-Frees server resources - always unsubscribe when done. \
-Get subscription_id from masc_a2a_subscribe response. \
-Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
+    description = "Stop receiving events from a background A2A subscription and free server resources. \
+Call when done monitoring delegated tasks, switching event types, or cleaning up before masc_leave. \
+Use the subscription_id returned by masc_a2a_subscribe. Always unsubscribe when monitoring is complete.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -119,7 +125,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_poll_events";
-    description = "Poll buffered events for a subscription. Use this for background subscription workflow: subscribe → do work → poll_events periodically. Returns and clears buffered events.";
+    description = "Poll and retrieve buffered events for a background subscription. Returns accumulated events and clears the buffer by default. \
+Use when you have an active masc_a2a_subscribe subscription and want to check for updates between work steps. \
+Workflow: masc_a2a_subscribe -> do work -> masc_poll_events -> repeat -> masc_a2a_unsubscribe.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -138,7 +146,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_tempo";
-    description = "Get or set cluster tempo (pace control). Use to slow down for careful work or speed up for simple tasks.";
+    description = "Get or set the cluster-wide tempo (pace control) for coordinated work speed. \
+Use when you need to slow down for careful review work or speed up for batch processing. \
+Pair with masc_tempo_get/masc_tempo_set/masc_tempo_adjust for granular orchestrator-level tempo control.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -162,7 +172,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_mcp_session";
-    description = "Manage MCP sessions (Mcp-Session-Id; legacy X-MCP-Session-ID also accepted). Sessions track client context across requests.";
+    description = "Manage MCP sessions that track client context across requests. Actions: get, create, list, cleanup, remove. \
+Use when debugging session state, cleaning up stale sessions, or creating a new session for a client. \
+Accepts both Mcp-Session-Id and legacy X-MCP-Session-ID headers. Pair with masc_init for room-level setup.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -185,7 +197,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_cancellation";
-    description = "Manage cancellation tokens for long-running operations. Check tokens to abort work gracefully.";
+    description = "Create, cancel, check, list, or cleanup cancellation tokens for long-running operations. \
+Use when you need cooperative cancellation: create a token before starting work, check it periodically, cancel it to signal abort. \
+Pair with masc_progress to track and cancel long tasks. Enables graceful shutdown of spawned or delegated work.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -208,7 +222,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_subscription";
-    description = "Subscribe to resource changes (tasks, agents, messages, votes). Receive notifications via polling or SSE.";
+    description = "Subscribe to resource change notifications for tasks, agents, messages, or votes. Receive updates via polling or SSE. \
+Use when you want to react to room state changes without repeatedly calling status tools. \
+Actions: subscribe, unsubscribe, list, poll. Pair with masc_a2a_subscribe for agent-level events.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -240,7 +256,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_progress";
-    description = "Send progress notifications for long-running tasks. Broadcasts via SSE using MCP notifications/progress format.";
+    description = "Send progress notifications for long-running tasks, broadcast via SSE in MCP notifications/progress format. \
+Use when executing a multi-step task and other agents or the dashboard need to see real-time progress (0.0-1.0). \
+Actions: start, update, step, complete, stop. Pair with masc_cancellation to allow aborting tracked tasks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -271,7 +289,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_handover_create";
-    description = "Create a handover record (agent's 'last will') before context limit or session end. Contains goal, progress, decisions, warnings for the next agent. Inspired by Stanford Generative Agents memory stream + Erlang 'let it crash' supervisor pattern.";
+    description = "Create a structured handover record (goal, progress, decisions, warnings, pending steps) before context exhaustion or session end. \
+Use when approaching context limits, timing out, or completing a session and another agent will continue. \
+Pair with masc_handover_list to find pending handovers and masc_handover_get to read one before claiming work.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -345,7 +365,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_handover_list";
-    description = "List all handover records, optionally filtering by pending (unclaimed) ones. Use to see what work is waiting to be picked up.";
+    description = "List all handover records with optional filtering for pending (unclaimed) ones. \
+Use when joining a room to see what work previous agents left behind, or to monitor incomplete handoffs. \
+After finding a pending handover, call masc_handover_get for full details, then masc_claim_next to take over.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -359,7 +381,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_handover_get";
-    description = "Get full details of a handover record as formatted markdown. Use to understand context before claiming.";
+    description = "Get the full details of a handover record as formatted markdown, including goal, progress, decisions, and warnings. \
+Use when you found a handover via masc_handover_list and need to understand the full context before claiming the work. \
+After reviewing, use masc_transition to claim the associated task and continue where the previous agent left off.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -373,7 +397,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_cache_set";
-    description = "Set a cache entry for sharing context between agents. Useful for caching file contents, API responses, or expensive computations.";
+    description = "Set a key-value cache entry shared across all agents in the room. Supports optional TTL and tags for filtering. \
+Use when you want to share file contents, API responses, or expensive computation results with other agents. \
+Pair with masc_cache_get to retrieve entries. Use masc_cache_list to browse, masc_cache_delete to invalidate.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -400,7 +426,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_cache_get";
-    description = "Get a cached entry by key. Returns null if not found or expired.";
+    description = "Retrieve a cached entry by key. Returns null if the key does not exist or the TTL has expired. \
+Use when you need data that another agent may have cached (file contents, API responses, computation results). \
+Pair with masc_cache_set to write entries and masc_cache_list to discover available keys.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -414,9 +442,9 @@ Example: masc_a2a_unsubscribe({subscription_id: 'sub-abc123'})";
   };
   {
     name = "masc_cache_delete";
-    description = "Delete a specific cache entry. \
-Use when: invalidating stale data, clearing specific key, freeing memory. \
-No error if key doesn't exist. Use masc_cache_list to find keys.";
+    description = "Delete a specific cache entry by key. No error if the key does not exist. \
+Use when invalidating stale data, clearing a specific key after use, or freeing memory. \
+Pair with masc_cache_list to find keys before deleting. For bulk cleanup, use masc_cache_clear instead.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -430,10 +458,9 @@ No error if key doesn't exist. Use masc_cache_list to find keys.";
   };
   {
     name = "masc_cache_list";
-    description = "List cache entries with keys, TTL remaining, and tags. \
-Filter by tag to find related entries. Shows creation time and expiry. \
-Use before: cache cleanup, debugging stale data, finding specific entries. \
-Example: masc_cache_list({tag: 'api'}) → [{key: 'user_123', ttl: 3600, tags: ['api']}]";
+    description = "List all cache entries showing keys, TTL remaining, tags, and creation time. Supports filtering by tag. \
+Use when browsing available cached data, debugging stale entries, or planning cleanup. \
+Pair with masc_cache_get to read a specific entry, masc_cache_delete to remove one, or masc_cache_clear for full reset.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -446,9 +473,9 @@ Example: masc_cache_list({tag: 'api'}) → [{key: 'user_123', ttl: 3600, tags: [
   };
   {
     name = "masc_cache_clear";
-    description = "Delete ALL cache entries. DESTRUCTIVE - cannot be undone. \
-Use only when: resetting room state, debugging cache issues, fresh start. \
-Consider masc_cache_delete for targeted cleanup instead.";
+    description = "Delete ALL cache entries at once. DESTRUCTIVE and cannot be undone. \
+Use only when resetting room state, debugging persistent cache corruption, or starting fresh. \
+Prefer masc_cache_delete for targeted removal. Check masc_cache_stats before clearing to understand impact.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -456,9 +483,9 @@ Consider masc_cache_delete for targeted cleanup instead.";
   };
   {
     name = "masc_cache_stats";
-    description = "Get cache usage statistics. \
-Shows: total entries, memory size, oldest/newest entry age, hit/miss ratio. \
-Use to: monitor cache health, decide when to clear, debug performance.";
+    description = "Get cache usage statistics: total entries, memory size, oldest/newest entry age, and hit/miss ratio. \
+Use when monitoring cache health, deciding whether to run masc_cache_clear, or debugging cache performance. \
+Pair with masc_cache_list for entry-level detail or masc_cache_clear if stats indicate bloat.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -466,7 +493,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_tempo_get";
-    description = "Get current orchestrator tempo (check interval). Shows adaptive tempo status.";
+    description = "Get the current orchestrator tempo (check interval in seconds) and adaptive tempo status. \
+Use when you want to see how frequently the orchestrator is polling without changing it. \
+Pair with masc_tempo_set to manually adjust or masc_tempo_adjust for automatic urgency-based tuning.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -474,7 +503,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_tempo_set";
-    description = "Set orchestrator tempo manually. Interval is clamped between 60s (fast) and 600s (slow).";
+    description = "Manually set the orchestrator check interval in seconds (clamped to 60s-600s range). \
+Use when you need a specific polling frequency for the current workload, overriding adaptive tempo. \
+Pair with masc_tempo_get to check the current interval or masc_tempo_adjust for automatic tuning.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -492,7 +523,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_tempo_adjust";
-    description = "Automatically adjust tempo based on pending task urgency. Fast for urgent tasks, slow when idle.";
+    description = "Automatically adjust the orchestrator tempo based on pending task urgency. Speeds up for urgent tasks, slows down when idle. \
+Call when workload has changed and you want the orchestrator to adapt without manually setting an interval. \
+Pair with masc_tempo_get to verify the result, or masc_tempo_set to override with a specific value.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -500,7 +533,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_dashboard";
-    description = "Show the MASC dashboard. By default it summarizes all rooms, and you can filter to the current room with scope='current'. Use with 'watch -n 1' for real-time updates.";
+    description = "Show the MASC dashboard with agents, tasks, and room status. Defaults to all rooms; use scope='current' for the active room only. \
+Use when you need a quick overview of the cluster state, agent activity, or task progress. \
+Pair with masc_observe_swarm for deeper operational metrics. Supports compact mode for single-line summary. Core_Ops category.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -518,7 +553,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_collaboration_graph";
-    description = "View the Hebbian collaboration graph showing learned agent relationships. Stronger connections indicate successful collaboration patterns.";
+    description = "View the Hebbian collaboration graph that tracks learned agent-to-agent relationships weighted by collaboration success. \
+Use when deciding which agent to delegate to, or reviewing collaboration patterns for optimization. \
+Pair with masc_consolidate_learning to decay old connections and prune weak links. Discovery category.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -533,7 +570,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_consolidate_learning";
-    description = "Trigger Hebbian consolidation - apply decay to old collaboration patterns and prune weak connections. Mimics memory consolidation during sleep.";
+    description = "Apply decay to old Hebbian collaboration patterns and prune weak connections, similar to memory consolidation during sleep. \
+Call when the collaboration graph has accumulated stale connections (default: decay after 7 days). \
+Pair with masc_collaboration_graph to view the graph before and after consolidation. Discovery category.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -547,7 +586,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_verify_handoff";
-    description = "Verify handoff context integrity. Compares original and received context to detect semantic drift, information loss, or distortion. Threshold: 0.85 similarity.";
+    description = "Verify handoff context integrity by comparing original and received context for semantic drift, information loss, or distortion. \
+Use when a successor agent receives context from a predecessor and wants to confirm nothing critical was lost (threshold: 0.85). \
+Call after masc_relay_now or masc_mitosis_handoff completes. Pair with masc_handover_get for the original context.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -570,7 +611,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_get_metrics";
-    description = "Get raw performance metrics for an agent. Returns task completion data, timing, error rates, and collaboration history.";
+    description = "Get raw performance metrics for a specific agent: task completion data, timing, error rates, and collaboration history over N days. \
+Use when evaluating agent reliability before delegation or reviewing an agent's track record. \
+Pair with masc_audit_stats for security-focused metrics, or masc_metrics_compare for cross-generation analysis. Discovery category.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -589,7 +632,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_audit_query";
-    description = "Query audit logs to inspect agent actions and security events. Returns recent security events: auth success/failure, anomalies, violations. Use for trust verification and debugging collaboration issues.";
+    description = "Query audit logs for security events: auth success/failure, anomaly detection, violations, and tool calls. Filterable by agent and event type. \
+Use when investigating suspicious agent behavior, verifying trust, or debugging collaboration issues. \
+Pair with masc_audit_stats for aggregated trust metrics, or masc_governance_report for periodic governance reviews.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -625,7 +670,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_audit_stats";
-    description = "Get security statistics and trust metrics for agents. Shows auth success rate, anomaly count, task completion rate per agent. Use to evaluate agent reliability before delegation.";
+    description = "Get aggregated security statistics and trust metrics per agent: auth success rate, anomaly count, and task completion rate. \
+Use when evaluating an agent's reliability before delegating sensitive work, or during periodic trust reviews. \
+Pair with masc_audit_query for raw event detail, or masc_get_metrics for performance-focused (non-security) metrics.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -638,7 +685,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_governance_report";
-    description = "Generate a governance summary report from the audit trail. Aggregates per-agent action counts, cost estimates, token usage, and failure rates over a time period. Use for periodic governance review and cost tracking.";
+    description = "Generate a governance summary report aggregating per-agent action counts, cost estimates, token usage, and failure rates over a time period. \
+Use when conducting periodic governance reviews, tracking costs, or preparing operational reports. \
+Pair with masc_audit_query for drill-down into specific events, or masc_governance_set to adjust security policies.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -655,7 +704,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
   };
   {
     name = "masc_governance_set";
-    description = "Configure governance policies for the room. Enables audit logging, anomaly detection, and agent isolation. Enterprise security for production use.";
+    description = "Configure room governance policies: security level (development/production/enterprise/paranoid), audit logging, and anomaly detection. \
+Use when setting up a room for production or high-security work, or when changing security posture mid-session. \
+Pair with masc_governance_report to review the effect of policy changes, and masc_audit_query to inspect events.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

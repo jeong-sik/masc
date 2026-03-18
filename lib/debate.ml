@@ -122,14 +122,8 @@ let masc_dir config =
 let debates_dir config =
   Filename.concat (masc_dir config) "debates"
 
-let rec ensure_dir path =
-  if not (Sys.file_exists path) then begin
-    let parent = Filename.dirname path in
-    if parent <> path && not (Sys.file_exists parent) then
-      ensure_dir parent;
-    try Unix.mkdir path 0o755
-    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
+let ensure_dir path =
+  Fs_compat.mkdir_p path
 
 let ensure_dirs config =
   ensure_dir (debates_dir config)
@@ -143,20 +137,13 @@ let write_json path json =
   let dir = Filename.dirname path in
   let base = Filename.basename path in
   let tmp_path = Filename.concat dir (Printf.sprintf ".%s.tmp.%d" base (Unix.getpid ())) in
-  let oc = open_out tmp_path in
-  let closed = ref false in
-  Common.protect ~module_name:"debate" ~finally_label:"finalizer" ~finally:(fun () ->
-    if not !closed then (try close_out oc with exn ->
-      Log.Misc.error "[debate] close_out failed: %s" (Printexc.to_string exn));
-    if Sys.file_exists tmp_path then
-      Safe_ops.remove_file_logged ~context:"debate" tmp_path
-  ) (fun () ->
-    output_string oc content;
-    flush oc;
-    close_out oc;
-    closed := true;
-    Sys.rename tmp_path path
-  )
+  (try
+     Fs_compat.save_file tmp_path content;
+     Sys.rename tmp_path path
+   with exn ->
+     (if Sys.file_exists tmp_path then
+        Safe_ops.remove_file_logged ~context:"debate" tmp_path);
+     raise exn)
 
 (** Read JSON from file *)
 let read_json path =

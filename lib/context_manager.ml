@@ -100,13 +100,7 @@ let extract_state_blocks (s : string) : string list =
 (* ================================================================ *)
 
 let ensure_dir path =
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
+  Fs_compat.mkdir_p path
 
 (* ================================================================ *)
 (* Token Estimation                                                 *)
@@ -627,10 +621,7 @@ let persist_message session msg =
   let line =
     (Yojson.Safe.to_string payload |> Llm_client.sanitize_text_utf8) ^ "\n"
   in
-  let fd = Unix.openfile path
-    [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-    let _ = Unix.write_substring fd line 0 (String.length line) in ())
+  Fs_compat.append_file path line
 
 let save_checkpoint session ckpt =
   let ckpt =
@@ -648,9 +639,7 @@ let save_checkpoint session ckpt =
     ("serialized", `String ckpt.serialized);
   ] in
   let content = Yojson.Safe.to_string json |> Llm_client.sanitize_text_utf8 in
-  let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-    let _ = Unix.write_substring fd content 0 (String.length content) in ())
+  Fs_compat.save_file path content
 
 let load_latest_checkpoint session =
   let dir = session.session_dir in
@@ -666,23 +655,19 @@ let load_latest_checkpoint session =
     | [] -> None
     | latest :: _ ->
       let path = Filename.concat dir latest in
-      let ic = open_in path in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        let n = in_channel_length ic in
-        let buf = Bytes.create n in
-        really_input ic buf 0 n;
-        let json =
-          Bytes.to_string buf
-          |> Llm_client.sanitize_text_utf8
-          |> Yojson.Safe.from_string
-        in
-        let open Yojson.Safe.Util in
-        Some {
-          checkpoint_id = json |> member "checkpoint_id" |> to_string;
-          timestamp = json |> member "timestamp" |> to_number;
-          generation = json |> member "generation" |> to_int;
-          message_count = json |> member "message_count" |> to_int;
-          token_count = json |> member "token_count" |> to_int;
-          serialized =
-            json |> member "serialized" |> to_string |> Llm_client.sanitize_text_utf8;
-        })
+      let content = Fs_compat.load_file path in
+      let json =
+        content
+        |> Llm_client.sanitize_text_utf8
+        |> Yojson.Safe.from_string
+      in
+      let open Yojson.Safe.Util in
+      Some {
+        checkpoint_id = json |> member "checkpoint_id" |> to_string;
+        timestamp = json |> member "timestamp" |> to_number;
+        generation = json |> member "generation" |> to_int;
+        message_count = json |> member "message_count" |> to_int;
+        token_count = json |> member "token_count" |> to_int;
+        serialized =
+          json |> member "serialized" |> to_string |> Llm_client.sanitize_text_utf8;
+      }

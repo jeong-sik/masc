@@ -28,11 +28,7 @@ let cache_dir (config : Room_utils.config) =
 (** Ensure cache directory exists *)
 let ensure_cache_dir config =
   let dir = cache_dir config in
-  let masc_dir = Filename.concat config.base_path ".masc" in
-  if not (Sys.file_exists masc_dir) then
-    Unix.mkdir masc_dir 0o755;
-  if not (Sys.file_exists dir) then
-    Unix.mkdir dir 0o755
+  Fs_compat.mkdir_p dir
 
 (** Sanitize key for filename *)
 let sanitize_key key =
@@ -143,9 +139,7 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
         let json = entry_to_json entry in
         let content = Yojson.Safe.pretty_to_string json in
         try
-          let oc = open_out path in
-          Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-            output_string oc content);
+          Fs_compat.save_file path content;
           Ok entry
         with e ->
           Error (Printexc.to_string e)
@@ -158,9 +152,7 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
       let json = entry_to_json entry in
       let content = Yojson.Safe.pretty_to_string json in
       try
-        let oc = open_out path in
-        Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-          output_string oc content);
+        Fs_compat.save_file path content;
         Ok entry
       with e ->
         Error (Printexc.to_string e)
@@ -174,9 +166,7 @@ let get config ~key : (cache_entry option, string) result =
     Ok None
   else
     try
-      let ic = open_in path in
-      let content = Common.protect ~module_name:"cache_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        really_input_string ic (in_channel_length ic)) in
+      let content = Fs_compat.load_file path in
       let json = Yojson.Safe.from_string content in
       match entry_of_json json with
       | Some entry ->

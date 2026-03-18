@@ -132,35 +132,20 @@ let read_events config =
   if not (Room_utils.path_exists config (events_path config)) then
     []
   else
-    In_channel.with_open_text (events_path config) (fun ic ->
-        let rec loop acc =
-          match input_line ic with
-          | line ->
-              let trimmed = String.trim line in
-              let acc' =
-                if trimmed = "" then
-                  acc
-                else
-                  match Safe_ops.parse_json_safe ~context:"command_plane_v2.events" trimmed with
-                  | Ok json -> (
-                      match event_of_json json with
-                      | Some event -> event :: acc
-                      | None -> acc)
-                  | Error _ -> acc
-              in
-              loop acc'
-          | exception End_of_file -> List.rev acc
-        in
-        loop [])
+    Fs_compat.load_file (events_path config)
+    |> String.split_on_char '\n'
+    |> List.filter_map (fun line ->
+           let trimmed = String.trim line in
+           if trimmed = "" then None
+           else
+             match Safe_ops.parse_json_safe ~context:"command_plane_v2.events" trimmed with
+             | Ok json -> event_of_json json
+             | Error _ -> None)
 
 let append_event config (event : event_record) =
   ensure_dirs config;
-  let line = Yojson.Safe.to_string (event_to_json event) ^ "\n" in
   let path = events_path config in
-  let oc = open_out_gen [ Open_creat; Open_append; Open_wronly ] 0o600 path in
-  Common.protect ~module_name:"command_plane_v2" ~finally_label:"close_out"
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc line)
+  Fs_compat.append_jsonl path (event_to_json event)
 
 let next_event_id prefix =
   Printf.sprintf "%s-%s-%04x" prefix

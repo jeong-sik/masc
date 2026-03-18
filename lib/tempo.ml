@@ -74,13 +74,10 @@ let load_state (config : Room_utils.config) : tempo_state =
 let save_state (config : Room_utils.config) (state : tempo_state) : unit =
   let path = tempo_file config in
   let masc_dir = Filename.concat config.base_path ".masc" in
-  if not (Sys.file_exists masc_dir) then
-    Unix.mkdir masc_dir 0o755;
+  Fs_compat.mkdir_p masc_dir;
   let json = state_to_json state in
   let content = Yojson.Safe.pretty_to_string json in
-  let oc = open_out path in
-  Common.protect ~module_name:"tempo" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    output_string oc content)
+  Fs_compat.save_file path content
 
 (** Set tempo manually *)
 let set_tempo (config : Room_utils.config) ~interval_s ~reason : tempo_state =

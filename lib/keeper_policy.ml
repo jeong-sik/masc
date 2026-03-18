@@ -215,7 +215,7 @@ let handle_keeper_dataset_export ctx args : tool_result =
           else
             output_path
         in
-        mkdir_p (Filename.dirname resolved_output_path);
+        Fs_compat.mkdir_p (Filename.dirname resolved_output_path);
         let json =
           `Assoc
             [
@@ -227,12 +227,7 @@ let handle_keeper_dataset_export ctx args : tool_result =
               ("examples", `List examples);
             ]
         in
-        let oc = open_out resolved_output_path in
-        Common.protect
-          ~module_name:"tool_keeper"
-          ~finally_label:"close_out"
-          ~finally:(fun () -> close_out_noerr oc)
-          (fun () -> output_string oc (Yojson.Safe.pretty_to_string json));
+        Fs_compat.save_file resolved_output_path (Yojson.Safe.pretty_to_string json);
         ( true,
           Yojson.Safe.pretty_to_string
             (`Assoc

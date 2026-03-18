@@ -259,25 +259,12 @@ let execute_keeper_tool_call
       | Ok target ->
           (try
              let parent = Filename.dirname target in
-             if not (Sys.file_exists parent) then Unix.mkdir parent 0o755;
+             Fs_compat.mkdir_p parent;
              (match mode with
              | "append" ->
-                 let oc =
-                   open_out_gen [ Open_wronly; Open_creat; Open_append ] 0o644
-                     target
-                 in
-                 Common.protect
-                   ~module_name:"tool_keeper"
-                   ~finally_label:"keeper_fs_edit_append_close"
-                   ~finally:(fun () -> close_out_noerr oc)
-                   (fun () -> output_string oc content)
+                 Fs_compat.append_file target content
              | "overwrite" | "" ->
-                 let oc = open_out target in
-                 Common.protect
-                   ~module_name:"tool_keeper"
-                   ~finally_label:"keeper_fs_edit_overwrite_close"
-                   ~finally:(fun () -> close_out_noerr oc)
-                   (fun () -> output_string oc content)
+                 Fs_compat.save_file target content
              | other -> raise (Invalid_argument ("unsupported_mode:" ^ other)));
              Yojson.Safe.to_string
                (`Assoc

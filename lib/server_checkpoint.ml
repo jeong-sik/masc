@@ -180,9 +180,7 @@ let checkpoint_path () =
 let save (c : checkpoint) : (unit, string) result =
   let path = checkpoint_path () in
   let dir = Filename.dirname path in
-  (try
-     if not (Sys.file_exists dir) then
-       Unix.mkdir dir 0o755
+  (try Fs_compat.mkdir_p dir
    with Unix.Unix_error _ | Sys_error _ -> ());
   try
     let json_str = Yojson.Safe.pretty_to_string (to_json c) in

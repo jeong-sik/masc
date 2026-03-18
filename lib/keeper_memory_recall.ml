@@ -21,41 +21,21 @@ let model_spec_for_used (specs : Llm_client.model_spec list) (model_used : strin
     m.model_id = model_used || m.model_id = used
   ) specs
 
-let read_file_tail_lines path ~max_bytes ~max_lines : string list =
-  if max_lines <= 0 || max_bytes <= 0 then []
-  else if not (Sys.file_exists path) then []
+let read_file_tail_lines path ~max_bytes:_ ~max_lines : string list =
+  if max_lines <= 0 then []
+  else if not (Fs_compat.file_exists path) then []
   else
     try
-      let ic = open_in_bin path in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        let len = in_channel_length ic in
-        let start = max 0 (len - max_bytes) in
-        let starts_mid_line =
-          if start <= 0 then false
-          else (
-            seek_in ic (start - 1);
-            input_char ic <> '\n')
-        in
-        seek_in ic start;
-        let remaining = len - start in
-        let buf = Bytes.create remaining in
-        really_input ic buf 0 remaining;
-        let chunk = Bytes.to_string buf in
-        let lines =
-          chunk
-          |> String.split_on_char '\n'
-          |> List.filter (fun s -> String.trim s <> "")
-        in
-        let lines =
-          match starts_mid_line, lines with
-          | true, _ :: rest -> rest
-          | _ -> lines
-        in
-        let n = List.length lines in
-        let drop = max 0 (n - max_lines) in
-        lines |> List.mapi (fun i s -> (i, s)) |> List.filter (fun (i, _) -> i >= drop) |> List.map snd
-      )
-    with Sys_error _ | End_of_file ->
+      let content = Fs_compat.load_file path in
+      let lines =
+        content
+        |> String.split_on_char '\n'
+        |> List.filter (fun s -> String.trim s <> "")
+      in
+      let n = List.length lines in
+      let drop = max 0 (n - max_lines) in
+      lines |> List.mapi (fun i s -> (i, s)) |> List.filter (fun (i, _) -> i >= drop) |> List.map snd
+    with Sys_error _ ->
       []
 
 let read_keeper_memory_summary
@@ -439,6 +419,45 @@ let evaluate_keeper_auto_rules
     guardrail_reason;
     reasons = List.rev reasons;
   }
+
+(** Deterministic priority stack for auto-rule evaluation results.
+    Given a keeper_auto_rule_eval where multiple rules may fire simultaneously,
+    returns the single highest-priority action. Priority order (first match wins):
+    1. guardrail_stop — safety-critical, 4-way AND gate
+    2. reflect — repetition prevention
+    3. plan — goal drift correction
+    4. compact — context cleanup
+    5. handoff — generation succession
+    6. none — no rule fired *)
+type prioritized_action =
+  | Act_guardrail_stop of string
+  | Act_reflect
+  | Act_plan
+  | Act_compact
+  | Act_handoff
+  | Act_none
+
+let prioritized_action (eval : keeper_auto_rule_eval) : prioritized_action =
+  if eval.guardrail_stop then
+    Act_guardrail_stop (Option.value eval.guardrail_reason ~default:"guardrail_stop")
+  else if eval.reflect then
+    Act_reflect
+  else if eval.plan then
+    Act_plan
+  else if eval.compact then
+    Act_compact
+  else if eval.handoff then
+    Act_handoff
+  else
+    Act_none
+
+let prioritized_action_to_string = function
+  | Act_guardrail_stop reason -> Printf.sprintf "guardrail_stop(%s)" reason
+  | Act_reflect -> "reflect"
+  | Act_plan -> "plan"
+  | Act_compact -> "compact"
+  | Act_handoff -> "handoff"
+  | Act_none -> "none"
 
 let learned_policy_auto_rules
     ~(meta : keeper_meta)

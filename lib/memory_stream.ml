@@ -63,13 +63,7 @@ let archive_path ~agent_name ~timestamp =
 (* ---------- Ensure directory ---------- *)
 
 let ensure_dir path =
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
+  Fs_compat.mkdir_p path
 
 (* ---------- JSON serialization ---------- *)
 
@@ -132,44 +126,31 @@ let entry_of_json (json : Yojson.Safe.t) : memory_entry option =
 
 let load_all_entries ~agent_name : memory_entry list =
   let path = stream_path ~agent_name in
-  if not (Sys.file_exists path) then []
-  else begin
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let entries = ref [] in
-      (try
-        while true do
-          let line = input_line ic in
-          if String.length line > 0 then
-            match Yojson.Safe.from_string line |> entry_of_json with
-            | Some e -> entries := e :: !entries
-            | None -> ()
-        done
-      with End_of_file -> ());
-      List.rev !entries)
-  end
+  if not (Fs_compat.file_exists path) then []
+  else
+    let content = Fs_compat.load_file path in
+    content
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.length line > 0)
+    |> List.filter_map (fun line ->
+           try Yojson.Safe.from_string line |> entry_of_json
+           with Yojson.Json_error _ -> None)
 
 let append_entry ~agent_name (entry : memory_entry) =
   let dir = memory_dir ~agent_name in
   ensure_dir dir;
   let path = stream_path ~agent_name in
-  let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    let json_str = Yojson.Safe.to_string (entry_to_json entry) in
-    output_string oc json_str;
-    output_char oc '\n')
+  Fs_compat.append_jsonl path (entry_to_json entry)
 
 let count_entries ~agent_name : int =
   let path = stream_path ~agent_name in
-  if not (Sys.file_exists path) then 0
-  else begin
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let n = ref 0 in
-      (try while true do ignore (input_line ic); incr n done
-       with End_of_file -> ());
-      !n)
-  end
+  if not (Fs_compat.file_exists path) then 0
+  else
+    let content = Fs_compat.load_file path in
+    content
+    |> String.split_on_char '\n'
+    |> List.filter (fun s -> String.length s > 0)
+    |> List.length
 
 (** Rewrite all entries atomically (used by Lodge_memory_gc). *)
 let rewrite_entries ~agent_name (entries : memory_entry list) =
@@ -178,13 +159,13 @@ let rewrite_entries ~agent_name (entries : memory_entry list) =
   let path = stream_path ~agent_name in
   let tmp_path = path ^ ".tmp" in
   (* Write to temp file first, then atomic rename *)
-  let oc = open_out tmp_path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    List.iter (fun entry ->
-      let json_str = Yojson.Safe.to_string (entry_to_json entry) in
-      output_string oc json_str;
-      output_char oc '\n'
-    ) entries);
+  let content =
+    entries
+    |> List.map (fun entry -> Yojson.Safe.to_string (entry_to_json entry))
+    |> String.concat "\n"
+  in
+  let content = if content <> "" then content ^ "\n" else content in
+  Fs_compat.save_file tmp_path content;
   Sys.rename tmp_path path
 
 (* ---------- Scoring ---------- *)
@@ -352,20 +333,22 @@ let rotate_if_needed ~agent_name =
     in
     (* Write archive *)
     let arch_path = archive_path ~agent_name ~timestamp:(Time_compat.now ()) in
-    let oc = open_out arch_path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      List.iter (fun e ->
-        output_string oc (Yojson.Safe.to_string (entry_to_json e));
-        output_char oc '\n'
-      ) archived);
+    let arch_content =
+      archived
+      |> List.map (fun e -> Yojson.Safe.to_string (entry_to_json e))
+      |> String.concat "\n"
+    in
+    let arch_content = if arch_content <> "" then arch_content ^ "\n" else arch_content in
+    Fs_compat.save_file arch_path arch_content;
     (* Rewrite stream with only kept entries *)
     let path = stream_path ~agent_name in
-    let oc = open_out path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      List.iter (fun e ->
-        output_string oc (Yojson.Safe.to_string (entry_to_json e));
-        output_char oc '\n'
-      ) kept);
+    let kept_content =
+      kept
+      |> List.map (fun e -> Yojson.Safe.to_string (entry_to_json e))
+      |> String.concat "\n"
+    in
+    let kept_content = if kept_content <> "" then kept_content ^ "\n" else kept_content in
+    Fs_compat.save_file path kept_content;
     eprintf "[memory_stream] Rotated %s: archived %d, kept %d\n%!"
       agent_name (List.length archived) (List.length kept)
   end

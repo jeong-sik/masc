@@ -165,24 +165,15 @@ let ledger_path base_path =
   Filename.concat (economy_dir base_path) "ledger.jsonl"
 
 let ensure_economy_dir base_path =
-  let masc = Filename.concat base_path ".masc" in
   let econ = economy_dir base_path in
-  if not (Sys.file_exists masc) then
-    Unix.mkdir masc 0o755;
-  if not (Sys.file_exists econ) then
-    Unix.mkdir econ 0o755
+  Fs_compat.mkdir_p econ
 
 let append_transaction base_path (txn : transaction) : (unit, string) result =
   try
     ensure_economy_dir base_path;
     let path = ledger_path base_path in
     let line = Yojson.Safe.to_string (transaction_to_json txn) ^ "\n" in
-    let oc = open_out_gen [Open_append; Open_creat; Open_wronly] 0o644 path in
-    Common.protect
-      ~module_name:"agent_economy"
-      ~finally_label:"close_ledger"
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc line; flush oc);
+    Fs_compat.append_file path line;
     Ok ()
   with e ->
     Error (Printf.sprintf "[agent_economy] ledger write failed: %s"

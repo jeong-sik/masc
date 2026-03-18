@@ -30,30 +30,27 @@ let activity_log_file () =
   | None -> "/tmp/auto-responder.log"
 
 let debug_log msg =
-  let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 "/tmp/auto_debug.log" in
-  Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer"
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> Printf.fprintf oc "[%f] %s\n%!" (Time_compat.now ()) msg)
+  let line = Printf.sprintf "[%f] %s\n" (Time_compat.now ()) msg in
+  try Fs_compat.append_file "/tmp/auto_debug.log" line
+  with _ -> ()
 
 let activity_log ~mode ~from_agent ~mention ~status ~detail =
   let log_file = activity_log_file () in
-  let oc = open_out_gen [Open_creat; Open_append; Open_text] 0o644 log_file in
-  Common.protect ~module_name:"auto_responder" ~finally_label:"finalizer"
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      let time = Unix.localtime (Time_compat.now ()) in
-      let timestamp =
-        Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
-          (time.Unix.tm_year + 1900)
-          (time.Unix.tm_mon + 1)
-          time.Unix.tm_mday
-          time.Unix.tm_hour
-          time.Unix.tm_min
-          time.Unix.tm_sec
-      in
-      let mode_str = match mode with Disabled -> "OFF" | Spawn -> "SPAWN" | Llm -> "LLM" in
-      Printf.fprintf oc "[%s] [%s] %s → @%s | %s | %s\n%!"
-        timestamp mode_str from_agent mention status detail)
+  let time = Unix.localtime (Time_compat.now ()) in
+  let timestamp =
+    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
+      (time.Unix.tm_year + 1900)
+      (time.Unix.tm_mon + 1)
+      time.Unix.tm_mday
+      time.Unix.tm_hour
+      time.Unix.tm_min
+      time.Unix.tm_sec
+  in
+  let mode_str = match mode with Disabled -> "OFF" | Spawn -> "SPAWN" | Llm -> "LLM" in
+  let line = Printf.sprintf "[%s] [%s] %s → @%s | %s | %s\n"
+    timestamp mode_str from_agent mention status detail in
+  try Fs_compat.append_file log_file line
+  with _ -> ()
 
 (* --- Loop prevention / throttling --- *)
 

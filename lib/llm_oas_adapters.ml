@@ -8,8 +8,12 @@
 
 (** Build an OAS cache adapter backed by MASC's L1+L2 cache.
     Wraps {!Llm_response_cache} with error handling — errors are
-    logged and treated as cache misses to avoid failing completions. *)
-let cache_adapter () : Llm_provider.Cache.t =
+    logged and treated as cache misses to avoid failing completions.
+
+    Currently unused: MASC handles caching at the orchestration layer
+    (temperature-aware keys). This adapter is for future full OAS cache
+    integration when OAS fingerprint gains temperature awareness. *)
+let [@warning "-32"] cache_adapter () : Llm_provider.Cache.t =
   {
     get =
       (fun ~key ->

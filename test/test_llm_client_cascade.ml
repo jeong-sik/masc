@@ -34,29 +34,27 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+(** Store a cached response in OAS api_response JSON format.
+    Uses MASC cache key (temperature-aware) + OAS serialization. *)
 let cache_response (req : Llm_client.completion_request) ~content ~model_used =
   let key = Llm_client.cache_key_of_request req in
   let payload =
     `Assoc
       [
-        ("schema_version", `String "1.0.0");
-        ("kind", `String "completion_response");
-        ( "response",
-          `Assoc
-            [
-              ("content", `String content);
-              ("tool_calls", `List []);
-              ( "usage",
-                `Assoc
-                  [
-                    ("input_tokens", `Int 1);
-                    ("output_tokens", `Int 1);
-                    ("total_tokens", `Int 2);
-                    ("cache_creation_input_tokens", `Int 0);
-                    ("cache_read_input_tokens", `Int 0);
-                  ] );
-              ("model_used", `String model_used);
-            ] );
+        ("v", `String "1");
+        ("id", `String "cached");
+        ("model", `String model_used);
+        ("stop_reason", `String "end_turn");
+        ("content", `List [
+          `Assoc [("type", `String "text"); ("text", `String content)]
+        ]);
+        ("usage", `Assoc
+          [
+            ("input_tokens", `Int 1);
+            ("output_tokens", `Int 1);
+            ("cache_creation_input_tokens", `Int 0);
+            ("cache_read_input_tokens", `Int 0);
+          ]);
       ]
   in
   match Cache.set_json ~key ~ttl_seconds:30 payload with

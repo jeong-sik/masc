@@ -83,7 +83,7 @@ type prepared_spawn = Tool_team_session_step.prepared_spawn = {
   worker_run_id : string;
   spec : spawn_spec;
   runtime_actor_name : string option;
-  runtime_model : Llm_client.model_spec;
+  runtime_model : Llm_types.model_spec;
   runtime_lease : Local_runtime_pool.lease option;
   assigned_runtime : string option;
 }
@@ -304,7 +304,7 @@ let router_judge_model () =
 
 let llama_router_model_spec model_id =
   {
-    Llm_client.provider = Llm_client.Llama;
+    Llm_types.provider = Llm_types.Llama;
     model_id;
     max_context = 262_144;
     api_url = Env_config.Llama.server_url;
@@ -465,14 +465,14 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
            worker_prompt=%S\n"
           worker_class_text role_text spawn_prompt
       in
-      let request : Llm_client.completion_request =
+      let request : Llm_types.completion_request =
         {
           model = llama_router_model_spec judge_model;
           messages =
             [
-              Llm_client.system_msg
+              Llm_types.system_msg
                 "You are a routing judge for a hybrid swarm. Output only JSON.";
-              Llm_client.user_msg prompt;
+              Llm_types.user_msg prompt;
             ];
           temperature = 0.0;
           max_tokens = 220;
@@ -485,7 +485,7 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
       with
       | Ok response -> (
           try
-            Yojson.Safe.from_string (Llm_client.text_of_response response)
+            Yojson.Safe.from_string (Llm_types.text_of_response response)
             |> parse_routing_decision_json
           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
       | Error _ -> None

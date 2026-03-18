@@ -30,3 +30,14 @@ val completion_response_of_api_response :
     Sets [id] to ["cached"] and [stop_reason] to [EndTurn]. *)
 val api_response_of_completion_response :
   Llm_types.completion_response -> Llm_provider.Types.api_response
+
+(** Build OAS provider config + converted messages + tool JSON from a MASC request. *)
+val provider_config_of_request :
+  Llm_types.completion_request ->
+  (Llm_provider.Provider_config.t
+   * Llm_provider.Types.message list
+   * Yojson.Safe.t list, string) result
+
+(** Human-readable string from an HTTP-level error. *)
+val string_of_http_error :
+  Llm_provider.Http_client.http_error -> string

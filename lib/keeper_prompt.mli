@@ -35,7 +35,7 @@ val proactive_prompt_for_keeper :
 
 type proactive_generation_result = {
   reply: string;
-  usage: Llm_client.token_usage;
+  usage: Llm_types.token_usage;
   model_used: string;
   latency_ms: int;
   attempts: int;

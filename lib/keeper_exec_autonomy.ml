@@ -77,14 +77,14 @@ let autonomous_gate_config
 let execute_approved_plan
     ~(config : Room.config)
     ~(meta : keeper_meta)
-    ~(specs : Llm_client.model_spec list)
+    ~(specs : Llm_types.model_spec list)
     ~(plan : string)
     ~(pa : Keeper_autonomy.proposed_action)
     ~(autonomy_level : Keeper_autonomy.autonomy_level)
     ~(trajectory_acc : Trajectory.accumulator option)
     : string * float * string list =
   let gate_config = autonomous_gate_config ~autonomy_level in
-  let primary = match specs with p :: _ -> p | [] -> Llm_client.default_local_model_spec () in
+  let primary = match specs with p :: _ -> p | [] -> Llm_types.default_local_model_spec () in
   let system_prompt = Printf.sprintf
 {|You are a keeper agent executing an approved action plan.
 Your name: %s
@@ -102,9 +102,9 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
     ~system_prompt:(Printf.sprintf "Keeper %s autonomous execution" meta.name)
     ~max_tokens:4000 in
   let execute_tool_calls
-      (tcs : Llm_client.tool_call list) : (Llm_client.tool_call * string) list =
+      (tcs : Llm_types.tool_call list) : (Llm_types.tool_call * string) list =
     List.map
-      (fun (tc : Llm_client.tool_call) ->
+      (fun (tc : Llm_types.tool_call) ->
          let execute () =
            execute_keeper_tool_call ~config ~meta ~ctx_work tc
          in
@@ -150,7 +150,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
   let run_cascade requests = Llm_orchestration.cascade requests in
   let max_rounds = 3 in
   let initial_request =
-    { Llm_client.model = primary;
+    { Llm_types.model = primary;
       messages = [
         Agent_sdk.Types.system_msg system_prompt;
         Agent_sdk.Types.user_msg "Execute the first step of the plan now.";
@@ -161,15 +161,15 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
       response_format = `Text;
     }
   in
-  let requests = List.map (fun (spec : Llm_client.model_spec) ->
-    { initial_request with Llm_client.model = spec }
+  let requests = List.map (fun (spec : Llm_types.model_spec) ->
+    { initial_request with Llm_types.model = spec }
   ) specs in
   match run_cascade requests with
   | Error e ->
       (Printf.sprintf "LLM cascade failed: %s" e, 0.0, [])
   | Ok resp0 ->
       let rec exec_loop ~round ~acc_cost ~acc_tools ~last_resp =
-        if last_resp.Llm_client.tool_calls = [] || round > max_rounds then
+        if last_resp.Llm_types.tool_calls = [] || round > max_rounds then
           let content =
             let c = String.trim (Llm_types.text_of_response last_resp) in
             if c = "" && acc_tools <> [] then
@@ -180,11 +180,11 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
           (content, acc_cost, acc_tools)
         else
           let round_tools =
-            List.map (fun (tc : Llm_client.tool_call) -> tc.call_name)
-              last_resp.Llm_client.tool_calls
+            List.map (fun (tc : Llm_types.tool_call) -> tc.call_name)
+              last_resp.Llm_types.tool_calls
           in
           let all_tools = acc_tools @ round_tools in
-          let tool_outputs = execute_tool_calls last_resp.Llm_client.tool_calls in
+          let tool_outputs = execute_tool_calls last_resp.Llm_types.tool_calls in
           let followup_prompt =
             keeper_tool_followup_prompt
               ~user_message:"Execute the next step of the plan."
@@ -197,8 +197,8 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
             keeper_write_done all_tools
           in
           let next_tools = keeper_allowed_llm_tools ~write_done meta in
-          let followup_requests = List.map (fun (spec : Llm_client.model_spec) ->
-            { Llm_client.model = spec;
+          let followup_requests = List.map (fun (spec : Llm_types.model_spec) ->
+            { Llm_types.model = spec;
               messages = [
                 Agent_sdk.Types.system_msg system_prompt;
                 Agent_sdk.Types.user_msg followup_prompt;
@@ -235,7 +235,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
     None to fall through to regular proactive generation.
     @since 2.74.0 *)
 let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
-    ~(specs : Llm_client.model_spec list) : keeper_meta option =
+    ~(specs : Llm_types.model_spec list) : keeper_meta option =
   if not (keeper_autonomy_enabled ()) then None
   else if meta.active_goal_ids = [] then None
   else
@@ -243,9 +243,9 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
     | None -> None
     | Some L1_Reactive -> None
     | Some level ->
-        let primary = match specs with p :: _ -> p | [] -> Llm_client.default_local_model_spec () in
+        let primary = match specs with p :: _ -> p | [] -> Llm_types.default_local_model_spec () in
         let verify_model =
-          match Llm_client.default_verifier_model_spec () with
+          match Llm_types.default_verifier_model_spec () with
           | Ok model -> model
           | Error _ -> primary
         in

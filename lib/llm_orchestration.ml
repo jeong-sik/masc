@@ -324,7 +324,7 @@ let call_provider_stream ?timeout_sec (req : completion_request)
         in
         (match result with
          | Ok resp ->
-             let masc_resp = completion_response_of_api_response resp in
+             let masc_resp = Llm_provider_dispatch.completion_response_of_api_response resp in
              let text = text_of_response masc_resp in
              if String.trim text = "" && masc_resp.tool_calls = [] then
                None  (* empty response, try batch *)
@@ -332,7 +332,7 @@ let call_provider_stream ?timeout_sec (req : completion_request)
                Some (Ok masc_resp)
          | Error http_err ->
              Log.LlmClient.warn "stream: provider error: %s"
-               (string_of_http_error http_err);
+               (Llm_provider_dispatch.string_of_http_error http_err);
              None  (* fall through to batch *))
   in
   match stream_result with

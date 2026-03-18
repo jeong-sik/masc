@@ -104,19 +104,19 @@ let parse_tier1 (text : string) : tier1_result =
   else
     Fail "unparseable response"
 
-let tier1_check ~(model : Llm_client.model_spec) ~actor_name ~actor_persona
+let tier1_check ~(model : Llm_types.model_spec) ~actor_name ~actor_persona
     ~response_text : tier1_result =
   let prompt = build_tier1_prompt ~actor_name ~actor_persona ~response_text in
-  let req : Llm_client.completion_request = {
+  let req : Llm_types.completion_request = {
     model;
-    messages = [Llm_client.user_msg prompt];
+    messages = [Llm_types.user_msg prompt];
     temperature = 0.0;
     max_tokens = 50;
     tools = [];
     response_format = `Text;
   } in
   match Llm_orchestration.complete req with
-  | Ok resp -> parse_tier1 (Llm_client.text_of_response resp)
+  | Ok resp -> parse_tier1 (Llm_types.text_of_response resp)
   | Error e ->
     eprintf "[trpg_harness] tier1 LLM call failed: %s\n%!" e;
     Fail ("tier1_unavailable: " ^ e)
@@ -198,20 +198,20 @@ let parse_tier2 (text : string) : dimension_score list =
     find_dim Narrative_consistency "NARRATIVE_CONSISTENCY";
   ]
 
-let tier2_evaluate ~(model : Llm_client.model_spec) ~actor_name ~actor_persona
+let tier2_evaluate ~(model : Llm_types.model_spec) ~actor_name ~actor_persona
     ~actor_traits ~scene_context ~response_text : dimension_score list =
   let prompt = build_tier2_prompt ~actor_name ~actor_persona ~actor_traits
     ~scene_context ~response_text in
-  let req : Llm_client.completion_request = {
+  let req : Llm_types.completion_request = {
     model;
-    messages = [Llm_client.user_msg prompt];
+    messages = [Llm_types.user_msg prompt];
     temperature = 0.0;
     max_tokens = 200;
     tools = [];
     response_format = `Text;
   } in
   match Llm_orchestration.complete req with
-  | Ok resp -> parse_tier2 (Llm_client.text_of_response resp)
+  | Ok resp -> parse_tier2 (Llm_types.text_of_response resp)
   | Error e ->
     eprintf "[trpg_harness] tier2 LLM call failed: %s\n%!" e;
     List.map default_score all_dimensions

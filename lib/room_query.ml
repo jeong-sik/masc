@@ -147,6 +147,16 @@ let audit_orphan_tasks config : (Types.task * string) list =
       | _ -> None
     ) backlog.tasks
 
+let is_agent_active_at_path config path =
+  if not (path_exists config path) then false
+  else
+    try
+      let json = read_json config path in
+      match agent_of_yojson json with
+      | Ok agent -> agent.status <> Inactive
+      | Error _ -> false
+    with Sys_error _ | Yojson.Json_error _ -> false
+
 let is_agent_joined_in_room config ~room_id ~agent_name =
   if not (root_is_initialized config) then false
   else
@@ -155,12 +165,12 @@ let is_agent_joined_in_room config ~room_id ~agent_name =
     (* Check room-scoped path first *)
     let room_agents = agents_dir_in_room config room_id in
     let room_path = Filename.concat room_agents filename in
-    if path_exists config room_path then true
+    if is_agent_active_at_path config room_path then true
     else
       (* Fallback: check root agents_dir (where default join writes) *)
       let root_agents = agents_dir config in
       let root_path = Filename.concat root_agents filename in
-      path_exists config root_path
+      is_agent_active_at_path config root_path
 
 (** Check if an agent has joined the room *)
 let is_agent_joined config ~agent_name =

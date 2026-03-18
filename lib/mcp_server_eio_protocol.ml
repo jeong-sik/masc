@@ -443,10 +443,10 @@ let handle_request
                        match TP.requested_tool_list_params req.params with
                        | Error msg -> make_error ~id (-32602) msg
                        | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier; cursor } ->
-                           (* Default to room config mode instead of Full.
-                              Agents see only tools enabled for the current mode
-                              (e.g. ~80 in Coding). Use masc_discover_tools or
-                              mode=full param to access the full catalog. *)
+                           (* BUG-017 fix: Default to Full profile for tools/list.
+                              Previously wrapped in Role_filtered which filtered out
+                              core coordination tools (masc_join, masc_claim, etc.)
+                              from discovery while tools/call still allowed them. *)
                            let list_profile =
                              match profile with
                              | Managed_agent | Operator_remote ->
@@ -454,10 +454,7 @@ let handle_request
                              | Full | Role_filtered _ ->
                                (match mode with
                                 | Some _ -> profile  (* explicit mode param: respect it *)
-                                | None ->
-                                  let room_path = Room.masc_dir state.Mcp_server.room_config in
-                                  let config = Config.load room_path in
-                                  Role_filtered config.Config.mode)
+                                | None -> Full)
                            in
                            handle_list_tools_eio ~profile:list_profile ?names ~include_hidden
                              ~include_deprecated ~include_usage ?mode ?tier ?cursor

@@ -100,11 +100,6 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
   let dev_tools =
     Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir:config.workdir ()
   in
-  let agent_config = { Types.default_config with
-    model = provider_cfg.model_id;
-    max_turns = config.max_turns;
-    system_prompt = Some (Agent_swarm_prompts.solo_developer ~goal:config.goal);
-  } in
   let hooks = if config.verbose then
     { Hooks.empty with
       pre_tool_use = Some (fun event -> match event with
@@ -114,10 +109,27 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
           Hooks.Continue
         | _ -> Hooks.Continue) }
   else Hooks.empty in
-  let agent = Agent.create ~net ~config:agent_config ~tools:dev_tools
-    ~options:{ Agent.default_options with
-               base_url; provider = Some provider_cfg; hooks } () in
-  Agent.run ~sw agent config.goal
+  let tool_names =
+    List.map (fun (tool : Tool.t) -> tool.schema.name) dev_tools
+  in
+  let builder =
+    Builder.create ~net ~model:provider_cfg.model_id
+    |> Builder.with_max_turns config.max_turns
+    |> Builder.with_system_prompt
+         (Agent_swarm_prompts.solo_developer ~goal:config.goal)
+    |> Builder.with_base_url base_url
+    |> Builder.with_provider provider_cfg
+    |> Builder.with_tools dev_tools
+    |> Builder.with_hooks hooks
+    |> Builder.with_guardrails
+         {
+           Guardrails.tool_filter = AllowList tool_names;
+           max_tool_calls_per_turn = Some 12;
+         }
+  in
+  match Builder.build_safe builder with
+  | Error err -> Error err
+  | Ok agent -> Agent.run ~sw agent config.goal
 
 let run_fleet ~sw ~net ~clock ~proc_mgr config =
   let provider_cfg = match resolve_provider config.provider_name with

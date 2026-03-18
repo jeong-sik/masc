@@ -567,6 +567,7 @@
    llm_client
    llm_response_cache
    context_manager
+   context_compact_oas
    verifier
    succession
    perpetual_loop

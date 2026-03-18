@@ -188,6 +188,12 @@
  (modules test_oas_integration)
  (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
 
+; OAS adapter tests (sentinel roundtrip, context_compact_oas strategies)
+(test
+ (name test_oas_adapters)
+ (modules test_oas_adapters)
+ (libraries masc_mcp agent_sdk alcotest yojson))
+
 ; Subsystem OAS integration tests (Agent Cards, Event_bus, Pulse migration)
 (test
  (name test_subsystem_events)

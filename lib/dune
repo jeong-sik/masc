@@ -160,6 +160,7 @@
    agent_swarm_contract
    worker_container
    worker_mcp_transport
+   worker_oas
    local_agent_eio
    local_agent_eio_types
    local_agent_eio_container
@@ -565,12 +566,17 @@
    llm_provider_bridge
    llm_orchestration
    llm_client
+   llm_provider_oas
    llm_response_cache
    context_manager
+   context_compact_oas
    verifier
+   verifier_oas
    succession
+   succession_oas
    perpetual_loop
    perpetual_loop_types
+   perpetual_oas
    procedural_memory
    oas_events
    oas_checkpoint_bridge

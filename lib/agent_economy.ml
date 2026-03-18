@@ -206,7 +206,8 @@ let load_balances_from_ledger base_path =
               | Some txn ->
                 Hashtbl.replace balance_cache (base_path, txn.agent_name) txn.balance_after
               | None -> ()
-            with Yojson.Json_error _ -> ())
+            with Yojson.Json_error msg ->
+              Log.Misc.warn "agent_economy: skipping malformed ledger entry: %s" msg)
     end;
     Hashtbl.replace loaded_paths base_path true
   end

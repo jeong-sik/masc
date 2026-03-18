@@ -35,7 +35,8 @@ let handle_agent_update ctx args =
 
 (** Handle masc_find_by_capability *)
 let handle_find_by_capability ctx args =
-  let capability = get_string args "capability" "" in
+  let ( let*! ) = Tool_args.( let*! ) in
+  let*! capability = get_string_required args "capability" in
   let json = Room.find_agents_by_capability ctx.config ~capability in
   (true, Yojson.Safe.pretty_to_string json)
 

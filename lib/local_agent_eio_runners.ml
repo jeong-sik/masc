@@ -424,11 +424,11 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
               in
               let model =
                 let base_model = Llm_client.default_local_model_spec () in
-                match checkpoint.model with
-                | Oas.Types.Custom model_id ->
-                    { base_model with model_id }
-                | _ ->
-                    { base_model with model_id = meta.effective_model }
+                let model_id =
+                  if checkpoint.model <> "" then checkpoint.model
+                  else meta.effective_model
+                in
+                { base_model with model_id }
               in
               let prompt =
                 let tool_contract =

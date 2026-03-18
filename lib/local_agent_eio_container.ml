@@ -535,7 +535,7 @@ let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
     {
       Oas.Types.default_config with
       name = worker_name;
-      model = Oas.Types.Custom model.Llm_client.model_id;
+      model = model.Llm_client.model_id;
       system_prompt = Some system_prompt;
       max_tokens = local_worker_max_tokens ();
       max_turns;

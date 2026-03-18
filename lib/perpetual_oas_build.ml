@@ -40,7 +40,7 @@ let build_perpetual_agent
     | m :: _ -> m
     | [] -> Llm_client.default_local_model_spec ()
   in
-  let oas_model = Oas.Types.Custom primary_model.model_id in
+  let oas_model = primary_model.model_id in
   (* Build provider via Phase 3 adapter.
      Uses Llm_client.to_oas_provider which handles the Llm_client.model_spec
      -> Oas.Provider.config conversion (avoiding Llm_types nominality gap). *)

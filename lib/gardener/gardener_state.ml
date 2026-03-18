@@ -28,6 +28,7 @@ let load_config () : gardener_config = {
 let gardener_state_ref : gardener_state option ref = ref None
 let gardener_lock : Eio.Mutex.t option ref = ref None
 let room_config_ref : Room_utils.config option ref = ref None
+let sw_ref : Eio.Switch.t option ref = ref None
 
 (** Execute [f] with lock if available, otherwise directly.
     Safe for single-threaded test scenarios (no Eio runtime). *)

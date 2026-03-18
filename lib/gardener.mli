@@ -104,11 +104,20 @@ val decide_retire :
 
 (** {1 Execution} *)
 
-(** Execute an approved spawn decision.
+(** Execute an approved spawn decision via OAS worker agent.
 
-    Creates agent in Neo4j, posts announcement, updates budgets.
-    @return [Ok agent_name] on success, [Error reason] otherwise *)
-val execute_spawn : decision:spawn_decision -> (string, string) result
+    Spawns a real OAS agent using [Spawn_eio.spawn]. When called from the
+    background tick loop, pass [~sw] and [~room_config] explicitly. When
+    called from the MCP tool layer, omit them to use the module-level refs
+    set during {!start}.
+
+    @return [Ok message] on success, [Error reason] otherwise *)
+val execute_spawn :
+  ?sw:Eio.Switch.t ->
+  ?room_config:Room_utils.config ->
+  decision:spawn_decision ->
+  unit ->
+  (string, string) result
 
 (** Execute an approved retirement decision.
 

@@ -33,7 +33,7 @@
 
 .social-graph-tooltip strong {
   font-size: 13px;
-  color: #f8fafc;
+  color: var(--text-near-white);
 }
 
 .social-graph-tooltip-kind {
@@ -41,7 +41,7 @@
   border-radius: 6px;
   background: rgba(148, 163, 184, 0.15);
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--text-slate);
 }
 
 /* Leaderboard */
@@ -67,7 +67,7 @@
   text-align: center;
   font-size: 12px;
   font-weight: 700;
-  color: #94a3b8;
+  color: var(--text-slate);
 }
 
 .social-leaderboard-info {
@@ -81,7 +81,7 @@
 .social-leaderboard-name {
   font-size: 13px;
   font-weight: 600;
-  color: #f8fafc;
+  color: var(--text-near-white);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -97,14 +97,14 @@
 .social-leaderboard-bar {
   height: 100%;
   border-radius: 2px;
-  background: #22d3ee;
+  background: var(--cyan);
   transition: width 0.3s ease;
 }
 
 .social-leaderboard-weight {
   font-size: 12px;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--text-slate-light);
   min-width: 32px;
   text-align: right;
 }
@@ -116,12 +116,12 @@
 }
 
 .social-leaderboard-status.active {
-  color: #4ade80;
+  color: var(--ok);
   background: rgba(74, 222, 128, 0.1);
 }
 
 .social-leaderboard-status.inactive {
-  color: #94a3b8;
+  color: var(--text-slate);
   background: rgba(148, 163, 184, 0.1);
 }
 
@@ -145,11 +145,11 @@
 
 .social-kind-label {
   font-size: 12px;
-  color: #cbd5e1;
+  color: var(--text-slate-light);
 }
 
 .social-kind-count {
   font-size: 13px;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--text-near-white);
 }

@@ -30,8 +30,8 @@
 }
 
 .monitor-stat-card {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--white-4);
+  border: 1px solid var(--white-8);
   border-radius: 14px;
   padding: 14px 16px;
   display: flex;
@@ -78,13 +78,13 @@
     radial-gradient(circle at top left, rgba(34,211,238,0.12), transparent 22%),
     radial-gradient(circle at top right, rgba(74,222,128,0.1), transparent 24%),
     linear-gradient(180deg, rgba(3,7,18,0.98), rgba(8,14,28,0.96));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+  box-shadow: inset 0 1px 0 var(--white-5);
 }
 
 .command-focus-banner {
   border-radius: 14px;
   border: 1px solid rgba(34,211,238,0.26);
-  background: linear-gradient(180deg, rgba(34,211,238,0.1), rgba(255,255,255,0.03));
+  background: linear-gradient(180deg, rgba(34,211,238,0.1), var(--white-3));
   padding: 14px 16px;
   display: grid;
   gap: 8px;
@@ -109,8 +109,8 @@
 .command-focus-preview {
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--white-8);
+  background: var(--white-5);
   color: var(--text-strong);
   line-height: 1.45;
 }
@@ -138,7 +138,7 @@
 }
 
 .command-entry-card strong {
-  color: #f8fafc;
+  color: var(--text-near-white);
   font-size: 18px;
   line-height: 1.2;
   word-break: break-word;
@@ -173,7 +173,7 @@
     radial-gradient(circle at top right, rgba(103,232,249,0.16), transparent 34%),
     radial-gradient(circle at bottom left, rgba(244,114,182,0.12), transparent 28%),
     linear-gradient(180deg, rgba(8,16,34,0.94), rgba(8,14,28,0.88));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  box-shadow: inset 0 1px 0 var(--white-4);
 }
 
 .command-hero:before {
@@ -252,15 +252,15 @@
 }
 
 .command-guide-card {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--white-4);
+  border: 1px solid var(--white-8);
   border-radius: 12px;
   padding: 14px;
 }
 
 .command-guide-card.highlight {
   border-color: rgba(34,211,238,0.32);
-  background: linear-gradient(180deg, rgba(34,211,238,0.12), rgba(255,255,255,0.03));
+  background: linear-gradient(180deg, rgba(34,211,238,0.12), var(--white-3));
 }
 
 .command-guide-card.focus {
@@ -301,8 +301,8 @@
   gap: 10px;
   padding: 14px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--white-8);
+  background: var(--white-3);
 }
 
 .command-readiness-row.ok {
@@ -346,7 +346,7 @@
   padding: 12px;
   border-radius: 10px;
   background: rgba(9,12,20,0.5);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--white-6);
 }
 
 .command-step-list {
@@ -420,7 +420,7 @@
 
 .command-surface-tab {
   border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(255,255,255,0.04);
+  background: var(--white-4);
   color: rgba(255,255,255,0.72);
   border-radius: 999px;
   padding: 8px 14px;
@@ -449,7 +449,7 @@
   gap: 16px;
   padding: 18px;
   border-radius: 18px;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--white-8);
   background:
     radial-gradient(circle at top left, rgba(34,211,238,0.16), transparent 32%),
     linear-gradient(135deg, rgba(7,10,18,0.94), rgba(12,18,30,0.94));
@@ -561,7 +561,7 @@
 .warroom-presence-card,
 .warroom-feed-card {
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.035));
+    linear-gradient(180deg, var(--white-5), rgba(255,255,255,0.035));
   border-color: rgba(148,163,184,0.18);
 }
 
@@ -664,8 +664,8 @@
 .command-alert,
 .command-trace-row,
 .command-tree-node {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--white-4);
+  border: 1px solid var(--white-8);
   border-radius: 12px;
   padding: 14px;
 }
@@ -698,8 +698,8 @@
   margin-bottom: 14px;
   padding: 14px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--white-4);
+  border: 1px solid var(--white-8);
 }
 
 .command-topology-explainer p {
@@ -725,7 +725,7 @@
 .command-card-foot {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(255,255,255,0.08);
+  border-top: 1px solid var(--white-8);
   color: #67e8f9;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
@@ -746,8 +746,8 @@
   color: inherit;
   font: inherit;
   cursor: pointer;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--white-4);
+  border: 1px solid var(--white-8);
   border-radius: 12px;
   padding: 14px;
 }
@@ -755,15 +755,15 @@
 .command-chain-item.selected {
   border-color: rgba(34,211,238,0.38);
   box-shadow: 0 0 0 1px rgba(34,211,238,0.2) inset;
-  background: linear-gradient(180deg, rgba(34,211,238,0.12), rgba(255,255,255,0.03));
+  background: linear-gradient(180deg, rgba(34,211,238,0.12), var(--white-3));
 }
 
 .command-chain-panel {
   margin-top: 14px;
   padding: 14px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--white-4);
+  border: 1px solid var(--white-8);
 }
 
 .command-chain-graph-shell {
@@ -789,7 +789,7 @@
   padding: 12px;
   border-radius: 10px;
   background: rgba(9,12,20,0.5);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--white-6);
 }
 
 .error-text {
@@ -804,31 +804,31 @@
   border-radius: 999px;
   font-size: 11px;
   letter-spacing: 0.02em;
-  background: rgba(255,255,255,0.08);
+  background: var(--white-8);
   color: rgba(255,255,255,0.86);
 }
 
 .command-chip.ok,
 .command-tag.ok {
   background: rgba(74,222,128,0.15);
-  color: #4ade80;
+  color: var(--ok);
 }
 
 .command-chip.warn,
 .command-tag.warn {
   background: rgba(251,191,36,0.16);
-  color: #fbbf24;
+  color: var(--warn);
 }
 
 .command-chip.bad,
 .command-tag.bad {
   background: rgba(248,113,113,0.16);
-  color: #f87171;
+  color: var(--ff-hp-low);
 }
 
 .command-chip.muted,
 .command-tag.muted {
-  background: rgba(255,255,255,0.06);
+  background: var(--white-6);
   color: rgba(255,255,255,0.35);
 }
 
@@ -848,8 +848,8 @@
   margin-top: 10px;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--white-8);
+  background: var(--white-4);
   color: rgba(255,255,255,0.84);
   font-size: 12px;
   line-height: 1.45;
@@ -880,13 +880,13 @@
   gap: 10px;
   margin-top: 12px;
   padding-left: 16px;
-  border-left: 1px solid rgba(255,255,255,0.08);
+  border-left: 1px solid var(--white-8);
 }
 
 .command-tree-node.depth-1,
 .command-tree-node.depth-2,
 .command-tree-node.depth-3 {
-  background: rgba(255,255,255,0.03);
+  background: var(--white-3);
 }
 
 .command-alert.bad {

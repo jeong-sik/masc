@@ -36,7 +36,7 @@ export function KeeperSummaryCard({ keeper }: KeeperSummaryCardProps) {
   const tools = (keeper.recent_tool_names ?? []).slice(0, 3)
 
   return html`
-    <div class="keeper-summary-card" onClick=${() => navigate('keepers')}>
+    <div class="keeper-summary-card" onClick=${() => navigate('agents')}>
       <div class="keeper-summary-card__header">
         <span class="keeper-summary-card__name">${keeper.name}</span>
         <span class="keeper-summary-card__meta">

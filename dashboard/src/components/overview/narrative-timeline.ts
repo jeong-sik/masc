@@ -3,6 +3,7 @@
 // Groups events by time window and actor, synthesizes Korean descriptions.
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import type { ReadonlySignal } from '@preact/signals'
 import type { JournalEntry } from '../../types'
 
@@ -10,6 +11,8 @@ interface NarrativeTimelineProps {
   entries: ReadonlySignal<JournalEntry[]>
   maxItems?: number
 }
+
+const expandedItems = signal(0)
 
 interface TimeGroup {
   label: string
@@ -100,7 +103,9 @@ function groupByTime(events: NarrativeEvent[]): TimeGroup[] {
 }
 
 export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps) {
-  const limit = maxItems ?? 12
+  const baseLimit = maxItems ?? 8
+  const limit = baseLimit + expandedItems.value
+  const totalAvailable = entries.value.length
   const raw = entries.value.slice(-limit).reverse()
 
   if (raw.length === 0) {
@@ -113,6 +118,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
 
   const narratives = raw.map(buildNarrative)
   const groups = groupByTime(narratives)
+  const hasMore = totalAvailable > limit
 
   return html`
     <div class="narrative-timeline">
@@ -132,6 +138,14 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
           </div>
         </div>
       `)}
+      ${hasMore ? html`
+        <button
+          class="narrative-timeline__load-more"
+          onClick=${() => { expandedItems.value += baseLimit }}
+        >
+          더 보기 (${totalAvailable - limit}건 남음)
+        </button>
+      ` : null}
     </div>
   `
 }

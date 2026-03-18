@@ -213,3 +213,11 @@ export const observatoryGroups: ReadonlySignal<ObservatoryGroup[]> = computed(()
 
   return groups
 })
+
+/** Top active agents (working/watching first), capped at `limit`. Used by Home AgentPulse. */
+export const topActiveAgents: ReadonlySignal<ObservatoryAgent[]> = computed(() => {
+  const allAgents = observatoryGroups.value.flatMap(g => g.agents)
+  return allAgents
+    .sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || a.name.localeCompare(b.name))
+    .slice(0, 8)
+})

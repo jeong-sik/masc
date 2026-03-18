@@ -1,7 +1,7 @@
 /* ── FF Character Sheet Theme Layer ────────────────────────────
    Additive overrides using higher-specificity selectors.
    Does not modify base styles; layers on top.
-   Color palette: navy #0a1628, gold #c8a84e, crystal #47b8ff
+   Color palette: navy #0a1628, gold var(--ff-gold), crystal var(--accent)
    ─────────────────────────────────────────────────────────── */
 
 /* ============================================
@@ -13,7 +13,7 @@
 .command-plane-view .monitor-headline {
   position: relative;
   padding-bottom: 10px;
-  color: var(--ff-gold-bright, #e8cc70);
+  color: var(--ff-gold-bright, var(--ff-gold-bright));
   text-shadow: 0 1px 6px rgba(200, 168, 78, 0.15);
 }
 
@@ -28,7 +28,7 @@
   height: 2px;
   background: linear-gradient(
     90deg,
-    var(--ff-gold, #c8a84e) 0%,
+    var(--ff-gold, var(--ff-gold)) 0%,
     rgba(200, 168, 78, 0.3) 60%,
     transparent 100%
   );
@@ -38,7 +38,7 @@
 /* Section h2 (overview, agents tab, etc.) */
 .section h2,
 .overview-section-collapsible > summary {
-  color: var(--ff-gold-bright, #e8cc70);
+  color: var(--ff-gold-bright, var(--ff-gold-bright));
 }
 
 /* ============================================
@@ -53,7 +53,7 @@ button.monitor-row {
       rgba(10, 22, 40, 0.85) 0%,
       rgba(16, 28, 48, 0.75) 100%
     );
-  border-color: var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border-color: var(--ff-border-subtle, var(--ff-border-subtle));
 }
 
 button.monitor-row:hover {
@@ -75,7 +75,7 @@ button.monitor-row:hover {
       rgba(10, 22, 40, 0.88) 0%,
       rgba(14, 26, 46, 0.78) 100%
     );
-  border-color: var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border-color: var(--ff-border-subtle, var(--ff-border-subtle));
 }
 
 .agent-card:hover {
@@ -86,13 +86,13 @@ button.monitor-row:hover {
 /* Agent name in cards — gold highlight */
 .monitor-row .monitor-title,
 .agent-card .agent-name {
-  color: var(--ff-gold-bright, #e8cc70);
+  color: var(--ff-gold-bright, var(--ff-gold-bright));
 }
 
 /* Rail cards */
 .rail-card {
   background: var(--ff-panel, rgba(10, 22, 40, 0.92));
-  border-color: var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border-color: var(--ff-border-subtle, var(--ff-border-subtle));
 }
 
 /* ============================================
@@ -103,52 +103,52 @@ button.monitor-row:hover {
 .command-chip.ok,
 .command-tag.ok {
   background: rgba(74, 222, 128, 0.12);
-  color: var(--ff-hp-full, #4ade80);
+  color: var(--ff-hp-full, var(--ok));
   border: 1px solid rgba(74, 222, 128, 0.25);
 }
 
 .command-chip.warn,
 .command-tag.warn {
   background: rgba(200, 168, 78, 0.14);
-  color: var(--ff-gold-bright, #e8cc70);
+  color: var(--ff-gold-bright, var(--ff-gold-bright));
   border: 1px solid rgba(200, 168, 78, 0.28);
 }
 
 .command-chip.bad,
 .command-tag.bad {
   background: rgba(248, 113, 113, 0.14);
-  color: var(--ff-hp-low, #f87171);
+  color: var(--ff-hp-low, var(--ff-hp-low));
   border: 1px solid rgba(248, 113, 113, 0.28);
 }
 
 /* Monitor pills — FF status effect style */
 .monitor-pill.ok {
   background: rgba(74, 222, 128, 0.1);
-  color: var(--ff-hp-full, #4ade80);
+  color: var(--ff-hp-full, var(--ok));
   border: 1px solid rgba(74, 222, 128, 0.2);
 }
 
 .monitor-pill.warn {
-  background: rgba(200, 168, 78, 0.12);
-  color: var(--ff-gold-bright, #e8cc70);
+  background: var(--ff-border-subtle);
+  color: var(--ff-gold-bright, var(--ff-gold-bright));
   border: 1px solid rgba(200, 168, 78, 0.22);
 }
 
 .monitor-pill.bad {
   background: rgba(248, 113, 113, 0.12);
-  color: var(--ff-hp-low, #f87171);
+  color: var(--ff-hp-low, var(--ff-hp-low));
   border: 1px solid rgba(248, 113, 113, 0.25);
 }
 
 /* Rail section chips — FF badge style */
 .rail-section-chip.ok {
-  color: var(--ff-hp-full, #4ade80);
+  color: var(--ff-hp-full, var(--ok));
   border-color: rgba(74, 222, 128, 0.25);
   background: rgba(74, 222, 128, 0.1);
 }
 
 .rail-section-chip.bad {
-  color: var(--ff-hp-low, #f87171);
+  color: var(--ff-hp-low, var(--ff-hp-low));
   border-color: rgba(248, 113, 113, 0.25);
   background: rgba(248, 113, 113, 0.1);
 }
@@ -160,14 +160,14 @@ button.monitor-row:hover {
 .ctx-bar {
   height: 7px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  background: var(--white-6);
+  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
 }
 
 .ctx-fill {
   background: linear-gradient(
     90deg,
-    var(--ff-hp-full, #4ade80) 0%,
+    var(--ff-hp-full, var(--ok)) 0%,
     #2dd46a 100%
   );
   border-radius: 1px;
@@ -177,7 +177,7 @@ button.monitor-row:hover {
 .ctx-fill.warn {
   background: linear-gradient(
     90deg,
-    var(--ff-hp-mid, #fbbf24) 0%,
+    var(--ff-hp-mid, var(--warn)) 0%,
     #e0a510 100%
   );
   box-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
@@ -186,7 +186,7 @@ button.monitor-row:hover {
 .ctx-fill.bad {
   background: linear-gradient(
     90deg,
-    var(--ff-hp-low, #f87171) 0%,
+    var(--ff-hp-low, var(--ff-hp-low)) 0%,
     #e04040 100%
   );
   box-shadow: 0 0 4px rgba(248, 113, 113, 0.3);
@@ -196,7 +196,7 @@ button.monitor-row:hover {
 .keeper-roster__pressure-track {
   height: 10px;
   border-radius: 2px;
-  border-color: var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border-color: var(--ff-border-subtle, var(--ff-border-subtle));
 }
 
 /* ============================================
@@ -231,19 +231,19 @@ button.monitor-row.state-offline:hover {
    ============================================ */
 
 .dashboard-header {
-  border-color: var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border-color: var(--ff-border-subtle, var(--ff-border-subtle));
   background: rgba(10, 22, 40, 0.88);
 }
 
 .header-title-wrap h1 {
-  color: var(--ff-gold-bright, #e8cc70);
+  color: var(--ff-gold-bright, var(--ff-gold-bright));
 }
 
 /* Version badge — crystal blue */
 .version-badge {
   border-color: rgba(71, 184, 255, 0.3);
   background: rgba(71, 184, 255, 0.12);
-  color: var(--ff-crystal, #47b8ff);
+  color: var(--ff-crystal, var(--accent));
 }
 
 /* ============================================
@@ -276,7 +276,7 @@ button.monitor-row.state-watching {
 
 .kpi-item {
   background: var(--ff-panel, rgba(10, 22, 40, 0.92));
-  border-color: var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border-color: var(--ff-border-subtle, var(--ff-border-subtle));
 }
 
 .kpi-label {
@@ -289,7 +289,7 @@ button.monitor-row.state-watching {
 
 .stat-card {
   background: var(--ff-panel, rgba(10, 22, 40, 0.92));
-  border-color: var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border-color: var(--ff-border-subtle, var(--ff-border-subtle));
 }
 
 .stat-label {

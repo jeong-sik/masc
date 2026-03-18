@@ -1,147 +1,125 @@
-// MASC Dashboard — Home Overview Surface (Redesigned)
-// 4-Layer information architecture: Situation -> Anomaly -> Entity Grid -> Timeline
+// MASC Dashboard — Home Command Center
+// "What's happening right now?" — answer in 1 second, no scroll.
+// Quiet when healthy, loud when something needs attention.
 
 import { html } from 'htm/preact'
-import { keepers, tasks, shellCounts } from '../../store'
 import { missionSnapshot } from '../../mission-store'
-import { observatoryGroups } from '../../observatory-store'
+import { topActiveAgents } from '../../observatory-store'
 import { journal } from '../../sse'
 import { navigate } from '../../router'
 import { formatDuration } from '../mission-utils'
 import { SituationBanner } from './situation-banner'
 import { AttentionSpotlight } from './attention-spotlight'
-import { AgentObservatory } from './agent-observatory'
-import { SessionTriage } from './session-triage'
 import { NarrativeTimeline } from './narrative-timeline'
-import { QuickStats } from './quick-stats'
-import type { TaskBreakdown, TaskSource } from './quick-stats'
+import { AgentAvatar } from './agent-avatar'
+import type { ObservatoryAgent } from '../../observatory-store'
 
-function pressureClass(ratio: number | null | undefined): string {
-  if (ratio == null) return ''
-  const pct = ratio * 100
-  if (pct < 50) return 'pressure--ok'
-  if (pct < 70) return 'pressure--amber'
-  if (pct < 85) return 'pressure--orange'
-  return 'pressure--red'
-}
+// --- Hot Sessions: top 3 active sessions (critical/watch first) ---
 
-function keeperHealthClass(status?: string): string {
-  const s = (status ?? '').toLowerCase()
-  if (s === 'active' || s === 'running' || s === 'ok') return 'keeper-status--ok'
-  if (s === 'idle' || s === 'listening') return 'keeper-status--idle'
-  if (s === 'offline' || s === 'inactive') return 'keeper-status--offline'
-  return ''
-}
-
-export function Overview() {
+function HotSessions() {
   const snap = missionSnapshot.value
-  const keeperList = keepers.value
-  const taskList = tasks.value
-  const counts = shellCounts.value
-
-  const activeTasks = taskList.filter((t: { status: string }) =>
-    t.status === 'in_progress' || t.status === 'claimed'
-  )
-
-  // Use observatory groups for honest agent counting:
-  // only count agents with fresh signal (working/watching), not stale ones.
-  const obsGroups = observatoryGroups.value
-  const allObsAgents = obsGroups.flatMap(g => g.agents)
-  const freshAgentCount = allObsAgents.filter(a => a.state === 'working' || a.state === 'watching').length
-  const staleAgentCount = allObsAgents.filter(a => a.state === 'quiet' || a.state === 'offline').length
-  const totalAgentCount = allObsAgents.length
-
-  const agentCount = totalAgentCount > 0 ? freshAgentCount : (counts?.agents ?? 0)
-  const taskCount = activeTasks.length > 0 ? activeTasks.length : (counts?.tasks ?? 0)
-  const taskSource: TaskSource = activeTasks.length > 0 ? 'store' : 'cache'
-  const keeperCount = keeperList.length > 0 ? keeperList.length : (counts?.keepers ?? 0)
-
-  const taskBreakdown: TaskBreakdown = {
-    todo: taskList.filter((t: { status: string }) => t.status === 'todo').length,
-    claimed: taskList.filter((t: { status: string }) => t.status === 'claimed').length,
-    inProgress: taskList.filter((t: { status: string }) => t.status === 'in_progress').length,
-    done: taskList.filter((t: { status: string }) => t.status === 'done').length,
-  }
-
-  const roomHealth = snap?.summary?.room_health ?? null
-  const attentionCount = snap?.attention_queue?.length ?? snap?.summary?.pending_approvals ?? 0
   const sessions = snap?.sessions ?? snap?.session_briefs ?? []
-  const keeperBriefs = snap?.keeper_briefs ?? []
+  if (sessions.length === 0) return null
+
+  // Sort: blocker/attention first, then by elapsed time desc
+  const sorted = [...sessions].sort((a, b) => {
+    const aCrit = a.blocker_summary ? 2 : (a.related_attention_count > 0 ? 1 : 0)
+    const bCrit = b.blocker_summary ? 2 : (b.related_attention_count > 0 ? 1 : 0)
+    if (aCrit !== bCrit) return bCrit - aCrit
+    return (b.elapsed_sec ?? 0) - (a.elapsed_sec ?? 0)
+  })
+  const top = sorted.slice(0, 3)
 
   return html`
-    <div class="overview-surface">
-      <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
-      <${AttentionSpotlight} snap=${snap} />
-
-      <${QuickStats}
-        agentCount=${agentCount}
-        staleAgentCount=${staleAgentCount}
-        totalAgentCount=${totalAgentCount}
-        activeTaskCount=${taskCount}
-        keeperCount=${keeperCount}
-        attentionCount=${attentionCount}
-        taskBreakdown=${taskBreakdown}
-        taskSource=${taskSource}
-      />
-
-      <div class="overview-main-v2">
-        <div class="overview-left-col">
-          <div class="overview-section-header">
-            <span class="overview-section-label">에이전트 Observatory</span>
-            <a class="overview-section-link" onClick=${() => navigate('agent-roster')}>전체 보기</a>
+    <div class="hot-sessions">
+      <div class="home-section-header">
+        <span class="home-section-label">활성 세션</span>
+        <a class="home-section-link" onClick=${() => navigate('situation')}>전체 보기</a>
+      </div>
+      <div class="hot-sessions__grid">
+        ${top.map(s => html`
+          <div
+            class="hot-session-card ${s.blocker_summary ? 'hot-session-card--critical' : ''}"
+            key=${s.session_id}
+            onClick=${() => navigate('situation', { session_id: s.session_id })}
+          >
+            <div class="hot-session-card__goal">${s.goal ?? s.session_id}</div>
+            <div class="hot-session-card__meta">
+              ${s.member_names?.length ? html`
+                <span>${s.member_names.slice(0, 3).join(', ')}${s.member_names.length > 3 ? ` +${s.member_names.length - 3}` : ''}</span>
+              ` : null}
+              ${s.elapsed_sec ? html`<span>${formatDuration(s.elapsed_sec)}</span>` : null}
+            </div>
+            ${s.blocker_summary ? html`
+              <div class="hot-session-card__blocker">${s.blocker_summary}</div>
+            ` : null}
           </div>
-          <${AgentObservatory}
-            onAgentClick=${(name: string) => navigate('execution', { agent: name })}
-          />
-        </div>
-
-        <div class="overview-right-col">
-          <div class="overview-section-label">세션</div>
-          <${SessionTriage} sessions=${sessions} />
-
-          ${keeperBriefs.length > 0 ? html`
-            <div class="overview-section-header" style="margin-top: var(--space-md, 16px)">
-              <span class="overview-section-label">키퍼</span>
-              <a class="overview-section-link" onClick=${() => navigate('agent-roster')}>전체 보기</a>
-            </div>
-            <div class="keeper-cards-v2">
-              ${keeperBriefs.map(k => html`
-                <div class="keeper-card-v2 ${keeperHealthClass(k.status)}" key=${k.name}>
-                  <div class="keeper-card-v2__header">
-                    <span class="keeper-card-v2__name">${k.name}</span>
-                    ${k.generation != null ? html`
-                      <span class="keeper-card-v2__gen">G${k.generation}</span>
-                    ` : null}
-                  </div>
-                  ${k.current_work ? html`
-                    <div class="keeper-card-v2__work">${k.current_work}</div>
-                  ` : null}
-                  ${k.context_ratio != null ? html`
-                    <div class="keeper-card-v2__pressure">
-                      <div
-                        class="keeper-card-v2__pressure-bar ${pressureClass(k.context_ratio)}"
-                        style=${{ width: `${Math.round(k.context_ratio * 100)}%` }}
-                      />
-                      <span class="keeper-card-v2__pressure-label">
-                        ctx ${Math.round(k.context_ratio * 100)}%
-                      </span>
-                    </div>
-                  ` : null}
-                  ${k.last_turn_ago_s != null ? html`
-                    <span class="keeper-card-v2__activity">
-                      ${formatDuration(k.last_turn_ago_s)} 전
-                    </span>
-                  ` : null}
-                </div>
-              `)}
-            </div>
-          ` : null}
-
-          <div class="overview-section-label" style="margin-top: var(--space-md, 16px)">최근 활동</div>
-          <${NarrativeTimeline} entries=${journal} maxItems=${12} />
-        </div>
+        `)}
       </div>
     </div>
   `
 }
 
+// --- Agent Pulse: top 8 active agents ---
+
+function stateIcon(state: string): string {
+  if (state === 'working') return '\u26A1'
+  if (state === 'watching') return '\uD83D\uDC41\uFE0F'
+  if (state === 'quiet') return '\uD83D\uDCA4'
+  return '\u26AB'
+}
+
+function AgentPulse() {
+  const agents = topActiveAgents.value
+  if (agents.length === 0) return null
+
+  return html`
+    <div class="agent-pulse">
+      <div class="home-section-header">
+        <span class="home-section-label">에이전트</span>
+        <a class="home-section-link" onClick=${() => navigate('agents')}>전체 보기</a>
+      </div>
+      <div class="agent-pulse__grid">
+        ${agents.map((a: ObservatoryAgent) => html`
+          <div
+            class="agent-pulse-card agent-pulse-card--${a.state}"
+            key=${a.name}
+            onClick=${() => navigate('agents', { agent: a.name })}
+          >
+            <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${28} />
+            <div class="agent-pulse-card__info">
+              <span class="agent-pulse-card__name">${a.koreanName ?? a.name}</span>
+              <span class="agent-pulse-card__status">
+                ${stateIcon(a.state)} ${a.focus ?? a.currentTask ?? a.status}
+              </span>
+            </div>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+// --- Overview (Home) ---
+
+export function Overview() {
+  const snap = missionSnapshot.value
+  const roomHealth = snap?.summary?.room_health ?? null
+
+  return html`
+    <div class="overview-surface overview-surface--home">
+      <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
+      <${AttentionSpotlight} snap=${snap} />
+
+      <div class="home-body">
+        <${HotSessions} />
+        <${AgentPulse} />
+
+        <div class="home-section-header">
+          <span class="home-section-label">최근 활동</span>
+        </div>
+        <${NarrativeTimeline} entries=${journal} maxItems=${8} />
+      </div>
+    </div>
+  `
+}

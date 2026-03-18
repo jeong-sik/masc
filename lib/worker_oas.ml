@@ -122,6 +122,42 @@ let description_of_meta (meta : Local_agent_eio_types.worker_container_meta) : s
 let oas_provider_of_model = Local_agent_eio_container.oas_provider_of_model
 
 (* ================================================================ *)
+(* execution_scope -> gate_config                                    *)
+(* ================================================================ *)
+
+(** Derive Eval_gate.gate_config from execution_scope.
+    Observe_only: strict allowlist (read-only tools), low budget.
+    Limited_code_change: moderate budget, deny destructive bash.
+    Autonomous: permissive, higher budget. *)
+let gate_config_of_execution_scope
+    (scope : Team_session_types.execution_scope) : Eval_gate.gate_config =
+  match scope with
+  | Observe_only ->
+      { Eval_gate.default_config with
+        allowlist_enabled = true;
+        allowed_tools = [
+          "file_read"; "shell_exec"; "list_dir"; "glob"; "grep";
+          "search"; "git_status"; "git_log"; "git_diff";
+        ];
+        max_tool_calls_per_turn = 8;
+        max_cost_usd = 0.05;
+      }
+  | Limited_code_change ->
+      { Eval_gate.default_config with
+        destructive_check_enabled = true;
+        denied_tools = [
+          "shell_exec_dangerous"; "git_push_force"; "rm_rf";
+        ];
+        max_tool_calls_per_turn = 12;
+        max_cost_usd = 0.20;
+      }
+  | Autonomous ->
+      { Eval_gate.default_config with
+        max_tool_calls_per_turn = 20;
+        max_cost_usd = 0.50;
+      }
+
+(* ================================================================ *)
 (* Build OAS Agent.t via Builder                                     *)
 (* ================================================================ *)
 

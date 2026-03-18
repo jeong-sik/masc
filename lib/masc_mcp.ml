@@ -319,6 +319,7 @@ module Context_scoring = Context_scoring
 module Context_compact_oas = Context_compact_oas
 module Context_manager = Context_manager
 module Verifier_oas = Verifier_oas
+module Worker_oas = Worker_oas
 module Succession_oas = Succession_oas
 module Perpetual_loop = Perpetual_loop
 module Perpetual_oas = Perpetual_oas

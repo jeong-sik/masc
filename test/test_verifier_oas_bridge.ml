@@ -216,6 +216,50 @@ let test_l5_gate_roundtrip () =
      | _ -> false)
 
 (* ================================================================ *)
+(* execution_scope -> gate_config -> guardrails roundtrip             *)
+(* ================================================================ *)
+
+let test_observe_only_roundtrip () =
+  let gate =
+    Worker_oas.gate_config_of_execution_scope
+      Team_session_types.Observe_only
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "Observe_only -> AllowList (read-only)"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowList names -> List.length names > 0
+     | _ -> false);
+  Alcotest.(check (option int)) "Observe_only max_calls = 8"
+    (Some 8) g.max_tool_calls_per_turn
+
+let test_limited_code_change_roundtrip () =
+  let gate =
+    Worker_oas.gate_config_of_execution_scope
+      Team_session_types.Limited_code_change
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "Limited -> DenyList"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.DenyList names -> List.length names > 0
+     | _ -> false)
+
+let test_autonomous_roundtrip () =
+  let gate =
+    Worker_oas.gate_config_of_execution_scope
+      Team_session_types.Autonomous
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "Autonomous -> AllowAll"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowAll -> true
+     | _ -> false);
+  Alcotest.(check (option int)) "Autonomous max_calls = 20"
+    (Some 20) g.max_tool_calls_per_turn
+
+(* ================================================================ *)
 (* Test Suite                                                        *)
 (* ================================================================ *)
 
@@ -248,5 +292,13 @@ let () =
       Alcotest.test_case "L3 -> AllowList (strict)" `Quick test_l3_gate_roundtrip;
       Alcotest.test_case "L4 -> AllowList (with bash)" `Quick test_l4_gate_roundtrip;
       Alcotest.test_case "L5 -> AllowAll" `Quick test_l5_gate_roundtrip;
+    ]);
+    ("execution_scope roundtrip", [
+      Alcotest.test_case "Observe_only -> AllowList" `Quick
+        test_observe_only_roundtrip;
+      Alcotest.test_case "Limited -> DenyList" `Quick
+        test_limited_code_change_roundtrip;
+      Alcotest.test_case "Autonomous -> AllowAll" `Quick
+        test_autonomous_roundtrip;
     ]);
   ]

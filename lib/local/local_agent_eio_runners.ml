@@ -200,9 +200,13 @@ let run_worker_oas ~sw ~base_path ~worker_name
                     | _ -> Oas.Hooks.Continue);
             }
           in
+          let gate_config =
+            Worker_oas.gate_config_of_execution_scope meta.execution_scope
+          in
           let* agent =
             Worker_oas.build_agent ~net ~meta ~model ~system_prompt ~tools
-              ~hooks ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ()
+              ~hooks ~raw_trace ~heartbeat_callbacks:heartbeat_cbs
+              ~gate_config ()
           in
           let result =
             Oas.Agent.run ~sw agent prompt

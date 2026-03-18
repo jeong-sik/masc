@@ -185,48 +185,9 @@ let () = test "handle_heartbeat_stop_not_found" (fun () ->
       assert (String.length result > 0 (* contains emoji *)))
 )
 
-(* ============================================================
-   Voice integration in heartbeat allowed_tools (#4, #5)
-   ============================================================ *)
-
-let () = test "heartbeat_voice_disabled_no_voice_tools" (fun () ->
-  Eio_main.run @@ fun _env ->
-  let tools = Lodge_heartbeat.heartbeat_allowed_tools
-    ~agent_name:"test-hb-no-voice" ~trigger:Lodge_heartbeat.Scheduled
-    ~recent_posts:[] () in
-  assert (not (List.mem "masc_voice_agent" tools));
-  assert (not (List.mem "masc_voice_speak" tools));
-  assert (not (List.mem "masc_voice_sessions" tools))
-)
-
-let () = test "heartbeat_voice_enabled_has_read_tools" (fun () ->
-  Eio_main.run @@ fun _env ->
-  let tools = Lodge_heartbeat.heartbeat_allowed_tools
-    ~agent_name:"test-hb-voice-on" ~trigger:Lodge_heartbeat.Scheduled
-    ~recent_posts:[] ~voice_enabled:true () in
-  assert (List.mem "masc_voice_agent" tools);
-  assert (List.mem "masc_voice_sessions" tools)
-)
-
-let () = test "heartbeat_voice_enabled_speak_allowed_fresh" (fun () ->
-  Eio_main.run @@ fun _env ->
-  let tools = Lodge_heartbeat.heartbeat_allowed_tools
-    ~agent_name:"test-hb-voice-speak-fresh" ~trigger:Lodge_heartbeat.Scheduled
-    ~recent_posts:[] ~voice_enabled:true () in
-  assert (List.mem "masc_voice_speak" tools)
-)
-
-let () = test "heartbeat_voice_rate_limited_after_action" (fun () ->
-  Eio_main.run @@ fun _env ->
-  let agent = "test-hb-voice-rl" in
-  Lodge_heartbeat.record_rate_action ~agent_name:agent `Voice;
-  let tools = Lodge_heartbeat.heartbeat_allowed_tools
-    ~agent_name:agent ~trigger:Lodge_heartbeat.Scheduled
-    ~recent_posts:[] ~voice_enabled:true () in
-  (* voice_speak should be absent after rate limit *)
-  assert (not (List.mem "masc_voice_speak" tools));
-  (* read tools should still be present *)
-  assert (List.mem "masc_voice_agent" tools)
-)
+(* Voice integration in heartbeat allowed_tools tests removed:
+   Lodge_heartbeat.heartbeat_allowed_tools was deleted in the Lodge
+   deprecation refactoring (#1596, #1640). Voice tool integration
+   now lives in keeper_exec_tools.ml and capability_registry.ml. *)
 
 let () = Printf.printf "\n✅ All Tool_heartbeat tests passed!\n"

@@ -1,7 +1,7 @@
 open Tool_lodge_config_http
 open Yojson.Safe.Util
 
-(** Call GLM API via Llm_client cascade — Z.ai cloud API, 200K context, no VRAM. *)
+(** Call GLM API via Llm_orchestration cascade — Z.ai cloud API, 200K context, no VRAM. *)
 let glm_direct ~net:_ ?temperature:(_temp = 0.7) ?(max_tokens = 500) ~system prompt =
   match Lodge_cascade.call ~cascade_name:"lodge_direct"
       ~prompt ~temperature:_temp ~timeout_sec:120 ~max_tokens ~system () with

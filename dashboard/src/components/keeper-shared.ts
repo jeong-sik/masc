@@ -45,13 +45,13 @@ function quietReasonLabel(reason?: string | null): string {
 function nextActionLabel(path: string): string {
   switch (path) {
     case 'manual_lodge_poke':
-      return 'Run Social Sweep'
+      return '소셜 스윕 실행'
     case 'probe':
-      return 'Probe'
+      return '프로브'
     case 'recover':
-      return 'Recover'
+      return '복구'
     default:
-      return 'Message'
+      return '메시지'
   }
 }
 
@@ -177,7 +177,7 @@ export function KeeperConversationPanel({
     <div class="keeper-conversation-shell">
       <${ChatTranscript}
         entries=${thread}
-        emptyText="No direct keeper conversation yet."
+        emptyText="아직 직접 대화 기록이 없습니다."
       />
       <${ChatComposer}
         draft=${draft}
@@ -222,7 +222,7 @@ export function KeeperRuntimeActions({
         }}
         disabled=${probing || !actor.trim()}
       >
-        ${probing ? 'Probing...' : 'Probe'}
+        ${probing ? '프로브 중...' : '프로브'}
       </button>
       <button
         class=${`control-btn secondary ${recommended === 'recover' ? 'is-active' : ''}`}
@@ -234,13 +234,13 @@ export function KeeperRuntimeActions({
         }}
         disabled=${recovering || !canRecover || !actor.trim()}
       >
-        ${recovering ? 'Recovering...' : 'Recover'}
+        ${recovering ? '복구 중...' : '복구'}
       </button>
       <button
         class=${`control-btn ghost ${recommended === 'manual_lodge_poke' ? 'is-active' : ''}`}
         onClick=${onPokeLodge}
       >
-        Run Social Sweep
+        소셜 스윕 실행
       </button>
     </div>
   `

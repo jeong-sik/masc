@@ -34,7 +34,7 @@ function bubbleTone(entry: KeeperConversationEntry): string {
 }
 
 function avatarLabel(entry: KeeperConversationEntry): string {
-  if (entry.role === 'user') return 'You'
+  if (entry.role === 'user') return '사용자'
   if (entry.label.trim()) return entry.label.trim()
   return entry.role
 }
@@ -67,7 +67,7 @@ function formatCurrency(value?: number | null): string | null {
 
 function stateRows(stateBlock?: string | null): Array<{ label: string; value: string }> {
   if (!stateBlock) return []
-  const labels = ['Goal', 'Progress', 'Next', 'Decisions', 'OpenQuestions', 'Constraints']
+  const labels = ['Goal', 'Progress', 'Next', 'Decisions', 'OpenQuestions', 'Constraints'] // state block parsing keys — keep English (API contract)
   return stateBlock
     .split('\n')
     .map(line => line.trim())
@@ -85,12 +85,12 @@ function stateRows(stateBlock?: string | null): Array<{ label: string; value: st
 
 function overviewRows(details: KeeperConversationDetails): Array<{ label: string; value: string }> {
   return [
-    details.modelUsed ? { label: 'Model', value: details.modelUsed } : null,
-    typeof details.latencyMs === 'number' ? { label: 'Latency', value: `${details.latencyMs} ms` } : null,
-    typeof details.usage?.totalTokens === 'number' ? { label: 'Tokens', value: `${details.usage.totalTokens}` } : null,
-    formatCurrency(details.costUsd) ? { label: 'Cost', value: formatCurrency(details.costUsd)! } : null,
-    details.traceId ? { label: 'Trace', value: details.traceId } : null,
-    typeof details.generation === 'number' ? { label: 'Generation', value: `${details.generation}` } : null,
+    details.modelUsed ? { label: '모델', value: details.modelUsed } : null,
+    typeof details.latencyMs === 'number' ? { label: '지연', value: `${details.latencyMs} ms` } : null,
+    typeof details.usage?.totalTokens === 'number' ? { label: '토큰', value: `${details.usage.totalTokens}` } : null,
+    formatCurrency(details.costUsd) ? { label: '비용', value: formatCurrency(details.costUsd)! } : null,
+    details.traceId ? { label: '트레이스', value: details.traceId } : null,
+    typeof details.generation === 'number' ? { label: '세대', value: `${details.generation}` } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
 
@@ -123,7 +123,7 @@ export function ChatMessageBubble({ entry }: { entry: KeeperConversationEntry })
                 class="chat-disclosure-btn"
                 onClick=${() => { setExpanded(!expanded) }}
               >
-                ${expanded ? 'Hide details' : 'Show details'}
+                ${expanded ? '상세 숨기기' : '상세 보기'}
               </button>
             `
           : null}
@@ -156,7 +156,7 @@ export function ChatMessageBubble({ entry }: { entry: KeeperConversationEntry })
               ${entry.details.skillPrimary
                 ? html`
                     <div class="chat-detail-callout">
-                      <div class="chat-detail-callout-label">Skill Route</div>
+                      <div class="chat-detail-callout-label">스킬 경로</div>
                       <div class="chat-detail-callout-value">${entry.details.skillPrimary}</div>
                       ${entry.details.skillReason
                         ? html`<div class="chat-detail-callout-copy">${entry.details.skillReason}</div>`
@@ -167,7 +167,7 @@ export function ChatMessageBubble({ entry }: { entry: KeeperConversationEntry })
               ${state.length > 0
                 ? html`
                     <div class="chat-detail-section">
-                      <div class="chat-detail-section-title">State Snapshot</div>
+                      <div class="chat-detail-section-title">상태 스냅샷</div>
                       <div class="chat-state-grid">
                         ${state.map(item => html`
                           <div class="chat-state-card">
@@ -187,7 +187,7 @@ export function ChatMessageBubble({ entry }: { entry: KeeperConversationEntry })
                         class="chat-raw-toggle"
                         onClick=${() => { setRawExpanded(!rawExpanded) }}
                       >
-                        ${rawExpanded ? 'Hide raw payload' : 'Show raw payload'}
+                        ${rawExpanded ? '원본 숨기기' : '원본 보기'}
                       </button>
                       ${rawExpanded
                         ? html`<pre>${JSON.stringify(entry.details.rawPayload, null, 2)}</pre>`
@@ -261,7 +261,7 @@ export function ChatComposer({
 
   const streamLabel = streaming
     ? `Streaming${elapsed > 0 ? ` ${elapsed}s` : '...'}`
-    : 'Send'
+    : '전송'
   const warnClass = streaming && elapsed > 60 ? ' chat-stream-warning' : ''
 
   return html`
@@ -289,7 +289,7 @@ export function ChatComposer({
                 class="control-btn ghost"
                 onClick=${onAbort}
               >
-                Stop
+                중지
               </button>
             `
           : null}

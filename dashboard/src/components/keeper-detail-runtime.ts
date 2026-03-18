@@ -77,17 +77,17 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
 
   const rows: Array<{ label: string; value: string | number }> = [
     { label: 'Model fallback', value: formatPct(typeof mw?.model_fallback_rate === 'number' ? mw.model_fallback_rate : undefined) },
-    { label: 'Proactive fallback', value: formatPct(typeof mw?.proactive_fallback_rate === 'number' ? mw.proactive_fallback_rate : undefined) },
-    { label: 'Memory pass rate', value: formatPct(typeof mw?.memory_pass_rate === 'number' ? mw.memory_pass_rate : undefined) },
-    { label: 'Handoffs', value: typeof mw?.handoff_count === 'number' ? mw.handoff_count : keeper.handoff_count_total ?? '-' },
-    { label: 'Compactions', value: typeof mw?.compaction_events === 'number' ? mw.compaction_events : keeper.compaction_count ?? '-' },
-    { label: 'Saved tokens', value: typeof mw?.compaction_saved_tokens === 'number' ? mw.compaction_saved_tokens : keeper.last_compaction_saved_tokens ?? '-' },
-    { label: 'K2K events', value: keeper.k2k_count ?? '-' },
-    { label: 'Conversation tail', value: keeper.conversation_tail_count ?? '-' },
-    { label: 'Tool Calls', value: typeof mw?.tool_call_count === 'number' ? mw.tool_call_count : '-' },
-    { label: 'Preview Similarity', value: typeof mw?.proactive_preview_similarity_avg === 'number' ? `${(mw.proactive_preview_similarity_avg * 100).toFixed(1)}%` : '-' },
-    { label: 'Memory Avg Score', value: typeof mw?.memory_avg_score === 'number' ? mw.memory_avg_score.toFixed(3) : '-' },
-    { label: 'Fallback Rate', value: typeof mw?.fallback_rate === 'number' ? `${(mw.fallback_rate * 100).toFixed(1)}%` : '-' },
+    { label: '선제적 폴백', value: formatPct(typeof mw?.proactive_fallback_rate === 'number' ? mw.proactive_fallback_rate : undefined) },
+    { label: '메모리 통과율', value: formatPct(typeof mw?.memory_pass_rate === 'number' ? mw.memory_pass_rate : undefined) },
+    { label: '핸드오프', value: typeof mw?.handoff_count === 'number' ? mw.handoff_count : keeper.handoff_count_total ?? '-' },
+    { label: '컴팩션', value: typeof mw?.compaction_events === 'number' ? mw.compaction_events : keeper.compaction_count ?? '-' },
+    { label: '절약 토큰', value: typeof mw?.compaction_saved_tokens === 'number' ? mw.compaction_saved_tokens : keeper.last_compaction_saved_tokens ?? '-' },
+    { label: 'K2K 이벤트', value: keeper.k2k_count ?? '-' },
+    { label: '대화 꼬리', value: keeper.conversation_tail_count ?? '-' },
+    { label: '도구 호출', value: typeof mw?.tool_call_count === 'number' ? mw.tool_call_count : '-' },
+    { label: '미리보기 유사도', value: typeof mw?.proactive_preview_similarity_avg === 'number' ? `${(mw.proactive_preview_similarity_avg * 100).toFixed(1)}%` : '-' },
+    { label: '메모리 평균 점수', value: typeof mw?.memory_avg_score === 'number' ? mw.memory_avg_score.toFixed(3) : '-' },
+    { label: '폴백 비율', value: typeof mw?.fallback_rate === 'number' ? `${(mw.fallback_rate * 100).toFixed(1)}%` : '-' },
   ]
 
   const visibleRows = rows.filter(row =>

@@ -99,7 +99,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
         <div style="min-height: 345px;">
           <${KeeperConversationPanel}
             keeperName=${keeper.name}
-            placeholder="Direct prompt for this keeper"
+            placeholder="이 키퍼에게 직접 프롬프트"
           />
         </div>
       </div>
@@ -150,20 +150,20 @@ export function KeeperDetailOverlay() {
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
 
           ${'' /* Left: Field Dictionary */}
-          <${Card} title="Field Dictionary">
+          <${Card} title="필드 사전">
             <${FieldDictionary} keeper=${keeper} />
           <//>
 
           ${'' /* Right: Traits + Interests */}
-          <${Card} title="Profile">
-            <${TraitsList} traits=${keeper.traits ?? []} label="Traits" />
-            <${TraitsList} traits=${keeper.interests ?? []} label="Interests" />
+          <${Card} title="프로필">
+            <${TraitsList} traits=${keeper.traits ?? []} label="특성" />
+            <${TraitsList} traits=${keeper.interests ?? []} label="관심사" />
             ${keeper.primaryValue
-              ? html`<div style="font-size:12px; color:#888;">Primary value: <span style="color:#4ade80;">${keeper.primaryValue}</span></div>`
+              ? html`<div style="font-size:12px; color:#888;">핵심 가치: <span style="color:#4ade80;">${keeper.primaryValue}</span></div>`
               : null}
             ${keeper.skill_primary
               ? html`<div style="font-size:12px; color:#888; margin-top:6px;">
-                  Skill route: <span style="color:#22d3ee;">${keeper.skill_primary}</span>
+                  스킬 경로: <span style="color:#22d3ee;">${keeper.skill_primary}</span>
                 </div>`
               : null}
             ${keeper.skill_reason
@@ -171,7 +171,7 @@ export function KeeperDetailOverlay() {
               : null}
             ${keeper.last_heartbeat
               ? html`<div style="font-size:12px; color:#888; margin-top:6px;">
-                  Last heartbeat: <${TimeAgo} timestamp=${keeper.last_heartbeat} />
+                  마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                 </div>`
               : null}
           <//>
@@ -179,7 +179,7 @@ export function KeeperDetailOverlay() {
           ${'' /* Autonomy Level (if available) */}
           ${keeper.autonomy_level
             ? html`
-              <${Card} title="Autonomy">
+              <${Card} title="자율성">
                 <${AutonomyMeter} keeper=${keeper} />
               <//>
             `
@@ -212,15 +212,15 @@ export function KeeperDetailOverlay() {
             `
             : null}
 
-          <${Card} title="Runtime Signals">
+          <${Card} title="런타임 신호">
             <${RuntimeSignals} keeper=${keeper} />
           <//>
 
-          <${Card} title="Neighborhood & Tool Audit">
+          <${Card} title="이웃 관계 및 도구 감사">
             <${KeeperNeighborhood} keeper=${keeper} />
           <//>
 
-          <${Card} title="Memory & Context">
+          <${Card} title="메모리 및 컨텍스트">
             <div class="keeper-signal-list">
               <div class="keeper-signal-row">
                 <span>Context source</span>

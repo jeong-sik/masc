@@ -456,8 +456,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
             net = state.Mcp_server.net; mcp_state = Some state;
             mcp_session_id; auth_token } in
         Tool_command_plane.dispatch ctx ~name ~args:arguments
-    | Mod_llama ->
-        Tool_llama.dispatch { Tool_llama.config; agent_name } ~name ~args:arguments
+    | Mod_local_runtime ->
+        Tool_local_runtime.dispatch { Tool_local_runtime.config; agent_name } ~name ~args:arguments
     | Mod_llm_catalog ->
         Tool_llm_catalog.dispatch () ~name ~args:arguments
     | Mod_team_session ->

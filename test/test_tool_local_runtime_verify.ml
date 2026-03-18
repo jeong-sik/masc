@@ -2,18 +2,18 @@ open Alcotest
 
 let test_provider_health_reachable_accepts_json_health () =
   check bool "json health body counts as reachable" true
-    (Masc_mcp.Tool_llama.provider_health_reachable ~status:(Some 200)
+    (Masc_mcp.Tool_local_runtime.provider_health_reachable ~status:(Some 200)
        ~body:(Some {|{"status":"ok"}|}));
   check bool "plain text health body counts as reachable" true
-    (Masc_mcp.Tool_llama.provider_health_reachable ~status:(Some 200)
+    (Masc_mcp.Tool_local_runtime.provider_health_reachable ~status:(Some 200)
        ~body:(Some "ok"));
   check bool "non-200 is unreachable" false
-    (Masc_mcp.Tool_llama.provider_health_reachable ~status:(Some 503)
+    (Masc_mcp.Tool_local_runtime.provider_health_reachable ~status:(Some 503)
        ~body:(Some {|{"status":"error"}|}))
 
 let test_classify_runtime_blocker_prefers_slot_count_when_health_ok () =
   let blocker, detail =
-    Masc_mcp.Tool_llama.classify_runtime_blocker ~provider_reachable:true
+    Masc_mcp.Tool_local_runtime.classify_runtime_blocker ~provider_reachable:true
       ~slot_reachable:true
       ~expected_model:(Some "qwen3.5-35b-a3b-ud-q8-xl")
       ~actual_model_id:(Some "qwen3.5-35b-a3b-ud-q8-xl")
@@ -28,7 +28,7 @@ let test_classify_runtime_blocker_prefers_slot_count_when_health_ok () =
     | None -> false)
 
 let () =
-  run "tool_llama_runtime_verify"
+  run "tool_local_runtime_verify"
     [
       ( "provider_health_reachable",
         [

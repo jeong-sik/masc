@@ -668,7 +668,7 @@ let worker_session_id worker_name =
   let digest =
     Digest.string (worker_name ^ string_of_float (Time_compat.now ())) |> Digest.to_hex
   in
-  sprintf "llama-%s" (String.sub digest 0 12)
+  sprintf "local-%s" (String.sub digest 0 12)
 
 let worker_auth_token ~base_path ~worker_name =
   let auth_cfg = Auth.load_auth_config base_path in

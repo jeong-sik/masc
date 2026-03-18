@@ -157,8 +157,8 @@
  (libraries masc_mcp alcotest yojson))
 
 (test
- (name test_tool_llama_runtime_verify)
- (modules test_tool_llama_runtime_verify)
+ (name test_tool_local_runtime_verify)
+ (modules test_tool_local_runtime_verify)
  (libraries masc_mcp alcotest yojson))
 
 ; Voice tool wrapper tests

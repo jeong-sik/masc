@@ -91,7 +91,7 @@ let execution_smoke_fixture_json () =
                 ("tool_audit_at", `String generated_at);
                 ("checked_at", `String generated_at);
                 ("decision_reason", `String "critical board state required intervention");
-                ("worker_name", `String "llama-local-dreamer");
+                ("worker_name", `String "local-dreamer");
                 ("failure_reason", `Null);
               ];
             `Assoc
@@ -165,7 +165,7 @@ let execution_smoke_fixture_json () =
                 ("tool_audit_at", `String generated_at);
                 ("checked_at", `String generated_at);
                 ("decision_reason", `String "critical board state required intervention");
-                ("worker_name", `String "llama-local-dreamer");
+                ("worker_name", `String "local-dreamer");
                 ("failure_reason", `Null);
               ];
             `Assoc
@@ -277,7 +277,7 @@ let execution_smoke_fixture_json () =
                 ("room", `String "default");
                 ("status", `String "interrupted");
                 ("health", `String "bad");
-                ("member_names", `List [ `String "llama-local-alpha"; `String "llama-local-beta"; `String "llama-local-delta" ]);
+                ("member_names", `List [ `String "local-alpha"; `String "local-beta"; `String "local-delta" ]);
                 ("linked_operation_id", `String "op-runtime-001");
                 ("linked_detachment_id", `String "det-runtime-001");
                 ("runtime_blocker", `String "session has 2 failed spawn event(s)");
@@ -301,7 +301,7 @@ let execution_smoke_fixture_json () =
                 ("room", `String "default");
                 ("status", `String "running");
                 ("health", `String "ok");
-                ("member_names", `List [ `String "llama-local-gamma" ]);
+                ("member_names", `List [ `String "local-gamma" ]);
                 ("linked_operation_id", `String "op-runtime-003");
                 ("linked_detachment_id", `String "det-runtime-003");
                 ("runtime_blocker", `Null);
@@ -362,8 +362,8 @@ let execution_smoke_fixture_json () =
           [
             `Assoc
               [
-                ("name", `String "llama-local-alpha");
-                ("agent_name", `String "llama-local-alpha");
+                ("name", `String "local-alpha");
+                ("agent_name", `String "local-alpha");
                 ("status", `String "busy");
                 ("tone", `String "ok");
                 ("state", `String "working");
@@ -377,15 +377,15 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `String "ts-execution-fixture-001");
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "llama-local-alpha");
+                ("korean_name", `String "local-alpha");
                 ("model", `String Env_config.Llama.default_model);
                 ("recent_output_preview", `String "manager synthesized runtime visibility and handed next checks to beta");
                 ("recent_event", `String "manager handoff");
               ];
             `Assoc
               [
-                ("name", `String "llama-local-beta");
-                ("agent_name", `String "llama-local-beta");
+                ("name", `String "local-beta");
+                ("agent_name", `String "local-beta");
                 ("status", `String "active");
                 ("tone", `String "warn");
                 ("state", `String "quiet");
@@ -399,15 +399,15 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `String "ts-execution-fixture-001");
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "llama-local-beta");
+                ("korean_name", `String "local-beta");
                 ("model", `String "qwen27-balanced");
                 ("recent_output_preview", `String "secondary runtime is quiet; watching queue depth before escalation");
                 ("recent_event", `String "secondary runtime probe");
               ];
             `Assoc
               [
-                ("name", `String "llama-local-gamma");
-                ("agent_name", `String "llama-local-gamma");
+                ("name", `String "local-gamma");
+                ("agent_name", `String "local-gamma");
                 ("status", `String "idle");
                 ("tone", `String "ok");
                 ("state", `String "watching");
@@ -421,7 +421,7 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `String "ts-execution-fixture-002");
                 ("related_operation_id", `String "op-runtime-003");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "llama-local-gamma");
+                ("korean_name", `String "local-gamma");
                 ("model", `String "qwen9-swarm");
                 ("recent_output_preview", `Null);
                 ("recent_event", `String "idle");
@@ -432,8 +432,8 @@ let execution_smoke_fixture_json () =
           [
             `Assoc
               [
-                ("name", `String "llama-local-alpha");
-                ("agent_name", `String "llama-local-alpha");
+                ("name", `String "local-alpha");
+                ("agent_name", `String "local-alpha");
                 ("status", `String "busy");
                 ("tone", `String "ok");
                 ("state", `String "working");
@@ -447,8 +447,8 @@ let execution_smoke_fixture_json () =
               ];
             `Assoc
               [
-                ("name", `String "llama-local-beta");
-                ("agent_name", `String "llama-local-beta");
+                ("name", `String "local-beta");
+                ("agent_name", `String "local-beta");
                 ("status", `String "active");
                 ("tone", `String "warn");
                 ("state", `String "quiet");
@@ -502,8 +502,8 @@ let execution_smoke_fixture_json () =
           [
             `Assoc
               [
-                ("name", `String "llama-local-delta");
-                ("agent_name", `String "llama-local-delta");
+                ("name", `String "local-delta");
+                ("agent_name", `String "local-delta");
                 ("status", `String "inactive");
                 ("tone", `String "bad");
                 ("state", `String "offline");
@@ -517,7 +517,7 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `String "ts-execution-fixture-001");
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "llama-local-delta");
+                ("korean_name", `String "local-delta");
                 ("model", `String "qwen9-swarm");
                 ("recent_output_preview", `Null);
                 ("recent_event", `String "missing heartbeat");
@@ -528,7 +528,7 @@ let execution_smoke_fixture_json () =
           [
             `Assoc
               [
-                ("name", `String "llama-local-alpha");
+                ("name", `String "local-alpha");
                 ("agent_type", `String "llama");
                 ("status", `String "busy");
                 ("current_task", `String "Validate local64 swarm role coverage");
@@ -536,11 +536,11 @@ let execution_smoke_fixture_json () =
                 ("last_seen", `String generated_at);
                 ("capabilities", `List [ `String "manager"; `String "local64" ]);
                 ("emoji", `String "🤖");
-                ("koreanName", `String "llama-local-alpha");
+                ("koreanName", `String "local-alpha");
               ];
             `Assoc
               [
-                ("name", `String "llama-local-beta");
+                ("name", `String "local-beta");
                 ("agent_type", `String "llama");
                 ("status", `String "active");
                 ("current_task", `String "Inspect secondary runtime health");
@@ -548,11 +548,11 @@ let execution_smoke_fixture_json () =
                 ("last_seen", `String "2026-03-11T09:15:00Z");
                 ("capabilities", `List [ `String "metacog"; `String "local64" ]);
                 ("emoji", `String "🤖");
-                ("koreanName", `String "llama-local-beta");
+                ("koreanName", `String "local-beta");
               ];
             `Assoc
               [
-                ("name", `String "llama-local-gamma");
+                ("name", `String "local-gamma");
                 ("agent_type", `String "llama");
                 ("status", `String "idle");
                 ("current_task", `Null);
@@ -560,11 +560,11 @@ let execution_smoke_fixture_json () =
                 ("last_seen", `String generated_at);
                 ("capabilities", `List [ `String "executor"; `String "local64" ]);
                 ("emoji", `String "🤖");
-                ("koreanName", `String "llama-local-gamma");
+                ("koreanName", `String "local-gamma");
               ];
             `Assoc
               [
-                ("name", `String "llama-local-delta");
+                ("name", `String "local-delta");
                 ("agent_type", `String "llama");
                 ("status", `String "inactive");
                 ("current_task", `Null);
@@ -572,7 +572,7 @@ let execution_smoke_fixture_json () =
                 ("last_seen", `String "2026-03-11T08:55:00Z");
                 ("capabilities", `List [ `String "observer"; `String "local64" ]);
                 ("emoji", `String "🤖");
-                ("koreanName", `String "llama-local-delta");
+                ("koreanName", `String "local-delta");
               ];
           ] );
       ( "tasks",
@@ -585,7 +585,7 @@ let execution_smoke_fixture_json () =
                 ("description", `String "manager census and runtime visibility");
                 ("status", `String "in_progress");
                 ("priority", `Int 1);
-                ("assignee", `String "llama-local-alpha");
+                ("assignee", `String "local-alpha");
                 ("created_at", `String generated_at);
               ];
             `Assoc
@@ -595,7 +595,7 @@ let execution_smoke_fixture_json () =
                 ("description", `String "probe quiet worker path");
                 ("status", `String "claimed");
                 ("priority", `Int 2);
-                ("assignee", `String "llama-local-beta");
+                ("assignee", `String "local-beta");
                 ("created_at", `String generated_at);
               ];
             `Assoc
@@ -614,14 +614,14 @@ let execution_smoke_fixture_json () =
           [
             `Assoc
               [
-                ("from", `String "llama-local-alpha");
+                ("from", `String "local-alpha");
                 ("content", `String "manager synthesized runtime visibility and handed next checks to beta");
                 ("timestamp", `String generated_at);
                 ("seq", `Int 1);
               ];
             `Assoc
               [
-                ("from", `String "llama-local-beta");
+                ("from", `String "local-beta");
                 ("content", `String "secondary runtime is quiet; watching queue depth before escalation");
                 ("timestamp", `String "2026-03-11T09:15:00Z");
                 ("seq", `Int 2);

@@ -32,7 +32,7 @@ type verdict =
 (** Verify an action using the given model.
     Max 200 output tokens to keep cost low.
     @return verdict based on cheap model analysis. *)
-val verify : model:Llm_client.model_spec -> verification_request -> verdict
+val verify : model:Llm_types.model_spec -> verification_request -> verdict
 
 (** Check if an action should skip verification (read-only ops). *)
 val should_skip : action_description:string -> bool

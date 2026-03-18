@@ -1,6 +1,6 @@
 open Alcotest
 
-module Llm = Masc_mcp.Llm_client
+module Llm = Masc_mcp.Llm_types
 
 let sample_request provider =
   {
@@ -70,8 +70,8 @@ let test_available_model_specs_of_strings_llama () =
 
 let test_cache_key_of_request_deterministic () =
   let request = sample_request Llm.Llama in
-  let key_a = Llm.cache_key_of_request request in
-  let key_b = Llm.cache_key_of_request request in
+  let key_a = Masc_mcp.Llm_orchestration.cache_key_of_request request in
+  let key_b = Masc_mcp.Llm_orchestration.cache_key_of_request request in
   check string "same request -> same key" key_a key_b
 
 let () =

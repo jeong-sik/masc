@@ -154,7 +154,7 @@ let handle_start ctx args =
   let auto_claim_cooldown = Safe_ops.json_float ~default:60.0 "auto_claim_cooldown_sec" args in
   (* Parse model specs *)
   let models = List.filter_map (fun s ->
-    match Llm_client.model_spec_of_string s with
+    match Llm_types.model_spec_of_string s with
     | Ok m -> Some m
     | Error e -> Log.Perpetual.info "Bad model spec %s: %s" s e; None
   ) model_strs in
@@ -202,7 +202,7 @@ let handle_start ctx args =
       ("trace_id", `String state.trace_id);
       ("status", `String (match ctx.start_loop with Some _ -> "started" | None -> "created"));
       ("generation", `Int 0);
-      ("models", `List (List.map (fun (m : Llm_client.model_spec) ->
+      ("models", `List (List.map (fun (m : Llm_types.model_spec) ->
         `String m.model_id) models));
     ]
   end
@@ -222,9 +222,9 @@ let handle_status args =
       (match base with
        | `Assoc fields ->
          let models =
-           `List (List.map (fun (m : Llm_client.model_spec) ->
+           `List (List.map (fun (m : Llm_types.model_spec) ->
              `Assoc [
-               ("provider", `String (Llm_client.string_of_provider m.provider));
+               ("provider", `String (Llm_types.string_of_provider m.provider));
                ("model_id", `String m.model_id);
                ("max_context", `Int m.max_context);
                ("api_key_env", match m.api_key_env with None -> `Null | Some k -> `String k);
@@ -277,7 +277,7 @@ let handle_inject args =
     match Hashtbl.find_opt active_agents id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Agent %s not found" id))]
     | Some (state, _config) ->
-      let msg = Llm_client.user_msg message in
+      let msg = Llm_types.user_msg message in
       state.context <- Context_manager.append state.context msg;
       Context_manager.persist_message state.session msg;
       state.idle_turns <- 0;  (* Reset idle counter *)

@@ -2,7 +2,7 @@ open Alcotest
 
 module Cache = Masc_mcp.Llm_response_cache
 module Env_config = Masc_mcp.Env_config
-module Llm_client = Masc_mcp.Llm_client
+module Llm_client = Masc_mcp.Llm_orchestration
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -36,8 +36,8 @@ let with_env name value f =
 
 (** Store a cached response in OAS api_response JSON format.
     Uses MASC cache key (temperature-aware) + OAS serialization. *)
-let cache_response (req : Llm_client.completion_request) ~content ~model_used =
-  let key = Llm_client.cache_key_of_request req in
+let cache_response (req : Masc_mcp.Llm_types.completion_request) ~content ~model_used =
+  let key = Masc_mcp.Llm_orchestration.cache_key_of_request req in
   let payload =
     `Assoc
       [
@@ -62,9 +62,9 @@ let cache_response (req : Llm_client.completion_request) ~content ~model_used =
   | Error e -> fail ("set_json failed: " ^ e)
 
 let make_request model_id =
-  let model : Llm_client.model_spec =
+  let model : Masc_mcp.Llm_types.model_spec =
     {
-      provider = Llm_client.Custom "cached";
+      provider = Masc_mcp.Llm_types.Custom "cached";
       model_id;
       max_context = 4096;
       api_url = "http://127.0.0.1:1";
@@ -75,24 +75,24 @@ let make_request model_id =
   in
   ({
      model;
-     messages = [ Llm_client.user_msg ("prompt:" ^ model_id) ];
+     messages = [ Masc_mcp.Llm_types.user_msg ("prompt:" ^ model_id) ];
      temperature = 0.0;
      max_tokens = 64;
      tools = [];
      response_format = `Text;
    }
-    : Llm_client.completion_request)
+    : Masc_mcp.Llm_types.completion_request)
 
 let make_request_for_model ?(temperature = 0.0) ~model ~prompt ~max_tokens () =
   ({
      model;
-     messages = [ Llm_client.user_msg prompt ];
+     messages = [ Masc_mcp.Llm_types.user_msg prompt ];
      temperature;
      max_tokens;
      tools = [];
      response_format = `Text;
    }
-    : Llm_client.completion_request)
+    : Masc_mcp.Llm_types.completion_request)
 
 let contains_substring haystack needle =
   let h_len = String.length haystack in
@@ -111,13 +111,13 @@ let test_cascade_uses_next_cached_response_when_validator_rejects () =
       cache_response first ~content:"reject me" ~model_used:"cached-1";
       cache_response second ~content:"accept me" ~model_used:"cached-2";
       match
-        Llm_client.cascade
-          ~accept:(fun (resp : Llm_client.completion_response) ->
-            not (String.equal (Llm_client.text_of_response resp) "reject me"))
+        Masc_mcp.Llm_orchestration.cascade
+          ~accept:(fun (resp : Masc_mcp.Llm_types.completion_response) ->
+            not (String.equal (Masc_mcp.Llm_types.text_of_response resp) "reject me"))
           [ first; second ]
       with
       | Ok resp ->
-          check string "content" "accept me" (Llm_client.text_of_response resp);
+          check string "content" "accept me" (Masc_mcp.Llm_types.text_of_response resp);
           check string "winner" "cached-2" resp.model_used
       | Error e -> fail ("unexpected cascade error: " ^ e))
 
@@ -127,9 +127,9 @@ let test_cascade_returns_error_when_all_responses_rejected () =
       let first = make_request "cached-only" in
       cache_response first ~content:"reject me" ~model_used:"cached-only";
       match
-        Llm_client.cascade
-          ~accept:(fun (resp : Llm_client.completion_response) ->
-            not (String.equal (Llm_client.text_of_response resp) "reject me"))
+        Masc_mcp.Llm_orchestration.cascade
+          ~accept:(fun (resp : Masc_mcp.Llm_types.completion_response) ->
+            not (String.equal (Masc_mcp.Llm_types.text_of_response resp) "reject me"))
           [ first ]
       with
       | Ok _ -> fail "expected rejection error"
@@ -140,52 +140,52 @@ let test_cascade_returns_error_when_all_responses_rejected () =
 let test_available_model_specs_filters_invalid_and_missing_keys () =
   with_env "GEMINI_API_KEY" "" (fun () ->
       let specs =
-        Llm_client.available_model_specs_of_strings
+        Masc_mcp.Llm_types.available_model_specs_of_strings
           [ "invalid"; "gemini:gemini-2.5-pro"; "llama:qwen3.5-35b-a3b-ud-q8-xl" ]
       in
       check int "only llama survives" 1 (List.length specs);
       match specs with
       | [ only ] ->
-          check bool "provider" true (only.provider = Llm_client.Llama);
+          check bool "provider" true (only.provider = Masc_mcp.Llm_types.Llama);
           check string "model id" "qwen3.5-35b-a3b-ud-q8-xl" only.model_id
       | _ -> fail "expected one filtered model")
 
 let test_model_spec_of_string_rejects_bare_ollama_provider () =
-  match Llm_client.model_spec_of_string "ollama:glm-4.7-flash" with
+  match Masc_mcp.Llm_types.model_spec_of_string "ollama:glm-4.7-flash" with
   | Ok _ -> fail "expected ollama: prefix to be rejected"
   | Error _ -> ()
 
 let test_model_spec_of_string_parses_llama_provider () =
-  match Llm_client.model_spec_of_string "llama:glm-4.7-flash" with
+  match Masc_mcp.Llm_types.model_spec_of_string "llama:glm-4.7-flash" with
   | Ok spec ->
-      check bool "provider" true (spec.provider = Llm_client.Llama);
+      check bool "provider" true (spec.provider = Masc_mcp.Llm_types.Llama);
       check string "model id" "glm-4.7-flash" spec.model_id
   | Error e -> fail ("expected llama: provider to parse: " ^ e)
 
 let test_model_spec_of_string_resolves_default_label () =
   with_env "MASC_DEFAULT_PROVIDER" "glm" (fun () ->
       with_env "MASC_DEFAULT_MODEL" "glm-4.7" (fun () ->
-          match Llm_client.model_spec_of_string "default" with
+          match Masc_mcp.Llm_types.model_spec_of_string "default" with
           | Ok spec ->
-              check bool "provider" true (spec.provider = Llm_client.Glm_cloud);
+              check bool "provider" true (spec.provider = Masc_mcp.Llm_types.Glm_cloud);
               check string "model id" "glm-4.7" spec.model_id
           | Error e -> fail ("expected default to resolve: " ^ e)))
 
 let test_model_spec_of_string_resolves_default_override () =
   with_env "MASC_DEFAULT_PROVIDER" "gemini" (fun () ->
       with_env "MASC_DEFAULT_MODEL" "gemini-2.5-pro" (fun () ->
-          match Llm_client.model_spec_of_string "default:gemini-2.5-flash" with
+          match Masc_mcp.Llm_types.model_spec_of_string "default:gemini-2.5-flash" with
           | Ok spec ->
-              check bool "provider" true (spec.provider = Llm_client.Gemini);
+              check bool "provider" true (spec.provider = Masc_mcp.Llm_types.Gemini);
               check string "model id" "gemini-2.5-flash" spec.model_id
           | Error e -> fail ("expected default override to resolve: " ^ e)))
 
 let test_run_prompt_cascade_uses_same_request_shape () =
   with_temp_cwd (fun () ->
       Cache.clear_l1 ();
-      let model1 : Llm_client.model_spec =
+      let model1 : Masc_mcp.Llm_types.model_spec =
         {
-          provider = Llm_client.Custom "cached";
+          provider = Masc_mcp.Llm_types.Custom "cached";
           model_id = "run-prompt-1";
           max_context = 4096;
           api_url = "http://127.0.0.1:1";
@@ -203,19 +203,19 @@ let test_run_prompt_cascade_uses_same_request_shape () =
         (make_request_for_model ~model:model2 ~prompt ~max_tokens:32 ())
         ~content:"accept me" ~model_used:"run-prompt-2";
       match
-        Llm_client.run_prompt_cascade ~temperature:0.0 ~timeout_sec:30
-          ~accept:(fun (resp : Llm_client.completion_response) ->
-            not (String.equal (Llm_client.text_of_response resp) "reject me"))
+        Masc_mcp.Llm_orchestration.run_prompt_cascade ~temperature:0.0 ~timeout_sec:30
+          ~accept:(fun (resp : Masc_mcp.Llm_types.completion_response) ->
+            not (String.equal (Masc_mcp.Llm_types.text_of_response resp) "reject me"))
           ~model_specs:[ model1; model2 ] ~max_tokens:32 ~prompt ()
       with
       | Ok resp ->
-          check string "content" "accept me" (Llm_client.text_of_response resp);
+          check string "content" "accept me" (Masc_mcp.Llm_types.text_of_response resp);
           check string "winner" "run-prompt-2" resp.model_used
       | Error e -> fail ("unexpected run_prompt_cascade error: " ^ e))
 
 let test_llama_cache_key_preserves_requested_budget_below_global_cap () =
   let llama_model =
-    { Llm_client.llama_default with model_id = "qwen3.5-35b-a3b-ud-q8-xl" }
+    { Masc_mcp.Llm_types.llama_default with model_id = "qwen3.5-35b-a3b-ud-q8-xl" }
   in
   let req_short =
     make_request_for_model ~model:llama_model ~prompt:"same prompt" ~max_tokens:32 ()
@@ -225,12 +225,12 @@ let test_llama_cache_key_preserves_requested_budget_below_global_cap () =
   in
   check bool "different cache key"
     true
-    (Llm_client.cache_key_of_request req_short
-     <> Llm_client.cache_key_of_request req_long)
+    (Masc_mcp.Llm_orchestration.cache_key_of_request req_short
+     <> Masc_mcp.Llm_orchestration.cache_key_of_request req_long)
 
 let test_llama_cache_key_caps_requests_above_global_limit () =
   let llama_model =
-    { Llm_client.llama_default with model_id = "qwen3.5-35b-a3b-ud-q8-xl" }
+    { Masc_mcp.Llm_types.llama_default with model_id = "qwen3.5-35b-a3b-ud-q8-xl" }
   in
   let req_near_cap =
     make_request_for_model ~model:llama_model ~prompt:"same prompt"
@@ -241,13 +241,13 @@ let test_llama_cache_key_caps_requests_above_global_limit () =
       ~max_tokens:(Env_config.Llama.max_tokens * 2) ()
   in
   check string "same capped cache key"
-    (Llm_client.cache_key_of_request req_near_cap)
-    (Llm_client.cache_key_of_request req_far_above_cap)
+    (Masc_mcp.Llm_orchestration.cache_key_of_request req_near_cap)
+    (Masc_mcp.Llm_orchestration.cache_key_of_request req_far_above_cap)
 
 let test_non_llama_cache_key_preserves_requested_budget () =
-  let model : Llm_client.model_spec =
+  let model : Masc_mcp.Llm_types.model_spec =
     {
-      provider = Llm_client.Custom "cached";
+      provider = Masc_mcp.Llm_types.Custom "cached";
       model_id = "shape-check";
       max_context = 4096;
       api_url = "http://127.0.0.1:1";
@@ -264,8 +264,8 @@ let test_non_llama_cache_key_preserves_requested_budget () =
   in
   check bool "different cache key"
     true
-    (Llm_client.cache_key_of_request req_short
-     <> Llm_client.cache_key_of_request req_long)
+    (Masc_mcp.Llm_orchestration.cache_key_of_request req_short
+     <> Masc_mcp.Llm_orchestration.cache_key_of_request req_long)
 
 let () =
   run "llm_client_cascade"

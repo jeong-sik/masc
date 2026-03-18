@@ -17,12 +17,12 @@ let default_config ~goal ~models ?verifier ?session_dir () =
   let verifier_model = match verifier with
     | Some v -> v
     | None -> (
-        match Llm_client.default_verifier_model_spec () with
+        match Llm_types.default_verifier_model_spec () with
         | Ok model -> model
         | Error _ -> (
             match models with
             | model :: _ -> model
-            | [] -> Llm_client.glm_cloud))
+            | [] -> Llm_types.glm_cloud))
   in
   let session_base = match session_dir with
     | Some d -> d
@@ -89,20 +89,20 @@ let create_state config =
   in
   let primary_model = match config.model_cascade with
     | m :: _ -> m
-    | [] -> Llm_client.default_local_model_spec ()
+    | [] -> Llm_types.default_local_model_spec ()
   in
   let context = Context_manager.create
     ~system_prompt
     ~max_tokens:primary_model.max_context in
   (* Inject goal as first user message with sticky prefix for compaction safety *)
-  let goal_msg = Llm_client.user_msg
+  let goal_msg = Llm_types.user_msg
     (sprintf "%s %s" Context_manager.goal_prefix config.initial_goal) in
   let context = Context_manager.append context goal_msg in
   let trace_id = generate_trace_id () in
   let session = Context_manager.create_session
     ~session_id:trace_id
     ~base_dir:config.session_base_dir in
-  let zero_usage : Llm_client.token_usage = {
+  let zero_usage : Llm_types.token_usage = {
     Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
     cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
   } in
@@ -326,7 +326,7 @@ let status ~config state : Yojson.Safe.t =
     ("last_usage", `Assoc [
       ("input_tokens", `Int state.last_usage.input_tokens);
       ("output_tokens", `Int state.last_usage.output_tokens);
-      ("total_tokens", `Int (Llm_client.total_tokens state.last_usage));
+      ("total_tokens", `Int (Llm_types.total_tokens state.last_usage));
     ]);
     ("last_latency_ms", `Int state.last_latency_ms);
     ("last_heartbeat_ts", `Float state.last_heartbeat);

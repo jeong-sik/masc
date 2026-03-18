@@ -148,21 +148,21 @@ One line only.|}
 (* Core: verify                                                     *)
 (* ================================================================ *)
 
-let verify ~(model : Llm_client.model_spec) (req : verification_request) : verdict =
+let verify ~(model : Llm_types.model_spec) (req : verification_request) : verdict =
   if should_skip ~action_description:req.action_description then
     Pass
   else
     let prompt = build_prompt req in
-    let completion_req : Llm_client.completion_request = {
+    let completion_req : Llm_types.completion_request = {
       model;
-      messages = [Llm_client.user_msg prompt];
+      messages = [Llm_types.user_msg prompt];
       temperature = 0.0;  (* Deterministic for verification *)
       max_tokens = 200;   (* Budget cap *)
       tools = [];
       response_format = `Text;
     } in
     match Llm_orchestration.complete completion_req with
-    | Ok resp -> parse_verdict (Llm_client.text_of_response resp)
+    | Ok resp -> parse_verdict (Llm_types.text_of_response resp)
     | Error e ->
       eprintf "[verifier] LLM call failed: %s (defaulting to WARN)\n%!" e;
       Warn ("verifier_unavailable: " ^ e)
@@ -206,7 +206,7 @@ let verdict_to_hook_decision (v : verdict) : Agent_sdk.Hooks.hook_decision =
     @param goal The current agent goal (for verification prompt context).
     @param context_summary Brief summary of agent state. *)
 let make_pre_tool_hook
-    ~(model : Llm_client.model_spec)
+    ~(model : Llm_types.model_spec)
     ~(goal : string)
     ~(context_summary : string)
   : Agent_sdk.Hooks.hook =
@@ -244,7 +244,7 @@ let make_pre_tool_hook
     @return Updated hooks record with the verifier installed in pre_tool_use. *)
 let install_hook
     ~(hooks : Agent_sdk.Hooks.hooks)
-    ~(model : Llm_client.model_spec)
+    ~(model : Llm_types.model_spec)
     ~(goal : string)
     ~(context_summary : string)
   : Agent_sdk.Hooks.hooks =

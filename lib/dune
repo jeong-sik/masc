@@ -546,7 +546,6 @@
    llm_oas_adapters
    llm_provider_dispatch
    llm_orchestration
-   llm_client
    llm_response_cache
    context_scoring
    compaction_types

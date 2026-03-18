@@ -43,7 +43,7 @@ module Progress = Progress
 module Sse = Sse
 module Safe_ops = Safe_ops
 module Context_manager = Context_manager
-module Llm_client = Llm_client
+
 module Tool_perpetual = Tool_perpetual
 module Tool_mdal = Tool_mdal
 module Tool_board = Tool_board

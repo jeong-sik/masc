@@ -174,7 +174,7 @@ let test_filter_empty_and_oversized () =
    ============================================ *)
 
 let make_llm_response content =
-  Llm_client.{
+  Masc_mcp.Llm_types.{
     content = [Agent_sdk.Types.Text content];
     tool_calls = [];
     usage = {

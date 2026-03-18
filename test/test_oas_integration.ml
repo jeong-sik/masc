@@ -52,25 +52,25 @@ let test_event_bus_task_transition () =
 (* ================================================================ *)
 
 let test_message_roundtrip () =
-  let masc_msg : Llm_client.message =
-    Llm_client.assistant_msg "test content"
+  let masc_msg : Masc_mcp.Llm_types.message =
+    Masc_mcp.Llm_types.assistant_msg "test content"
   in
-  let oas_msg = Llm_client.to_oas_message masc_msg in
+  let oas_msg = Masc_mcp.Llm_provider_dispatch.to_oas_message masc_msg in
   (match oas_msg with
    | None -> Alcotest.fail "Assistant message should not be dropped"
    | Some msg ->
-     let roundtrip = Llm_client.of_oas_message msg in
+     let roundtrip = Masc_mcp.Llm_provider_dispatch.of_oas_message msg in
      Alcotest.(check string) "role preserved"
        "assistant"
-       (match roundtrip.role with Llm_client.Assistant -> "assistant" | _ -> "other");
+       (match roundtrip.role with Masc_mcp.Llm_types.Assistant -> "assistant" | _ -> "other");
      Alcotest.(check string) "content preserved"
-       "test content" (Llm_client.text_of_message roundtrip))
+       "test content" (Masc_mcp.Llm_types.text_of_message roundtrip))
 
 let test_system_role_dropped () =
-  let masc_msg : Llm_client.message =
-    Llm_client.system_msg "system prompt"
+  let masc_msg : Masc_mcp.Llm_types.message =
+    Masc_mcp.Llm_types.system_msg "system prompt"
   in
-  let oas_msg = Llm_client.to_oas_message masc_msg in
+  let oas_msg = Masc_mcp.Llm_provider_dispatch.to_oas_message masc_msg in
   Alcotest.(check bool) "system message dropped (belongs in system_prompt)"
     true (Option.is_none oas_msg)
 
@@ -81,10 +81,10 @@ let test_restore_messages () =
     { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
       content = [Agent_sdk.Types.Text "world"] };
   ] in
-  let masc_msgs = List.map Llm_client.of_oas_message oas_msgs in
+  let masc_msgs = List.map Masc_mcp.Llm_provider_dispatch.of_oas_message oas_msgs in
   Alcotest.(check int) "2 messages" 2 (List.length masc_msgs);
   Alcotest.(check string) "first content" "hello"
-    (Llm_client.text_of_message (List.hd masc_msgs))
+    (Masc_mcp.Llm_types.text_of_message (List.hd masc_msgs))
 
 (* ================================================================ *)
 (* Context_manager OAS sync tests                                    *)
@@ -93,7 +93,7 @@ let test_restore_messages () =
 let test_oas_context_sync () =
   let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:1000 in
   let ctx = Context_manager.append ctx
-    (Llm_client.user_msg "hello") in
+    (Masc_mcp.Llm_types.user_msg "hello") in
   let ctx = Context_manager.sync_oas_context ctx in
   let msg_count =
     Context.get_scoped ctx.oas_context Context.Session "message_count" in
@@ -103,8 +103,8 @@ let test_oas_context_sync () =
 
 let test_compact_syncs_oas_context () =
   let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:1000 in
-  let ctx = Context_manager.append ctx (Llm_client.user_msg "msg1") in
-  let ctx = Context_manager.append ctx (Llm_client.assistant_msg "msg2") in
+  let ctx = Context_manager.append ctx (Masc_mcp.Llm_types.user_msg "msg1") in
+  let ctx = Context_manager.append ctx (Masc_mcp.Llm_types.assistant_msg "msg2") in
   let ctx = Context_manager.compact ctx [Context_manager.MergeContiguous] in
   let ratio =
     Context.get_scoped ctx.oas_context Context.Session "context_ratio" in

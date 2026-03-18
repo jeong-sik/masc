@@ -2,7 +2,6 @@ open Alcotest
 
 module Lodge_cascade = Masc_mcp.Lodge_cascade
 module Llm_types = Masc_mcp.Llm_types
-module Llm_orchestration = Masc_mcp.Llm_orchestration
 
 let with_temp_json contents f =
   let path = Filename.temp_file "lodge_cascade_" ".json" in
@@ -139,10 +138,6 @@ let test_classification_uses_llama_first () =
   check bool "classification starts with llama:" true
     (String.length first > 6 && String.sub first 0 6 = "llama:")
 
-let test_model_key_format () =
-  let key = Lodge_cascade.model_key_of_cascade "heartbeat_action" in
-  check string "key format" "heartbeat_action_models" key
-
 let () =
   run "lodge_cascade"
     [
@@ -170,7 +165,5 @@ let () =
             test_briefing_always_has_glm_auto;
           test_case "classification uses llama first" `Quick
             test_classification_uses_llama_first;
-          test_case "model_key appends _models" `Quick
-            test_model_key_format;
         ] );
     ]

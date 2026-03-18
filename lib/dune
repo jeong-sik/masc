@@ -160,6 +160,7 @@
    agent_swarm_contract
    worker_container
    worker_mcp_transport
+   worker_oas
    local_agent_eio
    local_agent_eio_types
    local_agent_eio_container

@@ -272,6 +272,16 @@ let handle_agent_card _ctx args =
   in
   (true, Yojson.Safe.pretty_to_string response)
 
+(** Handle masc_agent_relations — proxy to Neo4j/GraphQL.
+    MASC is a consumer: it queries the GraphQL API, which owns the data. *)
+let handle_agent_relations ctx args =
+  let target = match get_string_opt args "agent_name" with
+    | Some name when name <> "" -> name
+    | _ -> ctx.agent_name
+  in
+  let json = Dashboard_agent_relations.json ~agent_name:target () in
+  (true, Yojson.Safe.pretty_to_string json)
+
 (** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
 let dispatch ctx ~name ~args =
   match name with
@@ -285,6 +295,7 @@ let dispatch ctx ~name ~args =
   | "masc_collaboration_graph" -> Some (handle_collaboration_graph ctx args)
   | "masc_consolidate_learning" -> Some (handle_consolidate_learning ctx args)
   | "masc_agent_card" -> Some (handle_agent_card ctx args)
+  | "masc_agent_relations" -> Some (handle_agent_relations ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_agent.schemas

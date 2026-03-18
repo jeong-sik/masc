@@ -1,10 +1,10 @@
 (** Coverage tests for Tool_agent — Agent management and selection
 
     Tests dispatch routing, handler execution, helper functions, and
-    selection strategies for 10 tools: masc_agents, masc_register_capabilities,
+    selection strategies for 11 tools: masc_agents, masc_register_capabilities,
     masc_agent_update, masc_find_by_capability, masc_get_metrics,
     masc_agent_fitness, masc_select_agent, masc_collaboration_graph,
-    masc_consolidate_learning, masc_agent_card
+    masc_consolidate_learning, masc_agent_card, masc_agent_relations
 *)
 module Tool_args = Masc_mcp.Tool_args
 
@@ -254,6 +254,26 @@ let test_agent_card_refresh () =
   cleanup_dir base_dir
 
 (* ============================================================
+   Dispatch test — masc_agent_relations
+   ============================================================ *)
+
+let test_dispatch_agent_relations () =
+  let ctx, base_dir = make_ctx () in
+  let result = Tool_agent.dispatch ctx ~name:"masc_agent_relations" ~args:(`Assoc []) in
+  Alcotest.(check bool) "agent_relations dispatches" true (result <> None);
+  cleanup_dir base_dir
+
+(* ============================================================
+   Schema coverage — masc_agent_relations is registered
+   ============================================================ *)
+
+let test_schema_agent_relations_present () =
+  let schemas = Tool_agent.schemas in
+  let has_it = List.exists (fun (s : Masc_mcp.Types.tool_schema) ->
+    s.name = "masc_agent_relations") schemas in
+  Alcotest.(check bool) "schema registered" true has_it
+
+(* ============================================================
    Helper function tests
    ============================================================ *)
 
@@ -346,6 +366,10 @@ let () =
     ("agent_card", [
       Alcotest.test_case "get action" `Quick test_agent_card_get;
       Alcotest.test_case "refresh action" `Quick test_agent_card_refresh;
+    ]);
+    ("agent_relations", [
+      Alcotest.test_case "dispatches" `Quick test_dispatch_agent_relations;
+      Alcotest.test_case "schema present" `Quick test_schema_agent_relations_present;
     ]);
     ("helpers", [
       Alcotest.test_case "get_string present" `Quick test_get_string_present;

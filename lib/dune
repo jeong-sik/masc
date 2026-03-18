@@ -554,7 +554,6 @@
    verifier_oas
    succession_oas
    perpetual_loop
-   perpetual_loop_types
    perpetual_oas_state
    perpetual_oas_hooks
    perpetual_oas_build
@@ -795,7 +794,6 @@
   ;; godsplit-phase2: additional sub-modules
   autoresearch_types
   backend_eio_compression
-  perpetual_loop_types
   perpetual_oas_state
   perpetual_oas_hooks
   perpetual_oas_build

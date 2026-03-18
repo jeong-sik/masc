@@ -79,7 +79,7 @@ button.monitor-row.bad.state-quiet {
 /* Monitor pill state variants */
 .monitor-pill.state-working {
   background: rgba(74, 222, 128, 0.18);
-  color: #4ade80;
+  color: var(--ok);
   font-weight: 600;
 }
 .monitor-pill.state-offline {
@@ -132,8 +132,8 @@ button.monitor-row.bad.state-quiet {
 .mission-context-item {
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--white-8);
+  background: var(--white-4);
   display: grid;
   gap: 6px;
 }
@@ -159,8 +159,8 @@ button.monitor-row.bad.state-quiet {
 .mission-stat-card {
   padding: 14px;
   border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--white-8);
+  background: var(--white-4);
   display: grid;
   gap: 6px;
 }
@@ -220,8 +220,8 @@ button.monitor-row.bad.state-quiet {
 .mission-session-card {
   padding: 14px;
   border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--white-8);
+  background: var(--white-4);
 }
 
 .mission-priority-block.ok,
@@ -251,7 +251,7 @@ button.monitor-row.bad.state-quiet {
   margin-top: 12px;
   display: grid;
   gap: 10px;
-  background: linear-gradient(180deg, rgba(34,211,238,0.1), rgba(255,255,255,0.03));
+  background: linear-gradient(180deg, rgba(34,211,238,0.1), var(--white-3));
 }
 
 .mission-action-highlight p,
@@ -272,8 +272,8 @@ button.monitor-row.bad.state-quiet {
 .mission-action-preview {
   padding: 10px 12px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--white-5);
+  border: 1px solid var(--white-8);
   color: var(--text-strong);
   line-height: 1.45;
 }
@@ -288,8 +288,8 @@ button.monitor-row.bad.state-quiet {
   gap: 6px;
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--white-8);
+  background: var(--white-4);
 }
 
 .proof-summary-block.warn {
@@ -350,8 +350,8 @@ button.monitor-row.bad.state-quiet {
 .mission-focus-item {
   padding: 12px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.06);
+  background: var(--white-4);
+  border: 1px solid var(--white-6);
   display: grid;
   gap: 6px;
 }
@@ -387,8 +387,8 @@ button.monitor-row.bad.state-quiet {
 .mission-target-block {
   padding: 12px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.06);
+  background: var(--white-4);
+  border: 1px solid var(--white-6);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -453,8 +453,8 @@ button.monitor-row.bad.state-quiet {
 .mission-briefing-section {
   padding: 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--white-8);
+  background: var(--white-4);
   display: grid;
   gap: 8px;
 }
@@ -496,8 +496,8 @@ button.monitor-row.bad.state-quiet {
 .mission-briefing-evidence span {
   padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--white-4);
+  border: 1px solid var(--white-8);
   color: rgba(255,255,255,0.72);
   font-size: 12px;
   line-height: 1.35;
@@ -519,8 +519,8 @@ button.monitor-row.bad.state-quiet {
 .mission-briefing-gap {
   padding: 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--white-8);
+  background: var(--white-3);
   display: grid;
   gap: 8px;
 }
@@ -539,8 +539,8 @@ button.monitor-row.bad.state-quiet {
   margin-top: 14px;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--white-8);
+  background: var(--white-4);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -558,8 +558,8 @@ button.monitor-row.bad.state-quiet {
 .mission-attention-card {
   padding: 14px;
   border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
+  border: 1px solid var(--white-8);
+  background: linear-gradient(180deg, var(--white-6), var(--white-3));
   display: grid;
   gap: 12px;
 }
@@ -572,7 +572,7 @@ button.monitor-row.bad.state-quiet {
 .mission-crew-card.is-selected,
 .mission-activity-card.is-selected {
   box-shadow: 0 0 0 1px rgba(71,184,255,0.45);
-  background: linear-gradient(180deg, rgba(71,184,255,0.14), rgba(255,255,255,0.04));
+  background: linear-gradient(180deg, rgba(71,184,255,0.14), var(--white-4));
 }
 
 .mission-card-select {
@@ -598,7 +598,7 @@ button.monitor-row.bad.state-quiet {
 
 .mission-card-disclosure {
   padding-top: 4px;
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid var(--white-6);
 }
 
 .mission-card-disclosure.compact {
@@ -622,8 +622,8 @@ button.monitor-row.bad.state-quiet {
   width: 100%;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--white-6);
+  background: var(--white-3);
   display: grid;
   gap: 4px;
   text-align: left;
@@ -655,8 +655,8 @@ button.monitor-row.bad.state-quiet {
 .mission-pill {
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--white-8);
+  background: var(--white-4);
   color: rgba(255,255,255,0.76);
   font-size: 12px;
   line-height: 1.35;
@@ -675,8 +675,8 @@ button.monitor-row.bad.state-quiet {
 .mission-evidence-list span {
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--white-6);
+  background: var(--white-3);
   color: rgba(255,255,255,0.72);
   line-height: 1.45;
 }
@@ -684,8 +684,8 @@ button.monitor-row.bad.state-quiet {
 .mission-crew-card {
   padding: 14px;
   border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
+  border: 1px solid var(--white-8);
+  background: linear-gradient(180deg, var(--white-5), var(--white-3));
   display: grid;
   gap: 12px;
 }
@@ -703,8 +703,8 @@ button.monitor-row.bad.state-quiet {
 .mission-fact-tile {
   padding: 12px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.06);
+  background: var(--white-4);
+  border: 1px solid var(--white-6);
   display: grid;
   gap: 4px;
 }
@@ -763,8 +763,8 @@ button.monitor-row.bad.state-quiet {
   width: 100%;
   padding: 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--white-6);
+  background: var(--white-3);
   display: grid;
   gap: 4px;
   text-align: left;
@@ -785,8 +785,8 @@ button.monitor-row.bad.state-quiet {
   width: 100%;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--white-6);
+  background: var(--white-3);
   display: grid;
   gap: 4px;
   text-align: left;
@@ -812,7 +812,7 @@ button.monitor-row.bad.state-quiet {
   letter-spacing: 0.04em;
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(255,255,255,0.08);
+  background: var(--white-8);
   color: rgba(255,255,255,0.6);
   vertical-align: middle;
   margin-right: 4px;
@@ -828,8 +828,8 @@ button.monitor-row.bad.state-quiet {
   width: 100%;
   padding: 14px;
   border-radius: 14px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--white-8);
+  background: var(--white-4);
   display: grid;
   gap: 12px;
   color: inherit;
@@ -906,8 +906,8 @@ button.monitor-row.bad.state-quiet {
 .mission-io-item {
   padding: 12px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.06);
+  background: var(--white-3);
+  border: 1px solid var(--white-6);
   display: grid;
   gap: 4px;
 }
@@ -948,8 +948,8 @@ button.monitor-row.bad.state-quiet {
 .mission-timeline-row {
   padding: 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--white-6);
+  background: var(--white-3);
   display: grid;
   gap: 4px;
 }

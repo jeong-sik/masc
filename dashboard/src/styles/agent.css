@@ -5,9 +5,9 @@
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: rgba(255,255,255,0.03);
+  background: var(--white-3);
   border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--white-6);
 }
 .agent-row .agent-emoji { font-size: 20px; }
 .agent-row .agent-name { flex: 1; font-size: 14px; }
@@ -25,9 +25,9 @@
   flex-direction: column;
   gap: 6px;
   padding: 12px;
-  background: rgba(255,255,255,0.04);
+  background: var(--white-4);
   border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--white-8);
   transition: all 0.2s;
 }
 .live-agent:hover { border-color: rgba(255,255,255,0.15); }
@@ -47,9 +47,9 @@
 }
 .agent-card {
   padding: 15px;
-  background: rgba(255,255,255,0.04);
+  background: var(--white-4);
   border-radius: 10px;
-  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid var(--white-8);
   transition: border-color 0.2s;
   color: inherit;
   font: inherit;
@@ -65,8 +65,8 @@
 }
 .agent-card .agent-emoji { font-size: 24px; }
 .agent-card .agent-name { font-size: 15px; font-weight: 600; }
-.agent-card .agent-korean { font-size: 12px; color: #888; }
-.agent-card .agent-model { font-size: 11px; color: #22d3ee; font-family: monospace; }
+.agent-card .agent-korean { font-size: 12px; color: var(--text-dim); }
+.agent-card .agent-model { font-size: 11px; color: var(--cyan); font-family: monospace; }
 .agent-card .agent-interests {
   display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px;
 }
@@ -91,7 +91,7 @@
 }
 
 .agent-journal-entry:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
 }
 
 .agent-journal-kind {
@@ -182,7 +182,7 @@
 }
 
 .agent-timeline-event:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
 }
 
 .agent-timeline-type {

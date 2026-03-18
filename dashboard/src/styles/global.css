@@ -50,6 +50,24 @@
   --agent-offline: #5a6478;
   --agent-busy: #f0c060;
 
+  /* White overlay (glass morphism tints) */
+  --white-3: rgba(255, 255, 255, 0.03);
+  --white-4: rgba(255, 255, 255, 0.04);
+  --white-5: rgba(255, 255, 255, 0.05);
+  --white-6: rgba(255, 255, 255, 0.06);
+  --white-8: rgba(255, 255, 255, 0.08);
+  --white-10: rgba(255, 255, 255, 0.1);
+
+  /* Extended text scale */
+  --text-dim: #888;
+  --text-slate: #94a3b8;
+  --text-slate-light: #cbd5e1;
+
+  /* Extended palette */
+  --cyan: #22d3ee;
+  --purple: #a78bfa;
+  --text-near-white: #f8fafc;
+
   /* Stacking layers (low -> high) */
   --z-layout: 1;
   --z-tab-sticky: 30;
@@ -213,7 +231,7 @@ a:hover {
   padding: 5px 11px;
   color: var(--text-body);
   font-size: 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
 }
 
 .header-links a:hover {
@@ -337,7 +355,7 @@ a:hover {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-body);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-6);
   border: 1px solid rgba(138, 163, 211, 0.18);
 }
 
@@ -367,7 +385,7 @@ a:hover {
 .rail-toggle-btn {
   border: 1px solid var(--card-border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
   color: var(--text-body);
   font-size: 11px;
   padding: 5px 9px;
@@ -375,7 +393,7 @@ a:hover {
 }
 
 .rail-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-10);
 }
 
 .header-rail-toggle {
@@ -391,7 +409,7 @@ a:hover {
   border: 1px solid var(--card-border);
   border-radius: 9px;
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
   color: var(--text-strong);
   display: flex;
   align-items: center;
@@ -446,7 +464,7 @@ a:hover {
   border-radius: 10px;
   padding: 10px 11px;
   color: var(--text-body);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
   cursor: pointer;
   font-size: 12px;
   display: flex;
@@ -462,7 +480,7 @@ a:hover {
 }
 
 .rail-tab-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-10);
 }
 
 .rail-tab-icon {
@@ -534,7 +552,7 @@ a:hover {
 .rail-view-note {
   margin-top: 14px;
   padding-top: 10px;
-  border-top: 1px solid rgba(138, 163, 211, 0.2);
+  border-top: 1px solid var(--card-border);
   display: grid;
   gap: 4px;
 }
@@ -621,7 +639,7 @@ a:hover {
   border: 1px solid rgba(138, 163, 211, 0.16);
   border-radius: 10px;
   padding: 10px 11px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
   display: grid;
   gap: 4px;
 }
@@ -658,7 +676,7 @@ a:hover {
 .rail-density {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid rgba(138, 163, 211, 0.2);
+  border-top: 1px solid var(--card-border);
   display: grid;
   gap: 6px;
 }
@@ -679,7 +697,7 @@ a:hover {
 .rail-density-btn {
   border: 1px solid var(--card-border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
   color: var(--text-body);
   font-size: 12px;
   padding: 6px 8px;
@@ -687,7 +705,7 @@ a:hover {
 }
 
 .rail-density-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-10);
 }
 
 .rail-density-btn.active {
@@ -716,14 +734,14 @@ a:hover {
   border: 1px solid var(--card-border);
   border-radius: 10px;
   padding: 9px 11px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
   color: var(--text-body);
   font-size: 12px;
   cursor: pointer;
 }
 
 .rail-secondary-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-10);
 }
 
 /* Core cards and sections */

@@ -2,8 +2,8 @@
 
 .activity-panel-toggle {
   padding: 6px 14px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--white-6);
+  border: 1px solid var(--white-10);
   border-radius: 8px;
   color: #bbb;
   font-size: 13px;
@@ -11,13 +11,13 @@
   transition: all 0.15s;
 }
 .activity-panel-toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-10);
   color: #eee;
 }
 .activity-panel-toggle.active {
   background: rgba(74, 222, 128, 0.12);
   border-color: rgba(74, 222, 128, 0.3);
-  color: #4ade80;
+  color: var(--ok);
 }
 
 .activity-panel-backdrop {
@@ -35,7 +35,7 @@
   bottom: 0;
   width: min(520px, 90vw);
   background: var(--bg-primary, #111318);
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 1px solid var(--white-8);
   z-index: 3051;
   display: flex;
   flex-direction: column;
@@ -52,7 +52,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--white-8);
   flex-shrink: 0;
 }
 .activity-panel-header h3 {
@@ -62,15 +62,15 @@
 }
 .activity-panel-close {
   padding: 4px 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--white-6);
+  border: 1px solid var(--white-10);
   border-radius: 6px;
   color: #aaa;
   font-size: 12px;
   cursor: pointer;
 }
 .activity-panel-close:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-10);
   color: #eee;
 }
 

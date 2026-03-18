@@ -38,7 +38,7 @@
   white-space: nowrap;
 }
 
-.stat-delta.up { color: #4ade80; }
+.stat-delta.up { color: var(--ok); }
 .stat-delta.down { color: #fb7185; }
 .stat-delta.neutral { color: #64748b; }
 
@@ -104,7 +104,7 @@
   border: 1px solid rgba(138, 163, 211, 0.14);
   border-radius: 10px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
   color: #9db4db;
   font-size: 12px;
   line-height: 1.5;
@@ -163,7 +163,7 @@
 
 .overview-hero-detail {
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--text-slate);
   line-height: 1.5;
 }
 
@@ -257,7 +257,7 @@
   padding: 12px 16px;
   font-size: 14px;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--text-slate-light);
   cursor: pointer;
   list-style: none;
   user-select: none;
@@ -269,7 +269,7 @@
 }
 
 .overview-section-collapsible > summary:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
 }
 
 .overview-section-collapsible > summary::-webkit-details-marker {
@@ -364,8 +364,8 @@
 }
 
 .message-row {
-  border: 1px solid rgba(138, 163, 211, 0.2);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--card-border);
+  background: var(--white-3);
 }
 
 .message-author {
@@ -397,7 +397,7 @@
 
 /* Journal */
 .journal-entry {
-  border-bottom-color: rgba(138, 163, 211, 0.2);
+  border-bottom-color: var(--card-border);
 }
 
 .journal-agent {
@@ -413,7 +413,7 @@
 }
 
 .board-post {
-  border-color: rgba(138, 163, 211, 0.2);
+  border-color: var(--card-border);
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
 }
@@ -447,12 +447,12 @@
   padding: 7px 12px;
   font-size: 12px;
   color: #bdd8ff;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
   cursor: pointer;
 }
 
 .back-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-10);
 }
 
 /* ── Density Modes (Agents + Board) ───────────────────────── */
@@ -539,12 +539,12 @@
 
 /* Tasks */
 .task-row {
-  border-color: rgba(138, 163, 211, 0.2);
+  border-color: var(--card-border);
 }
 
 /* Status badges */
 .status-badge {
-  border: 1px solid rgba(138, 163, 211, 0.2);
+  border: 1px solid var(--card-border);
 }
 
 .status-badge.offline {
@@ -628,7 +628,7 @@
   width: 100%;
   border-radius: 8px;
   border: 1px solid rgba(138, 163, 211, 0.28);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
   color: #d3e3ff;
   padding: 8px 10px;
   font-size: 13px;
@@ -737,7 +737,7 @@
   margin: 8px 0 0;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid rgba(138, 163, 211, 0.2);
+  border: 1px solid var(--card-border);
   background: rgba(2, 10, 24, 0.82);
   color: #9ad8b6;
   font-size: 12px;
@@ -775,7 +775,7 @@
   padding: 10px;
   border-radius: 10px;
   border: 1px solid rgba(138, 163, 211, 0.16);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
 }
 
 .keeper-conversation-meta {
@@ -793,7 +793,7 @@
   font-size: 11px;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  border: 1px solid rgba(138, 163, 211, 0.2);
+  border: 1px solid var(--card-border);
   color: #d8e8ff;
   background: rgba(138, 163, 211, 0.08);
 }
@@ -848,7 +848,7 @@
 
 .control-btn.ghost {
   border-color: rgba(138, 163, 211, 0.35);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-5);
   color: #9fb8e1;
 }
 
@@ -868,7 +868,7 @@
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid rgba(138, 163, 211, 0.22);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
   color: #9fb8e1;
   font-size: 12px;
   text-decoration: none;
@@ -876,7 +876,7 @@
 }
 
 .mission-jump-link:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-8);
 }
 
 /* ── Mission Collapsible Sections ──────────────────────── */
@@ -890,7 +890,7 @@
   padding: 12px 16px;
   font-size: 14px;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--text-slate-light);
   cursor: pointer;
   list-style: none;
   user-select: none;
@@ -902,7 +902,7 @@
 }
 
 .mission-collapsible-summary:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
 }
 
 .mission-collapsible-summary::-webkit-details-marker {
@@ -931,12 +931,12 @@
 }
 
 .mission-status-dot.mission-state-alive {
-  background: var(--ok, #4ade80);
+  background: var(--ok, var(--ok));
   box-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
 }
 
 .mission-status-dot.mission-state-idle {
-  background: var(--warn, #fbbf24);
+  background: var(--warn, var(--warn));
 }
 
 .mission-status-dot.mission-state-offline {

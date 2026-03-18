@@ -34,7 +34,7 @@
   border-radius: 8px;
   box-shadow:
     0 0 0 2px var(--ff-navy, #0a1628),
-    0 0 0 3px var(--ff-gold, #c8a84e),
+    0 0 0 3px var(--ff-gold, var(--ff-gold)),
     0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
@@ -68,7 +68,7 @@
 
 /* ── Phase 2: Signal truth ring ────────────── */
 .pixel-avatar.signal-ring--live {
-  box-shadow: 0 0 0 2px var(--agent-working, #7ae09a);
+  box-shadow: 0 0 0 2px var(--agent-working, var(--agent-working));
 }
 
 .pixel-avatar.signal-ring--stale {
@@ -102,13 +102,13 @@
 }
 
 .activity-dot--live-pulse {
-  background: var(--agent-working, #7ae09a);
+  background: var(--agent-working, var(--agent-working));
   box-shadow: 0 0 4px rgba(122, 224, 154, 0.8);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
 .activity-dot--live {
-  background: var(--agent-working, #7ae09a);
+  background: var(--agent-working, var(--agent-working));
 }
 
 .activity-dot--stale {
@@ -120,7 +120,7 @@
 }
 
 .activity-dot--unknown {
-  background: rgba(138, 163, 211, 0.2);
+  background: var(--card-border);
 }
 
 /* ── Phase 2: Speech bubble ────────────────── */

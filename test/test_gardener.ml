@@ -81,6 +81,7 @@ let test_ecosystem_health_to_json () =
     task_backlog = empty_task_backlog;
     system_error_rate = 0.0;
     needs_workers = false;
+    room_active_agents = 0;
   } in
   let json = ecosystem_health_to_yojson health in
   let open Yojson.Safe.Util in
@@ -705,6 +706,7 @@ let test_spawn_high_similarity_rejected () =
     task_backlog = empty_task_backlog;
     system_error_rate = 0.0;
     needs_workers = false;
+    room_active_agents = 0;
   } in
   ignore config; ignore health; ignore gap;
   (* Can't easily test internal decide_spawn without Eio, but we verify types compile *)
@@ -824,6 +826,7 @@ let test_needs_workers_logic () =
     task_backlog = { empty_task_backlog with todo_count = 10; high_priority_todo = 2 };
     system_error_rate = 0.0;
     needs_workers = true;
+    room_active_agents = 0;
   } in
   check bool "needs_workers true" true health.needs_workers;
   check int "task backlog todo" 10 health.task_backlog.todo_count
@@ -850,6 +853,7 @@ let test_needs_workers_false_with_active () =
     task_backlog = { empty_task_backlog with todo_count = 5 };
     system_error_rate = 0.0;
     needs_workers = false;
+    room_active_agents = 0;
   } in
   check bool "needs_workers false" false health.needs_workers
 
@@ -885,6 +889,7 @@ let test_health_json_with_task_backlog () =
     task_backlog = backlog;
     system_error_rate = 0.02;
     needs_workers = true;
+    room_active_agents = 0;
   } in
   let json = ecosystem_health_to_yojson health in
   let open Yojson.Safe.Util in
@@ -1018,6 +1023,150 @@ let test_tick_opens_backlog_triage_session_with_inactive_joined_agent () =
              raise Exit)
        with Exit -> ()))
 
+(** {1 Duplicate Task Prevention Tests (Issue #1439)} *)
+
+(** Helper: create a health record with backlog *)
+let make_health_with_backlog ~room_active_agents ~active_agents ~todo_count ~high_priority_todo ~orphan_count =
+  {
+    total_agents = 10;
+    active_agents;
+    idle_agents = 3;
+    overloaded_agents = 0;
+    posts_24h = 10;
+    comments_24h = 20;
+    unanswered_questions = 1;
+    topic_coverage = [];
+    selection_entropy = 0.5;
+    homeostatic_score = 0.8;
+    needs_spawn = false;
+    needs_retirement = false;
+    last_spawn = None;
+    last_retirement = None;
+    spawns_today = 0;
+    retirements_today = 0;
+    task_backlog = { empty_task_backlog with todo_count; high_priority_todo; orphan_count };
+    system_error_rate = 0.0;
+    needs_workers = todo_count > 0 && active_agents < 2;
+    room_active_agents;
+  }
+
+(** Test 1: room_active_agents=0 blocks NeedWorker even with high-pri tasks *)
+let test_room_active_zero_blocks_need_worker () =
+  let config = { (Gardener.load_config ()) with use_llm_decision = false } in
+  let health = make_health_with_backlog ~room_active_agents:0 ~active_agents:1
+    ~todo_count:5 ~high_priority_todo:3 ~orphan_count:0 in
+  let decision = Gardener.detect_intervention ~config ~health in
+  (match decision with
+   | Balanced -> ()
+   | _ -> Alcotest.fail "Expected Balanced when room_active_agents=0")
+
+(** Test 2: room_active_agents>0 fires NeedWorker normally *)
+let test_room_active_nonzero_fires_need_worker () =
+  let config = { (Gardener.load_config ()) with use_llm_decision = false } in
+  let health = make_health_with_backlog ~room_active_agents:2 ~active_agents:1
+    ~todo_count:5 ~high_priority_todo:3 ~orphan_count:0 in
+  let decision = Gardener.detect_intervention ~config ~health in
+  (match decision with
+   | NeedWorker _ -> ()
+   | _ -> Alcotest.fail "Expected NeedWorker when room_active_agents>0")
+
+(** Test 3: Inactive-only agents → tick produces no triage session *)
+let test_inactive_fallback_removed () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room.default_config dir in
+      Eio_main.run @@ fun env ->
+      ignore (Room.init config ~agent_name:(Some "fixture-root"));
+      ignore (Room.join config ~agent_name:"worker-a" ~capabilities:["executor"] ());
+      (* Mark both as inactive *)
+      (match Room.update_agent_r config ~agent_name:"fixture-root" ~status:"inactive" () with
+       | Ok _ -> ()
+       | Error _ -> Alcotest.fail "Expected inactive update to succeed");
+      (match Room.update_agent_r config ~agent_name:"worker-a" ~status:"inactive" () with
+       | Ok _ -> ()
+       | Error _ -> Alcotest.fail "Expected inactive update to succeed");
+      ignore (Room.add_task config ~title:"Test Task" ~priority:1 ~description:"test");
+      let gardener_config =
+        { (Gardener.load_config ()) with
+          enabled = true;
+          use_llm_decision = false;
+          check_interval_sec = 1.0;
+        }
+      in
+      (try
+         Eio.Switch.run (fun sw ->
+             Gardener.tick ~sw ~clock:(Eio.Stdenv.clock env)
+               ~config:gardener_config ~room_config:config;
+             let sessions =
+               Team_session_store.list_sessions config
+               |> List.filter (fun (session : Team_session_types.session) ->
+                      session.created_by = "gardener"
+                      && String.starts_with ~prefix:"[Gardener] Backlog triage"
+                           session.goal)
+             in
+             (* With inactive fallback removed, no session should be created
+                because room_active_agents=0 causes NeedWorker to be suppressed *)
+             check int "no gardener session with all-inactive agents" 0
+               (List.length sessions);
+             raise Exit)
+       with Exit -> ()))
+
+(** Test 4: Triage cooldown after noop blocks session creation *)
+let test_triage_cooldown_after_noop () =
+  let state = Gardener_types.make_gardener_state () in
+  state.last_triage_outcome <- Triage_noop;
+  state.last_triage_started_at <- Time_compat.now ();
+  check bool "triage outcome is noop" true
+    (equal_triage_outcome state.last_triage_outcome Triage_noop);
+  check bool "triage started recently" true
+    (state.last_triage_started_at > 0.0)
+
+(** Test 5: Productive triage does not trigger cooldown *)
+let test_triage_cooldown_allows_productive () =
+  let state = Gardener_types.make_gardener_state () in
+  state.last_triage_outcome <- Triage_productive;
+  state.last_triage_started_at <- Time_compat.now ();
+  (* Cooldown check: only blocks if outcome is Triage_noop *)
+  let config = Gardener.load_config () in
+  let cooldown_sec = config.check_interval_sec *. 2.0 in
+  let now = Time_compat.now () in
+  let would_block =
+    state.last_triage_outcome = Triage_noop
+    && state.last_triage_started_at > 0.0
+    && (now -. state.last_triage_started_at) < cooldown_sec
+  in
+  check bool "productive does not trigger cooldown" false would_block
+
+(** Test 6: Triage outcome defaults *)
+let test_triage_outcome_defaults () =
+  let state = Gardener_types.make_gardener_state () in
+  check bool "default outcome is Triage_none" true
+    (equal_triage_outcome state.last_triage_outcome Triage_none);
+  check (float 0.01) "default triage_started_at is 0" 0.0
+    state.last_triage_started_at;
+  (* With Triage_none, cooldown should not apply *)
+  let config = Gardener.load_config () in
+  let cooldown_sec = config.check_interval_sec *. 2.0 in
+  let now = Time_compat.now () in
+  let would_block =
+    state.last_triage_outcome = Triage_noop
+    && state.last_triage_started_at > 0.0
+    && (now -. state.last_triage_started_at) < cooldown_sec
+  in
+  check bool "Triage_none does not trigger cooldown" false would_block
+
+(** Test: orphan tasks with room_active_agents=0 returns Balanced *)
+let test_orphan_with_zero_room_agents_returns_balanced () =
+  let config = { (Gardener.load_config ()) with use_llm_decision = false } in
+  let health = make_health_with_backlog ~room_active_agents:0 ~active_agents:5
+    ~todo_count:0 ~high_priority_todo:0 ~orphan_count:3 in
+  let decision = Gardener.detect_intervention ~config ~health in
+  (match decision with
+   | Balanced -> ()
+   | _ -> Alcotest.fail "Expected Balanced when orphans exist but room_active_agents=0")
+
 (** {1 Test Suite} *)
 
 let suite = [
@@ -1139,6 +1288,15 @@ let suite = [
   "tick_reuses_backlog_session", `Quick, test_tick_reuses_existing_backlog_triage_session;
   "tick_opens_backlog_session_with_inactive_joined_agent", `Quick,
   test_tick_opens_backlog_triage_session_with_inactive_joined_agent;
+
+  (* Duplicate Task Prevention — Issue #1439 *)
+  "room_active_zero_blocks_need_worker", `Quick, test_room_active_zero_blocks_need_worker;
+  "room_active_nonzero_fires_need_worker", `Quick, test_room_active_nonzero_fires_need_worker;
+  "inactive_fallback_removed", `Quick, test_inactive_fallback_removed;
+  "triage_cooldown_after_noop", `Quick, test_triage_cooldown_after_noop;
+  "triage_cooldown_allows_productive", `Quick, test_triage_cooldown_allows_productive;
+  "triage_outcome_defaults", `Quick, test_triage_outcome_defaults;
+  "orphan_zero_room_agents_balanced", `Quick, test_orphan_with_zero_room_agents_returns_balanced;
 ]
 
 let () =

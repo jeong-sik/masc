@@ -110,7 +110,8 @@ let record_health_summary ~(at : float) (health : ecosystem_health) =
       state.last_high_priority_todo <- health.task_backlog.high_priority_todo;
       state.last_orphan_count <- health.task_backlog.orphan_count;
       state.last_homeostatic_score <- health.homeostatic_score;
-      state.last_needs_workers <- health.needs_workers)
+      state.last_needs_workers <- health.needs_workers;
+      state.last_room_active_agents <- health.room_active_agents)
 
 let record_decision (decision : decision_snapshot) =
   with_lock (fun () ->

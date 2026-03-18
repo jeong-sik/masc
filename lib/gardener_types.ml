@@ -128,6 +128,7 @@ type ecosystem_health = {
   task_backlog: task_backlog_summary;  (** MASC task backlog state *)
   system_error_rate: float;    (** Error rate from telemetry (0.0-1.0) *)
   needs_workers: bool;         (** todo > 0 AND no available workers *)
+  room_active_agents: int;     (** Non-Inactive agents currently in room *)
 } [@@deriving show]
 
 let ecosystem_health_to_yojson h = `Assoc [
@@ -151,6 +152,7 @@ let ecosystem_health_to_yojson h = `Assoc [
   ("task_backlog", task_backlog_summary_to_yojson h.task_backlog);
   ("system_error_rate", `Float h.system_error_rate);
   ("needs_workers", `Bool h.needs_workers);
+  ("room_active_agents", `Int h.room_active_agents);
 ]
 
 (** {1 Enriched Gap Signal} *)
@@ -266,6 +268,20 @@ let retirement_decision_to_yojson = function
         ("reason", `String reason);
       ]
 
+(** {1 Triage Outcome} *)
+
+(** Outcome of the last backlog triage session *)
+type triage_outcome =
+  | Triage_none       (** No triage attempted yet *)
+  | Triage_productive (** Triage resulted in claimed tasks *)
+  | Triage_noop       (** Triage completed but no tasks claimed *)
+[@@deriving show, eq]
+
+let string_of_triage_outcome = function
+  | Triage_none -> "none"
+  | Triage_productive -> "productive"
+  | Triage_noop -> "noop"
+
 (** {1 Gardener State} *)
 
 (** Persistent state for the Gardener Agent *)
@@ -294,7 +310,10 @@ type gardener_state = {
   mutable last_orphan_count: int;
   mutable last_homeostatic_score: float;
   mutable last_needs_workers: bool;
+  mutable last_room_active_agents: int;
   mutable day_start: float;  (** Start of current "day" for budget tracking *)
+  mutable last_triage_started_at: float;
+  mutable last_triage_outcome: triage_outcome;
 } [@@deriving show]
 
 let make_gardener_state () = {
@@ -322,7 +341,10 @@ let make_gardener_state () = {
   last_orphan_count = 0;
   last_homeostatic_score = 0.0;
   last_needs_workers = false;
+  last_room_active_agents = 0;
   day_start = Time_compat.now ();
+  last_triage_started_at = 0.0;
+  last_triage_outcome = Triage_none;
 }
 
 (** {1 Gardener Configuration} *)

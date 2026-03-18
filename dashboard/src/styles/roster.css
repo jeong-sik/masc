@@ -386,26 +386,6 @@
 /* ============================================
    Overview Enhancements
    ============================================ */
-
-.overview-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.overview-section-link {
-  font-size: 12px;
-  color: var(--ff-gold, var(--ff-gold));
-  cursor: pointer;
-  transition: color 0.15s;
-  opacity: 0.6;
-}
-
-.overview-section-link:hover {
-  color: var(--ff-gold-bright, var(--ff-gold-bright));
-  opacity: 1;
-}
-
 /* Attention badge — gold warning */
 .attention-badge {
   background: rgba(212, 169, 75, 0.15);
@@ -418,19 +398,6 @@
 }
 
 /* Session triage additions */
-.triage-card__summary {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
-  margin: 2px 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.triage-routine-label {
-  color: rgba(255, 255, 255, 0.25);
-}
-
 /* Pressure bar colors — FF HP gradient */
 .pressure--ok {
   background: linear-gradient(90deg, #1a9c3a, #3dcc5e);

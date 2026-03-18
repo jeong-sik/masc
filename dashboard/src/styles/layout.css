@@ -1,19 +1,22 @@
 /* ── Responsive (components) ───────────────────────────────── */
 @media (max-width: 980px) {
+
   .keeper-detail-grid { grid-template-columns: 1fr; }
   .keeper-kpis { grid-template-columns: repeat(2, 1fr); }
   .council-grid { grid-template-columns: 1fr; }
   .agent-detail-grid { grid-template-columns: 1fr; }
+
 }
 @media (max-width: 900px) {
-  .task-board { grid-template-columns: 1fr; }
   .trpg-layout { grid-template-columns: 1fr; }
   .trpg-screen-tabs { grid-template-columns: 1fr; }
   .council-create { grid-template-columns: 1fr; }
   .control-row { grid-template-columns: 1fr; }
   .agent-mention-row { grid-template-columns: 1fr; }
+
 }
 @media (max-width: 600px) {
+
   .trpg-control-grid { grid-template-columns: 1fr; }
   .trpg-story-toolbar { flex-direction: column; align-items: stretch; }
   .trpg-story-filter { min-width: 0; }
@@ -27,6 +30,7 @@
     min-width: 220px;
     max-width: min(320px, calc(100vw - 56px));
   }
+
 }
 
 /* Mitosis Ring Chart */
@@ -69,11 +73,6 @@
 }
 
 /* Enhancements for Agent Cards */
-.agent-card-header {
-  display: flex;
-  align-items: center;
-  width: 100%;
-}
 .agent-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
   transform: translateY(-2px);
@@ -179,347 +178,10 @@
 }
 
 /* Activity Feed */
-.activity-toolbar {
-  display: grid;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.activity-filter-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.activity-toolbar-meta {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.terminal-feed {
-  background: rgba(13, 22, 40, 0.74);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  height: 520px;
-  overflow-y: auto;
-  font-family: "IBM Plex Mono", "Fira Code", monospace;
-  box-shadow: inset 0 1px 0 var(--white-3);
-}
-
-.term-row {
-  display: flex;
-  gap: 12px;
-  padding: 6px 0;
-  font-size: 0.85rem;
-  border-bottom: 1px solid rgba(138, 163, 211, 0.14);
-  line-height: 1.5;
-}
-.term-row:hover {
-  background: rgba(71, 184, 255, 0.08);
-}
-
-.term-time {
-  color: var(--text-muted);
-  white-space: nowrap;
-  font-size: 0.75rem;
-  align-self: flex-start;
-  margin-top: 2px;
-}
-.term-actor {
-  color: var(--accent);
-  font-weight: bold;
-  white-space: nowrap;
-}
-.term-actor::before { content: "["; color: var(--text-muted); font-weight: normal; }
-.term-actor::after { content: "]"; color: var(--text-muted); font-weight: normal; }
-
-.term-source {
-  color: var(--warn);
-  text-transform: uppercase;
-  font-size: 0.7rem;
-  align-self: flex-start;
-  margin-top: 3px;
-  padding: 1px 4px;
-  border-radius: 4px;
-  background: rgba(255, 184, 0, 0.1);
-}
-.term-source.event { 
-  color: var(--ok); 
-  background: rgba(0, 255, 157, 0.1);
-}
-.term-text {
-  color: var(--text-strong);
-  word-break: break-all;
-  flex: 1;
-}
-
-.activity-kind-badge {
-  align-self: flex-start;
-  margin-top: 2px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-weight: 700;
-}
-
-.activity-kind-badge.messages {
-  background: rgba(71, 184, 255, 0.14);
-  color: #8fd9ff;
-}
-
-.activity-kind-badge.board {
-  background: rgba(251, 191, 36, 0.14);
-  color: #fcd87c;
-}
-
-.activity-kind-badge.tasks {
-  background: rgba(248, 113, 113, 0.14);
-  color: #fda4af;
-}
-
-.activity-kind-badge.keepers {
-  background: rgba(74, 222, 128, 0.14);
-  color: #9af3ba;
-}
-
-.activity-kind-badge.system {
-  background: rgba(148, 163, 184, 0.16);
-  color: var(--text-slate-light);
-}
-
-.activity-motion-list {
-  display: grid;
-  gap: 10px;
-}
-
-.activity-motion-row {
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  background: rgba(13, 22, 40, 0.58);
-  padding: 12px 14px;
-  display: grid;
-  gap: 6px;
-}
-
-.activity-motion-agent {
-  color: var(--text-strong);
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.activity-motion-meta {
-  color: var(--text-muted);
-  font-size: 11px;
-  margin-top: 2px;
-}
-
-.activity-motion-text {
-  color: var(--text-body);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 /* Overview HUD Layout */
-.overview-hud {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-.lodge-banner {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 12px;
-  border: 1px solid var(--card-border);
-  background: linear-gradient(180deg, rgba(9, 18, 36, 0.9), rgba(9, 18, 36, 0.68));
-}
-
-.lodge-banner.is-disabled {
-  border-color: rgba(239, 68, 68, 0.24);
-}
-
-.lodge-banner-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.lodge-banner-pill.is-on {
-  border-color: rgba(74, 222, 128, 0.42);
-  color: #b5f6ce;
-}
-
-.lodge-banner-pill.is-off {
-  border-color: rgba(239, 68, 68, 0.35);
-  color: #ffc3c3;
-}
-
-.lodge-banner-copy {
-  color: #dce8fb;
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.hud-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
-}
-
-.hud-stat-card {
-  background: rgba(16, 24, 43, 0.8);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-md);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5), 0 4px 15px rgba(0,0,0,0.3);
-  transition: all 0.3s ease;
-}
-
-.hud-stat-card:hover {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 15px rgba(0, 240, 255, 0.1), 0 8px 25px rgba(0, 240, 255, 0.1);
-  transform: translateY(-2px);
-}
-
-.hud-stat-card .stat-label {
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-bottom: 8px;
-}
-
-.hud-stat-card .stat-value {
-  font-size: 2.5rem;
-  font-weight: 800;
-  font-family: "Fira Code", monospace;
-  color: var(--text-strong);
-  text-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
-}
-
-.hud-stat-card .stat-value.online {
-  color: var(--ok);
-  text-shadow: 0 0 15px var(--ok);
-  animation: pulse-ring 2s infinite;
-}
-
-.hud-stat-card .stat-value.offline {
-  color: var(--bad);
-  text-shadow: 0 0 15px var(--bad);
-}
-
-.agent-keeper-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-}
-@media (max-width: 1024px) {
-  .agent-keeper-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.more-items {
-  text-align: center;
-  padding: 10px;
-  font-size: 0.85rem;
-  color: var(--accent);
-  background: var(--accent-soft);
-  border-radius: var(--radius-sm);
-  margin-top: 10px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease;
-}
-.more-items:hover {
-  background: rgba(0, 240, 255, 0.2);
-}
-
-.agent-critical {
-  border-color: var(--bad) !important;
-  box-shadow: inset 0 0 10px rgba(255, 0, 85, 0.1) !important;
-}
-
-.keeper-detail-row {
-  font-size: 0.75rem;
-  margin-top: 4px;
-  display: flex;
-  flex-direction: column;
-  background: var(--white-3);
-  padding: 6px;
-  border-radius: 4px;
-  border-left: 2px solid var(--text-muted);
-}
-.keeper-label {
-  font-weight: 600;
-  color: var(--text-muted);
-  font-size: 0.65rem;
-  text-transform: uppercase;
-}
-.keeper-value {
-  color: var(--text-body);
-  line-height: 1.3;
-  margin-top: 2px;
-}
 .memory-note {
   font-style: italic;
   color: var(--accent);
 }
 
 /* Keeper Inner Info Styles */
-.keeper-inner-info {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--white-5);
-}
-
-.keeper-detail-row {
-  display: flex;
-  flex-direction: column;
-  background: rgba(16, 24, 43, 0.4);
-  padding: 8px 12px;
-  border-radius: 8px;
-  border-left: 3px solid var(--accent);
-  transition: background 0.2s ease;
-}
-
-.keeper-detail-row:hover {
-  background: rgba(16, 24, 43, 0.8);
-}
-
-.keeper-label {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 4px;
-}
-
-.keeper-value {
-  font-size: 0.85rem;
-  color: var(--text-body);
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-.keeper-value.memory-note {
-  font-style: italic;
-  color: var(--ok);
-}
-

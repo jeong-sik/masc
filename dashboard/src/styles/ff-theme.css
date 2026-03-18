@@ -156,49 +156,7 @@ button.monitor-row:hover {
 /* ============================================
    4. Context Ratio Bars — HP-style gradient
    ============================================ */
-
-.ctx-bar {
-  height: 7px;
-  border-radius: 2px;
-  background: var(--white-6);
-  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-}
-
-.ctx-fill {
-  background: linear-gradient(
-    90deg,
-    var(--ff-hp-full, var(--ok)) 0%,
-    #2dd46a 100%
-  );
-  border-radius: 1px;
-  box-shadow: 0 0 4px rgba(74, 222, 128, 0.3);
-}
-
-.ctx-fill.warn {
-  background: linear-gradient(
-    90deg,
-    var(--ff-hp-mid, var(--warn)) 0%,
-    #e0a510 100%
-  );
-  box-shadow: 0 0 4px rgba(251, 191, 36, 0.3);
-}
-
-.ctx-fill.bad {
-  background: linear-gradient(
-    90deg,
-    var(--ff-hp-low, var(--ff-hp-low)) 0%,
-    #e04040 100%
-  );
-  box-shadow: 0 0 4px rgba(248, 113, 113, 0.3);
-}
-
 /* Keeper roster pressure bar — same HP treatment */
-.keeper-roster__pressure-track {
-  height: 10px;
-  border-radius: 2px;
-  border-color: var(--ff-border-subtle, var(--ff-border-subtle));
-}
-
 /* ============================================
    5. Terminated Cards — KO'd look
    ============================================ */
@@ -273,12 +231,6 @@ button.monitor-row.state-watching {
 /* ============================================
    8. KPI Strip — FF panel treatment
    ============================================ */
-
-.kpi-item {
-  background: var(--ff-panel, rgba(10, 22, 40, 0.92));
-  border-color: var(--ff-border-subtle, var(--ff-border-subtle));
-}
-
 .kpi-label {
   color: rgba(200, 168, 78, 0.6);
 }

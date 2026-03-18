@@ -88,71 +88,6 @@
 .goal-row:hover {
   background: var(--white-5);
 }
-
-.planning-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 18px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-
-.planning-headline {
-  color: var(--text-strong);
-  font-size: 18px;
-  line-height: 1.4;
-}
-
-.planning-subtitle {
-  margin-top: 6px;
-  color: var(--text-muted);
-  font-size: 13px;
-  line-height: 1.55;
-  max-width: 72ch;
-}
-
-.planning-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.planning-freshness-grid {
-  margin-top: 14px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 10px;
-}
-
-.planning-freshness-row {
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  background: rgba(13, 22, 40, 0.58);
-  padding: 12px 14px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-}
-
-.planning-freshness-label {
-  color: var(--text-strong);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.planning-freshness-source {
-  color: var(--text-muted);
-  font-size: 11px;
-  margin-top: 2px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.planning-freshness-value {
-  color: #9af3ba;
-  font-size: 13px;
-}
-
 .planning-loop-list {
   display: grid;
   gap: 12px;
@@ -225,26 +160,6 @@
 .planning-loop-bad {
   color: #fda4af;
 }
-
-.keeper-focus-row {
-  color: var(--text-body);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.keeper-diagnostic-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-}
-
-.keeper-diagnostic-copy {
-  color: #9fb8e1;
-  font-size: 11px;
-}
-
 .goal-row-main {
   flex: 1;
   min-width: 0;

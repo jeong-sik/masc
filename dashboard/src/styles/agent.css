@@ -1,50 +1,6 @@
 /* ── Agent List (Overview) ─────────────────────────────────── */
-.agent-list { display: flex; flex-direction: column; gap: 8px; }
-.agent-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--white-3);
-  border-radius: 8px;
-  border: 1px solid var(--white-6);
-}
-.agent-row .agent-emoji { font-size: 20px; }
-.agent-row .agent-name { flex: 1; font-size: 14px; }
-.agent-activity-meta {
-  width: 100%;
-  margin-top: 4px;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
 /* ── Live Agent / Keeper Cards ─────────────────────────────── */
-.live-agent {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-  background: var(--white-4);
-  border-radius: 10px;
-  border: 1px solid var(--white-8);
-  transition: all 0.2s;
-}
-.live-agent:hover { border-color: rgba(255,255,255,0.15); }
-.live-agent.keeper-card {
-  cursor: pointer;
-}
-.live-agent.keeper-card.selected {
-  border-color: rgba(74,222,128,0.55);
-  box-shadow: 0 0 0 1px rgba(74,222,128,0.35) inset;
-}
-
 /* ── Agents Tab Grid ───────────────────────────────────────── */
-.agents-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
 .agent-card {
   padding: 15px;
   background: var(--white-4);
@@ -65,12 +21,6 @@
 }
 .agent-card .agent-emoji { font-size: 24px; }
 .agent-card .agent-name { font-size: 15px; font-weight: 600; }
-.agent-card .agent-korean { font-size: 12px; color: var(--text-dim); }
-.agent-card .agent-model { font-size: 11px; color: var(--cyan); font-family: monospace; }
-.agent-card .agent-interests {
-  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px;
-}
-
 /* ── Agent Journal Stream (Phase 2) ───────────────────────── */
 .agent-journal-stream {
   display: flex;

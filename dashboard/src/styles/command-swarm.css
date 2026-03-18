@@ -199,16 +199,9 @@
   font-size: 15px;
 }
 
-.orchestra-node.worker .orchestra-node-body,
-.orchestra-node.worker-ghost .orchestra-node-body {
+.orchestra-node.worker .orchestra-node-body {
   rx: 20px;
 }
-
-.orchestra-node.worker-ghost .orchestra-node-body {
-  fill: rgba(51,65,85,0.7);
-  stroke-dasharray: 5 4;
-}
-
 .orchestra-node.session .orchestra-node-body {
   fill: rgba(15,23,42,0.88);
 }
@@ -550,7 +543,9 @@
 }
 
 @media (max-width: 1100px) {
+
   .command-swarm-layout {
     grid-template-columns: minmax(0, 1fr);
   }
+
 }

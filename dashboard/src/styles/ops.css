@@ -39,7 +39,7 @@
 .ops-banner {
   border-radius: 12px;
   padding: 12px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-8);
 }
 
 .ops-banner.error {
@@ -85,8 +85,8 @@
 .ops-handoff-preview {
   padding: 10px 12px;
   border-radius: 12px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--white-5);
+  border: 1px solid var(--white-8);
   color: var(--text-strong);
   line-height: 1.45;
 }
@@ -181,7 +181,7 @@
   padding: 14px;
   border-radius: 12px;
   border: 1px solid rgba(138, 163, 211, 0.16);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
   display: grid;
   gap: 6px;
 }
@@ -242,7 +242,7 @@
 }
 
 .ops-studio-group + .ops-studio-group {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--white-8);
   padding-top: 16px;
 }
 
@@ -255,8 +255,8 @@
 .ops-stat {
   padding: 12px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--white-8);
+  background: var(--white-3);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -317,8 +317,8 @@
 .ops-guidance-card {
   padding: 12px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--white-8);
+  background: var(--white-3);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -363,8 +363,8 @@
 .ops-log-entry {
   padding: 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-3);
+  border: 1px solid var(--white-8);
 }
 
 .ops-feed-meta,
@@ -427,8 +427,8 @@
 .ops-entity-card {
   padding: 12px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--white-8);
+  background: var(--white-3);
   color: inherit;
   font: inherit;
   text-align: left;
@@ -474,7 +474,7 @@
   padding: 10px 12px;
   border-radius: 10px;
   background: rgba(8, 15, 29, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-8);
   color: #b9d6ff;
   font-size: 11px;
   line-height: 1.45;

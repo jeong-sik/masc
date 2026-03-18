@@ -11,7 +11,7 @@
   min-width: 60px;
   text-align: center;
   padding: 8px 4px;
-  background: rgba(255,255,255,0.03);
+  background: var(--white-3);
   border-radius: 8px;
 }
 
@@ -23,7 +23,7 @@
 
 .goal-summary-label {
   font-size: 11px;
-  color: #888;
+  color: var(--text-dim);
   margin-top: 2px;
 }
 
@@ -42,13 +42,13 @@
 
 .goal-filter-label {
   font-size: 11px;
-  color: #888;
+  color: var(--text-dim);
   margin-right: 4px;
 }
 
 .goal-filter-btn {
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--white-5);
+  border: 1px solid var(--white-8);
   color: #aaa;
   padding: 3px 10px;
   border-radius: 12px;
@@ -58,7 +58,7 @@
 }
 
 .goal-filter-btn:hover {
-  background: rgba(255,255,255,0.1);
+  background: var(--white-10);
   color: #e0e0e0;
 }
 
@@ -86,7 +86,7 @@
 }
 
 .goal-row:hover {
-  background: rgba(255,255,255,0.05);
+  background: var(--white-5);
 }
 
 .planning-header {
@@ -125,7 +125,7 @@
 }
 
 .planning-freshness-row {
-  border: 1px solid rgba(138, 163, 211, 0.2);
+  border: 1px solid var(--card-border);
   border-radius: 10px;
   background: rgba(13, 22, 40, 0.58);
   padding: 12px 14px;
@@ -159,7 +159,7 @@
 }
 
 .planning-loop-row {
-  border: 1px solid rgba(138, 163, 211, 0.2);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
   background: rgba(13, 22, 40, 0.58);
   padding: 14px;
@@ -269,7 +269,7 @@
   flex-wrap: wrap;
   margin-top: 4px;
   font-size: 11px;
-  color: #888;
+  color: var(--text-dim);
 }
 
 .goal-priority {
@@ -278,20 +278,20 @@
 }
 
 .goal-metric {
-  color: #22d3ee;
+  color: var(--cyan);
 }
 
 .goal-due {
-  color: #f87171;
+  color: var(--ff-hp-low);
 }
 
 .goal-review-note {
   font-size: 11px;
-  color: #888;
+  color: var(--text-dim);
   font-style: italic;
   margin-top: 4px;
   padding-left: 8px;
-  border-left: 2px solid rgba(255,255,255,0.08);
+  border-left: 2px solid var(--white-8);
 }
 
 .goal-row-right {
@@ -333,13 +333,13 @@
 
 .priority-badge--p1 {
   background: rgba(248, 113, 113, 0.2);
-  color: #f87171;
+  color: var(--ff-hp-low);
   border: 1px solid rgba(248, 113, 113, 0.35);
 }
 
 .priority-badge--p2 {
   background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  color: var(--warn);
   border: 1px solid rgba(251, 191, 36, 0.35);
 }
 
@@ -350,9 +350,9 @@
 }
 
 .priority-badge--p4 {
-  background: rgba(255, 255, 255, 0.05);
-  color: #888;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-5);
+  color: var(--text-dim);
+  border: 1px solid var(--white-8);
 }
 
 /* -- Kanban card header (badge + title row) -- */
@@ -372,7 +372,7 @@
   line-height: 1.5;
   margin-left: 8px;
   padding: 4px 8px;
-  border-left: 2px solid rgba(255, 255, 255, 0.06);
+  border-left: 2px solid var(--white-6);
   cursor: pointer;
   transition: color 0.15s;
   overflow: hidden;

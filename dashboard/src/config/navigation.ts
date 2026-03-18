@@ -1,8 +1,8 @@
 import type { TabId } from '../types'
 
-// --- Surface grouping: 12 tabs -> 5 surfaces ---
+// --- Surface grouping: 7 tabs -> 5 surfaces ---
 
-export type SurfaceId = 'home' | 'agents' | 'work' | 'control' | 'lab'
+export type SurfaceId = 'home' | 'observe' | 'work' | 'control' | 'lab'
 
 export interface DashboardNavGroup {
   id: SurfaceId
@@ -25,145 +25,96 @@ export interface DashboardNavItem {
 export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'home',
-    label: '홈',
+    label: '\uD64D',
     icon: '\uD83C\uDFE0',
-    description: '에이전트 생태계 전체를 한눈에',
+    description: '\uC5D0\uC774\uC804\uD2B8 \uC0DD\uD0DC\uACC4 \uC804\uCCB4\uB97C \uD55C\uB208\uC5D0',
     defaultTab: 'home',
     tabs: ['home'],
   },
   {
-    id: 'agents',
-    label: '에이전트',
-    icon: '\uD83E\uDD16',
-    description: '에이전트, 키퍼, 세션, 관계',
-    defaultTab: 'agent-roster',
-    tabs: ['agent-roster', 'mission', 'execution', 'live', 'social'],
+    id: 'observe',
+    label: '\uAD00\uCC30',
+    icon: '\uD83D\uDD2D',
+    description: '\uC5D0\uC774\uC804\uD2B8, \uC0C1\uD669, \uD65C\uB3D9 \uD750\uB984',
+    defaultTab: 'situation',
+    tabs: ['situation', 'agents', 'activity'],
   },
   {
     id: 'work',
-    label: '작업',
+    label: '\uC791\uC5C5',
     icon: '\uD83D\uDCCB',
-    description: '태스크, 근거, 거버넌스, 메모리',
-    defaultTab: 'proof',
-    tabs: ['proof', 'memory', 'governance'],
+    description: '\uAC8C\uC2DC\uD310, \uAC70\uBC84\uB10C\uC2A4, \uADFC\uAC70, \uACC4\uD68D',
+    defaultTab: 'work',
+    tabs: ['work'],
   },
   {
     id: 'control',
-    label: '운영',
+    label: '\uC6B4\uC601',
     icon: '\uD83C\uDFAE',
-    description: '목표, 도구, 개입',
-    defaultTab: 'planning',
-    tabs: ['planning', 'tools', 'intervene'],
+    description: '\uAC1C\uC785, \uB3C4\uAD6C \uD604\uD669',
+    defaultTab: 'control',
+    tabs: ['control'],
   },
   {
     id: 'lab',
-    label: '실험',
-    icon: '\u2694\uFE0F',
-    description: '지휘, TRPG, 실험',
-    defaultTab: 'command',
-    tabs: ['command', 'lab'],
+    label: '\uC2E4\uD5D8',
+    icon: '\u2697\uFE0F',
+    description: '\uC9C0\uD718, TRPG, \uC2E4\uD5D8',
+    defaultTab: 'lab',
+    tabs: ['lab'],
   },
 ]
 
-// Full nav item list (all 13 tabs including 'home')
+// Full nav item list (all 7 tabs)
 export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
   {
     id: 'home',
-    label: '홈',
+    label: '\uD64D',
     icon: '\uD83C\uDFE0',
     group: 'home',
-    description: '에이전트 생태계 전체를 한눈에 보는 개요',
+    description: '\uC5D0\uC774\uC804\uD2B8 \uC0DD\uD0DC\uACC4 \uC804\uCCB4\uB97C \uD55C\uB208\uC5D0 \uBCF4\uB294 \uAC1C\uC694',
   },
   {
-    id: 'agent-roster',
-    label: '에이전트 목록',
-    icon: '\uD83D\uDC65',
-    group: 'agents',
-    description: '전체 에이전트를 스크롤하며 탐색하는 목록 화면',
-  },
-  {
-    id: 'mission',
-    label: '상황판',
+    id: 'situation',
+    label: '\uC0C1\uD669\uD310',
     icon: '\uD83C\uDFE0',
-    group: 'agents',
-    description: '방 중심으로 지금 상황과 흐름을 가장 먼저 읽는 기본 화면',
+    group: 'observe',
+    description: '\uBC29 \uC911\uC2EC\uC73C\uB85C \uC9C0\uAE08 \uC0C1\uD669\uACFC \uD750\uB984\uC744 \uAC00\uC7A5 \uBA3C\uC800 \uC77D\uB294 \uAE30\uBCF8 \uD654\uBA74',
   },
   {
-    id: 'execution',
-    label: '실행',
-    icon: '\uD83E\uDD16',
-    group: 'agents',
-    description: '에이전트, 키퍼, 세션을 중심으로 참여자를 파악하는 화면',
+    id: 'agents',
+    label: '\uC5D0\uC774\uC804\uD2B8',
+    icon: '\uD83D\uDC65',
+    group: 'observe',
+    description: '\uC5D0\uC774\uC804\uD2B8, \uD0A4\uD37C, \uC138\uC158\uC744 \uD55C\uACF3\uC5D0\uC11C \uD0D0\uC0C9',
   },
   {
-    id: 'live',
-    label: '라이브',
+    id: 'activity',
+    label: '\uD65C\uB3D9',
     icon: '\uD83D\uDCE1',
-    group: 'agents',
-    description: '실시간 에이전트 활동과 이벤트 흐름을 관찰하는 화면',
+    group: 'observe',
+    description: '\uC2E4\uC2DC\uAC04 \uC774\uBCA4\uD2B8 \uD750\uB984\uACFC \uC18C\uC15C \uADF8\uB798\uD504',
   },
   {
-    id: 'social',
-    label: '소셜',
-    icon: '\uD83D\uDD17',
-    group: 'agents',
-    description: '에이전트 관계 그래프와 활동 흐름을 보는 관계 분석 화면',
-  },
-  {
-    id: 'proof',
-    label: '근거',
-    icon: '\uD83D\uDD0D',
+    id: 'work',
+    label: '\uC791\uC5C5',
+    icon: '\uD83D\uDCCB',
     group: 'work',
-    description: '협업, 대화, 실행의 증거 경로를 확인하는 화면',
+    description: '\uAC8C\uC2DC\uD310, \uAC70\uBC84\uB10C\uC2A4, \uADFC\uAC70, \uACC4\uD68D\uC744 \uC11C\uBE0C\uC139\uC158\uC73C\uB85C \uD0D0\uC0C9',
   },
   {
-    id: 'memory',
-    label: '메모리',
-    icon: '\uD83D\uDCAC',
-    group: 'work',
-    description: '게시글, 댓글, 비동기 기억으로 방의 누적 맥락을 읽는 화면',
-  },
-  {
-    id: 'governance',
-    label: '거버넌스',
-    icon: '\u2696\uFE0F',
-    group: 'work',
-    description: '토론, 표결, 판단 구조를 규범과 결정의 관점에서 읽는 화면',
-  },
-  {
-    id: 'planning',
-    label: '계획',
-    icon: '\uD83C\uDFAF',
-    group: 'control',
-    description: '목표, 백로그, 우선순위를 운영 관점으로 읽는 계획 화면',
-  },
-  {
-    id: 'tools',
-    label: '도구',
-    icon: '\uD83E\uDDF0',
-    group: 'control',
-    description: '시스템 전체 도구 목록과 사용 현황을 확인하는 운영 화면',
-  },
-  {
-    id: 'intervene',
-    label: '개입',
+    id: 'control',
+    label: '\uC6B4\uC601',
     icon: '\uD83C\uDFAE',
     group: 'control',
-    description: '룸, 세션, 키퍼에 직접 개입하는 운영 화면',
-  },
-  {
-    id: 'command',
-    label: '지휘',
-    icon: '\uD83E\uDDED',
-    group: 'lab',
-    description: 'command-plane, swarm, resolution 같은 고급 지휘/실험 화면',
+    description: '\uB8F8/\uC138\uC158/\uD0A4\uD37C\uC5D0 \uC9C1\uC811 \uAC1C\uC785\uD558\uACE0 \uB3C4\uAD6C \uD604\uD669\uC744 \uD655\uC778',
   },
   {
     id: 'lab',
-    label: '실험',
-    icon: '\u2694\uFE0F',
+    label: '\uC2E4\uD5D8',
+    icon: '\u2697\uFE0F',
     group: 'lab',
-    description: 'TRPG 같은 실험 기능을 메인 대시보드 밖에서 다룹니다',
+    description: '\uC9C0\uD718\uBA74, TRPG \uB4F1 \uC2E4\uD5D8 \uAE30\uB2A5',
   },
 ]
 
@@ -178,10 +129,10 @@ export interface DashboardNavSection {
 
 // Kept for backward compat — unused in the new nav but referenced by semantic-layer
 export const DASHBOARD_NAV_SECTIONS: DashboardNavSection[] = [
-  { id: 'now', label: '지금', description: '현재 상태' },
-  { id: 'why', label: '이유', description: '근거와 맥락' },
-  { id: 'act', label: '개입', description: '운영 액션' },
-  { id: 'lab', label: '실험', description: '실험 화면' },
+  { id: 'now', label: '\uC9C0\uAE08', description: '\uD604\uC7AC \uC0C1\uD0DC' },
+  { id: 'why', label: '\uC774\uC720', description: '\uADFC\uAC70\uC640 \uB9E5\uB77D' },
+  { id: 'act', label: '\uAC1C\uC785', description: '\uC6B4\uC601 \uC561\uC158' },
+  { id: 'lab', label: '\uC2E4\uD5D8', description: '\uC2E4\uD5D8 \uD654\uBA74' },
 ]
 
 // Surface lookup by tab id

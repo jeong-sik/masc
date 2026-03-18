@@ -202,7 +202,7 @@ let handle_execute_spawn _ctx args : result =
       (* Then execute if approved *)
       match decision with
       | SpawnApproved _ ->
-          (match Gardener.execute_spawn ~decision with
+          (match Gardener.execute_spawn ~decision () with
            | Ok name ->
                let json = `Assoc [
                  ("status", `String "ok");

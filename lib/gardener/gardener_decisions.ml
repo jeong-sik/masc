@@ -225,15 +225,59 @@ let decide_retire ~config ~health ~(agent_stats : agent_stats) : retirement_deci
 
 (** {1 Spawn Execution} *)
 
-(** Execute an approved spawn *)
-let execute_spawn ~(decision : spawn_decision) : (string, string) result =
+(** Execute an approved spawn via OAS worker agent (Spawn_eio).
+
+    When called from the background tick loop, [~sw] and [~room_config] are
+    passed explicitly. When called from the MCP tool layer (which has no
+    Eio.Switch in scope), the function falls back to the module-level refs
+    set during [Gardener.start]. *)
+let execute_spawn ?sw ?room_config ~(decision : spawn_decision) () : (string, string) result =
   match decision with
-  | SpawnApproved { topic; proposed_traits = _; proposed_hours = _; reason; _ } ->
-      Eio.traceln "[Gardener] Executing spawn: %s (reason: %s)" topic reason;
-      (* Lodge heartbeat spawn removed (#1596). Use Gardener Neo4j spawn directly. *)
+  | SpawnApproved { topic; proposed_traits; proposed_hours = _; reason; _ } ->
+      Eio.traceln "[Gardener] Executing OAS spawn: %s (reason: %s)" topic reason;
       let config = load_config () in
-      trip_circuit ~config;
-      Error "spawn_agent_from_gap not available (Lodge removed)"
+      let resolved_sw = match sw with Some s -> Some s | None -> !sw_ref in
+      let resolved_rc = match room_config with Some rc -> Some rc | None -> !room_config_ref in
+      (match resolved_sw, resolved_rc with
+       | None, _ ->
+           trip_circuit ~config;
+           Error "execute_spawn: no Eio.Switch available (gardener not started?)"
+       | _, None ->
+           trip_circuit ~config;
+           Error "execute_spawn: no room_config available (gardener not started?)"
+       | Some sw, Some room_config ->
+      let traits_str = String.concat ", " proposed_traits in
+      let prompt = Printf.sprintf
+        "You are a MASC agent spawned by Gardener to address: %s\n\
+         Traits: %s\n\
+         Your task: Check the room for pending tasks (masc_status), claim one (masc_claim_next), and work on it.\n\
+         When done, broadcast your results and leave the room."
+        topic traits_str
+      in
+      let agent_name = Printf.sprintf "gardener-worker-%s"
+        (String.sub (Digest.to_hex (Digest.string topic)) 0 8) in
+      (try
+        let result = Spawn_eio.spawn ~sw ~agent_name ~prompt
+          ~room_config ~timeout_seconds:300 () in
+        if result.Spawn_eio.success then begin
+          record_spawn ();
+          reset_circuit ();
+          let msg = Printf.sprintf "OAS worker '%s' spawned for '%s' (elapsed: %dms)"
+            agent_name topic result.Spawn_eio.elapsed_ms in
+          let store = Board.global () in
+          (try ignore (Board.create_post store ~author:"gardener"
+            ~content:(Printf.sprintf "New agent deployed: %s\nTopic: %s\nReason: %s" agent_name topic reason)
+            ~ttl_hours:24 ())
+           with exn -> Log.Spawn.error "Board.create_post failed: %s" (Printexc.to_string exn));
+          Ok msg
+        end else begin
+          trip_circuit ~config;
+          Error (Printf.sprintf "OAS spawn failed: %s"
+            (String.sub result.Spawn_eio.output 0 (min 200 (String.length result.Spawn_eio.output))))
+        end
+      with exn ->
+        trip_circuit ~config;
+        Error (Printf.sprintf "OAS spawn exception: %s" (Printexc.to_string exn))))
   | SpawnDeferred { topic = _; reason; _ } ->
       Error (Printf.sprintf "Spawn deferred: %s" reason)
   | SpawnRejected { topic; reason } ->

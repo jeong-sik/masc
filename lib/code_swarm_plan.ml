@@ -113,9 +113,7 @@ let save_plan (plan : swarm_plan) =
       ]
   in
   let path = plan_file plan.base_path plan.plan_id in
-  let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    output_string oc (Yojson.Safe.pretty_to_string json))
+  Fs_compat.save_file path (Yojson.Safe.pretty_to_string json)
 
 let load_plan base_path plan_id : (swarm_plan, string) result =
   let path = plan_file base_path plan_id in

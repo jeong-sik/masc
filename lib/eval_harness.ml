@@ -433,13 +433,7 @@ let load_scenarios_from_file (path : string) : (scenario list, string) result =
     Error (Printf.sprintf "Scenario file not found: %s" path)
   else
     try
-      let ic = open_in path in
-      let content = Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
-        let n = in_channel_length ic in
-        let buf = Bytes.create n in
-        really_input ic buf 0 n;
-        Bytes.to_string buf
-      ) in
+      let content = Fs_compat.load_file path in
       let json = Yojson.Safe.from_string content in
       match json with
       | `List items ->
@@ -489,15 +483,13 @@ let report_to_string (r : eval_suite_result) : string =
 
 (** Write suite results as JSONL (one line per eval_result). *)
 let write_results_jsonl ~(path : string) (r : eval_suite_result) : unit =
-  let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-    (* Header line *)
-    let header = Yojson.Safe.to_string (suite_result_to_json r) ^ "\n" in
-    let _ = Unix.write_substring fd header 0 (String.length header) in
-    (* Per-result lines *)
-    List.iter (fun er ->
-      let line = Yojson.Safe.to_string (eval_result_to_json er) ^ "\n" in
-      let _ = Unix.write_substring fd line 0 (String.length line) in
-      ()
-    ) r.results
-  )
+  let buf = Buffer.create 4096 in
+  (* Header line *)
+  Buffer.add_string buf (Yojson.Safe.to_string (suite_result_to_json r));
+  Buffer.add_char buf '\n';
+  (* Per-result lines *)
+  List.iter (fun er ->
+    Buffer.add_string buf (Yojson.Safe.to_string (eval_result_to_json er));
+    Buffer.add_char buf '\n'
+  ) r.results;
+  Fs_compat.save_file path (Buffer.contents buf)

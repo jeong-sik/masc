@@ -219,23 +219,17 @@ let ensure_dir path =
 
 let append_cycle ~base_path loop_id record =
   let dir = results_dir ~base_path loop_id in
-  ensure_dir dir;
+  Fs_compat.mkdir_p dir;
   let path = results_file ~base_path loop_id in
   let line = Yojson.Safe.to_string (cycle_to_yojson record) ^ "\n" in
-  let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    output_string oc line
-  )
+  Fs_compat.append_file path line
 
 let save_state ~base_path (state : loop_state) =
   let dir = results_dir ~base_path state.loop_id in
-  ensure_dir dir;
+  Fs_compat.mkdir_p dir;
   let path = state_file ~base_path state.loop_id in
   let json = Yojson.Safe.pretty_to_string (state_to_yojson state) in
-  let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    output_string oc json
-  )
+  Fs_compat.save_file path json
 
 let save_swarm_link ~base_path (link : swarm_link) =
   let loop_path = loop_link_file ~base_path link.loop_id in
@@ -243,21 +237,20 @@ let save_swarm_link ~base_path (link : swarm_link) =
   let json = swarm_link_to_yojson link in
   let write path =
     let dir = Filename.dirname path in
-    ensure_dir dir;
-    let oc = open_out path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc (Yojson.Safe.pretty_to_string json))
+    Fs_compat.mkdir_p dir;
+    Fs_compat.save_file path (Yojson.Safe.pretty_to_string json)
   in
   write loop_path;
   write session_path
 
 let load_json_file path =
-  if not (Sys.file_exists path) then
+  if not (Fs_compat.file_exists path) then
     None
   else
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      try Some (Yojson.Safe.from_channel ic) with _ -> None)
+    try
+      let content = Fs_compat.load_file path in
+      Some (Yojson.Safe.from_string content)
+    with _ -> None
 
 let load_swarm_link_by_loop ~base_path loop_id =
   load_json_file (loop_link_file ~base_path loop_id)
@@ -272,29 +265,18 @@ let load_state ~base_path loop_id =
 
 let latest_cycle_record ~base_path loop_id =
   let path = results_file ~base_path loop_id in
-  if not (Sys.file_exists path) then
+  if not (Fs_compat.file_exists path) then
     None
   else
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let rec loop last =
-        match input_line ic with
-        | line ->
-            let trimmed = String.trim line in
-            if trimmed = "" then loop last
-            else
-              let next =
-                try Some (cycle_of_yojson (Yojson.Safe.from_string trimmed))
-                with
-                | Yojson.Json_error _ -> last
-                | exn ->
-                    Log.Autoresearch.warn "cycle parse failed: %s" (Printexc.to_string exn);
-                    last
-              in
-              loop next
-        | exception End_of_file -> last
-      in
-      loop None)
+    let lines = Fs_compat.load_jsonl path in
+    List.fold_left (fun last json ->
+      try Some (cycle_of_yojson json)
+      with
+      | Yojson.Json_error _ -> last
+      | exn ->
+          Log.Autoresearch.warn "cycle parse failed: %s" (Printexc.to_string exn);
+          last
+    ) None lines
 
 let stop_loop ~base_path ?reason loop_id =
   let stop_state (state : loop_state) =
@@ -580,13 +562,7 @@ let validate_target_file ~workdir target_file =
 
 (** Read entire file contents. *)
 let read_file path =
-  let ic = open_in path in
-  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-    let n = in_channel_length ic in
-    let buf = Bytes.create n in
-    really_input ic buf 0 n;
-    Bytes.to_string buf
-  )
+  Fs_compat.load_file path
 
 (** Apply code change: write new_content to target_file atomically.
     Writes to a temp file in the same directory, then renames.
@@ -600,10 +576,7 @@ let apply_code_change ~workdir ~target_file ~new_content =
     let tmp_path = Filename.concat dir
       (Printf.sprintf ".autoresearch_tmp_%d" (Unix.getpid ())) in
     (try
-      let oc = open_out tmp_path in
-      Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-        output_string oc new_content
-      );
+      Fs_compat.save_file tmp_path new_content;
       Unix.rename tmp_path abs_path;
       Result.ok original
     with exn ->

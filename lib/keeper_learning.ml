@@ -139,15 +139,13 @@ let rewrite_decisions (config : Room.config) ~(keeper_name : string)
     (records : decision_record list) : unit =
   let path = decisions_path config keeper_name in
   let tmp_path = path ^ ".tmp" in
-  let oc = open_out tmp_path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      List.iter
-        (fun r ->
-          output_string oc (Yojson.Safe.to_string (decision_record_to_json r));
-          output_char oc '\n')
-        records);
+  let buf = Buffer.create 4096 in
+  List.iter
+    (fun r ->
+      Buffer.add_string buf (Yojson.Safe.to_string (decision_record_to_json r));
+      Buffer.add_char buf '\n')
+    records;
+  Fs_compat.save_file tmp_path (Buffer.contents buf);
   Sys.rename tmp_path path
 
 let record_outcome (config : Room.config) ~(keeper_name : string)

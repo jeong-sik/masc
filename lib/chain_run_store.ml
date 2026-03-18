@@ -32,23 +32,17 @@ let ensure_dir path =
   ensure path
 
 let read_lines_tail ~max_bytes:_ ~max_lines path =
-  let lines = ref [] in
-  let ic = open_in path in
-  Common.protect ~module_name:"chain_run_store" ~finally_label:"close_in"
-    ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      (try
-         while true do
-           lines := input_line ic :: !lines
-         done
-       with End_of_file -> ());
-      let rec take n xs =
-        if n <= 0 then []
-        else
-          match xs with
-          | [] -> []
-          | hd :: tl -> hd :: take (n - 1) tl
-      in
-      List.rev !lines |> take max_lines)
+  let content = Fs_compat.load_file path in
+  let all_lines = String.split_on_char '\n' content
+    |> List.filter (fun line -> String.length (String.trim line) > 0) in
+  let rec take n xs =
+    if n <= 0 then []
+    else
+      match xs with
+      | [] -> []
+      | hd :: tl -> hd :: take (n - 1) tl
+  in
+  take max_lines all_lines
 
 let truncate s max_chars =
   let len = String.length s in
@@ -241,10 +235,8 @@ let mutex = Eio.Mutex.create ()
 
 let append_persistent_json json =
   let path = store_path () in
-  ensure_dir (Filename.dirname path);
-  let line = Yojson.Safe.to_string json ^ "\n" in
-  Out_channel.with_open_gen [ Open_creat; Open_append; Open_wronly ] 0o644 path
-    (fun oc -> output_string oc line)
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.append_jsonl path json
 
 let list_runs () : run_record list =
   Eio.Mutex.use_rw ~protect:true mutex (fun () -> !store)

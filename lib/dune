@@ -552,9 +552,7 @@
    compaction_types
    context_manager
    context_compact_oas
-   verifier
    verifier_oas
-   succession
    succession_oas
    perpetual_loop
    perpetual_loop_types

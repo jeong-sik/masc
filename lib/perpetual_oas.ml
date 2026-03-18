@@ -174,7 +174,7 @@ let run_perpetual_via_oas
   if pstate.handoff_triggered then begin
     eprintf "[perpetual_oas] Handoff triggered at gen %d, preparing DNA\n%!"
       pstate.generation;
-    let metrics : Succession.succession_metrics = {
+    let metrics : Succession_oas.succession_metrics = {
       total_turns = pstate.turn_count;
       total_tokens_used = pstate.total_tokens;
       total_cost_usd = pstate.total_cost;

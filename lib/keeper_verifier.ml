@@ -51,9 +51,9 @@ let keeper_verdict_to_json = function
 
 (** Map the underlying verifier verdict to keeper-specific verdict. *)
 let of_verifier_verdict = function
-  | Verifier.Pass -> Proceed
-  | Verifier.Warn reason -> ProceedWithCaution reason
-  | Verifier.Fail reason -> Block reason
+  | Verifier_oas.Pass -> Proceed
+  | Verifier_oas.Warn reason -> ProceedWithCaution reason
+  | Verifier_oas.Fail reason -> Block reason
 
 (* ================================================================ *)
 (* Cost Guard                                                       *)
@@ -110,7 +110,7 @@ let verify_action
   | Some reason -> Block reason
   | None ->
   (* Layer 3: LLM verification *)
-  let verifier_req : Verifier.verification_request = {
+  let verifier_req : Verifier_oas.verification_request = {
     action_description = req.proposed_action.action_description;
     action_result = req.action_plan;
     goal = sprintf "%s (goal_id=%s)"
@@ -122,7 +122,7 @@ let verify_action
       else
         req.keeper_context;
   } in
-  let verdict = Verifier.verify ~model verifier_req in
+  let verdict = Verifier_oas.verify ~model verifier_req in
   of_verifier_verdict verdict
 
 (* ================================================================ *)

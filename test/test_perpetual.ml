@@ -358,48 +358,48 @@ let test_context_manager () = group "Context Manager" (fun () ->
 let test_verifier () = group "Verifier" (fun () ->
 
   (* 1. Parse PASS *)
-  let v = Verifier.parse_verdict "PASS" in
-  assert_true "parse:pass" (v = Verifier.Pass);
+  let v = Verifier_oas.parse_verdict "PASS" in
+  assert_true "parse:pass" (v = Verifier_oas.Pass);
 
   (* 2. Parse WARN *)
-  let v2 = Verifier.parse_verdict "WARN: might be slow" in
+  let v2 = Verifier_oas.parse_verdict "WARN: might be slow" in
   (match v2 with
-   | Verifier.Warn reason ->
+   | Verifier_oas.Warn reason ->
      assert_true "parse:warn_reason" (String.length reason > 0)
    | _ -> assert_true "parse:warn" false);
 
   (* 3. Parse FAIL *)
-  let v3 = Verifier.parse_verdict "FAIL: wrong approach" in
+  let v3 = Verifier_oas.parse_verdict "FAIL: wrong approach" in
   (match v3 with
-   | Verifier.Fail reason ->
+   | Verifier_oas.Fail reason ->
      assert_true "parse:fail_reason" (String.length reason > 0)
    | _ -> assert_true "parse:fail" false);
 
   (* 4. Parse with colon *)
-  let v4 = Verifier.parse_verdict "WARN: something" in
+  let v4 = Verifier_oas.parse_verdict "WARN: something" in
   (match v4 with
-   | Verifier.Warn r -> assert_equal "parse:warn_colon" "something" r
+   | Verifier_oas.Warn r -> assert_equal "parse:warn_colon" "something" r
    | _ -> assert_true "parse:warn_colon" false);
 
   (* 5. Parse unknown → Warn *)
-  let v5 = Verifier.parse_verdict "I think this is fine" in
+  let v5 = Verifier_oas.parse_verdict "I think this is fine" in
   (match v5 with
-   | Verifier.Warn _ -> assert_true "parse:unknown_as_warn" true
+   | Verifier_oas.Warn _ -> assert_true "parse:unknown_as_warn" true
    | _ -> assert_true "parse:unknown" false);
 
   (* 6. Should skip: read operations *)
-  assert_true "skip:read" (Verifier.should_skip ~action_description:"Read file.txt");
-  assert_true "skip:glob" (Verifier.should_skip ~action_description:"Glob **/*.ml");
-  assert_true "skip:grep" (Verifier.should_skip ~action_description:"Grep pattern");
+  assert_true "skip:read" (Verifier_oas.should_skip ~action_description:"Read file.txt");
+  assert_true "skip:glob" (Verifier_oas.should_skip ~action_description:"Glob **/*.ml");
+  assert_true "skip:grep" (Verifier_oas.should_skip ~action_description:"Grep pattern");
 
   (* 7. Should not skip: write operations *)
-  assert_true "skip:write" (not (Verifier.should_skip ~action_description:"Write file.txt"));
-  assert_true "skip:edit" (not (Verifier.should_skip ~action_description:"Edit code"));
+  assert_true "skip:write" (not (Verifier_oas.should_skip ~action_description:"Write file.txt"));
+  assert_true "skip:edit" (not (Verifier_oas.should_skip ~action_description:"Edit code"));
 
   (* 8. Verdict to string *)
-  assert_equal "verdict_str:pass" "PASS" (Verifier.verdict_to_string Pass);
+  assert_equal "verdict_str:pass" "PASS" (Verifier_oas.verdict_to_string Pass);
   assert_true "verdict_str:warn"
-    (String.length (Verifier.verdict_to_string (Warn "x")) > 5);
+    (String.length (Verifier_oas.verdict_to_string (Warn "x")) > 5);
 )
 
 (* ================================================================ *)
@@ -409,19 +409,19 @@ let test_verifier () = group "Verifier" (fun () ->
 let test_succession () = group "Succession" (fun () ->
 
   (* 1. Empty metrics *)
-  let m = Succession.empty_metrics in
+  let m = Succession_oas.empty_metrics in
   assert_equal "metrics:empty_turns" 0 m.total_turns;
   assert_float_near "metrics:empty_cost" 0.0 m.total_cost_usd 0.001;
 
   (* 2. Merge metrics *)
-  let m1 = { Succession.empty_metrics with total_turns = 5; total_cost_usd = 1.0 } in
-  let m2 = { Succession.empty_metrics with total_turns = 3; total_cost_usd = 0.5 } in
-  let merged = Succession.merge_metrics m1 m2 in
+  let m1 = { Succession_oas.empty_metrics with total_turns = 5; total_cost_usd = 1.0 } in
+  let m2 = { Succession_oas.empty_metrics with total_turns = 3; total_cost_usd = 0.5 } in
+  let merged = Succession_oas.merge_metrics m1 m2 in
   assert_equal "merge:turns" 8 merged.total_turns;
   assert_float_near "merge:cost" 1.5 merged.total_cost_usd 0.001;
 
   (* 3. DNA to JSON roundtrip *)
-  let dna = Succession.{
+  let dna = Succession_oas.{
     generation = 2;
     trace_id = "test-trace";
     goal = "test goal";
@@ -433,8 +433,8 @@ let test_succession () = group "Succession" (fun () ->
     warnings = ["warn1"];
     metrics = empty_metrics;
   } in
-  let json = Succession.dna_to_json dna in
-  (match Succession.dna_of_json json with
+  let json = Succession_oas.dna_to_json dna in
+  (match Succession_oas.dna_of_json json with
    | Ok restored ->
      assert_equal "dna_rt:generation" 2 restored.generation;
      assert_equal "dna_rt:trace" "test-trace" restored.trace_id;
@@ -444,7 +444,7 @@ let test_succession () = group "Succession" (fun () ->
    | Error e -> assert_true (sprintf "dna_roundtrip: %s" e) false);
 
   (* 4. DNA from invalid JSON *)
-  (match Succession.dna_of_json (`String "invalid") with
+  (match Succession_oas.dna_of_json (`String "invalid") with
    | Error _ -> assert_true "dna_invalid:error" true
    | Ok _ -> assert_true "dna_invalid:should_fail" false);
 
@@ -454,7 +454,7 @@ let test_succession () = group "Succession" (fun () ->
     Llm_client.tool_msg ~name:"grep" ~call_id:"c1" "results";
     Llm_client.assistant_msg "done";
   ] in
-  let normalized = Succession.normalize_for_model msgs Llm_client.llama_default in
+  let normalized = Succession_oas.normalize_for_model msgs Llm_client.llama_default in
   (* Tool messages should be converted to user messages for local llama runtimes *)
   let tool_msgs = List.filter (fun (m : Llm_client.message) ->
     m.role = Llm_client.Tool) normalized in
@@ -466,17 +466,17 @@ let test_succession () = group "Succession" (fun () ->
     Llm_client.user_msg "part2";
     Llm_client.assistant_msg "response";
   ] in
-  let normalized2 = Succession.normalize_for_model msgs2 Llm_client.claude_opus in
+  let normalized2 = Succession_oas.normalize_for_model msgs2 Llm_client.claude_opus in
   assert_true "normalize:claude_merged"
     (List.length normalized2 <= List.length msgs2);
 
   (* 7. Hydrate from DNA *)
-  let spec = Succession.{
+  let spec = Succession_oas.{
     model = Llm_client.llama_default;
     inherit_tools = true;
     context_budget = 0.3;
   } in
-  let hydrated = Succession.hydrate dna spec in
+  let hydrated = Succession_oas.hydrate dna spec in
   assert_true "hydrate:has_system"
     (String.length hydrated.system_prompt > 0);
   assert_true "hydrate:system_contains_goal"
@@ -738,22 +738,22 @@ let test_integration () = group "Integration" (fun () ->
   let session = Context_manager.create_session
     ~session_id:"test-session"
     ~base_dir:(Filename.get_temp_dir_name ()) in
-  let dna = Succession.extract_dna
+  let dna = Succession_oas.extract_dna
     ~working_ctx:ctx
     ~session_ctx:session
     ~goal:"integration test"
     ~generation:0
     ~trace_id:"test-trace-001"
-    ~metrics:Succession.empty_metrics in
+    ~metrics:Succession_oas.empty_metrics in
   assert_equal "integration:dna_gen" 0 dna.generation;
   assert_equal "integration:dna_goal" "integration test" dna.goal;
 
-  let spec = Succession.{
+  let spec = Succession_oas.{
     model = Llm_client.llama_default;
     inherit_tools = true;
     context_budget = 0.5;
   } in
-  let hydrated = Succession.hydrate dna spec in
+  let hydrated = Succession_oas.hydrate dna spec in
   assert_true "integration:hydrated_system"
     (String.length hydrated.system_prompt > 0);
 
@@ -859,7 +859,7 @@ let test_integration () = group "Integration" (fun () ->
   let scored = Context_manager.score_importance ctx_v in
   assert_true "integration:scored"
     (List.length scored.importance_scores > 0);
-  let _verdict = Verifier.parse_verdict "PASS" in
+  let _verdict = Verifier_oas.parse_verdict "PASS" in
   assert_true "integration:verdict_parsed" true;
 )
 

@@ -169,7 +169,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
       (Printf.sprintf "LLM cascade failed: %s" e, 0.0, [])
   | Ok resp0 ->
       let rec exec_loop ~round ~acc_cost ~acc_tools ~last_resp =
-        if last_resp.Llm_types.tool_calls = [] || round > max_rounds then
+        if not (Llm_types.has_tool_calls last_resp) || round > max_rounds then
           let content =
             let c = String.trim (Llm_types.text_of_response last_resp) in
             if c = "" && acc_tools <> [] then
@@ -179,12 +179,13 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
           in
           (content, acc_cost, acc_tools)
         else
+          let last_resp_tool_calls = Llm_types.tool_calls_of_response last_resp in
           let round_tools =
             List.map (fun (tc : Llm_types.tool_call) -> tc.call_name)
-              last_resp.Llm_types.tool_calls
+              last_resp_tool_calls
           in
           let all_tools = acc_tools @ round_tools in
-          let tool_outputs = execute_tool_calls last_resp.Llm_types.tool_calls in
+          let tool_outputs = execute_tool_calls last_resp_tool_calls in
           let followup_prompt =
             keeper_tool_followup_prompt
               ~user_message:"Execute the next step of the plan."
@@ -214,20 +215,20 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
               (Llm_types.text_of_response last_resp, acc_cost, all_tools)
           | Ok next_resp ->
               let used_spec =
-                model_spec_for_used specs next_resp.model_used
+                model_spec_for_used specs next_resp.Llm_provider.Types.model
                 |> Option.value ~default:primary
               in
-              let round_cost = cost_usd_of_usage next_resp.usage used_spec in
+              let round_cost = cost_usd_of_usage (Llm_types.usage_of_response next_resp) used_spec in
               exec_loop ~round:(round + 1)
                 ~acc_cost:(acc_cost +. round_cost)
                 ~acc_tools:all_tools
                 ~last_resp:next_resp
       in
       let used_spec0 =
-        model_spec_for_used specs resp0.model_used
+        model_spec_for_used specs resp0.Llm_provider.Types.model
         |> Option.value ~default:primary
       in
-      let cost0 = cost_usd_of_usage resp0.usage used_spec0 in
+      let cost0 = cost_usd_of_usage (Llm_types.usage_of_response resp0) used_spec0 in
       exec_loop ~round:1 ~acc_cost:cost0 ~acc_tools:[] ~last_resp:resp0
 
 (** Autonomous goal turn: evaluate goals and optionally generate/verify action plan.

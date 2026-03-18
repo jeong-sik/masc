@@ -72,20 +72,28 @@ type completion_request = {
   response_format : [ `Text | `Json ];
 }
 
-(** Completion response.
-    [content] is a list of {!Agent_sdk.Types.content_block} for type convergence
-    with OAS api_response. Use {!text_of_response} to extract text. *)
-type completion_response = {
-  content : Agent_sdk.Types.content_block list;
-  tool_calls : tool_call list;
-  usage : token_usage;
-  model_used : string;
-  latency_ms : int;
-}
+(** LLM completion result — OAS api_response directly.
+    No more MASC-specific wrapper; use helpers below for field access.
+    @since Phase 2 — OAS SDK Only *)
+type api_response = Llm_provider.Types.api_response
 
-(** Extract text content from a completion_response.
-    Extracts [Text] blocks, concatenates with newlines. *)
-val text_of_response : completion_response -> string
+(** Zero usage sentinel for api_response with [usage = None]. *)
+val zero_usage : token_usage
+
+(** Extract usage from an api_response, defaulting to zero. *)
+val usage_of_response : api_response -> token_usage
+
+(** Extract text content from an api_response. *)
+val text_of_response : api_response -> string
+
+(** Extract tool calls from content blocks. *)
+val tool_calls_of_content : Agent_sdk.Types.content_block list -> tool_call list
+
+(** Extract tool calls from an api_response. *)
+val tool_calls_of_response : api_response -> tool_call list
+
+(** Check if an api_response has any tool calls. *)
+val has_tool_calls : api_response -> bool
 
 (** {1 Request Normalization} *)
 

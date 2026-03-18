@@ -1,14 +1,11 @@
-(** Provider dispatch — config build, HTTP execution, response mapping.
+(** Provider dispatch — config build, HTTP execution.
 
     Converts MASC {!Llm_types.completion_request} to OAS
     {!Llm_provider.Provider_config.t} and calls
-    {!Llm_provider.Complete.complete}. Response mapping converts OAS
-    {!Llm_provider.Types.api_response} back to MASC
-    {!Llm_types.completion_response}.
+    {!Llm_provider.Complete.complete}. Returns OAS
+    {!Llm_provider.Types.api_response} directly.
 
-    Extracted from llm_orchestration.ml for module size hygiene.
-
-    @since 2.107.0 — extracted from Llm_provider_bridge migration *)
+    @since 2.107.0 *)
 
 open Printf
 open Llm_types
@@ -304,50 +301,8 @@ let provider_config_of_request (req : completion_request)
       Ok (config, provider_messages, provider_tools)
 
 (* ================================================================ *)
-(* OAS api_response ↔ MASC completion_response                     *)
+(* Response helpers                                                 *)
 (* ================================================================ *)
-
-let tool_calls_of_content (blocks : Llm_provider.Types.content_block list)
-    : tool_call list =
-  List.filter_map
-    (function
-      | Llm_provider.Types.ToolUse { id; name; input } ->
-          Some
-            {
-              call_id = id;
-              call_name = name;
-              call_arguments = Yojson.Safe.to_string input;
-            }
-      | _ -> None)
-    blocks
-
-let completion_response_of_api_response
-    (resp : Llm_provider.Types.api_response) : completion_response =
-  let tool_calls = tool_calls_of_content resp.content in
-  let usage : Llm_types.token_usage =
-    match resp.usage with
-    | Some u -> u
-    | None ->
-        { Agent_sdk.Types.input_tokens = 0;
-          output_tokens = 0;
-          cache_creation_input_tokens = 0;
-          cache_read_input_tokens = 0 }
-  in
-  {
-    content = resp.content;
-    tool_calls;
-    usage;
-    model_used = resp.model;
-    latency_ms = 0;
-  }
-
-let api_response_of_completion_response
-    (resp : completion_response) : Llm_provider.Types.api_response =
-  { Llm_provider.Types.id = "cached";
-    model = resp.model_used;
-    stop_reason = Llm_provider.Types.EndTurn;
-    content = resp.content;
-    usage = Some resp.usage }
 
 (* ================================================================ *)
 (* Error conversion                                                 *)
@@ -368,7 +323,7 @@ let string_of_http_error = function
 (* ================================================================ *)
 
 let call_provider ?timeout_sec:_ ?cache ?metrics (req : completion_request)
-    : (completion_response, string) result =
+    : (Llm_provider.Types.api_response, string) result =
   let req = normalize_request req in
   match provider_config_of_request req with
   | Error e -> Error e
@@ -391,15 +346,14 @@ let call_provider ?timeout_sec:_ ?cache ?metrics (req : completion_request)
       in
       match result with
       | Ok resp ->
-          let masc_resp = completion_response_of_api_response resp in
-          let text = text_of_response masc_resp in
-          if String.trim text = "" && masc_resp.tool_calls = [] then
+          let text = Agent_sdk.Types.text_of_content resp.content in
+          if String.trim text = "" && not (Llm_types.has_tool_calls resp) then
             Error "Empty completion (no content or tool_calls)"
-          else Ok masc_resp
+          else Ok resp
       | Error http_err -> Error (string_of_http_error http_err))
 
 let call_glm_cloud_with_pool ?timeout_sec ?cache ?metrics
-    (req : completion_request) : (completion_response, string) result =
+    (req : completion_request) : (Llm_provider.Types.api_response, string) result =
   let preferred_model =
     if Glm_pool.is_pool_model req.model.model_id then
       Some req.model.model_id
@@ -410,7 +364,7 @@ let call_glm_cloud_with_pool ?timeout_sec ?cache ?metrics
     let modified_model = { req.model with model_id = pool_model_id } in
     let modified_req = { req with model = modified_model } in
     match call_provider ?timeout_sec ?cache ?metrics modified_req with
-    | Ok resp -> Ok { resp with model_used = pool_model_id }
+    | Ok resp -> Ok { resp with model = pool_model_id }
     | Error e -> Error e)
 
 (* OAS Type Adapters *)

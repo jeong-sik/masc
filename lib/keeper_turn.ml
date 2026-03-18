@@ -310,10 +310,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               (false, Printf.sprintf "❌ LLM failed: %s" e)
             | Ok resp0 ->
               let used_model0 =
-                model_spec_for_used specs resp0.model_used
+                model_spec_for_used specs resp0.Llm_provider.Types.model
                 |> Option.value ~default:primary
               in
-              let cost0 = cost_usd_of_usage resp0.usage used_model0 in
+              let cost0 = cost_usd_of_usage (Llm_types.usage_of_response resp0) used_model0 in
               (* Multi-round tool calling loop: up to 3 rounds *)
               let max_tool_rounds = 3 in
               let _trunc s n = if String.length s > n then String.sub s 0 n ^ "..." else s in
@@ -375,7 +375,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               in
               let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
                   ~acc_tools_used ~last_resp =
-                if last_resp.Llm_types.tool_calls = [] || round > max_tool_rounds then
+                if not (Llm_types.has_tool_calls last_resp) || round > max_tool_rounds then
                   (* Terminal: no more tool calls or hit round limit *)
                   let content =
                     let c = String.trim (Llm_types.text_of_response last_resp) in
@@ -384,18 +384,19 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         (String.concat ", " acc_tools_used)
                     else Llm_types.text_of_response last_resp
                   in
-                  ( content, acc_usage, last_resp.Llm_types.model_used,
+                  ( content, acc_usage, last_resp.Llm_provider.Types.model,
                     acc_latency, acc_cost, acc_tools_used )
                 else begin
+                  let last_resp_tool_calls = Llm_types.tool_calls_of_response last_resp in
                   Log.Trpg.info "Tool round %d/%d: %d tool calls"
                     round max_tool_rounds
-                    (List.length last_resp.Llm_types.tool_calls);
+                    (List.length last_resp_tool_calls);
                   let round_tools =
                     List.map (fun (tc : Llm_types.tool_call) -> tc.call_name)
-                      last_resp.Llm_types.tool_calls
+                      last_resp_tool_calls
                   in
                   let all_tools_so_far = acc_tools_used @ round_tools in
-                  let tool_outputs = execute_tool_calls last_resp.Llm_types.tool_calls in
+                  let tool_outputs = execute_tool_calls last_resp_tool_calls in
                   let followup_prompt =
                     keeper_tool_followup_prompt
                       ~user_message:message
@@ -440,23 +441,25 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   | Error _ ->
                     (* Cascade failed — return what we have *)
                     ( Llm_types.text_of_response last_resp, acc_usage,
-                      last_resp.Llm_types.model_used, acc_latency,
+                      last_resp.Llm_provider.Types.model, acc_latency,
                       acc_cost, acc_tools_used @ round_tools )
                   | Ok resp_next ->
+                    let resp_next_tool_calls = Llm_types.tool_calls_of_response resp_next in
                     Log.Trpg.info "Follow-up round %d resp: tool_calls=%d content_len=%d model=%s"
                       round
-                      (List.length resp_next.Llm_types.tool_calls)
+                      (List.length resp_next_tool_calls)
                       (String.length (Llm_types.text_of_response resp_next))
-                      resp_next.Llm_types.model_used;
+                      resp_next.Llm_provider.Types.model;
                     let used_model_next =
-                      model_spec_for_used specs resp_next.model_used
+                      model_spec_for_used specs resp_next.Llm_provider.Types.model
                       |> Option.value ~default:primary
                     in
-                    let cost_next = cost_usd_of_usage resp_next.usage used_model_next in
+                    let resp_next_usage = Llm_types.usage_of_response resp_next in
+                    let cost_next = cost_usd_of_usage resp_next_usage used_model_next in
                     tool_loop
                       ~round:(round + 1)
-                      ~acc_usage:(merge_usage acc_usage resp_next.usage)
-                      ~acc_latency:(acc_latency + resp_next.latency_ms)
+                      ~acc_usage:(merge_usage acc_usage resp_next_usage)
+                      ~acc_latency
                       ~acc_cost:(acc_cost +. cost_next)
                       ~acc_tools_used:(acc_tools_used @ round_tools)
                       ~last_resp:resp_next
@@ -466,8 +469,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               Trajectory.increment_turn trajectory_acc;
               let (base_content, base_usage, base_model_used, base_latency_ms,
                    base_cost_usd, tools_used) =
-                tool_loop ~round:1 ~acc_usage:resp0.usage
-                  ~acc_latency:resp0.latency_ms ~acc_cost:cost0
+                tool_loop ~round:1 ~acc_usage:(Llm_types.usage_of_response resp0)
+                  ~acc_latency:0 ~acc_cost:cost0
                   ~acc_tools_used:[] ~last_resp:resp0
               in
               let eval0 =
@@ -520,10 +523,11 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       eval0, true, false, false, base_cost_usd, tools_used )
                   | Ok corr ->
                     let used_model1 =
-                      model_spec_for_used specs corr.model_used
+                      model_spec_for_used specs corr.Llm_provider.Types.model
                       |> Option.value ~default:primary
                     in
-                    let cost1 = cost_usd_of_usage corr.usage used_model1 in
+                    let corr_usage = Llm_types.usage_of_response corr in
+                    let cost1 = cost_usd_of_usage corr_usage used_model1 in
                     let eval1 =
                       evaluate_memory_recall
                         ~user_message:message
@@ -531,9 +535,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         ~candidates:recall_candidates
                     in
                     let evalf = { eval1 with initial_score = eval0.final_score } in
-                    let merged_usage = merge_usage base_usage corr.usage in
-                    ( Llm_types.text_of_response corr, merged_usage, corr.model_used,
-                      base_latency_ms + corr.latency_ms,
+                    let merged_usage = merge_usage base_usage corr_usage in
+                    ( Llm_types.text_of_response corr, merged_usage, corr.Llm_provider.Types.model,
+                      base_latency_ms,
                       evalf, true, evalf.passed, false, base_cost_usd +. cost1,
                       tools_used )
               in
@@ -585,12 +589,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         eval_after_correction, true, false, false, cost_after_correction )
                   | Ok forced ->
                       let used_model2 =
-                        model_spec_for_used specs forced.model_used
+                        model_spec_for_used specs forced.Llm_provider.Types.model
                         |> Option.value ~default:primary
                       in
-                      let cost2 = cost_usd_of_usage forced.usage used_model2 in
-                      let merged_usage = merge_usage usage_after_correction forced.usage in
-                      let merged_latency = latency_after_correction + forced.latency_ms in
+                      let forced_usage = Llm_types.usage_of_response forced in
+                      let cost2 = cost_usd_of_usage forced_usage used_model2 in
+                      let merged_usage = merge_usage usage_after_correction forced_usage in
+                      let merged_latency = latency_after_correction in
                       let grounded_content =
                         let c = String.trim (Llm_types.text_of_response forced) in
                         if c = "" then content_after_correction else Llm_types.text_of_response forced
@@ -603,7 +608,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       in
                       let eval2 = { eval2 with initial_score = eval_after_correction.final_score } in
                       if eval2.passed then
-                        ( grounded_content, merged_usage, forced.model_used,
+                        ( grounded_content, merged_usage, forced.Llm_provider.Types.model,
                           merged_latency, eval2, true, true, false,
                           cost_after_correction +. cost2 )
                       else

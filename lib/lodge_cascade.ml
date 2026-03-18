@@ -136,28 +136,8 @@ let get_cascade ?(config_path = "") ~cascade_name () :
         cascade_name;
       Llm_types.available_model_specs_of_strings fallback)
 
-(** Bridge MASC accept validator (completion_response -> bool)
-    to OAS accept validator (api_response -> bool).
-    Constructs a minimal completion_response from the OAS api_response. *)
-let adapt_accept (masc_accept : Llm_types.completion_response -> bool) :
-    Llm_provider.Types.api_response -> bool =
- fun (oas_resp : Llm_provider.Types.api_response) ->
-  let usage : Agent_sdk.Types.api_usage =
-    match oas_resp.usage with
-    | Some u -> u
-    | None ->
-      { input_tokens = 0; output_tokens = 0;
-        cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
-  in
-  let fake_resp : Llm_types.completion_response =
-    { content = oas_resp.content;
-      tool_calls = [];
-      usage;
-      model_used = oas_resp.model;
-      latency_ms = 0;
-    }
-  in
-  masc_accept fake_resp
+(** Accept validator type: api_response -> bool.
+    Now that MASC validators use api_response directly, no bridging needed. *)
 
 (** Call LLM cascade. Routes directly through OAS Cascade_config.complete_named,
     bypassing MASC's Llm_orchestration. *)
@@ -177,14 +157,13 @@ let call ~cascade_name ~prompt
      | None -> [])
     @ [ Llm_provider.Types.user_msg prompt ]
   in
-  let oas_accept = adapt_accept accept in
   let t0 = Time_compat.now () in
   match
     Llm_provider.Cascade_config.complete_named
       ~sw:env.sw ~net:env.net ?clock:env.clock
       ?config_path:config_path_opt
       ~name:cascade_name ~defaults ~messages
-      ~temperature ~max_tokens ~accept:oas_accept ()
+      ~temperature ~max_tokens ~accept ()
   with
   | Ok resp ->
     let t1 = Time_compat.now () in

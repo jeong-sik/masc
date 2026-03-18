@@ -332,11 +332,7 @@ let format_message_readable (m : Llm_client.message) : string =
     | Llm_client.Assistant -> "assistant"
     | Llm_client.Tool -> "tool"
   in
-  let name_suffix = match m.name with
-    | Some n -> sprintf " (%s)" n
-    | None -> ""
-  in
-  sprintf "%s%s: %s" role_str name_suffix (text_of_message m)
+  sprintf "%s: %s" role_str (text_of_message m)
 
 (** Offload messages to a markdown file for later retrieval.
     Returns [Some path] on success, [None] on failure (fail-safe). *)
@@ -444,7 +440,10 @@ let masc_msg_to_oas_tagged (m : Llm_client.message) : Agent_sdk.Types.message =
   in
   let content = match m.role with
     | Llm_client.Tool ->
-      let tool_use_id = Option.value ~default:"masc-tool" m.tool_call_id in
+      let tool_use_id =
+        List.find_map (function Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id | _ -> None) m.content
+        |> Option.value ~default:"masc-tool"
+      in
       [Agent_sdk.Types.ToolResult { tool_use_id; content = text; is_error = false }]
     | _ -> [Agent_sdk.Types.Text text]
   in
@@ -481,11 +480,13 @@ let oas_msg_to_masc_tagged (m : Agent_sdk.Types.message) : Llm_client.message =
        | Agent_sdk.Types.Tool -> Llm_client.Tool),
       text
   in
-  let tool_call_id = match role with
-    | Llm_client.Tool -> tool_id
-    | _ -> None
+  let content_blocks = match role with
+    | Llm_client.Tool ->
+      let tool_use_id = Option.value ~default:"masc-tool" tool_id in
+      [Agent_sdk.Types.ToolResult { tool_use_id; content; is_error = false }]
+    | _ -> [Agent_sdk.Types.Text content]
   in
-  { Llm_client.role; content = [Agent_sdk.Types.Text content]; name = None; tool_call_id }
+  { Agent_sdk.Types.role; content = content_blocks }
 
 let oas_strategy_of_compaction (s : compaction_strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
@@ -543,26 +544,21 @@ let role_of_string = function
 
 let message_to_json (m : Llm_client.message) : Yojson.Safe.t =
   let m = Llm_client.sanitize_message_utf8 m in
-  let base = [
+  `Assoc [
     ("role", `String (role_to_string m.role));
     ("content", `String (text_of_message m));
-  ] in
-  let with_name = match m.name with
-    | Some n -> ("name", `String n) :: base | None -> base in
-  let with_id = match m.tool_call_id with
-    | Some id -> ("tool_call_id", `String id) :: with_name | None -> with_name in
-  `Assoc with_id
+  ]
 
 let message_of_json (json : Yojson.Safe.t) : Llm_client.message =
   let open Yojson.Safe.Util in
-  {
-    role = json |> member "role" |> to_string |> role_of_string;
-    content = [Agent_sdk.Types.Text (json |> member "content" |> to_string |> Llm_client.sanitize_text_utf8)];
-    name = json |> member "name" |> to_string_option |> Option.map Llm_client.sanitize_text_utf8;
-    tool_call_id =
-      json |> member "tool_call_id" |> to_string_option
-      |> Option.map Llm_client.sanitize_text_utf8;
-  }
+  let role = json |> member "role" |> to_string |> role_of_string in
+  let text = json |> member "content" |> to_string |> Llm_client.sanitize_text_utf8 in
+  match role with
+  | Llm_client.Tool ->
+    let tool_use_id = json |> member "tool_call_id" |> to_string_option |> Option.value ~default:"masc-tool" in
+    { Agent_sdk.Types.role; content = [Agent_sdk.Types.ToolResult { tool_use_id; content = text; is_error = false }] }
+  | _ ->
+    { Agent_sdk.Types.role; content = [Agent_sdk.Types.Text text] }
 
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [

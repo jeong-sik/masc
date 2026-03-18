@@ -51,18 +51,12 @@ let response_format_to_string = function
   | `Text -> "text"
   | `Json -> "json"
 
-let string_opt_to_json = function
-  | Some v -> `String v
-  | None -> `Null
-
 let message_fingerprint_json (m : message) : Yojson.Safe.t =
   let m = sanitize_message_utf8 m in
   `Assoc
     [
       ("role", `String (string_of_role m.role));
       ("content", `String (text_of_message m));
-      ("name", string_opt_to_json m.name);
-      ("tool_call_id", string_opt_to_json m.tool_call_id);
     ]
 
 let completion_request_fingerprint_json (req : completion_request) : Yojson.Safe.t =

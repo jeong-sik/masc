@@ -113,10 +113,11 @@ let parse_message (json : Yojson.Safe.t) : Llm_client.message =
   let open Yojson.Safe.Util in
   let role = json |> member "role" |> to_string |> role_of_string in
   let content = json |> member "content" |> to_string in
-  { Llm_client.role;
-    content = [Agent_sdk.Types.Text content];
-    name = None;
-    tool_call_id = None }
+  match role with
+  | Llm_client.Tool ->
+    { Agent_sdk.Types.role; content = [Agent_sdk.Types.ToolResult { tool_use_id = "compact"; content; is_error = false }] }
+  | _ ->
+    { Agent_sdk.Types.role; content = [Agent_sdk.Types.Text content] }
 
 (** Serialize an Llm_client.message back to JSON. *)
 let message_to_json (m : Llm_client.message) : Yojson.Safe.t =

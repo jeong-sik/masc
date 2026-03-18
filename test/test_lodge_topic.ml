@@ -178,7 +178,7 @@ let make_llm_response content =
     content = [Agent_sdk.Types.Text content];
     tool_calls = [];
     usage = {
-      input_tokens = 0; output_tokens = 0; total_tokens = 0;
+      Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
       cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
     };
     model_used = "test";

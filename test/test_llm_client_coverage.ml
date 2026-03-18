@@ -33,8 +33,9 @@ let test_message_constructors () =
   let tool_msg = Llm.tool_msg ~name:"grep" ~call_id:"call-1" "done" in
   check bool "system role" true
     (match (Llm.system_msg "x").role with Llm.System -> true | _ -> false);
-  check (option string) "tool name" (Some "grep") tool_msg.name;
-  check (option string) "tool call id" (Some "call-1") tool_msg.tool_call_id
+  let has_call1 = List.exists (function
+    | Agent_sdk.Types.ToolResult { tool_use_id = "call-1"; _ } -> true | _ -> false) tool_msg.content in
+  check bool "tool call id in content" true has_call1
 
 let test_estimate_tokens_positive () =
   let tokens = Llm.estimate_tokens [ Llm.user_msg "hello world" ] in

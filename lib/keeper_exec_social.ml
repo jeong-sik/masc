@@ -119,14 +119,14 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
                   total_turns = meta.total_turns + 1;
                   total_input_tokens = meta.total_input_tokens + usage.input_tokens;
                   total_output_tokens = meta.total_output_tokens + usage.output_tokens;
-                  total_tokens = meta.total_tokens + usage.total_tokens;
+                  total_tokens = meta.total_tokens + Llm_client.total_tokens usage;
                   total_cost_usd =
                     meta.total_cost_usd +. cost_usd_of_usage usage used_model;
                   last_turn_ts = now_ts;
                   last_model_used = resp.model_used;
                   last_input_tokens = usage.input_tokens;
                   last_output_tokens = usage.output_tokens;
-                  last_total_tokens = usage.total_tokens;
+                  last_total_tokens = Llm_client.total_tokens usage;
                   last_latency_ms = resp.latency_ms;
                 }
               in
@@ -384,13 +384,13 @@ let run_social_board_event_turn
                   total_turns = meta.total_turns + 1;
                   total_input_tokens = meta.total_input_tokens + final_usage.input_tokens;
                   total_output_tokens = meta.total_output_tokens + final_usage.output_tokens;
-                  total_tokens = meta.total_tokens + final_usage.total_tokens;
+                  total_tokens = meta.total_tokens + Llm_client.total_tokens final_usage;
                   total_cost_usd = meta.total_cost_usd +. final_cost_usd;
                   last_turn_ts = now_ts;
                   last_model_used = final_model_used;
                   last_input_tokens = final_usage.input_tokens;
                   last_output_tokens = final_usage.output_tokens;
-                  last_total_tokens = final_usage.total_tokens;
+                  last_total_tokens = Llm_client.total_tokens final_usage;
                   last_latency_ms = final_latency_ms;
                   last_autonomous_action_at =
                     (if action_kind = "none" then meta.last_autonomous_action_at else now_iso ());

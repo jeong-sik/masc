@@ -568,25 +568,19 @@ let parse_text_tool_calls (content : string) : Llm_client.tool_call list =
   in
   collect 0 1 []
 
-let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () =
-  {
-    Llm_client.input_tokens;
+let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Llm_client.token_usage =
+  { Agent_sdk.Types.input_tokens;
     output_tokens;
-    total_tokens = input_tokens + output_tokens;
     cache_creation_input_tokens = 0;
-    cache_read_input_tokens = 0;
-  }
+    cache_read_input_tokens = 0 }
 
-let merge_usage a b =
-  {
-    Llm_client.input_tokens = a.Llm_client.input_tokens + b.Llm_client.input_tokens;
+let merge_usage (a : Llm_client.token_usage) (b : Llm_client.token_usage) : Llm_client.token_usage =
+  { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
-    total_tokens = a.total_tokens + b.total_tokens;
     cache_creation_input_tokens =
       a.cache_creation_input_tokens + b.cache_creation_input_tokens;
     cache_read_input_tokens =
-      a.cache_read_input_tokens + b.cache_read_input_tokens;
-  }
+      a.cache_read_input_tokens + b.cache_read_input_tokens }
 
 let estimate_cost_usd (model : Llm_client.model_spec)
     (usage : Llm_client.token_usage) : float option =

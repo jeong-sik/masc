@@ -119,26 +119,16 @@ let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
         expected labels)
 
 let test_llm_client_sanitize_message_utf8_repairs_invalid_fields () =
-  let raw =
-    {
-      Masc_mcp.Llm_client.role = Masc_mcp.Llm_client.User;
-      content = [Agent_sdk.Types.Text "hello\x80.world"];
-      name = Some "to\xFFol";
-      tool_call_id = Some "id\x80";
-    }
+  let raw : Masc_mcp.Llm_client.message =
+    { Agent_sdk.Types.role = User;
+      content = [Agent_sdk.Types.Text "hello\x80.world"] }
   in
   let sanitized = Masc_mcp.Llm_client.sanitize_message_utf8 raw in
   check bool "role preserved" true (sanitized.role = raw.role);
   let sanitized_text = Masc_mcp.Llm_client.text_of_message sanitized in
   let raw_text = Masc_mcp.Llm_client.text_of_message raw in
   check bool "content valid utf8" true (string_is_valid_utf8 sanitized_text);
-  check bool "content changed" true (sanitized_text <> raw_text);
-  check bool "name valid utf8" true
-    (match sanitized.name with Some v -> string_is_valid_utf8 v | None -> false);
-  check bool "tool_call_id valid utf8" true
-    (match sanitized.tool_call_id with Some v -> string_is_valid_utf8 v | None -> false);
-  check bool "name kept present" true (Option.is_some sanitized.name);
-  check bool "tool_call_id kept present" true (Option.is_some sanitized.tool_call_id)
+  check bool "content changed" true (sanitized_text <> raw_text)
 
 let test_llm_client_sanitize_messages_utf8_preserves_message_count () =
   let msgs =

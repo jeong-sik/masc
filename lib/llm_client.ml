@@ -64,25 +64,12 @@ let to_oas_provider (spec : model_spec) : Agent_sdk.Provider.config option =
 let to_oas_message (m : message) : Agent_sdk.Types.message option =
   match m.role with
   | System -> None
-  | _ -> Some { Agent_sdk.Types.role = m.role; content = m.content }
+  | _ -> Some m
 
 (** Convert OAS message to MASC message. Near-identity after type convergence. *)
 let of_oas_message (m : Agent_sdk.Types.message) : message =
-  { role = m.role; content = m.content; name = None; tool_call_id = None }
+  m
 
-let of_oas_usage (u : Agent_sdk.Types.api_usage) : token_usage =
-  {
-    input_tokens = u.input_tokens;
-    output_tokens = u.output_tokens;
-    total_tokens = u.input_tokens + u.output_tokens;
-    cache_creation_input_tokens = u.cache_creation_input_tokens;
-    cache_read_input_tokens = u.cache_read_input_tokens;
-  }
-
-let to_oas_usage (u : token_usage) : Agent_sdk.Types.api_usage =
-  {
-    Agent_sdk.Types.input_tokens = u.input_tokens;
-    output_tokens = u.output_tokens;
-    cache_creation_input_tokens = u.cache_creation_input_tokens;
-    cache_read_input_tokens = u.cache_read_input_tokens;
-  }
+(** Identity after type unification. *)
+let of_oas_usage (u : Agent_sdk.Types.api_usage) : token_usage = u
+let to_oas_usage (u : token_usage) : Agent_sdk.Types.api_usage = u

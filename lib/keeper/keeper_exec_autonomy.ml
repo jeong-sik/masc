@@ -83,6 +83,7 @@ let execute_approved_plan
     ~(autonomy_level : Keeper_autonomy.autonomy_level)
     ~(trajectory_acc : Trajectory.accumulator option)
     : string * float * string list =
+  ignore trajectory_acc;
   let gate_config = autonomous_gate_config ~autonomy_level in
   let primary = match specs with p :: _ -> p | [] -> Llm_types.default_local_model_spec () in
   let system_prompt = Printf.sprintf
@@ -97,58 +98,6 @@ Execute step 1 of this plan using the available tools.
 Be concise. Only use tools that directly advance the plan.
 Do NOT use destructive tools (bash rm, edit, delete).|}
     meta.name pa.goal_title pa.goal_id plan
-  in
-  let ctx_work = Context_manager.create
-    ~system_prompt:(Printf.sprintf "Keeper %s autonomous execution" meta.name)
-    ~max_tokens:4000 in
-  (* gate_config is now passed to OAS guardrails via run_with_tools.
-     The _execute_tool_calls below is dead code (kept as reference
-     for Eval_gate.guarded_execute pattern, remove in next PR). *)
-  let _execute_tool_calls
-      (tcs : Llm_types.tool_call list) : (Llm_types.tool_call * string) list =
-    List.map
-      (fun (tc : Llm_types.tool_call) ->
-         let execute () =
-           execute_keeper_tool_call ~config ~meta ~ctx_work tc
-         in
-         let (decision, result_opt, _post_eval, duration_ms) =
-           Eval_gate.guarded_execute
-             ~config:gate_config
-             ~accumulated_cost:0.0
-             ~trajectory_acc
-             ~tool_name:tc.call_name
-             ~args_json:tc.call_arguments
-             ~execute
-         in
-         let result = match decision, result_opt with
-           | Trajectory.Reject reason, _ ->
-               Log.KeeperExec.info "GATE BLOCKED %s: %s"
-                 tc.call_name reason;
-               Yojson.Safe.to_string (`Assoc [("gate_blocked", `String tc.call_name); ("reason", `String reason)])
-           | _, Some r -> r
-           | _, None -> "{\"error\":\"no result\"}"
-         in
-         (* Record to trajectory *)
-         (match trajectory_acc with
-          | Some acc ->
-              Trajectory.record_entry acc {
-                ts = Time_compat.now ();
-                ts_iso = Types.now_iso ();
-                turn = acc.Trajectory.turn;
-                round = 0;
-                tool_name = tc.call_name;
-                args_json = tc.call_arguments;
-                gate_decision = decision;
-                result = Some (if String.length result > 500
-                          then String.sub result 0 500 ^ "..."
-                          else result);
-                duration_ms;
-                error = None;
-                cost_usd = 0.0;
-              }
-          | None -> ());
-         (tc, result))
-      tcs
   in
   let max_rounds = 3 in
   let guardrails = Verifier_oas.eval_gate_to_oas_guardrails gate_config in

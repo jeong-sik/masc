@@ -452,7 +452,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                 Option.value ~default:false meta.thinking_enabled
               in
               let config, options =
-                build_oas_agent ~worker_name ~model
+                build_resume_config ~worker_name ~model
                   ~system_prompt:
                     (default_system_prompt ~worker_name ~model_id:model.model_id
                        ?session_id:meta.team_session_id ?role:meta.role

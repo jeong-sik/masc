@@ -222,7 +222,7 @@ let make_heartbeat_callbacks
 
     This function mirrors run_worker_oas in local_agent_eio_runners.ml,
     but constructs the agent using the Builder pattern instead of
-    build_oas_agent + Agent.create directly.
+    build_resume_config + Agent.create directly.
 
     Returns a run_result on success, or an error string on failure. *)
 let run_worker_via_oas

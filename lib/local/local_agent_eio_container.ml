@@ -529,7 +529,9 @@ let append_worker_completion_log ~base_path ~team_session_id ~worker_name
           Option.fold ~none:`Null ~some:(fun value -> `String value) error );
       ])
 
-let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
+(** Build (config, options) for Agent.resume — the continue_worker path.
+    New workers use Worker_oas.build_agent (Builder pattern) instead. *)
+let build_resume_config ~worker_name ~model ~system_prompt ~tools ~max_turns
     ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = []) () =
   let config =
     {

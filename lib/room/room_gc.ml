@@ -122,7 +122,11 @@ let cleanup_zombies config =
     if !zombie_entries = [] then
       "✅ No zombie agents found"
     else begin
-      (* Phase 2: Transition status to Inactive + stop heartbeats *)
+      (* Phase 2: Transition status to Inactive + stop heartbeats.
+         Note: If later phases fail (task release or file deletion), the agent
+         remains in active_agents with an Inactive file. This is intentional:
+         Inactive+in-list is self-healing (next GC cycle cleans up), whereas
+         Active+dead (the old behavior) is invisible to monitoring. *)
       List.iter (fun (name, path) ->
         (try
           let json = read_json config path in

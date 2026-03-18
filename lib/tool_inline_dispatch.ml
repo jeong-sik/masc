@@ -405,6 +405,10 @@ let dispatch (ctx : context) ~(name : string) : result option =
 
   | "masc_broadcast" ->
       let message = arg_get_string "message" "" in
+      let trimmed = String.trim message in
+      if trimmed = "" then
+        Some (false, "Broadcast message cannot be empty")
+      else
       let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
       if not allowed then
         Some (false, Printf.sprintf "Rate limited. %d sec remaining." wait_secs)

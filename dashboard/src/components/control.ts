@@ -18,13 +18,13 @@ export function Control() {
           class="tab-pill ${section === 'intervene' ? 'tab-pill--active' : ''}"
           onClick=${() => navigate('control')}
         >
-          \uAC1C\uC785
+          개입
         </button>
         <button
           class="tab-pill ${section === 'tools' ? 'tab-pill--active' : ''}"
           onClick=${() => navigate('control', { section: 'tools' })}
         >
-          \uB3C4\uAD6C
+          도구
         </button>
       </div>
 

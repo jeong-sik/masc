@@ -28,11 +28,11 @@ const SURFACE_MAP: Record<Exclude<SurfaceFilter, 'all'>, string[]> = {
 }
 
 const SURFACE_LABELS: Record<SurfaceFilter, string> = {
-  all: 'All',
-  public_mcp: 'MCP Public',
-  agent: 'Agent',
-  keeper: 'Keeper',
-  internal: 'Internal',
+  all: '전체',
+  public_mcp: 'MCP 공개',
+  agent: '에이전트',
+  keeper: '키퍼',
+  internal: '내부',
 }
 
 async function loadTools() {
@@ -121,18 +121,18 @@ function InventoryRow({ item }: { item: DashboardToolInventoryItem }) {
         </div>
       </div>
       <div class="tool-inventory-meta">
-        <span>Category: <strong>${item.category}</strong></span>
-        <span>Mode: <strong>${item.enabled_in_current_mode ? 'enabled' : 'disabled'}</strong></span>
-        <span>Direct call: <strong>${item.direct_call_allowed ? 'allowed' : 'blocked'}</strong></span>
-        <span>Permission: <strong>${item.required_permission ?? 'none'}</strong></span>
+        <span>카테고리: <strong>${item.category}</strong></span>
+        <span>모드: <strong>${item.enabled_in_current_mode ? '활성' : '비활성'}</strong></span>
+        <span>직접 호출: <strong>${item.direct_call_allowed ? '허용' : '차단'}</strong></span>
+        <span>권한: <strong>${item.required_permission ?? '없음'}</strong></span>
       </div>
       ${item.reason
         ? html`<div class="tool-inventory-reason">${item.reason}</div>`
         : null}
       <div class="tool-inventory-links">
-        ${item.canonicalName ? html`<span>Canonical: <strong>${item.canonicalName}</strong></span>` : null}
-        ${item.replacement ? html`<span>Replacement: <strong>${item.replacement}</strong></span>` : null}
-        ${item.doc_refs.length > 0 ? html`<span>Docs: <strong>${item.doc_refs.join(', ')}</strong></span>` : null}
+        ${item.canonicalName ? html`<span>정식 이름: <strong>${item.canonicalName}</strong></span>` : null}
+        ${item.replacement ? html`<span>대체 도구: <strong>${item.replacement}</strong></span>` : null}
+        ${item.doc_refs.length > 0 ? html`<span>문서: <strong>${item.doc_refs.join(', ')}</strong></span>` : null}
       </div>
     </article>
   `
@@ -274,27 +274,27 @@ function FullInventoryView({
       <div class="tool-inventory-summary">
         <div class="tool-inventory-stat">
           <span class="stat-value">${totalCount}</span>
-          <span class="stat-label">Total tools</span>
+          <span class="stat-label">전체 도구</span>
         </div>
         <div class="tool-inventory-stat">
           <span class="stat-value">${enabledCount}</span>
-          <span class="stat-label">Mode enabled</span>
+          <span class="stat-label">활성화됨</span>
         </div>
         <div class="tool-inventory-stat">
           <span class="stat-value">${hiddenCount}</span>
-          <span class="stat-label">Hidden</span>
+          <span class="stat-label">숨김</span>
         </div>
         <div class="tool-inventory-stat">
           <span class="stat-value">${deprecatedCount}</span>
-          <span class="stat-label">Deprecated</span>
+          <span class="stat-label">지원 중단</span>
         </div>
         <div class="tool-inventory-stat">
           <span class="stat-value">${directCallCount}</span>
-          <span class="stat-label">Direct call</span>
+          <span class="stat-label">직접 호출</span>
         </div>
         <div class="tool-inventory-stat">
           <span class="stat-value">${filtered.length}</span>
-          <span class="stat-label">Filtered</span>
+          <span class="stat-label">필터 결과</span>
         </div>
       </div>
 
@@ -314,7 +314,7 @@ function FullInventoryView({
         <input
           class="control-input"
           type="text"
-          placeholder="Search tools, docs, permission, replacement..."
+          placeholder="도구, 문서, 권한, 대체 도구 검색..."
           value=${searchQuery.value}
           onInput=${(e: Event) => {
             searchQuery.value = (e.target as HTMLInputElement).value
@@ -327,7 +327,7 @@ function FullInventoryView({
             categoryFilter.value = (e.target as HTMLSelectElement).value
           }}
         >
-          <option value="all">All categories</option>
+          <option value="all">전체 카테고리</option>
           ${categories.map(category => html`<option value=${category}>${category}</option>`)}
         </select>
         <label class="tool-inventory-toggle">
@@ -338,7 +338,7 @@ function FullInventoryView({
               enabledOnly.value = (e.target as HTMLInputElement).checked
             }}
           />
-          <span>Enabled only</span>
+          <span>활성화만</span>
         </label>
         <label class="tool-inventory-toggle">
           <input
@@ -348,7 +348,7 @@ function FullInventoryView({
               directOnly.value = (e.target as HTMLInputElement).checked
             }}
           />
-          <span>Direct-call only</span>
+          <span>직접 호출만</span>
         </label>
         <label class="tool-inventory-toggle">
           <input
@@ -358,7 +358,7 @@ function FullInventoryView({
               showHidden.value = (e.target as HTMLInputElement).checked
             }}
           />
-          <span>Show hidden</span>
+          <span>숨김 표시</span>
         </label>
         <label class="tool-inventory-toggle">
           <input
@@ -368,10 +368,10 @@ function FullInventoryView({
               showDeprecated.value = (e.target as HTMLInputElement).checked
             }}
           />
-          <span>Show deprecated</span>
+          <span>지원 중단 표시</span>
         </label>
         <button class="control-btn ghost" onClick=${() => { void loadTools() }} disabled=${loading}>
-          ${loading ? 'Refreshing...' : 'Refresh inventory'}
+          ${loading ? '새로고침 중...' : '새로고침'}
         </button>
       </div>
     </div>
@@ -387,13 +387,13 @@ function FullInventoryView({
             getKey=${(item: DashboardToolInventoryItem) => item.name}
             className="tool-inventory-list"
           />`
-        : html`<div class="empty-state">No tools matched the current filters.</div>`}
+        : html`<div class="empty-state">조건에 맞는 도구가 없습니다.</div>`}
     </div>
 
     <button
       class=${`tool-back-to-top${showBackToTop.value ? ' visible' : ''}`}
       onClick=${scrollToTop}
-      title="Back to top"
+      title="맨 위로"
     >
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
         <path d="M10 15V5M10 5L5 10M10 5L15 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -417,9 +417,9 @@ export function Tools() {
 
   return html`
     <div>
-      <${Card} title="System Tool Inventory" class="section">
+      <${Card} title="시스템 도구 목록" class="section">
         <div class="monitor-section-head">
-          <h2 class="monitor-headline">System Tool Inventory</h2>
+          <h2 class="monitor-headline">시스템 도구 목록</h2>
           <p class="monitor-subheadline">
             ${showFullInventory.value
               ? 'hidden/deprecated 포함 전체 도구 surface를 봅니다.'
@@ -444,11 +444,11 @@ export function Tools() {
         }
       <//>
 
-      <${Card} title="Tool Usage" class="section">
+      <${Card} title="도구 사용 현황" class="section">
         ${usage
           ? html`
               <div class="tool-inventory-usage-hint">
-                Registered ${usage.registered_count} · Distinct called ${usage.distinct_tools_called} · Never called ${usage.never_called_count}
+                등록됨 ${usage.registered_count} · 사용된 ${usage.distinct_tools_called} · 미사용 ${usage.never_called_count}
               </div>
             `
           : null}

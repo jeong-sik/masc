@@ -4,7 +4,7 @@ open Keeper_types
 
 include Keeper_memory_bank
 
-let cost_usd_of_usage (usage : Llm_client.token_usage) (model : Llm_client.model_spec) : float =
+let cost_usd_of_usage (usage : Agent_sdk.Types.api_usage) (model : Llm_client.model_spec) : float =
   let input_cost = float_of_int usage.input_tokens *. model.cost_per_1k_input /. 1000.0 in
   let output_cost = float_of_int usage.output_tokens *. model.cost_per_1k_output /. 1000.0 in
   input_cost +. output_cost
@@ -151,23 +151,23 @@ let jaccard_similarity (a : string) (b : string) : float =
     if union = 0 then 0.0 else float_of_int !inter /. float_of_int union
 
 let latest_message_content_by_role
-    ~(role : Llm_client.role)
-    (messages : Llm_client.message list) : string option =
+    ~(role : Agent_sdk.Types.role)
+    (messages : Agent_sdk.Types.message list) : string option =
   match
     messages
     |> List.rev
-    |> List.find_opt (fun (m : Llm_client.message) -> m.role = role)
+    |> List.find_opt (fun (m : Agent_sdk.Types.message) -> m.role = role)
   with
   | None -> None
-  | Some m -> trim_nonempty (String.trim (Llm_client.text_of_message m))
+  | Some m -> trim_nonempty (String.trim (Agent_sdk.Types.text_of_message m))
 
 let previous_assistant_message_content
-    (messages : Llm_client.message list) : string option =
+    (messages : Agent_sdk.Types.message list) : string option =
   let assistants =
     messages
     |> List.rev
-    |> List.filter_map (fun (m : Llm_client.message) ->
-         if m.role = Llm_client.Assistant then trim_nonempty (Llm_client.text_of_message m) else None)
+    |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
+         if m.role = Agent_sdk.Types.Assistant then trim_nonempty (Agent_sdk.Types.text_of_message m) else None)
   in
   match assistants with
   | _latest :: previous :: _ -> Some previous
@@ -223,17 +223,17 @@ let goal_alignment_score
     | Some u, Some r -> (u +. r) /. 2.0
 
 let repetition_risk_score
-    ~(messages : Llm_client.message list)
+    ~(messages : Agent_sdk.Types.message list)
     ~(candidate_reply : string option) : float =
   match candidate_reply with
   | Some reply -> (
-      match latest_message_content_by_role ~role:Llm_client.Assistant messages with
+      match latest_message_content_by_role ~role:Agent_sdk.Types.Assistant messages with
       | Some prev -> jaccard_similarity reply prev
       | None -> 0.0)
   | None -> (
       match
         previous_assistant_message_content messages,
-        latest_message_content_by_role ~role:Llm_client.Assistant messages
+        latest_message_content_by_role ~role:Agent_sdk.Types.Assistant messages
       with
       | Some prev, Some latest -> jaccard_similarity latest prev
       | _ -> 0.0)
@@ -500,12 +500,12 @@ let learned_policy_auto_rules
       ];
   }
 
-let recent_user_messages (msgs : Llm_client.message list) ~(max_n : int) : string list =
+let recent_user_messages (msgs : Agent_sdk.Types.message list) ~(max_n : int) : string list =
   msgs
   |> List.rev
-  |> List.filter_map (fun (m : Llm_client.message) ->
-       if m.role = Llm_client.User then
-         let c = String.trim (Llm_client.text_of_message m) in
+  |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
+       if m.role = Agent_sdk.Types.User then
+         let c = String.trim (Agent_sdk.Types.text_of_message m) in
          if c = "" then None else Some c
        else None)
   |> take max_n

@@ -192,9 +192,7 @@ let get_cascade ?(config_path = "") ~cascade_name () :
         cascade_name;
       Llm_client.available_model_specs_of_strings defaults)
 
-(** Call LLM cascade via OAS provider path (no global semaphore).
-    Bypasses [Llm_orchestration.cascade] and its global [Eio.Semaphore]
-    (max=2), routing directly through [Llm_provider_oas] instead. *)
+(** Call LLM cascade via OAS orchestration path. *)
 let call ~cascade_name ~prompt
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
     ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
@@ -203,13 +201,13 @@ let call ~cascade_name ~prompt
     Error (Printf.sprintf "[cascade] no callable models for %s" cascade_name)
   else
     match
-      Llm_provider_oas.run_prompt_cascade ~temperature
+      Llm_orchestration.run_prompt_cascade ~temperature
         ~timeout_sec ~model_specs:specs ~max_tokens ~accept ?system ~prompt ()
     with
     | Ok resp ->
         Ok
           {
-            response = Llm_client.text_of_response resp;
+            response = Llm_types.text_of_response resp;
             llm_used = resp.Llm_client.model_used;
             duration_ms = resp.Llm_client.latency_ms;
           }

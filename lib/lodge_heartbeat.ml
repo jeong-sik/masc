@@ -380,7 +380,7 @@ let select_agents_with_thompson ~ignore_quiet_hours
       Eio.traceln "   😴 [thompson] Quiet hours (%d-%d), skipping selection" quiet_start quiet_end;
     []
   end else begin
-    let tick_interval = Env_config.LodgeV2.tick_interval_seconds in
+    let tick_interval = Runtime_params.get Governance_registry.lodge_tick_interval in
     let agent_names = List.map (fun (a : agent) -> a.name) agents in
     let converted_triggers = List.map (fun (name, t) ->
       (name, selection_trigger_of_trigger t)
@@ -496,7 +496,7 @@ let tick ~ignore_quiet_hours ~config ~pending_triggers =
   let agents = get_agents () in
 
   (* Select which agents to check in — Thompson (default) / plan-based / legacy *)
-  let max_agents = Env_config.LodgeV2.agents_per_tick in
+  let max_agents = Runtime_params.get Governance_registry.lodge_agents_per_tick in
   let use_thompson = Env_config.LodgeV2.use_planner in  (* Reuse planner flag for Thompson *)
   let selected =
     if use_thompson then
@@ -693,10 +693,10 @@ let start ~sw ~clock room_config =
   Printf.printf "+Lodge Heartbeat v2 (Generative Agent): initializing...\n%!";
   lodge_init_lock ();
   let config = load_config () in
-  let tick_interval = Env_config.LodgeV2.tick_interval_seconds in
+  let tick_interval = config.interval_s in
   let use_planner = Env_config.LodgeV2.use_planner in
   Printf.printf "+Lodge Heartbeat: enabled=%b interval=%.0fs agents_per_tick=%d planner=%b\n%!"
-    config.enabled tick_interval Env_config.LodgeV2.agents_per_tick use_planner;
+    config.enabled tick_interval config.agents_per_tick use_planner;
 
   (* Configure and load persistent selection stats for Thompson Sampling *)
   Lodge_selection.set_base_path room_config.Room_utils.base_path;
@@ -716,7 +716,7 @@ let start ~sw ~clock room_config =
   end else begin
     _lodge_enabled := true;
     Eio.traceln "🫀 Lodge Heartbeat v2 (Generative): starting (interval=%.0fs, max=%d/tick, planner=%b)"
-      tick_interval Env_config.LodgeV2.agents_per_tick use_planner;
+      tick_interval config.agents_per_tick use_planner;
 
     (* Track last tick time for content alert scanning *)
     let last_tick_time = ref (Time_compat.now ()) in

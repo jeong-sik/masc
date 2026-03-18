@@ -5,13 +5,98 @@
     calls {!Llm_provider.Complete.complete}, and converts
     {!Llm_provider.Types.api_response} back to {!Llm_types.completion_response}.
 
-    Replaces curl-subprocess calls in {!Llm_transport} with cohttp-eio
-    via the shared OAS HTTP client.
+    Provider config construction (API key resolution, endpoint discovery) and
+    HTTP execution via the shared OAS HTTP client.
 
     @since 2.103.0 — v0.49 transport replacement *)
 
 open Printf
 open Llm_types
+
+(* ================================================================ *)
+(* API Key & Endpoint Resolution                                    *)
+(* ================================================================ *)
+
+let get_api_key (spec : model_spec) : string =
+  match spec.api_key_env with
+  | Some env_var -> Sys.getenv_opt env_var |> Option.value ~default:""
+  | None -> ""
+
+let fetch_vertex_adc_access_token () =
+  let manual_override = Sys.getenv_opt "MASC_VERTEX_ACCESS_TOKEN" |> Option.value ~default:"" |> String.trim in
+  if manual_override <> "" then Ok manual_override
+  else
+    let status, output =
+      Process_eio.run_argv_with_status
+        ~timeout_sec:Env_config_runtime.Timeout.gcloud_auth_sec
+        [ "gcloud"; "auth"; "application-default"; "print-access-token" ]
+    in
+    match status with
+    | Unix.WEXITED 0 ->
+        let token = String.trim output in
+        if token = "" then
+          Error "Gemini Vertex ADC unavailable; run gcloud auth application-default login"
+        else Ok token
+    | _ ->
+        Error "Gemini Vertex ADC unavailable; run gcloud auth application-default login"
+
+let resolve_openai_compatible_endpoint (spec : model_spec) =
+  match spec.provider with
+  | Gemini -> (
+      match Provider_adapter.resolve_gemini_direct_auth () with
+      | Provider_adapter.Gemini_vertex_adc { project; location } -> (
+          match fetch_vertex_adc_access_token () with
+          | Ok access_token ->
+              Ok
+                ( Provider_adapter.gemini_vertex_openai_base_url ~project ~location,
+                  "/chat/completions",
+                  [ ("Authorization", sprintf "Bearer %s" access_token) ] )
+          | Error _ as e -> e)
+      | Provider_adapter.Gemini_api_key ->
+          let api_key = get_api_key spec in
+          if api_key = "" then
+            Error
+              "Gemini auth unavailable; set GOOGLE_CLOUD_PROJECT for Vertex ADC or GEMINI_API_KEY"
+          else
+            Ok
+              ( spec.api_url,
+                "/v1beta/openai/chat/completions",
+                [ ("Authorization", sprintf "Bearer %s" api_key) ] )
+      | Provider_adapter.Gemini_auth_missing message -> Error message)
+  | OpenAI ->
+      let api_key = get_api_key spec in
+      if api_key = "" then Error "OPENAI_API_KEY not set"
+      else
+        Ok
+          ( spec.api_url,
+            "/v1/chat/completions",
+            [ ("Authorization", sprintf "Bearer %s" api_key) ] )
+  | Glm_cloud ->
+      let api_key = get_api_key spec in
+      if api_key = "" then Error "ZAI_API_KEY not set"
+      else
+        Ok
+          ( spec.api_url,
+            "/api/coding/paas/v4/chat/completions",
+            [ ("Authorization", sprintf "Bearer %s" api_key) ] )
+  | OpenRouter ->
+      let api_key = get_api_key spec in
+      if api_key = "" then Error "OPENROUTER_API_KEY not set"
+      else
+        Ok
+          ( spec.api_url,
+            "/v1/chat/completions",
+            [ ("Authorization", sprintf "Bearer %s" api_key) ] )
+  | Claude ->
+      Error "Claude uses Anthropic provider via Llm_provider_bridge"
+  | Llama -> Ok (spec.api_url, "/v1/chat/completions", [])
+  | Custom _ ->
+      let auth_headers =
+        match get_api_key spec with
+        | "" -> []
+        | api_key -> [ ("Authorization", sprintf "Bearer %s" api_key) ]
+      in
+      Ok (spec.api_url, "/v1/chat/completions", auth_headers)
 
 (* ================================================================ *)
 (* MASC message → Llm_provider.Types.message                       *)
@@ -66,7 +151,7 @@ let provider_config_of_request (req : completion_request)
     : (Llm_provider.Provider_config.t
        * Llm_provider.Types.message list
        * Yojson.Safe.t list, string) result =
-  let sanitized_messages = Llm_transport.sanitize_messages_utf8 req.messages in
+  let sanitized_messages = sanitize_messages_utf8 req.messages in
   let system_prompt, non_system_msgs = extract_system sanitized_messages in
   let provider_messages =
     List.map provider_message_of_masc non_system_msgs
@@ -78,7 +163,7 @@ let provider_config_of_request (req : completion_request)
   in
   match req.model.provider with
   | Claude ->
-      let api_key = Llm_transport.get_api_key req.model in
+      let api_key = get_api_key req.model in
       if api_key = "" then Error "ANTHROPIC_API_KEY not set"
       else
         let config =
@@ -117,7 +202,7 @@ let provider_config_of_request (req : completion_request)
       Ok (config, provider_messages, provider_tools)
 
   | Gemini -> (
-      match Llm_transport.resolve_openai_compatible_endpoint req.model with
+      match resolve_openai_compatible_endpoint req.model with
       | Error e -> Error e
       | Ok (base_url, path, auth_headers) ->
           let headers = [("Content-Type", "application/json")] @ auth_headers in
@@ -137,7 +222,7 @@ let provider_config_of_request (req : completion_request)
           Ok (config, provider_messages, provider_tools))
 
   | OpenAI ->
-      let api_key = Llm_transport.get_api_key req.model in
+      let api_key = get_api_key req.model in
       if api_key = "" then Error "OPENAI_API_KEY not set"
       else
         let config =
@@ -160,7 +245,7 @@ let provider_config_of_request (req : completion_request)
         Ok (config, provider_messages, provider_tools)
 
   | OpenRouter ->
-      let api_key = Llm_transport.get_api_key req.model in
+      let api_key = get_api_key req.model in
       if api_key = "" then Error "OPENROUTER_API_KEY not set"
       else
         let config =
@@ -183,7 +268,7 @@ let provider_config_of_request (req : completion_request)
         Ok (config, provider_messages, provider_tools)
 
   | Glm_cloud ->
-      let api_key = Llm_transport.get_api_key req.model in
+      let api_key = get_api_key req.model in
       if api_key = "" then Error "ZAI_API_KEY not set"
       else
         let config =
@@ -207,7 +292,7 @@ let provider_config_of_request (req : completion_request)
 
   | Custom _ ->
       let auth_headers =
-        match Llm_transport.get_api_key req.model with
+        match get_api_key req.model with
         | "" -> []
         | api_key -> [("Authorization", sprintf "Bearer %s" api_key)]
       in

@@ -1,29 +1,27 @@
 import { html } from 'htm/preact'
 import { route } from '../router'
+import { agents } from '../store'
 import { Card } from './common/card'
 import { Trpg } from './trpg'
 import { AgentAvatar } from './overview/agent-avatar'
 
-const AVATAR_TEST_AGENTS = [
-  { name: 'dreamer', status: 'active', traits: ['creative'] },
-  { name: 'sentinel', status: 'busy', traits: ['robot', 'security'] },
-  { name: 'chronicler', status: 'idle', traits: ['abstract'] },
-  { name: 'harbinger', status: 'listening', traits: ['animal'] },
-  { name: 'wanderer', status: 'offline', traits: [] },
-  { name: 'architect', status: 'active', traits: ['system'] },
-  { name: 'healer', status: 'idle', traits: ['creature'] },
-  { name: 'oracle', status: 'busy', traits: ['machine'] },
-]
-
 function AvatarGallery() {
+  const agentList = agents.value
+  // Use real agents from store, fall back to empty if none loaded
+  const displayAgents = agentList.slice(0, 12)
+
+  if (displayAgents.length === 0) {
+    return html`<div class="empty-state">에이전트 데이터를 불러오는 중...</div>`
+  }
+
   return html`
     <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 16px; padding: 16px 0;">
-      ${AVATAR_TEST_AGENTS.map(a => html`
+      ${displayAgents.map((a: { name: string; status?: string; traits?: string[] }) => html`
         <${AgentAvatar}
           key=${a.name}
           name=${a.name}
-          status=${a.status}
-          traits=${a.traits}
+          status=${a.status ?? 'idle'}
+          traits=${a.traits ?? []}
           size="md"
           showName=${true}
         />
@@ -33,19 +31,14 @@ function AvatarGallery() {
       <div>
         <div style="color: var(--text-muted); font-size: 11px; margin-bottom: 8px;">SIZES</div>
         <div style="display: flex; gap: 12px; align-items: end;">
-          <${AgentAvatar} name="size-sm" size="sm" showName=${true} />
-          <${AgentAvatar} name="size-md" size="md" showName=${true} />
-          <${AgentAvatar} name="size-lg" size="lg" showName=${true} />
-        </div>
-      </div>
-      <div>
-        <div style="color: var(--text-muted); font-size: 11px; margin-bottom: 8px;">STATES</div>
-        <div style="display: flex; gap: 12px; align-items: end;">
-          <${AgentAvatar} name="active" status="active" showName=${true} />
-          <${AgentAvatar} name="busy" status="busy" showName=${true} />
-          <${AgentAvatar} name="idle" status="idle" showName=${true} />
-          <${AgentAvatar} name="listening" status="listening" showName=${true} />
-          <${AgentAvatar} name="offline" status="offline" showName=${true} />
+          ${displayAgents.slice(0, 3).map((a: { name: string }, i: number) => html`
+            <${AgentAvatar}
+              key=${'size-' + a.name}
+              name=${a.name}
+              size=${(['sm', 'md', 'lg'] as const)[i]}
+              showName=${true}
+            />
+          `)}
         </div>
       </div>
     </div>

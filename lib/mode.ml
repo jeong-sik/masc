@@ -180,6 +180,7 @@ let tool_category tool_name =
   (* LLM runtime *)
   | "masc_llama_models" | "masc_llama_runtime_status"
   | "masc_runtime_verify" | "masc_llama_runtime_bench"
+  | "masc_llm_catalog"
   (* Units *)
   | "masc_unit_define" | "masc_unit_list"
   | "masc_unit_reparent" | "masc_unit_reassign"

@@ -419,6 +419,7 @@
    tool_agent_timeline
    tool_llama
    tool_llama_core
+   tool_llm_catalog
    tool_board
    tool_command_plane
    tool_command_plane_support

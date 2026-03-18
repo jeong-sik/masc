@@ -379,8 +379,7 @@ let persist reg ~reg_path : (unit, spawn_error) result =
 
     try
       (* Ensure directory exists *)
-      if not (Sys.file_exists reg_path) then
-        Unix.mkdir reg_path 0o755;
+      Fs_compat.mkdir_p reg_path;
 
       (* Write to temp file *)
       let fd = Unix.openfile tmp_path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644 in

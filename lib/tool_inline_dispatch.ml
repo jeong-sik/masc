@@ -856,7 +856,7 @@ Call masc_listen again to continue listening.
             );
 
             let processed_dir = Filename.concat base_path ".masc/processed_episodes" in
-            (try Unix.mkdir processed_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+            Fs_compat.mkdir_p processed_dir;
             let new_path = Filename.concat processed_dir file in
             Sys.rename file_path new_path;
             Printf.printf "[EPISODE/FLUSH] Processed episode %s -> %s\n%!" ep_id new_path;

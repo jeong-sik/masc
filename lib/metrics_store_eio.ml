@@ -54,13 +54,8 @@ let agent_metrics_dir config agent_id =
 
 (** Ensure metrics directories exist *)
 let ensure_metrics_dir config agent_id =
-  let masc_dir = Filename.concat config.Room_utils.base_path ".masc" in
-  let metrics = metrics_dir config in
   let agent_dir = agent_metrics_dir config agent_id in
-  List.iter (fun dir ->
-    if not (Sys.file_exists dir) then
-      Unix.mkdir dir 0o755
-  ) [masc_dir; metrics; agent_dir]
+  Fs_compat.mkdir_p agent_dir
 
 (** Get current month's file path *)
 let current_month_file config agent_id =

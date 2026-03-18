@@ -107,20 +107,12 @@ module FileSystemBackend : BACKEND = struct
 
   let ensure_dir path =
     let dir = Filename.dirname path in
-    if not (Sys.file_exists dir) then
-      let rec mkdir_p d =
-        if not (Sys.file_exists d) then begin
-          mkdir_p (Filename.dirname d);
-          try Unix.mkdir d 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-        end
-      in
-      mkdir_p dir
+    Fs_compat.mkdir_p dir
 
   let create (cfg : config) : (t, error) result =
     let path = cfg.base_path in
     (try
-      if not (Sys.file_exists path) then
-        Unix.mkdir path 0o755
+      Fs_compat.mkdir_p path
     with Unix.Unix_error (err, _, _) ->
       Log.Misc.error "Failed to mkdir %s: %s" path (Unix.error_message err));
     Ok { base_path = path; mutex = Eio.Mutex.create () }

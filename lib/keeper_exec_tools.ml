@@ -259,7 +259,7 @@ let execute_keeper_tool_call
       | Ok target ->
           (try
              let parent = Filename.dirname target in
-             if not (Sys.file_exists parent) then Unix.mkdir parent 0o755;
+             Fs_compat.mkdir_p parent;
              (match mode with
              | "append" ->
                  Fs_compat.append_file target content

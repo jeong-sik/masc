@@ -119,7 +119,7 @@ let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
 
         (* Create .worktrees directory if not exists *)
         let worktrees_dir = Filename.concat root ".worktrees" in
-        if not (Sys.file_exists worktrees_dir) then Unix.mkdir worktrees_dir 0o755;
+        Fs_compat.mkdir_p worktrees_dir;
 
         if Sys.file_exists worktree_path then
           Ok

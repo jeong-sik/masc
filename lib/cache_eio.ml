@@ -28,11 +28,7 @@ let cache_dir (config : Room_utils.config) =
 (** Ensure cache directory exists *)
 let ensure_cache_dir config =
   let dir = cache_dir config in
-  let masc_dir = Filename.concat config.base_path ".masc" in
-  if not (Sys.file_exists masc_dir) then
-    Unix.mkdir masc_dir 0o755;
-  if not (Sys.file_exists dir) then
-    Unix.mkdir dir 0o755
+  Fs_compat.mkdir_p dir
 
 (** Sanitize key for filename *)
 let sanitize_key key =

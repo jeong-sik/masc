@@ -468,7 +468,7 @@ let find_skill catalog ~id =
 let load_json_list path parse fallback =
   if Sys.file_exists path then
     try
-      let json = Safe_ops.read_json_eio path in
+      let json = Util.read_json_eio path in
       let items = json |> to_list |> List.map parse in
       Ok items
     with exn -> Error (Printf.sprintf "failed to parse %s: %s" path (Printexc.to_string exn))
@@ -545,12 +545,12 @@ let load_scenario_world_presets ~base_dir : world_preset list =
        |> List.filter_map (fun file_name ->
             let path = Filename.concat scenarios_dir file_name in
             try
-              Safe_ops.read_json_eio path |> parse_scenario_world_preset
+              Util.read_json_eio path |> parse_scenario_world_preset
             with exn ->
-              Log.Trpg.warn "trpg_preset_store: scenario preset parse failed for %s: %s" path (Printexc.to_string exn);
+              Util.log_warn "trpg_preset_store: scenario preset parse failed for %s: %s" path (Printexc.to_string exn);
               None)
      with exn ->
-       Log.Trpg.error "failed to load scenario presets from %s: %s"
+       Util.log_error "failed to load scenario presets from %s: %s"
          scenarios_dir (Printexc.to_string exn);
        [])
   else

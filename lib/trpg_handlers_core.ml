@@ -24,9 +24,9 @@ let handle_dice_roll ctx args : result =
           if i < 1 || i > 20 then Error "raw_d20 must be between 1 and 20" else Ok i
       | None -> Ok (1 + Random.int 20)
     in
-    let bonus = Trpg_rule_dnd5e_lite.stat_bonus stat_value in
+    let bonus = Trpg.Rule_dnd5e_lite.stat_bonus stat_value in
     let total = raw_d20 + bonus in
-    let c = Trpg_rule_dnd5e_lite.classify_roll ~raw_d20 ~total in
+    let c = Trpg.Rule_dnd5e_lite.classify_roll ~raw_d20 ~total in
     let payload =
       `Assoc
         [
@@ -37,7 +37,7 @@ let handle_dice_roll ctx args : result =
           ("raw_d20", `Int raw_d20);
           ("bonus", `Int bonus);
           ("total", `Int total);
-          ("tier", `String (Trpg_rule_dnd5e_lite.roll_tier_to_string c.tier));
+          ("tier", `String (Trpg.Rule_dnd5e_lite.roll_tier_to_string c.tier));
           ("label", `String c.label);
           ("passed", `Bool c.passed);
         ]
@@ -46,7 +46,7 @@ let handle_dice_roll ctx args : result =
       append_event
         ~store
         ~room_id
-        ~event_type:Trpg_engine_event.Dice_rolled
+        ~event_type:Trpg.Engine_event.Dice_rolled
         ~actor_id
         ~payload
         ()
@@ -56,7 +56,7 @@ let handle_dice_roll ctx args : result =
       (`Assoc
         [
           ("ok", `Bool true);
-          ("event", Trpg_engine_event.to_yojson event);
+          ("event", Trpg.Engine_event.to_yojson event);
           ( "roll",
             `Assoc
               [
@@ -85,9 +85,9 @@ let handle_turn_advance ctx args : result =
       match phase_opt_raw with
       | None -> Ok None
       | Some p -> (
-          match Trpg_engine_types.phase_of_string p with
+          match Trpg.Engine_types.phase_of_string p with
           | Ok phase ->
-              Ok (Some (Trpg_engine_types.string_of_phase phase))
+              Ok (Some (Trpg.Engine_types.string_of_phase phase))
           | Error e -> Error e)
     in
     let* derived = derive_state ~store ~room_id ~rule_module in
@@ -97,7 +97,7 @@ let handle_turn_advance ctx args : result =
       append_event
         ~store
         ~room_id
-        ~event_type:Trpg_engine_event.Turn_started
+        ~event_type:Trpg.Engine_event.Turn_started
         ~payload:(`Assoc [ ("turn", `Int next_turn) ])
         ()
     in
@@ -105,7 +105,7 @@ let handle_turn_advance ctx args : result =
       append_event
         ~store
         ~room_id
-        ~event_type:Trpg_engine_event.Join_window_opened
+        ~event_type:Trpg.Engine_event.Join_window_opened
         ~payload:
           (`Assoc
             [
@@ -123,7 +123,7 @@ let handle_turn_advance ctx args : result =
             append_event
               ~store
               ~room_id
-              ~event_type:Trpg_engine_event.Phase_changed
+              ~event_type:Trpg.Engine_event.Phase_changed
               ~payload:(`Assoc [ ("phase", `String p) ])
               ()
           in
@@ -133,7 +133,7 @@ let handle_turn_advance ctx args : result =
     let events_json =
       [ Some turn_event; Some join_window_event; phase_event_opt ]
       |> List.filter_map (fun x -> x)
-      |> List.map Trpg_engine_event.to_yojson
+      |> List.map Trpg.Engine_event.to_yojson
     in
     Ok
       (`Assoc
@@ -159,7 +159,7 @@ let handle_stream ctx args : result =
       match event_type_opt with
       | None -> Ok None
       | Some s -> (
-          match Trpg_engine_event.event_type_of_string s with
+          match Trpg.Engine_event.event_type_of_string s with
           | Ok et -> Ok (Some et)
           | Error _ -> Error (Printf.sprintf "invalid event_type: %s" s))
     in
@@ -173,7 +173,7 @@ let handle_stream ctx args : result =
       | None -> events
       | Some et ->
           List.filter
-            (fun (ev : Trpg_engine_event.t) -> ev.event_type = et)
+            (fun (ev : Trpg.Engine_event.t) -> ev.event_type = et)
             events
     in
     Ok
@@ -184,7 +184,7 @@ let handle_stream ctx args : result =
           ("room_id", `String room_id);
           ("after_seq", `Int after_seq);
           ("count", `Int (List.length events));
-          ("events", `List (List.map Trpg_engine_event.to_yojson events));
+          ("events", `List (List.map Trpg.Engine_event.to_yojson events));
         ])
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
@@ -205,22 +205,22 @@ let pick_by_seed ~seed xs =
 let resolve_dm_preset ~seed catalog dm_preset_id_opt =
   match dm_preset_id_opt with
   | Some preset_id -> (
-      match Trpg_preset_store.find_dm_preset catalog ~id:preset_id with
+      match Trpg.Preset_store.find_dm_preset catalog ~id:preset_id with
       | Some preset -> Ok preset
       | None -> Error (Printf.sprintf "unknown dm_preset_id: %s" preset_id))
   | None -> (
-      match pick_by_seed ~seed catalog.Trpg_preset_store.dm_presets with
+      match pick_by_seed ~seed catalog.Trpg.Preset_store.dm_presets with
       | Some preset -> Ok preset
       | None -> Error "no dm presets available")
 
 let resolve_world_preset ~seed catalog world_preset_id_opt =
   match world_preset_id_opt with
   | Some preset_id -> (
-      match Trpg_preset_store.find_world_preset catalog ~id:preset_id with
+      match Trpg.Preset_store.find_world_preset catalog ~id:preset_id with
       | Some preset -> Ok preset
       | None -> Error (Printf.sprintf "unknown world_preset_id: %s" preset_id))
   | None -> (
-      match pick_by_seed ~seed catalog.Trpg_preset_store.world_presets with
+      match pick_by_seed ~seed catalog.Trpg.Preset_store.world_presets with
       | Some preset -> Ok preset
       | None -> Error "no world presets available")
 
@@ -237,7 +237,7 @@ let shuffle_with_seed ~seed xs =
 
 let generate_pool_members ~catalog ~pool_size ~seed =
   let templates =
-    shuffle_with_seed ~seed catalog.Trpg_preset_store.character_presets
+    shuffle_with_seed ~seed catalog.Trpg.Preset_store.character_presets
   in
   match templates with
   | [] -> Error "no character presets available"
@@ -274,7 +274,7 @@ let default_party_from_catalog ~seed catalog party_size =
 let assoc_put key value fields =
   (key, value) :: List.remove_assoc key fields
 
-let append_pending_interventions ~(store : Trpg_store.t) ~room_id ~phase ~turn =
+let append_pending_interventions ~(store : Trpg.Store.t) ~room_id ~phase ~turn =
   let ( let* ) = Result.bind in
   let* events = store.read_events ~room_id in
   let pending = derive_pending_interventions events in
@@ -301,7 +301,7 @@ let append_pending_interventions ~(store : Trpg_store.t) ~room_id ~phase ~turn =
         in
         let* ev =
           append_event ~store ~room_id
-            ~event_type:Trpg_engine_event.Intervention_applied
+            ~event_type:Trpg.Engine_event.Intervention_applied
             ~payload:applied_payload ()
         in
         loop (applied_payload :: applied_payloads) (ev :: applied_events) tl
@@ -326,25 +326,25 @@ let handle_preset_list ctx args : result =
             ( "dm_presets",
               `List
                 (List.map
-                   Trpg_preset_store.dm_preset_to_yojson
+                   Trpg.Preset_store.dm_preset_to_yojson
                    catalog.dm_presets) );
             ( "world_presets",
               `List
                 (List.map
-                   Trpg_preset_store.world_preset_to_yojson
+                   Trpg.Preset_store.world_preset_to_yojson
                    catalog.world_presets) );
             ( "character_presets",
               if include_characters then
                 `List
                   (List.map
-                     Trpg_preset_store.character_preset_to_yojson
+                     Trpg.Preset_store.character_preset_to_yojson
                      catalog.character_presets)
               else `List [] );
             ( "skills",
               if include_skills then
                 `List
                   (List.map
-                     Trpg_preset_store.skill_to_yojson
+                     Trpg.Preset_store.skill_to_yojson
                      catalog.skills)
               else `List [] );
           ]
@@ -395,8 +395,8 @@ let handle_pool_generate ctx args : result =
           ("ok", `Bool true);
           ("session_id", `String session_id);
           ("pool_id", `String pool_id);
-          ("dm_preset", Trpg_preset_store.dm_preset_to_yojson dm_preset);
-          ("world_preset", Trpg_preset_store.world_preset_to_yojson world_preset);
+          ("dm_preset", Trpg.Preset_store.dm_preset_to_yojson dm_preset);
+          ("world_preset", Trpg.Preset_store.world_preset_to_yojson world_preset);
           ("pool", `List (List.map pool_member_to_yojson pool));
           ("suggested_party_ids", json_of_strings suggested);
           ("party_size", `Int party_size);
@@ -448,7 +448,7 @@ let handle_party_select ctx args : result =
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Party_selected ~payload ()
+          ~event_type:Trpg.Engine_event.Party_selected ~payload ()
       in
       Ok
         (`Assoc
@@ -458,7 +458,7 @@ let handle_party_select ctx args : result =
             ("session_id", `String session_id);
             ("party_count", `Int (List.length selected_party));
             ("party", `List (List.map pool_member_to_yojson selected_party));
-            ("event", Trpg_engine_event.to_yojson event);
+            ("event", Trpg.Engine_event.to_yojson event);
           ])
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
@@ -481,8 +481,8 @@ let handle_session_start ctx args : result =
     let* phase_opt = get_optional_string args "phase" in
     let phase_input = phase_opt |> Option.value ~default:"briefing" in
     let* phase =
-      match Trpg_engine_types.phase_of_string phase_input with
-      | Ok phase -> Ok (Trpg_engine_types.string_of_phase phase)
+      match Trpg.Engine_types.phase_of_string phase_input with
+      | Ok phase -> Ok (Trpg.Engine_types.string_of_phase phase)
       | Error e -> Error e
     in
     let* rule_opt = get_optional_string args "rule_module" in
@@ -493,7 +493,7 @@ let handle_session_start ctx args : result =
       entropy_seed ~session_id
         ~salt:(Printf.sprintf "session.start|%s|%s" room_id phase)
     in
-    let* catalog = store.Trpg_store.load_catalog () in
+    let* catalog = store.Trpg.Store.load_catalog () in
     let* dm_preset = resolve_dm_preset ~seed:fallback_seed catalog dm_preset_id in
     let* world_preset =
       (* +19 offset decorrelates world preset selection from DM selection *)
@@ -517,11 +517,11 @@ let handle_session_start ctx args : result =
     in
     let has_existing_bootstrap_event =
       List.exists
-        (fun (ev : Trpg_engine_event.t) ->
+        (fun (ev : Trpg.Engine_event.t) ->
           match ev.event_type with
-          | Trpg_engine_event.Room_created
-          | Trpg_engine_event.Room_started
-          | Trpg_engine_event.Session_started ->
+          | Trpg.Engine_event.Room_created
+          | Trpg.Engine_event.Room_started
+          | Trpg.Engine_event.Session_started ->
               true
           | _ -> false)
         existing_events
@@ -566,7 +566,7 @@ let handle_session_start ctx args : result =
     in
     let* room_created =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Room_created
+        ~event_type:Trpg.Engine_event.Room_created
         ~actor_id:ctx.agent_name ~payload:room_created_payload ()
     in
     let session_started_payload =
@@ -585,7 +585,7 @@ let handle_session_start ctx args : result =
     in
     let* session_started =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Session_started
+        ~event_type:Trpg.Engine_event.Session_started
         ~actor_id:ctx.agent_name ~payload:session_started_payload ()
     in
     let party_selected_payload =
@@ -598,18 +598,18 @@ let handle_session_start ctx args : result =
     in
     let* party_selected =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Party_selected
+        ~event_type:Trpg.Engine_event.Party_selected
         ~actor_id:ctx.agent_name ~payload:party_selected_payload ()
     in
     let* phase_event =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Phase_changed
+        ~event_type:Trpg.Engine_event.Phase_changed
         ~payload:(`Assoc [ ("phase", `String phase) ])
         ()
     in
     let* room_started =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Room_started
+        ~event_type:Trpg.Engine_event.Room_started
         ~payload:(`Assoc [ ("phase", `String phase) ])
         ()
     in
@@ -636,8 +636,8 @@ let handle_session_start ctx args : result =
           ("session_id", `String session_id);
           ("phase", `String phase);
           ("dm_keeper", `String dm_keeper);
-          ("dm_preset", Trpg_preset_store.dm_preset_to_yojson dm_preset);
-          ("world_preset", Trpg_preset_store.world_preset_to_yojson world_preset);
+          ("dm_preset", Trpg.Preset_store.dm_preset_to_yojson dm_preset);
+          ("world_preset", Trpg.Preset_store.world_preset_to_yojson world_preset);
           ( "world_contract",
             world_contract_ref_to_yojson ~contract:world_contract
               ~strict:canon_strict );
@@ -654,11 +654,11 @@ let handle_session_start ctx args : result =
           ( "events",
             `List
               [
-                Trpg_engine_event.to_yojson room_created;
-                Trpg_engine_event.to_yojson session_started;
-                Trpg_engine_event.to_yojson party_selected;
-                Trpg_engine_event.to_yojson phase_event;
-                Trpg_engine_event.to_yojson room_started;
+                Trpg.Engine_event.to_yojson room_created;
+                Trpg.Engine_event.to_yojson session_started;
+                Trpg.Engine_event.to_yojson party_selected;
+                Trpg.Engine_event.to_yojson phase_event;
+                Trpg.Engine_event.to_yojson room_started;
               ] );
         ])
   in

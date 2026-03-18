@@ -3,8 +3,8 @@
     prompt building in Trpg_round_prompt. *)
 
 include Trpg_round_prompt
-include Trpg_action
-include Trpg_bestiary
+include Trpg.Action
+include Trpg.Bestiary
 open Yojson.Safe.Util
 
 let room_id_for_session session_id =
@@ -100,7 +100,7 @@ let party_config (members : pool_member list) : Yojson.Safe.t =
        (fun (m : pool_member) -> (m.actor_id, party_member_config m))
        members)
 
-let world_config ~(preset : Trpg_preset_store.world_preset) : Yojson.Safe.t =
+let world_config ~(preset : Trpg.Preset_store.world_preset) : Yojson.Safe.t =
   `Assoc
     [
       ("preset_id", `String preset.id);
@@ -108,10 +108,10 @@ let world_config ~(preset : Trpg_preset_store.world_preset) : Yojson.Safe.t =
       ("description", `String preset.description);
       ("intro", `String preset.intro);
       ("story_flags", json_of_strings preset.initial_flags);
-      ("end_rules", Trpg_preset_store.end_rules_to_yojson preset.end_rules);
+      ("end_rules", Trpg.Preset_store.end_rules_to_yojson preset.end_rules);
     ]
 
-let dm_config ~(preset : Trpg_preset_store.dm_preset) ~dm_keeper : Yojson.Safe.t =
+let dm_config ~(preset : Trpg.Preset_store.dm_preset) ~dm_keeper : Yojson.Safe.t =
   `Assoc
     [
       ("preset_id", `String preset.id);
@@ -122,19 +122,19 @@ let dm_config ~(preset : Trpg_preset_store.dm_preset) ~dm_keeper : Yojson.Safe.t
       ("keeper_name", `String dm_keeper);
     ]
 
-let derive_pending_interventions (events : Trpg_engine_event.t list) :
+let derive_pending_interventions (events : Trpg.Engine_event.t list) :
     (int * string * Yojson.Safe.t) list =
   let submitted = ref [] in
   let applied = Hashtbl.create 16 in
   List.iter
-    (fun (ev : Trpg_engine_event.t) ->
+    (fun (ev : Trpg.Engine_event.t) ->
       match ev.event_type with
-      | Trpg_engine_event.Intervention_submitted -> (
+      | Trpg.Engine_event.Intervention_submitted -> (
           match ev.payload |> member "intervention_id" with
           | `String intervention_id when String.trim intervention_id <> "" ->
               submitted := (ev.seq, intervention_id, ev.payload) :: !submitted
           | _ -> ())
-      | Trpg_engine_event.Intervention_applied -> (
+      | Trpg.Engine_event.Intervention_applied -> (
           match ev.payload |> member "intervention_id" with
           | `String intervention_id when String.trim intervention_id <> "" ->
               Hashtbl.replace applied intervention_id true
@@ -179,7 +179,7 @@ type unavailable_sampling_state = {
 }
 
 type unavailable_append_result =
-  [ `Appended of Trpg_engine_event.t | `Sampled of string ]
+  [ `Appended of Trpg.Engine_event.t | `Sampled of string ]
 
 let unavailable_sampling_key ~turn ~actor_id ~keeper_name ~stage ~reason =
   Printf.sprintf "%d|%s|%s|%s|%s" turn actor_id
@@ -187,13 +187,13 @@ let unavailable_sampling_key ~turn ~actor_id ~keeper_name ~stage ~reason =
     (String.lowercase_ascii (String.trim stage))
     (String.lowercase_ascii (String.trim reason))
 
-let make_unavailable_sampling_state ~(events : Trpg_engine_event.t list) ~turn :
+let make_unavailable_sampling_state ~(events : Trpg.Engine_event.t list) ~turn :
     unavailable_sampling_state =
   let seen_keys = Hashtbl.create 64 in
   let count_in_turn = ref 0 in
   List.iter
-    (fun (event : Trpg_engine_event.t) ->
-      if event.event_type = Trpg_engine_event.Keeper_unavailable then
+    (fun (event : Trpg.Engine_event.t) ->
+      if event.event_type = Trpg.Engine_event.Keeper_unavailable then
         let payload_turn =
           match event.payload |> member "turn" with
           | `Int i -> Some i
@@ -280,7 +280,7 @@ let rec append_timeout_and_unavailable_events
     append_event
       ~store
       ~room_id
-      ~event_type:Trpg_engine_event.Turn_timeout
+      ~event_type:Trpg.Engine_event.Turn_timeout
       ~actor_id
       ~payload:timeout_payload
       ()
@@ -338,7 +338,7 @@ and append_unavailable_event
       append_event
         ~store
         ~room_id
-        ~event_type:Trpg_engine_event.Keeper_unavailable
+        ~event_type:Trpg.Engine_event.Keeper_unavailable
         ~actor_id
         ~payload
         ()
@@ -357,7 +357,7 @@ let append_keeper_reply_event
   let (event_type, payload) =
     match role with
     | `Dm ->
-        ( Trpg_engine_event.Narration_posted,
+        ( Trpg.Engine_event.Narration_posted,
           `Assoc
             [
               ("phase", `String phase);
@@ -368,7 +368,7 @@ let append_keeper_reply_event
               ("reply", `String reply);
             ] )
     | `Player ->
-        ( Trpg_engine_event.Turn_action_proposed,
+        ( Trpg.Engine_event.Turn_action_proposed,
           `Assoc
             [
               ("phase", `String phase);
@@ -397,11 +397,11 @@ let action_type_requires_round_dice = function
   | SceneTransition | QuestUpdate ->
       false
 
-let resolved_effects_of_events (events : Trpg_engine_event.t list) : Yojson.Safe.t list =
+let resolved_effects_of_events (events : Trpg.Engine_event.t list) : Yojson.Safe.t list =
   let rec collect seen acc = function
     | [] -> List.rev acc
-    | (event : Trpg_engine_event.t) :: tl ->
-        let event_name = Trpg_engine_event.string_of_event_type event.event_type in
+    | (event : Trpg.Engine_event.t) :: tl ->
+        let event_name = Trpg.Engine_event.string_of_event_type event.event_type in
         if List.mem event_name seen then collect seen acc tl
         else collect (event_name :: seen) (`String ("event:" ^ event_name) :: acc) tl
   in
@@ -428,8 +428,8 @@ let append_round_observability_events
       && action_type_requires_round_dice sa.sa_type
       && not
            (List.exists
-              (fun (event : Trpg_engine_event.t) ->
-                event.event_type = Trpg_engine_event.Dice_rolled)
+              (fun (event : Trpg.Engine_event.t) ->
+                event.event_type = Trpg.Engine_event.Dice_rolled)
               action_events)
     then
       let raw_d20 =
@@ -438,9 +438,9 @@ let append_round_observability_events
       in
       let stat_value = 12 in
       let dc = 10 in
-      let bonus = Trpg_rule_dnd5e_lite.stat_bonus stat_value in
+      let bonus = Trpg.Rule_dnd5e_lite.stat_bonus stat_value in
       let total = raw_d20 + bonus in
-      let c = Trpg_rule_dnd5e_lite.classify_roll ~raw_d20 ~total in
+      let c = Trpg.Rule_dnd5e_lite.classify_roll ~raw_d20 ~total in
       let payload =
         `Assoc
           [
@@ -455,7 +455,7 @@ let append_round_observability_events
             ("raw_d20", `Int raw_d20);
             ("bonus", `Int bonus);
             ("total", `Int total);
-            ("tier", `String (Trpg_rule_dnd5e_lite.roll_tier_to_string c.tier));
+            ("tier", `String (Trpg.Rule_dnd5e_lite.roll_tier_to_string c.tier));
             ("label", `String c.label);
             ("passed", `Bool c.passed);
             ("resolved_by", `String "deterministic_round_run");
@@ -464,7 +464,7 @@ let append_round_observability_events
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Dice_rolled ~actor_id ~payload ()
+          ~event_type:Trpg.Engine_event.Dice_rolled ~actor_id ~payload ()
       in
       Ok (Some event)
     else Ok None
@@ -498,7 +498,7 @@ let append_round_observability_events
   in
   let* resolved_event =
     append_event ~store ~room_id
-      ~event_type:Trpg_engine_event.Turn_action_resolved ~actor_id ~payload ()
+      ~event_type:Trpg.Engine_event.Turn_action_resolved ~actor_id ~payload ()
   in
   Ok
     (match dice_event_opt with

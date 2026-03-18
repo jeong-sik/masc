@@ -25,7 +25,7 @@ let trpg_take_right n lst =
   lst |> List.rev |> take n |> List.rev
 
 let trpg_recent_events ~base_dir ~room_id ~limit =
-  match Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+  match Trpg.Engine_store_sqlite.read_events ~base_dir ~room_id with
   | Ok events -> trpg_take_right limit events
   | Error _ -> []
 
@@ -119,9 +119,9 @@ let trpg_lobby_catalog_json ~base_dir ~(config : Room.config) ~room_id ~rule_mod
   let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
   let state = trpg_state_from_derived derived in
   let preset_catalog =
-    match Trpg_preset_store.load_catalog ~base_dir with
+    match Trpg.Preset_store.load_catalog ~base_dir with
     | Ok catalog -> catalog
-    | Error _ -> Trpg_preset_store.default_catalog
+    | Error _ -> Trpg.Preset_store.default_catalog
   in
   let keepers = trpg_keeper_summary_rows config in
   let keeper_names =
@@ -146,11 +146,11 @@ let trpg_lobby_catalog_json ~base_dir ~(config : Room.config) ~room_id ~rule_mod
         ("keeper_rows", `List keepers);
         ( "world_presets",
           `List
-            (List.map Trpg_preset_store.world_preset_to_yojson
+            (List.map Trpg.Preset_store.world_preset_to_yojson
                preset_catalog.world_presets) );
         ( "dm_presets",
           `List
-            (List.map Trpg_preset_store.dm_preset_to_yojson
+            (List.map Trpg.Preset_store.dm_preset_to_yojson
                preset_catalog.dm_presets) );
         ("model_catalog", trpg_available_models_json ());
         ("occupancy", `List (trpg_actor_control_rows state));
@@ -199,7 +199,7 @@ let trpg_lobby_preflight_json ~base_dir ~(config : Room.config) ~room_id ~rule_m
       | Some name -> Hashtbl.replace keeper_lookup name row
       | None -> ())
     keepers;
-  let preset_catalog_result = Trpg_preset_store.load_catalog ~base_dir in
+  let preset_catalog_result = Trpg.Preset_store.load_catalog ~base_dir in
   let preset_ok = Result.is_ok preset_catalog_result in
   let derived =
     match trpg_derive_state_json ~base_dir ~room_id ~rule_module with
@@ -394,10 +394,10 @@ let trpg_overview_json ~base_dir ~room_id ~rule_module : trpg_api_result =
          unclaimed_players);
   List.iter
     (fun ev ->
-      match ev.Trpg_engine_event.event_type with
-      | Trpg_engine_event.Turn_timeout ->
+      match ev.Trpg.Engine_event.event_type with
+      | Trpg.Engine_event.Turn_timeout ->
           add_alarm "warn" "turn_timeout" "최근 턴 timeout 이벤트가 기록되었습니다."
-      | Trpg_engine_event.Keeper_unavailable ->
+      | Trpg.Engine_event.Keeper_unavailable ->
           add_alarm "warn" "keeper_unavailable" "최근 keeper unavailable 이벤트가 기록되었습니다."
       | _ -> ())
     recent_events;
@@ -438,7 +438,7 @@ let trpg_overview_json ~base_dir ~room_id ~rule_module : trpg_api_result =
         ("party", `List party);
         ( "recent_events",
           `List
-            (List.map Trpg_engine_event.to_yojson recent_events) );
+            (List.map Trpg.Engine_event.to_yojson recent_events) );
       ])
 
 let trpg_control_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
@@ -466,9 +466,9 @@ let trpg_control_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
   let recent_interventions =
     trpg_recent_events ~base_dir ~room_id ~limit:20
     |> List.filter (fun ev ->
-           match ev.Trpg_engine_event.event_type with
-           | Trpg_engine_event.Intervention_submitted
-           | Trpg_engine_event.Intervention_applied -> true
+           match ev.Trpg.Engine_event.event_type with
+           | Trpg.Engine_event.Intervention_submitted
+           | Trpg.Engine_event.Intervention_applied -> true
            | _ -> false)
   in
   let allowed_actions =
@@ -533,13 +533,13 @@ let trpg_control_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
         ("unclaimed_players", `List unclaimed_players);
         ( "recent_interventions",
           `List
-            (List.map Trpg_engine_event.to_yojson recent_interventions) );
+            (List.map Trpg.Engine_event.to_yojson recent_interventions) );
         ("allowed_actions", `List allowed_actions);
         ("warnings", `List (List.map (fun item -> `String item) warnings));
       ])
 
 let trpg_event_phase_matches (phase_filter : string option)
-    (event : Trpg_engine_event.t) =
+    (event : Trpg.Engine_event.t) =
   match phase_filter with
   | None -> true
   | Some phase_filter ->
@@ -566,10 +566,10 @@ let trpg_timeline_json ~base_dir ~room_id ~after_seq ~event_type_filter ~actor_f
         | Some (`List entries) ->
             entries
             |> List.filter_map (fun item ->
-                   match Trpg_engine_event.of_yojson item with
+                   match Trpg.Engine_event.of_yojson item with
                    | Ok event -> Some event
                    | Error _ -> None)
-            |> List.filter (fun (event : Trpg_engine_event.t) ->
+            |> List.filter (fun (event : Trpg.Engine_event.t) ->
                    let actor_ok =
                      match actor_filter with
                      | Some actor when String.trim actor <> "" -> (
@@ -585,7 +585,7 @@ let trpg_timeline_json ~base_dir ~room_id ~after_seq ~event_type_filter ~actor_f
       let last_seq =
         events
         |> List.rev
-        |> List.find_map (fun event -> Some event.Trpg_engine_event.seq)
+        |> List.find_map (fun event -> Some event.Trpg.Engine_event.seq)
         |> Option.value ~default:after_seq
       in
       Ok
@@ -614,6 +614,6 @@ let trpg_timeline_json ~base_dir ~room_id ~after_seq ~event_type_filter ~actor_f
             ("count", `Int (List.length events));
             ("last_seq", `Int last_seq);
             ( "events",
-              `List (List.map Trpg_engine_event.to_yojson events) );
+              `List (List.map Trpg.Engine_event.to_yojson events) );
           ])
 

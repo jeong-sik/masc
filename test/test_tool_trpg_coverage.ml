@@ -118,35 +118,35 @@ let bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids =
       ]
   in
   let room_created =
-    Trpg_engine_event.make ~seq:1 ~room_id ~ts:(Types.now_iso ())
-      ~event_type:Trpg_engine_event.Room_created ~payload:room_created_payload ()
+    Trpg.Engine_event.make ~seq:1 ~room_id ~ts:(Types.now_iso ())
+      ~event_type:Trpg.Engine_event.Room_created ~payload:room_created_payload ()
   in
-  (match Trpg_engine_store_sqlite.append_event ~base_dir ~event:room_created with
+  (match Trpg.Engine_store_sqlite.append_event ~base_dir ~event:room_created with
   | Ok () -> ()
   | Error e -> failwith ("bootstrap Room_created failed: " ^ e));
   let room_started =
-    Trpg_engine_event.make ~seq:2 ~room_id ~ts:(Types.now_iso ())
-      ~event_type:Trpg_engine_event.Room_started
+    Trpg.Engine_event.make ~seq:2 ~room_id ~ts:(Types.now_iso ())
+      ~event_type:Trpg.Engine_event.Room_started
       ~payload:(`Assoc [ ("phase", `String "round") ])
       ()
   in
-  (match Trpg_engine_store_sqlite.append_event ~base_dir ~event:room_started with
+  (match Trpg.Engine_store_sqlite.append_event ~base_dir ~event:room_started with
   | Ok () -> ()
   | Error e -> failwith ("bootstrap Room_started failed: " ^ e))
 
-let append_event_exn ~base_dir ~(event : Trpg_engine_event.t) =
-  match Trpg_engine_store_sqlite.append_event ~base_dir ~event with
+let append_event_exn ~base_dir ~(event : Trpg.Engine_event.t) =
+  match Trpg.Engine_store_sqlite.append_event ~base_dir ~event with
   | Ok () -> ()
   | Error e -> failwith ("append event failed: " ^ e)
 
 let append_room_event ~base_dir ~room_id ?actor_id ~event_type ~payload () =
   let next_seq =
-    match Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+    match Trpg.Engine_store_sqlite.read_events ~base_dir ~room_id with
     | Ok events -> List.length events + 1
     | Error _ -> 1
   in
   let event =
-    Trpg_engine_event.make ~seq:next_seq ~room_id ~ts:(Types.now_iso ())
+    Trpg.Engine_event.make ~seq:next_seq ~room_id ~ts:(Types.now_iso ())
       ~event_type ?actor_id ~payload ()
   in
   append_event_exn ~base_dir ~event
@@ -193,7 +193,7 @@ let test_round_run_success_path () =
           (keeper_payload ~action_type:"defend" "I hold defensive line.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -290,7 +290,7 @@ let test_round_run_memory_hint_guardrail_escalates_tier () =
              "I scout the bridge perimeter.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -372,7 +372,7 @@ let test_round_run_canon_check_strict_failure () =
              "I keep moving despite the anomaly.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -492,7 +492,7 @@ let test_round_run_canon_any_of_passes_with_flag_set () =
              "I secure the perimeter.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -571,7 +571,7 @@ let test_round_run_emits_combat_semantic_events () =
              "I attack the goblin.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -644,7 +644,7 @@ let test_round_run_reinforces_pressure_after_wave_clear () =
   let room_id = "room-round-pressure-reinforce" in
   bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:["p1"];
   append_room_event ~base_dir ~room_id
-    ~event_type:Trpg_engine_event.Actor_spawned
+    ~event_type:Trpg.Engine_event.Actor_spawned
     ~payload:
       (`Assoc
         [
@@ -677,7 +677,7 @@ let test_round_run_reinforces_pressure_after_wave_clear () =
              "I finish the seeded enemy quickly.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -717,8 +717,8 @@ let test_round_run_emits_session_outcome_event () =
   let _ = Room.init config ~agent_name:(Some "tester") in
   bootstrap_room_with_actors ~base_dir ~room_id:"room-round-outcome" ~actor_ids:["p1"];
   let flag_event =
-    Trpg_engine_event.make ~seq:3 ~room_id:"room-round-outcome" ~ts:(Types.now_iso ())
-      ~event_type:Trpg_engine_event.Flag_set
+    Trpg.Engine_event.make ~seq:3 ~room_id:"room-round-outcome" ~ts:(Types.now_iso ())
+      ~event_type:Trpg.Engine_event.Flag_set
       ~payload:(`Assoc [ ("scope", `String "world"); ("key", `String "outcome.victory") ])
       ()
   in
@@ -736,7 +736,7 @@ let test_round_run_emits_session_outcome_event () =
              "I secure the gate.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -786,15 +786,15 @@ let test_round_run_uses_current_session_for_outcome_gate () =
   let _ = Room.init config ~agent_name:(Some "tester") in
   bootstrap_room_with_actors ~base_dir ~room_id:"room-round-restart-outcome" ~actor_ids:["p1"];
   let old_room_end =
-    Trpg_engine_event.make ~seq:3 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
-      ~event_type:Trpg_engine_event.Room_ended
+    Trpg.Engine_event.make ~seq:3 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
+      ~event_type:Trpg.Engine_event.Room_ended
       ~payload:(`Assoc [ ("reason", `String "old_session_done") ])
       ()
   in
   append_event_exn ~base_dir ~event:old_room_end;
   let old_outcome =
-    Trpg_engine_event.make ~seq:4 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
-      ~event_type:Trpg_engine_event.Session_outcome
+    Trpg.Engine_event.make ~seq:4 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
+      ~event_type:Trpg.Engine_event.Session_outcome
       ~payload:
         (`Assoc
           [
@@ -808,15 +808,15 @@ let test_round_run_uses_current_session_for_outcome_gate () =
   in
   append_event_exn ~base_dir ~event:old_outcome;
   let restarted =
-    Trpg_engine_event.make ~seq:5 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
-      ~event_type:Trpg_engine_event.Room_started
+    Trpg.Engine_event.make ~seq:5 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
+      ~event_type:Trpg.Engine_event.Room_started
       ~payload:(`Assoc [ ("phase", `String "round") ])
       ()
   in
   append_event_exn ~base_dir ~event:restarted;
   let turn_40 =
-    Trpg_engine_event.make ~seq:6 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
-      ~event_type:Trpg_engine_event.Turn_started
+    Trpg.Engine_event.make ~seq:6 ~room_id:"room-round-restart-outcome" ~ts:(Types.now_iso ())
+      ~event_type:Trpg.Engine_event.Turn_started
       ~payload:(`Assoc [ ("turn", `Int 40) ])
       ()
   in
@@ -834,7 +834,7 @@ let test_round_run_uses_current_session_for_outcome_gate () =
              "I secure the gate.")
     | other -> `Error ("unknown keeper: " ^ other)
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -912,7 +912,7 @@ let test_round_run_timeout_policy () =
     | "pk-timeout" -> `Timeout
     | _ -> `Error "unknown keeper"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -1053,7 +1053,7 @@ let test_round_run_local_fallback_progresses_round () =
   let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     `Error "keeper runtime unavailable"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     {
       store;
@@ -1156,7 +1156,7 @@ let test_round_run_local_fallback_distributes_team_pressure () =
   let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     `Error "keeper runtime unavailable"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     {
       store;
@@ -1257,8 +1257,8 @@ let test_round_run_unavailable_sampling_cap () =
     bootstrap_room_with_actors ~base_dir ~room_id:"room-round-unavailable-sampled"
       ~actor_ids:["p1"];
     let seeded_unavailable =
-      Trpg_engine_event.make ~seq:3 ~room_id:"room-round-unavailable-sampled"
-        ~ts:(Types.now_iso ()) ~event_type:Trpg_engine_event.Keeper_unavailable
+      Trpg.Engine_event.make ~seq:3 ~room_id:"room-round-unavailable-sampled"
+        ~ts:(Types.now_iso ()) ~event_type:Trpg.Engine_event.Keeper_unavailable
         ~actor_id:"p1"
         ~payload:
           (`Assoc
@@ -1283,7 +1283,7 @@ let test_round_run_unavailable_sampling_cap () =
       | "pk-timeout" -> `Timeout
       | _ -> `Error "unknown keeper"
     in
-    let store = Trpg_store.make_sqlite ~base_dir in
+    let store = Trpg.Store.make_sqlite ~base_dir in
     let ctx : Tool_trpg.context =
       { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
     in
@@ -1364,7 +1364,7 @@ let test_round_run_uses_majority_player_quorum () =
     | "pk-timeout" -> `Timeout
     | _ -> `Error "unknown keeper"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -1447,7 +1447,7 @@ let test_round_run_skips_dead_player_assignments () =
         `Ok (keeper_payload ~action_type:"explore" "This should never run.")
     | _ -> `Error "unknown keeper"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -1517,7 +1517,7 @@ let test_round_run_short_circuits_when_session_already_ended () =
   let room_id = "room-round-session-ended" in
   bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:["p1"];
   append_room_event ~base_dir ~room_id
-    ~event_type:Trpg_engine_event.Session_outcome
+    ~event_type:Trpg.Engine_event.Session_outcome
     ~payload:
       (`Assoc
         [
@@ -1533,7 +1533,7 @@ let test_round_run_short_circuits_when_session_already_ended () =
     keeper_called := true;
     `Ok (keeper_payload ~action_type:"explore" "Should not be called.")
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -1594,7 +1594,7 @@ let test_round_run_rejects_meta_only_keeper_reply () =
     | "pk-meta" -> `Ok (`Assoc [ ("reply", `String "[/STATE]") ])
     | _ -> `Error "unknown keeper"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -1663,7 +1663,7 @@ let test_round_run_requires_keeper_runtime () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
@@ -1711,7 +1711,7 @@ let test_round_run_preflight_warning_is_non_blocking () =
     | "pk-down" -> `Error "keeper not found"
     | _ -> `Error "unknown keeper"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     {
       store;
@@ -1774,7 +1774,7 @@ let test_round_run_lang_english_prompt () =
           (keeper_payload ~action_type:"defend" "I move to cover.")
     | _ -> `Error "unknown keeper"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -1819,7 +1819,7 @@ let test_round_run_dm_prompt_reflects_player_action () =
              "정찰 결과를 받아 다음 장면을 연다.")
     | _ -> `Error "unknown keeper"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -1853,7 +1853,7 @@ let test_round_run_rejects_non_unique_keepers () =
   let keeper_call ~name:_ ~message:_ ~timeout_sec:_ : Tool_trpg.keeper_call_result =
     `Ok (keeper_payload ~action_type:"scene_transition" ~scene:"noop" "noop")
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -1896,7 +1896,7 @@ let test_session_bootstrap_and_intervention_flow () =
     else
       `Error ("unknown keeper: " ^ name)
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -2030,7 +2030,7 @@ let test_examples_scenario_visible_as_world_preset () =
   "runtime": { "max_rounds": 6 }
 }|};
   let _ = Room.init config ~agent_name:(Some "tester") in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
@@ -2079,7 +2079,7 @@ let test_actor_spawn_claim_release_flow () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
@@ -2230,7 +2230,7 @@ let test_actor_spawn_auto_generates_actor_id () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
@@ -2287,7 +2287,7 @@ let test_actor_spawn_profile_fields () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
@@ -2371,7 +2371,7 @@ let test_actor_update_delete_flow () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
@@ -2491,7 +2491,7 @@ let test_actor_claim_rejects_dead_actor () =
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
@@ -2535,7 +2535,7 @@ let test_mid_join_eligibility_and_request_flow () =
   let _ = Room.init config ~agent_name:(Some "tester") in
   let room_id = "room-mid-join-flow" in
   bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p1" ];
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
@@ -2556,12 +2556,12 @@ let test_mid_join_eligibility_and_request_flow () =
     (json0 |> Yojson.Safe.Util.member "eligible" |> Yojson.Safe.Util.to_bool);
 
   append_room_event ~base_dir ~room_id
-    ~event_type:Trpg_engine_event.Turn_action_resolved
+    ~event_type:Trpg.Engine_event.Turn_action_resolved
     ~actor_id:"p1"
     ~payload:(`Assoc [ ("actor_id", `String "p1"); ("result", `String "advance") ])
     ();
   append_room_event ~base_dir ~room_id
-    ~event_type:Trpg_engine_event.Dice_rolled
+    ~event_type:Trpg.Engine_event.Dice_rolled
     ~actor_id:"p1"
     ~payload:
       (`Assoc
@@ -2638,10 +2638,10 @@ let test_mid_join_reject_when_window_closed () =
   let room_id = "room-mid-join-closed" in
   bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p2" ];
   append_room_event ~base_dir ~room_id
-    ~event_type:Trpg_engine_event.Join_window_closed
+    ~event_type:Trpg.Engine_event.Join_window_closed
     ~payload:(`Assoc [ ("turn", `Int 1); ("reason", `String "test") ])
     ();
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = None; keeper_probe = None; dm_voice_emit = None }
   in
@@ -2816,7 +2816,7 @@ let test_apply_structured_action_emits_flag_set () =
     (fun () ->
       let _ = Room.init (Room.default_config base_dir) ~agent_name:(Some "tester") in
       bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p1" ];
-      let store = Trpg_store.make_sqlite ~base_dir in
+      let store = Trpg.Store.make_sqlite ~base_dir in
       let sa : Tool_trpg.structured_action =
         {
           sa_type = Tool_trpg.SetFlag;
@@ -2837,15 +2837,15 @@ let test_apply_structured_action_emits_flag_set () =
       | Ok events ->
           let has_flag_set =
             List.exists
-              (fun (ev : Trpg_engine_event.t) ->
-                ev.event_type = Trpg_engine_event.Flag_set)
+              (fun (ev : Trpg.Engine_event.t) ->
+                ev.event_type = Trpg.Engine_event.Flag_set)
               events
           in
           Alcotest.(check bool) "Flag_set event emitted" true has_flag_set;
           let flag_event =
             List.find
-              (fun (ev : Trpg_engine_event.t) ->
-                ev.event_type = Trpg_engine_event.Flag_set)
+              (fun (ev : Trpg.Engine_event.t) ->
+                ev.event_type = Trpg.Engine_event.Flag_set)
               events
           in
           let key =
@@ -2863,7 +2863,7 @@ let test_apply_structured_action_emits_scene_transition () =
     (fun () ->
       let _ = Room.init (Room.default_config base_dir) ~agent_name:(Some "tester") in
       bootstrap_room_with_actors ~base_dir ~room_id ~actor_ids:[ "p1" ];
-      let store = Trpg_store.make_sqlite ~base_dir in
+      let store = Trpg.Store.make_sqlite ~base_dir in
       let sa : Tool_trpg.structured_action =
         {
           sa_type = Tool_trpg.SceneTransition;
@@ -2884,15 +2884,15 @@ let test_apply_structured_action_emits_scene_transition () =
       | Ok events ->
           let has_scene =
             List.exists
-              (fun (ev : Trpg_engine_event.t) ->
-                ev.event_type = Trpg_engine_event.Scene_transition)
+              (fun (ev : Trpg.Engine_event.t) ->
+                ev.event_type = Trpg.Engine_event.Scene_transition)
               events
           in
           Alcotest.(check bool) "Scene_transition event emitted" true has_scene;
           let scene_event =
             List.find
-              (fun (ev : Trpg_engine_event.t) ->
-                ev.event_type = Trpg_engine_event.Scene_transition)
+              (fun (ev : Trpg.Engine_event.t) ->
+                ev.event_type = Trpg.Engine_event.Scene_transition)
               events
           in
           let scene_name =
@@ -2902,23 +2902,23 @@ let test_apply_structured_action_emits_scene_transition () =
           Alcotest.(check string) "scene is The Dark Cave" "The Dark Cave" scene_name)
 
 let make_event ~seq ~room_id ~event_type =
-  Trpg_engine_event.make ~seq ~room_id ~ts:(Types.now_iso ()) ~event_type
+  Trpg.Engine_event.make ~seq ~room_id ~ts:(Types.now_iso ()) ~event_type
     ~payload:(`Assoc []) ()
 
 let test_detect_stagnation_true () =
   let room_id = "room-stagnation" in
   let events =
     [
-      make_event ~seq:1 ~room_id ~event_type:Trpg_engine_event.Turn_started;
-      make_event ~seq:2 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
-      make_event ~seq:3 ~room_id ~event_type:Trpg_engine_event.Turn_started;
-      make_event ~seq:4 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
-      make_event ~seq:5 ~room_id ~event_type:Trpg_engine_event.Turn_started;
-      make_event ~seq:6 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
-      make_event ~seq:7 ~room_id ~event_type:Trpg_engine_event.Turn_started;
-      make_event ~seq:8 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
-      make_event ~seq:9 ~room_id ~event_type:Trpg_engine_event.Turn_started;
-      make_event ~seq:10 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+      make_event ~seq:1 ~room_id ~event_type:Trpg.Engine_event.Turn_started;
+      make_event ~seq:2 ~room_id ~event_type:Trpg.Engine_event.Narration_posted;
+      make_event ~seq:3 ~room_id ~event_type:Trpg.Engine_event.Turn_started;
+      make_event ~seq:4 ~room_id ~event_type:Trpg.Engine_event.Narration_posted;
+      make_event ~seq:5 ~room_id ~event_type:Trpg.Engine_event.Turn_started;
+      make_event ~seq:6 ~room_id ~event_type:Trpg.Engine_event.Narration_posted;
+      make_event ~seq:7 ~room_id ~event_type:Trpg.Engine_event.Turn_started;
+      make_event ~seq:8 ~room_id ~event_type:Trpg.Engine_event.Narration_posted;
+      make_event ~seq:9 ~room_id ~event_type:Trpg.Engine_event.Turn_started;
+      make_event ~seq:10 ~room_id ~event_type:Trpg.Engine_event.Narration_posted;
     ]
   in
   Alcotest.(check bool)
@@ -2930,16 +2930,16 @@ let test_detect_stagnation_false () =
   let room_id = "room-no-stagnation" in
   let events =
     [
-      make_event ~seq:1 ~room_id ~event_type:Trpg_engine_event.Turn_started;
-      make_event ~seq:2 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
-      make_event ~seq:3 ~room_id ~event_type:Trpg_engine_event.Turn_started;
-      make_event ~seq:4 ~room_id ~event_type:Trpg_engine_event.Flag_set;
-      make_event ~seq:5 ~room_id ~event_type:Trpg_engine_event.Turn_started;
-      make_event ~seq:6 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
-      make_event ~seq:7 ~room_id ~event_type:Trpg_engine_event.Turn_started;
-      make_event ~seq:8 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
-      make_event ~seq:9 ~room_id ~event_type:Trpg_engine_event.Turn_started;
-      make_event ~seq:10 ~room_id ~event_type:Trpg_engine_event.Narration_posted;
+      make_event ~seq:1 ~room_id ~event_type:Trpg.Engine_event.Turn_started;
+      make_event ~seq:2 ~room_id ~event_type:Trpg.Engine_event.Narration_posted;
+      make_event ~seq:3 ~room_id ~event_type:Trpg.Engine_event.Turn_started;
+      make_event ~seq:4 ~room_id ~event_type:Trpg.Engine_event.Flag_set;
+      make_event ~seq:5 ~room_id ~event_type:Trpg.Engine_event.Turn_started;
+      make_event ~seq:6 ~room_id ~event_type:Trpg.Engine_event.Narration_posted;
+      make_event ~seq:7 ~room_id ~event_type:Trpg.Engine_event.Turn_started;
+      make_event ~seq:8 ~room_id ~event_type:Trpg.Engine_event.Narration_posted;
+      make_event ~seq:9 ~room_id ~event_type:Trpg.Engine_event.Turn_started;
+      make_event ~seq:10 ~room_id ~event_type:Trpg.Engine_event.Narration_posted;
     ]
   in
   Alcotest.(check bool)
@@ -2962,7 +2962,7 @@ let test_fallback_tracked_separately () =
              "The scene continues...")
     | _ -> `Timeout
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     {
       store;
@@ -3035,7 +3035,7 @@ let test_end_to_end_victory_via_flags () =
             ])
     | other -> `Error ("unknown keeper: " ^ other)
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     {
       store;
@@ -3105,7 +3105,7 @@ let test_round_run_reprompts_once_for_missing_structured_action () =
               ])
     | _ -> `Error "unknown keeper"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in
@@ -3176,7 +3176,7 @@ let test_round_run_dm_persona_override_in_prompt_and_summary () =
           (keeper_payload ~action_type:"investigate" "I inspect enemy positions.")
     | _ -> `Error "unknown keeper"
   in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_trpg.context =
     { store; agent_name = "tester"; keeper_call = Some keeper_call; keeper_probe = None; dm_voice_emit = None }
   in

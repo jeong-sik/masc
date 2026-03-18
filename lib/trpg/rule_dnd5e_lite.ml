@@ -1,11 +1,11 @@
-(** Trpg_rule_dnd5e_lite — D&D 5e lite rule engine. *)
+(** Rule_dnd5e_lite — D&D 5e lite rule engine. *)
 
 open Yojson.Safe.Util [@@warning "-33"]
-include Trpg_rule_dnd5e_lite_core
+include Rule_dnd5e_lite_core
 
 
 let apply_combat_attack ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   let attacker_id = resolve_actor_id payload event in
   let target_id = get_string_opt "target_id" payload in
   let raw_d20 = get_int_opt "raw_d20" payload |> Option.value ~default:10 in
@@ -77,7 +77,7 @@ let apply_combat_attack ~state ~event =
   | _ -> append_to_list "narration_log" payload state
 
 let apply_combat_defense ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   let defender_id = resolve_actor_id payload event in
   let raw_d20 = get_int_opt "raw_d20" payload |> Option.value ~default:10 in
   let incoming_damage = get_int_opt "incoming_damage" payload |> Option.value ~default:0 in
@@ -148,7 +148,7 @@ let apply_combat_defense ~state ~event =
   | None -> append_to_list "narration_log" payload state
 
 let apply_turn_timeout ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   let turn = state |> member "turn" |> to_int_option |> Option.value ~default:1 in
   let actor_id =
     resolve_actor_id payload event |> Option.value ~default:"unknown"
@@ -170,7 +170,7 @@ let apply_turn_timeout ~state ~event =
   | _ -> state
 
 let apply_keeper_unavailable ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   let actor_id = resolve_actor_id payload event in
   match actor_id with
   | Some aid ->
@@ -191,7 +191,7 @@ let apply_keeper_unavailable ~state ~event =
   | None -> state
 
 let apply_world_event ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   let effect_type =
     get_string_opt "effect_type" payload |> Option.value ~default:"unknown"
   in
@@ -260,13 +260,13 @@ let apply_world_event ~state ~event =
   append_to_list "narration_log" narration_entry next_state
 
 let apply_session_started ~state ~event =
-  let ts = event.Trpg_engine_event.ts in
+  let ts = event.Engine_event.ts in
   match state with
   | `Assoc fields ->
       `Assoc (assoc_put "session_started_at" (`String ts) fields)
   | _ -> state
 
-let apply_event ~state ~(event : Trpg_engine_event.t) =
+let apply_event ~state ~(event : Engine_event.t) =
   (* Track last_event_ts for every event — enables staleness detection *)
   let state =
     match state with
@@ -275,7 +275,7 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
     | _ -> state
   in
   match event.event_type with
-  | Trpg_engine_event.Room_created ->
+  | Engine_event.Room_created ->
       let config = config_from_room_created_payload event.payload in
       let fields =
         init_state ~config
@@ -286,7 +286,7 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
         |> assoc_put "status" (`String "lobby")
         |> assoc_put "phase" (`String "lobby")
         |> assoc_put "session_outcome" `Null)
-  | Trpg_engine_event.Room_started ->
+  | Engine_event.Room_started ->
       (match state with
       | `Assoc fields ->
           `Assoc (fields
@@ -309,14 +309,14 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
                    ])
             |> assoc_put "current_node" `Null)
       | _ -> state)
-  | Trpg_engine_event.Room_ended ->
+  | Engine_event.Room_ended ->
       (match state with
       | `Assoc fields ->
           `Assoc (fields
             |> assoc_put "status" (`String "ended")
             |> assoc_put "phase" (`String "ended"))
       | _ -> state)
-  | Trpg_engine_event.Session_outcome ->
+  | Engine_event.Session_outcome ->
       (match state with
       | `Assoc fields ->
           `Assoc
@@ -325,7 +325,7 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
             |> assoc_put "phase" (`String "ended")
             |> assoc_put "session_outcome" event.payload)
       | _ -> state)
-  | Trpg_engine_event.Turn_started ->
+  | Engine_event.Turn_started ->
       let next_turn =
         event.payload |> member "turn" |> to_int_option |> Option.value ~default:1
       in
@@ -336,45 +336,45 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
             |> assoc_put "phase" (`String "round"))
       | _ -> state)
       |> apply_turn_penalty_decay
-  | Trpg_engine_event.Phase_changed ->
+  | Engine_event.Phase_changed ->
       let phase = get_string_opt "phase" event.payload |> Option.value ~default:"" in
       if phase = "" then state
       else
         (match state with
         | `Assoc fields -> `Assoc (assoc_put "phase" (`String phase) fields)
         | _ -> state)
-  | Trpg_engine_event.Dice_rolled | Trpg_engine_event.Turn_action_resolved ->
+  | Engine_event.Dice_rolled | Engine_event.Turn_action_resolved ->
       append_to_list "dice_log" event.payload state
-  | Trpg_engine_event.Narration_posted ->
+  | Engine_event.Narration_posted ->
       append_to_list "narration_log" event.payload state
-  | Trpg_engine_event.Turn_action_proposed ->
+  | Engine_event.Turn_action_proposed ->
       append_to_list "narration_log"
         (normalize_player_action_for_narration ~state event.payload)
         state
-  | Trpg_engine_event.Combat_attack -> apply_combat_attack ~state ~event
-  | Trpg_engine_event.Combat_defense -> apply_combat_defense ~state ~event
-  | Trpg_engine_event.Hp_changed -> apply_hp_changed ~state ~event
-  | Trpg_engine_event.Inventory_changed -> apply_inventory_changed ~state ~event
-  | Trpg_engine_event.Flag_set -> apply_flag_set ~state ~event
-  | Trpg_engine_event.Node_advanced -> apply_node_advanced ~state ~event
-  | Trpg_engine_event.Actor_spawned -> apply_actor_spawned ~state ~event
-  | Trpg_engine_event.Actor_updated -> apply_actor_updated ~state ~event
-  | Trpg_engine_event.Actor_deleted -> apply_actor_deleted ~state ~event
-  | Trpg_engine_event.Actor_claimed -> apply_actor_claimed ~state ~event
-  | Trpg_engine_event.Actor_released -> apply_actor_released ~state ~event
-  | Trpg_engine_event.Join_window_opened ->
+  | Engine_event.Combat_attack -> apply_combat_attack ~state ~event
+  | Engine_event.Combat_defense -> apply_combat_defense ~state ~event
+  | Engine_event.Hp_changed -> apply_hp_changed ~state ~event
+  | Engine_event.Inventory_changed -> apply_inventory_changed ~state ~event
+  | Engine_event.Flag_set -> apply_flag_set ~state ~event
+  | Engine_event.Node_advanced -> apply_node_advanced ~state ~event
+  | Engine_event.Actor_spawned -> apply_actor_spawned ~state ~event
+  | Engine_event.Actor_updated -> apply_actor_updated ~state ~event
+  | Engine_event.Actor_deleted -> apply_actor_deleted ~state ~event
+  | Engine_event.Actor_claimed -> apply_actor_claimed ~state ~event
+  | Engine_event.Actor_released -> apply_actor_released ~state ~event
+  | Engine_event.Join_window_opened ->
       apply_join_window_state ~state ~event ~phase_open:true
-  | Trpg_engine_event.Join_window_closed ->
+  | Engine_event.Join_window_closed ->
       apply_join_window_state ~state ~event ~phase_open:false
-  | Trpg_engine_event.Contribution_delta ->
+  | Engine_event.Contribution_delta ->
       apply_contribution_delta ~state ~event
-  | Trpg_engine_event.Mid_join_requested
-  | Trpg_engine_event.Mid_join_granted
-  | Trpg_engine_event.Mid_join_rejected
-  | Trpg_engine_event.Memory_signal ->
+  | Engine_event.Mid_join_requested
+  | Engine_event.Mid_join_granted
+  | Engine_event.Mid_join_rejected
+  | Engine_event.Memory_signal ->
       append_to_list "narration_log" event.payload state
-  | Trpg_engine_event.Scene_transition ->
-      let payload = event.Trpg_engine_event.payload in
+  | Engine_event.Scene_transition ->
+      let payload = event.Engine_event.payload in
       let scene =
         get_string_opt "scene" payload |> Option.value ~default:"unknown"
       in
@@ -388,8 +388,8 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
           in
           `Assoc (assoc_put "world" world fields)
       | _ -> state)
-  | Trpg_engine_event.Quest_update ->
-      let payload = event.Trpg_engine_event.payload in
+  | Engine_event.Quest_update ->
+      let payload = event.Engine_event.payload in
       let quest_info =
         get_string_opt "quest_info" payload |> Option.value ~default:""
       in
@@ -403,16 +403,16 @@ let apply_event ~state ~(event : Trpg_engine_event.t) =
           in
           `Assoc (assoc_put "world" world fields)
       | _ -> state)
-  | Trpg_engine_event.Turn_timeout -> apply_turn_timeout ~state ~event
-  | Trpg_engine_event.Keeper_unavailable -> apply_keeper_unavailable ~state ~event
-  | Trpg_engine_event.World_event -> apply_world_event ~state ~event
-  | Trpg_engine_event.Session_started -> apply_session_started ~state ~event
-  | Trpg_engine_event.Metric_updated
-  | Trpg_engine_event.Party_selected
-  | Trpg_engine_event.Intervention_submitted
-  | Trpg_engine_event.Intervention_applied
-  | Trpg_engine_event.Bdi_updated
-  | Trpg_engine_event.Evaluation_scored ->
+  | Engine_event.Turn_timeout -> apply_turn_timeout ~state ~event
+  | Engine_event.Keeper_unavailable -> apply_keeper_unavailable ~state ~event
+  | Engine_event.World_event -> apply_world_event ~state ~event
+  | Engine_event.Session_started -> apply_session_started ~state ~event
+  | Engine_event.Metric_updated
+  | Engine_event.Party_selected
+  | Engine_event.Intervention_submitted
+  | Engine_event.Intervention_applied
+  | Engine_event.Bdi_updated
+  | Engine_event.Evaluation_scored ->
       state
 
 let derive_state ~state = state

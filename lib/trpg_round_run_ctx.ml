@@ -9,8 +9,8 @@
     referenced via their defining modules. *)
 
 type round_ctx = {
-  ctx : Trpg_types.context;
-  store : Trpg_store.t;
+  ctx : Trpg.Types.context;
+  store : Trpg.Store.t;
   room_id : string;
   phase : string;
   turn_before : int;
@@ -41,5 +41,5 @@ type round_ctx = {
   unavailable_count : int ref;
   timeout_count : int ref;
   state_for_players_ref : Yojson.Safe.t ref;
-  appended_events : Trpg_engine_event.t list ref;
+  appended_events : Trpg.Engine_event.t list ref;
 }

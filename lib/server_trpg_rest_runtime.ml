@@ -188,7 +188,7 @@ let trpg_round_run_json
       in
       let trpg_ctx : Tool_trpg.context =
         {
-          store = Trpg_store.make_sqlite ~base_dir:state.Mcp_server.room_config.base_path;
+          store = Trpg.Store.make_sqlite ~base_dir:state.Mcp_server.room_config.base_path;
           agent_name;
           keeper_call = Some keeper_call;
           keeper_probe = Some keeper_probe;
@@ -247,9 +247,9 @@ let trpg_sse_keepalive_s = 30.0
 
 (** Format a single TRPG event as an SSE frame.
     Uses the event's seq as the SSE id, and the event_type string as the SSE event field. *)
-let trpg_event_to_sse (ev : Trpg_engine_event.t) : string =
-  let data = Yojson.Safe.to_string (Trpg_engine_event.to_yojson ev) in
-  let event_type_str = Trpg_engine_event.string_of_event_type ev.event_type in
+let trpg_event_to_sse (ev : Trpg.Engine_event.t) : string =
+  let data = Yojson.Safe.to_string (Trpg.Engine_event.to_yojson ev) in
+  let event_type_str = Trpg.Engine_event.string_of_event_type ev.event_type in
   Printf.sprintf "id: %d\nevent: %s\ndata: %s\n\n" ev.seq event_type_str data
 
 (** Handle TRPG SSE streaming endpoint (HTTP/1.1).
@@ -307,23 +307,23 @@ let handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd =
         (* Replay existing events newer than last_seq *)
         (match
            (if !last_seq > 0 then
-              Trpg_engine_store_sqlite.read_events_after
+              Trpg.Engine_store_sqlite.read_events_after
                 ~base_dir ~room_id ~after_seq:!last_seq
             else
-              Trpg_engine_store_sqlite.read_events ~base_dir ~room_id)
+              Trpg.Engine_store_sqlite.read_events ~base_dir ~room_id)
          with
          | Ok events ->
              let events = match event_type_opt with
                | None -> events
                | Some et ->
                    List.filter
-                     (fun (ev : Trpg_engine_event.t) -> ev.event_type = et)
+                     (fun (ev : Trpg.Engine_event.t) -> ev.event_type = et)
                      events
              in
              List.iter (fun ev ->
                if not !closed then begin
                  ignore (send_raw_data (trpg_event_to_sse ev));
-                 last_seq := max !last_seq ev.Trpg_engine_event.seq
+                 last_seq := max !last_seq ev.Trpg.Engine_event.seq
                end) events
          | Error err ->
              Log.Trpg.warn "SSE initial event read failed for room %s: %s"
@@ -346,7 +346,7 @@ let handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd =
                     with exn -> if is_cancelled exn then raise exn);
                    if not !closed then begin
                      (match
-                        Trpg_engine_store_sqlite.read_events_after
+                        Trpg.Engine_store_sqlite.read_events_after
                           ~base_dir ~room_id ~after_seq:!last_seq
                       with
                       | Ok events ->
@@ -354,7 +354,7 @@ let handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd =
                             | None -> events
                             | Some et ->
                                 List.filter
-                                  (fun (ev : Trpg_engine_event.t) ->
+                                  (fun (ev : Trpg.Engine_event.t) ->
                                     ev.event_type = et)
                                   events
                           in
@@ -364,7 +364,7 @@ let handle_trpg_sse ~base_dir ~room_id ~event_type_filter request reqd =
                                 closed := true
                               else
                                 last_seq := max !last_seq
-                                  ev.Trpg_engine_event.seq
+                                  ev.Trpg.Engine_event.seq
                             end) events
                       | Error _ -> ());
                      incr keepalive_counter;

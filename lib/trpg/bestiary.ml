@@ -1,9 +1,9 @@
-(** Trpg_bestiary — NPC templates, difficulty tiers, combat resolution,
+(** Bestiary — NPC templates, difficulty tiers, combat resolution,
     memory signals, and round-level combat event helpers.
 
     Extracted from trpg_action.ml to reduce file size. *)
 
-open Trpg_action
+open Action
 
 (* --- NPC Bestiary -------------------------------------------------------- *)
 
@@ -367,7 +367,7 @@ let append_combat_semantic_event ~store ~room_id ~phase ~turn ~actor_id ~reply
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Combat_attack ~actor_id ~payload ()
+          ~event_type:Engine_event.Combat_attack ~actor_id ~payload ()
       in
       let* hp_event_opt =
         match target_id with
@@ -386,7 +386,7 @@ let append_combat_semantic_event ~store ~room_id ~phase ~turn ~actor_id ~reply
             in
             let* hp_event =
               append_event ~store ~room_id
-                ~event_type:Trpg_engine_event.Hp_changed
+                ~event_type:Engine_event.Hp_changed
                 ~actor_id:target_actor_id ~payload:hp_payload ()
             in
             Ok (Some hp_event)
@@ -409,7 +409,7 @@ let append_combat_semantic_event ~store ~room_id ~phase ~turn ~actor_id ~reply
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Combat_defense ~actor_id ~payload ()
+          ~event_type:Engine_event.Combat_defense ~actor_id ~payload ()
       in
       Ok [ event ]
 
@@ -553,7 +553,7 @@ let apply_structured_action ~store ~room_id ~turn ~phase ~actor_id ~state
       in
       let* combat_event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Combat_attack ~actor_id ~payload ()
+          ~event_type:Engine_event.Combat_attack ~actor_id ~payload ()
       in
       let* hp_event_opt =
         match target_id with
@@ -572,7 +572,7 @@ let apply_structured_action ~store ~room_id ~turn ~phase ~actor_id ~state
             in
             let* hp_event =
               append_event ~store ~room_id
-                ~event_type:Trpg_engine_event.Hp_changed
+                ~event_type:Engine_event.Hp_changed
                 ~actor_id:target_actor_id ~payload:hp_payload ()
             in
             Ok (Some hp_event)
@@ -597,7 +597,7 @@ let apply_structured_action ~store ~room_id ~turn ~phase ~actor_id ~state
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Combat_defense ~actor_id ~payload ()
+          ~event_type:Engine_event.Combat_defense ~actor_id ~payload ()
       in
       finalize ~events:[ event ] ~target_id:None ~damage_opt:None
   | SetFlag ->
@@ -616,7 +616,7 @@ let apply_structured_action ~store ~room_id ~turn ~phase ~actor_id ~state
         in
         let* event =
           append_event ~store ~room_id
-            ~event_type:Trpg_engine_event.Flag_set ~actor_id ~payload ()
+            ~event_type:Engine_event.Flag_set ~actor_id ~payload ()
         in
         finalize ~events:[ event ] ~target_id:None ~damage_opt:None
   | SceneTransition ->
@@ -634,7 +634,7 @@ let apply_structured_action ~store ~room_id ~turn ~phase ~actor_id ~state
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Scene_transition ~actor_id ~payload ()
+          ~event_type:Engine_event.Scene_transition ~actor_id ~payload ()
       in
       finalize ~events:[ event ] ~target_id:None ~damage_opt:None
   | QuestUpdate ->
@@ -652,7 +652,7 @@ let apply_structured_action ~store ~room_id ~turn ~phase ~actor_id ~state
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Quest_update ~actor_id ~payload ()
+          ~event_type:Engine_event.Quest_update ~actor_id ~payload ()
       in
       finalize ~events:[ event ] ~target_id:None ~damage_opt:None
   | Heal | Investigate | Social | Explore | Magic | UseItem ->
@@ -671,7 +671,7 @@ let apply_structured_action ~store ~room_id ~turn ~phase ~actor_id ~state
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Narration_posted ~actor_id ~payload ()
+          ~event_type:Engine_event.Narration_posted ~actor_id ~payload ()
       in
       finalize ~events:[ event ] ~target_id:sa.target_id ~damage_opt:None
 
@@ -718,7 +718,7 @@ let ensure_round_npc_spawn_event ~store ~room_id ~turn ~state =
     let ( let* ) = Result.bind in
     let* event =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Actor_spawned
+        ~event_type:Engine_event.Actor_spawned
         ~actor_id:npc_id ~payload ()
     in
     Ok (Some event)

@@ -1,7 +1,7 @@
 (** Trpg_round_fallback — deterministic fallback replies and NPC counterattack logic *)
 
-include Trpg_action
-open Trpg_bestiary
+include Trpg.Action
+open Trpg.Bestiary
 open Yojson.Safe.Util
 
 let default_placeholder_reply = "상황을 살피며 다음 행동을 준비합니다."
@@ -460,7 +460,7 @@ let append_npc_counterattack_events ~store ~room_id ~phase ~turn ~state =
     in
     let* spawn_event =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Actor_spawned ~actor_id:npc_id
+        ~event_type:Trpg.Engine_event.Actor_spawned ~actor_id:npc_id
         ~payload:spawn_payload ()
     in
     let state_with_spawn =
@@ -539,7 +539,7 @@ let append_npc_counterattack_events ~store ~room_id ~phase ~turn ~state =
           in
           (match
              append_event ~store ~room_id
-               ~event_type:Trpg_engine_event.Hp_changed
+               ~event_type:Trpg.Engine_event.Hp_changed
                ~actor_id:npc_actor_id ~payload:heal_payload ()
            with
           | Ok ev -> pre_attack_events := [ ev ]
@@ -563,7 +563,7 @@ let append_npc_counterattack_events ~store ~room_id ~phase ~turn ~state =
       in
       let* attack_event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Combat_attack ~actor_id:npc_actor_id
+          ~event_type:Trpg.Engine_event.Combat_attack ~actor_id:npc_actor_id
           ~payload:attack_payload ()
       in
       let hp_payload =
@@ -579,7 +579,7 @@ let append_npc_counterattack_events ~store ~room_id ~phase ~turn ~state =
       in
       let* hp_event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Hp_changed ~actor_id:target_actor_id
+          ~event_type:Trpg.Engine_event.Hp_changed ~actor_id:target_actor_id
           ~payload:hp_payload ()
       in
       (* MultiTarget: attack a second player target if available *)
@@ -614,7 +614,7 @@ let append_npc_counterattack_events ~store ~room_id ~phase ~turn ~state =
                 in
                 let* second_attack_ev =
                   append_event ~store ~room_id
-                    ~event_type:Trpg_engine_event.Combat_attack
+                    ~event_type:Trpg.Engine_event.Combat_attack
                     ~actor_id:npc_actor_id ~payload:second_attack_payload ()
                 in
                 let second_hp_payload =
@@ -630,7 +630,7 @@ let append_npc_counterattack_events ~store ~room_id ~phase ~turn ~state =
                 in
                 let* second_hp_ev =
                   append_event ~store ~room_id
-                    ~event_type:Trpg_engine_event.Hp_changed
+                    ~event_type:Trpg.Engine_event.Hp_changed
                     ~actor_id:second_target_id ~payload:second_hp_payload ()
                 in
                 Ok [ second_attack_ev; second_hp_ev ])

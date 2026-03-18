@@ -590,41 +590,20 @@
    tool_lodge_project
    tool_lodge_autonomous
    trpg_schema
-   trpg_types_world
-   trpg_types_canon
-   trpg_types
-   trpg_bestiary
-   trpg_action
+   trpg_dm_intent
    trpg_round_fallback
    trpg_round_keeper_parse
    trpg_round_prompt
    trpg_round
-   trpg_handlers
    trpg_handlers_core
    trpg_handlers_actors
    trpg_handlers_session
+   trpg_handlers
    trpg_round_run_ctx
-   trpg_round_run_process
    trpg_round_run_handler
-   tool_trpg
-   trpg_store
-   trpg_preset_store
-   trpg_engine_types
-   trpg_engine_event
-   trpg_engine_state_machine
-   trpg_engine_store
-   trpg_engine_store_sqlite
-   trpg_world_projection
-   trpg_visibility
-   trpg_rule
-   trpg_rule_dnd5e_lite
-   trpg_rule_dnd5e_lite_core
-   trpg_engine_replay
-   trpg_slot
-   trpg_dm_intent
-   trpg_bdi
+   trpg_round_run_process
    trpg_harness
-   trpg_actor_match
+   tool_trpg
    json_util
    ;; Autoresearch — Karpathy-inspired autonomous experiment loop
    autoresearch
@@ -646,10 +625,17 @@
 )
 (private_modules
  gardener_state
+ trpg_round_run_ctx
+ trpg_round_run_process
+ trpg_round_run_handler
+ trpg_round_fallback
+ trpg_round_keeper_parse
+ trpg_round_prompt
+ trpg_handlers_core
+ trpg_handlers_actors
+ trpg_handlers_session
  gardener_health
  gardener_decisions
- trpg_types_world
- trpg_types_canon
  tool_protocol_game_view_utils
  tool_protocol_game_view_handlers
  dashboard_http_keeper_metrics
@@ -657,9 +643,6 @@
  mitosis_helpers
  mitosis_spawn
  mitosis_defaults
- trpg_round_run_ctx
- trpg_round_run_process
- trpg_round_run_handler
  board_core
  board_votes
  cp_snapshot_core
@@ -674,7 +657,6 @@
  dashboard_mission_assembly
  keeper_types_profile
  keeper_types_resident
- trpg_bestiary
  cp_lifecycle_swarm_live
  tool_team_session_routing_workers
  cp_lifecycle_search
@@ -756,14 +738,6 @@
   chain_mermaid_parse
   chain_mermaid_node_content
   chain_mermaid_graph
-  ;; trpg_round sub-modules
-  trpg_round_fallback
-  trpg_round_keeper_parse
-  trpg_round_prompt
-  ;; trpg_handlers sub-modules
-  trpg_handlers_core
-  trpg_handlers_actors
-  trpg_handlers_session
   ;; local_agent_eio sub-modules
   local_agent_eio_types
   local_agent_eio_container
@@ -860,6 +834,8 @@
    council
    ;; Jiphyeon - Episode storage for Agent Being Protocol
    jiphyeon
+   ;; TRPG engine (tabletop RPG sublibrary)
+   trpg
    ;; Neo4j Bolt native driver (OCaml 5.x Eio)
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))

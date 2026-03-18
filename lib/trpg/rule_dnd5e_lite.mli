@@ -21,4 +21,4 @@ val roll_with_disadvantage : d20_1:int -> d20_2:int -> stat:int -> modifier:int 
 val damage_multiplier_of_tier : roll_tier -> float
 val defense_mitigation_of_tier : roll_tier -> float
 
-include Trpg_rule.S
+include Rule.S

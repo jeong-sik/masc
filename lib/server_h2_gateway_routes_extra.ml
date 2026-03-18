@@ -268,23 +268,23 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
             ignore (send init_comment);
             (match
                (if !last_seq > 0 then
-                  Trpg_engine_store_sqlite.read_events_after
+                  Trpg.Engine_store_sqlite.read_events_after
                     ~base_dir ~room_id:room_id_trimmed ~after_seq:!last_seq
                 else
-                  Trpg_engine_store_sqlite.read_events
+                  Trpg.Engine_store_sqlite.read_events
                     ~base_dir ~room_id:room_id_trimmed)
              with
              | Ok events ->
                  let events = match event_type_opt with
                    | None -> events
                    | Some et ->
-                       List.filter (fun (ev : Trpg_engine_event.t) ->
+                       List.filter (fun (ev : Trpg.Engine_event.t) ->
                          ev.event_type = et) events
                  in
                  List.iter (fun ev ->
                    if not !closed then begin
                      ignore (send (trpg_event_to_sse ev));
-                     last_seq := max !last_seq ev.Trpg_engine_event.seq
+                     last_seq := max !last_seq ev.Trpg.Engine_event.seq
                    end) events
              | Error _ -> ());
             (match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
@@ -301,14 +301,14 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
                         with exn -> if is_cancelled exn then raise exn);
                        if not !closed then begin
                          (match
-                            Trpg_engine_store_sqlite.read_events_after
+                            Trpg.Engine_store_sqlite.read_events_after
                               ~base_dir ~room_id:room_id_trimmed ~after_seq:!last_seq
                           with
                           | Ok events ->
                               let events = match event_type_opt with
                                 | None -> events
                                 | Some et ->
-                                    List.filter (fun (ev : Trpg_engine_event.t) ->
+                                    List.filter (fun (ev : Trpg.Engine_event.t) ->
                                       ev.event_type = et) events
                               in
                               List.iter (fun ev ->
@@ -317,7 +317,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
                                     closed := true
                                   else
                                     last_seq := max !last_seq
-                                      ev.Trpg_engine_event.seq
+                                      ev.Trpg.Engine_event.seq
                                 end) events
                           | Error _ -> ());
                          incr keepalive_counter;

@@ -604,7 +604,7 @@ let run_proactive_generation
          (tc, output))
       tcs
   in
-  let run_cascade requests = Llm_orchestration.cascade requests in
+  let run_cascade requests = Keeper_oas_adapter.run_cascade requests in
   let rec loop attempt usage_acc latency_acc cost_acc retry_hint =
     if attempt > max_attempts then
       Some {

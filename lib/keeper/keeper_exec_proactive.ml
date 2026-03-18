@@ -178,24 +178,28 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                         ~triggers
                         obs
                     in
+                    let system =
+                      "You are " ^ meta.name
+                      ^ ", a keeper agent. Respond with JSON only."
+                    in
                     let model_specs =
                       Llm_types.available_model_specs_of_strings meta.models
                     in
                     let (result, delib_latency) = Llm_types.timed (fun () ->
-                      Llm_orchestration.run_prompt_cascade
-                        ~temperature:0.3
-                        ~model_specs
-                        ~max_tokens:1024
+                      Keeper_oas_adapter.run_simple
+                        ~config:ctx.config
+                        ~meta
+                        ~system_prompt:system
                         ~prompt
-                        ~system:("You are " ^ meta.name
-                                 ^ ", a keeper agent. Respond with JSON only.")
-                        ()) in
+                        ~temperature:0.3
+                        ~max_tokens:1024) in
                     match result with
                     | Error msg ->
                         Log.KeeperExec.error "%s LLM call failed: %s"
                           meta.name msg;
                         meta
-                    | Ok response ->
+                    | Ok run_result ->
+                        let response = run_result.Oas_worker.response in
                         let response_usage = Llm_types.usage_of_response response in
                         let turn_cost =
                           let inp =

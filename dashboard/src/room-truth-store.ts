@@ -156,6 +156,12 @@ function normalizeRoomTruth(raw: unknown): DashboardRoomTruthResponse {
   }
 }
 
+/** True while the server is still computing its first cache (warm-up). */
+export const roomTruthInitializing = signal(false)
+
+const WARM_RETRY_DELAY_MS = 3_000
+const WARM_MAX_RETRIES = 10
+
 export async function refreshRoomTruth(): Promise<void> {
   if (inflightRoomTruthRefresh) return inflightRoomTruthRefresh
 
@@ -164,6 +170,15 @@ export async function refreshRoomTruth(): Promise<void> {
   inflightRoomTruthRefresh = (async () => {
     try {
       const raw = await fetchDashboardRoomTruth()
+      const isInitializing =
+        isRecord(raw)
+        && asString((raw as Record<string, unknown>).status) === 'initializing'
+      if (isInitializing) {
+        roomTruthInitializing.value = true
+        scheduleWarmRetry(1)
+        return
+      }
+      roomTruthInitializing.value = false
       roomTruth.value = normalizeRoomTruth(raw)
     } catch (err) {
       roomTruthError.value = err instanceof Error ? err.message : 'Failed to load room truth'
@@ -174,4 +189,22 @@ export async function refreshRoomTruth(): Promise<void> {
   })()
 
   return inflightRoomTruthRefresh
+}
+
+function scheduleWarmRetry(attempt: number): void {
+  if (attempt > WARM_MAX_RETRIES) {
+    roomTruthInitializing.value = false
+    roomTruthError.value = 'Server warm-up timed out. Try refreshing.'
+    roomTruthLoading.value = false
+    inflightRoomTruthRefresh = null
+    return
+  }
+  window.setTimeout(() => {
+    inflightRoomTruthRefresh = null
+    void refreshRoomTruth().then(() => {
+      if (roomTruthInitializing.value) {
+        scheduleWarmRetry(attempt + 1)
+      }
+    })
+  }, WARM_RETRY_DELAY_MS)
 }

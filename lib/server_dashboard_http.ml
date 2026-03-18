@@ -42,6 +42,20 @@ let _execution_refresh_interval_s = 60.0
 let start_execution_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
+  (* Warm cache: compute once synchronously so the first browser request
+     sees real data instead of the "initializing" placeholder. *)
+  (let t0 = Time_compat.now () in
+   try
+     let json =
+       Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
+     in
+     _execution_json_ref := json;
+     let dt = Time_compat.now () -. t0 in
+     Printf.eprintf "[INFO] Dashboard: execution warm cache done (%.1fs).\n%!" dt
+   with exn ->
+     let dt = Time_compat.now () -. t0 in
+     Printf.eprintf "[WARN] Dashboard: execution warm cache failed (%.1fs): %s\n%!"
+       dt (Printexc.to_string exn));
   Eio.Fiber.fork ~sw (fun () ->
     Printf.eprintf "[INFO] Dashboard: starting execution refresh loop.\n%!";
     let rec loop () =

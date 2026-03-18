@@ -310,7 +310,7 @@ let sessions_json config =
     List.map
       (fun (session : Team_session_types.session) ->
         let recent_events =
-          Team_session_store.read_events ~max_events:200 config session.session_id
+          Team_session_store.read_events ~max_events:5 config session.session_id
           |> Team_session_engine_eio.take_last 5
         in
         `Assoc

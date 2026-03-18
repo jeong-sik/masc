@@ -565,6 +565,7 @@
    llm_provider_bridge
    llm_orchestration
    llm_client
+   llm_provider_oas
    llm_response_cache
    context_manager
    context_compact_oas

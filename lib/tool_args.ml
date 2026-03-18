@@ -56,3 +56,26 @@ let error_result msg = (false, error_response msg)
 
 (** Convenience: [(true, ok_response fields)] *)
 let ok_result fields = (true, ok_response fields)
+
+(** {1 Parse, Don't Validate — Required Field Extractors}
+
+    Use these for required parameters instead of [get_string args key ""].
+    Returns [Ok value] on success, [Error json_string] on missing/empty input.
+    Combine with [let*!] for early-return chaining. *)
+
+(** Required non-empty string. Trims whitespace. *)
+let get_string_required args key =
+  match Safe_ops.json_string_opt key args with
+  | Some s when String.trim s <> "" -> Ok (String.trim s)
+  | Some _ -> Error (error_response (Printf.sprintf "%s must not be empty" key))
+  | None -> Error (error_response (Printf.sprintf "%s is required" key))
+
+(** Required integer. *)
+let get_int_required args key =
+  match Safe_ops.json_int_opt key args with
+  | Some i -> Ok i
+  | None -> Error (error_response (Printf.sprintf "%s is required" key))
+
+(** Monadic bind for [(ok, string) result] → [(bool * string)].
+    Chains required field extractions with early error return. *)
+let ( let*! ) r f = match r with Ok v -> f v | Error e -> (false, e)

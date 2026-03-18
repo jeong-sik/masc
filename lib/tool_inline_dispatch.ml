@@ -95,6 +95,9 @@ let dispatch (ctx : context) ~(name : string) : result option =
     | Some "" -> None
     | other -> other
   in
+  let _arg_get_string_required key =
+    Tool_args.get_string_required arguments key
+  in
   let _arg_get_int_opt _key = () in  (* unused but kept for symmetry *)
   let _arg_get_float_opt key =
     Safe_ops.json_float_opt key arguments
@@ -485,6 +488,8 @@ Call masc_listen again to continue listening.
 
   | "masc_mcp_session" ->
       let action = arg_get_string "action" "" in
+      if action = "" then Some (false, "action is required (create|get|list|delete)")
+      else
       let now = Time_compat.now () in
       let sessions = ctx.load_mcp_sessions config in
       let save sessions = ctx.save_mcp_sessions config sessions in
@@ -558,8 +563,11 @@ Call masc_listen again to continue listening.
 
   | "masc_interrupt" ->
       let task_id = arg_get_string "task_id" "" in
-      let step = arg_get_int "step" 1 in
       let action = arg_get_string "action" "" in
+      if task_id = "" || action = "" then
+        Some (false, "task_id and action are required")
+      else
+      let step = arg_get_int "step" 1 in
       let message = arg_get_string "message" "" in
       Notify.notify_interrupt ~agent:agent_name ~action;
       Some (safe_exec ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config;
@@ -568,11 +576,15 @@ Call masc_listen again to continue listening.
 
   | "masc_approve" ->
       let task_id = arg_get_string "task_id" "" in
+      if task_id = "" then Some (false, "task_id is required")
+      else
       Some (safe_exec ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config;
                  "--task-id"; task_id; "--approve"])
 
   | "masc_reject" ->
       let task_id = arg_get_string "task_id" "" in
+      if task_id = "" then Some (false, "task_id is required")
+      else
       let reason = arg_get_string "reason" "" in
       let args = if reason = "" then
         ["masc-checkpoint"; "--masc-dir"; Room.masc_dir config; "--task-id"; task_id; "--reject"]
@@ -619,6 +631,8 @@ Call masc_listen again to continue listening.
   | "masc_spawn" ->
       let spawn_agent_name = arg_get_string "agent_name" "" in
       let prompt = arg_get_string "prompt" "" in
+      if prompt = "" then Some (false, "prompt is required")
+      else
       let timeout_seconds = arg_get_int "timeout_seconds" 300 in
       let model_name =
         match arguments |> Yojson.Safe.Util.member "model" with

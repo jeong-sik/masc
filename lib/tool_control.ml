@@ -61,10 +61,9 @@ let handle_pause_status ctx args =
   (true, Yojson.Safe.to_string payload)
 
 let handle_switch_mode ctx args =
-  let mode_str = get_string args "mode" "" |> String.trim |> String.lowercase_ascii in
-  if mode_str = "" then
-    (false, "mode is required (minimal|standard|parallel|coding|full|solo|custom)")
-  else
+  let ( let*! ) = Tool_args.( let*! ) in
+  let*! mode_raw = get_string_required args "mode" in
+  let mode_str = String.lowercase_ascii mode_raw in
     match Mode.mode_of_string mode_str with
     | None ->
         (false, Printf.sprintf "invalid mode: %s (minimal|standard|parallel|coding|full|solo|custom)" mode_str)

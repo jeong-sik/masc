@@ -4,7 +4,6 @@ open Types
 open Server_utils
 open Server_auth
 open Server_tts_proxy
-open Server_trpg_rest
 open Server_dashboard_http
 open Server_routes_http_common
 open Server_routes_http_pages

@@ -5,7 +5,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_heartbeat_result";
-    description = "A2A Worker submits heartbeat completion evidence. Worker receives heartbeat_task, runs an MCP tool loop directly, then reports status, tool usage, and decision metadata. MASC no longer proxies the board write.";
+    description = "Submit heartbeat completion evidence after running an assigned heartbeat_task MCP tool loop. \
+Call when a worker agent finishes its heartbeat action cycle with status (acted/skipped/failed). \
+Reports tool usage and decision metadata. Pair with masc_heartbeat_start to initiate the cycle.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -69,7 +71,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_tempo";
-    description = "Get or set cluster tempo (pace control). Use to slow down for careful work or speed up for simple tasks.";
+    description = "Read or change cluster-wide tempo (pace) in one call: get current or set normal/slow/fast/paused. \
+Use when switching between careful review (slow) and batch processing (fast). \
+For finer control, use masc_tempo_set (exact interval) or masc_tempo_adjust (auto-tune).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -98,7 +102,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_mcp_session";
-    description = "Manage MCP sessions (Mcp-Session-Id; legacy X-MCP-Session-ID also accepted). Sessions track client context across requests.";
+    description = "Create, get, list, or remove MCP sessions that track client context across requests. \
+Use when managing multi-request workflows that need session continuity (Mcp-Session-Id header). \
+Pair with masc_subscription to receive session-scoped event notifications.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -122,7 +128,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_cancellation";
-    description = "Manage cancellation tokens for long-running operations. Check tokens to abort work gracefully.";
+    description = "Create, cancel, or check cancellation tokens for long-running operations. \
+Use when starting a long task (create token), aborting work (cancel), or polling abort status (check). \
+Pair with masc_progress to track operation progress alongside cancellation state.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -146,7 +154,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_subscription";
-    description = "Subscribe to resource changes (tasks, agents, messages, votes). Receive notifications via polling or SSE.";
+    description = "Watch for changes on tasks, agents, messages, or votes via polling or SSE notifications. \
+Use when coordinating with other agents and you need to react to state changes. \
+After subscribing, poll with action=poll. Clean up with action=unsubscribe before leaving.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -179,7 +189,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_progress";
-    description = "Send progress notifications for long-running tasks. Broadcasts via SSE using MCP notifications/progress format.";
+    description = "Broadcast progress updates (start/update/step/complete/stop) for long-running tasks via SSE. \
+Call when executing multi-step work so other agents and the dashboard can track progress. \
+Pair with masc_cancellation to support cooperative abort during tracked operations.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -212,7 +224,7 @@ let schemas : tool_schema list = [
   (* Cellular Agent - Handover Tools *)
   {
     name = "masc_handover_create";
-    description = "Create a handover record (agent's 'last will') before context limit or session end. Contains goal, progress, decisions, warnings for the next agent. Inspired by Stanford Generative Agents memory stream + Erlang 'let it crash' supervisor pattern.";
+    description = "Write a structured handover record (goal, progress, decisions, warnings) before context limit or session end. \\nCall when approaching context capacity, hitting a timeout, or completing a task phase. \\nSuccessor claims it via masc_handover_claim or masc_handover_claim_and_spawn.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -287,7 +299,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_handover_list";
-    description = "List all handover records, optionally filtering by pending (unclaimed) ones. Use to see what work is waiting to be picked up.";
+    description = "List handover records, optionally filtered to pending (unclaimed) only. \
+Use when starting a session to find abandoned work waiting to be continued. \
+After finding a handover, call masc_handover_get for details, then masc_handover_claim to take it.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -302,7 +316,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_handover_claim";
-    description = "Claim a pending handover to continue the work. You become the successor agent. The handover DNA will be loaded into your context.";
+    description = "Claim a pending handover as the successor agent, loading its DNA into your context. \
+Use when you found unclaimed work via masc_handover_list and want to continue it. \
+After claiming, the handover context guides your next steps. Or use masc_handover_claim_and_spawn to auto-launch.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -321,7 +337,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_handover_get";
-    description = "Get full details of a handover record as formatted markdown. Use to understand context before claiming.";
+    description = "Retrieve a handover record as formatted markdown showing goal, progress, decisions, and warnings. \
+Use when reviewing a handover before deciding to claim it via masc_handover_claim. \
+Pair with masc_handover_list to browse available handovers first.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -337,7 +355,9 @@ let schemas : tool_schema list = [
   (* Auto-spawn on claim *)
   {
     name = "masc_handover_claim_and_spawn";
-    description = "Claim a handover AND automatically spawn the successor agent with the DNA. The successor agent will receive the handover context as its initial prompt and begin work immediately.";
+    description = "Claim a handover and auto-spawn a successor agent that receives the DNA as its initial prompt. \
+Use when you want a hands-off continuation: the new agent starts working immediately. \
+Combines masc_handover_claim + masc_spawn in one step. Review with masc_handover_get first.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -366,7 +386,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_run_init";
-    description = "Initialize execution memory for a task. Creates .masc/runs/{task_id}/ to track plan, notes, and deliverables.";
+    description = "Create an execution memory directory (.masc/runs/{task_id}/) to track plan, logs, and deliverables. \
+Call when starting work on a claimed task to enable structured progress tracking. \
+After init, use masc_run_plan to set approach, masc_run_log for notes, masc_run_deliverable to close.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -385,10 +407,7 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_run_plan";
-    description = "Set or update the execution plan for a task run. \
-Use at start of work to document your approach. Supports markdown. \
-Plan is versioned - updates create new revision. Other agents can view via masc_run_get. \
-Example: masc_run_plan({task_id: 'task-001', plan: '## Steps\\n1. Analyze code\\n2. Write tests\\n3. Refactor'})";
+    description = "Set or update the execution plan (markdown) for a task run; each update creates a new revision. \\nCall after masc_run_init to document your approach before starting implementation. \\nOther agents can view plans via masc_run_get for coordination and handoff context.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -407,10 +426,7 @@ Example: masc_run_plan({task_id: 'task-001', plan: '## Steps\\n1. Analyze code\\
 
   {
     name = "masc_run_log";
-    description = "Add a timestamped note to task's execution log. \
-Use for: progress updates, blockers found, decisions made, key findings. \
-Auto-timestamps with ISO8601. Creates audit trail for handoffs. \
-Example: masc_run_log({task_id: 'task-001', note: 'Found 3 failing tests in auth module'})";
+    description = "Append a timestamped note (ISO8601) to a task's execution log for audit and handoff continuity. \\nCall when reaching milestones, finding blockers, or making key decisions during task execution. \\nPair with masc_run_plan for the approach and masc_run_get to review the full log.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -429,7 +445,9 @@ Example: masc_run_log({task_id: 'task-001', note: 'Found 3 failing tests in auth
 
   {
     name = "masc_run_deliverable";
-    description = "Record the final deliverable/output of a task run. Marks the run as completed.";
+    description = "Record the final deliverable (markdown) and mark the task run as completed. \
+Call when task implementation is finished and verified to close out the execution record. \
+After recording, the run shows as completed in masc_run_list and masc_run_get.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

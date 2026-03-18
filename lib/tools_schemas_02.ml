@@ -5,7 +5,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_claim_next";
-    description = "Automatically claim the highest priority unclaimed task. Use this when you want to pick up the most important available work without manually checking the task board. Returns the claimed task details including priority level.";
+    description = "Claim the highest-priority unclaimed task from the backlog in one step. \
+Use when you are ready to work and want the most urgent available task. \
+After masc_join; follow with masc_plan_set_task to set session context, then masc_transition(action='done').";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -20,7 +22,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_update_priority";
-    description = "Change the priority of a task. Priority 1 is highest (most urgent), 5 is lowest. Use this to reprioritize work based on new information or urgency changes.";
+    description = "Change a task's priority (1=highest, 5=lowest). \
+Use when new information shifts urgency, e.g., a blocker is discovered or a deadline moves. \
+Pair with masc_tasks to review the current backlog order after reprioritizing.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -41,7 +45,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_broadcast";
-    description = "Send a message visible to ALL agents via SSE push. Use for: status updates ('Starting task X'), help requests ('@gemini can you review this?'), completions ('✅ Done!'). Use @agent_name to ping specific agent. Default: verbose format.";
+    description = "Send a message visible to all agents in the room via SSE push. \
+Use when you need to share status updates, request help (@agent_name to ping), or announce completion. \
+Pair with masc_messages to read replies or masc_listen to wait for responses.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -66,11 +72,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_messages";
-    description = "Get recent broadcast messages from all agents. \
-Use to: catch up after joining, check if someone @mentioned you, see room activity. \
-Returns chronological list with sender, timestamp, content. \
-Default: last 20 messages. Use limit param for more/less. \
-Tip: Search for '@your-name' in results to find mentions.";
+    description = "Fetch recent broadcast messages from all agents in chronological order. \
+Use when catching up after joining, checking for @mentions, or reviewing room activity. \
+Pair with masc_broadcast to send messages or masc_listen to block-wait for new ones.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -90,7 +94,9 @@ Tip: Search for '@your-name' in results to find mentions.";
 
   {
     name = "masc_listen";
-    description = "Listen for incoming messages (blocking). Returns after message arrives or timeout.";
+    description = "Block-wait for incoming messages, returning when a message arrives or timeout is reached. \
+Use when you are idle and waiting for instructions, @mentions, or task assignments. \
+Pair with masc_broadcast to send a reply or masc_messages for non-blocking reads.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -110,11 +116,9 @@ Tip: Search for '@your-name' in results to find mentions.";
 
   {
     name = "masc_who";
-    description = "List all agents currently in the room with their capabilities. \
-Shows: agent name, join time, capabilities (e.g., ['typescript', 'testing']). \
-Use to: find who can help, check if specific agent is online, see team composition. \
-Agents appear after masc_join, disappear after masc_leave. \
-Tip: Use capabilities to find the right agent for @mentions.";
+    description = "List all agents currently in the room with their capabilities and join time. \
+Use when you need to find who can help or check if a specific agent is online. \
+Pair with masc_find_by_capability to search by skill or masc_broadcast to @mention someone.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -123,10 +127,9 @@ Tip: Use capabilities to find the right agent for @mentions.";
 
   {
     name = "masc_reset";
-    description = "⚠️ DESTRUCTIVE: Reset MASC room completely. Deletes ALL data in .masc/ folder. \
-Removes: tasks, messages, agents, locks, cache, telemetry. Cannot be undone. \
-Use only for: fresh start, corrupted state recovery, testing. \
-Requires confirm=true to execute. Example: masc_reset({confirm: true})";
+    description = "DESTRUCTIVE: wipe all MASC room data (tasks, messages, agents, locks, cache). Cannot be undone. \
+Use only when you need a fresh start or the room state is corrupted beyond repair. \
+Requires confirm=true. After reset, call masc_init and masc_join to rebuild.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -142,7 +145,9 @@ Requires confirm=true to execute. Example: masc_reset({confirm: true})";
   (* Portal/A2A Tools - Direct Agent-to-Agent Communication *)
   {
     name = "masc_portal_open";
-    description = "Open a direct channel to another agent (A2A protocol). Unlike broadcast, portal messages are PRIVATE between two agents. Use for: delegating tasks to specific agent, getting expert help, parallel work handoff. The target agent will see your tasks in their portal_status.";
+    description = "Open a private A2A channel to another agent for direct task delegation or expert help. \
+Use when you need 1:1 communication instead of room-wide broadcast. \
+After opening, send requests via masc_portal_send; check masc_portal_status for responses.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -165,7 +170,9 @@ Requires confirm=true to execute. Example: masc_reset({confirm: true})";
 
   {
     name = "masc_portal_send";
-    description = "Send a task/request through your open portal. The connected agent will receive this as a pending A2A task. Good for: code review requests, parallel subtasks, expert consultations. Check portal_status to see if they've responded. Default: verbose format.";
+    description = "Send a task or request through your open portal to the connected agent. \
+Use when you have an active portal and need to delegate a subtask or request a review. \
+After masc_portal_open; check masc_portal_status to see if they have responded.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -190,10 +197,9 @@ Requires confirm=true to execute. Example: masc_reset({confirm: true})";
 
   {
     name = "masc_portal_close";
-    description = "Close your portal connection to external services. \
-Use when: finished with external API, cleaning up before leave. \
-Portals are tunnels to external MCP servers (e.g., GitHub, Slack). \
-Auto-closes on masc_leave. Check masc_portal_status for active portals.";
+    description = "Close your open portal connection to another agent. \
+Use when the delegated work is done or you are cleaning up before masc_leave. \
+Portals auto-close on masc_leave. Check masc_portal_status to see active portals.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -208,7 +214,9 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
 
   {
     name = "masc_portal_status";
-    description = "Get status of your portal connections and pending A2A tasks.";
+    description = "Get the status of your portal connections and any pending A2A tasks from connected agents. \
+Use when you have sent a portal request and want to check for responses. \
+After masc_portal_open or masc_portal_send; pair with masc_portal_close to tear down.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -224,7 +232,9 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
   (* Git Worktree Integration - v2 Agent Isolation *)
   {
     name = "masc_worktree_create";
-    description = "Create an isolated Git worktree for your work. This requires the active MASC base repository to have `.git` (resolved with git root detection) and always creates worktrees under `<repo_root>/.worktrees/{agent}-{task}/` with a new branch. If you are in a workspace with multiple repos, run MASC from the target repo root. This is BETTER than file locks: you get complete isolation and can work in parallel. After work, create a PR with `gh pr create` and remove the worktree.";
+    description = "Create an isolated Git worktree under .worktrees/{agent}-{task}/ with a new branch. \
+Use when you need full file isolation for parallel work instead of file locks. \
+After masc_claim_next; remove with masc_worktree_remove once the PR is merged.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -248,7 +258,9 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
 
   {
     name = "masc_worktree_remove";
-    description = "Remove a worktree after your work is merged. This cleans up both the worktree directory and the local branch. Call this after your PR is merged to keep the repo clean.";
+    description = "Remove a worktree and its local branch after the PR is merged. \
+Call when your task branch has been merged and you no longer need the isolated workspace. \
+After masc_worktree_create; check masc_worktree_list for remaining worktrees.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -267,7 +279,9 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
 
   {
     name = "masc_worktree_list";
-    description = "List all active worktrees in the project. Shows which agents are working on what tasks.";
+    description = "List all active Git worktrees in the project, showing which agents work on which tasks. \
+Use when you want to see existing isolation branches or check for stale worktrees to clean up. \
+Pair with masc_worktree_create to add or masc_worktree_remove to clean up.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -280,7 +294,9 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
 
   {
     name = "masc_heartbeat";
-    description = "Update your heartbeat timestamp. Call periodically (every few minutes) to indicate you're still active. Agents without heartbeat for 5+ minutes are considered 'zombies' and can be cleaned up.";
+    description = "Update your heartbeat timestamp to prove you are still active. \
+Call every few minutes during long tasks; agents silent for 5+ min become zombie candidates. \
+Prefer masc_heartbeat_start for automatic pings. Pair with masc_cleanup_zombies to reap stale agents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -295,7 +311,9 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
 
   {
     name = "masc_cleanup_zombies";
-    description = "Clean up zombie agents (no heartbeat for 5+ minutes). Removes stale agents and releases their file locks. Run this periodically or when you suspect agent crashes.";
+    description = "Remove zombie agents (no heartbeat for 5+ min) and release their file locks. \
+Use when you see stale agents in masc_agents or suspect a crashed session left locks behind. \
+Pair with masc_gc for full room maintenance including old tasks and messages.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -304,7 +322,9 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
 
   {
     name = "masc_heartbeat_start";
-    description = "Start periodic heartbeat broadcasts. Runs in background, sending pings at specified interval. Smart mode skips heartbeats when agent is busy (60-80% token savings).";
+    description = "Start automatic background heartbeat pings at a given interval. \
+Call after masc_join to keep your presence alive during long-running work. \
+Smart mode skips beats when busy. Stop with masc_heartbeat_stop before masc_leave.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -329,8 +349,8 @@ Auto-closes on masc_leave. Check masc_portal_status for active portals.";
 
   {
     name = "masc_heartbeat_stop";
-    description = "Stop a periodic heartbeat started by masc_heartbeat_start. \
-Use when: long task complete, no longer need keep-alive, cleaning up. \
+    description = "Stop a periodic heartbeat that was started by masc_heartbeat_start. \
+Call when your long task is complete or you are about to masc_leave. \
 Get heartbeat_id from masc_heartbeat_start response or masc_heartbeat_list.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -346,9 +366,9 @@ Get heartbeat_id from masc_heartbeat_start response or masc_heartbeat_list.";
 
   {
     name = "masc_heartbeat_list";
-    description = "List all active heartbeats in the room. \
-Shows: heartbeat_id, agent, interval, last_beat time. \
-Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
+    description = "List all active heartbeat timers in the room with their interval and last beat time. \
+Use when debugging presence issues or looking for orphaned heartbeats before cleanup. \
+Pair with masc_heartbeat_stop to cancel or masc_cleanup_zombies to reap dead agents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -357,7 +377,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
 
   {
     name = "masc_gc";
-    description = "Garbage collection - cleanup zombies, archive stale tasks, delete old messages. One command to clean everything older than N days.";
+    description = "Run garbage collection: remove zombie agents, archive stale tasks, delete old messages. \
+Call periodically or when the room feels cluttered; defaults to 7-day age threshold. \
+Pair with masc_archive_view to inspect what was archived or masc_cleanup_zombies for agents only.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -372,7 +394,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
 
   {
     name = "masc_agents";
-    description = "Get detailed status of all agents including zombie detection, current tasks, capabilities, and last seen time.";
+    description = "Get detailed status of all agents: zombie detection, current tasks, capabilities, and last seen time. \
+Use when you need a full roster beyond what masc_who shows, including health indicators. \
+Pair with masc_cleanup_zombies to remove stale agents or masc_find_by_capability to search.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -385,7 +409,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
 
   {
     name = "masc_register_capabilities";
-    description = "Register your capabilities for agent discovery. Other agents can then find you by capability. Examples: ['typescript', 'code-review', 'testing', 'python', 'architecture'].";
+    description = "Register your skill tags so other agents can discover you by capability. \
+Call after masc_join if you did not pass capabilities at join time, or to update them later. \
+Pair with masc_find_by_capability to search others or masc_who to see the full roster.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -405,7 +431,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
 
   {
     name = "masc_agent_update";
-    description = "Update agent metadata (status/capabilities). Use for external agents or manual corrections. Status guards prevent illegal transitions.";
+    description = "Update an agent's metadata (status or capabilities) with transition guards. \
+Use when you need to correct an external agent's state or change your own status to busy/listening. \
+Pair with masc_agents to verify the update or masc_register_capabilities for capability-only changes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -429,7 +457,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
 
   {
     name = "masc_find_by_capability";
-    description = "Find agents by capability. Use this to discover who can help with specific tasks. Only returns non-zombie agents.";
+    description = "Search for active (non-zombie) agents that have a specific capability tag. \
+Use when you need help with a particular skill (e.g., 'typescript') and want to find the right agent. \
+Pair with masc_broadcast to @mention the found agent or masc_portal_open for direct delegation.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -445,7 +475,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
   (* A2A Agent Card - Discovery *)
   {
     name = "masc_agent_card";
-    description = "Get or update the A2A-compatible Agent Card for this MASC instance. Agent Cards enable standardized agent discovery and capability advertisement. Use 'get' to retrieve current card, 'refresh' to regenerate with current bindings.";
+    description = "Get or regenerate the A2A-compatible Agent Card for this MASC instance. \
+Use when integrating with external A2A systems or verifying advertised capabilities. \
+Action 'get' returns current card; 'refresh' rebuilds it from live bindings. Pair with masc_agents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

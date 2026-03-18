@@ -5,7 +5,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_governance_report";
-    description = "Generate a governance summary report from the audit trail. Aggregates per-agent action counts, cost estimates, token usage, and failure rates over a time period. Use for periodic governance review and cost tracking.";
+    description = "Generate a governance summary report from the audit trail, aggregating per-agent action counts, cost, tokens, and failure rates. \
+Use when reviewing room costs, auditing agent behavior, or preparing periodic governance summaries. \
+Pair with masc_governance_set to configure audit policies, or masc_governance_status for a compact overview.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -23,7 +25,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_governance_set";
-    description = "Configure governance policies for the room. Enables audit logging, anomaly detection, and agent isolation. Enterprise security for production use.";
+    description = "Configure governance policies for the room including audit logging, anomaly detection, and agent isolation levels. \
+Use when setting up a new room for production or tightening security after an incident. \
+Pair with masc_governance_report to verify policy effects and masc_governance_status for current state.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -61,7 +65,9 @@ let schemas : tool_schema list = [
      - preset="drain" → simple task claiming without LLM execution *)
   {
     name = "masc_walph_loop";
-    description = "Walph pattern: Keep claiming and completing tasks until stop condition. Iterates claim_next → work → done cycle. Control via @walph in broadcast: START <preset>, STOP, PAUSE, RESUME, STATUS. Presets: coverage → test coverage FeedbackLoop, refactor → lint FeedbackLoop, docs → doc coverage FeedbackLoop, review → PR review pipeline, figma → SSIM visual fidelity loop, drain → simple claim loop.";
+    description = "Start an automated claim-work-done loop that keeps claiming and completing tasks until a stop condition is met. \
+Use when you want to drain a task backlog or run a preset feedback loop (coverage, refactor, docs, figma, drain). \
+Control with masc_walph_control (STOP/PAUSE/RESUME/STATUS) or via broadcast '@walph STOP'.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -115,7 +121,9 @@ let schemas : tool_schema list = [
   (* Walph Control: STOP, PAUSE, RESUME, STATUS *)
   {
     name = "masc_walph_control";
-    description = "Control a running @walph loop. Commands: STOP (end loop after current iteration), PAUSE (suspend loop), RESUME (continue paused loop), STATUS (get current state). Can also be triggered via broadcast: '@walph STOP', '@walph PAUSE', etc.";
+    description = "Send a control command (STOP, PAUSE, RESUME, STATUS) to a running walph loop. \
+Use when you need to halt, pause, or inspect a walph loop mid-execution. \
+After masc_walph_loop starts a loop; also triggerable via broadcast '@walph STOP'.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -136,7 +144,9 @@ let schemas : tool_schema list = [
   (* Walph Natural Language: Control walph via natural language *)
   {
     name = "masc_walph_natural";
-    description = "Control Walph loop using natural language. Heuristic-based intent classification (Korean/English). Examples: '커버리지 올려줘' → START coverage, '그만' → STOP, '잠깐 멈춰' → PAUSE, '다시 시작' → RESUME, '지금 뭐해?' → STATUS. Uses direct LLM calls for ambiguous message classification.";
+    description = "Control a walph loop using natural language in Korean or English (e.g., 'stop the loop', 'coverage up'). \
+Use when sending free-form instructions instead of explicit STOP/PAUSE/RESUME commands. \
+Translates intent into masc_walph_control commands; falls back to LLM for ambiguous messages.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -156,7 +166,9 @@ let schemas : tool_schema list = [
   (* Walph status: detailed per-agent runtime counters *)
   {
     name = "masc_walph_status";
-    description = "Get detailed status for the current agent's Walph loop, including iterations, claimed/done counts, error counters, backoff settings, and last stop reason.";
+    description = "Return detailed runtime status for your walph loop: iterations, claimed/done counts, errors, backoff, and stop reason. \
+Use when checking loop progress or diagnosing why a loop stopped. \
+After masc_walph_loop starts; pair with masc_walph_control STATUS for a lighter check.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -172,7 +184,9 @@ let schemas : tool_schema list = [
   (* Hat System: Role-based hats for agents *)
   {
     name = "masc_hat_wear";
-    description = "Wear a hat (role) to specialize agent behavior. Hats: builder (🔨 code), reviewer (🔍 review), researcher (🔬 explore), tester (🧪 tests), architect (📐 design), debugger (🐛 fix), documenter (📝 docs). Broadcast format: @agent:hat (e.g., @claude:builder).";
+    description = "Assign a role hat (builder, reviewer, researcher, tester, architect, debugger, documenter) to specialize your behavior. \
+Use when switching focus, e.g., from coding to reviewing. \
+Pair with masc_hat_status to see all agents' current hats.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -196,7 +210,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_hat_status";
-    description = "Show current hat status for all agents. Displays which role each agent is currently using.";
+    description = "Show which role hat each agent is currently wearing. \
+Use when coordinating team roles or checking if a hat is already taken. \
+Pair with masc_hat_wear to assign or change hats.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -212,7 +228,9 @@ let schemas : tool_schema list = [
   (* Bounded Autonomy: Constrained multi-agent execution with formal guarantees *)
   {
     name = "masc_bounded_run";
-    description = "Run multi-agent loop with formal constraints. Guarantees: termination (hard_max_iterations), safety (post-check prevents silent violations), predictive limits (token_buffer). Use for autonomous agent collaboration with budget control.";
+    description = "Run a multi-agent round-robin loop with formal termination, token budget, cost, and time constraints. \
+Use when orchestrating autonomous agent collaboration that needs guaranteed termination and budget control. \
+Pair with masc_team_session_start for supervised sessions or masc_mdal_start for metric-driven loops.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -281,7 +299,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_convo_start";
-    description = "Start a new conversation thread on a topic. Returns thread_id for subsequent replies. Conversations persist to file and Neo4j for queryability. Loop prevention: max 50 turns by default.";
+    description = "Start a persistent conversation thread on a topic and return a thread_id for subsequent replies. \
+Use when agents need structured multi-turn discussion on a decision or design question. \
+Follow up with masc_convo_reply to add turns; end with masc_convo_conclude.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -313,7 +333,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_convo_reply";
-    description = "Add a reply to an existing conversation thread. Includes loop prevention: blocks identical consecutive messages (3x) and cooldown violations (2s between same speaker). Returns updated thread.";
+    description = "Add a reply to an existing conversation thread with built-in loop prevention (blocks repeated messages and cooldown violations). \
+Use when contributing to an ongoing multi-agent discussion. \
+After masc_convo_start creates a thread; before masc_convo_conclude closes it.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -349,7 +371,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_convo_conclude";
-    description = "Conclude a conversation with a summary/decision. Marks thread as Concluded and adds final turn. No more replies allowed after this.";
+    description = "Close a conversation thread with a final summary or decision, marking it as Concluded (no further replies allowed). \
+Use when the discussion has reached consensus or a decision point. \
+After masc_convo_reply turns are complete; pair with masc_convo_get to review the full thread.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -372,7 +396,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_convo_get";
-    description = "Get a conversation thread by ID. Returns full thread with all turns, participants, and status.";
+    description = "Retrieve a conversation thread by ID with all turns, participants, and status. \
+Use when reviewing discussion history or checking thread state before replying. \
+Pair with masc_convo_list to find thread IDs.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -387,7 +413,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_convo_list";
-    description = "List all active conversation threads in the current room.";
+    description = "List all active conversation threads in the current room. \
+Use when looking for ongoing discussions to join or finding a thread_id. \
+Pair with masc_convo_get to read a specific thread.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -400,7 +428,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_gardener_health";
-    description = "Get comprehensive ecosystem health metrics. Returns agent population stats (total, active, idle), activity metrics (posts, comments, unanswered questions), homeostatic score, and intervention recommendations. Use this to understand if the ecosystem needs spawning or retirement.";
+    description = "Return ecosystem health metrics: agent population, activity counts, homeostatic score, and intervention recommendations. \
+Use when checking whether the agent ecosystem needs spawning or retirement. \
+Pair with masc_gardener_propose_spawn or masc_gardener_retire_agent based on the health assessment.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -409,7 +439,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_gardener_config";
-    description = "Get current Gardener configuration from environment variables. Shows population bounds (min/max/target), daily budgets, cooldowns, and circuit breaker status.";
+    description = "Return current Gardener configuration: population bounds, daily budgets, cooldowns, and circuit breaker state. \
+Use when diagnosing why a spawn or retirement was rejected, or verifying environment settings. \
+Pair with masc_gardener_health for runtime metrics and masc_gardener_reset_circuit to clear a tripped breaker.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -418,7 +450,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_gardener_status";
-    description = "Get truth-only gardener loop runtime status. Returns liveness, last tick timestamps, last decision source, last action, last error, cooldown/circuit state, and the last observed health summary.";
+    description = "Return the gardener background loop runtime status: liveness, last tick, last action, errors, and circuit state. \
+Use when checking whether the gardener loop is alive and what it last decided. \
+Pair with masc_gardener_config for settings and masc_gardener_health for ecosystem metrics.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -427,7 +461,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_gardener_propose_spawn";
-    description = "Evaluate whether a new agent should be spawned for a given topic. Uses LLM decision (if enabled) or rule-based logic. Returns approval/deferral/rejection with reasons. Does NOT actually create the agent — use masc_gardener_execute_spawn for that.";
+    description = "Evaluate whether a new agent should be spawned for a given topic, returning approval/deferral/rejection with reasons. \
+Use when a gap in ecosystem coverage is detected (e.g., no security agent). \
+Before masc_gardener_execute_spawn which performs the actual creation.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -452,7 +488,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_gardener_retire_agent";
-    description = "Evaluate whether an agent should be retired. Checks population minimums, idle thresholds, and recent contributions. Returns approval/deferral/rejection with reasons. Does NOT actually retire — use masc_gardener_execute_retire for that.";
+    description = "Evaluate whether an idle agent should be retired, checking population minimums and recent contributions. \
+Use when an agent appears inactive and the ecosystem may be overpopulated. \
+Before masc_gardener_execute_retire which initiates the grace period.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

@@ -3,7 +3,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_heartbeat";
-    description = "Update your heartbeat timestamp. Call periodically (every few minutes) to indicate you're still active. Agents without heartbeat for 5+ minutes are considered 'zombies' and can be cleaned up.";
+    description = "Update your heartbeat timestamp to prove you are still active. \
+Call every few minutes during long tasks; agents silent for 5+ min become zombie candidates. \
+Prefer masc_heartbeat_start for automatic pings. Pair with masc_cleanup_zombies to reap stale agents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -17,7 +19,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_cleanup_zombies";
-    description = "Clean up zombie agents (no heartbeat for 5+ minutes). Removes stale agents and releases their file locks. Run this periodically or when you suspect agent crashes.";
+    description = "Remove zombie agents (no heartbeat for 5+ min) and release their file locks. \
+Use when you see stale agents in masc_agents or suspect a crashed session left locks behind. \
+Pair with masc_gc for full room maintenance including old tasks and messages.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -25,7 +29,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_heartbeat_start";
-    description = "Start periodic heartbeat broadcasts. Runs in background, sending pings at specified interval. Smart mode skips heartbeats when agent is busy (60-80% token savings).";
+    description = "Start automatic background heartbeat pings at a given interval. \
+Call after masc_join to keep your presence alive during long-running work. \
+Smart mode skips beats when busy. Stop with masc_heartbeat_stop before masc_leave.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -49,8 +55,8 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_heartbeat_stop";
-    description = "Stop a periodic heartbeat started by masc_heartbeat_start. \
-Use when: long task complete, no longer need keep-alive, cleaning up. \
+    description = "Stop a periodic heartbeat that was started by masc_heartbeat_start. \
+Call when your long task is complete or you are about to masc_leave. \
 Get heartbeat_id from masc_heartbeat_start response or masc_heartbeat_list.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -65,9 +71,9 @@ Get heartbeat_id from masc_heartbeat_start response or masc_heartbeat_list.";
   };
   {
     name = "masc_heartbeat_list";
-    description = "List all active heartbeats in the room. \
-Shows: heartbeat_id, agent, interval, last_beat time. \
-Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
+    description = "List all active heartbeat timers in the room with their interval and last beat time. \
+Use when debugging presence issues or looking for orphaned heartbeats before cleanup. \
+Pair with masc_heartbeat_stop to cancel or masc_cleanup_zombies to reap dead agents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -75,7 +81,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
   };
   {
     name = "masc_gc";
-    description = "Garbage collection - cleanup zombies, archive stale tasks, delete old messages. One command to clean everything older than N days.";
+    description = "Run garbage collection: remove zombie agents, archive stale tasks, delete old messages. \
+Call periodically or when the room feels cluttered; defaults to 7-day age threshold. \
+Pair with masc_archive_view to inspect what was archived or masc_cleanup_zombies for agents only.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -89,7 +97,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
   };
   {
     name = "masc_agents";
-    description = "Get detailed status of all agents including zombie detection, current tasks, capabilities, and last seen time.";
+    description = "Get detailed status of all agents: zombie detection, current tasks, capabilities, and last seen time. \
+Use when you need a full roster beyond what masc_who shows, including health indicators. \
+Pair with masc_cleanup_zombies to remove stale agents or masc_find_by_capability to search.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -97,7 +107,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
   };
   {
     name = "masc_agent_update";
-    description = "Update agent metadata (status/capabilities). Use for external agents or manual corrections. Status guards prevent illegal transitions.";
+    description = "Update an agent's metadata (status or capabilities) with transition guards. \
+Use when you need to correct an external agent's state or change your own status to busy/listening. \
+Pair with masc_agents to verify the update or masc_register_capabilities for capability-only changes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -120,7 +132,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
   };
   {
     name = "masc_agent_card";
-    description = "Get or update the A2A-compatible Agent Card for this MASC instance. Agent Cards enable standardized agent discovery and capability advertisement. Use 'get' to retrieve current card, 'refresh' to regenerate with current bindings.";
+    description = "Get or regenerate the A2A-compatible Agent Card for this MASC instance. \
+Use when integrating with external A2A systems or verifying advertised capabilities. \
+Action 'get' returns current card; 'refresh' rebuilds it from live bindings. Pair with masc_agents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -134,7 +148,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
   };
   {
     name = "masc_heartbeat_result";
-    description = "A2A Worker submits heartbeat completion evidence. Worker receives heartbeat_task, runs an MCP tool loop directly, then reports status, tool usage, and decision metadata. MASC no longer proxies the board write.";
+    description = "Submit heartbeat completion evidence from an A2A worker after running an MCP tool loop. \
+Call when the worker finishes its heartbeat task and needs to report status, tool usage, and confidence. \
+Pair with masc_heartbeat_start on the orchestrator side. MASC records but does not proxy the board write.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -193,7 +209,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
   };
   {
     name = "masc_agent_fitness";
-    description = "Get fitness scores for agents based on performance metrics. Higher scores indicate better performance (completion rate, reliability, speed). Use for understanding agent capabilities.";
+    description = "Get fitness scores for agents based on performance metrics (completion rate, reliability, speed). \
+Use when choosing which agent to assign work to or reviewing agent performance over time. \
+Pair with masc_select_agent for automated assignment or masc_agents for raw status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -211,7 +229,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
   };
   {
     name = "masc_select_agent";
-    description = "Select the best agent for a task based on fitness scores. Uses weighted scoring: completion (35%), reliability (25%), speed (15%), handoff (15%), collaboration (10%).";
+    description = "Select the best agent for a task using weighted fitness scoring (completion, reliability, speed). \
+Use when you have a task to assign and multiple agents are available. \
+Pair with masc_agent_fitness to review scores or masc_transition(action='claim') to assign directly.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -237,7 +257,9 @@ Use to: find orphaned heartbeats, debug presence issues, cleanup before leave.";
   };
   {
     name = "masc_gardener_retire_agent";
-    description = "Evaluate whether an agent should be retired. Checks population minimums, idle thresholds, and recent contributions. Returns approval/deferral/rejection with reasons. Does NOT actually retire — use masc_gardener_execute_retire for that.";
+    description = "Evaluate whether an agent should be retired based on population limits and idle thresholds. \
+Use when the ecosystem has too many agents or one appears consistently idle. \
+Returns approval/deferral/rejection. To execute, follow up with masc_gardener_execute_retire.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

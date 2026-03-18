@@ -10,7 +10,9 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_start";
       description =
-        "Start a long-running team collaboration session with periodic checkpoints and final report artifacts.";
+        "Start a supervised team collaboration session with periodic checkpoints and final report artifacts. \
+Use when orchestrating multi-agent work that needs progress tracking and proof generation. \
+Pair with masc_team_session_step to record turns and masc_team_session_finalize to end.";
       input_schema =
         `Assoc
           [
@@ -190,7 +192,9 @@ let schemas : tool_schema list =
     };
     {
       name = "masc_team_session_status";
-      description = "Get the current status and progress summary for a team session.";
+      description = "Get the current status, progress summary, and health metrics for a team session. \
+Use when checking session progress mid-execution or after a checkpoint. \
+After masc_team_session_start; pair with masc_team_session_events for detailed timeline.";
       input_schema =
         `Assoc
           [
@@ -204,7 +208,9 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_step";
       description =
-        "Canonical team-session write entrypoint: record a note/broadcast/portal/task/checkpoint turn, optionally spawn workers, and optionally attach vote/run evidence.";
+        "Record a turn (note/broadcast/portal/task/checkpoint) in a team session, optionally spawning workers or attaching vote/run evidence. \
+Use when advancing session progress with notes, delegating work, or recording checkpoints. \
+After masc_team_session_start; the primary write path for all session activity.";
       input_schema =
         `Assoc
           [
@@ -501,7 +507,9 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_finalize";
       description =
-        "Stop session, wait for terminal status, then optionally generate report and proof in one command.";
+        "Stop a team session, wait for terminal status, then optionally generate report and proof artifacts in one call. \
+Use when ending a session and you want both the stop and artifact generation done atomically. \
+Alternative to calling masc_team_session_stop then masc_team_session_report separately.";
       input_schema =
         `Assoc
           [
@@ -527,7 +535,9 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_stop";
       description =
-        "Request stop for a team session and optionally generate report artifacts.";
+        "Request graceful stop for a team session and optionally generate report artifacts. \
+Use when the session goal is achieved or time is up. \
+After masc_team_session_step turns are complete; follow with masc_team_session_prove for proof.";
       input_schema =
         `Assoc
           [
@@ -544,7 +554,9 @@ let schemas : tool_schema list =
     };
     {
       name = "masc_team_session_report";
-      description = "Generate (or regenerate) report artifacts for a team session.";
+      description = "Generate or regenerate report artifacts (markdown summary, metrics) for a team session. \
+Use when you need fresh reports after additional evidence or a re-run. \
+After masc_team_session_stop; pair with masc_team_session_prove for verifiable proof.";
       input_schema =
         `Assoc
           [
@@ -561,7 +573,9 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_list";
       description =
-        "List recent team sessions with optional status filter and health/cascade summary.";
+        "List recent team sessions with optional status filter and health/cascade summary. \
+Use when finding past sessions to compare, resume, or audit. \
+Pair with masc_team_session_compare to diff two sessions.";
       input_schema =
         `Assoc
           [
@@ -582,7 +596,9 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_compare";
       description =
-        "Compare two team sessions and return throughput/policy/communication deltas.";
+        "Compare two team sessions side by side, returning throughput, policy, and communication deltas. \
+Use when evaluating whether a configuration change improved session outcomes. \
+After masc_team_session_list identifies the two session IDs.";
       input_schema =
         `Assoc
           [
@@ -599,7 +615,9 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_events";
       description =
-        "Read team session event timeline with optional event type and timestamp filters.";
+        "Read the team session event timeline with optional event type and timestamp filters. \
+Use when reviewing what happened during a session or debugging a specific time range. \
+After masc_team_session_start; the most-called session tool for progress monitoring.";
       input_schema =
         `Assoc
           [
@@ -623,7 +641,9 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_prove";
       description =
-        "Generate verifiable proof artifacts (proof.json/proof.md) for a team session based on timeline evidence.";
+        "Generate verifiable proof artifacts (proof.json/proof.md) for a team session based on timeline evidence. \
+Use when session work needs an auditable proof trail with evidence hashes. \
+After masc_team_session_stop or masc_team_session_report.";
       input_schema =
         `Assoc
           [
@@ -647,7 +667,9 @@ let schemas : tool_schema list =
     {
       name = "masc_team_session_verify_trace";
       description =
-        "Verify worker-run trace evidence for a team session using stored worker run snapshots.";
+        "Verify worker-run trace evidence for a team session using stored worker run snapshots. \
+Use when validating that spawned workers actually ran and produced the claimed results. \
+After masc_team_session_prove; the final verification step in the proof chain.";
       input_schema =
         `Assoc
           [

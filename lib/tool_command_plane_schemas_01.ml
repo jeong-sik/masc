@@ -5,7 +5,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_unit_define";
       description =
-        "CPv2 benchmark step 1. Create or update a managed company/platoon/squad/agent unit before starting operations.";
+        "Create or update a managed unit (company/platoon/squad/agent) in the Command Plane V2 hierarchy. \
+Use when setting up organizational structure before starting operations (CPv2 benchmark step 1). \
+Pair with masc_operation_start to run operations on defined units.";
       input_schema =
         object_schema ~required:[ "kind"; "label" ]
           [
@@ -23,13 +25,17 @@ let schemas : tool_schema list = [
     {
       name = "masc_unit_list";
       description =
-        "Read managed and effective Command Plane V2 units, including auto-generated topology for unassigned agents.";
+        "Read managed and effective CPv2 units including auto-generated topology for unassigned agents. \
+Use when inspecting the organizational hierarchy or verifying unit definitions. \
+Pair with masc_observe_topology for a richer view with health and operation counts.";
       input_schema = object_schema [];
     };
     {
       name = "masc_unit_reparent";
       description =
-        "Move a unit under a new parent unit while preserving its policy and budget envelopes.";
+        "Move a unit under a new parent unit while preserving its policy and budget envelopes. \
+Use when restructuring the organizational hierarchy without losing existing configurations. \
+Pair with masc_unit_list to verify the new topology after reparenting.";
       input_schema =
         object_schema ~required:[ "unit_id" ]
           [
@@ -40,7 +46,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_unit_reassign";
       description =
-        "Update a unit's leader or explicit roster. Use this to rotate squad leaders or replace a detachment roster.";
+        "Update a unit's leader or explicit roster for leader rotation or roster replacement. \
+Use when rotating squad leaders or adjusting the team composition of a unit. \
+Pair with masc_observe_topology to verify roster changes took effect.";
       input_schema =
         object_schema ~required:[ "unit_id" ]
           [
@@ -52,7 +60,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_intent_create";
       description =
-        "Create a managed intent above goals/tasks/operations. Intents hold invariants, artifact priors, and success metrics for lifecycle control.";
+        "Create a managed intent that sits above goals/tasks/operations, holding invariants, artifact priors, and success metrics. \
+Use when starting a new workstream that needs lifecycle tracking across multiple operations. \
+Pair with masc_operation_start to attach operations under this intent.";
       input_schema =
         object_schema ~required:[ "title" ]
           [
@@ -70,7 +80,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_intent_status";
       description =
-        "Read managed intents and their current focus/lifecycle summary.";
+        "Read managed intents and their current focus, lifecycle state, and linked operations. \
+Use when checking which intents are active and what they are focused on. \
+Pair with masc_intent_update to change focus or state, or masc_intent_forecast for predictions.";
       input_schema =
         object_schema
           [
@@ -80,7 +92,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_intent_update";
       description =
-        "Update an intent's title, state, focus, invariants, artifact priors, or success metric.";
+        "Update an intent's title, state, focus, invariants, artifact priors, or success metric. \
+Use when an intent's direction changes or a milestone is reached. \
+After masc_intent_status to review current state; pair with masc_intent_forecast to predict next steps.";
       input_schema =
         object_schema ~required:[ "intent_id" ]
           [
@@ -99,7 +113,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_intent_forecast";
       description =
-        "Predict the next likely focus states for an intent using linked operations and current focus.";
+        "Predict the next likely focus states for an intent based on linked operations and current progress. \
+Use when planning ahead or deciding which operation to start next under an intent. \
+After masc_intent_status; pair with masc_operation_start to act on the forecast.";
       input_schema =
         object_schema ~required:[ "intent_id" ]
           [
@@ -110,7 +126,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_operation_start";
       description =
-        "CPv2 benchmark step 2. Start a managed operation on a ready unit after leadership, live-roster, and capacity checks pass. Set orchestration_kind=chain_dsl to attach native chain-plane execution.";
+        "Start a managed operation on a unit after leadership, roster, and capacity checks pass (CPv2 benchmark step 2). \
+Use when launching work on a defined unit with budget and policy controls. \
+After masc_unit_define; follow with masc_dispatch_tick to materialize detachments.";
       input_schema =
         object_schema ~required:[ "assigned_unit_id"; "objective" ]
           [
@@ -141,7 +159,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_operation_status";
       description =
-        "Read Command Plane V2 operations. Use this after operation_start or later during CPv2 benchmark triage.";
+        "Read CPv2 operations with their current state, detachments, and trace lineage. \
+Use when triaging operations after start or monitoring progress during execution. \
+After masc_operation_start; pair with masc_observe_operations for a combined view.";
       input_schema =
         object_schema
           [ ("operation_id", string_prop "Operation id to filter."); ];
@@ -149,7 +169,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_operation_checkpoint";
       description =
-        "Attach or update a checkpoint reference for a managed Command Plane V2 operation and append a trace event.";
+        "Attach or update a checkpoint reference for a managed CPv2 operation, appending a trace event. \
+Use when saving durable resume pointers at key milestones during an operation. \
+Pair with masc_operation_resume to restart from the saved checkpoint.";
       input_schema =
         object_schema ~required:[ "operation_id"; "checkpoint_ref" ]
           [
@@ -160,7 +182,9 @@ let schemas : tool_schema list = [
     };
     {
       name = "masc_operation_pause";
-      description = "Pause a managed operation and sync its managed detachment status.";
+      description = "Pause a managed operation and sync its detachment status to paused. \
+Use when the operation needs to be temporarily halted without losing progress. \
+Pair with masc_operation_resume to continue or masc_operation_stop to cancel.";
       input_schema =
         object_schema ~required:[ "operation_id" ]
           [
@@ -170,7 +194,9 @@ let schemas : tool_schema list = [
     };
     {
       name = "masc_operation_resume";
-      description = "Resume a paused managed operation.";
+      description = "Resume a paused managed operation from its last checkpoint. \
+Use when a previously paused operation is ready to continue. \
+After masc_operation_pause; pair with masc_dispatch_tick to re-materialize detachments.";
       input_schema =
         object_schema ~required:[ "operation_id" ]
           [
@@ -180,7 +206,9 @@ let schemas : tool_schema list = [
     };
     {
       name = "masc_operation_stop";
-      description = "Cancel a managed operation and mark its detachment stopped.";
+      description = "Cancel a managed operation and mark its detachment as stopped. \
+Use when an operation is no longer needed or has failed beyond recovery. \
+Pair with masc_operation_status to verify the cancellation took effect.";
       input_schema =
         object_schema ~required:[ "operation_id" ]
           [
@@ -190,7 +218,9 @@ let schemas : tool_schema list = [
     };
     {
       name = "masc_operation_finalize";
-      description = "Finalize a managed operation as completed.";
+      description = "Finalize a managed operation as completed, marking it done in the trace lineage. \
+Use when all operation objectives are met and work is finished. \
+After the operation's detachments report completion; pair with masc_observe_traces to review the full trail.";
       input_schema =
         object_schema ~required:[ "operation_id" ]
           [
@@ -201,13 +231,17 @@ let schemas : tool_schema list = [
     {
       name = "masc_chain_snapshot";
       description =
-        "Summarize native chain runtime and history, linked back to CPv2 managed operations.";
+        "Summarize native chain runtime state and run history, linked back to CPv2 managed operations. \
+Use when reviewing chain-backed operation execution or debugging chain runs. \
+Pair with masc_chain_run_get to fetch details of a specific run.";
       input_schema = object_schema [];
     };
     {
       name = "masc_chain_run_get";
       description =
-        "Fetch native chain run-store details for a completed chain run by run_id.";
+        "Fetch detailed results from the chain run store for a completed chain run by run_id. \
+Use when inspecting the output, steps, or errors of a specific chain execution. \
+After masc_chain_snapshot identifies the run_id.";
       input_schema =
         object_schema ~required:[ "run_id" ]
           [
@@ -217,7 +251,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_dispatch_plan";
       description =
-        "Recommend the best target units for an operation. best_first_v1 plans include score breakdown, routing reason, and dependency blockers.";
+        "Recommend the best target units for an operation with score breakdown and routing reasons. \
+Use when deciding which unit should handle a new operation or when rebalancing. \
+Before masc_dispatch_assign to act on the recommendation.";
       input_schema =
         object_schema
           [
@@ -228,7 +264,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_dispatch_assign";
       description =
-        "Assign or move an operation to a new unit. Cross-platoon or strict-policy moves become pending approvals.";
+        "Assign or move an operation to a new unit (cross-platoon moves become pending approvals). \
+Use when routing an operation to a specific unit based on dispatch plan results. \
+After masc_dispatch_plan; follow with masc_dispatch_tick to materialize.";
       input_schema =
         object_schema ~required:[ "operation_id"; "target_unit_id" ]
           [
@@ -240,7 +278,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_dispatch_rebalance";
       description =
-        "Rebalance an operation to another unit using the same approval semantics as dispatch_assign.";
+        "Rebalance an operation to another unit using the same approval semantics as dispatch_assign. \
+Use when load is uneven across units and work needs redistribution. \
+After masc_observe_capacity identifies overloaded units.";
       input_schema =
         object_schema ~required:[ "operation_id"; "target_unit_id" ]
           [
@@ -252,7 +292,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_dispatch_escalate";
       description =
-        "Escalate an operation toward a parent unit or explicit target unit. Cross-platoon moves require approval.";
+        "Escalate an operation toward a parent unit or explicit target (cross-platoon moves require approval). \
+Use when a unit lacks capacity or expertise and the operation needs higher-level handling. \
+Pair with masc_policy_approve if the escalation requires approval.";
       input_schema =
         object_schema ~required:[ "operation_id" ]
           [
@@ -264,7 +306,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_dispatch_recall";
       description =
-        "Recall an operation by pausing it without deleting its checkpoint or trace lineage.";
+        "Recall an operation by pausing it while preserving its checkpoint and trace lineage. \
+Use when an operation needs to be pulled back temporarily without data loss. \
+Pair with masc_operation_resume to re-activate when ready.";
       input_schema =
         object_schema ~required:[ "operation_id" ]
           [
@@ -275,7 +319,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_dispatch_tick";
       description =
-        "CPv2 benchmark step 3. Run one deterministic reconcile tick to materialize or repair detachments, failover, approvals, alerts, and traces.";
+        "Run one deterministic reconcile tick to materialize detachments, process failovers, approvals, alerts, and traces (CPv2 step 3). \
+Use when operations need their detachments materialized or the control plane needs reconciliation. \
+After masc_operation_start or masc_dispatch_assign; run repeatedly until stable.";
       input_schema =
         object_schema
           [
@@ -286,7 +332,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_detachment_list";
       description =
-        "CPv2 benchmark observe step. List managed and projected detachments after dispatch/tick to confirm runtime materialization.";
+        "List managed and projected detachments after dispatch/tick to confirm runtime materialization. \
+Use when verifying that dispatch_tick created the expected detachments. \
+After masc_dispatch_tick; pair with masc_detachment_status for per-detachment details.";
       input_schema =
         object_schema
           [
@@ -297,7 +345,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_detachment_status";
       description =
-        "CPv2 benchmark observe step. Inspect one detachment with runtime, heartbeat, failover, and approval context.";
+        "Inspect a single detachment with runtime, heartbeat, failover, and approval context. \
+Use when debugging a specific detachment or verifying its runtime state. \
+After masc_detachment_list identifies the detachment_id.";
       input_schema =
         object_schema ~required:[ "detachment_id" ]
           [
@@ -307,13 +357,17 @@ let schemas : tool_schema list = [
     {
       name = "masc_policy_status";
       description =
-        "CPv2 benchmark approval step. Read policy decisions, approval queue, capacity overlays, and topology state before strict actions.";
+        "Read policy decisions, approval queue, capacity overlays, and topology state. \
+Use when checking pending approvals or reviewing policy state before strict actions. \
+Pair with masc_policy_approve or masc_policy_deny to process pending decisions.";
       input_schema = object_schema [];
     };
     {
       name = "masc_policy_approve";
       description =
-        "Approve a pending managed policy decision and apply its queued action.";
+        "Approve a pending managed policy decision and apply its queued action. \
+Use when a cross-platoon move, escalation, or policy change needs human/admin approval. \
+After masc_policy_status shows pending decisions.";
       input_schema =
         object_schema ~required:[ "decision_id" ]
           [
@@ -324,7 +378,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_policy_deny";
       description =
-        "Deny a pending managed policy decision.";
+        "Deny a pending managed policy decision, preventing its queued action. \
+Use when a proposed move or policy change should not proceed. \
+After masc_policy_status shows pending decisions.";
       input_schema =
         object_schema ~required:[ "decision_id" ]
           [
@@ -335,7 +391,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_policy_update";
       description =
-        "Replace a unit's explicit policy and budget envelope.";
+        "Replace a unit's explicit policy and budget envelope. \
+Use when adjusting a unit's capacity limits, spending controls, or operational constraints. \
+Pair with masc_policy_status to review the updated configuration.";
       input_schema =
         object_schema ~required:[ "unit_id" ]
           [
@@ -347,7 +405,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_policy_freeze_unit";
       description =
-        "Toggle a unit's frozen state. Frozen units reject new dispatch assignments.";
+        "Toggle a unit's frozen state so it rejects new dispatch assignments when frozen. \
+Use when a unit needs maintenance or should temporarily stop accepting new work. \
+Pair with masc_observe_capacity to check unit workload before/after freezing.";
       input_schema =
         object_schema ~required:[ "unit_id" ]
           [
@@ -358,7 +418,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_policy_kill_switch";
       description =
-        "Toggle a unit kill-switch. Kill-switched units reject all new assignments.";
+        "Toggle a unit kill-switch that rejects all new assignments when enabled. \
+Use when a unit must be fully isolated from receiving any work. \
+Pair with masc_policy_status to verify the kill-switch state.";
       input_schema =
         object_schema ~required:[ "unit_id" ]
           [
@@ -369,7 +431,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_observe_topology";
       description =
-        "CPv2 benchmark observe step. Read company/platoon/squad/agent topology with live roster health and active operation counts.";
+        "Read the full company/platoon/squad/agent topology with live roster health and active operation counts. \
+Use when getting a birds-eye view of the organizational structure and its operational load. \
+Pair with masc_observe_capacity for per-unit budget utilization details.";
       input_schema = object_schema [];
     };
 ]

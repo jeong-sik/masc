@@ -5,13 +5,17 @@ let schemas : tool_schema list = [
     {
       name = "masc_observe_operations";
       description =
-        "Read operations and detachments together for operator triage.";
+        "Read operations and detachments together in a single view for operator triage. \
+Use when you need a combined operations + detachments snapshot for quick assessment. \
+Pair with masc_observe_alerts for derived alerts on problematic units.";
       input_schema = object_schema [];
     };
     {
       name = "masc_observe_swarm";
       description =
-        "Read the swarm-live projection for a run or operation, including pass/fail summary, hot-slot proof, runtime blocker, and next tool guidance.";
+        "Read the swarm-live projection for a run or operation with pass/fail summary, hot-slot proof, and runtime blockers. \
+Use when monitoring a swarm-live execution or diagnosing why slots are blocked. \
+Pair with masc_swarm_live_run to start a new swarm run.";
       input_schema =
         object_schema
           [
@@ -22,19 +26,25 @@ let schemas : tool_schema list = [
     {
       name = "masc_observe_alerts";
       description =
-        "CPv2 benchmark observe step. Read derived alerts such as leader loss, over-capacity units, quiet detachments, and orphaned operations.";
+        "Read derived alerts: leader loss, over-capacity units, quiet detachments, and orphaned operations. \
+Use when scanning for problems across the command plane that need attention. \
+Pair with masc_dispatch_escalate or masc_dispatch_rebalance to address issues.";
       input_schema = object_schema [];
     };
     {
       name = "masc_observe_capacity";
       description =
-        "CPv2 benchmark observe step. Read per-unit capacity envelopes, live roster counts, and operation utilization.";
+        "Read per-unit capacity envelopes, live roster counts, and operation utilization. \
+Use when checking which units have available capacity or are overloaded. \
+Pair with masc_dispatch_rebalance to redistribute work from overloaded units.";
       input_schema = object_schema [];
     };
     {
       name = "masc_observe_traces";
       description =
-        "CPv2 benchmark observe step. Read recent trace events for a single operation or the whole command plane.";
+        "Read recent trace events for a single operation or the entire command plane. \
+Use when auditing what happened during an operation or reviewing system-wide activity. \
+Pair with masc_operation_status for the operation's current state.";
       input_schema =
         object_schema
           [
@@ -45,7 +55,9 @@ let schemas : tool_schema list = [
     {
       name = "masc_swarm_live_run";
       description =
-        "Preflight and optionally execute the deterministic swarm-live harness. The tool always writes runtime doctor and summary artifacts under .masc/control-plane/swarm-live/<run_id>/. By default, synchronous self-execution is disabled to avoid MCP server reentrancy hangs, so callers should treat this as a preflight-first orchestration surface that may return structured runtime blockers instead of an inline full run.";
+        "Preflight and optionally execute the deterministic swarm-live harness, writing artifacts under .masc/control-plane/swarm-live/. \
+Use when running a swarm benchmark or checking runtime readiness before a swarm execution. \
+Pair with masc_observe_swarm to monitor the run after launch.";
       input_schema =
         object_schema
           [

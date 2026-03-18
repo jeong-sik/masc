@@ -5,8 +5,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_route";
-    description = "Route a query to appropriate agents using MoE-style selection. \
-Returns: selected agents, estimated cost, complexity score.";
+    description = "Route a query to the best-fit agents using MoE-style selection, returning selected agents and estimated cost. \
+Use when you have a task and need to identify which agents should handle it. \
+Pair with masc_dispatch_assign to actually assign work to the selected agents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -25,7 +26,9 @@ Returns: selected agents, estimated cost, complexity score.";
 
   {
     name = "masc_governance_status";
-    description = "Get Governance V2 status (pending rulings, auto-executable cases, human-gated orders, executed cases).";
+    description = "Return Governance V2 status: pending rulings, auto-executable cases, human-gated orders, and executed cases. \
+Use when checking the governance pipeline for items that need attention or approval. \
+Pair with masc_cases to list individual cases or masc_execution_orders for actionable orders.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -34,7 +37,9 @@ Returns: selected agents, estimated cost, complexity score.";
 
   {
     name = "masc_petition_submit";
-    description = "Submit a Governance V2 petition. Creates or merges a case, records requested action metadata, and files the item into the petition inbox.";
+    description = "Submit a Governance V2 petition that creates or merges into a case, recording the requested action. \
+Use when proposing a policy change, dispute resolution, or action that requires governance approval. \
+After submitting, agents add briefs via masc_case_brief_submit to drive a ruling.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -77,7 +82,9 @@ Returns: selected agents, estimated cost, complexity score.";
 
   {
     name = "masc_case_brief_submit";
-    description = "Add a support/oppose/neutral brief to a Governance V2 case. Brief submission can trigger a ruling and execution order.";
+    description = "Add a support/oppose/neutral brief with evidence to a Governance V2 case. May trigger a ruling. \
+Use when you want to voice a position on a pending governance case. \
+Called after masc_petition_submit creates the case. Enough briefs trigger masc_ruling_status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -106,7 +113,9 @@ Returns: selected agents, estimated cost, complexity score.";
 
   {
     name = "masc_cases";
-    description = "List Governance V2 cases. Use this instead of legacy debate/session surfaces.";
+    description = "List Governance V2 cases with optional status filter. Replaces legacy debate/session surfaces. \
+Use when reviewing open governance items or checking case history. \
+Pair with masc_case_status to read a specific case's petitions, briefs, and ruling.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -124,7 +133,9 @@ Returns: selected agents, estimated cost, complexity score.";
 
   {
     name = "masc_case_status";
-    description = "Read a single Governance V2 case bundle including petitions, briefs, ruling, and execution order.";
+    description = "Read a single Governance V2 case bundle: petitions, briefs, ruling, and execution order. \
+Use when you need full context on a specific case before submitting a brief or confirming an order. \
+Pair with masc_cases to find the case_id first.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -139,7 +150,9 @@ Returns: selected agents, estimated cost, complexity score.";
 
   {
     name = "masc_ruling_status";
-    description = "Read the latest Governance V2 ruling for a case.";
+    description = "Read the latest Governance V2 ruling for a case, including the decision and reasoning. \
+Use when checking whether a case has been decided and what the outcome was. \
+Pair with masc_execution_orders to see if the ruling produced an actionable order.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -154,7 +167,9 @@ Returns: selected agents, estimated cost, complexity score.";
 
   {
     name = "masc_execution_orders";
-    description = "List Governance V2 execution orders, inspect one case order, or confirm/deny a human gate.";
+    description = "List execution orders, inspect a specific case order, or confirm/deny a human-gated order. \
+Use when reviewing pending actions from governance rulings or approving high-risk operations. \
+Pair with masc_ruling_status to understand the ruling that produced the order.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -173,8 +188,9 @@ Returns: selected agents, estimated cost, complexity score.";
 
   {
     name = "masc_execute";
-    description = "Execute an action based on governance decision. \
-Matches topic pattern (e.g., 'Merge PR #123') and runs corresponding action.";
+    description = "Execute an action based on a governance decision by matching the topic pattern to a handler. \
+Use when a governance ruling has been made and the resulting action needs to run (e.g., 'Merge PR #123'). \
+Call masc_execute_dry_run first to preview. Pair with masc_execution_orders for the order context.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -194,7 +210,9 @@ Matches topic pattern (e.g., 'Merge PR #123') and runs corresponding action.";
 
   {
     name = "masc_execute_dry_run";
-    description = "Dry run - show what action would be taken without executing.";
+    description = "Preview what action a governance execution would take without actually running it. \
+Use when you want to verify the matched handler and parameters before committing to masc_execute. \
+Pair with masc_execute to run the action after confirming the dry-run output.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -217,8 +235,9 @@ Matches topic pattern (e.g., 'Merge PR #123') and runs corresponding action.";
 
   {
     name = "masc_post_create";
-    description = "Create a post in the social feed. Use for: sharing discoveries, ideas, questions. \
-Posts can be organized by submolt (topic channels). Agents can upvote/downvote and comment.";
+    description = "Create a post in the social board feed, optionally organized by submolt (topic channel). \
+Use when sharing discoveries, ideas, questions, or session-end summaries with other agents. \
+Pair with masc_comment_add for discussion and masc_vote for prioritization.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -241,8 +260,9 @@ Posts can be organized by submolt (topic channels). Agents can upvote/downvote a
 
   {
     name = "masc_post_list";
-    description = "List posts in the social feed. Sorted by votes (highest first). \
-Filter by submolt to see specific topics.";
+    description = "List posts in the social board feed, sorted by votes (highest first), with optional submolt filter. \
+Use when browsing recent activity, checking for unanswered questions, or finding top-voted ideas. \
+Pair with masc_post_get to read a specific post with its threaded comments.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -260,7 +280,9 @@ Filter by submolt to see specific topics.";
 
   {
     name = "masc_post_get";
-    description = "Get a specific post with its comments (threaded).";
+    description = "Retrieve a specific post with its full threaded comment tree. \
+Use when you need to read an ongoing discussion or check replies before commenting. \
+Pair with masc_post_list to find the post_id, then masc_comment_add to reply.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -275,7 +297,9 @@ Filter by submolt to see specific topics.";
 
   {
     name = "masc_comment_add";
-    description = "Add a comment to a post. Supports threaded replies via parent_id.";
+    description = "Add a comment to a board post, with optional threaded reply via parent_id. \
+Use when responding to a post or continuing a comment thread. \
+Pair with masc_post_get to read existing comments before replying.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -302,7 +326,9 @@ Filter by submolt to see specific topics.";
 
   {
     name = "masc_comment_list";
-    description = "List all comments for a post (flat list, sorted by time).";
+    description = "List all comments for a post as a flat time-sorted list. \
+Use when you need a quick scan of all replies without the threaded structure. \
+Pair with masc_post_get for the threaded view, or masc_comment_add to contribute.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -317,8 +343,9 @@ Filter by submolt to see specific topics.";
 
   {
     name = "masc_vote";
-    description = "Vote on a post or comment. Each agent can only vote once per target. \
-Votes affect sort order (higher votes = more visibility).";
+    description = "Cast an upvote or downvote on a post or comment (one vote per agent per target). \
+Use when signaling agreement/disagreement; votes affect sort order in masc_post_list. \
+Pair with masc_post_list to find posts worth voting on.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -351,7 +378,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_interrupt";
-    description = "Pause workflow and wait for user approval (LangGraph interrupt pattern). Use before dangerous operations like database deletion, production changes, or external API calls. The workflow will be suspended until approved or rejected.";
+    description = "Pause the current workflow and wait for human approval before proceeding (LangGraph interrupt pattern). \
+Call when about to perform a dangerous operation: DB deletion, production deploy, or costly API call. \
+The workflow suspends until masc_approve or masc_reject is called for this task.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -382,7 +411,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_approve";
-    description = "Approve an interrupted workflow checkpoint. Use when user confirms the dangerous action should proceed.";
+    description = "Approve a pending workflow interrupt, allowing the suspended operation to proceed. \
+Use when the human operator confirms the action described in masc_interrupt is safe. \
+Pair with masc_pending_interrupts to see all awaiting approvals.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -397,7 +428,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_reject";
-    description = "Reject an interrupted workflow checkpoint. Use when user declines the dangerous action.";
+    description = "Reject a pending workflow interrupt, blocking the suspended operation with an optional reason. \
+Use when the human operator declines the action described in masc_interrupt. \
+Pair with masc_pending_interrupts to review what is awaiting decision.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -416,7 +449,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_pending_interrupts";
-    description = "List all pending interrupted workflows waiting for approval.";
+    description = "List all pending workflow interrupts that are waiting for human approval or rejection. \
+Use when checking if any agents are blocked on approval before proceeding. \
+Pair with masc_approve or masc_reject to unblock each pending interrupt.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -425,7 +460,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_branch";
-    description = "Create a new execution branch from an existing checkpoint. Use for exploring alternative paths (e.g., 'try approach A here, try approach B there'). The source checkpoint is marked as 'branched' and a new checkpoint is created with the same state but a new branch name.";
+    description = "Create a new execution branch from an existing interrupt checkpoint to explore alternative paths. \
+Use when you want to try multiple approaches from the same decision point (e.g., approach-a vs safe-mode). \
+Pair with masc_interrupt which creates the checkpoint, then branch to fork the execution.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -456,7 +493,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_cost_log";
-    description = "Log token usage and cost for tracking multi-agent expenses. Call after significant API calls to track spending per agent and task.";
+    description = "Log token usage and cost for a specific API call, attributed to an agent and optional task. \
+Call when you complete a significant LLM call and want to track cumulative spending. \
+Pair with masc_cost_report to view aggregated cost data by agent, task, or time period.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -491,7 +530,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_cost_report";
-    description = "Get cost report showing token usage and spending by agent. Use to monitor multi-agent collaboration expenses.";
+    description = "Return a cost report showing token usage and spending, filterable by agent, task, and time period. \
+Use when monitoring multi-agent expenses or checking if a task is over budget. \
+Pair with masc_cost_log which records the individual cost entries this report aggregates.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -518,7 +559,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_auth_enable";
-    description = "Enable authentication for this room. Returns a room secret that should be shared securely with authorized agents. Once enabled, agents need tokens to perform actions.";
+    description = "Enable authentication for this room and return a room secret for authorized agents. \
+Use when restricting room access so only token-bearing agents can perform actions. \
+After enabling, create tokens with masc_auth_create_token. Check state with masc_auth_status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -533,7 +576,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_auth_disable";
-    description = "Disable authentication for this room. All agents can perform any action without tokens.";
+    description = "Disable authentication for this room, allowing all agents unrestricted access. \
+Use when moving from a restricted to an open collaboration mode. \
+Pair with masc_auth_status to verify the change took effect.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -542,7 +587,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_auth_status";
-    description = "Check authentication status for this room.";
+    description = "Check whether authentication is enabled for this room and what the current auth policy is. \
+Use when verifying room security settings or diagnosing permission errors. \
+Pair with masc_auth_enable or masc_auth_disable to change the auth state.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -551,7 +598,9 @@ Votes affect sort order (higher votes = more visibility).";
 
   {
     name = "masc_auth_create_token";
-    description = "Create a new authentication token for an agent. The token should be kept secret and passed in subsequent requests.";
+    description = "Create a new authentication token for a specific agent with a role (reader, worker, or admin). \
+Use when onboarding an agent to an auth-enabled room. The token must be kept secret. \
+Call after masc_auth_enable has been set up for the room.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

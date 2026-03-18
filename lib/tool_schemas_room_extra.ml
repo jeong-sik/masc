@@ -11,7 +11,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_rooms_list";
-    description = "List all available MASC rooms. Returns rooms with agent/task counts and current active room. Use to see available coordination spaces before entering one.";
+    description = "List all available MASC rooms with agent/task counts and active room indicator. \
+Use when you need to discover or switch between coordination spaces. \
+Pair with masc_room_enter to switch rooms, or masc_room_create to add one.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -19,7 +21,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_room_create";
-    description = "Create a new MASC room for coordination. Room ID is auto-generated from name (slugified). Use to create separate spaces for different projects or teams.";
+    description = "Create a new MASC room for coordination. Room ID is auto-generated from name (slugified). \
+Use when you need a separate coordination space for a different project or team. \
+After creation, call masc_room_enter to switch into the new room.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -37,7 +41,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_room_enter";
-    description = "Enter a specific MASC room. Switches context to the selected room and auto-joins with a unique nickname. Use after masc_rooms_list to switch between coordination spaces.";
+    description = "Enter a specific MASC room by ID. Switches context and auto-joins with a unique nickname. \
+Use when switching between coordination spaces. Call masc_rooms_list first to see available rooms. \
+Pair with masc_room_create if the target room does not exist.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -56,7 +62,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_room_strategy_get";
-    description = "Read the current room-level search and speculation defaults. Use this before changing routing behavior so you know whether best_first_v1 or speculation is already enabled for the room.";
+    description = "Read current room-level search strategy and speculation defaults. \
+Use when you need to check routing configuration before modifying it. \
+Pair with masc_room_strategy_set to update the strategy.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -64,7 +72,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_room_strategy_set";
-    description = "Update room-level search and speculation defaults. Use this to set the default command-plane search strategy and to enable or disable speculative routing for the current room.";
+    description = "Update room-level search strategy and speculation defaults. \
+Use when you want to change the command-plane routing behavior (legacy vs best_first_v1) or toggle speculative routing. \
+Call masc_room_strategy_get first to see current settings.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

@@ -3,7 +3,7 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_walph_loop";
-    description = "Walph pattern: Keep claiming and completing tasks until stop condition. Iterates claim_next → work → done cycle. Control via @walph in broadcast: START <preset>, STOP, PAUSE, RESUME, STATUS. Presets: coverage → test coverage FeedbackLoop, refactor → lint FeedbackLoop, docs → doc coverage FeedbackLoop, review → PR review pipeline, figma → SSIM visual fidelity loop, drain → simple claim loop.";
+    description = "Autonomous claim-work-done loop that drains a task backlog using a preset strategy. \nUse when you need repeated task execution (test coverage, lint, docs, review, figma SSIM, or drain). \nPair with masc_walph_control to STOP/PAUSE/RESUME mid-run. Also controllable via @walph in broadcast.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -55,7 +55,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_walph_control";
-    description = "Control a running @walph loop. Commands: STOP (end loop after current iteration), PAUSE (suspend loop), RESUME (continue paused loop), STATUS (get current state). Can also be triggered via broadcast: '@walph STOP', '@walph PAUSE', etc.";
+    description = "Send a control command (STOP, PAUSE, RESUME, STATUS) to a running walph loop. \
+Use when you need to halt, suspend, or inspect a walph loop mid-execution. \
+Pair with masc_walph_loop which starts the loop. Broadcast '@walph STOP' is equivalent.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -74,7 +76,7 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_walph_natural";
-    description = "Control Walph loop using natural language. Heuristic-based intent classification (Korean/English). Examples: '커버리지 올려줘' → START coverage, '그만' → STOP, '잠깐 멈춰' → PAUSE, '다시 시작' → RESUME, '지금 뭐해?' → STATUS. Uses direct LLM calls for ambiguous message classification.";
+    description = "Interpret a natural-language message (Korean or English) and map it to a walph control action. \nUse when human input is informal (e.g. 'stop the loop'). \nCalls masc_walph_loop or masc_walph_control internally after intent classification.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -92,7 +94,7 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_hat_wear";
-    description = "Wear a hat (role) to specialize agent behavior. Hats: builder (🔨 code), reviewer (🔍 review), researcher (🔬 explore), tester (🧪 tests), architect (📐 design), debugger (🐛 fix), documenter (📝 docs). Broadcast format: @agent:hat (e.g., @claude:builder).";
+    description = "Assign a role hat to an agent, specializing its behavior for a task domain. \nUse when switching focus: builder (code), reviewer, researcher, tester, architect, debugger, documenter. \nPair with masc_hat_status to check current hat. Broadcast shows as @agent:hat.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -115,7 +117,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_convo_start";
-    description = "Start a new conversation thread on a topic. Returns thread_id for subsequent replies. Conversations persist to file and Neo4j for queryability. Loop prevention: max 50 turns by default.";
+    description = "Open a new multi-agent conversation thread on a topic and get a thread_id. \
+Use when agents need structured discussion (design decisions, reviews, disputes). \
+After starting, use masc_convo_reply to add turns and masc_convo_conclude to close.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -146,7 +150,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_convo_reply";
-    description = "Add a reply to an existing conversation thread. Includes loop prevention: blocks identical consecutive messages (3x) and cooldown violations (2s between same speaker). Returns updated thread.";
+    description = "Post a reply to an existing conversation thread. \
+Use when contributing to an ongoing multi-agent discussion started by masc_convo_start. \
+Built-in loop prevention blocks identical consecutive messages and enforces 2s cooldown per speaker.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -181,7 +187,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_convo_conclude";
-    description = "Conclude a conversation with a summary/decision. Marks thread as Concluded and adds final turn. No more replies allowed after this.";
+    description = "Close a conversation thread with a final summary or decision. \
+Use when consensus is reached or discussion is complete. No further replies are allowed after this. \
+Pair with masc_convo_start (open) and masc_convo_reply (discuss) to form the full lifecycle.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -203,7 +211,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_convo_get";
-    description = "Get a conversation thread by ID. Returns full thread with all turns, participants, and status.";
+    description = "Retrieve a conversation thread by ID, including all turns, participants, and current status. \
+Use when you need to read the history of a discussion before replying or concluding. \
+Pair with masc_convo_list to find thread IDs.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -217,7 +227,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_convo_list";
-    description = "List all active conversation threads in the current room.";
+    description = "List all active conversation threads in the current room. \
+Use when checking what discussions are in progress before starting a new one. \
+Pair with masc_convo_get to read a specific thread.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -225,7 +237,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_gardener_health";
-    description = "Get comprehensive ecosystem health metrics. Returns agent population stats (total, active, idle), activity metrics (posts, comments, unanswered questions), homeostatic score, and intervention recommendations. Use this to understand if the ecosystem needs spawning or retirement.";
+    description = "Return ecosystem health metrics: population stats, activity counts, homeostatic score, and recommendations. \
+Use when deciding whether to spawn or retire agents. \
+Pair with masc_gardener_propose_spawn or masc_gardener_retire_agent based on the score.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -233,7 +247,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_gardener_config";
-    description = "Get current Gardener configuration from environment variables. Shows population bounds (min/max/target), daily budgets, cooldowns, and circuit breaker status.";
+    description = "Return current Gardener configuration: population bounds, daily budgets, cooldowns, and circuit breaker state. \
+Use when diagnosing why a spawn or retirement was rejected. \
+Pair with masc_gardener_health for live ecosystem metrics.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -241,7 +257,7 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_gardener_propose_spawn";
-    description = "Evaluate whether a new agent should be spawned for a given topic. Uses LLM decision (if enabled) or rule-based logic. Returns approval/deferral/rejection with reasons. Does NOT actually create the agent — use masc_gardener_execute_spawn for that.";
+    description = "Evaluate whether a new agent should be spawned for a topic (approval/deferral/rejection). \nUse when a capability gap is detected and you want to check spawn eligibility before acting. \nDoes NOT create the agent. After approval, call masc_gardener_execute_spawn to proceed.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -265,7 +281,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_library_list";
-    description = "List all documents in the agent knowledge library. Returns title, confidence, source, and tags for each document.";
+    description = "List all documents in the agent knowledge library with title, confidence, source, and tags. \
+Use when browsing available knowledge before reading or adding a document. \
+Pair with masc_library_read for full content or masc_library_search for keyword lookup.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -278,7 +296,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_library_read";
-    description = "Read a specific library document by topic name.";
+    description = "Read the full content of a library document by topic name or partial match. \
+Use when you need detailed knowledge on a specific topic (e.g. 'eio-mutex'). \
+Pair with masc_library_list to find available topics first.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -292,7 +312,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_library_add";
-    description = "Add a new document to the library. Documents with confidence < 0.5 go to candidates/.";
+    description = "Add a new document to the agent knowledge library. Documents with confidence < 0.5 go to candidates/. \
+Use when capturing a new learning, experiment result, or operational pattern for future reference. \
+After adding a candidate, use masc_library_promote once verified.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -324,7 +346,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_library_promote";
-    description = "Promote a candidate document to the main library after verification.";
+    description = "Promote a candidate document to the main library after verification (confidence must be >= 0.5). \
+Use when a candidate document added via masc_library_add has been validated through testing or review. \
+Pair with masc_library_list (include_candidates=true) to find promotable documents.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -342,7 +366,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_library_search";
-    description = "Search library documents by content or tags.";
+    description = "Search library documents by content keywords or tags. \
+Use when looking for specific knowledge without knowing the exact topic name. \
+Pair with masc_library_read to get the full document once you find a match.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -356,7 +382,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_verify_request";
-    description = "Request verification of task output.";
+    description = "Request verification of a completed task's output by another agent or automated check. \
+Use when a task is done and needs quality review before marking it accepted. \
+After requesting, the verifier calls masc_verify_submit with a pass/fail/partial verdict.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -385,7 +413,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_verify_submit";
-    description = "Submit a verification verdict for a task request.";
+    description = "Submit a pass/fail/partial verdict for a pending verification request. \
+Use when you are the assigned verifier and have reviewed the task output. \
+Called after masc_verify_request creates the review. Check masc_verify_pending for your queue.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -412,7 +442,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_verify_pending";
-    description = "List pending verification requests for the current agent.";
+    description = "List pending verification requests assigned to you or unassigned. \
+Use when checking if any task outputs need your review. \
+After identifying a request, call masc_verify_submit or masc_verify_auto to process it.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -420,7 +452,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_verify_auto";
-    description = "Run automated verification for a request.";
+    description = "Run automated verification checks (tests, lint, build) for a pending verification request. \
+Use when manual review is not needed and the verification criteria can be checked programmatically. \
+Alternative to masc_verify_submit for cases where automated checks suffice.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -434,7 +468,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_code_search";
-    description = "Search code using ripgrep with regex support. Returns structured results with file path, line number, and matched content. Use for finding specific patterns, function names, or text across the codebase.";
+    description = "Search code using ripgrep with regex support, returning file path, line number, and matched content. \
+Use when finding function definitions, patterns, or text across the codebase from within MASC. \
+Pair with masc_code_symbols for a token-efficient overview or masc_code_read for targeted file reading.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -468,7 +504,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_code_symbols";
-    description = "Extract symbols (functions, types, classes) from a file using heuristics. Token-efficient alternative to reading full file content. Saves ~70% tokens by returning only symbol names and line numbers.";
+    description = "Extract symbol names (functions, types, classes) and line numbers from a file using heuristics. \
+Use when you need a file overview without reading full content (saves ~70% tokens). \
+Pair with masc_code_read to then read only the relevant line ranges you identified.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -482,7 +520,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_code_read";
-    description = "Read file with offset/limit pagination. Token-efficient way to read specific sections of large files. Use with masc_code_symbols to determine relevant line ranges.";
+    description = "Read a file with offset/limit pagination for token-efficient access to specific sections. \
+Use when reading large files where full content would waste context. \
+Pair with masc_code_symbols to find relevant line ranges, then read only those ranges.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -506,7 +546,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_tool_stats";
-    description = "In-memory tool usage statistics for the current server session. Returns top-20 tools by call count, tools unused for 30+ days, and tools never called. Data resets on server restart; telemetry.jsonl is the durable store.";
+    description = "Return in-memory tool usage statistics: top tools by call count, stale tools (30+ days unused), and never-called tools. \
+Use when auditing tool adoption or identifying dead tools for cleanup. \
+Data resets on server restart; telemetry.jsonl is the durable store.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -520,7 +562,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_tool_help";
-    description = "Return canonical help and metadata for a specific MASC tool.";
+    description = "Return canonical help text, parameters, and metadata for a specific MASC tool by name. \
+Use when you need to understand a tool's purpose, required params, or usage before calling it. \
+Pair with masc_tool_stats for usage frequency or masc_tool_admin_snapshot for the full inventory.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -534,7 +578,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_tool_admin_snapshot";
-    description = "Return a unified admin snapshot of tool inventory, auth/RBAC, mode gates, keeper policy, and command-plane policy surfaces.";
+    description = "Return a unified admin snapshot: tool inventory, auth/RBAC config, mode gates, keeper policy, and command-plane surfaces. \
+Use when diagnosing tool visibility issues or auditing system-wide access controls. \
+Pair with masc_tool_admin_update to modify any of the surfaces returned.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -553,7 +599,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_tool_admin_update";
-    description = "Apply mode, auth, unit-policy, or keeper-policy updates through a single admin entrypoint.";
+    description = "Apply mode, auth, unit-policy, or keeper-policy updates through a single admin entrypoint. \
+Use when changing tool visibility mode, toggling auth, or adjusting keeper autonomy level. \
+Pair with masc_tool_admin_snapshot to inspect current state before making changes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -624,7 +672,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_keeper_tool_catalog";
-    description = "List visible server-side masc_* tools alongside keeper-internal wrapper coverage.";
+    description = "List all visible masc_* tools alongside keeper-internal wrapper coverage, filterable by tier. \
+Use when checking which tools keepers can proxy and which lack wrapper coverage. \
+Pair with masc_tool_admin_snapshot for the broader admin view including auth and mode gates.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

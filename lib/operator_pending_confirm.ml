@@ -246,7 +246,7 @@ let available_actions : available_action list =
     {
       action_type = "room_resume";
       target_type = "room";
-      description = "Use this when you need to resume a paused room.";
+      description = "Resume a paused MASC room, allowing the orchestrator to spawn agents again. Use when the pause reason is resolved (review done, incident cleared).";
       confirm_required = false;
     };
     {

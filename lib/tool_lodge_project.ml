@@ -128,7 +128,7 @@ let tool_propose_project : Types.tool_schema = {
 
 let tool_join_project : Types.tool_schema = {
   name = "lodge_join_project";
-  description = "Join an existing project as a contributor";
+  description = "Join an existing lodge project as a contributor with a specific role (lead, contributor, reviewer, advisor). Use when you want to participate in a collaborative project posted on the board.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [

@@ -43,7 +43,7 @@ let sdk_bindings : sdk_tool_binding list =
     {
       sdk_name = "masc_list_tasks";
       canonical_operation = "masc_tasks";
-      description = "List all tasks in the MASC room.";
+      description = "List all tasks in the MASC room with status, assignee, and priority. Use after joining a room to find available work or check what others are doing.";
       input_schema = object_schema [];
       arg_bindings = [];
     };
@@ -86,7 +86,7 @@ let sdk_bindings : sdk_tool_binding list =
     {
       sdk_name = "masc_add_task";
       canonical_operation = "masc_add_task";
-      description = "Create a single new task in the MASC room.";
+      description = "Create a single new task in the MASC room backlog. Use when you identify work that any agent can pick up. Returns a task-XXX ID for tracking.";
       input_schema =
         object_schema ~required:[ "title"; "description" ]
           [
@@ -121,7 +121,7 @@ let sdk_bindings : sdk_tool_binding list =
     {
       sdk_name = "masc_claim_task";
       canonical_operation = "masc_transition";
-      description = "Claim a specific task by task_id.";
+      description = "Claim a specific task by task_id, locking it to your agent. Use when you want a particular task rather than the next available one.";
       input_schema =
         object_schema ~required:[ "task_id" ]
           [ assoc_field "task_id" (string_prop "The task ID to claim") ];
@@ -135,7 +135,7 @@ let sdk_bindings : sdk_tool_binding list =
     {
       sdk_name = "masc_claim_next";
       canonical_operation = "masc_claim_next";
-      description = "Claim the next available task automatically.";
+      description = "Claim the next available task automatically by priority order. Use when you are ready to work and any pending task is acceptable.";
       input_schema = object_schema [];
       arg_bindings = [ ("agent_name", Agent_name) ];
     };
@@ -156,7 +156,7 @@ let sdk_bindings : sdk_tool_binding list =
     {
       sdk_name = "masc_complete_task";
       canonical_operation = "masc_transition";
-      description = "Mark a task as done after finishing the work.";
+      description = "Mark a task as done after finishing the work and verification. Use when implementation is complete to release the task from your assignment.";
       input_schema =
         object_schema ~required:[ "task_id" ]
           [
@@ -207,7 +207,7 @@ let sdk_bindings : sdk_tool_binding list =
     {
       sdk_name = "masc_broadcast";
       canonical_operation = "masc_broadcast";
-      description = "Broadcast a message to all agents in the room.";
+      description = "Broadcast a message to all agents currently in the room. Use when sharing status updates, coordination signals, or requesting help from any available agent.";
       input_schema =
         object_schema ~required:[ "message" ]
           [

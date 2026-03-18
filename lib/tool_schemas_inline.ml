@@ -285,7 +285,7 @@ Tip: Use capabilities to find the right agent for @mentions.";
   };
   {
     name = "masc_verify_status";
-    description = "Check verification status by request ID.";
+    description = "Check the current status and result of a verification request by its ID. Use when polling for completion after submitting an action for asynchronous verification.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

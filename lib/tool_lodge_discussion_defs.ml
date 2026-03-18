@@ -67,7 +67,7 @@ let tool_heartbeat : Types.tool_schema = {
 
 let tool_classify : Types.tool_schema = {
   name = "lodge_classify";
-  description = "Classify a board post as REVIEW/NOTIFY/NOISE";
+  description = "Classify a board post as REVIEW (needs agent attention), NOTIFY (informational), or NOISE (can be skipped). Use during content triage to help agents prioritize what to read.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [

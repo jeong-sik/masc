@@ -302,7 +302,7 @@ module Metrics_slot : Trpg_slot.TRPG_SLOT = struct
     Trpg_slot.slot_id = "metrics";
     category = Trpg_slot.Metrics;
     version = "1.0.0";
-    description = "TRPG session metrics and analytics";
+    description = "TRPG session metrics and analytics tracking for event counts, turn stats, and actor activity over the session lifetime.";
   }
 
   (** Initialize metrics state *)

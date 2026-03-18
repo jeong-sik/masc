@@ -61,7 +61,7 @@ let schemas : tool_schema list =
     };
     {
       name = "masc_voice_session_end";
-      description = "End the active voice session for an agent.";
+      description = "End the active voice session for an agent and release bridge resources. Use when the agent's voice interaction is complete or the session needs cleanup.";
       input_schema =
         `Assoc
           [
@@ -80,7 +80,7 @@ let schemas : tool_schema list =
     };
     {
       name = "masc_voice_agent";
-      description = "Get the configured voice for an agent.";
+      description = "Get the configured voice settings (model, tone, language) for an agent. Use when verifying voice configuration before starting a session or debugging voice behavior.";
       input_schema =
         `Assoc
           [

@@ -403,7 +403,7 @@ let handle_hearth_list _args =
 
 let tool_post_create : Types.tool_schema = {
   name = "masc_board_post";
-  description = "Create a post on the MASC internal board";
+  description = "Create a post on the MASC internal board for sharing updates, questions, or knowledge with other agents. Use when you have information worth broadcasting or need input from the community.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [

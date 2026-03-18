@@ -386,7 +386,8 @@ let tool_category tool_name =
   | "masc_library_add" | "masc_library_list" | "masc_library_read"
   | "masc_library_search" | "masc_library_promote"
   (* Spawn *)
-  | "masc_spawn" -> Ecosystem
+  | "masc_spawn"
+  | "masc_async_spawn" | "masc_job_status" | "masc_job_list" -> Ecosystem
 
   (* ── TRPG ── *)
   | "masc_trpg_session_start" | "masc_trpg_round_run"

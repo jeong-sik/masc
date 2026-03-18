@@ -35,20 +35,20 @@ let starts_with ~prefix s =
 
     Messages starting with [memory_summary_prefix] or [goal_prefix]
     receive a minimum score of 0.95 (sticky memory). *)
-let score_messages (msgs : Llm_client.message list) : (int * float) list =
+let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
   let n = List.length msgs in
-  List.mapi (fun i (m : Llm_client.message) ->
+  List.mapi (fun i (m : Agent_sdk.Types.message) ->
     let recency = if n <= 1 then 1.0
       else let t = float_of_int i /. float_of_int (n - 1) in
            t *. t
     in
     let role_w = match m.role with
-      | Llm_client.System -> 1.0
-      | Llm_client.Tool -> 0.7
-      | Llm_client.User -> 0.6
-      | Llm_client.Assistant -> 0.4
+      | Agent_sdk.Types.System -> 1.0
+      | Agent_sdk.Types.Tool -> 0.7
+      | Agent_sdk.Types.User -> 0.6
+      | Agent_sdk.Types.Assistant -> 0.4
     in
-    let msg_text = Llm_client.text_of_message m in
+    let msg_text = Agent_sdk.Types.text_of_message m in
     let len = String.length msg_text in
     let content_w = if len < 20 then 0.3
       else if len < 100 then 0.6

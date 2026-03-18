@@ -301,8 +301,8 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
           messages =
             (match system with
             | Some sys when trim sys <> "" ->
-                [ Llm_client.system_msg sys; Llm_client.user_msg prompt ]
-            | _ -> [ Llm_client.user_msg prompt ]);
+                [ Agent_sdk.Types.system_msg sys; Agent_sdk.Types.user_msg prompt ]
+            | _ -> [ Agent_sdk.Types.user_msg prompt ]);
           temperature = 0.2;
           max_tokens = 4096;
           tools = llm_tool_defs_of_json tools;
@@ -310,7 +310,7 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
         }
       in
       (match Llm_orchestration.complete ~timeout_sec req with
-      | Ok resp when trim (Llm_client.text_of_response resp) <> "" -> Ok (Llm_client.text_of_response resp)
+      | Ok resp when trim (Llm_types.text_of_response resp) <> "" -> Ok (Llm_types.text_of_response resp)
       | Ok resp when resp.tool_calls <> [] ->
           Ok (Yojson.Safe.to_string (llm_tool_calls_json resp.tool_calls))
       | Ok _ -> Error "empty completion"

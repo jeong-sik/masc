@@ -42,7 +42,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         try
           let name = Fs_compat.load_file file |> String.trim in
           if name = "" then None else Some name
-        with Sys_error _ -> None
+        with Sys_error _ | Eio.Io _ -> None
   in
 
   (* Legacy helper - write to file for backward compat with non-identity-aware tools *)
@@ -51,10 +51,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | None -> ()
     | Some sid ->
         let file = Printf.sprintf "/tmp/.masc_agent_mcp_%s" sid in
-        try
+        (try
           Fs_compat.save_file file agent_name
-        with Sys_error msg ->
-          Log.Misc.warn "write_mcp_session_agent: %s" msg
+        with
+        | Sys_error msg -> Log.Misc.warn "write_mcp_session_agent: %s" msg
+        | Eio.Io _ as exn -> Log.Misc.warn "write_mcp_session_agent: %s" (Printexc.to_string exn))
   in
 
   (* Helper to get values from JSON arguments - delegates to Safe_ops *)

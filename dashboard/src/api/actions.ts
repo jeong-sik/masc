@@ -1,10 +1,10 @@
-import { get, post, callMcpTool, fetchWithTimeout } from '../api'
+import { get, post, fetchWithTimeout } from './core'
+import { callMcpTool } from './mcp'
 import { isRecord } from '../components/common/normalize'
-import { asString } from './trpg'
-import { normalizeGovernanceCaseBundle, normalizeGovernanceExecutionOrder } from './board'
+import { asString, asNumber, asInt } from './trpg'
+import { toIsoTimestamp, normalizeGovernanceCaseBundle, normalizeGovernanceExecutionOrder } from './board'
 import type {
-  Agent, Goal, KeeperAutonomyInfo, SocialGraphResponse,
-  GovernanceCaseBundle, GovernanceExecutionOrder, MdalIterationRecord, MdalLoop,
+  Agent, GovernanceCaseBundle, GovernanceExecutionOrder, MdalIterationRecord, MdalLoop,
 } from '../types'
 
 // --- Lodge ---
@@ -274,7 +274,7 @@ export async function fetchLatestMdalLoop(): Promise<LatestMdalLoopResult> {
 
 // --- Goal Store ---
 
-export async function fetchGoals(): Promise<import('./types').Goal[]> {
+export async function fetchGoals(): Promise<import('../types').Goal[]> {
   try {
     const res = await callMcpTool('masc_goal_list', {})
     if (typeof res === 'string') {
@@ -282,20 +282,20 @@ export async function fetchGoals(): Promise<import('./types').Goal[]> {
       return Array.isArray(parsed) ? parsed : parsed.goals ?? []
     }
     if (Array.isArray(res)) return res
-    return (res as Record<string, unknown>).goals as import('./types').Goal[] ?? []
+    return (res as Record<string, unknown>).goals as import('../types').Goal[] ?? []
   } catch {
     return []
   }
 }
 
-export async function fetchKeeperAutonomy(name: string): Promise<import('./types').KeeperAutonomyInfo | null> {
+export async function fetchKeeperAutonomy(name: string): Promise<import('../types').KeeperAutonomyInfo | null> {
   try {
     const res = await callMcpTool('masc_keeper_status', { name })
     if (typeof res === 'string') {
       const parsed = JSON.parse(res)
       return parsed.autonomy ?? null
     }
-    return (res as Record<string, unknown>).autonomy as import('./types').KeeperAutonomyInfo ?? null
+    return (res as Record<string, unknown>).autonomy as import('../types').KeeperAutonomyInfo ?? null
   } catch {
     return null
   }
@@ -303,11 +303,11 @@ export async function fetchKeeperAutonomy(name: string): Promise<import('./types
 
 // --- Social Graph ---
 
-export async function fetchSocialGraph(): Promise<import('./types').SocialGraphResponse | null> {
+export async function fetchSocialGraph(): Promise<import('../types').SocialGraphResponse | null> {
   try {
     const resp = await fetchWithTimeout('/api/v1/social-graph', {}, 10000)
     if (!resp.ok) return null
-    return (await resp.json()) as import('./types').SocialGraphResponse
+    return (await resp.json()) as import('../types').SocialGraphResponse
   } catch {
     return null
   }

@@ -52,7 +52,7 @@ let test_shard_voice_exists () =
   match Tool_shard.get_shard "voice" with
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
-    Alcotest.(check bool) "has 1 tool" true (List.length s.Tool_shard.tools = 1)
+    Alcotest.(check bool) "has 5 tools" true (List.length s.Tool_shard.tools = 5)
   | None -> Alcotest.fail "voice shard not found"
 
 let test_shard_unknown () =
@@ -98,8 +98,8 @@ let test_tools_of_shards_unknown_ignored () =
 
 let test_keeper_llm_tools_count () =
   let tools = Tool_shard.keeper_llm_tools in
-  (* base=3 + board=4 + filesystem=2 + shell=3 + weather=1 + voice=1 = 14 *)
-  Alcotest.(check int) "14 total tools" 14 (List.length tools)
+  (* base=3 + board=4 + filesystem=2 + shell=3 + weather=1 + voice=5 = 18 *)
+  Alcotest.(check int) "18 total tools" 18 (List.length tools)
 
 (* ============================================================
    grant_shard tests

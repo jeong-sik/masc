@@ -210,6 +210,10 @@ let keeper_backend_tool_name = function
   | "keeper_board_list" -> "masc_board_list"
   | "keeper_board_comment" -> "masc_board_comment"
   | "keeper_voice_speak" -> "masc_voice_speak"
+  | "keeper_voice_agent" -> "masc_voice_agent"
+  | "keeper_voice_sessions" -> "masc_voice_sessions"
+  | "keeper_voice_session_start" -> "masc_voice_session_start"
+  | "keeper_voice_session_end" -> "masc_voice_session_end"
   | "keeper_tasks_list" -> "masc_tasks"
   | "keeper_broadcast" -> "masc_broadcast"
   | other -> other
@@ -436,7 +440,10 @@ let keeper_privileged_tool_names : string list =
   privileged_keeper_tool_names
 
 let keeper_wrapped_server_tools : string list =
-  [ "masc_board_post"; "masc_board_comment"; "masc_board_list"; "masc_voice_speak"; "masc_tasks"; "masc_broadcast" ]
+  [ "masc_board_post"; "masc_board_comment"; "masc_board_list";
+    "masc_voice_speak"; "masc_voice_agent"; "masc_voice_sessions";
+    "masc_voice_session_start"; "masc_voice_session_end";
+    "masc_tasks"; "masc_broadcast" ]
 
 let keeper_wrapped_internal_tools : string list =
   keeper_all_tool_names

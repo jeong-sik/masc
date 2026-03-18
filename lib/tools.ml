@@ -1,32 +1,58 @@
-(** MCP Tool Definitions for MASC *)
+(** MCP Tool Definitions for MASC
+
+    All schemas are now owned by individual modules.
+    This file assembles cycle-free schemas; config.ml adds
+    modules that depend on Config (Tool_control, Tool_a2a, Tool_misc). *)
 
 open Types
 
-(** All MASC tool schemas *)
+(** Tool schemas from modules that do NOT depend on Config
+    (avoids Tools -> Config -> Tools cycle) *)
 let raw_schemas : tool_schema list =
-  Tools_schemas_01.schemas
-  @ Tools_schemas_02.schemas
-  @ Tools_schemas_03.schemas
-  @ Tools_schemas_04.schemas
-  @ Tools_schemas_05.schemas
-  @ Tools_schemas_06.schemas
-  @ Tools_schemas_07.schemas
-  @ Tools_schemas_08.schemas
-  @ Tools_schemas_09.schemas
-  @ Tools_schemas_10.schemas
-  @ Tools_schemas_11.schemas
+  Tool_schemas_room_core.schemas
+  @ Tool_schemas_room_extra.schemas
+  @ Tool_schemas_inline.schemas
+  @ Tool_schemas_plan.schemas
+  @ Tool_schemas_agent.schemas
+  @ Tool_schemas_auth.schemas
+  @ Tool_schemas_portal.schemas
+  @ Tool_schemas_worktree.schemas
+  @ Tool_task.schemas
+  @ Tool_suspend.schemas
+  @ Tool_cost.schemas
+  @ Tool_rate_limit.schemas
+  @ Tool_encryption.schemas
+  @ Tool_council.schemas
+  @ Tool_relay.schemas
+  @ Tool_mitosis.schemas
+  @ Tool_handover.schemas
+  @ Tool_tempo.schemas
+  @ Tool_walph.schemas
+  @ Tool_hat.schemas
+  @ Tool_gardener.schemas
+  @ Tool_cache.schemas
+  @ Tool_run.schemas
+  @ Tool_social.schemas
+  @ Tool_vote.schemas
+  @ Tool_code.schemas
+  @ Tool_library.schemas
+  @ Tool_audit.schemas
+  @ Tool_heartbeat.schemas
 
 let all_schemas : tool_schema list = raw_schemas
 
 (** All schemas including Perpetual Agent Runtime tools *)
 let all_schemas_with_perpetual =
-  all_schemas @ Tool_keeper.schemas
+  all_schemas
+  (* Config-dependent module schemas (cycle-safe: these files don't depend on Config) *)
+  @ Tool_schemas_control.schemas
+  @ Tool_schemas_a2a.schemas
+  @ Tool_schemas_misc.schemas
+  @ Tool_keeper.schemas
   @ Tool_operator.schemas @ Tool_llama.schemas @ Tool_command_plane.schemas @ Tool_goals.schemas
   @ Tool_team_session.schemas @ Tool_voice.schemas @ Tool_shard.schemas
   @ Tool_autoresearch.schemas
   @ Tool_compact.schemas
-  (* Removed from surface (0 calls in 6-day audit):
-     Tool_perpetual, Tool_code_swarm, Tool_notifications, Tool_agent_timeline *)
 
 (** Get tool by name *)
 let find_tool name =

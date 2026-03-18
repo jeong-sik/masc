@@ -97,6 +97,108 @@ let schemas : Types.tool_schema list = [
       ("required", `List [`String "agent_name"]);
     ];
   };
+
+  (* masc_walph_loop *)
+  {
+    name = "masc_walph_loop";
+    description = "Start an automated claim-work-done loop that keeps claiming and completing tasks until a stop condition is met. \
+Use when you want to drain a task backlog or run a preset feedback loop (coverage, refactor, docs, figma, drain). \
+Control with masc_walph_control (STOP/PAUSE/RESUME/STATUS) or via broadcast '@walph STOP'.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name for claiming tasks");
+        ]);
+        ("preset", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [
+            `String "coverage";
+            `String "refactor";
+            `String "docs";
+            `String "review";
+            `String "figma";
+            `String "drain"
+          ]);
+          ("description", `String "Loop preset: coverage (80%+ test coverage), refactor (0 lint errors), docs (90%+ doc coverage), review (PR self-review), figma (SSIM visual fidelity loop), drain (empty backlog)");
+          ("default", `String "drain");
+        ]);
+        ("max_iterations", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum iterations before forced stop (default: 10)");
+          ("default", `Int 10);
+          ("minimum", `Int 1);
+          ("maximum", `Int 100);
+        ]);
+        ("max_consecutive_errors", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Stop loop after this many consecutive errors (default: 5)");
+          ("default", `Int 5);
+          ("minimum", `Int 1);
+          ("maximum", `Int 100);
+        ]);
+        ("error_backoff_sec", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Sleep seconds after an error before retrying (default: 2)");
+          ("default", `Int 2);
+          ("minimum", `Int 0);
+          ("maximum", `Int 300);
+        ]);
+        ("target", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Target file or directory for preset (e.g., src/utils.ts)");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
+  (* masc_walph_control *)
+  {
+    name = "masc_walph_control";
+    description = "Send a control command (STOP, PAUSE, RESUME, STATUS) to a running walph loop. \
+Use when you need to halt, pause, or inspect a walph loop mid-execution. \
+After masc_walph_loop starts a loop; also triggerable via broadcast '@walph STOP'.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("command", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Control command");
+          ("enum", `List [`String "STOP"; `String "PAUSE"; `String "RESUME"; `String "STATUS"]);
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent sending the command (for audit trail)");
+        ]);
+      ]);
+      ("required", `List [`String "command"; `String "agent_name"]);
+    ];
+  };
+
+  (* masc_walph_natural *)
+  {
+    name = "masc_walph_natural";
+    description = "Control a walph loop using natural language in Korean or English (e.g., 'stop the loop', 'coverage up'). \
+Use when sending free-form instructions instead of explicit STOP/PAUSE/RESUME commands. \
+Translates intent into masc_walph_control commands; falls back to LLM for ambiguous messages.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("message", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Natural language message to interpret (e.g., '커버리지 좀 올려줘', 'stop the loop', '지금 진행상황 알려줘')");
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent sending the command (for audit trail)");
+        ]);
+      ]);
+      ("required", `List [`String "message"; `String "agent_name"]);
+    ];
+  };
+
 ]
 
 (* Dispatch handler *)

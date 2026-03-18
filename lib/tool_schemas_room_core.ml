@@ -35,4 +35,52 @@ Requires confirm=true to execute. Example: masc_reset({confirm: true})";
       ]);
     ];
   };
+  {
+    name = "masc_workflow_guide";
+    description = "Get personalized next-step guidance based on your current agent state. \
+Call when you are unsure which MASC tool to use next or want to verify your workflow. \
+Pair with masc_check to assert specific prerequisites before acting.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+  {
+    name = "masc_check";
+    description = "Assert preconditions on your agent state (joined, task claimed, worktree active, etc). \
+Call when you want to confirm prerequisites before starting work; returns pass/fail with fix hints. \
+Pair with masc_workflow_guide for next-step recommendations.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("assertions", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [
+            ("type", `String "string");
+            ("enum", `List [
+              `String "room_set"; `String "joined"; `String "task_claimed";
+              `String "current_task_set"; `String "worktree_active";
+            ]);
+          ]);
+          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false.");
+        ]);
+      ]);
+      ("required", `List [`String "assertions"]);
+    ];
+  };
+  {
+    name = "masc_init";
+    description = "Create the .masc/ folder to bootstrap a new MASC room in this project. \
+Call once per project when no .masc/ exists yet; if it already exists you auto-join. \
+After init, call masc_join to register your presence, then masc_add_task or masc_claim_next.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent identity: 'claude' (Claude Code), 'gemini' (Gemini CLI), or 'codex' (Codex CLI)");
+        ]);
+      ]);
+    ];
+  };
 ]

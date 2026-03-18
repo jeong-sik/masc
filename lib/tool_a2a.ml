@@ -115,3 +115,5 @@ let dispatch ctx ~name ~args : result option =
   | "masc_poll_events" -> Some (handle_poll_events ctx args)
   | "masc_heartbeat_result" -> Some (handle_heartbeat_result ctx args)
   | _ -> None
+
+let schemas = Tool_schemas_a2a.schemas

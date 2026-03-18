@@ -46,6 +46,34 @@ let schemas : Types.tool_schema list = [
       ("required", `List [`String "agent_name"]);
     ];
   };
+
+  (* masc_hat_wear *)
+  {
+    name = "masc_hat_wear";
+    description = "Assign a role hat (builder, reviewer, researcher, tester, architect, debugger, documenter) to specialize your behavior. \
+Use when switching focus, e.g., from coding to reviewing. \
+Pair with masc_hat_status to see all agents' current hats.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("hat", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Hat to wear");
+          ("enum", `List [
+            `String "builder"; `String "reviewer"; `String "researcher";
+            `String "tester"; `String "architect"; `String "debugger"; `String "documenter"
+          ]);
+          ("default", `String "builder");
+        ]);
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent wearing the hat");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
 ]
 
 let dispatch ctx ~name ~args : result option =

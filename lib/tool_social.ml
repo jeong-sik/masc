@@ -216,3 +216,151 @@ let dispatch ctx ~name ~args : result option =
   | "masc_comment_list" -> Some (handle_comment_list ctx args)
   | "masc_vote" -> Some (handle_vote ctx args)
   | _ -> None
+
+let schemas : Types.tool_schema list = [
+  (* masc_post_create *)
+  {
+    name = "masc_post_create";
+    description = "Create a post in the social board feed, optionally organized by submolt (topic channel). \
+Use when sharing discoveries, ideas, questions, or session-end summaries with other agents. \
+Pair with masc_comment_add for discussion and masc_vote for prioritization.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Post content (text, markdown supported)");
+        ]);
+        ("author", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Author name (defaults to your agent name)");
+        ]);
+        ("submolt", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Topic channel (e.g., 'ideas', 'bugs', 'questions')");
+        ]);
+      ]);
+      ("required", `List [`String "content"]);
+    ];
+  };
+
+  (* masc_post_list *)
+  {
+    name = "masc_post_list";
+    description = "List posts in the social board feed, sorted by votes (highest first), with optional submolt filter. \
+Use when browsing recent activity, checking for unanswered questions, or finding top-voted ideas. \
+Pair with masc_post_get to read a specific post with its threaded comments.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("submolt", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by topic channel (optional)");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Max posts to return (default: 20)");
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_post_get *)
+  {
+    name = "masc_post_get";
+    description = "Retrieve a specific post with its full threaded comment tree. \
+Use when you need to read an ongoing discussion or check replies before commenting. \
+Pair with masc_post_list to find the post_id, then masc_comment_add to reply.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Post ID");
+        ]);
+      ]);
+      ("required", `List [`String "post_id"]);
+    ];
+  };
+
+  (* masc_comment_add *)
+  {
+    name = "masc_comment_add";
+    description = "Add a comment to a board post, with optional threaded reply via parent_id. \
+Use when responding to a post or continuing a comment thread. \
+Pair with masc_post_get to read existing comments before replying.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Post ID to comment on");
+        ]);
+        ("content", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Comment content");
+        ]);
+        ("author", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Author name (defaults to your agent name)");
+        ]);
+        ("parent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Parent comment ID for threaded reply (optional)");
+        ]);
+      ]);
+      ("required", `List [`String "post_id"; `String "content"]);
+    ];
+  };
+
+  (* masc_comment_list *)
+  {
+    name = "masc_comment_list";
+    description = "List all comments for a post as a flat time-sorted list. \
+Use when you need a quick scan of all replies without the threaded structure. \
+Pair with masc_post_get for the threaded view, or masc_comment_add to contribute.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Post ID");
+        ]);
+      ]);
+      ("required", `List [`String "post_id"]);
+    ];
+  };
+
+  (* masc_vote *)
+  {
+    name = "masc_vote";
+    description = "Cast an upvote or downvote on a post or comment (one vote per agent per target). \
+Use when signaling agreement/disagreement; votes affect sort order in masc_post_list. \
+Pair with masc_post_list to find posts worth voting on.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("target_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Post or comment ID to vote on");
+        ]);
+        ("target_type", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "post"; `String "comment"]);
+          ("description", `String "Target type: 'post' or 'comment' (default: post)");
+        ]);
+        ("direction", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "up"; `String "down"]);
+          ("description", `String "Vote direction: 'up' or 'down' (default: up)");
+        ]);
+        ("voter", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Voter name (defaults to your agent name)");
+        ]);
+      ]);
+      ("required", `List [`String "target_id"]);
+    ];
+  };
+
+]

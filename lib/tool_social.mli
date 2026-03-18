@@ -14,4 +14,7 @@ val handle_comment_add : context -> Yojson.Safe.t -> result
 val handle_comment_list : context -> Yojson.Safe.t -> result
 val handle_vote : context -> Yojson.Safe.t -> result
 
+(** Tool schemas for MCP tools/list *)
+val schemas : Types.tool_schema list
+
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option

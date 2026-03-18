@@ -95,3 +95,106 @@ let dispatch ctx ~name ~args : result option =
   | "masc_cache_clear" -> Some (handle_cache_clear ctx args)
   | "masc_cache_stats" -> Some (handle_cache_stats ctx args)
   | _ -> None
+
+let schemas : Types.tool_schema list = [
+  (* masc_cache_set *)
+  {
+    name = "masc_cache_set";
+    description = "Store a key-value pair in shared cache with optional TTL and tags for cross-agent data sharing. \
+Use when caching file contents, API responses, or expensive computations for reuse by other agents. \
+Retrieve with masc_cache_get. Browse entries with masc_cache_list.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("key", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Cache key (e.g., 'file:src/main.ts', 'jira:PK-123')");
+        ]);
+        ("value", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Value to cache");
+        ]);
+        ("ttl_seconds", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Time-to-live in seconds. Omit for no expiry.");
+        ]);
+        ("tags", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Tags for filtering (e.g., ['file', 'typescript'])");
+        ]);
+      ]);
+      ("required", `List [`String "key"; `String "value"]);
+    ];
+  };
+
+  (* masc_cache_get *)
+  {
+    name = "masc_cache_get";
+    description = "Retrieve a cached entry by key; returns null if not found or expired. \
+Use when you need data previously stored by yourself or another agent via masc_cache_set. \
+If miss, check masc_cache_list to verify the key exists or re-populate with masc_cache_set.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("key", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Cache key to retrieve");
+        ]);
+      ]);
+      ("required", `List [`String "key"]);
+    ];
+  };
+
+  (* masc_cache_delete *)
+  {
+    name = "masc_cache_delete";
+    description = "Remove a specific cache entry by key; no error if key does not exist. \\nUse when invalidating stale data, clearing a specific key, or freeing memory. \\nFind keys first with masc_cache_list. For bulk cleanup, use masc_cache_clear instead.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("key", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Cache key to delete");
+        ]);
+      ]);
+      ("required", `List [`String "key"]);
+    ];
+  };
+
+  (* masc_cache_list *)
+  {
+    name = "masc_cache_list";
+    description = "List cache entries with keys, TTL remaining, and tags; optionally filter by tag. \\nUse when browsing cached data before cleanup or looking for specific entries across agents. \\nPair with masc_cache_delete for targeted removal or masc_cache_stats for aggregate health.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("tag", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by tag (optional)");
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_cache_clear *)
+  {
+    name = "masc_cache_clear";
+    description = "Delete ALL cache entries (destructive, cannot undo). \\nUse only when resetting room state, debugging persistent cache issues, or starting fresh. \\nPrefer masc_cache_delete for targeted cleanup. Check masc_cache_stats before clearing.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  (* masc_cache_stats *)
+  {
+    name = "masc_cache_stats";
+    description = "Get aggregate cache statistics: total entries, memory size, oldest/newest entry age, hit/miss ratio. \\nUse when monitoring cache health, deciding whether to clear, or debugging performance issues. \\nPair with masc_cache_list for per-entry details, masc_cache_clear for full reset.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+]

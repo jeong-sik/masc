@@ -184,6 +184,106 @@ let schemas : Types.tool_schema list = [
       ]);
     ];
   };
+
+  (* masc_relay_checkpoint *)
+  {
+    name = "masc_relay_checkpoint";
+    description = "Save a checkpoint of current work state (summary, TODOs, relevant files) for smooth handoff. \
+Use when completing a subtask or before starting a complex operation. \
+Pair with masc_relay_now to trigger handoff, or masc_relay_status to check if relay is needed.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("summary", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Brief summary of work done so far");
+        ]);
+        ("current_task", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Current task being worked on (optional)");
+        ]);
+        ("todos", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "List of remaining TODO items");
+        ]);
+        ("pdca_state", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Current PDCA cycle state (optional)");
+        ]);
+        ("relevant_files", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "List of files being worked on");
+        ]);
+      ]);
+      ("required", `List [`String "summary"]);
+    ];
+  };
+
+  (* masc_relay_now *)
+  {
+    name = "masc_relay_now";
+    description = "Trigger immediate relay to a new agent with compressed context. \
+Use when context is getting full (>70%) or before a task that will overflow. \
+Call masc_relay_checkpoint first to save state. The successor continues where you left off.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("summary", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Summary of work for handoff");
+        ]);
+        ("current_task", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task to continue (optional)");
+        ]);
+        ("target_agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to relay to (default: claude)");
+          ("default", `String "claude");
+        ]);
+        ("generation", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Current relay generation (default: 0)");
+          ("default", `Int 0);
+        ]);
+      ]);
+      ("required", `List [`String "summary"]);
+    ];
+  };
+
+  (* masc_relay_smart_check *)
+  {
+    name = "masc_relay_smart_check";
+    description = "Proactive relay check with task complexity hint. Predicts if the next task will overflow context. \
+Use when about to start a large_file, multi_file, or long_running task. \
+Returns relay recommendation before you commit. Pair with masc_relay_now if relay is advised.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("messages", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Current message count");
+        ]);
+        ("tool_calls", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Current tool call count");
+        ]);
+        ("task_hint", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "large_file"; `String "multi_file"; `String "long_running"; `String "exploration"; `String "simple"]);
+          ("description", `String "Hint about upcoming task complexity");
+        ]);
+        ("file_count", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "For multi_file hint: number of files");
+        ]);
+      ]);
+      ("required", `List [`String "task_hint"]);
+    ];
+  };
+
 ]
 
 let dispatch ctx ~name ~args : result option =

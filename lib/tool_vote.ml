@@ -97,3 +97,94 @@ let[@warning "-32"] oas_tools (ctx : context) : Agent_sdk.Tool.t list =
       ])
       (fun args -> handle_votes ctx args);
   ]
+
+let schemas : Types.tool_schema list = [
+  (* masc_vote_create *)
+  {
+    name = "masc_vote_create";
+    description = "Create a vote for multi-agent consensus on a decision (approach, PR approval, architecture). \
+Use when 2+ agents need to agree before proceeding. All active agents can participate. \
+Pair with masc_vote_cast to collect votes and masc_vote_status to check the result.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("proposer", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name (vote creator)");
+        ]);
+        ("topic", `Assoc [
+          ("type", `String "string");
+          ("description", `String "What are we voting on? (e.g., 'Approach for API refactoring')");
+        ]);
+        ("options", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Vote options (e.g., ['Option A: REST', 'Option B: GraphQL'])");
+        ]);
+        ("required_votes", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of votes needed to resolve (usually 2 or 3)");
+          ("default", `Int 2);
+        ]);
+      ]);
+      ("required", `List [`String "proposer"; `String "topic"; `String "options"]);
+    ];
+  };
+
+  (* masc_vote_cast *)
+  {
+    name = "masc_vote_cast";
+    description = "Cast your vote on an active proposal. Choice must match one of the options exactly. \
+Call when you receive a vote notification or see an open vote in masc_votes. \
+After masc_vote_create; check masc_vote_status to see if quorum is reached.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+        ("vote_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Vote ID from masc_vote_create");
+        ]);
+        ("choice", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your choice (must match an option exactly)");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "vote_id"; `String "choice"]);
+    ];
+  };
+
+  (* masc_vote_status *)
+  {
+    name = "masc_vote_status";
+    description = "Get the current tally and result of a specific vote. \
+Use when you want to check if quorum has been reached or see who voted for what. \
+After masc_vote_create or masc_vote_cast; pair with masc_votes to list all votes.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("vote_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Vote ID to check");
+        ]);
+      ]);
+      ("required", `List [`String "vote_id"]);
+    ];
+  };
+
+  (* masc_votes *)
+  {
+    name = "masc_votes";
+    description = "List all votes in the room (active and resolved) with their tallies and status. \
+Use when you want an overview of pending decisions or past consensus outcomes. \
+Pair with masc_vote_cast to participate or masc_vote_create to start a new vote.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+]

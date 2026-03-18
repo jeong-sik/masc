@@ -57,7 +57,7 @@ function SemanticPanelBody({ panel }: { panel: DashboardSemanticPanel }) {
 export function PanelSemanticDetails({
   panelId,
   compact = false,
-  label = '왜 필요한가',
+  label = '의미 계층',
 }: {
   panelId: string
   compact?: boolean

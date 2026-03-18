@@ -11,10 +11,10 @@ import { Planning } from './goals'
 type WorkSection = 'board' | 'governance' | 'evidence' | 'planning'
 
 const SECTIONS: { id: WorkSection; label: string }[] = [
-  { id: 'board', label: '\uAC8C\uC2DC\uD310' },
-  { id: 'governance', label: '\uAC70\uBC84\uB10C\uC2A4' },
-  { id: 'evidence', label: '\uADFC\uAC70' },
-  { id: 'planning', label: '\uACC4\uD68D' },
+  { id: 'board', label: '게시판' },
+  { id: 'governance', label: '거버넌스' },
+  { id: 'evidence', label: '근거' },
+  { id: 'planning', label: '계획' },
 ]
 
 function isWorkSection(v: string | undefined): v is WorkSection {

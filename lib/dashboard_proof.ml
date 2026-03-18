@@ -530,13 +530,13 @@ let session_summary_json session verdict ~planned_actor_count ~active_actor_coun
     match historical_verdict, live_verdict, verdict_basis with
     | Some "proven", "insufficient", "historical_only" ->
         base_detail
-        ^ " Historical proof says this session was proved, but current live evidence is missing or stale."
+        ^ " 과거 proof 기록은 proved였으나 현재 live evidence가 부족하거나 오래됨."
     | Some "proven", "partial", _ ->
         base_detail
-        ^ " Historical proof is stronger than the current live evidence, so the dashboard keeps this as partial."
+        ^ " 과거 proof가 현재 live evidence보다 강해서 partial로 유지."
     | Some historical, _, _ when not (String.equal historical live_verdict) ->
         base_detail
-        ^ Printf.sprintf " Historical proof=%s, live verdict=%s." historical
+        ^ Printf.sprintf " 과거 proof=%s, 현재 live verdict=%s." historical
           live_verdict
     | _ -> base_detail
   in
@@ -544,8 +544,8 @@ let session_summary_json session verdict ~planned_actor_count ~active_actor_coun
   | None ->
       `Assoc
         [
-          ("headline", `String "No collaboration session evidence is currently selected.");
-          ("detail", `String "Provide session_id or start a team session to build proof.");
+          ("headline", `String "선택된 협업 세션이 없습니다.");
+          ("detail", `String "session_id를 제공하거나 team session을 시작해서 근거를 쌓으세요.");
           ("verdict", `String verdict);
           ("live_verdict", `String live_verdict);
           ( "historical_verdict",
@@ -563,21 +563,21 @@ let session_summary_json session verdict ~planned_actor_count ~active_actor_coun
         ]
   | Some session ->
       let headline =
-        Printf.sprintf "%d actors left real traces in '%s'."
-          active_actor_count
+        Printf.sprintf "'%s'에서 %d명이 실제 흔적을 남겼습니다."
           (truncate_preview ~max_len:100 session.Team_session_types.goal)
+          active_actor_count
       in
       let detail =
         if unanswered_actor_count > 0 then
           Printf.sprintf
-            "%d actors were invited or mentioned but still have no reply/tool evidence. Interaction=%d, backing traces=%d."
+            "%d명이 호출되었으나 아직 응답/도구 증거 없음. 상호작용=%d, backing trace=%d."
             unanswered_actor_count interaction_count cp_trace_count
         else if active_actor_count >= 2 && interaction_count = 0 then
           Printf.sprintf
-            "Multiple actors were active, but direct cross-actor interaction is still missing. Backing traces=%d."
+            "여러 참여자가 활동했으나 직접 상호작용 증거가 아직 없음. Backing trace=%d."
             cp_trace_count
         else
-          Printf.sprintf "Interaction=%d, evidence=%d, backing traces=%d."
+          Printf.sprintf "상호작용=%d, 증거=%d, backing trace=%d."
             interaction_count evidence_count cp_trace_count
       in
       `Assoc
@@ -607,18 +607,18 @@ let selection_json ~requested_session_id ~requested_operation_id ~session ~opera
   let mode, reason =
     match requested_session_id, session with
     | Some requested, Some current when String.equal requested current.Team_session_types.session_id ->
-        ("explicit", "Requested session_id matched a recorded collaboration session.")
+        ("explicit", "요청한 session_id가 기록된 협업 세션과 일치.")
     | Some requested, None ->
         ( "requested_not_found",
           Printf.sprintf
-            "Requested session_id '%s' was not found. No proof context is selected."
+            "요청한 session_id '%s'을(를) 찾지 못했습니다. 근거 컨텍스트가 선택되지 않았습니다."
             requested )
     | None, Some _ ->
-        ("latest_auto_selected", "No session_id was supplied, so the most recent session was selected automatically.")
+        ("latest_auto_selected", "session_id가 없어서 가장 최근 세션을 자동 선택.")
     | None, None ->
-        ("none", "No recorded collaboration session is available yet.")
+        ("none", "기록된 협업 세션이 아직 없습니다.")
     | Some _, Some _ ->
-        ("explicit", "Requested session_id matched a recorded collaboration session.")
+        ("explicit", "요청한 session_id가 기록된 협업 세션과 일치.")
   in
   `Assoc
     [

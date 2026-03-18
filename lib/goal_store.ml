@@ -287,8 +287,10 @@ let parse_yyyy_mm_dd s =
             tm_isdst = false;
           }
         in
-        let ts, _ = Unix.mktime tm in
-        Some ts)
+        let local_epoch, _ = Unix.mktime tm in
+        let utc_as_local, _ = Unix.mktime (Unix.gmtime local_epoch) in
+        let tz_offset = local_epoch -. utc_as_local in
+        Some (local_epoch +. tz_offset))
   with exn ->
     Log.Misc.warn "goal_store: parse_yyyy_mm_dd failed: %s" (Printexc.to_string exn);
     None

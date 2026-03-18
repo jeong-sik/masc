@@ -17,7 +17,7 @@ open Printf
 (* Feature Flag                                                      *)
 (* ================================================================ *)
 
-let use_oas_guardrails () = true
+(* OAS guardrails path is always active. *)
 
 (* ================================================================ *)
 (* Verdict -> Hook Decision                                          *)

@@ -30,7 +30,6 @@ module Oas = Agent_sdk
 (* Feature Flag                                                      *)
 (* ================================================================ *)
 
-let use_oas_perpetual () = true
 
 (* ================================================================ *)
 (* Perpetual State — mutable tracking for hook closures              *)
@@ -557,8 +556,5 @@ let run
     ~(config : Perpetual_loop.loop_config)
     ~(state : Perpetual_loop.loop_state)
   : unit =
-  if use_oas_perpetual () then
-    (try run_perpetual_via_oas ~sw ~config ~state
-     with Exit -> ())
-  else
-    Perpetual_loop.run ~config ~state
+  (try run_perpetual_via_oas ~sw ~config ~state
+   with Exit -> ())

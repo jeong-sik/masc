@@ -22,7 +22,7 @@ open Printf
 (* Feature Flag                                                      *)
 (* ================================================================ *)
 
-let use_oas_checkpoint = true
+(* OAS checkpoint path is always active. *)
 
 (* ================================================================ *)
 (* DNA Scope — Custom scope for succession metadata in Context.t     *)

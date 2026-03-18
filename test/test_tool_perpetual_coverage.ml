@@ -9,7 +9,7 @@
 
 module Tool_perpetual = Masc_mcp.Tool_perpetual
 module Perpetual_loop = Masc_mcp.Perpetual_loop
-module Llm_client = Masc_mcp.Llm_client
+module Llm_provider_bridge = Masc_mcp.Llm_provider_bridge
 
 (* ============================================================
    Test Helpers

@@ -464,7 +464,7 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
   | Error e, _ | _, Error e -> Error e
 
 let oas_provider_of_model (model : Llm_types.model_spec) : Oas.Provider.config =
-  match Llm_client.to_oas_provider model with
+  match Llm_provider_bridge.to_oas_provider model with
   | Some config -> config
   | None ->
       (* Fallback for Custom providers — use OpenAICompat with model's api_url *)

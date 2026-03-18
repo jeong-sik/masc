@@ -2,7 +2,7 @@ open Alcotest
 
 module Cache = Masc_mcp.Llm_response_cache
 module Env_config = Masc_mcp.Env_config
-module Llm_client = Masc_mcp.Llm_client
+module Llm_orch = Masc_mcp.Llm_orchestration
 
 let rec rm_rf path =
   if Sys.file_exists path then

@@ -27,10 +27,10 @@ let make_test_messages () : Llm_types.message list =
 
 let test_roundtrip_user_msg () =
   let msg = Llm_types.user_msg "hello world" in
-  match Llm_client.to_oas_message msg with
+  match Llm_provider_bridge.to_oas_message msg with
   | None -> Alcotest.fail "user message should not be dropped"
   | Some oas ->
-    let rt = Llm_client.of_oas_message oas in
+    let rt = Llm_provider_bridge.of_oas_message oas in
     Alcotest.(check string) "role preserved" "user"
       (match rt.role with Llm_types.User -> "user" | _ -> "other");
     Alcotest.(check string) "content preserved"
@@ -38,10 +38,10 @@ let test_roundtrip_user_msg () =
 
 let test_roundtrip_assistant_msg () =
   let msg = Llm_types.assistant_msg "The answer is 42." in
-  match Llm_client.to_oas_message msg with
+  match Llm_provider_bridge.to_oas_message msg with
   | None -> Alcotest.fail "assistant message should not be dropped"
   | Some oas ->
-    let rt = Llm_client.of_oas_message oas in
+    let rt = Llm_provider_bridge.of_oas_message oas in
     Alcotest.(check string) "role preserved" "assistant"
       (match rt.role with Llm_types.Assistant -> "assistant" | _ -> "other");
     Alcotest.(check string) "content preserved"
@@ -49,17 +49,17 @@ let test_roundtrip_assistant_msg () =
 
 let test_roundtrip_system_msg_dropped () =
   let msg = Llm_types.system_msg "system prompt" in
-  let result = Llm_client.to_oas_message msg in
+  let result = Llm_provider_bridge.to_oas_message msg in
   Alcotest.(check bool) "system message dropped (belongs in system_prompt)"
     true (Option.is_none result)
 
 let test_roundtrip_tool_msg () =
   let msg = Llm_types.tool_msg ~name:"calc" ~call_id:"tc-1" "tool output here" in
-  match Llm_client.to_oas_message msg with
+  match Llm_provider_bridge.to_oas_message msg with
   | None -> Alcotest.fail "tool message should not be dropped"
   | Some oas ->
-    let rt = Llm_client.of_oas_message oas in
-    (* Llm_client.to_oas_message preserves Tool role directly (shared type).
+    let rt = Llm_provider_bridge.of_oas_message oas in
+    (* Llm_provider_bridge.to_oas_message preserves Tool role directly (shared type).
        Context_compact_oas.masc_msg_to_oas uses sentinel-tagging instead. *)
     Alcotest.(check string) "tool role preserved"
       "tool"

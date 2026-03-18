@@ -1,7 +1,7 @@
 open Alcotest
 
 module Lodge_cascade = Masc_mcp.Lodge_cascade
-module Llm_client = Masc_mcp.Llm_client
+module Llm_provider_bridge = Masc_mcp.Llm_provider_bridge
 
 let with_temp_json contents f =
   let path = Filename.temp_file "lodge_cascade_" ".json" in

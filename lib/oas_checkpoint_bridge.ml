@@ -16,7 +16,7 @@
     @since 2.90.0 *)
 
 (* v0.50: masc_msg_to_oas / oas_msg_to_masc removed — were identity wrappers
-   around Llm_client.to_oas_message / of_oas_message. Call sites inlined. *)
+   around Llm_provider_bridge.to_oas_message / of_oas_message. Call sites inlined. *)
 
 (** Minimal perpetual-loop state needed for OAS checkpoint persistence. *)
 type checkpoint_state = {
@@ -67,7 +67,7 @@ let to_oas_checkpoint
     "trace_id" (`String state.trace_id);
   Agent_sdk.Context.set_scoped oas_ctx Agent_sdk.Context.App
     "masc_version" (`String Version.version);
-  let messages = List.filter_map Llm_client.to_oas_message ctx.messages in
+  let messages = List.filter_map Llm_provider_bridge.to_oas_message ctx.messages in
   {
     Agent_sdk.Checkpoint.version = 3;
     session_id = state.session_id;
@@ -120,4 +120,4 @@ let from_oas_checkpoint (ckpt : Agent_sdk.Checkpoint.t)
 
 (** Convert OAS messages back to MASC messages for working context init. *)
 let restore_messages (oas_msgs : Agent_sdk.Types.message list) : Llm_types.message list =
-  List.map Llm_client.of_oas_message oas_msgs
+  List.map Llm_provider_bridge.of_oas_message oas_msgs

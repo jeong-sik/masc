@@ -827,25 +827,25 @@ let test_integration () = group "Integration" (fun () ->
   assert_true "roundtrip:no_tag_collision" (back_tricky.role = Llm_types.User);
 
   (* 3e. Llm_client OAS type adapters *)
-  let provider_config = Llm_client.to_oas_provider Llm_types.claude_opus in
+  let provider_config = Llm_provider_bridge.to_oas_provider Llm_types.claude_opus in
   assert_true "oas_adapter:claude_mapped" (Option.is_some provider_config);
-  let provider_config_custom = Llm_client.to_oas_provider
+  let provider_config_custom = Llm_provider_bridge.to_oas_provider
     { Llm_types.llama_default with provider = Llm_types.Custom "test" } in
   assert_true "oas_adapter:custom_mapped" (Option.is_some provider_config_custom);
 
   (* 3f. Llm_client message/usage roundtrip *)
   let test_msg = Llm_types.user_msg "test" in
-  (match Llm_client.to_oas_message test_msg with
+  (match Llm_provider_bridge.to_oas_message test_msg with
    | None -> assert_true "oas_adapter:msg_roundtrip" false
    | Some oas_m ->
-     let back_m = Llm_client.of_oas_message oas_m in
+     let back_m = Llm_provider_bridge.of_oas_message oas_m in
      assert_true "oas_adapter:msg_roundtrip" (Llm_types.text_of_message back_m = "test"));
 
   let test_usage : Llm_types.token_usage =
     { Agent_sdk.Types.input_tokens = 100; output_tokens = 50;
       cache_creation_input_tokens = 10; cache_read_input_tokens = 20 } in
-  let oas_u = Llm_client.to_oas_usage test_usage in
-  let back_u = Llm_client.of_oas_usage oas_u in
+  let oas_u = Llm_provider_bridge.to_oas_usage test_usage in
+  let back_u = Llm_provider_bridge.of_oas_usage oas_u in
   assert_equal "oas_adapter:usage_input" 100 back_u.input_tokens;
   assert_equal "oas_adapter:usage_output" 50 back_u.output_tokens;
 

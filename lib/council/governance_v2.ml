@@ -741,6 +741,17 @@ let submit_petition base_path ~title ~origin ~subject_type ~risk_class
             },
             false )
     in
+    (* Skip duplicate petition: if case already has a petition with same key,
+       just return the existing case without adding another petition.
+       This prevents sentinel sweeps from accumulating 41+ petitions per task. *)
+    if merged && List.length case_.petition_ids > 0 then
+      Ok { petition = {
+             id = ""; case_id = case_.id; title; normalized_key;
+             origin; subject_type; risk_class; requested_action;
+             source_refs; created_by; created_at = now;
+           };
+           case_; merged = true }
+    else
     let petition =
       {
         id = generate_id "petition";

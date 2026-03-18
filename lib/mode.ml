@@ -390,8 +390,20 @@ let tool_category tool_name =
   | "masc_spawn"
   | "masc_async_spawn" | "masc_job_status" | "masc_job_list" -> Ecosystem
 
-  (* ── TRPG (canonical names only) ── *)
-  | "trpg_roleplay" -> TRPG
+  (* ── TRPG (canonical + legacy masc_trpg_* names) ── *)
+  | "trpg_roleplay"
+  | "masc_trpg_actor_claim" | "masc_trpg_actor_delete"
+  | "masc_trpg_actor_match" | "masc_trpg_actor_release"
+  | "masc_trpg_actor_spawn" | "masc_trpg_actor_update"
+  | "masc_trpg_dice_roll"
+  | "masc_trpg_intervention_submit"
+  | "masc_trpg_join_eligibility" | "masc_trpg_mid_join_request"
+  | "masc_trpg_party_select" | "masc_trpg_pool_generate"
+  | "masc_trpg_preset_list"
+  | "masc_trpg_quest_update" | "masc_trpg_round_run"
+  | "masc_trpg_scene_transition"
+  | "masc_trpg_session_start" | "masc_trpg_stream"
+  | "masc_trpg_turn_advance" | "masc_trpg_world_event" -> TRPG
 
   (* ── Deprecated/archived tools (hidden via tool_catalog, excluded from presets) ── *)
 
@@ -402,6 +414,7 @@ let tool_category tool_name =
   | _ when String.starts_with ~prefix:"experiment." tool_name -> Ecosystem
   | _ when String.starts_with ~prefix:"experiment_" tool_name -> Ecosystem
   | _ when String.starts_with ~prefix:"trpg." tool_name -> TRPG
+  | _ when String.starts_with ~prefix:"masc_trpg_" tool_name -> TRPG
   | _ when String.starts_with ~prefix:"client." tool_name -> Core_Ops
   | _ when String.starts_with ~prefix:"client_" tool_name -> Core_Ops
 

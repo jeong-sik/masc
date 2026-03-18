@@ -214,7 +214,7 @@ MASC_POSTGRES_URL="..." dune exec _build/default/test/test_board_pg.exe
 ### 환경변수 설정
 
 ```bash
-# 활성화 (기본: false)
+# 활성화 (기본: true, 비활성화하려면 =false)
 MASC_GARDENER_ENABLED=true
 
 # 인원 제한

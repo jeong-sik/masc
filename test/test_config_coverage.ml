@@ -75,12 +75,12 @@ let test_of_json_valid () =
     ("enabled_categories", `List []);
   ] in
   let config = Config.of_json json in
-  check bool "parsed mode" true (config.mode = Mode.Standard)
+  check bool "always Full" true (config.mode = Mode.Full)
 
 let test_of_json_minimal () =
   let json = `Assoc [("mode", `String "minimal")] in
   let config = Config.of_json json in
-  check bool "minimal mode" true (config.mode = Mode.Minimal)
+  check bool "always Full" true (config.mode = Mode.Full)
 
 let test_of_json_full () =
   let json = `Assoc [("mode", `String "full")] in
@@ -90,12 +90,12 @@ let test_of_json_full () =
 let test_of_json_parallel () =
   let json = `Assoc [("mode", `String "parallel")] in
   let config = Config.of_json json in
-  check bool "parallel mode" true (config.mode = Mode.Parallel)
+  check bool "always Full" true (config.mode = Mode.Full)
 
 let test_of_json_solo () =
   let json = `Assoc [("mode", `String "solo")] in
   let config = Config.of_json json in
-  check bool "solo mode" true (config.mode = Mode.Solo)
+  check bool "always Full" true (config.mode = Mode.Full)
 
 let test_of_json_invalid_mode () =
   let json = `Assoc [("mode", `String "invalid")] in
@@ -113,7 +113,7 @@ let test_of_json_custom_with_categories () =
     ("enabled_categories", `List [`String "task"; `String "agent"]);
   ] in
   let config = Config.of_json json in
-  check bool "custom mode" true (config.mode = Mode.Custom)
+  check bool "always Full" true (config.mode = Mode.Full)
 
 (* ============================================================
    Roundtrip Tests
@@ -131,7 +131,7 @@ let test_roundtrip_minimal () =
   } in
   let json = Config.to_json config in
   let config' = Config.of_json json in
-  check bool "roundtrip minimal" true (config'.mode = Mode.Minimal)
+  check bool "roundtrip always Full" true (config'.mode = Mode.Full)
 
 let test_roundtrip_full () =
   let config : Config.t = {
@@ -186,102 +186,31 @@ let test_save_creates_file () =
    switch_mode Tests
    ============================================================ *)
 
-let test_switch_mode_minimal () =
+let test_switch_mode_noop () =
   let dir = setup_temp_dir () in
   let config = Config.switch_mode dir Mode.Minimal in
   cleanup_temp_dir dir;
-  check bool "switched to Minimal" true (config.mode = Mode.Minimal)
-
-let test_switch_mode_full () =
-  let dir = setup_temp_dir () in
-  let config = Config.switch_mode dir Mode.Full in
-  cleanup_temp_dir dir;
-  check bool "switched to Full" true (config.mode = Mode.Full)
-
-let test_switch_mode_persists () =
-  let dir = setup_temp_dir () in
-  let _ = Config.switch_mode dir Mode.Parallel in
-  let loaded = Config.load dir in
-  cleanup_temp_dir dir;
-  check bool "persisted Parallel" true (loaded.mode = Mode.Parallel)
-
-let test_switch_mode_writes_audit_event () =
-  let dir = setup_temp_dir () in
-  let _ =
-    Config.switch_mode ~actor:"tester" ~source:"masc_switch_mode" dir
-      Mode.Minimal
-  in
-  let audit_path = Filename.concat dir "audit.jsonl" in
-  let json =
-    match Fs_compat.load_jsonl audit_path with
-    | first :: _ -> first
-    | [] -> fail "expected audit event"
-  in
-  let open Yojson.Safe.Util in
-  check string "event_type" "mode_change"
-    (json |> member "event_type" |> to_string);
-  check string "agent" "tester" (json |> member "agent" |> to_string);
-  check string "source" "masc_switch_mode"
-    (json |> member "source" |> to_string);
-  check string "previous_mode" "full"
-    (json |> member "previous_mode" |> to_string);
-  check string "mode" "minimal" (json |> member "mode" |> to_string);
-  cleanup_temp_dir dir
+  check bool "always Full" true (config.mode = Mode.Full)
 
 (* ============================================================
    set_categories Tests
    ============================================================ *)
 
-let test_set_categories () =
+let test_set_categories_noop () =
   let dir = setup_temp_dir () in
-  let cats = [Mode.Core; Mode.Comm] in
-  let config = Config.set_categories dir cats in
+  let config = Config.set_categories dir [Mode.Core; Mode.Comm] in
   cleanup_temp_dir dir;
-  check bool "Custom mode" true (config.mode = Mode.Custom);
-  check int "2 categories" 2 (List.length config.enabled_categories)
-
-let test_set_categories_persists () =
-  let dir = setup_temp_dir () in
-  let cats = [Mode.Core] in
-  let _ = Config.set_categories dir cats in
-  let loaded = Config.load dir in
-  cleanup_temp_dir dir;
-  check bool "Custom mode loaded" true (loaded.mode = Mode.Custom)
+  check bool "always Full" true (config.mode = Mode.Full)
 
 (* ============================================================
    enable_category / disable_category Tests
    ============================================================ *)
 
-let test_enable_category () =
+let test_enable_disable_noop () =
   let dir = setup_temp_dir () in
-  let _ = Config.set_categories dir [Mode.Core] in
   let config = Config.enable_category dir Mode.Comm in
   cleanup_temp_dir dir;
-  check bool "has Comm" true (List.mem Mode.Comm config.enabled_categories);
-  check bool "has Core" true (List.mem Mode.Core config.enabled_categories)
-
-let test_enable_category_duplicate () =
-  let dir = setup_temp_dir () in
-  let _ = Config.set_categories dir [Mode.Core] in
-  let config = Config.enable_category dir Mode.Core in
-  cleanup_temp_dir dir;
-  let core_count = List.length (List.filter (fun c -> c = Mode.Core) config.enabled_categories) in
-  check int "no duplicate" 1 core_count
-
-let test_disable_category () =
-  let dir = setup_temp_dir () in
-  let _ = Config.set_categories dir [Mode.Core; Mode.Comm] in
-  let config = Config.disable_category dir Mode.Core in
-  cleanup_temp_dir dir;
-  check bool "removed Core" false (List.mem Mode.Core config.enabled_categories);
-  check bool "kept Comm" true (List.mem Mode.Comm config.enabled_categories)
-
-let test_disable_category_not_present () =
-  let dir = setup_temp_dir () in
-  let _ = Config.set_categories dir [Mode.Core] in
-  let config = Config.disable_category dir Mode.Comm in
-  cleanup_temp_dir dir;
-  check bool "Core still there" true (List.mem Mode.Core config.enabled_categories)
+  check bool "always Full" true (config.mode = Mode.Full)
 
 (* ============================================================
    get_config_summary Tests
@@ -305,13 +234,13 @@ let test_get_config_summary_has_tool_count () =
   | `Assoc fields -> check bool "has enabled_tool_count" true (List.mem_assoc "enabled_tool_count" fields)
   | _ -> fail "expected Assoc"
 
-let test_get_config_summary_has_available_modes () =
+let test_get_config_summary_has_mode_note () =
   let dir = setup_temp_dir () in
   Config.save dir Config.default;
   let summary = Config.get_config_summary dir in
   cleanup_temp_dir dir;
   match summary with
-  | `Assoc fields -> check bool "has available_modes" true (List.mem_assoc "available_modes" fields)
+  | `Assoc fields -> check bool "has mode_note" true (List.mem_assoc "mode_note" fields)
   | _ -> fail "expected Assoc"
 
 let test_get_config_summary_has_categories () =
@@ -392,25 +321,18 @@ let () =
       test_case "save creates file" `Quick test_save_creates_file;
     ];
     "switch_mode", [
-      test_case "minimal" `Quick test_switch_mode_minimal;
-      test_case "full" `Quick test_switch_mode_full;
-      test_case "persists" `Quick test_switch_mode_persists;
-      test_case "writes audit event" `Quick test_switch_mode_writes_audit_event;
+      test_case "noop returns Full" `Quick test_switch_mode_noop;
     ];
     "set_categories", [
-      test_case "basic" `Quick test_set_categories;
-      test_case "persists" `Quick test_set_categories_persists;
+      test_case "noop returns Full" `Quick test_set_categories_noop;
     ];
     "enable_disable", [
-      test_case "enable" `Quick test_enable_category;
-      test_case "enable duplicate" `Quick test_enable_category_duplicate;
-      test_case "disable" `Quick test_disable_category;
-      test_case "disable not present" `Quick test_disable_category_not_present;
+      test_case "noop returns Full" `Quick test_enable_disable_noop;
     ];
     "get_config_summary", [
       test_case "has mode" `Quick test_get_config_summary_has_mode;
       test_case "has tool count" `Quick test_get_config_summary_has_tool_count;
-      test_case "has available modes" `Quick test_get_config_summary_has_available_modes;
+      test_case "has mode note" `Quick test_get_config_summary_has_mode_note;
       test_case "has categories" `Quick test_get_config_summary_has_categories;
       test_case "has mode description" `Quick test_get_config_summary_mode_description;
     ];

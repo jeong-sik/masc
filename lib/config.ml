@@ -11,8 +11,7 @@ type t = {
   enabled_categories : category list;
 }
 
-(** Default configuration — Full mode exposes all tools.
-    Agents can switch to a narrower mode via masc_switch_mode. *)
+(** Default configuration — always Full mode. Mode switching has been removed. *)
 let default = {
   mode = Full;
   enabled_categories = categories_for_mode Full;
@@ -32,30 +31,8 @@ let to_json config =
     ("enabled_categories", categories_to_json config.enabled_categories);
   ]
 
-(** Parse config from JSON *)
-let of_json json =
-  try
-    let mode_str =
-      match Yojson.Safe.Util.member "mode" json with
-      | `String s -> s
-      | _ -> "full"
-    in
-    let mode =
-      match mode_of_string mode_str with
-      | Some m -> m
-      | None -> Full
-    in
-    let enabled_categories =
-      match mode with
-      | Custom ->
-        let cats_json = Yojson.Safe.Util.member "enabled_categories" json in
-        categories_of_json cats_json
-      | _ -> categories_for_mode mode
-    in
-    { mode; enabled_categories }
-  with e ->
-    Log.Misc.error "config of_json failed: %s" (Printexc.to_string e);
-    default
+(** Parse config from JSON — always returns Full mode regardless of stored value. *)
+let of_json _json = default
 
 (** Load config from file *)
 let load room_path =
@@ -207,39 +184,17 @@ let enabled_tool_schemas ?(include_hidden = false) ?(include_deprecated = false)
          if include_hidden then true
          else Mode.is_tool_enabled enabled_categories schema.name)
 
-(** Switch to a preset mode *)
-let switch_mode ?actor ?source room_path mode =
-  let previous_config = load room_path in
-  let enabled_categories = categories_for_mode mode in
-  let config = { mode; enabled_categories } in
-  save room_path config;
-  append_mode_change_audit ~actor ~source ~room_path ~previous_config ~config;
-  config
+(** Switch mode — no-op, always returns Full. *)
+let switch_mode ?actor:_ ?source:_ _room_path _mode = default
 
-(** Enable specific categories (switches to Custom mode) *)
-let set_categories ?actor ?source room_path categories =
-  let previous_config = load room_path in
-  let config = { mode = Custom; enabled_categories = categories } in
-  save room_path config;
-  append_mode_change_audit ~actor ~source ~room_path ~previous_config ~config;
-  config
+(** Set categories — no-op, always returns Full. *)
+let set_categories ?actor:_ ?source:_ _room_path _categories = default
 
-(** Enable a category *)
-let enable_category ?actor ?source room_path category =
-  let current = load room_path in
-  let new_cats =
-    if List.mem category current.enabled_categories then
-      current.enabled_categories
-    else
-      category :: current.enabled_categories
-  in
-  set_categories ?actor ?source room_path new_cats
+(** Enable a category — no-op, always returns Full. *)
+let enable_category ?actor:_ ?source:_ _room_path _category = default
 
-(** Disable a category *)
-let disable_category ?actor ?source room_path category =
-  let current = load room_path in
-  let new_cats = List.filter (fun c -> c <> category) current.enabled_categories in
-  set_categories ?actor ?source room_path new_cats
+(** Disable a category — no-op, always returns Full. *)
+let disable_category ?actor:_ ?source:_ _room_path _category = default
 
 (** Get current config summary as JSON for tool response *)
 let get_config_summary room_path =
@@ -259,12 +214,5 @@ let get_config_summary room_path =
     ("enabled_tool_count", `Int tool_count);
     ("placeholder_tools_enabled", `Bool (Tool_catalog.placeholder_tools_enabled ()));
     ("hidden_placeholder_tools", `List (List.map (fun s -> `String s) hidden_placeholder_tools));
-    ("available_modes", `List [
-      `Assoc [("name", `String "minimal"); ("description", `String (mode_description Minimal))];
-      `Assoc [("name", `String "standard"); ("description", `String (mode_description Standard))];
-      `Assoc [("name", `String "parallel"); ("description", `String (mode_description Parallel))];
-      `Assoc [("name", `String "coding"); ("description", `String (mode_description Coding))];
-      `Assoc [("name", `String "full"); ("description", `String (mode_description Full))];
-      `Assoc [("name", `String "solo"); ("description", `String (mode_description Solo))];
-    ]);
+    ("mode_note", `String "Mode is hardcoded to Full. Mode switching has been removed.");
   ]

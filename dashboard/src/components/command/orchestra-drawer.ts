@@ -55,17 +55,17 @@ function jumpTo(tab: string, surface: CommandPlaneSurface | string | null | unde
   if (tab === 'command') {
     if (surface) {
       setCommandPlaneSurface(surface as CommandPlaneSurface)
-      navigate('command', { ...surfaceRouteParams(surface as CommandPlaneSurface), ...params })
+      navigate('lab', { ...surfaceRouteParams(surface as CommandPlaneSurface), ...params })
       return
     }
-    navigate('command', params)
+    navigate('lab', params)
     return
   }
   if (tab === 'intervene') {
-    navigate('intervene', params)
+    navigate('control', params)
     return
   }
-  navigate('command', params)
+  navigate('lab', params)
 }
 
 // ── Node rendering helpers ──────────────────────────────

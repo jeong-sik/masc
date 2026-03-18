@@ -56,7 +56,7 @@ function SurfaceTabs() {
                   class="command-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
                   onClick=${() => {
                     setCommandPlaneSurface(surface.id)
-                    navigate('command', surfaceRouteParams(surface.id))
+                    navigate('lab', surfaceRouteParams(surface.id))
                   }}
                 >
                   ${surface.label}
@@ -255,7 +255,7 @@ export function Command() {
               class="control-btn ghost"
               onClick=${() => {
                 setCommandPlaneSurface('warroom')
-                navigate('command', { ...surfaceRouteParams('warroom'), presentation: 'wallboard' })
+                navigate('lab', { ...surfaceRouteParams('warroom'), presentation: 'wallboard' })
               }}
             >
               Wallboard

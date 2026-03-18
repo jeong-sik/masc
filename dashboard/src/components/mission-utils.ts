@@ -99,19 +99,19 @@ export function actionTargetLabel(action?: OperatorRecommendedAction | null): st
 }
 
 function navigateWithContext(
-  tab: 'intervene' | 'command',
+  tab: 'control' | 'lab',
   context = createMissionWorkflowContext(),
 ): void {
   persistWorkflowContext(context)
-  navigate(tab, tab === 'intervene' ? missionInterveneParams(context) : missionCommandParams(context))
+  navigate(tab, tab === 'control' ? missionInterveneParams(context) : missionCommandParams(context))
 }
 
 export function openIncidentIntervene(item: OperatorAttentionItem): void {
-  navigateWithContext('intervene', createMissionWorkflowContext(null, item, '상황판 incident'))
+  navigateWithContext('control', createMissionWorkflowContext(null, item, '상황판 incident'))
 }
 
 export function openIncidentCommand(item: OperatorAttentionItem): void {
-  navigateWithContext('command', createMissionWorkflowContext(null, item, '상황판 incident'))
+  navigateWithContext('lab', createMissionWorkflowContext(null, item, '상황판 incident'))
 }
 
 export function openActionIntervene(
@@ -119,7 +119,7 @@ export function openActionIntervene(
   incident?: OperatorAttentionItem | null,
   sourceLabel = '상황판 추천 액션',
 ): void {
-  navigateWithContext('intervene', createMissionWorkflowContext(action, incident, sourceLabel))
+  navigateWithContext('control', createMissionWorkflowContext(action, incident, sourceLabel))
 }
 
 export function openActionCommand(
@@ -127,17 +127,17 @@ export function openActionCommand(
   incident?: OperatorAttentionItem | null,
   sourceLabel = '상황판 추천 액션',
 ): void {
-  navigateWithContext('command', createMissionWorkflowContext(action, incident, sourceLabel))
+  navigateWithContext('lab', createMissionWorkflowContext(action, incident, sourceLabel))
 }
 
-export function openSession(tab: 'intervene' | 'command', sessionId: string): void {
+export function openSession(tab: 'control' | 'lab', sessionId: string): void {
   const params: Record<string, string> = {
     source: 'mission',
     target_type: 'team_session',
     target_id: sessionId,
     focus_kind: 'team_session',
   }
-  if (tab === 'command') params.surface = 'swarm'
+  if (tab === 'lab') params.surface = 'swarm'
   navigate(tab, params)
 }
 

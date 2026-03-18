@@ -122,3 +122,82 @@ let dispatch ctx ~name ~args : result option =
   | "masc_heartbeat_stop" -> Some (handle_heartbeat_stop ctx args)
   | "masc_heartbeat_list" -> Some (handle_heartbeat_list ctx args)
   | _ -> None
+
+let schemas : Types.tool_schema list = [
+  (* masc_heartbeat *)
+  {
+    name = "masc_heartbeat";
+    description = "Update your heartbeat timestamp to prove you are still active. \
+Call every few minutes during long tasks; agents silent for 5+ min become zombie candidates. \
+Prefer masc_heartbeat_start for automatic pings. Pair with masc_cleanup_zombies to reap stale agents.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
+  (* masc_heartbeat_start *)
+  {
+    name = "masc_heartbeat_start";
+    description = "Start automatic background heartbeat pings at a given interval. \
+Call after masc_join to keep your presence alive during long-running work. \
+Smart mode skips beats when busy. Stop with masc_heartbeat_stop before masc_leave.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("interval", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Interval in seconds between heartbeats (min: 5, max: 300)");
+          ("default", `Int 30);
+        ]);
+        ("message", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Heartbeat message content");
+          ("default", `String "🏓 heartbeat");
+        ]);
+        ("smart", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Enable smart mode: skip when busy, 3x interval when idle >5min");
+          ("default", `Bool false);
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_heartbeat_stop *)
+  {
+    name = "masc_heartbeat_stop";
+    description = "Stop a periodic heartbeat that was started by masc_heartbeat_start. \
+Call when your long task is complete or you are about to masc_leave. \
+Get heartbeat_id from masc_heartbeat_start response or masc_heartbeat_list.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("heartbeat_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "ID of heartbeat to stop (from masc_heartbeat_start)");
+        ]);
+      ]);
+      ("required", `List [`String "heartbeat_id"]);
+    ];
+  };
+
+  (* masc_heartbeat_list *)
+  {
+    name = "masc_heartbeat_list";
+    description = "List all active heartbeat timers in the room with their interval and last beat time. \
+Use when debugging presence issues or looking for orphaned heartbeats before cleanup. \
+Pair with masc_heartbeat_stop to cancel or masc_cleanup_zombies to reap dead agents.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+]

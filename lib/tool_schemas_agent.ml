@@ -271,4 +271,106 @@ Returns approval/deferral/rejection. To execute, follow up with masc_gardener_ex
       ("required", `List [`String "agent_name"]);
     ];
   };
+
+  (* masc_register_capabilities *)
+  {
+    name = "masc_register_capabilities";
+    description = "Register your skill tags so other agents can discover you by capability. \
+Call after masc_join if you did not pass capabilities at join time, or to update them later. \
+Pair with masc_find_by_capability to search others or masc_who to see the full roster.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+        ("capabilities", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "List of your capabilities (e.g., ['typescript', 'testing'])");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "capabilities"]);
+    ];
+  };
+
+  (* masc_find_by_capability *)
+  {
+    name = "masc_find_by_capability";
+    description = "Search for active (non-zombie) agents that have a specific capability tag. \
+Use when you need help with a particular skill (e.g., 'typescript') and want to find the right agent. \
+Pair with masc_broadcast to @mention the found agent or masc_portal_open for direct delegation.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("capability", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Capability to search for (e.g., 'typescript')");
+        ]);
+      ]);
+      ("required", `List [`String "capability"]);
+    ];
+  };
+
+  (* masc_collaboration_graph *)
+  {
+    name = "masc_collaboration_graph";
+    description = "View the Hebbian collaboration graph showing learned agent-to-agent relationship strengths. \
+Use when analyzing which agent pairs collaborate well or planning team composition. \
+Pair with masc_consolidate_learning to prune weak connections, masc_select_agent for dispatch.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("format", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "text"; `String "json"]);
+          ("description", `String "Output format (default: text)");
+          ("default", `String "text");
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_consolidate_learning *)
+  {
+    name = "masc_consolidate_learning";
+    description = "Apply decay to old collaboration patterns and prune weak Hebbian connections. \
+Trigger periodically (e.g., weekly) or after major team changes to keep the graph current. \
+Pair with masc_collaboration_graph to review the graph before and after consolidation.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("decay_after_days", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Apply decay to connections older than this (default: 7)");
+          ("default", `Int 7);
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_get_metrics *)
+  {
+    name = "masc_get_metrics";
+    description = "Fetch raw performance metrics for an agent: task completion data, timing, error rates, and collaboration history. \
+Use when investigating agent performance issues or preparing data for masc_metrics_compare. \
+Pair with masc_agent_fitness for computed scores, masc_audit_stats for security-focused metrics.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent name to get metrics for");
+        ]);
+        ("days", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of days of history (default: 7)");
+          ("default", `Int 7);
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"]);
+    ];
+  };
+
 ]

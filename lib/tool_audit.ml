@@ -293,3 +293,84 @@ let dispatch ctx ~name ~args =
   | "masc_audit_stats" -> Some (handle_audit_stats ctx args)
   | "masc_governance_report" -> Some (handle_governance_report ctx args)
   | _ -> None
+
+let schemas : Types.tool_schema list = [
+  (* masc_audit_query *)
+  {
+    name = "masc_audit_query";
+    description = "Search audit logs for security events: auth success/failure, anomalies, violations, tool calls. \
+Use when investigating suspicious activity, verifying trust, or debugging collaboration issues. \
+Pair with masc_audit_stats for aggregate trust metrics, masc_auth_list for credential status.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by agent name (optional)");
+        ]);
+        ("event_type", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [
+            `String "auth_success";
+            `String "auth_failure";
+            `String "anomaly_detected";
+            `String "security_violation";
+            `String "tool_call";
+            `String "all"
+          ]);
+          ("description", `String "Filter by event type (default: all)");
+          ("default", `String "all");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum events to return (default: 50)");
+          ("default", `Int 50);
+        ]);
+        ("since_hours", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Only show events from last N hours (default: 24)");
+          ("default", `Float 24.0);
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_audit_stats *)
+  {
+    name = "masc_audit_stats";
+    description = "Get aggregate security and trust metrics per agent: auth success rate, anomaly count, task completion rate. \
+Use when evaluating agent reliability before delegating sensitive tasks. \
+Pair with masc_audit_query for detailed event logs, masc_agent_fitness for performance scores.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Specific agent to analyze (optional, shows all if omitted)");
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_governance_report *)
+  {
+    name = "masc_governance_report";
+    description = "Generate a governance summary report from the audit trail, aggregating per-agent action counts, cost, tokens, and failure rates. \
+Use when reviewing room costs, auditing agent behavior, or preparing periodic governance summaries. \
+Pair with masc_governance_set to configure audit policies, or masc_governance_status for a compact overview.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("since", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Start of period as Unix timestamp string (optional, defaults to all time)");
+        ]);
+        ("until", `Assoc [
+          ("type", `String "string");
+          ("description", `String "End of period as Unix timestamp string (optional, defaults to now)");
+        ]);
+      ]);
+    ];
+  };
+
+]

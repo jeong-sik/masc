@@ -122,6 +122,25 @@ let schemas : Types.tool_schema list = [
       ("properties", `Assoc []);
     ];
   };
+
+  (* masc_generate_key *)
+  {
+    name = "masc_generate_key";
+    description = "Generate a random 256-bit encryption key in hex or base64 format. \
+Use when setting up encryption for the first time or rotating keys. \
+Store the key securely. Pair with masc_encryption_enable to apply.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("output", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Output format: 'hex' (64 chars), 'base64' (44 chars)");
+          ("default", `String "hex");
+        ]);
+      ]);
+    ];
+  };
+
 ]
 
 let dispatch ctx ~name ~args : result option =

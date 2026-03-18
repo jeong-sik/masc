@@ -357,17 +357,6 @@
    telemetry_eio
    tempo
    tools
-   tools_schemas_01
-   tools_schemas_02
-   tools_schemas_03
-   tools_schemas_04
-   tools_schemas_05
-   tools_schemas_06
-   tools_schemas_07
-   tools_schemas_08
-   tools_schemas_09
-   tools_schemas_10
-   tools_schemas_11
    tool_args
    tool_schemas_plan
    tool_schemas_portal
@@ -375,6 +364,9 @@
    tool_schemas_auth
    tool_schemas_agent
    tool_schemas_room
+   tool_schemas_control
+   tool_schemas_a2a
+   tool_schemas_misc
    tool_plan
    tool_run
    tool_bridge
@@ -575,6 +567,9 @@
  tool_schemas_auth
  tool_schemas_agent
  tool_schemas_room
+ tool_schemas_control
+ tool_schemas_a2a
+ tool_schemas_misc
  env_config_core
    env_config_runtime
    env_config_governance
@@ -736,17 +731,6 @@
  tool_lodge_agents_ops
  tool_lodge_project
  tool_lodge_autonomous
- tools_schemas_01
- tools_schemas_02
- tools_schemas_03
- tools_schemas_04
- tools_schemas_05
- tools_schemas_06
- tools_schemas_07
- tools_schemas_08
- tools_schemas_09
- tools_schemas_10
- tools_schemas_11
  env_config_core
  env_config_runtime
  env_config_governance

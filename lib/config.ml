@@ -109,9 +109,12 @@ let dedupe_schemas (schemas : Types.tool_schema list) =
 let raw_all_tool_schemas : Types.tool_schema list =
   dedupe_schemas
     (Tools.raw_schemas
+    (* Config-dependent modules: schemas split into Tool_schemas_*.ml to avoid cycle *)
+    @ Tool_schemas_control.schemas
+    @ Tool_schemas_a2a.schemas
+    @ Tool_schemas_misc.schemas
     @ Tool_board.tools
     @ Tool_lodge.tools
-    (* Tool_perpetual: 0 calls in 6-day audit *)
     @ Tool_mdal.schemas
     @ Tool_keeper.schemas
     @ Tool_operator.schemas
@@ -125,7 +128,6 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_trpg.schemas
     @ Tool_compact.schemas
     @ Tool_async_spawn.schemas
-    (* Tool_code_swarm: 0 calls in 6-day audit *)
     )
 
 (** Validate tool schemas at module initialization time.

@@ -64,6 +64,81 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
       ("properties", `Assoc []);
     ];
   };
+
+  (* masc_tempo_get *)
+  {
+    name = "masc_tempo_get";
+    description = "Read the current orchestrator check interval and adaptive tempo status. \
+Use when checking how frequently the orchestrator polls before adjusting tempo. \
+Pair with masc_tempo_set to change interval or masc_tempo_adjust for auto-tuning.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  (* masc_tempo_set *)
+  {
+    name = "masc_tempo_set";
+    description = "Set the orchestrator check interval manually (clamped 60s-600s). \
+Use when you need a specific polling frequency for intensive or idle work phases. \
+Check current value with masc_tempo_get first. Use masc_tempo_reset to return to default 300s.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("interval_seconds", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Check interval in seconds (60-600)");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Reason for tempo change");
+        ]);
+      ]);
+      ("required", `List [`String "interval_seconds"]);
+    ];
+  };
+
+  (* masc_tempo_adjust *)
+  {
+    name = "masc_tempo_adjust";
+    description = "Auto-tune orchestrator tempo based on pending task urgency: fast for urgent, slow when idle. \
+Call when you want the system to pick the right interval without manual calculation. \
+Pair with masc_tempo_get to see the resulting interval after adjustment.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
+
+  (* masc_tempo *)
+  {
+    name = "masc_tempo";
+    description = "Read or change cluster-wide tempo (pace) in one call: get current or set normal/slow/fast/paused. \
+Use when switching between careful review (slow) and batch processing (fast). \
+For finer control, use masc_tempo_set (exact interval) or masc_tempo_adjust (auto-tune).";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("action", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "get"; `String "set"]);
+          ("description", `String "Get current tempo or set new tempo");
+        ]);
+        ("mode", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "normal"; `String "slow"; `String "fast"; `String "paused"]);
+          ("description", `String "Tempo mode (only for set action)");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Why changing tempo");
+        ]);
+      ]);
+      ("required", `List [`String "action"]);
+    ];
+  };
+
 ]
 
 (** {1 Dispatcher} *)

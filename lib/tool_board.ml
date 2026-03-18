@@ -11,6 +11,36 @@
 
 open Tool_args
 
+(** Strip [STATE]...[/STATE] blocks from text (inlined to avoid
+    Keeper_prompt dependency which creates a cycle via Keeper_alerting). *)
+let strip_state_blocks_text (s : string) : string =
+  let start_marker = "[STATE]" in
+  let end_marker = "[/STATE]" in
+  let start_re = Str.regexp_string start_marker in
+  let end_re = Str.regexp_string end_marker in
+  let len = String.length s in
+  let rec loop from (buf : Buffer.t) =
+    if from >= len then ()
+    else
+      try
+        let i = Str.search_forward start_re s from in
+        if i > from then Buffer.add_substring buf s from (i - from);
+        let block_start = i + String.length start_marker in
+        let next_from =
+          try
+            let j = Str.search_forward end_re s block_start in
+            j + String.length end_marker
+          with Not_found ->
+            len
+        in
+        loop next_from buf
+      with Not_found ->
+        Buffer.add_substring buf s from (len - from)
+  in
+  let buf = Buffer.create len in
+  loop 0 buf;
+  Buffer.contents buf
+
 type result = bool * string
 
 type board_event_callback = {
@@ -122,9 +152,9 @@ let format_comment_tree ?(max_depth=5) (comments : Board.comment list) =
 
 let handle_post_create args =
   let title = get_string_opt args "title" in
-  let body = get_string_opt args "body" |> Option.map Keeper_prompt.strip_state_blocks_text in
+  let body = get_string_opt args "body" |> Option.map strip_state_blocks_text in
   let raw_content = match body with Some value -> value | None -> get_string args "content" "" in
-  let content = Keeper_prompt.strip_state_blocks_text raw_content in
+  let content = strip_state_blocks_text raw_content in
   let author = get_string args "author" "anonymous" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
   let visibility_str = get_string args "visibility" "internal" in

@@ -356,6 +356,8 @@
  (modules test_room_messages_raw)
  (libraries masc_mcp alcotest unix))
 
+; TRPG tests moved to sublibrary (#1668)
+
 (test
  (name test_tool_goals)
  (modules test_tool_goals)
@@ -427,6 +429,8 @@
  (name test_local_runtime_pool)
  (modules test_local_runtime_pool)
  (libraries masc_mcp alcotest unix))
+
+; TRPG tests moved to sublibrary (#1668)
 
 (test
  (name test_tool_keeper)
@@ -684,6 +688,8 @@
  (libraries alcotest yojson unix)
  (deps ../bin/main_eio.exe))
 
+; TRPG tests moved to sublibrary (#1668)
+
 ; Operator MCP endpoint-level supervision tests
 (test
  (name test_operator_mcp_e2e)
@@ -771,6 +777,8 @@
  (name test_perpetual)
  (modules test_perpetual)
  (libraries masc_mcp str yojson unix))
+
+; TRPG tests moved to sublibrary (#1668)
 
 ; ============================================================
 ; Keeper Agent Harness tests (trajectory + eval gates + scenarios)

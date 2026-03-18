@@ -22,8 +22,10 @@ import {
   fetchTaskHistory,
   sendBroadcast,
   fetchAgentTimeline,
+  fetchAgentRelations,
   type AgentTimelineEvent,
   type AgentTimelineResponse,
+  type AgentRelationsResponse,
 } from '../api'
 import { journal } from '../sse'
 import { missionSnapshot } from '../mission-store'
@@ -47,6 +49,7 @@ const profileError = signal('')
 const roomActivity = signal<string[]>([])
 const taskHistories = signal<TaskHistoryRow[]>([])
 const agentTimeline = signal<AgentTimelineResponse | null>(null)
+const agentRelations = signal<AgentRelationsResponse | null>(null)
 const mentionText = signal('')
 const sendingMention = signal(false)
 
@@ -103,12 +106,16 @@ async function loadProfile(name: string): Promise<void> {
   roomActivity.value = []
   taskHistories.value = []
   agentTimeline.value = null
+  agentRelations.value = null
 
   try {
-    const [lines, timeline] = await Promise.all([
+    const [lines, timeline, relations] = await Promise.all([
       fetchRoomMessages(80),
       fetchAgentTimeline(name, 4, 20).catch(() => null),
+      fetchAgentRelations(name).catch(() => null),
     ])
+
+    agentRelations.value = relations
 
     roomActivity.value = lines
       .filter(line => line.includes(name))
@@ -344,6 +351,42 @@ export function AgentProfile({ name }: { name: string }) {
                 </div>
               `)}</div>`}
         <//>
+
+        ${(() => {
+          const rel = agentRelations.value
+          if (!rel) return null
+          const collabs = rel.collaborators ?? []
+          const interests = rel.interests ?? []
+          const hasData = collabs.length > 0 || interests.length > 0
+          if (!hasData) return null
+          return html`
+            <${Card} title="관계 (${collabs.length})" class="ff-card">
+              ${collabs.length > 0 ? html`
+                <div class="ff-relations-list">
+                  ${collabs.map(c => html`
+                    <div class="ff-relation-row" key=${c.name}
+                      onClick=${() => navigate('agents', { agent: c.name })}
+                      style="cursor:pointer;"
+                    >
+                      <span class="ff-relation-name">${c.name}</span>
+                      <span class="ff-relation-count">${c.collaborations}회</span>
+                      ${c.last_collab ? html`<span class="ff-relation-time"><${TimeAgo} timestamp=${c.last_collab} /></span>` : null}
+                    </div>
+                  `)}
+                </div>
+              ` : null}
+              ${interests.length > 0 ? html`
+                <div class="ff-interests" style="margin-top:8px;">
+                  <span class="ff-interests-label">관심사</span>
+                  <div class="ff-interests-tags">
+                    ${interests.slice(0, 12).map(t => html`<span class="ff-interest-tag" key=${t}>${t}</span>`)}
+                    ${interests.length > 12 ? html`<span class="ff-interest-tag">+${interests.length - 12}</span>` : null}
+                  </div>
+                </div>
+              ` : null}
+            <//>
+          `
+        })()}
 
         <${Card} title="타임라인" class="ff-card">
           ${!timeline || (timeline.events ?? []).length === 0

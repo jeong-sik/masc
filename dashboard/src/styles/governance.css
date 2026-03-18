@@ -798,6 +798,73 @@ button.council-row.selected {
   .ff-profile__grid { grid-template-columns: 1fr; }
 }
 
+/* --- Agent Relations Card --- */
+
+.ff-relations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ff-relation-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.ff-relation-row:hover {
+  background: rgba(255, 215, 0, 0.08);
+}
+
+.ff-relation-name {
+  color: #c8a84e;
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+}
+
+.ff-relation-count {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ff-relation-time {
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 11px;
+}
+
+.ff-interests {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+}
+
+.ff-interests-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ff-interests-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.ff-interest-tag {
+  background: rgba(255, 215, 0, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  border: 1px solid rgba(255, 215, 0, 0.15);
+}
+
 /* ── Keeper Rich Card (Overview) ──────────────────────────── */
 @keyframes keeperPulse {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(74,222,128,0.4); }

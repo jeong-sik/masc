@@ -47,6 +47,7 @@ export function refreshForTab(tab: string) {
       refreshGovernance()
     } else if (section === 'planning') {
       refreshGoals()
+      refreshExecution()
     } else {
       refreshBoard()
     }

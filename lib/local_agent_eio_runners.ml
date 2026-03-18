@@ -620,7 +620,7 @@ let run_worker_legacy ~sw ~base_path ~worker_name
                     response_format = `Text;
                   }
                 in
-                match Llm_client.complete ~timeout_sec request with
+                match Llm_provider_oas.complete ~timeout_sec request with
                 | Error e -> Error e
                 | Ok resp ->
                     let tool_calls =

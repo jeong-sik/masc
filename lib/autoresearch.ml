@@ -677,7 +677,7 @@ let parse_llm_code_response response =
             in
             Result.ok (hypothesis, trimmed)
 
-(** Generate code change by calling Llm_client.complete.
+(** Generate code change by calling Llm_provider_oas.complete.
     Returns Ok (hypothesis, new_code) or Error reason. *)
 let generate_code_change ~goal ~baseline ~history ~insights
     ~target_file ~file_content ~llm_model =
@@ -694,7 +694,7 @@ let generate_code_change ~goal ~baseline ~history ~insights
       tools = [];
       response_format = `Text;
     } in
-    (match Llm_client.complete ~timeout_sec:120 req with
+    (match Llm_provider_oas.complete ~timeout_sec:120 req with
     | Result.Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
     | Result.Ok resp -> parse_llm_code_response (Llm_client.text_of_response resp))
 

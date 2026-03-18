@@ -538,7 +538,7 @@ let run_turn ~config ~state =
 
     (* 1. THINK + ACT: Call LLM *)
     let requests = build_requests config state in
-    let result = Llm_client.cascade requests in
+    let result = Llm_provider_oas.cascade requests in
 
     match result with
     | Error e ->

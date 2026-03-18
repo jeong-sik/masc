@@ -481,7 +481,7 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
         }
       in
       match
-        Llm_client.complete ~timeout_sec:(router_judge_timeout_sec ()) request
+        Llm_provider_oas.complete ~timeout_sec:(router_judge_timeout_sec ()) request
       with
       | Ok response -> (
           try

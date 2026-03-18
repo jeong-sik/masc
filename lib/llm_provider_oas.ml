@@ -80,7 +80,7 @@ let provider_config_of_model_spec (spec : model_spec)
     endpoint discovery) and to
     {!Llm_provider_bridge.completion_response_of_api_response} for
     response conversion. *)
-let complete_via_oas ?timeout_sec:_ (req : completion_request)
+let complete_via_oas ?timeout_sec (req : completion_request)
     : (completion_response, string) result =
   let req = normalize_request req in
   match Llm_provider_bridge.provider_config_of_request req with
@@ -92,20 +92,30 @@ let complete_via_oas ?timeout_sec:_ (req : completion_request)
         req.model.model_id
         (string_of_provider req.model.provider)
         req.max_tokens (List.length req.tools);
-      match
-        Llm_provider.Complete.complete ~sw:env.sw ~net:env.net ~config
-          ~messages ~tools ()
-      with
-      | Ok resp ->
-          let masc_resp =
-            Llm_provider_bridge.completion_response_of_api_response resp
-          in
-          let text = text_of_response masc_resp in
-          if String.trim text = "" && masc_resp.tool_calls = [] then
-            Error "Empty completion (no content or tool_calls)"
-          else Ok masc_resp
-      | Error http_err ->
-          Error (Llm_provider_bridge.string_of_http_error http_err))
+      let do_complete () =
+        match
+          Llm_provider.Complete.complete ~sw:env.sw ~net:env.net ~config
+            ~messages ~tools ()
+        with
+        | Ok resp ->
+            let masc_resp =
+              Llm_provider_bridge.completion_response_of_api_response resp
+            in
+            let text = text_of_response masc_resp in
+            if String.trim text = "" && masc_resp.tool_calls = [] then
+              Error "Empty completion (no content or tool_calls)"
+            else Ok masc_resp
+        | Error http_err ->
+            Error (Llm_provider_bridge.string_of_http_error http_err)
+      in
+      match timeout_sec, env.clock with
+      | Some sec, Some clock ->
+          Eio.Fiber.first
+            do_complete
+            (fun () ->
+               Eio.Time.sleep clock (Float.of_int sec);
+               Error (sprintf "LLM completion timed out after %ds" sec))
+      | _ -> do_complete ())
 
 (* ================================================================ *)
 (* cascade_complete — multi-model failover via OAS cascade          *)

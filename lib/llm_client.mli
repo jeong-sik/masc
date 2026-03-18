@@ -12,8 +12,9 @@
 
 (** {1 Provider Types} *)
 
-(** Supported LLM providers. *)
-type provider =
+(** Supported LLM providers.
+    Equal to {!Llm_types.provider} for cross-module compatibility. *)
+type provider = Llm_types.provider =
   | Llama
   | Claude
   | OpenAI
@@ -22,8 +23,9 @@ type provider =
   | OpenRouter
   | Custom of string
 
-(** Model specification — everything needed to call a specific model. *)
-type model_spec = {
+(** Model specification — everything needed to call a specific model.
+    Equal to {!Llm_types.model_spec} for cross-module compatibility. *)
+type model_spec = Llm_types.model_spec = {
   provider : provider;
   model_id : string;           (** e.g. "glm-4.7-flash", "claude-opus-4-6" *)
   max_context : int;           (** Max context window in tokens *)
@@ -42,15 +44,17 @@ type role = Agent_sdk.Types.role = System | User | Assistant | Tool
     [content] uses {!Agent_sdk.Types.content_block} list for OAS type convergence. *)
 type message = Agent_sdk.Types.message
 
-(** Tool/function definition for function calling. *)
-type tool_def = {
+(** Tool/function definition for function calling.
+    Equal to {!Llm_types.tool_def} for cross-module compatibility. *)
+type tool_def = Llm_types.tool_def = {
   tool_name : string;
   tool_description : string;
   parameters : Yojson.Safe.t;  (** JSON Schema for parameters *)
 }
 
-(** A tool call requested by the model. *)
-type tool_call = {
+(** A tool call requested by the model.
+    Equal to {!Llm_types.tool_call} for cross-module compatibility. *)
+type tool_call = Llm_types.tool_call = {
   call_id : string;
   call_name : string;
   call_arguments : string;     (** JSON string of arguments *)
@@ -64,8 +68,9 @@ val total_tokens : token_usage -> int
 
 (** {1 Request/Response} *)
 
-(** Completion request. *)
-type completion_request = {
+(** Completion request.
+    Equal to {!Llm_types.completion_request} for cross-module compatibility. *)
+type completion_request = Llm_types.completion_request = {
   model : model_spec;
   messages : message list;
   temperature : float;
@@ -75,9 +80,10 @@ type completion_request = {
 }
 
 (** Completion response.
+    Equal to {!Llm_types.completion_response} for cross-module compatibility.
     [content] is a list of {!Agent_sdk.Types.content_block} for type convergence
     with OAS api_response. Use {!text_of_response} to extract text. *)
-type completion_response = {
+type completion_response = Llm_types.completion_response = {
   content : Agent_sdk.Types.content_block list;
   tool_calls : tool_call list;
   usage : token_usage;
@@ -93,7 +99,8 @@ val text_of_response : completion_response -> string
 (** Call LLM with structured request.
     Uses subprocess curl for HTTP — no Eio runtime dependency.
     Optional [timeout_sec] overrides provider HTTP timeout (seconds) for this call.
-    @return Ok response on success, Error message on failure. *)
+    @return Ok response on success, Error message on failure.
+    @deprecated Use {!Llm_provider_oas.complete} instead (OAS provider path). *)
 val complete :
   ?timeout_sec:int ->
   completion_request ->
@@ -105,7 +112,8 @@ val complete :
     the cascade to continue with the next model.
     Optional [timeout_sec] sets an overall wall-clock budget (seconds) for the
     full cascade. Remaining budget is applied per-attempt.
-    @return Ok response from first successful model, Error if all fail. *)
+    @return Ok response from first successful model, Error if all fail.
+    @deprecated Use {!Llm_provider_oas.cascade} instead (OAS provider path). *)
 val cascade :
   ?accept:(completion_response -> bool) ->
   ?timeout_sec:int ->

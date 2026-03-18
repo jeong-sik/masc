@@ -15,17 +15,20 @@ val cache_key_of_request : Llm_types.completion_request -> string
 val filter_by_provider_health :
   Llm_types.completion_request list -> Llm_types.completion_request list
 
+(** @deprecated Use {!Llm_provider_oas.complete} instead. *)
 val complete :
   ?timeout_sec:int ->
   Llm_types.completion_request ->
   (Llm_types.completion_response, string) result
 
+(** @deprecated Use {!Llm_provider_oas.cascade} instead. *)
 val cascade :
   ?accept:(Llm_types.completion_response -> bool) ->
   ?timeout_sec:int ->
   Llm_types.completion_request list ->
   (Llm_types.completion_response, string) result
 
+(** @deprecated Use {!Llm_provider_oas.run_prompt_cascade} instead. *)
 val run_prompt_cascade :
   ?temperature:float ->
   ?timeout_sec:int ->

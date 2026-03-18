@@ -268,8 +268,8 @@ let handle_keeper_msg ctx args : tool_result =
             let run_cascade requests =
               match timeout_sec_opt with
               | Some timeout_sec ->
-                  Llm_client.cascade ~timeout_sec requests
-              | None -> Llm_client.cascade requests
+                  Llm_provider_oas.cascade ~timeout_sec requests
+              | None -> Llm_provider_oas.cascade requests
             in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
             match run_cascade requests with

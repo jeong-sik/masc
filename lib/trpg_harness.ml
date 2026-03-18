@@ -115,7 +115,7 @@ let tier1_check ~(model : Llm_client.model_spec) ~actor_name ~actor_persona
     tools = [];
     response_format = `Text;
   } in
-  match Llm_client.complete req with
+  match Llm_provider_oas.complete req with
   | Ok resp -> parse_tier1 (Llm_client.text_of_response resp)
   | Error e ->
     eprintf "[trpg_harness] tier1 LLM call failed: %s\n%!" e;
@@ -210,7 +210,7 @@ let tier2_evaluate ~(model : Llm_client.model_spec) ~actor_name ~actor_persona
     tools = [];
     response_format = `Text;
   } in
-  match Llm_client.complete req with
+  match Llm_provider_oas.complete req with
   | Ok resp -> parse_tier2 (Llm_client.text_of_response resp)
   | Error e ->
     eprintf "[trpg_harness] tier2 LLM call failed: %s\n%!" e;

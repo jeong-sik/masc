@@ -344,7 +344,7 @@ let verify_worker ~model ~pattern (worker : worker_plan) diff =
       }
     in
     let verdict =
-      match Llm_client.complete req with
+      match Llm_provider_oas.complete req with
       | Ok resp -> Verifier.parse_verdict (Llm_client.text_of_response resp)
       | Error e -> Verifier.Warn ("verifier_unavailable: " ^ e)
     in

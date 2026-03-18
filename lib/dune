@@ -588,6 +588,7 @@
    runtime_params
    governance_registry
    tool_perpetual
+   tool_compact
    tool_shard
    tool_keeper
    tool_lodge_config_http

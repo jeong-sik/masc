@@ -833,6 +833,12 @@
  (modules test_adaptive_thresholds)
  (libraries masc_mcp alcotest str yojson unix))
 
+; Tool_compact + Fs_compat backend types — Issue #1441, #1442
+(test
+ (name test_tool_compact)
+ (modules test_tool_compact)
+ (libraries masc_mcp fs_compat alcotest str yojson))
+
 ; LLM Pool tests (provider-based concurrency, no LLM calls)
 (test
  (name test_llm_pool)

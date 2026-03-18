@@ -159,6 +159,7 @@ let () =
   register_module_tag ~schemas:Tool_agent_timeline.schemas ~tag:Mod_agent_timeline;
   register_module_tag ~schemas:Tool_keeper.schemas ~tag:Mod_keeper;
   register_module_tag ~schemas:Tool_perpetual.schemas ~tag:Mod_perpetual;
+  register_module_tag ~schemas:Tool_compact.schemas ~tag:Mod_compact;
   register_module_tag ~schemas:Tool_mdal.schemas ~tag:Mod_mdal;
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
   register_module_tag ~schemas:Tool_trpg.schemas ~tag:Mod_trpg;

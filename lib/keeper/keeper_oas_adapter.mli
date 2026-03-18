@@ -42,22 +42,41 @@ val usage_of_run_result : Oas_worker.run_result -> Llm_types.token_usage
 (** Extract model ID string from an OAS run result. *)
 val model_of_run_result : Oas_worker.run_result -> string
 
-(** Cascade through OAS provider — compatibility wrapper for call sites
-    that already construct [completion_request list].
-    Routes through [Llm_orchestration.cascade] which uses OAS provider
-    internally. This is a transitional API: prefer [run_with_tools] or
-    [run_simple] for new code. *)
+(** Parameters extracted from a cascade request list for OAS execution. *)
+type cascade_params = {
+  primary_spec : Llm_types.model_spec;
+  fallback_specs : Llm_types.model_spec list;
+  system_prompt : string;
+  goal : string;
+  temperature : float;
+  max_tokens : int;
+}
+
+(** Extract OAS execution parameters from a cascade request list.
+    Separates system messages into [system_prompt], remaining messages
+    into [goal] text. Returns [Error] on empty list or no user messages. *)
+val cascade_config_of_requests :
+  Llm_types.completion_request list ->
+  (cascade_params, string) result
+
+(** Cascade through OAS Agent.t — tries each model spec in order via
+    [Oas_worker.run]. Falls back to next model on failure.
+    Prefer [run_with_tools] or [run_simple] for new code. *)
 val run_cascade :
   ?timeout_sec:int ->
   Llm_types.completion_request list ->
   (Llm_provider.Types.api_response, string) result
 
-(** Streaming cascade through OAS provider — compatibility wrapper for
-    call sites that need SSE text deltas. Falls back to batch cascade
-    on streaming failure. *)
+(** Streaming cascade — uses [Llm_orchestration.call_provider_stream]
+    for streaming (OAS Agent SDK lacks streaming API). Falls back to
+    OAS batch [run_cascade] on streaming failure. *)
 val run_cascade_stream :
   ?timeout_sec:float ->
   on_event:(Llm_provider.Types.sse_event -> unit) ->
   Llm_types.completion_request ->
   fallback:Llm_types.completion_request list ->
   (Llm_provider.Types.api_response, string) result
+
+(** Expose model spec resolution for testing. *)
+val resolve_primary_model_spec :
+  keeper_meta -> (Llm_types.model_spec, string) result

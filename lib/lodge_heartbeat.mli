@@ -194,3 +194,18 @@ val clear_gap_signals : topic:string -> unit
 
 (** Spawn a new agent from accumulated gap signals *)
 val spawn_agent_from_gap : topic:string -> signals:gap_signal_t list -> bool
+
+(** {1 Rate Limiting (delegated to Lodge_rate_limit)} *)
+
+val check_rate_limit : agent_name:string -> [< `Post | `Comment | `Vote | `Voice ] -> bool
+val record_rate_action : agent_name:string -> [< `Post | `Comment | `Vote | `Voice ] -> unit
+
+(** {1 Heartbeat Tool Surface} *)
+
+val heartbeat_allowed_tools :
+  agent_name:string ->
+  trigger:checkin_trigger ->
+  recent_posts:Board.post list ->
+  ?voice_enabled:bool ->
+  unit ->
+  string list

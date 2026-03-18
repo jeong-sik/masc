@@ -430,9 +430,9 @@ let tick ~sw ~clock ~config ~room_config : unit =
         Eio.traceln "[Gardener] Task pressure: %d TODO, %d high-pri, %d orphans"
           backlog.todo_count backlog.high_priority_todo backlog.orphan_count;
         let triage_state = get_state () in
-        triage_state.last_triage_started_at <- Time_compat.now ();
         (match start_backlog_triage_session ~sw ~clock ~room_config ~backlog with
          | Ok session_id ->
+             triage_state.last_triage_started_at <- Time_compat.now ();
              triage_state.last_triage_outcome <- Triage_productive;
              record_action "worker_session_started" ~target:session_id
                ~reason:"started backlog triage session";
@@ -447,7 +447,12 @@ let tick ~sw ~clock ~config ~room_config : unit =
                    ("orphan_count", `Int backlog.orphan_count);
                  ])
          | Error err ->
-             triage_state.last_triage_outcome <- Triage_noop;
+             (* Only record noop + timestamp if this was an actual attempt,
+                not a cooldown rejection (which preserves original timestamp) *)
+             if not (String.equal err "triage cooldown active") then begin
+               triage_state.last_triage_started_at <- Time_compat.now ();
+               triage_state.last_triage_outcome <- Triage_noop
+             end;
              record_action "worker_request_posted"
                ~reason:"backlog triage session failed; posted worker request"
                ~error:err;

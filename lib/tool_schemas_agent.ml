@@ -373,4 +373,23 @@ Pair with masc_agent_fitness for computed scores, masc_audit_stats for security-
     ];
   };
 
+  (* masc_agent_relations — proxy to Neo4j/GraphQL for relationship data *)
+  {
+    name = "masc_agent_relations";
+    description = "Query an agent's collaboration network and trust relationships from Neo4j via GraphQL. \
+MASC proxies this data — Neo4j is the source of truth, not MASC. \
+Returns collaborators (with count and last-seen), interests, and typed relations. \
+If agent_name is omitted, defaults to the calling agent. \
+Pair with masc_agents for room-level status or masc_collaboration_graph for Hebbian weights.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent name to query. Defaults to calling agent if omitted.");
+        ]);
+      ]);
+    ];
+  };
+
 ]

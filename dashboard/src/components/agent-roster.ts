@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
+import type { Agent } from '../types'
 import { agents, keepers } from '../store'
 import { missionSnapshot } from '../mission-store'
 import { AgentAvatar } from './overview/agent-avatar'
@@ -82,7 +83,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const briefs = snap?.agent_briefs ?? []
   const keeperBriefs = snap?.keeper_briefs ?? []
 
-  const briefMap = new Map(briefs.map(b => [b.name, b]))
+  const briefMap = new Map(briefs.map(b => [b.agent_name, b]))
 
   const filtered = agentList
     .filter((a: { name: string; status: string }) => {
@@ -139,12 +140,12 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       </div>
 
       <div class="roster-list">
-        ${filtered.map((agent: { name: string; status: string; current_task?: string; traits?: string[] }) => {
+        ${filtered.map((agent: Agent) => {
           const brief = briefMap.get(agent.name)
           const keeper = findKeeper(agent.name, keeperList, keeperBriefs)
           const isKeeper = keeper != null
           const currentWork = keeper?.current_work ?? brief?.current_work ?? agent.current_task ?? null
-          const lastActivity = keeper?.last_turn_ago_s ?? brief?.last_turn_ago_s ?? null
+          const lastActivity = keeper?.last_turn_ago_s ?? brief?.last_activity_age_sec ?? null
           const ctxPct = keeper?.context_ratio != null ? Math.round(keeper.context_ratio * 100) : null
 
           return html`
@@ -200,8 +201,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   ${lastActivity != null ? html`
                     <span>${formatDuration(lastActivity)} 전</span>
                   ` : null}
-                  ${(keeper?.model ?? brief?.model) ? html`
-                    <span class="roster-card__model">${keeper?.model ?? brief?.model}</span>
+                  ${keeper?.model ? html`
+                    <span class="roster-card__model">${keeper.model}</span>
                   ` : null}
                 </div>
               </div>

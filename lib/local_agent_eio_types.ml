@@ -679,8 +679,4 @@ let worker_auth_token ~base_path ~worker_name =
   else
     Ok None
 
-let configured_backend () =
-  match Sys.getenv_opt "MASC_LOCAL_WORKER_BACKEND" with
-  | Some raw when String.lowercase_ascii (String.trim raw) = "legacy" -> `Legacy
-  | _ -> `Oas
 

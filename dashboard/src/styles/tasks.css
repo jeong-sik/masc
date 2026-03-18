@@ -9,9 +9,7 @@
   border-radius: 8px;
   border: 1px solid var(--white-6);
 }
-.task-info { flex: 1; }
 .task-title { font-size: 14px; }
-.task-assignee { font-size: 12px; color: var(--text-dim); margin-left: 8px; }
 
 /* Task Board (Kanban) */
 .task-board {
@@ -44,7 +42,3 @@
   border-radius: 8px;
   font-size: 13px;
 }
-.message-agent { font-weight: 600; color: var(--cyan); margin-right: 8px; }
-.message-text { color: #ccc; }
-.message-time { font-size: 11px; color: #666; float: right; }
-

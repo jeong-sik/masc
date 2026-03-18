@@ -14,13 +14,6 @@
   color: #f7b6b6;
   font-size: 12px;
 }
-
-.council-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-}
-
 .council-list {
   display: flex;
   flex-direction: column;
@@ -363,6 +356,7 @@ button.council-row.selected {
 }
 
 @media (max-width: 1180px) {
+
   .governance-layout {
     grid-template-columns: 1fr;
   }
@@ -370,6 +364,7 @@ button.council-row.selected {
   .governance-inbox {
     max-height: none;
   }
+
 }
 
 /* ── Agent Detail Overlay ─────────────────────────────────── */
@@ -804,110 +799,10 @@ button.council-row.selected {
 }
 
 /* ── Keeper Rich Card (Overview) ──────────────────────────── */
-.keeper-ctx-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-.keeper-ctx-bar {
-  flex: 1;
-  height: 5px;
-  background: var(--white-8);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.keeper-ctx-fill {
-  height: 100%;
-  border-radius: 999px;
-  transition: width 0.4s ease;
-}
-.keeper-ctx-fill.ctx-bar-ok { background: var(--ok); }
-.keeper-ctx-fill.ctx-bar-warn { background: var(--warn); }
-.keeper-ctx-fill.ctx-bar-bad { background: var(--bad); }
-.keeper-ctx-label {
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  min-width: 52px;
-  text-align: right;
-}
-.keeper-ctx-label.ctx-bar-ok { color: var(--ok); }
-.keeper-ctx-label.ctx-bar-warn { color: var(--warn); }
-.keeper-ctx-label.ctx-bar-bad { color: var(--bad); }
-
-.keeper-metrics-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-  color: #9db4de;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-.keeper-metric-hl { color: var(--warn); }
-.keeper-metric-compact { color: var(--purple); }
-
-.keeper-heartbeat-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-  font-size: 11px;
-  color: #8ca8d5;
-}
-.keeper-heartbeat-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ok);
-  flex-shrink: 0;
-}
-.keeper-heartbeat-dot.pulse {
-  animation: keeperPulse 2s ease-in-out infinite;
-}
 @keyframes keeperPulse {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(74,222,128,0.4); }
   50% { opacity: 0.6; box-shadow: 0 0 0 4px rgba(74,222,128,0); }
 }
-
-.keeper-trait-row {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-}
-.keeper-trait-chip {
-  font-size: 10px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: rgba(138, 163, 211, 0.15);
-  color: #b7cbee;
-  white-space: nowrap;
-}
-.keeper-trait-more {
-  font-size: 10px;
-  padding: 1px 6px;
-  color: #8ca8d5;
-}
-
-.keeper-note-preview {
-  margin-top: 4px;
-  font-size: 11px;
-  color: #7f9ccc;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-style: italic;
-}
-
-.pill.pill-skill {
-  background: rgba(167, 139, 250, 0.15);
-  color: var(--purple);
-  border-color: rgba(167, 139, 250, 0.3);
-}
-
 /* ── Metric explain tooltip ──────────────────────────────── */
 .metric-tip {
   position: relative;
@@ -970,76 +865,7 @@ button.council-row.selected {
 }
 
 /* ── Core keeper card (6 key metrics) ───────────────────── */
-.keeper-core-grid {
-  margin-top: 10px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.keeper-core-item {
-  border: 1px solid rgba(138, 163, 211, 0.22);
-  border-radius: 8px;
-  background: var(--white-3);
-  padding: 8px 9px;
-  min-height: 52px;
-}
-
-.keeper-core-item-span {
-  grid-column: 1 / -1;
-}
-
-.keeper-core-label {
-  display: inline-flex;
-  align-items: center;
-  color: #8ea9d6;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.keeper-core-value {
-  display: block;
-  margin-top: 5px;
-  font-size: 13px;
-  color: #e8f0ff;
-  font-weight: 600;
-  line-height: 1.35;
-}
-
-.keeper-core-text {
-  font-weight: 500;
-  color: #cfe0ff;
-}
-
 /* ── Keeper detail tabs ──────────────────────────────────── */
-.keeper-detail-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-bottom: 14px;
-}
-
-.keeper-detail-tab {
-  border: 1px solid rgba(138, 163, 211, 0.28);
-  border-radius: 8px;
-  background: var(--white-3);
-  color: #9fb8e1;
-  font-size: 12px;
-  padding: 6px 10px;
-  cursor: pointer;
-}
-
-.keeper-detail-tab:hover {
-  background: var(--white-8);
-}
-
-.keeper-detail-tab.active {
-  border-color: rgba(71, 184, 255, 0.48);
-  background: rgba(71, 184, 255, 0.15);
-  color: #c9ebff;
-}
-
 /* --- Governance staleness warning --- */
 .governance-stale-warning {
   padding: 10px 14px;

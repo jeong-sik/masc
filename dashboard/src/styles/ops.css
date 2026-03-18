@@ -230,22 +230,6 @@
     linear-gradient(180deg, rgba(13, 22, 40, 0.76), rgba(13, 22, 40, 0.62)),
     radial-gradient(circle at top right, rgba(71, 184, 255, 0.1), transparent 42%);
 }
-
-.ops-studio-panel {
-  gap: 16px;
-}
-
-.ops-studio-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.ops-studio-group + .ops-studio-group {
-  border-top: 1px solid var(--white-8);
-  padding-top: 16px;
-}
-
 .ops-stat-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -509,6 +493,7 @@
 }
 
 @media (max-width: 1180px) {
+
   .command-entry-strip,
   .ops-priority-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -517,9 +502,11 @@
   .ops-workbench {
     grid-template-columns: 1fr;
   }
+
 }
 
 @media (max-width: 860px) {
+
   .ops-header {
     flex-direction: column;
   }
@@ -568,4 +555,5 @@
   .vote-column {
     min-width: 42px;
   }
+
 }

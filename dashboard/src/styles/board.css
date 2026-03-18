@@ -1,40 +1,4 @@
 /* ── Board (Posts) ─────────────────────────────────────────── */
-.feed-health-banner {
-  margin-bottom: 12px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(138, 163, 211, 0.3);
-  background: rgba(71, 184, 255, 0.12);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.feed-health-banner.degraded {
-  border-color: rgba(251, 191, 36, 0.4);
-  background: rgba(251, 191, 36, 0.12);
-}
-
-.feed-health-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: #d8e8ff;
-}
-
-.feed-health-banner.degraded .feed-health-title {
-  color: #ffe09b;
-}
-
-.feed-health-meta {
-  font-size: 11px;
-  color: #9fb8e1;
-}
-
-.feed-health-banner.degraded .feed-health-meta {
-  color: #fcd985;
-}
 
 .board-controls {
   display: flex;
@@ -102,7 +66,6 @@
   color: var(--ok);
   border-color: rgba(74,222,128,0.3);
 }
-.board-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
 
 .board-post {
   display: flex;
@@ -202,30 +165,8 @@
   font-size: 13px;
   line-height: 1.6;
 }
-.post-author-avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  color: #fff;
-  font-weight: bold;
-}
 
 /* Post flair badges */
-.post-flair {
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 999px;
-}
-.post-flair.insight { background: rgba(251,191,36,0.15); color: var(--warn); }
-.post-flair.question { background: rgba(167,139,250,0.15); color: var(--purple); }
-.post-flair.announcement { background: rgba(239,68,68,0.15); color: var(--bad); }
-.post-flair.bug { background: rgba(239,68,68,0.15); color: var(--bad); }
-.post-flair.idea { background: rgba(74,222,128,0.15); color: var(--ok); }
-.post-flair.meta { background: rgba(136,136,136,0.15); color: var(--text-dim); }
 
 /* Board detail */
 .board-detail { padding: 20px; }
@@ -245,12 +186,6 @@
 .board-comment .comment-time { font-size: 11px; color: #666; }
 
 /* ── Activity Tab ──────────────────────────────────────────── */
-.activity-agents {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 15px;
-}
 .activity-line {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 13px;
@@ -260,13 +195,6 @@
 }
 
 /* ── Journal ───────────────────────────────────────────────── */
-.journal-list {
-  max-height: 400px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
 .journal-entry {
   display: flex;
   gap: 10px;
@@ -281,11 +209,3 @@
   min-width: 100px;
   font-weight: 600;
 }
-.journal-data {
-  flex: 1;
-  color: #aaa;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-

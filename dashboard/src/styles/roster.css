@@ -327,12 +327,25 @@
    Situation Reasons (WHY panel)
    ============================================ */
 
+.situation-reasons-collapse {
+  margin-bottom: var(--space-sm, 8px);
+}
+.situation-reasons-collapse__summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  padding: 4px var(--space-md, 16px);
+  letter-spacing: 0.04em;
+}
+.situation-reasons-collapse__summary:hover {
+  color: var(--text-primary, #e2e8f0);
+}
+
 .situation-reasons {
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 6px var(--space-md, 16px);
-  margin-bottom: var(--space-sm, 8px);
   border-left: 2px solid var(--ff-border, var(--ff-border));
 }
 

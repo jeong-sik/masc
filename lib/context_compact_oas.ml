@@ -103,46 +103,8 @@ let oas_msg_to_masc (m : Agent_sdk.Types.message) : Llm_client.message =
   { Llm_client.role; content = [Agent_sdk.Types.Text content]; name = None; tool_call_id }
 
 (* ================================================================ *)
-(* Importance Scoring (standalone — no Context_manager dependency)   *)
+(* Importance Scoring — delegated to Context_scoring (shared SSOT)  *)
 (* ================================================================ *)
-
-(** Stanford Generative Agents adapted scoring (standalone version).
-    Duplicated from Context_manager to avoid circular module dependency.
-    TODO: Extract shared scoring into a separate module to avoid duplication. *)
-
-let memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
-let goal_prefix = "[MASC_GOAL]"
-
-let score_messages (msgs : Llm_client.message list) : (int * float) list =
-  let n = List.length msgs in
-  List.mapi (fun i (m : Llm_client.message) ->
-    let recency = if n <= 1 then 1.0
-      else let t = float_of_int i /. float_of_int (n - 1) in
-           t *. t
-    in
-    let role_w = match m.role with
-      | Llm_client.System -> 1.0
-      | Llm_client.Tool -> 0.7
-      | Llm_client.User -> 0.6
-      | Llm_client.Assistant -> 0.4
-    in
-    let msg_text = Llm_client.text_of_message m in
-    let len = String.length msg_text in
-    let content_w = if len < 20 then 0.3
-      else if len < 100 then 0.6
-      else if len < 500 then 0.8
-      else 0.7
-    in
-    let tool_w = match m.tool_call_id with Some _ -> 0.8 | None -> 0.5 in
-    let score = 0.4 *. recency +. 0.25 *. role_w +. 0.2 *. content_w +. 0.15 *. tool_w in
-    let score =
-      if starts_with ~prefix:memory_summary_prefix msg_text
-         || starts_with ~prefix:goal_prefix msg_text then
-        Float.max score 0.95
-      else score
-    in
-    (i, Float.min 1.0 (Float.max 0.0 score))
-  ) msgs
 
 (* ================================================================ *)
 (* Token Estimation                                                 *)
@@ -176,7 +138,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   | DropLowImportance ->
     Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
       let masc_msgs = List.map oas_msg_to_masc oas_msgs in
-      let scores = score_messages masc_msgs in
+      let scores = Context_scoring.score_messages masc_msgs in
       let threshold = 0.3 in
       let filtered = List.filteri (fun i _m ->
         match List.assoc_opt i scores with

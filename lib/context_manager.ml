@@ -60,15 +60,13 @@ type compaction_result = {
 (* Memory Formats                                                  *)
 (* ================================================================ *)
 
-let memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
-let goal_prefix = "[MASC_GOAL]"
+let memory_summary_prefix = Context_scoring.memory_summary_prefix
+let goal_prefix = Context_scoring.goal_prefix
 
 let state_block_start = "[STATE]"
 let state_block_end = "[/STATE]"
 
-let starts_with ~prefix s =
-  let lp = String.length prefix in
-  String.length s >= lp && String.sub s 0 lp = prefix
+let starts_with = Context_scoring.starts_with
 
 let find_substring ~needle haystack ~from =
   let n_len = String.length needle in
@@ -160,47 +158,10 @@ let append_many ctx msgs =
 (* Importance Scoring                                               *)
 (* ================================================================ *)
 
-(** Stanford Generative Agents adapted scoring.
-    - Recency: exponential decay from most recent
-    - Role weight: system > tool results > user > assistant
-    - Content length: longer messages tend to be more important
-    - Tool calls: messages with tool actions are important *)
+(** Score messages by importance using shared scoring logic.
+    Delegates to [Context_scoring.score_messages] (SSOT). *)
 let score_importance ctx =
-  let n = List.length ctx.messages in
-  let scores = List.mapi (fun i (m : Llm_client.message) ->
-    (* Recency: 0.0 (oldest) → 1.0 (newest) with exponential curve *)
-    let recency = if n <= 1 then 1.0
-      else let t = float_of_int i /. float_of_int (n - 1) in
-           t *. t  (* Quadratic: recent messages weighted more *)
-    in
-    (* Role weight *)
-    let role_w = match m.role with
-      | Llm_client.System -> 1.0
-      | Llm_client.Tool -> 0.7
-      | Llm_client.User -> 0.6
-      | Llm_client.Assistant -> 0.4
-    in
-    (* Content signal: very short = less important, very long = average *)
-    let msg_text = text_of_message m in
-    let len = String.length msg_text in
-    let content_w = if len < 20 then 0.3
-      else if len < 100 then 0.6
-      else if len < 500 then 0.8
-      else 0.7  (* Very long = slightly less (verbose tool output) *)
-    in
-    (* Tool call indicator *)
-    let tool_w = match m.tool_call_id with Some _ -> 0.8 | None -> 0.5 in
-    let score = 0.4 *. recency +. 0.25 *. role_w +. 0.2 *. content_w +. 0.15 *. tool_w in
-    (* Sticky memory: never drop compacted memory summary or goal injection. *)
-    let score =
-      if starts_with ~prefix:memory_summary_prefix msg_text
-         || starts_with ~prefix:goal_prefix msg_text then
-        Float.max score 0.95
-      else
-        score
-    in
-    (i, Float.min 1.0 (Float.max 0.0 score))
-  ) ctx.messages in
+  let scores = Context_scoring.score_messages ctx.messages in
   { ctx with importance_scores = scores }
 
 (* ================================================================ *)
@@ -330,9 +291,12 @@ let sync_oas_context (ctx : working_context) : working_context =
   ctx
 
 (** Feature flag: route compaction through OAS Context_reducer adapter.
-    Set MASC_USE_OAS_REDUCER=true to enable A/B testing. *)
-let use_oas_reducer =
-  try Sys.getenv "MASC_USE_OAS_REDUCER" = "true" with Not_found -> false
+    Set MASC_USE_OAS_REDUCER=true to enable A/B testing.
+    Evaluated per call (not module load) for runtime toggling consistency. *)
+let use_oas_reducer () =
+  match Sys.getenv_opt "MASC_USE_OAS_REDUCER" with
+  | Some v -> String.lowercase_ascii (String.trim v) = "true"
+  | None -> false
 
 (** Map MASC compaction_strategy to the adapter's local strategy type. *)
 let oas_adapter_strategy_of = function
@@ -342,7 +306,7 @@ let oas_adapter_strategy_of = function
   | SummarizeOld -> Context_compact_oas.SummarizeOld
 
 let compact ctx strategies =
-  if use_oas_reducer then
+  if use_oas_reducer () then
     let oas_strategies = List.map oas_adapter_strategy_of strategies in
     let messages, token_count =
       Context_compact_oas.compact
@@ -429,7 +393,7 @@ let compact_with_offload
   in
   (* Run the compaction pipeline (OAS adapter or legacy) *)
   let compacted =
-    if use_oas_reducer then begin
+    if use_oas_reducer () then begin
       let oas_strategies = List.map oas_adapter_strategy_of strategies in
       let messages, token_count =
         Context_compact_oas.compact

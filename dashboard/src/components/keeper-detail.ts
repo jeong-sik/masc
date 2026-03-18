@@ -83,25 +83,30 @@ async function pokeLodgeNow(): Promise<void> {
 
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   return html`
-    <div style="margin-top: 24px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 24px;">
-      <h3 style="margin: 0 0 16px; color: var(--accent-cyan); font-family: var(--font-display);">Direct Comms & Runtime Diagnostics</h3>
+    <div class="keeper-comms-section">
+      <h3 class="keeper-comms-heading">Direct Comms</h3>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-        <div style="display: flex; flex-direction: column; gap: 12px;">
-          <${KeeperDiagnosticSummary} keeper=${keeper} />
-          <${KeeperRuntimeActions}
-            actor=${currentOperatorActor()}
-            keeper=${keeper}
-            onPokeLodge=${() => { void pokeLodgeNow() }}
-          />
-        </div>
-
-        <div style="min-height: 345px;">
+      <div class="keeper-comms-layout">
+        ${'' /* Chat takes full width — the primary interaction surface */}
+        <div class="keeper-comms-chat">
           <${KeeperConversationPanel}
             keeperName=${keeper.name}
             placeholder="이 키퍼에게 직접 프롬프트"
           />
         </div>
+
+        ${'' /* Diagnostics and actions in a collapsible panel below */}
+        <details class="keeper-comms-diagnostics">
+          <summary class="keeper-comms-diagnostics-toggle">런타임 진단 및 액션</summary>
+          <div class="keeper-comms-diagnostics-body">
+            <${KeeperDiagnosticSummary} keeper=${keeper} />
+            <${KeeperRuntimeActions}
+              actor=${currentOperatorActor()}
+              keeper=${keeper}
+              onPokeLodge=${() => { void pokeLodgeNow() }}
+            />
+          </div>
+        </details>
       </div>
     </div>
   `
@@ -122,7 +127,7 @@ export function KeeperDetailOverlay() {
         }
       }}
     >
-      <div style="max-width:780px; width:100%; max-height:90vh; overflow-y:auto; background:#1a1a2e; border-radius:16px; border:1px solid rgba(255,255,255,0.08); padding:24px;">
+      <div style="max-width:1100px; width:100%; max-height:90vh; overflow-y:auto; background:#1a1a2e; border-radius:16px; border:1px solid rgba(255,255,255,0.08); padding:24px;">
         ${'' /* Header */}
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
           <div style="display:flex; align-items:center; gap:12px;">
@@ -145,6 +150,9 @@ export function KeeperDetailOverlay() {
 
         ${'' /* Context chart */}
         <${ContextChart} keeper=${keeper} />
+
+        ${'' /* Direct conversation — placed prominently before detail cards */}
+        <${KeeperCommsPanel} keeper=${keeper} />
 
         ${'' /* Two-column grid for sections */}
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
@@ -244,7 +252,6 @@ export function KeeperDetailOverlay() {
             </div>
           <//>
         </div>
-        <${KeeperCommsPanel} keeper=${keeper} />
       </div>
     </div>
   `

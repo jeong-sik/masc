@@ -101,7 +101,9 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
   let ctx_work = Context_manager.create
     ~system_prompt:(Printf.sprintf "Keeper %s autonomous execution" meta.name)
     ~max_tokens:4000 in
-  let execute_tool_calls
+  (* TODO: migrate Eval_gate logic into OAS guardrails when
+     run_with_tools fully replaces the manual tool loop. *)
+  let _execute_tool_calls
       (tcs : Llm_types.tool_call list) : (Llm_types.tool_call * string) list =
     List.map
       (fun (tc : Llm_types.tool_call) ->
@@ -147,89 +149,33 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
          (tc, result))
       tcs
   in
-  let run_cascade requests = Llm_orchestration.cascade requests in
   let max_rounds = 3 in
-  let initial_request =
-    { Llm_types.model = primary;
-      messages = [
-        Agent_sdk.Types.system_msg system_prompt;
-        Agent_sdk.Types.user_msg "Execute the first step of the plan now.";
-      ];
-      temperature = 0.3;
-      max_tokens = 1024;
-      tools = keeper_allowed_llm_tools meta;
-      response_format = `Text;
-    }
-  in
-  let requests = List.map (fun (spec : Llm_types.model_spec) ->
-    { initial_request with Llm_types.model = spec }
-  ) specs in
-  match run_cascade requests with
+  match Keeper_oas_adapter.run_with_tools
+    ~config ~meta ~system_prompt
+    ~goal:"Execute the first step of the plan now."
+    ~max_turns:max_rounds
+    ~temperature:0.3
+    ~max_tokens:1024
+  with
   | Error e ->
-      (Printf.sprintf "LLM cascade failed: %s" e, 0.0, [])
-  | Ok resp0 ->
-      let rec exec_loop ~round ~acc_cost ~acc_tools ~last_resp =
-        if not (Llm_types.has_tool_calls last_resp) || round > max_rounds then
-          let content =
-            let c = String.trim (Llm_types.text_of_response last_resp) in
-            if c = "" && acc_tools <> [] then
-              Printf.sprintf "(autonomous execution: %s)"
-                (String.concat ", " acc_tools)
-            else c
-          in
-          (content, acc_cost, acc_tools)
-        else
-          let last_resp_tool_calls = Llm_types.tool_calls_of_response last_resp in
-          let round_tools =
-            List.map (fun (tc : Llm_types.tool_call) -> tc.call_name)
-              last_resp_tool_calls
-          in
-          let all_tools = acc_tools @ round_tools in
-          let tool_outputs = execute_tool_calls last_resp_tool_calls in
-          let followup_prompt =
-            keeper_tool_followup_prompt
-              ~user_message:"Execute the next step of the plan."
-              ~draft_reply:(Llm_types.text_of_response last_resp)
-              ~tool_outputs
-              ~already_executed:all_tools
-          in
-          (* Stop providing tools after write operations *)
-          let write_done =
-            keeper_write_done all_tools
-          in
-          let next_tools = keeper_allowed_llm_tools ~write_done meta in
-          let followup_requests = List.map (fun (spec : Llm_types.model_spec) ->
-            { Llm_types.model = spec;
-              messages = [
-                Agent_sdk.Types.system_msg system_prompt;
-                Agent_sdk.Types.user_msg followup_prompt;
-              ];
-              temperature = 0.3;
-              max_tokens = 1024;
-              tools = next_tools;
-              response_format = `Text;
-            }
-          ) specs in
-          match run_cascade followup_requests with
-          | Error _ ->
-              (Llm_types.text_of_response last_resp, acc_cost, all_tools)
-          | Ok next_resp ->
-              let used_spec =
-                model_spec_for_used specs next_resp.Llm_provider.Types.model
-                |> Option.value ~default:primary
-              in
-              let round_cost = cost_usd_of_usage (Llm_types.usage_of_response next_resp) used_spec in
-              exec_loop ~round:(round + 1)
-                ~acc_cost:(acc_cost +. round_cost)
-                ~acc_tools:all_tools
-                ~last_resp:next_resp
+      (Printf.sprintf "OAS agent failed: %s" e, 0.0, [])
+  | Ok run_result ->
+      let content =
+        let c = String.trim (Keeper_oas_adapter.text_of_run_result run_result) in
+        if c = "" then "(autonomous execution completed)" else c
       in
-      let used_spec0 =
-        model_spec_for_used specs resp0.Llm_provider.Types.model
+      let usage = Keeper_oas_adapter.usage_of_run_result run_result in
+      let used_model_spec =
+        model_spec_for_used specs (Keeper_oas_adapter.model_of_run_result run_result)
         |> Option.value ~default:primary
       in
-      let cost0 = cost_usd_of_usage (Llm_types.usage_of_response resp0) used_spec0 in
-      exec_loop ~round:1 ~acc_cost:cost0 ~acc_tools:[] ~last_resp:resp0
+      let cost = cost_usd_of_usage usage used_model_spec in
+      (* OAS handles tool dispatch internally; extract tool names from response *)
+      let tools_used =
+        Llm_types.tool_calls_of_response run_result.response
+        |> List.map (fun (tc : Llm_types.tool_call) -> tc.call_name)
+      in
+      (content, cost, tools_used)
 
 (** Autonomous goal turn: evaluate goals and optionally generate/verify action plan.
     Returns Some updated_meta when an autonomous action decision was made,

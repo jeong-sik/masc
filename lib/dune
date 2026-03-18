@@ -487,6 +487,7 @@
    keeper_exec_status
    keeper_exec_persona
    keeper_exec_context
+   keeper_oas_adapter
    keeper_exec_autonomy
    keeper_exec_proactive
    keeper_exec_social
@@ -658,6 +659,7 @@
   keeper_exec_status
   keeper_exec_persona
   keeper_exec_context
+  keeper_oas_adapter
   keeper_exec_autonomy
   keeper_exec_social
   keeper_exec_proactive

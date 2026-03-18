@@ -245,6 +245,11 @@ let generate_action_plan ~model ~goal ~keeper_context =
     tools = [];
     response_format = `Text;
   } in
+  (* NOTE: Llm_orchestration.complete used directly here to avoid
+     dependency cycle: Keeper_autonomy → Keeper_oas_adapter →
+     Keeper_exec_tools → ... → Keeper_autonomy.
+     This is a tool-free single-shot call, so the OAS Agent.t loop
+     is not needed. *)
   match Llm_orchestration.complete req with
   | Ok resp -> Ok (Llm_types.text_of_response resp)
   | Error e -> Error (sprintf "plan generation failed: %s" e)

@@ -7,12 +7,7 @@
     The file is hot-reloaded via a simple mtime cache.
     When the file or requested key is missing, built-in defaults are used.
 
-    All LLM calls route through {!Llm_provider_oas} (OAS provider path).
-    This bypasses the legacy [Llm_orchestration] global semaphore,
-    eliminating the permit-contention bottleneck between sentinel,
-    heartbeat, and lodge subsystems.
-
-    @since 2.114.0 — OAS-native cascade *)
+    @since 2.114.0 *)
 
 open Printf
 
@@ -192,7 +187,8 @@ let get_cascade ?(config_path = "") ~cascade_name () :
         cascade_name;
       Llm_client.available_model_specs_of_strings defaults)
 
-(** Call LLM cascade via OAS orchestration path. *)
+(** Call LLM cascade. Routes through [Llm_orchestration.run_prompt_cascade]
+    which uses OAS-inlined provider calls (no global semaphore after v2.114). *)
 let call ~cascade_name ~prompt
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
     ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
@@ -207,7 +203,7 @@ let call ~cascade_name ~prompt
     | Ok resp ->
         Ok
           {
-            response = Llm_types.text_of_response resp;
+            response = Llm_client.text_of_response resp;
             llm_used = resp.Llm_client.model_used;
             duration_ms = resp.Llm_client.latency_ms;
           }

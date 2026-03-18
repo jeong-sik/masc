@@ -152,8 +152,8 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
   let initial_request =
     { Llm_client.model = primary;
       messages = [
-        Llm_client.system_msg system_prompt;
-        Llm_client.user_msg "Execute the first step of the plan now.";
+        Agent_sdk.Types.system_msg system_prompt;
+        Agent_sdk.Types.user_msg "Execute the first step of the plan now.";
       ];
       temperature = 0.3;
       max_tokens = 1024;
@@ -171,7 +171,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
       let rec exec_loop ~round ~acc_cost ~acc_tools ~last_resp =
         if last_resp.Llm_client.tool_calls = [] || round > max_rounds then
           let content =
-            let c = String.trim (Llm_client.text_of_response last_resp) in
+            let c = String.trim (Llm_types.text_of_response last_resp) in
             if c = "" && acc_tools <> [] then
               Printf.sprintf "(autonomous execution: %s)"
                 (String.concat ", " acc_tools)
@@ -188,7 +188,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
           let followup_prompt =
             keeper_tool_followup_prompt
               ~user_message:"Execute the next step of the plan."
-              ~draft_reply:(Llm_client.text_of_response last_resp)
+              ~draft_reply:(Llm_types.text_of_response last_resp)
               ~tool_outputs
               ~already_executed:all_tools
           in
@@ -200,8 +200,8 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
           let followup_requests = List.map (fun (spec : Llm_client.model_spec) ->
             { Llm_client.model = spec;
               messages = [
-                Llm_client.system_msg system_prompt;
-                Llm_client.user_msg followup_prompt;
+                Agent_sdk.Types.system_msg system_prompt;
+                Agent_sdk.Types.user_msg followup_prompt;
               ];
               temperature = 0.3;
               max_tokens = 1024;
@@ -211,7 +211,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
           ) specs in
           match run_cascade followup_requests with
           | Error _ ->
-              (Llm_client.text_of_response last_resp, acc_cost, all_tools)
+              (Llm_types.text_of_response last_resp, acc_cost, all_tools)
           | Ok next_resp ->
               let used_spec =
                 model_spec_for_used specs next_resp.model_used

@@ -75,7 +75,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
                    ~instructions:meta.instructions)
           in
           let prompt = explicit_room_prompt ~meta ~room_id msg in
-          let user_message = Llm_client.user_msg prompt in
+          let user_message = Agent_sdk.Types.user_msg prompt in
           let ctx_work = Context_manager.append ctx_work user_message in
           Context_manager.persist_message session user_message;
           let requests =
@@ -83,7 +83,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               (fun (model : Llm_client.model_spec) ->
                 ({
                   Llm_client.model;
-                  messages = (Llm_client.system_msg ctx_work.system_prompt) :: ctx_work.messages;
+                  messages = (Agent_sdk.Types.system_msg ctx_work.system_prompt) :: ctx_work.messages;
                   temperature = Keeper_config.keeper_reflection_temp ();
                   max_tokens = Keeper_config.keeper_explicit_reply_max_tokens ();
                   tools = [];
@@ -97,14 +97,14 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               let used_model =
                 model_spec_for_used specs resp.model_used |> Option.value ~default:primary
               in
-              let reply_raw = String.trim (Llm_client.text_of_response resp) in
+              let reply_raw = String.trim (Llm_types.text_of_response resp) in
               let reply =
                 if reply_raw = "" then
                   Printf.sprintf "@%s 야, 다시 한 번만 말해봐." msg.from_agent
                 else
                   reply_raw
               in
-              let assistant_message = Llm_client.assistant_msg reply in
+              let assistant_message = Agent_sdk.Types.assistant_msg reply in
               let ctx_work = Context_manager.append ctx_work assistant_message in
               Context_manager.persist_message session assistant_message;
               (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
@@ -119,14 +119,14 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
                   total_turns = meta.total_turns + 1;
                   total_input_tokens = meta.total_input_tokens + usage.input_tokens;
                   total_output_tokens = meta.total_output_tokens + usage.output_tokens;
-                  total_tokens = meta.total_tokens + Llm_client.total_tokens usage;
+                  total_tokens = meta.total_tokens + Llm_types.total_tokens usage;
                   total_cost_usd =
                     meta.total_cost_usd +. cost_usd_of_usage usage used_model;
                   last_turn_ts = now_ts;
                   last_model_used = resp.model_used;
                   last_input_tokens = usage.input_tokens;
                   last_output_tokens = usage.output_tokens;
-                  last_total_tokens = Llm_client.total_tokens usage;
+                  last_total_tokens = Llm_types.total_tokens usage;
                   last_latency_ms = resp.latency_ms;
                 }
               in
@@ -221,7 +221,7 @@ let run_social_board_event_turn
                    ~instructions:meta.instructions)
           in
           let prompt = social_board_event_prompt ~meta event in
-          let user_message = Llm_client.user_msg prompt in
+          let user_message = Agent_sdk.Types.user_msg prompt in
           let ctx_work = Context_manager.append ctx_work user_message in
           Context_manager.persist_message session user_message;
           let execute_tool_calls
@@ -248,8 +248,8 @@ let run_social_board_event_turn
                  ({
                     Llm_client.model;
                     messages =
-                      (Llm_client.system_msg ctx_work.system_prompt)
-                      :: (ctx_work.messages @ [ Llm_client.user_msg prompt ]);
+                      (Agent_sdk.Types.system_msg ctx_work.system_prompt)
+                      :: (ctx_work.messages @ [ Agent_sdk.Types.user_msg prompt ]);
                     temperature = Keeper_config.keeper_planning_temp ();
                     max_tokens = Keeper_config.keeper_social_initial_max_tokens ();
                     tools = keeper_allowed_llm_tools meta;
@@ -271,12 +271,12 @@ let run_social_board_event_turn
                   ~acc_tools_used ~last_resp =
                 if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
                   let content =
-                    let trimmed = String.trim (Llm_client.text_of_response last_resp) in
+                    let trimmed = String.trim (Llm_types.text_of_response last_resp) in
                     if trimmed = "" && acc_tools_used <> [] then
                       Printf.sprintf "(tools executed: %s)"
                         (String.concat ", " acc_tools_used)
                     else
-                      Llm_client.text_of_response last_resp
+                      Llm_types.text_of_response last_resp
                   in
                   ( content,
                     acc_usage,
@@ -297,7 +297,7 @@ let run_social_board_event_turn
                   let followup_prompt =
                     keeper_tool_followup_prompt
                       ~user_message:prompt
-                      ~draft_reply:(Llm_client.text_of_response last_resp)
+                      ~draft_reply:(Llm_types.text_of_response last_resp)
                       ~tool_outputs
                       ~already_executed:all_tools_so_far
                   in
@@ -312,10 +312,10 @@ let run_social_board_event_turn
                          ({
                             Llm_client.model;
                             messages = [
-                              Llm_client.system_msg
+                              Agent_sdk.Types.system_msg
                                 (keeper_tool_loop_system_prompt
                                    ~character_context:ctx_work.system_prompt);
-                              Llm_client.user_msg followup_prompt;
+                              Agent_sdk.Types.user_msg followup_prompt;
                             ];
                             temperature = Keeper_config.keeper_deterministic_temp ();
                             max_tokens = Keeper_config.keeper_social_followup_max_tokens ();
@@ -327,7 +327,7 @@ let run_social_board_event_turn
                   in
                   match Llm_client.cascade followup_requests with
                   | Error _ ->
-                      ( Llm_client.text_of_response last_resp,
+                      ( Llm_types.text_of_response last_resp,
                         acc_usage,
                         last_resp.Llm_client.model_used,
                         acc_latency,
@@ -366,7 +366,7 @@ let run_social_board_event_turn
                 else
                   trimmed
               in
-              let assistant_message = Llm_client.assistant_msg assistant_text in
+              let assistant_message = Agent_sdk.Types.assistant_msg assistant_text in
               let ctx_work = Context_manager.append ctx_work assistant_message in
               Context_manager.persist_message session assistant_message;
               (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
@@ -384,13 +384,13 @@ let run_social_board_event_turn
                   total_turns = meta.total_turns + 1;
                   total_input_tokens = meta.total_input_tokens + final_usage.input_tokens;
                   total_output_tokens = meta.total_output_tokens + final_usage.output_tokens;
-                  total_tokens = meta.total_tokens + Llm_client.total_tokens final_usage;
+                  total_tokens = meta.total_tokens + Llm_types.total_tokens final_usage;
                   total_cost_usd = meta.total_cost_usd +. final_cost_usd;
                   last_turn_ts = now_ts;
                   last_model_used = final_model_used;
                   last_input_tokens = final_usage.input_tokens;
                   last_output_tokens = final_usage.output_tokens;
-                  last_total_tokens = Llm_client.total_tokens final_usage;
+                  last_total_tokens = Llm_types.total_tokens final_usage;
                   last_latency_ms = final_latency_ms;
                   last_autonomous_action_at =
                     (if action_kind = "none" then meta.last_autonomous_action_at else now_iso ());

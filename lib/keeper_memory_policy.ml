@@ -482,13 +482,13 @@ let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Sa
     ("constraints", `List (List.map (fun s -> `String s) snapshot.constraints));
   ]
 
-let latest_state_snapshot_from_messages (messages : Llm_client.message list) :
+let latest_state_snapshot_from_messages (messages : Agent_sdk.Types.message list) :
     keeper_state_snapshot option =
-  let rec loop (msgs : Llm_client.message list) =
+  let rec loop (msgs : Agent_sdk.Types.message list) =
     match msgs with
     | [] -> None
     | msg :: rest ->
-      match parse_state_snapshot_from_reply (Llm_client.text_of_message msg) with
+      match parse_state_snapshot_from_reply (Agent_sdk.Types.text_of_message msg) with
       | None -> loop rest
       | Some snapshot -> Some snapshot
   in

@@ -15,6 +15,7 @@ import {
 } from '../store'
 import { fetchRoomMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineEvent, type AgentTimelineResponse } from '../api'
 import { journal } from '../sse'
+import { route, navigate } from '../router'
 import { missionSnapshot } from '../mission-store'
 import { executionWorkerSupportBriefs } from '../store'
 import type { JournalEntry } from '../types'
@@ -54,6 +55,9 @@ export function closeAgentDetail(): void {
   taskHistories.value = []
   agentTimeline.value = null
   mentionText.value = ''
+  if (route.value.tab === 'agents' && route.value.params.agent) {
+    navigate('agents')
+  }
 }
 
 function selectedAgent(): Agent | null {

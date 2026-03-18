@@ -6,8 +6,8 @@ import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
 import { agents, keepers } from '../store'
 import { missionSnapshot } from '../mission-store'
-import { navigate } from '../router'
 import { AgentAvatar } from './overview/agent-avatar'
+import { openAgentDetail } from './agent-detail'
 import { formatDuration } from './mission-utils'
 
 type StatusFilter = 'all' | 'active' | 'idle' | 'offline'
@@ -151,7 +151,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div
               class="roster-card ${isKeeper ? 'roster-card--keeper' : ''}"
               key=${agent.name}
-              onClick=${() => navigate('execution', { agent: agent.name })}
+              onClick=${() => openAgentDetail(agent.name)}
               role="button"
               tabindex="0"
             >

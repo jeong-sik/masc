@@ -13,9 +13,9 @@
 
 .overview-stat {
   padding: 12px 14px;
-  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
   border-radius: 6px;
-  background: var(--ff-panel, rgba(13, 21, 38, 0.9));
+  background: var(--ff-panel, rgba(10, 22, 40, 0.92));
   display: grid;
   gap: 2px;
   position: relative;
@@ -23,11 +23,11 @@
 }
 
 .overview-stat:hover {
-  border-color: var(--ff-border, rgba(212, 169, 75, 0.35));
+  border-color: var(--ff-border, rgba(200, 168, 78, 0.35));
 }
 
 .overview-stat__label {
-  color: var(--ff-gold, #d4a94b);
+  color: var(--ff-gold, #c8a84e);
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -50,9 +50,9 @@
   gap: 12px;
   padding: 14px 18px;
   border-radius: 6px;
-  background: var(--ff-panel, rgba(13, 21, 38, 0.9));
-  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
-  border-left: 3px solid var(--ff-hp, #3dcc5e);
+  background: var(--ff-panel, rgba(10, 22, 40, 0.92));
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border-left: 3px solid var(--ff-hp-full, #4ade80);
   font-size: 14px;
   font-weight: 500;
   color: var(--text-strong);
@@ -60,11 +60,11 @@
 }
 
 .situation-banner--ok {
-  border-left-color: var(--ff-hp, #3dcc5e);
+  border-left-color: var(--ff-hp-full, #4ade80);
 }
 
 .situation-banner--warn {
-  border-left-color: var(--ff-xp, #d4a94b);
+  border-left-color: var(--ff-xp, #c8a84e);
 }
 
 .situation-banner--bad {

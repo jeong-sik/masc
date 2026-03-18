@@ -18,7 +18,7 @@
 .roster-title {
   font-size: 20px;
   font-weight: 600;
-  color: var(--ff-gold-bright, #f0d080);
+  color: var(--ff-gold-bright, #e8cc70);
   margin: 0 0 var(--space-md, 16px) 0;
   letter-spacing: 0.5px;
   text-shadow: 0 1px 4px rgba(212, 169, 75, 0.2);
@@ -34,8 +34,8 @@
 .roster-search {
   padding: 6px 12px;
   border-radius: 4px;
-  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
-  background: var(--ff-navy, #0d1526);
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  background: var(--ff-navy, #0a1628);
   color: rgba(255, 255, 255, 0.9);
   font-size: 13px;
   width: 200px;
@@ -44,8 +44,8 @@
 
 .roster-search:focus {
   outline: none;
-  border-color: var(--ff-gold, #d4a94b);
-  box-shadow: 0 0 0 2px var(--ff-gold-dim, rgba(212, 169, 75, 0.25));
+  border-color: var(--ff-gold, #c8a84e);
+  box-shadow: 0 0 0 2px var(--ff-gold-dim, rgba(200, 168, 78, 0.25));
 }
 
 .roster-search::placeholder {
@@ -60,7 +60,7 @@
 .roster-filter-btn {
   padding: 4px 10px;
   border-radius: 3px;
-  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
   background: transparent;
   color: rgba(255, 255, 255, 0.45);
   font-size: 12px;
@@ -69,15 +69,15 @@
 }
 
 .roster-filter-btn:hover {
-  background: var(--ff-gold-dim, rgba(212, 169, 75, 0.25));
-  color: var(--ff-gold-bright, #f0d080);
-  border-color: var(--ff-border, rgba(212, 169, 75, 0.35));
+  background: var(--ff-gold-dim, rgba(200, 168, 78, 0.25));
+  color: var(--ff-gold-bright, #e8cc70);
+  border-color: var(--ff-border, rgba(200, 168, 78, 0.35));
 }
 
 .roster-filter-btn.active {
-  background: var(--ff-gold-dim, rgba(212, 169, 75, 0.25));
-  color: var(--ff-gold-bright, #f0d080);
-  border-color: var(--ff-gold, #d4a94b);
+  background: var(--ff-gold-dim, rgba(200, 168, 78, 0.25));
+  color: var(--ff-gold-bright, #e8cc70);
+  border-color: var(--ff-gold, #c8a84e);
 }
 
 /* ============================================
@@ -94,8 +94,8 @@
   display: flex;
   gap: var(--space-md, 16px);
   padding: 16px 20px;
-  background: var(--ff-panel, rgba(13, 21, 38, 0.9));
-  border: 1px solid var(--ff-border, rgba(212, 169, 75, 0.35));
+  background: var(--ff-panel, rgba(10, 22, 40, 0.92));
+  border: 1px solid var(--ff-border, rgba(200, 168, 78, 0.35));
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
@@ -109,7 +109,7 @@
   position: absolute;
   width: 8px;
   height: 8px;
-  border-color: var(--ff-gold, #d4a94b);
+  border-color: var(--ff-gold, #c8a84e);
   opacity: 0.5;
   transition: opacity 0.2s;
 }
@@ -129,8 +129,8 @@
 }
 
 .roster-card:hover {
-  background: var(--ff-navy-light, #142040);
-  border-color: var(--ff-gold, #d4a94b);
+  background: var(--ff-navy-light, #122040);
+  border-color: var(--ff-gold, #c8a84e);
   box-shadow: 0 0 12px rgba(212, 169, 75, 0.1);
 }
 
@@ -149,7 +149,7 @@
   content: '';
   position: absolute;
   inset: -3px;
-  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
   border-radius: 14px;
   pointer-events: none;
 }
@@ -171,7 +171,7 @@
 
 .roster-card__name {
   font-size: 15px;
-  color: var(--ff-gold-bright, #f0d080);
+  color: var(--ff-gold-bright, #e8cc70);
   font-weight: 600;
   letter-spacing: 0.3px;
 }
@@ -199,7 +199,7 @@
 .roster-card__model {
   padding: 1px 6px;
   background: rgba(212, 169, 75, 0.08);
-  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
   border-radius: 3px;
   color: rgba(212, 169, 75, 0.6);
 }
@@ -219,13 +219,13 @@
 
 .roster-badge--active {
   background: rgba(61, 204, 94, 0.12);
-  color: var(--ff-hp, #3dcc5e);
+  color: var(--ff-hp-full, #4ade80);
   border: 1px solid rgba(61, 204, 94, 0.25);
 }
 
 .roster-badge--idle {
   background: rgba(212, 169, 75, 0.1);
-  color: var(--ff-xp, #d4a94b);
+  color: var(--ff-xp, #c8a84e);
   border: 1px solid rgba(212, 169, 75, 0.2);
 }
 
@@ -240,7 +240,7 @@
   text-align: center;
   color: rgba(255, 255, 255, 0.2);
   font-size: 14px;
-  border: 1px dashed var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border: 1px dashed var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
   border-radius: 6px;
 }
 
@@ -289,7 +289,7 @@
   background: rgba(255, 255, 255, 0.04);
   border-radius: 2px;
   overflow: hidden;
-  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
 }
 
 .keeper-roster__pressure-bar {
@@ -317,7 +317,7 @@
   gap: 4px;
   padding: 6px var(--space-md, 16px);
   margin-bottom: var(--space-sm, 8px);
-  border-left: 2px solid var(--ff-border, rgba(212, 169, 75, 0.35));
+  border-left: 2px solid var(--ff-border, rgba(200, 168, 78, 0.35));
 }
 
 .situation-reason {
@@ -333,7 +333,7 @@
 }
 
 .situation-reason--warn {
-  color: var(--ff-gold, #d4a94b);
+  color: var(--ff-gold, #c8a84e);
 }
 
 .situation-reason__tag {
@@ -341,7 +341,7 @@
   padding: 1px 6px;
   border-radius: 2px;
   background: rgba(212, 169, 75, 0.08);
-  border: 1px solid var(--ff-border-subtle, rgba(212, 169, 75, 0.12));
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
   white-space: nowrap;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -366,14 +366,14 @@
 
 .overview-section-link {
   font-size: 12px;
-  color: var(--ff-gold, #d4a94b);
+  color: var(--ff-gold, #c8a84e);
   cursor: pointer;
   transition: color 0.15s;
   opacity: 0.6;
 }
 
 .overview-section-link:hover {
-  color: var(--ff-gold-bright, #f0d080);
+  color: var(--ff-gold-bright, #e8cc70);
   opacity: 1;
 }
 
@@ -386,7 +386,7 @@
 /* Attention badge — gold warning */
 .attention-badge {
   background: rgba(212, 169, 75, 0.15);
-  color: var(--ff-gold, #d4a94b);
+  color: var(--ff-gold, #c8a84e);
   border: 1px solid rgba(212, 169, 75, 0.3);
   border-radius: 3px;
   padding: 2px 8px;

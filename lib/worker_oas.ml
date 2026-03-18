@@ -1,17 +1,8 @@
-(** Worker_oas — Adapter bridging MASC worker_container_meta to OAS Agent.t.
-
-    NOTE: Not yet wired into production code paths. These adapters will
-    replace existing implementations when feature flags are enabled.
-    Currently available for direct testing only.
+(** Worker_oas — Bridges MASC worker_container_meta to OAS Agent.t.
 
     Converts MASC worker metadata into OAS Agent configuration, using the
     OAS Builder pattern for agent construction. Wraps Agent.run with MASC
     worker lifecycle hooks (heartbeat, join/leave, board posting).
-
-    This module demonstrates the migration path from MASC's bespoke worker
-    runner (local_agent_eio_runners.ml) to the OAS Agent SDK. It does not
-    replace the existing runner; instead it provides an alternative entry
-    point gated by [MASC_USE_OAS_WORKERS=true].
 
     Key mappings:
     - worker_container_meta fields -> OAS agent_config + Builder options
@@ -25,17 +16,6 @@
 open Printf
 
 module Oas = Agent_sdk
-
-(* ================================================================ *)
-(* Feature Flag                                                      *)
-(* ================================================================ *)
-
-let use_oas_workers () =
-  match Sys.getenv_opt "MASC_USE_OAS_WORKERS" with
-  | Some v ->
-    let v = String.lowercase_ascii (String.trim v) in
-    v = "true" || v = "1" || v = "yes"
-  | None -> false
 
 (* ================================================================ *)
 (* worker_container_meta -> OAS Types.model                          *)

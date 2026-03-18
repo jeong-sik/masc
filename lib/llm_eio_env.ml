@@ -9,11 +9,12 @@
 type t = {
   sw : Eio.Switch.t;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
+  clock : float Eio.Time.clock_ty Eio.Resource.t option;
 }
 
 let env : t option Atomic.t = Atomic.make None
 
-let init ~sw ~net = Atomic.set env (Some { sw; net })
+let init ~sw ~net ?clock () = Atomic.set env (Some { sw; net; clock })
 
 let get () =
   match Atomic.get env with

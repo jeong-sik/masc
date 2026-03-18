@@ -371,7 +371,12 @@ let string_of_http_error = function
 (* ================================================================ *)
 
 (** Execute an LLM completion using Llm_provider (cohttp-eio).
-    Replaces curl-subprocess calls for all providers. *)
+    Uses {!Llm_provider.Complete.complete_with_retry} when a clock is
+    available (server runtime), falls back to bare {!complete} otherwise
+    (unit tests without Eio clock).
+
+    @since 2.103.0 — v0.49 curl-subprocess replacement
+    @since 2.106.0 — per-provider retry via OAS Complete.complete_with_retry *)
 let call ?timeout_sec:_ (req : completion_request)
     : (completion_response, string) result =
   let req = normalize_request req in
@@ -384,10 +389,17 @@ let call ?timeout_sec:_ (req : completion_request)
         req.model.model_id
         (string_of_provider req.model.provider)
         req.max_tokens (List.length req.tools);
-      match
-        Llm_provider.Complete.complete ~sw:env.sw ~net:env.net ~config
-          ~messages ~tools ()
-      with
+      let result = match env.clock with
+        | Some clock ->
+            Llm_provider.Complete.complete_with_retry
+              ~sw:env.sw ~net:env.net ~clock ~config
+              ~messages ~tools ()
+        | None ->
+            Llm_provider.Complete.complete
+              ~sw:env.sw ~net:env.net ~config
+              ~messages ~tools ()
+      in
+      match result with
       | Ok resp ->
           let masc_resp = completion_response_of_api_response resp in
           let text = text_of_response masc_resp in

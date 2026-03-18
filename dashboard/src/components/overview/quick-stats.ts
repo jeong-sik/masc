@@ -81,7 +81,7 @@ export function QuickStats({
       </div>
       <div class="overview-stat"
         style="cursor: pointer;"
-        onClick=${() => navigate('keeper-roster')}
+        onClick=${() => navigate('agent-roster')}
       >
         <span class="overview-stat__label">키퍼</span>
         <strong class="overview-stat__value">${keeperCount}</strong>

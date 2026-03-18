@@ -24,6 +24,12 @@
   text-shadow: 0 1px 4px rgba(212, 169, 75, 0.2);
 }
 
+.agent-page__subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-top: 4px;
+}
+
 .roster-controls {
   display: flex;
   gap: var(--space-md, 16px);
@@ -245,65 +251,75 @@
 }
 
 /* ============================================
-   Keeper Roster — HP/MP bar style
+   Keeper inline variant — blue accent on agent card
+   Agent with keeper runtime gets visual distinction
    ============================================ */
 
-.keeper-roster-card {
-  flex-direction: column;
-  padding: 14px 20px;
+.roster-card--keeper {
+  border-left: 3px solid #4a9ef5;
+  border-color: rgba(74, 158, 245, 0.25);
 }
 
-.keeper-roster__main {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.roster-card--keeper:hover {
+  border-color: rgba(74, 158, 245, 0.4);
+  box-shadow: 0 0 12px rgba(74, 158, 245, 0.08);
 }
 
-.keeper-roster__header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm, 8px);
+.roster-card--keeper::before,
+.roster-card--keeper::after {
+  border-color: #4a9ef5;
 }
 
-.keeper-roster__gen {
+.roster-card__keeper-tag {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 2px;
+  background: rgba(74, 158, 245, 0.12);
+  color: #4a9ef5;
+  border: 1px solid rgba(74, 158, 245, 0.25);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 700;
+}
+
+.roster-card__gen {
   font-size: 10px;
   padding: 2px 7px;
   border-radius: 3px;
   background: rgba(74, 158, 245, 0.12);
-  color: var(--ff-mp, #4a9ef5);
+  color: #4a9ef5;
   border: 1px solid rgba(74, 158, 245, 0.2);
   font-weight: 700;
   letter-spacing: 0.5px;
 }
 
-/* Context pressure — FF HP bar */
-.keeper-roster__pressure {
+/* Inline context gauge */
+.roster-card__gauge {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
-.keeper-roster__pressure-track {
+.roster-card__gauge-track {
   flex: 1;
-  height: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  height: 8px;
+  background: rgba(255, 255, 255, 0.03);
   border-radius: 2px;
   overflow: hidden;
-  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border: 1px solid rgba(74, 158, 245, 0.1);
 }
 
-.keeper-roster__pressure-bar {
+.roster-card__gauge-bar {
   height: 100%;
   border-radius: 1px;
   transition: width 0.3s ease;
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
 }
 
-.keeper-roster__pressure-label {
+.roster-card__gauge-label {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.4);
   white-space: nowrap;
-  min-width: 60px;
+  min-width: 50px;
   font-variant-numeric: tabular-nums;
 }
 

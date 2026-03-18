@@ -179,10 +179,10 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                         obs
                     in
                     let model_specs =
-                      Llm_client.available_model_specs_of_strings meta.models
+                      Llm_types.available_model_specs_of_strings meta.models
                     in
                     let result =
-                      Llm_client.run_prompt_cascade
+                      Llm_orchestration.run_prompt_cascade
                         ~temperature:0.3
                         ~model_specs
                         ~max_tokens:1024
@@ -207,7 +207,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                           let primary =
                             match model_specs with
                             | p :: _ -> p
-                            | [] -> Llm_client.default_local_model_spec ()
+                            | [] -> Llm_types.default_local_model_spec ()
                           in
                           (inp *. primary.cost_per_1k_input)
                           +. (outp *. primary.cost_per_1k_output)
@@ -532,7 +532,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                let primary =
                  match specs with
                  | p :: _ -> p
-                 | [] -> Llm_client.default_local_model_spec ()
+                 | [] -> Llm_types.default_local_model_spec ()
                in
                let base_dir = session_base_dir ctx.config in
                let (session, ctx_opt) =

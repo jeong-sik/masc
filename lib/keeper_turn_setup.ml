@@ -300,7 +300,7 @@ let ensure_keeper_exists
        (match ensure_api_keys specs with
         | Error e -> Error e
         | Ok () ->
-          let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.default_local_model_spec () in
+          let primary = match specs with m0 :: _ -> m0 | [] -> Llm_types.default_local_model_spec () in
           let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
           let system_prompt =
             build_keeper_system_prompt

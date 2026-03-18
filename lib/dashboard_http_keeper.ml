@@ -123,9 +123,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             match Keeper_types.model_specs_of_strings m.models with
             | Error _ -> `List []
             | Ok specs ->
-                `List (List.map (fun (s : Llm_client.model_spec) ->
+                `List (List.map (fun (s : Llm_types.model_spec) ->
                   `Assoc [
-                    ("provider", `String (Llm_client.string_of_provider s.provider));
+                    ("provider", `String (Llm_types.string_of_provider s.provider));
                     ("model_id", `String s.model_id);
                     ("max_context", `Int s.max_context);
                   ]
@@ -218,7 +218,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                  | Error _ -> `Assoc [("has_checkpoint", `Bool false)]
                  | Ok specs ->
                      let primary =
-                       match specs with m0 :: _ -> m0 | [] -> Llm_client.llama_default
+                       match specs with m0 :: _ -> m0 | [] -> Llm_types.llama_default
                      in
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =

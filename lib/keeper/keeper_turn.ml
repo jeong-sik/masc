@@ -417,6 +417,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                              "keeper_board_comment";
                              "keeper_fs_edit";
                              "keeper_edit";
+                             "keeper_voice_speak";
+                             "keeper_voice_session_start";
+                             "keeper_voice_session_end";
                            ])
                       all_tools_so_far
                   in

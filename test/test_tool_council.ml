@@ -226,9 +226,10 @@ let test_duplicate_petition_merges_by_source_ref () =
   (* Verify only 1 active case exists *)
   let cases = GV2.list_cases ~include_test:true base_path in
   check int "exactly 1 case" 1 (List.length cases);
-  (* The case should have 3 petitions *)
+  (* After BUG-1627/1608 fix: merged duplicates do not add new petitions,
+     so the case has only the original petition. *)
   let the_case = List.hd cases in
-  check int "case has 3 petitions" 3 (List.length the_case.petition_ids)
+  check int "case has 1 petition (dedup)" 1 (List.length the_case.petition_ids)
 
 let test_petition_rejects_unsupported_action_type () =
   with_base_path @@ fun base_path ->

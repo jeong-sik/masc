@@ -88,7 +88,7 @@ let test_dashboard_execution_fixture () =
         check bool "worker focus carried through" true
           (worker_briefs
            |> List.exists (fun row ->
-                  row |> member "name" |> to_string = "llama-local-alpha"
+                  row |> member "name" |> to_string = "local-alpha"
                   && row |> member "related_session_id" |> to_string = "ts-execution-fixture-001"));
       ))
 

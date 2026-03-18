@@ -71,7 +71,7 @@ let perpetual_hooks
         let next_model = match config.model_cascade with
           | _ :: m :: _ -> m
           | [m] -> m
-          | [] -> Llm_client.default_local_model_spec ()
+          | [] -> Llm_types.default_local_model_spec ()
         in
         Perpetual_oas_state.update_state (fun ps ->
           ps.handoff_triggered <- true;

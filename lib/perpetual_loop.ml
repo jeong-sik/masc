@@ -17,12 +17,12 @@ let default_config ~goal ~models ?verifier ?session_dir () =
   let verifier_model = match verifier with
     | Some v -> v
     | None -> (
-        match Llm_client.default_verifier_model_spec () with
+        match Llm_types.default_verifier_model_spec () with
         | Ok model -> model
         | Error _ -> (
             match models with
             | model :: _ -> model
-            | [] -> Llm_client.glm_cloud))
+            | [] -> Llm_types.glm_cloud))
   in
   let session_base = match session_dir with
     | Some d -> d
@@ -89,7 +89,7 @@ let create_state config =
   in
   let primary_model = match config.model_cascade with
     | m :: _ -> m
-    | [] -> Llm_client.default_local_model_spec ()
+    | [] -> Llm_types.default_local_model_spec ()
   in
   let context = Context_manager.create
     ~system_prompt

@@ -964,3 +964,51 @@
   opacity: 0.85;
 }
 
+/* ── Shared: tab-unified, pill bar, collapsible ── */
+.tab-unified {
+  display: grid;
+  gap: var(--space-md, 16px);
+}
+
+.tab-pill-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tab-pill {
+  padding: 4px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tab-pill:hover {
+  border-color: var(--accent, #60a5fa);
+  color: var(--text-primary, #e2e8f0);
+}
+.tab-pill--active {
+  background: var(--accent, #60a5fa);
+  border-color: var(--accent, #60a5fa);
+  color: #fff;
+}
+
+.tab-collapsible {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  border-radius: 8px;
+}
+.tab-collapsible__summary {
+  padding: 8px 12px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tab-collapsible__summary:hover {
+  color: var(--text-primary, #e2e8f0);
+}
+

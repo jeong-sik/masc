@@ -5,17 +5,12 @@ import { connected } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
 import { missionSnapshot } from '../mission-store'
 import { Mission } from './mission'
-import { Proof } from './proof'
-import { Command } from './command'
-import { Ops } from './ops'
-import { Memory } from './memory'
-import { Tools } from './tools'
-import { Planning } from './goals'
-import { Governance } from './governance'
-import { Lab } from './lab'
-import { Live } from './live'
 import { Overview } from './overview/overview'
 import { AgentsUnified } from './agents-unified'
+import { Activity } from './activity'
+import { Work } from './work'
+import { Control } from './control'
+import { LabUnified } from './lab-unified'
 import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
 import {
@@ -191,24 +186,13 @@ export function TabContent() {
     case 'agents':
       return html`<${AgentsUnified} />`
     case 'activity':
-      return html`<${Live} />`
-    case 'work': {
-      const section = route.value.params.section
-      switch (section) {
-        case 'evidence': return html`<${Proof} />`
-        case 'governance': return html`<${Governance} />`
-        case 'planning': return html`<${Planning} />`
-        default: return html`<${Memory} />`
-      }
-    }
+      return html`<${Activity} />`
+    case 'work':
+      return html`<${Work} />`
     case 'control':
-      return route.value.params.section === 'tools'
-        ? html`<${Tools} />`
-        : html`<${Ops} />`
+      return html`<${Control} />`
     case 'lab':
-      return route.value.params.surface === 'trpg'
-        ? html`<${Lab} />`
-        : html`<${Command} />`
+      return html`<${LabUnified} />`
     default:
       return html`<${Overview} />`
   }

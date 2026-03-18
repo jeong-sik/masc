@@ -10,11 +10,11 @@ import { Planning } from './goals'
 
 type WorkSection = 'board' | 'governance' | 'evidence' | 'planning'
 
-const SECTIONS: { id: WorkSection; label: string }[] = [
-  { id: 'board', label: '게시판' },
-  { id: 'governance', label: '거버넌스' },
-  { id: 'evidence', label: '근거' },
-  { id: 'planning', label: '계획' },
+const SECTIONS: { id: WorkSection; label: string; tooltip: string }[] = [
+  { id: 'board', label: '\uAC8C\uC2DC\uD310', tooltip: '\uC5D0\uC774\uC804\uD2B8 \uAC04 \uC18C\uD1B5\uACFC \uC9C0\uC2DD \uACF5\uC720' },
+  { id: 'governance', label: '\uAC70\uBC84\uB10C\uC2A4', tooltip: '\uC758\uC0AC\uACB0\uC815 \uAE30\uB85D\uACFC \uD310\uACB0' },
+  { id: 'evidence', label: '\uADFC\uAC70', tooltip: '\uC791\uC5C5 \uC99D\uAC70\uC640 \uAC80\uC99D \uACB0\uACFC' },
+  { id: 'planning', label: '\uACC4\uD68D', tooltip: '\uC7A5\uAE30 \uBAA9\uD45C\uC640 \uBA54\uD2B8\uB9AD \uB8E8\uD504' },
 ]
 
 function isWorkSection(v: string | undefined): v is WorkSection {
@@ -33,6 +33,7 @@ export function Work() {
           <button
             key=${s.id}
             class="tab-pill ${current === s.id ? 'tab-pill--active' : ''}"
+            title=${s.tooltip}
             onClick=${() => navigate('work', { section: s.id })}
           >
             ${s.label}

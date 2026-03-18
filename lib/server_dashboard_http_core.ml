@@ -313,6 +313,20 @@ let _mission_refresh_interval_s = 120.0
 let start_mission_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
+  (* Warm cache: compute once synchronously so the first browser request
+     sees real data instead of the empty placeholder. *)
+  (let t0 = Time_compat.now () in
+   try
+     let json =
+       Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ()
+     in
+     _mission_json_ref := json;
+     let dt = Time_compat.now () -. t0 in
+     Printf.eprintf "[INFO] Dashboard: mission warm cache done (%.1fs).\n%!" dt
+   with exn ->
+     let dt = Time_compat.now () -. t0 in
+     Printf.eprintf "[WARN] Dashboard: mission warm cache failed (%.1fs): %s\n%!"
+       dt (Printexc.to_string exn));
   Eio.Fiber.fork ~sw (fun () ->
     Printf.eprintf "[INFO] Dashboard: starting mission proactive refresh loop.\n%!";
     let rec loop () =

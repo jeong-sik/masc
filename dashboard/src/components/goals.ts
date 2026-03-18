@@ -450,7 +450,7 @@ export function Planning() {
                   `}
           ` : html`
             <div class="empty-state">
-              정의된 목표가 없습니다. <code>masc_goal_upsert</code>로 목표를 만들 수 있습니다.
+              장기 목표가 아직 없습니다. <code>masc_goal_upsert</code>로 단기/중기/장기 목표를 등록하면 메트릭 기반 추적이 시작됩니다.
             </div>
           `}
         </div>

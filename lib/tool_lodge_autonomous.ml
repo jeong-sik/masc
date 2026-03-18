@@ -13,6 +13,15 @@ let loop_status : (int * int * string) option ref = ref None  (* (current, total
 
     For long-running loops, use Walph presets with direct LLM execution. *)
 let autonomous_loop ~net args =
+  (* Auto-researcher disabled by default — produces bot-like noise, not real agent content.
+     Re-enable after redesigning with proper agent autonomy (cf. Karpathy autoresearch). *)
+  let enabled = match Sys.getenv_opt "MASC_AUTO_RESEARCHER_ENABLED" with
+    | Some v -> String.lowercase_ascii v = "true" || v = "1"
+    | None -> false
+  in
+  if not enabled then
+    (true, "autonomous_loop is disabled (MASC_AUTO_RESEARCHER_ENABLED not set). Set to 'true' to enable.")
+  else
   let iterations = Safe_ops.json_int ~default:10 "iterations" args in
   let iterations = min iterations 50 in  (* cap at 50 for foreground - prevents blocking *)
   let delay_ms = Safe_ops.json_int ~default:3000 "delay_ms" args in

@@ -208,54 +208,28 @@ let run_cascade ?timeout_sec requests =
   match cascade_config_of_requests requests with
   | Error e -> Error e
   | Ok params ->
-  match require_net (), require_switch () with
-  | Error e, _ | _, Error e -> Error e
-  | Ok net, Ok sw ->
-  let all_specs = params.primary_spec :: params.fallback_specs in
-  let rec try_specs errors = function
-    | [] ->
-        let all = String.concat "; " (List.rev errors) in
-        Error (Printf.sprintf "All OAS cascade models failed: %s" all)
-    | spec :: rest ->
-        let oas_config = { (Oas_worker.default_config
-          ~name:"keeper-cascade"
-          ~model_spec:spec
-          ~system_prompt:params.system_prompt
-          ~tools:[]) with
-          max_turns = 1;
-          max_tokens = params.max_tokens;
-          temperature = params.temperature;
-        } in
-        let deadline =
-          Option.map (fun sec -> Time_compat.now () +. float_of_int sec) timeout_sec
-        in
-        let past_deadline () =
-          match deadline with
-          | None -> false
-          | Some d -> Time_compat.now () >= d
-        in
-        if past_deadline () then
-          Error "OAS cascade timeout"
-        else
-        let result = Oas_worker.run ~sw ~net ~config:oas_config params.goal in
-        (match result with
-         | Ok r ->
-             Log.Keeper.info "oas cascade: success with %s" spec.model_id;
-             Ok r.Oas_worker.response
-         | Error e ->
-             Log.Keeper.warn "oas cascade: %s failed: %s" spec.model_id e;
-             try_specs (e :: errors) rest)
+  let messages : Llm_provider.Types.message list =
+    (if String.length params.system_prompt > 0 then
+       [ Llm_provider.Types.system_msg params.system_prompt ]
+     else [])
+    @ [ Llm_provider.Types.user_msg params.goal ]
   in
-  try_specs [] all_specs
+  Llm_cascade.call_with_tools ~cascade_name:"keeper_autonomy" ~messages
+    ~temperature:params.temperature ~max_tokens:params.max_tokens
+    ?timeout_sec ()
 
 let run_cascade_stream ?timeout_sec ~on_event request ~fallback =
-  (* OAS Agent SDK does not support streaming — use Llm_orchestration
-     for the streaming path, fall back to OAS batch on failure. *)
-  match
-    Llm_orchestration.call_provider_stream ?timeout_sec request ~on_event
-  with
-  | Ok _ as ok -> ok
-  | Error e ->
-      Log.Keeper.warn "oas adapter stream failed (%s), falling back to OAS batch" e;
-      let timeout_int = Option.map int_of_float timeout_sec in
-      run_cascade ?timeout_sec:timeout_int (request :: fallback)
+  (* Batch fallback with synthetic SSE events.
+     Streaming via Llm_orchestration removed; all calls route through Llm_cascade. *)
+  let timeout_int = Option.map int_of_float timeout_sec in
+  match run_cascade ?timeout_sec:timeout_int (request :: fallback) with
+  | Ok resp ->
+      let text = Llm_types.text_of_response resp in
+      on_event (Llm_provider.Types.MessageStart {
+        id = "batch-keeper"; model = resp.Llm_provider.Types.model; usage = None });
+      if text <> "" then
+        on_event (Llm_provider.Types.ContentBlockDelta {
+          index = 0; delta = TextDelta text });
+      on_event Llm_provider.Types.MessageStop;
+      Ok resp
+  | Error _ as e -> e

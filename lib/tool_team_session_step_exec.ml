@@ -359,6 +359,44 @@ let release_all_prepared prepareds ~error =
       release_prepared_runtime prepared ~success:false ~error ())
     prepareds
 
+let fail_all_prepared (env : _ step_env) ?(include_worker_run_id = true)
+    prepared_spawns ~error =
+  List.iter
+    (fun (prepared : prepared_spawn) ->
+      release_prepared_runtime prepared ~success:false ~error ();
+      append_spawn_event env
+        ?worker_run_id:
+          (if include_worker_run_id then Some prepared.worker_run_id else None)
+        ~spawn_agent:prepared.spec.spawn_agent
+        ?runtime_actor:prepared.runtime_actor_name
+        ?spawn_role:prepared.spec.spawn_role
+        ?spawn_model:prepared.spec.spawn_model
+        ?execution_scope:
+          (env.deps.effective_execution_scope_of_spec prepared.spec)
+        ?worker_class:prepared.spec.worker_class
+        ?worker_size:(env.deps.worker_size_of_spec prepared.spec)
+        ?worker_backend:
+          (if env.deps.is_local_spawn_agent prepared.spec.spawn_agent then
+             Some "local"
+           else None)
+        ?parent_actor:prepared.spec.parent_actor
+        ?capsule_mode:prepared.spec.capsule_mode
+        ?runtime_pool:prepared.spec.runtime_pool
+        ?lane_id:prepared.spec.lane_id
+        ?controller_level:
+          (env.deps.inferred_controller_level_of_spec prepared.spec)
+        ?control_domain:prepared.spec.control_domain
+        ?supervisor_actor:prepared.spec.supervisor_actor
+        ?model_tier:prepared.spec.model_tier
+        ?task_profile:prepared.spec.task_profile
+        ?risk_level:prepared.spec.risk_level
+        ?routing_confidence:prepared.spec.routing_confidence
+        ?routing_reason:prepared.spec.routing_reason
+        ?assigned_runtime:prepared.assigned_runtime
+        ?spawn_selection_note:prepared.spec.spawn_selection_note
+        ~success:false ~error ())
+    prepared_spawns
+
 let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
   let runtime_actor_name =
     if env.deps.is_local_spawn_agent spec.spawn_agent then

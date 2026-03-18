@@ -5,8 +5,8 @@
     use OAS serialization format for version tracking and cross-agent portability.
 
     This module is independent of [context_compact_oas] (Phase 1) and
-    [oas_checkpoint_bridge] (basic state persistence). It specifically handles
-    the succession/handoff pathway.
+    basic state persistence. It specifically handles the succession/handoff
+    pathway.
 
     Design: MASC-specific fields (goal, progress_summary, pending_actions,
     key_decisions, warnings, generation, trace_id, metrics) are stored in the

@@ -44,7 +44,7 @@ OAS  ──does NOT──→ know about MASC
 | 2 | 경계 문서 | - | 이 문서 | 완료 |
 | 3 | Context 연결 | `Context.t`, `Context_reducer` | `Context_manager` | 진행 중 |
 | 4 | Event_bus 브리지 | `Event_bus.Custom` | `Oas_events` | 계획 |
-| 5 | Checkpoint 통합 | `Checkpoint`, `Checkpoint_store` | `Oas_checkpoint_bridge` | 계획 |
+| 5 | Checkpoint 통합 | `Checkpoint`, `Checkpoint_store` | 인라인 (`perpetual_loop.ml` / `perpetual_oas.ml`) | 완료 |
 
 ### Oas_compat 제거 (v2.95.1)
 

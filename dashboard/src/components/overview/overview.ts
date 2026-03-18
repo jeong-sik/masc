@@ -11,6 +11,7 @@ import { formatDuration } from '../mission-utils'
 import { SituationBanner } from './situation-banner'
 import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
+import { OasPipeline } from './oas-pipeline'
 import { AgentAvatar } from './agent-avatar'
 import type { ObservatoryAgent } from '../../observatory-store'
 
@@ -114,6 +115,8 @@ export function Overview() {
       <div class="home-body">
         <${HotSessions} />
         <${AgentPulse} />
+
+        <${OasPipeline} />
 
         <div class="home-section-header">
           <span class="home-section-label">최근 활동</span>

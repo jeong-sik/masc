@@ -1,7 +1,6 @@
 type runtime_kind =
   | Local
   | Direct_api
-  | Cli_agent
 
 type provider_family =
   | Claude_family
@@ -15,19 +14,10 @@ type provider_family =
 type auth_mode =
   | No_auth
   | Api_key of string
-  | Cli_cached_login
   | Vertex_adc of {
       project_env : string;
       location_env : string;
     }
-
-type prompt_transport =
-  | Prompt_stdin
-  | Prompt_arg of string
-
-type output_contract =
-  | Human_stdout
-  | Json_stdout
 
 type voice_transport =
   | Voice_openai_compat
@@ -40,14 +30,6 @@ type adapter = {
   provider_family : provider_family;
   auth_mode : auth_mode;
   aliases : string list;
-}
-
-type cli_adapter = {
-  meta : adapter;
-  command : string;
-  prompt_transport : prompt_transport;
-  output_contract : output_contract;
-  default_allowed_mcp_servers : string list;
 }
 
 type voice_adapter = {
@@ -78,7 +60,6 @@ let google_cloud_location_env = "GOOGLE_CLOUD_LOCATION"
 let string_of_runtime_kind = function
   | Local -> "local"
   | Direct_api -> "direct_api"
-  | Cli_agent -> "cli_agent"
 
 let string_of_provider_family = function
   | Claude_family -> "claude"
@@ -92,17 +73,8 @@ let string_of_provider_family = function
 let string_of_auth_mode = function
   | No_auth -> "none"
   | Api_key env_name -> "api_key:" ^ env_name
-  | Cli_cached_login -> "cli_cached_login"
   | Vertex_adc { project_env; location_env } ->
       "vertex_adc:" ^ project_env ^ ":" ^ location_env
-
-let string_of_prompt_transport = function
-  | Prompt_stdin -> "stdin"
-  | Prompt_arg flag -> "arg:" ^ flag
-
-let string_of_output_contract = function
-  | Human_stdout -> "human_stdout"
-  | Json_stdout -> "json_stdout"
 
 let string_of_voice_transport = function
   | Voice_openai_compat -> "openai_compat"
@@ -162,52 +134,6 @@ let direct_adapters =
     };
   ]
 
-let cli_adapters =
-  [
-    {
-      meta =
-        {
-          canonical_name = "claude";
-          runtime_kind = Cli_agent;
-          provider_family = Claude_family;
-          auth_mode = Cli_cached_login;
-          aliases = [ "claude"; "claude-code" ];
-        };
-      command = "claude --output-format json -p";
-      prompt_transport = Prompt_stdin;
-      output_contract = Json_stdout;
-      default_allowed_mcp_servers = [ "masc" ];
-    };
-    {
-      meta =
-        {
-          canonical_name = "codex";
-          runtime_kind = Cli_agent;
-          provider_family = OpenAI_family;
-          auth_mode = Cli_cached_login;
-          aliases = [ "codex"; "codex-cli" ];
-        };
-      command = "codex exec --json";
-      prompt_transport = Prompt_stdin;
-      output_contract = Json_stdout;
-      default_allowed_mcp_servers = [ "masc" ];
-    };
-    {
-      meta =
-        {
-          canonical_name = "gemini";
-          runtime_kind = Cli_agent;
-          provider_family = Gemini_family;
-          auth_mode = Cli_cached_login;
-          aliases = [ "gemini"; "gemini-cli" ];
-        };
-      command = "gemini --yolo --output-format json";
-      prompt_transport = Prompt_arg "-p";
-      output_contract = Json_stdout;
-      default_allowed_mcp_servers = [ "masc" ];
-    };
-  ]
-
 let voice_openai_compat_adapter =
   {
     canonical_name = "voice-openai-compat";
@@ -249,17 +175,9 @@ let resolve_direct_adapter label =
     (fun (adapter : adapter) ->
       List.exists (fun alias -> normalize_label alias = normalized) adapter.aliases)
     direct_adapters
-let resolve_cli_adapter label =
-  let normalized = normalize_label label in
-  List.find_opt
-    (fun adapter ->
-      List.exists
-        (fun alias -> normalize_label alias = normalized)
-        adapter.meta.aliases)
-    cli_adapters
 
-let resolve_cli_canonical_name label =
-  Option.map (fun adapter -> adapter.meta.canonical_name) (resolve_cli_adapter label)
+let resolve_direct_canonical_name label =
+  Option.map (fun (adapter : adapter) -> adapter.canonical_name) (resolve_direct_adapter label)
 
 let resolve_voice_adapter label =
   let normalized = normalize_label label in

@@ -107,14 +107,13 @@ let handle_async_spawn (ctx : context) args : bool * string =
     match ctx.proc_mgr with
     | None ->
         (false, "proc_mgr unavailable (server not in Eio mode)")
-    | Some proc_mgr ->
+    | Some _proc_mgr ->
         let timeout_seconds = Safe_ops.json_int_opt "timeout_seconds" args in
         let working_dir = Safe_ops.json_string_opt "working_dir" args in
         let room_config = Some ctx.config in
         let run_fn () =
           Spawn_eio.spawn
             ~sw:ctx.sw
-            ~proc_mgr
             ~agent_name:agent_target
             ~prompt
             ?timeout_seconds

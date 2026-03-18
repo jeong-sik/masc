@@ -265,9 +265,9 @@ let model_runner_of_string raw =
 let call_spawn_model (runtime : runtime) ~agent_name ?model_override ~prompt ~timeout_sec () =
   match runtime.mcp_state.Mcp_server.proc_mgr with
   | None -> Error "spawn runtime unavailable"
-  | Some proc_mgr ->
+  | Some _proc_mgr ->
       let result =
-        Spawn_eio.spawn ~sw:runtime.sw ~proc_mgr ~agent_name ~prompt
+        Spawn_eio.spawn ~sw:runtime.sw ~agent_name ~prompt
           ~timeout_seconds:timeout_sec
           ?working_dir:(Some runtime.config.base_path)
           ?model_override

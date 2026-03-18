@@ -116,7 +116,7 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 Start by calling mcp__masc__masc_status to see the current room state.|}
 
 (** Spawn the orchestrator agent (Eio-friendly, runs in a domain if provided) *)
-let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
+let spawn_orchestrator ~sw ~proc_mgr:_ ?domain_mgr config room_config =
   (* TOCTOU defense: re-check pause before spawn *)
   if Room.is_paused room_config then begin
     Log.Orchestrator.debug "room paused before spawn, aborting";
@@ -136,7 +136,6 @@ let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
   let run () =
     Spawn_eio.spawn
       ~sw
-      ~proc_mgr
       ~agent_name:config.orchestrator_agent
       ~prompt
       ~timeout_seconds:config.agent_timeout_s

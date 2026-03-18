@@ -601,9 +601,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   in
 
   (* Primary dispatch: O(1) tag lookup → lazy context creation.
-     Falls through to brute-force chain when tag lookup misses
-     (e.g., tools defined in tool_schemas_core but dispatched by
-     a module whose schemas don't include them). *)
+     All known tools are registered in the tag registry (via register_module_tag
+     or Tool_tag_init). If lookup_tag returns None, the tool is truly unknown. *)
   let tag_result =
     match Tool_dispatch.lookup_tag name with
     | Some tag -> dispatch_by_tag tag
@@ -612,36 +611,5 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   match tag_result with
   | Some result -> result
   | None ->
-    (* Fallback: tag registry should handle all known tools.
-       This chain only catches tools whose names are not in any module's
-       schema list (e.g. dynamically generated tool names, schema-gap fills
-       in Tool_tag_init, or truly unknown tools). *)
-    let try_dispatch f = f () in
-    let fallback_result =
-      (* Schema-gap modules: tools dispatched but not in any schema list *)
-      try_dispatch (fun () -> Tool_room.dispatch { Tool_room.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_auth.dispatch { Tool_auth.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      try_dispatch (fun () -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args:arguments)
-      |> function Some r -> Some r | None ->
-      None
-    in
-    (match fallback_result with
-     | Some result -> result
-     | None -> (false, Printf.sprintf "Unknown tool: %s" name))
-
-  (* --- Removed inline match block: extracted to lib/tool_inline_dispatch.ml --- *)
-  (* Original block handled: masc_lock, masc_unlock, masc_set_room, masc_join,
-     masc_leave, masc_bounded_run, masc_broadcast, masc_messages, masc_listen,
-     masc_who, masc_verify_*, masc_mcp_session, masc_cancellation,
-     masc_subscription, masc_progress, masc_interrupt, masc_approve,
-     masc_reject, masc_pending_interrupts, masc_branch, masc_governance_set,
-     masc_spawn, masc_memento_mori, masc_episode_flush, masc_episode_list,
-     masc_self_introspect, masc_recall_search, masc_board_*, lodge_*,
-     masc_convo_* *)
+    (false, Printf.sprintf "Unknown tool: %s" name)
 

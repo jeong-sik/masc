@@ -382,10 +382,6 @@
    tool_schemas_auth
    tool_schemas_agent
    tool_schemas_room
-   tool_schemas_core
-   tool_schemas_core_01
-   tool_schemas_core_02
-   tool_schemas_core_03
    tool_plan
    tool_run
    tool_bridge
@@ -672,9 +668,6 @@
  tool_protocol_game_view_handlers
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
- tool_schemas_core_01
- tool_schemas_core_02
- tool_schemas_core_03
  mitosis_helpers
  mitosis_spawn
  mitosis_defaults

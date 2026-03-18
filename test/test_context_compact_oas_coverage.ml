@@ -115,6 +115,83 @@ let test_validate_roundtrip_empty () =
     (Compact.validate_roundtrip ~original:[] ~reduced:[])
 
 (* ================================================================ *)
+(* Sentinel Corruption Tests (C2 — real OAS reduction scenarios)    *)
+(* ================================================================ *)
+
+let test_merge_contiguous_preserves_sentinel_roles () =
+  (* BUG SCENARIO: Two consecutive System messages become two User messages
+     with sentinel tags. OAS Merge_contiguous would merge them (same role),
+     corrupting the second sentinel into the first message's text.
+     After fix: sentinel-tagged messages are excluded from merging. *)
+  let msgs = [
+    msg Llm.System "System prompt 1";
+    msg Llm.System "System prompt 2";
+    msg Llm.User "User question";
+    msg Llm.Assistant "Response";
+  ] in
+  let result, _tokens = Compact.compact
+    ~system_prompt:"sys" ~messages:msgs
+    ~strategies:[Compact.MergeContiguous] in
+  (* Both system messages should survive as separate System messages *)
+  let system_msgs = List.filter (fun (m : Llm.message) ->
+    m.role = Llm.System) result in
+  check int "two system messages preserved separately" 2 (List.length system_msgs);
+  check string "first system text intact" "System prompt 1"
+    (Llm.text_of_message (List.nth system_msgs 0));
+  check string "second system text intact" "System prompt 2"
+    (Llm.text_of_message (List.nth system_msgs 1))
+
+let test_merge_contiguous_tool_sentinel_preserved () =
+  (* Consecutive Tool messages should not be merged either *)
+  let msgs = [
+    msg Llm.User "query";
+    msg Llm.Assistant "thinking";
+    tool_msg ~id:"t1" "Result 1";
+    tool_msg ~id:"t2" "Result 2";
+    msg Llm.Assistant "final answer";
+  ] in
+  let result, _tokens = Compact.compact
+    ~system_prompt:"sys" ~messages:msgs
+    ~strategies:[Compact.MergeContiguous] in
+  let tool_msgs = List.filter (fun (m : Llm.message) ->
+    m.role = Llm.Tool) result in
+  check int "two tool messages preserved separately" 2 (List.length tool_msgs)
+
+let test_merge_contiguous_still_merges_plain_user () =
+  (* Regular User messages (no sentinel) should still be merged *)
+  let msgs = [
+    msg Llm.User "Hello";
+    msg Llm.User "World";
+    msg Llm.Assistant "Hi";
+  ] in
+  let result, _tokens = Compact.compact
+    ~system_prompt:"sys" ~messages:msgs
+    ~strategies:[Compact.MergeContiguous] in
+  let user_msgs = List.filter (fun (m : Llm.message) ->
+    m.role = Llm.User) result in
+  check int "plain user messages merged" 1 (List.length user_msgs)
+
+let test_prune_tool_outputs_sentinel_survives () =
+  (* ToolResult with sentinel tag and long content — sentinel at front
+     should survive truncation since max_output_len=500 > sentinel length *)
+  let long_tool_output = String.make 600 'x' in
+  let msgs = [
+    msg Llm.User "query";
+    tool_msg long_tool_output;
+    msg Llm.Assistant "done";
+  ] in
+  let result, _tokens = Compact.compact
+    ~system_prompt:"sys" ~messages:msgs
+    ~strategies:[Compact.PruneToolOutputs] in
+  let tool_msgs = List.filter (fun (m : Llm.message) ->
+    m.role = Llm.Tool) result in
+  check int "tool message exists" 1 (List.length tool_msgs);
+  (* The Tool role should be correctly recovered *)
+  let tool_text = Llm.text_of_message (List.nth tool_msgs 0) in
+  check bool "tool text was pruned" true
+    (String.length tool_text < String.length long_tool_output)
+
+(* ================================================================ *)
 (* Strategy Mapping Tests                                           *)
 (* ================================================================ *)
 
@@ -240,6 +317,12 @@ let () =
       test_case "clean" `Quick test_validate_roundtrip_clean;
       test_case "no sentinels" `Quick test_validate_roundtrip_no_sentinels;
       test_case "empty" `Quick test_validate_roundtrip_empty;
+    ];
+    "sentinel_corruption", [
+      test_case "merge_contiguous preserves system sentinel" `Quick test_merge_contiguous_preserves_sentinel_roles;
+      test_case "merge_contiguous preserves tool sentinel" `Quick test_merge_contiguous_tool_sentinel_preserved;
+      test_case "merge_contiguous still merges plain user" `Quick test_merge_contiguous_still_merges_plain_user;
+      test_case "prune_tool_outputs sentinel survives" `Quick test_prune_tool_outputs_sentinel_survives;
     ];
     "strategy_mapping", [
       test_case "prune_tool_outputs" `Quick test_compact_prune_tool_outputs;

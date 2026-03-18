@@ -134,7 +134,36 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   | PruneToolOutputs ->
     Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 }
   | MergeContiguous ->
-    Agent_sdk.Context_reducer.Merge_contiguous
+    (* Cannot delegate to OAS Merge_contiguous directly — it would merge
+       consecutive User messages that carry different sentinel tags (System
+       mapped to User, Tool mapped to User), corrupting role recovery.
+       Use Custom wrapper that skips sentinel-tagged messages from merging. *)
+    Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
+      let has_sentinel (m : Agent_sdk.Types.message) =
+        List.exists (function
+          | Agent_sdk.Types.Text s -> String.length s > 0 && s.[0] = '\x00'
+          | Agent_sdk.Types.ToolResult { content; _ } ->
+            String.length content > 0 && content.[0] = '\x00'
+          | _ -> false
+        ) m.content
+      in
+      (* Split into sentinel-protected and mergeable segments, merge only
+         the mergeable ones via OAS, then reassemble in order. *)
+      let reducer = { Agent_sdk.Context_reducer.strategy =
+        Agent_sdk.Context_reducer.Merge_contiguous } in
+      let rec process acc buf = function
+        | [] ->
+          let merged = if buf = [] then [] else
+            Agent_sdk.Context_reducer.reduce reducer (List.rev buf) in
+          List.rev_append acc merged
+        | m :: rest when has_sentinel m ->
+          let merged = if buf = [] then [] else
+            Agent_sdk.Context_reducer.reduce reducer (List.rev buf) in
+          process (m :: List.rev_append merged acc) [] rest
+        | m :: rest ->
+          process acc (m :: buf) rest
+      in
+      process [] [] oas_msgs)
   | DropLowImportance ->
     Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
       let masc_msgs = List.map oas_msg_to_masc oas_msgs in

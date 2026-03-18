@@ -32,7 +32,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
           let primary =
             match specs with
             | model :: _ -> model
-            | [] -> Llm_client.default_local_model_spec ()
+            | [] -> Llm_types.default_local_model_spec ()
           in
           let base_dir = session_base_dir ctx.config in
           mkdir_p base_dir;
@@ -80,15 +80,15 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
           Context_manager.persist_message session user_message;
           let requests =
             List.map
-              (fun (model : Llm_client.model_spec) ->
+              (fun (model : Llm_types.model_spec) ->
                 ({
-                  Llm_client.model;
+                  Llm_types.model;
                   messages = (Agent_sdk.Types.system_msg ctx_work.system_prompt) :: ctx_work.messages;
                   temperature = Keeper_config.keeper_reflection_temp ();
                   max_tokens = Keeper_config.keeper_explicit_reply_max_tokens ();
                   tools = [];
                   response_format = `Text;
-                } : Llm_client.completion_request))
+                } : Llm_types.completion_request))
               specs
           in
           match Llm_orchestration.cascade requests with
@@ -179,7 +179,7 @@ let run_social_board_event_turn
           let primary =
             match specs with
             | model :: _ -> model
-            | [] -> Llm_client.default_local_model_spec ()
+            | [] -> Llm_types.default_local_model_spec ()
           in
           let base_dir = session_base_dir ctx.config in
           let session, ctx_opt =
@@ -226,9 +226,9 @@ let run_social_board_event_turn
           Context_manager.persist_message session user_message;
           let execute_tool_calls
               ~(ctx_work : Context_manager.working_context)
-              (tcs : Llm_client.tool_call list) : (Llm_client.tool_call * string) list =
+              (tcs : Llm_types.tool_call list) : (Llm_types.tool_call * string) list =
             List.map
-              (fun (tc : Llm_client.tool_call) ->
+              (fun (tc : Llm_types.tool_call) ->
                  let output =
                    try execute_keeper_tool_call ~config:ctx.config ~meta ~ctx_work tc
                    with exn ->
@@ -244,9 +244,9 @@ let run_social_board_event_turn
           in
           let requests =
             List.map
-              (fun (model : Llm_client.model_spec) ->
+              (fun (model : Llm_types.model_spec) ->
                  ({
-                    Llm_client.model;
+                    Llm_types.model;
                     messages =
                       (Agent_sdk.Types.system_msg ctx_work.system_prompt)
                       :: (ctx_work.messages @ [ Agent_sdk.Types.user_msg prompt ]);
@@ -255,7 +255,7 @@ let run_social_board_event_turn
                     tools = keeper_allowed_llm_tools meta;
                     response_format = `Text;
                   }
-                   : Llm_client.completion_request))
+                   : Llm_types.completion_request))
               specs
           in
           match Llm_orchestration.cascade requests with
@@ -269,7 +269,7 @@ let run_social_board_event_turn
               let cost0 = cost_usd_of_usage resp0.usage used_model0 in
               let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
                   ~acc_tools_used ~last_resp =
-                if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
+                if last_resp.Llm_types.tool_calls = [] || round > max_tool_rounds then
                   let content =
                     let trimmed = String.trim (Llm_types.text_of_response last_resp) in
                     if trimmed = "" && acc_tools_used <> [] then
@@ -280,19 +280,19 @@ let run_social_board_event_turn
                   in
                   ( content,
                     acc_usage,
-                    last_resp.Llm_client.model_used,
+                    last_resp.Llm_types.model_used,
                     acc_latency,
                     acc_cost,
                     acc_tools_used )
                 else
                   let round_tools =
                     List.map
-                      (fun (tc : Llm_client.tool_call) -> tc.call_name)
-                      last_resp.Llm_client.tool_calls
+                      (fun (tc : Llm_types.tool_call) -> tc.call_name)
+                      last_resp.Llm_types.tool_calls
                   in
                   let all_tools_so_far = acc_tools_used @ round_tools in
                   let tool_outputs =
-                    execute_tool_calls ~ctx_work last_resp.Llm_client.tool_calls
+                    execute_tool_calls ~ctx_work last_resp.Llm_types.tool_calls
                   in
                   let followup_prompt =
                     keeper_tool_followup_prompt
@@ -308,9 +308,9 @@ let run_social_board_event_turn
                   in
                   let followup_requests =
                     List.map
-                      (fun (model : Llm_client.model_spec) ->
+                      (fun (model : Llm_types.model_spec) ->
                          ({
-                            Llm_client.model;
+                            Llm_types.model;
                             messages = [
                               Agent_sdk.Types.system_msg
                                 (keeper_tool_loop_system_prompt
@@ -322,14 +322,14 @@ let run_social_board_event_turn
                             tools = next_tools;
                             response_format = `Text;
                           }
-                           : Llm_client.completion_request))
+                           : Llm_types.completion_request))
                       specs
                   in
                   match Llm_orchestration.cascade followup_requests with
                   | Error _ ->
                       ( Llm_types.text_of_response last_resp,
                         acc_usage,
-                        last_resp.Llm_client.model_used,
+                        last_resp.Llm_types.model_used,
                         acc_latency,
                         acc_cost,
                         acc_tools_used @ round_tools )

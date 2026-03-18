@@ -42,3 +42,9 @@ val provider_config_of_request :
 (** Human-readable string from an HTTP client error. *)
 val string_of_http_error :
   Llm_provider.Http_client.http_error -> string
+
+val to_oas_provider : Llm_types.model_spec -> Agent_sdk.Provider.config option
+val to_oas_message : Llm_types.message -> Agent_sdk.Types.message option
+val of_oas_message : Agent_sdk.Types.message -> Llm_types.message
+val of_oas_usage : Agent_sdk.Types.api_usage -> Llm_types.token_usage
+val to_oas_usage : Llm_types.token_usage -> Agent_sdk.Types.api_usage

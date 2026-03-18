@@ -90,7 +90,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
                  let primary_model =
                    match model_specs_of_strings meta_current.models with
                    | Ok (primary :: _) -> primary
-                   | _ -> Llm_client.default_local_model_spec ()
+                   | _ -> Llm_types.default_local_model_spec ()
                  in
                  let base_dir = session_base_dir ctx.config in
                  let _session, ctx_opt =
@@ -103,12 +103,12 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
                  | None -> ()
                  | Some c ->
                      let latest_user_message =
-                       latest_message_content_by_role ~role:Llm_client.User
+                       latest_message_content_by_role ~role:Llm_types.User
                          c.messages
                      in
                      let latest_assistant_message =
                        latest_message_content_by_role
-                         ~role:Llm_client.Assistant c.messages
+                         ~role:Llm_types.Assistant c.messages
                      in
                      let continuity_snapshot =
                        latest_state_snapshot_from_messages c.messages

@@ -463,8 +463,8 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
                ~on_exec ()))
   | Error e, _ | _, Error e -> Error e
 
-let oas_provider_of_model (model : Llm_client.model_spec) : Oas.Provider.config =
-  match Llm_client.to_oas_provider model with
+let oas_provider_of_model (model : Llm_types.model_spec) : Oas.Provider.config =
+  match Llm_provider_dispatch.to_oas_provider model with
   | Some config -> config
   | None ->
       (* Fallback for Custom providers — use OpenAICompat with model's api_url *)
@@ -535,7 +535,7 @@ let build_oas_agent ~worker_name ~model ~system_prompt ~tools ~max_turns
     {
       Oas.Types.default_config with
       name = worker_name;
-      model = model.Llm_client.model_id;
+      model = model.Llm_types.model_id;
       system_prompt = Some system_prompt;
       max_tokens = local_worker_max_tokens ();
       max_turns;

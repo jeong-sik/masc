@@ -38,13 +38,13 @@ let build_perpetual_agent
   (* Resolve OAS model from primary cascade model *)
   let primary_model = match config.model_cascade with
     | m :: _ -> m
-    | [] -> Llm_client.default_local_model_spec ()
+    | [] -> Llm_types.default_local_model_spec ()
   in
   let oas_model = primary_model.model_id in
   (* Build provider via Phase 3 adapter.
-     Uses Llm_client.to_oas_provider which handles the Llm_client.model_spec
+     Uses Llm_provider_dispatch.to_oas_provider which handles the Llm_types.model_spec
      -> Oas.Provider.config conversion (avoiding Llm_types nominality gap). *)
-  let provider = match Llm_client.to_oas_provider primary_model with
+  let provider = match Llm_provider_dispatch.to_oas_provider primary_model with
     | Some cfg -> cfg
     | None ->
       (* Fallback for Custom providers — use OpenAICompat *)
@@ -74,7 +74,7 @@ let build_perpetual_agent
      Tool_bridge.oas_tool_of_masc creates OAS Tool.t from name/desc/schema/handler.
      For the perpetual loop adapter, each tool delegates to a no-op handler since
      actual tool dispatch remains in MASC's perpetual_loop infrastructure. *)
-  let tools = List.map (fun (td : Llm_client.tool_def) ->
+  let tools = List.map (fun (td : Llm_types.tool_def) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.tool_name
       ~description:td.tool_description

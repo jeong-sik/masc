@@ -245,11 +245,25 @@ let generate_action_plan ~model ~goal ~keeper_context =
     tools = [];
     response_format = `Text;
   } in
-  (* NOTE: Llm_orchestration.complete used directly here to avoid
-     dependency cycle: Keeper_autonomy → Keeper_oas_adapter →
-     Keeper_exec_tools → ... → Keeper_autonomy.
-     This is a tool-free single-shot call, so the OAS Agent.t loop
-     is not needed. *)
-  match Llm_orchestration.complete req with
-  | Ok resp -> Ok (Llm_types.text_of_response resp)
-  | Error e -> Error (sprintf "plan generation failed: %s" e)
+  (* Use Oas_worker.run directly to avoid dependency cycle
+     (Keeper_autonomy → Keeper_oas_adapter → ... → Keeper_autonomy).
+     Tool-free single-shot: OAS Agent with max_turns=1, no tools. *)
+  match Eio_context.get_net_opt (), Eio_context.get_switch_opt () with
+  | None, _ | _, None ->
+      (* Eio context unavailable — fall back to direct LLM call *)
+      (match Llm_orchestration.complete req with
+       | Ok resp -> Ok (Llm_types.text_of_response resp)
+       | Error e -> Error (sprintf "plan generation failed: %s" e))
+  | Some net, Some sw ->
+      let oas_config = { (Oas_worker.default_config
+        ~name:"keeper-autonomy-plan"
+        ~model_spec:model
+        ~system_prompt:"You are a planning agent. Generate concrete action plans."
+        ~tools:[]) with
+        max_turns = 1;
+        max_tokens = 500;
+        temperature = 0.3;
+      } in
+      match Oas_worker.run ~sw ~net ~config:oas_config prompt with
+      | Ok r -> Ok (Llm_types.text_of_response r.Oas_worker.response)
+      | Error e -> Error (sprintf "plan generation failed: %s" e)

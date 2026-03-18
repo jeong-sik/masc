@@ -545,7 +545,7 @@ let checkpoint_of_dna
     Agent_sdk.Checkpoint.version = 3;
     session_id = sprintf "succession-%s-gen%d" dna.trace_id dna.generation;
     agent_name = "perpetual-successor";
-    model = Agent_sdk.Types.Custom "masc-perpetual";
+    model = "masc-perpetual";
     system_prompt = Some working_ctx.system_prompt;
     messages;
     usage = {

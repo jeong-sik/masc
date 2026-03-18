@@ -210,7 +210,7 @@ let test_auth_disabled_allows_all () =
 
 let test_auth_enabled_requires_token () =
   let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:true in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-agent" in
   let result = Auth.check_permission dir ~agent_name:"claude" ~token:None ~permission:Types.CanClaimTask in
   cleanup_test_room dir;
   match result with
@@ -220,7 +220,7 @@ let test_auth_enabled_requires_token () =
 
 let test_auth_enabled_with_valid_token () =
   let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:true in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-agent" in
   let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Types.Worker in
   let check_result = match create_result with
     | Ok (raw_token, _) ->
@@ -234,7 +234,7 @@ let test_auth_enabled_with_valid_token () =
 
 let test_permission_denied_for_reader () =
   let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:true in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-agent" in
   let create_result = Auth.create_token dir ~agent_name:"reader_agent" ~role:Types.Reader in
   let check_result = match create_result with
     | Ok (raw_token, _) ->
@@ -249,7 +249,7 @@ let test_permission_denied_for_reader () =
 
 let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:true in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-agent" in
   let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
   let result =
     match create_result with
@@ -266,7 +266,7 @@ let test_authorize_unknown_masc_tool_strict_worker_allowed () =
 
 let test_authorize_unknown_masc_tool_strict_reader_denied () =
   let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:true in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-agent" in
   let create_result = Auth.create_token dir ~agent_name:"reader_agent" ~role:Types.Reader in
   let result =
     match create_result with
@@ -284,7 +284,7 @@ let test_authorize_unknown_masc_tool_strict_reader_denied () =
 
 let test_authorize_unknown_non_masc_tool_strict_denied () =
   let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:true in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-agent" in
   let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
   let result =
     match create_result with
@@ -302,7 +302,7 @@ let test_authorize_unknown_non_masc_tool_strict_denied () =
 
 let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
   let dir = setup_test_room () in
-  let _ = Auth.enable_auth dir ~require_token:true in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-agent" in
   let create_result = Auth.create_token dir ~agent_name:"worker_agent" ~role:Types.Worker in
   let result =
     match create_result with
@@ -324,7 +324,7 @@ let test_authorize_unknown_canonical_tool_strict_worker_allowed () =
 let test_enable_disable_auth () =
   let dir = setup_test_room () in
   let initially_disabled = not (Auth.is_auth_enabled dir) in
-  let _ = Auth.enable_auth dir ~require_token:false in
+  let _ = Auth.enable_auth dir ~require_token:false ~agent_name:"test-agent" in
   let enabled = Auth.is_auth_enabled dir in
   Auth.disable_auth dir;
   let disabled_again = not (Auth.is_auth_enabled dir) in

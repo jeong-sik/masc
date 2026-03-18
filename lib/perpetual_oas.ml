@@ -132,7 +132,7 @@ let run_perpetual_via_oas
       version = 3;
       session_id = trace_id;
       agent_name = "perpetual";
-      model = Oas.Types.Custom "masc-perpetual";
+      model = "masc-perpetual";
       system_prompt = Some ctx.system_prompt;
       messages;
       usage = {

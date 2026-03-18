@@ -101,6 +101,18 @@ val cascade :
   completion_request list ->
   (completion_response, string) result
 
+(** Streaming completion for a single request.
+    Invokes [on_event] for each SSE event from the LLM provider.
+    Returns the assembled final response.
+    Falls back to batch completion if streaming is unavailable.
+
+    @since 2.110.0 *)
+val call_provider_stream :
+  ?timeout_sec:float ->
+  completion_request ->
+  on_event:(Llm_provider.Types.sse_event -> unit) ->
+  (completion_response, string) result
+
 (** {1 Concurrency Control} *)
 
 (** Maximum concurrent cascade calls (from MASC_MAX_CONCURRENT_LLM env,

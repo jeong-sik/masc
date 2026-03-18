@@ -163,6 +163,7 @@ let () =
   register_module_tag ~schemas:Tool_mdal.schemas ~tag:Mod_mdal;
   register_module_tag ~schemas:Tool_async_spawn.schemas ~tag:Mod_async_spawn;
   register_module_tag ~schemas:Tool_autoresearch.schemas ~tag:Mod_autoresearch;
+  register_module_tag ~schemas:Tool_llm_catalog.schemas ~tag:Mod_llm_catalog;
   register_module_tag ~schemas:Tool_trpg.schemas ~tag:Mod_trpg;
   register_module_tag ~schemas:Tool_notifications.schemas ~tag:Mod_notifications;
   (* God Schema decomposition: register modules that now own their schemas *)

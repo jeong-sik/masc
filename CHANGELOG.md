@@ -1,6 +1,222 @@
 # Changelog
 
 
+## [Unreleased]
+
+### Added
+- **OAS Event_bus SSE bridge** — dashboard receives agent lifecycle events via SSE (#1581)
+- **Keeper token streaming** — real-time token streaming for keeper chat (#1577)
+- **`masc_agent_relations` tool** — proxy to Neo4j/GraphQL for agent collaboration network (#1561)
+- **`masc_llm_catalog` tool** — LLM endpoint discovery (#1535)
+- **Per-provider retry** — `Complete.complete_with_retry` in OAS (#1548)
+- **Provider-aware capacity** — cascade checks provider capacity before dispatch (#1541)
+- **Agent collaboration network** — dashboard shows collaboration graph and interests (#1542)
+
+### Changed
+- **OAS-only LLM path** — eliminate custom LLM wrapper, all calls through `Llm_orchestration` (#1531, #1575)
+- **Remove global LLM semaphore** — per-provider concurrency instead (#1576)
+- **Remove OAS feature flags** — OAS is the only path (#1557)
+- **Remove perpetual_loop legacy** — `Perpetual_oas` is sole runtime (#1565)
+- **Centralize vendor model labels** — single resolution point (#1579)
+- **Llm_client to Agent_sdk.Types** — direct type usage (batches 1-2/4) (#1578, #1573)
+- **Schema decomposition** — monolithic tool schemas into owning modules (-4739 LOC) (#1546)
+- **Remove 26 unreferenced modules** (-5,485 lines) (#1536)
+
+### Fixed
+- **Keeper cascade routing** — route through `Llm_orchestration`, fix broken main build (#1582)
+- **C2 sentinel tag corruption** — protect from OAS `Merge_contiguous` + add `.mli` (#1540)
+- **Context scoring** — adapt to unified message type (#1554)
+- **Local-only cascade** — don't block when endpoints are down (#1563)
+- **Discovery cache** — initialize at server startup (#1568)
+- **Dashboard keeper UX** — layout, filtering, live updates (#1570)
+- **26 short tool descriptions** — expanded with what/when/workflow context (#1538)
+- **PR #1517 review** — extract shared scoring, add 20 tests, unify feature flags (#1537)
+
+## [2.112.0] - 2026-03-18
+
+### Added
+- **Relation materializer** — auto-record agent collaboration to Neo4j on leave/task-done (#1532)
+- **OAS Context_reducer adapter** — Phase 1 of runtime migration (#1517)
+
+### Fixed
+- **11 short tool descriptions** — improved with what/when/workflow context (#1533)
+- **20 `masc_trpg_*` tools** — classified into TRPG category (was unknown) (#1530)
+
+## [2.111.0] - 2026-03-18
+
+### Added
+- **FF character sheet agent profile** — dashboard agent detail page (#1513)
+- **Tool-vote OAS PoC** — `OAS Tool.t` + fix re-introduced unicode escapes (#1515)
+- **Tool-bridge schema conversion** — OAS `Tool.t` creation for migration (#1510)
+
+### Changed
+- **Spawn via OAS** — route all agents through `Provider_adapter` (#1512)
+- **Gardener OAS migration** — spawn decision via OAS instead of `Lodge_cascade.call` (#1528)
+- **Mode hardcode** — hardcode Mode to Full, remove mode switching (#1519)
+- **Remove CLI spawn artifacts** — `proc_mgr`, `cli_adapters`, `spawn_config` (#1526)
+- **Remove 292 orphaned CSS selectors** across 21 files (#1514)
+- **Remove TRPG legacy aliases** (#1516)
+
+### Fixed
+- **Dashboard TypeScript** — resolve all 17 TypeScript errors, clean `tsc --noEmit` (#1523, #1527)
+- **Dashboard i18n** — translate remaining 40+ English strings to Korean (#1525)
+- **Dashboard NaN** — fix tier distribution API field name mismatch (#1521)
+- **Dashboard UX** — remove jargon, reduce noise (#1511)
+
+## [2.110.0] - 2026-03-18
+
+### Added
+- **Dashboard tab tooltips** + disable auto-researcher (#1502)
+
+### Changed
+- **Dashboard restructure** — 4-chip agents, tool summary, dead code cleanup (#1479)
+- **Replace legacy tab navigations** with canonical tabs (#1508)
+- **Remove 7 dead overview components** and 1000+ orphaned CSS rules (#1504)
+- **handle_step decomposition** — pipeline functions in team-session (#1503)
+
+### Fixed
+- **Dashboard warm cache** on startup + agent profile page (#1505)
+- **Agent card click** — wire to detail overlay in agents tab (#1507)
+- **Dashboard i18n** — replace unicode escapes with UTF-8 Korean, translate English strings (#1482)
+- **Gardener default** — change `enabled` from false to true (#1483)
+- **5 of 7 CI test failures** on main (#1506)
+
+## [2.109.0] - 2026-03-18
+
+### Changed
+- **Dashboard store normalizers** — deduplicate into `store-normalizers.ts` and `common/normalize.ts` (#1471, #1472)
+
+### Fixed
+- **`masc_compact_context`** — register in Mode + bump health baseline (#1476)
+- **SituationBanner** — cap blocker reasons + collapsible details (#1475)
+
+## [2.108.0] - 2026-03-18
+
+### Added
+- **Deep Agents features** — wired into live pipelines (#1473)
+
+### Changed
+- **Dashboard api.ts split** — 935-line monolith into domain modules (#1469)
+- **Dashboard utility dedup** — consolidate into `src/lib/` modules (#1468)
+- **Operator domain handlers** — extract from `execute_action` (#1466)
+
+## [2.107.0] - 2026-03-18
+
+### Added
+- **`async_spawn`** — non-blocking agent execution with job tracking (#1464)
+
+### Changed
+- **God Schema decomposition Phase 3** — eliminate fallback chain + dead code (-2120 LOC) (#1454)
+- **Dashboard restructure** — 15 tabs to 7 narrative-first tabs (#1462)
+- **Dashboard CSS** — migrate hardcoded colors to CSS custom properties (#1463)
+- **Dashboard extractions** — keeper-detail-panels, orchestra-drawer, war-room-metrics (#1458, #1459, #1461)
+- **Dashboard sub-modules** — split command-normalizers-swarm into domain modules (#1457)
+
+### Fixed
+- **HTTP session Hashtbl** — consolidate to single mutex-protected source (#1455)
+- **LLM exception in dm_intent** + done_delta nickname mismatch (#1460)
+
+## [2.106.0] - 2026-03-18
+
+### Added
+- **`masc_compact_context` tool** + `fs_compat` backend abstraction (#1451)
+- **Governance enforcement bridge** — rulings change runtime params (#1431)
+- **Tool discovery** — 363 tools to ~80 default + `masc_discover_tools` (#1404)
+- **Dashboard Agent Observatory** — session-grouped agent visibility (#1388)
+- **Dashboard provider capacity** visibility (#1377)
+- **Dashboard per-agent activity tracking** and timeline (#1380)
+
+### Changed
+- **Tool descriptions rewrite** — 300+ descriptions for agent discoverability (#1418, #1444)
+- **Delete `llm_transport.ml`** — move functions to proper homes (-159 LOC) (#1415)
+- **Dashboard Final Fantasy aesthetic** — character-sheet CSS (#1419)
+- **Dashboard split** — `agents.ts` into `execution/` modules (#1420)
+- **Dashboard roster pages** + status transparency (#1403)
+- **Completion_response type convergence** with OAS v0.47 (#1387)
+- **God File campaign** — all `lib/*.ml` under 900 lines (#1381)
+- **God Schema decomposition** — tool schemas to owning modules (#1397)
+
+### Fixed
+- **Zero blocking I/O** — migrate all 70+ modules from `Stdlib` to `Fs_compat` (Phases 1-3) (#1421, #1437, #1438)
+- **Replace Stdlib.Mutex with Eio.Mutex** — guard HTTP session Hashtbl, split tool_council JSON (#1449)
+- **17 remaining Stdlib.Mutex** migrated to Eio.Mutex (#1364)
+- **MCP transport hang** — global timeout, relax Accept, fix pagination (#1434)
+- **Gardener duplicate tasks** — prevent accumulation (#1450)
+- **Dashboard honest staleness** — eliminate fake information (#1408, #1413)
+- **Dashboard status-aware session severity** (#1416)
+- **Dashboard execution queue** — active/terminal separation (#1405)
+- **4 race conditions** in mutable shared state (#1376)
+- **6 semantic bugs** — ghost refs, tilde expansion, stop status, delta leak, scope default, proof threshold (#1370)
+- **29 of 32 backlog bugs** — QA sweep (#1417)
+- **`masc_gc` guardrail** — defense in depth for days=0 (#1390)
+- **Dashboard API timeouts** — cache and I/O optimization (#1314)
+
+## [2.105.0] - 2026-03-18
+
+### Added
+- **Deterministic recall stack** + subagent state isolation (#1435)
+
+### Fixed
+- **Hot-path blocking I/O** — migrate to `Fs_compat` (Phase 1) (#1421)
+
+## [2.104.0] - 2026-03-18
+
+### Added
+- **Termination records** + institution effectiveness tracking (#1429)
+
+## [2.103.0] - 2026-03-18
+
+### Added
+- **Conversation history offload** on compaction (#1410)
+- **Autonomy liberation** — 5-phase refactoring wired into spawn pipeline (#1379, #1399)
+- **Mode dead tool cleanup** + progressive disclosure (#1394)
+- **`masc_start`** — error recovery, registration linter, convo extraction (#1385)
+- **Autoresearch module** — Karpathy experiment loop (#1313)
+- **Metrics warm-up** — `Tool_registry` from `telemetry.jsonl` on startup (#1372)
+- **Phase 1-5 remaining issues** — quick wins, resilience, state management, lifecycle, validation (#1321, #1325, #1329, #1331, #1335)
+- **OAS swarm bridge** + `agent_sdk` v0.42.0 compatibility (#1348)
+- **Domain-local Caqti pool** for `Executor_pool` compute (#1341)
+
+### Changed
+- **Mode filtering** — enforce in Full profile dispatch (#1378)
+- **Dispatch registration** — 195+ tools with correct module tags (#1383)
+- **Provider pattern cleanup** + structured logging (#1326)
+- **Replace `Unix.sleepf` with `Time_compat.sleep`** (#1339)
+- **Extract hardcoded values** to env-based config (#1337)
+- **Unify `Llm_types.role`** with `Agent_sdk.Types.role` (#1360)
+- **Dashboard aggressive SWR caching** + pre-warm (#1311)
+- **Dashboard proactive cache** for `/operator`, `/mission`, `/execution` endpoints (#1369, #1374)
+- **Dashboard light mode for /execution** — 477KB/79s to ~30KB/<5s (#1365)
+- **Delete duplicate `llm_client_core`** + `llm_client_providers` (-1,316 LOC) (#1409)
+
+### Fixed
+- **Lock-free reads in FileSystemBackend** — 1000x dashboard speedup (#1332)
+- **Per-call dispatch overhead** — eliminate in `execute_tool_eio` (#1330)
+- **Dashboard mtime pre-filter** — `list_sessions` 10s to <1s (#1327)
+- **SSE Cancelled guard** + background fiber propagation + mutex poison re-raise (#1316)
+- **30/32 test failures** from env leakage and API drift (#1346)
+- **24 flaky CI tests** on main (#1343)
+- **8 bugs from black-box user testing** (#1359)
+- **4 black-box testing bugs** (#1361)
+- **Re-raise `Eio.Cancel.Cancelled`** in 7 remaining catch-all handlers (#1347)
+- **Exhaustive pattern match** for `Agent_sdk.Types.role` (#1344)
+- **HIGH/MEDIUM risk catch-all handlers** replaced with logging (#1371)
+- **OAS v0.43 compat** — `Agent_types` module path + `Stdlib.Mutex` (#1401)
+- **Lodge graceful fallback** when Eio context unavailable (#1396)
+- **Duplicate fallback task creation** — goal idempotency (#1395)
+- **Merge conflict markers** and 316 lines of dead code (#1393)
+- **Schema-gap modules** added to dispatch fallback chain (#1363)
+- **Dashboard Korean QA** — mistranslations and awkward expressions (#1357)
+- **Concurrent mutable state** protection (chain_log, relay, chain_stats) (#1358)
+
+## [2.102.1] - 2026-03-17
+
+### Fixed
+- **Dashboard SWR caching** — aggressive caching + pre-warm for execution endpoint (#1311)
+- **Swarm catch-all** — narrow exception handlers in `code_swarm_plan` (#1323)
+- **Dashboard API timeouts** — cache and I/O optimization (#1314)
+- **Autoresearch module** restored (Karpathy experiment loop) (#1313)
+
 ## [2.101.0] - 2026-03-17
 
 ### Added

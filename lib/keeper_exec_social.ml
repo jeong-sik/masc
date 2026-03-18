@@ -91,7 +91,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
                 } : Llm_client.completion_request))
               specs
           in
-          match Llm_client.cascade requests with
+          match Llm_orchestration.cascade requests with
           | Error e -> Error e
           | Ok resp ->
               let used_model =
@@ -258,7 +258,7 @@ let run_social_board_event_turn
                    : Llm_client.completion_request))
               specs
           in
-          match Llm_client.cascade requests with
+          match Llm_orchestration.cascade requests with
           | Error e -> Error e
           | Ok resp0 ->
               let max_tool_rounds = Keeper_config.keeper_max_tool_rounds () in
@@ -325,7 +325,7 @@ let run_social_board_event_turn
                            : Llm_client.completion_request))
                       specs
                   in
-                  match Llm_client.cascade followup_requests with
+                  match Llm_orchestration.cascade followup_requests with
                   | Error _ ->
                       ( Llm_types.text_of_response last_resp,
                         acc_usage,

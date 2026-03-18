@@ -302,7 +302,7 @@ let call_provider_stream ?timeout_sec (req : completion_request)
   let req = normalize_request req in
   (* Try real streaming first *)
   let stream_result =
-    match provider_config_of_request req with
+    match Llm_provider_dispatch.provider_config_of_request req with
     | Error _ -> None  (* fall through to batch *)
     | Ok (config, messages, tools) ->
         let env = Llm_eio_env.get () in

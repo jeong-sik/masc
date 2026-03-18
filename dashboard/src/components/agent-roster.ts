@@ -151,7 +151,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div
               class="roster-card ${isKeeper ? 'roster-card--keeper' : ''}"
               key=${agent.name}
-              onClick=${() => navigate('execution', { agent: agent.name })}
+              onClick=${() => navigate('agents', { agent: agent.name })}
               role="button"
               tabindex="0"
             >

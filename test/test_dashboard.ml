@@ -129,25 +129,14 @@ let test_worktrees_section_empty () =
 
 let test_lodge_status_json_has_runtime_fields () =
   Eio_main.run @@ fun _env ->
+  (* Lodge heartbeat deprecated (#1596) — stub returns {status: deprecated} *)
   let json = Lib.Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
-  let open Yojson.Safe.Util in
   let has_key key =
     match json with
     | `Assoc fields -> List.mem_assoc key fields
     | _ -> false
   in
-  Alcotest.(check bool) "enabled present" true (has_key "enabled");
-  Alcotest.(check bool) "interval present" true (has_key "interval_s");
-  Alcotest.(check bool) "quiet_start present" true (has_key "quiet_start");
-  Alcotest.(check bool) "quiet_end present" true (has_key "quiet_end");
-  Alcotest.(check bool) "quiet_active present" true (has_key "quiet_active");
-  Alcotest.(check bool) "last_tick_ago_s present" true (has_key "last_tick_ago_s");
-  Alcotest.(check bool) "last_tick_result present" true (has_key "last_tick_result");
-  Alcotest.(check bool) "manual_tick_running present" true (has_key "manual_tick_running");
-  Alcotest.(check bool) "last_skip_reason present" true (has_key "last_skip_reason");
-  Alcotest.(check bool) "last_pass_reason present" true (has_key "last_pass_reason");
-  Alcotest.(check bool) "last_system_skip_reason present" true (has_key "last_system_skip_reason");
-  Alcotest.(check bool) "last_tick_ago string" true (member "last_tick_ago" json <> `Null)
+  Alcotest.(check bool) "status present" true (has_key "status")
 
 let test_dashboard_semantics_has_required_surfaces () =
   let json = Lib.Dashboard_semantics.json () in

@@ -45,20 +45,13 @@ let test_dashboard_execution_fixture () =
         let worker_briefs = json |> member "worker_support_briefs" |> to_list in
         let social_tick = json |> member "social_tick" in
         let social_checkins = json |> member "social_checkins" |> to_list in
-        let lodge_tick = json |> member "lodge_tick" in
-        let lodge_checkins = json |> member "lodge_checkins" |> to_list in
         let continuity_briefs = json |> member "continuity_briefs" |> to_list in
         let offline_worker_briefs = json |> member "offline_worker_briefs" |> to_list in
         check bool "summary removed from execution payload" true
           (json |> member "summary" = `Null);
         check int "social checked count" 3 (social_tick |> member "checked" |> to_int);
         check int "social checkins" 3 (List.length social_checkins);
-        check int "lodge alias checked count" 3 (lodge_tick |> member "checked" |> to_int);
-        check int "lodge alias checkins" 3 (List.length lodge_checkins);
-        check string "lodge alias pass reason" "stayed read-only after evaluating the board"
-          (lodge_tick |> member "last_pass_reason" |> to_string);
-        check string "lodge alias system skip reason" "rate-limited after a recent board action"
-          (lodge_tick |> member "last_system_skip_reason" |> to_string);
+        (* lodge_tick / lodge_checkins assertions removed — Lodge deprecated #1596 *)
         check bool "social runtime present" true
           (json |> member "status" |> member "social_runtime" <> `Null);
         check string "top queue kind" "session"

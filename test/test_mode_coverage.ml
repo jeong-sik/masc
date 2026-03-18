@@ -293,7 +293,7 @@ let test_tool_category_ecosystem_voice () =
     (Mode.tool_category "masc_voice_conference_start" = Mode.Voice)
 
 let test_tool_category_namespace_mapping () =
-  check bool "lodge namespace" true (Mode.tool_category "lodge_heartbeat" = Mode.Comm);
+  (* lodge_ prefix removed — Lodge heartbeat deprecated (#1596) *)
   check bool "trpg namespace" true (Mode.tool_category "trpg.dice.roll" = Mode.TRPG);
   check bool "experiment namespace" true (Mode.tool_category "experiment.start" = Mode.Ecosystem);
   check bool "decision namespace" true (Mode.tool_category "decision.create" = Mode.Consensus);

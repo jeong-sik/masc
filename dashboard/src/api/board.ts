@@ -11,7 +11,7 @@ import type {
 
 // --- Board ---
 
-const SYSTEM_BOARD_AUTHORS = new Set(['lodge-system', 'team-session'])
+const SYSTEM_BOARD_AUTHORS = new Set(['team-session'])
 
 export function toIsoTimestamp(value: unknown): string {
   if (typeof value === 'string' && value.trim()) return value

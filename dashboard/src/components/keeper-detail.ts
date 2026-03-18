@@ -10,7 +10,7 @@ import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
-import { normalizeLodgeTickResult, selectKeeper } from '../keeper-runtime'
+import { selectKeeper } from '../keeper-runtime'
 import {
   KeeperConversationPanel,
   KeeperDiagnosticSummary,
@@ -55,26 +55,17 @@ function currentOperatorActor(): string {
   return actor || 'dashboard'
 }
 
-async function pokeLodgeNow(): Promise<void> {
+async function runSocialSweep(): Promise<void> {
   try {
-    const response = await runOperatorAction({
+    await runOperatorAction({
       actor: currentOperatorActor(),
       action_type: 'social_sweep',
       target_type: 'room',
       payload: {},
     })
-    const result = normalizeLodgeTickResult(response.result)
     invalidateDashboardCache()
     await refreshDashboard()
-    const skipReason = result?.last_system_skip_reason ?? result?.skipped_reason
-    if (skipReason) {
-      showToast(skipReason, 'warning')
-    } else {
-      showToast(
-        result ? `Social sweep finished: ${result.acted}/${result.checked} acted` : 'Social sweep finished',
-        result && result.acted > 0 ? 'success' : 'warning',
-      )
-    }
+    showToast('Social sweep finished', 'success')
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to run social sweep'
     showToast(message, 'error')
@@ -103,7 +94,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
             <${KeeperRuntimeActions}
               actor=${currentOperatorActor()}
               keeper=${keeper}
-              onPokeLodge=${() => { void pokeLodgeNow() }}
+              onSocialSweep=${() => { void runSocialSweep() }}
             />
           </div>
         </details>

@@ -1,21 +1,11 @@
-import { get, post, fetchWithTimeout } from './core'
+import { get, fetchWithTimeout } from './core'
 import { callMcpTool } from './mcp'
 import { isRecord } from '../components/common/normalize'
 import { asString, asNumber, asInt } from './trpg'
 import { toIsoTimestamp, normalizeGovernanceCaseBundle, normalizeGovernanceExecutionOrder } from './board'
 import type {
-  Agent, GovernanceCaseBundle, GovernanceExecutionOrder, MdalIterationRecord, MdalLoop,
+  GovernanceCaseBundle, GovernanceExecutionOrder, MdalIterationRecord, MdalLoop,
 } from '../types'
-
-// --- Lodge ---
-
-export function fetchLodgeAgents(): Promise<{ agents: Agent[] }> {
-  return get('/api/v1/lodge/agents')
-}
-
-export function createLodgeAgent(data: Partial<Agent>): Promise<Agent> {
-  return post('/api/v1/lodge/agents', data)
-}
 
 // --- Karma ---
 

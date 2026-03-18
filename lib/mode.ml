@@ -416,7 +416,7 @@ let tool_category tool_name =
   (* ── Deprecated/archived tools (hidden via tool_catalog, excluded from presets) ── *)
 
   (* ── Prefix-based fallbacks for legacy dot-separated names ── *)
-  | _ when String.starts_with ~prefix:"lodge_" tool_name -> Comm
+  (* lodge_ prefix removed -- Lodge heartbeat deprecated (#1596) *)
   | _ when String.starts_with ~prefix:"decision." tool_name -> Consensus
   | _ when String.starts_with ~prefix:"decision_" tool_name -> Consensus
   | _ when String.starts_with ~prefix:"experiment." tool_name -> Ecosystem

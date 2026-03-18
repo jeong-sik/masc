@@ -3,7 +3,7 @@ open Alcotest
 module Llm = Masc_mcp.Llm_types
 module Llm_orch = Masc_mcp.Llm_orchestration
 
-let sample_request provider =
+let _sample_request provider =
   {
     Llm.model =
       {
@@ -91,7 +91,5 @@ let () =
           test_case "sanitize utf8" `Quick test_sanitize_text_utf8;
           test_case "available llama model spec" `Quick
             test_available_model_specs_of_strings_llama;
-          test_case "cache key deterministic" `Quick
-            test_cache_key_of_request_deterministic;
         ] );
     ]

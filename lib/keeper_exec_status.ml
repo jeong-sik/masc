@@ -518,7 +518,11 @@ let string_contains_ci haystack needle =
   needle <> "" && loop 0
 
 let quiet_hours_active () =
-  let current_hour = Lodge_heartbeat.current_hour_kst () in
+  let current_hour =
+    let tm = Unix.gmtime (Time_compat.now ()) in
+    (* KST = UTC+9; must use gmtime, not localtime *)
+    (tm.Unix.tm_hour + 9) mod 24
+  in
   let quiet_start = Env_config.LodgeV2.quiet_start in
   let quiet_end = Env_config.LodgeV2.quiet_end in
   quiet_start < quiet_end

@@ -3,7 +3,7 @@
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
-import { pushOasAgentEvent, updateOasKeeperSnapshot, oasLastGardenerTick, oasTotalEvents } from './store'
+import { updateOasKeeperSnapshot, oasLastGardenerTick, oasTotalEvents } from './store'
 import type { OasKeeperSnapshot } from './types/oas'
 
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
@@ -224,45 +224,6 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     // OAS bridge events
-    case 'oas:masc:lodge:agent_selected': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = (p.agent_name as string) ?? agent
-      pushOasAgentEvent({
-        type: 'selected',
-        agent_name: agentName,
-        trigger: p.trigger as string | undefined,
-        timestamp: (p.timestamp as number) ?? Date.now() / 1000,
-      })
-      addTypedJournalEntry(agentName, `Selected (${p.trigger ?? '?'})`, 'oas', 'oas_agent_selected')
-      break
-    }
-    case 'oas:masc:lodge:agent_decision': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = (p.agent_name as string) ?? agent
-      pushOasAgentEvent({
-        type: 'decision',
-        agent_name: agentName,
-        action: p.action as string | undefined,
-        trigger_reason: p.trigger_reason as string | undefined,
-        timestamp: (p.timestamp as number) ?? Date.now() / 1000,
-      })
-      addTypedJournalEntry(agentName, `Decision: ${p.action ?? '?'}`, 'oas', 'oas_agent_decision')
-      break
-    }
-    case 'oas:masc:lodge:agent_action_executed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = (p.agent_name as string) ?? agent
-      pushOasAgentEvent({
-        type: 'action_executed',
-        agent_name: agentName,
-        action: p.action as string | undefined,
-        success: p.success as boolean | undefined,
-        timestamp: (p.timestamp as number) ?? Date.now() / 1000,
-      })
-      const ok = p.success ? 'ok' : 'fail'
-      addTypedJournalEntry(agentName, `Action: ${p.action ?? '?'} [${ok}]`, 'oas', 'oas_agent_action')
-      break
-    }
     case 'oas:masc:keeper:snapshot': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const snap: OasKeeperSnapshot = {

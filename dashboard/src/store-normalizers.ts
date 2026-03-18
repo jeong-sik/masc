@@ -1,11 +1,9 @@
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
-import { normalizeLodgeRuntimeStatus } from './keeper-runtime'
 import type {
   Agent, Task, Message, ServerStatus, SocialRuntimeStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
   DashboardExecutionQueueItem, DashboardExecutionSessionBrief,
   DashboardExecutionOperationBrief, DashboardExecutionWorkerSupportBrief,
-  DashboardExecutionLodgeTick, DashboardExecutionLodgeCheckin,
   DashboardExecutionContinuityBrief, MdalLoop, MdalIterationRecord,
   OperatorAttentionItem, OperatorRecommendedAction,
 } from './types'
@@ -259,49 +257,6 @@ export function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExe
   }
 }
 
-export function normalizeExecutionLodgeTick(raw: unknown): DashboardExecutionLodgeTick | null {
-  if (!isRecord(raw)) return null
-  const lastSystemSkipReason = asString(raw.last_system_skip_reason) ?? asString(raw.last_skip_reason) ?? null
-  return {
-    checked: asNumber(raw.checked),
-    acted: asNumber(raw.acted),
-    passed: asNumber(raw.passed),
-    skipped: asNumber(raw.skipped),
-    failed: asNumber(raw.failed),
-    last_tick_at: asString(raw.last_tick_at) ?? null,
-    last_skip_reason: lastSystemSkipReason,
-    last_pass_reason: asString(raw.last_pass_reason) ?? null,
-    last_system_skip_reason: lastSystemSkipReason,
-    strategy: asString(raw.strategy) ?? null,
-    queue_depth: asNumber(raw.queue_depth) ?? null,
-    activity_report: asString(raw.activity_report) ?? null,
-  }
-}
-
-export function normalizeExecutionLodgeCheckin(raw: unknown): DashboardExecutionLodgeCheckin | null {
-  if (!isRecord(raw)) return null
-  const agentName = asString(raw.agent_name)
-  const outcome = asString(raw.outcome)
-  if (!agentName || !outcome) return null
-  return {
-    agent_name: agentName,
-    trigger: asString(raw.trigger) ?? null,
-    outcome,
-    summary: asString(raw.summary) ?? null,
-    reason: asString(raw.reason) ?? null,
-    allowed_tool_names: asStringArray(raw.allowed_tool_names) ?? [],
-    used_tool_names: asStringArray(raw.used_tool_names) ?? [],
-    used_tool_call_count: asNumber(raw.used_tool_call_count) ?? null,
-    action_kind: asString(raw.action_kind) ?? 'none',
-    tool_audit_source: asString(raw.tool_audit_source) ?? null,
-    tool_audit_at: asString(raw.tool_audit_at) ?? null,
-    checked_at: asString(raw.checked_at) ?? null,
-    decision_reason: asString(raw.decision_reason) ?? null,
-    worker_name: asString(raw.worker_name) ?? null,
-    failure_reason: asString(raw.failure_reason) ?? null,
-  }
-}
-
 export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecutionContinuityBrief | null {
   if (!isRecord(raw)) return null
   const name = asString(raw.name)
@@ -475,20 +430,10 @@ export function normalizeGuardianRuntimeStatus(raw: unknown): ServerStatus['guar
     runtime_owner: asString(raw.runtime_owner) ?? null,
     zombie_loop_running: typeof raw.zombie_loop_running === 'boolean' ? raw.zombie_loop_running : undefined,
     gc_loop_running: typeof raw.gc_loop_running === 'boolean' ? raw.gc_loop_running : undefined,
-    lodge_enabled: typeof raw.lodge_enabled === 'boolean' ? raw.lodge_enabled : undefined,
-    lodge_loop_started: typeof raw.lodge_loop_started === 'boolean' ? raw.lodge_loop_started : undefined,
-    lodge_running: typeof raw.lodge_running === 'boolean' ? raw.lodge_running : undefined,
     last_zombie_cleanup: toIsoTimestamp(raw.last_zombie_cleanup) ?? asString(raw.last_zombie_cleanup) ?? null,
     last_gc: toIsoTimestamp(raw.last_gc) ?? asString(raw.last_gc) ?? null,
-    last_lodge: toIsoTimestamp(raw.last_lodge) ?? asString(raw.last_lodge) ?? null,
     last_zombie_result: asString(raw.last_zombie_result) ?? null,
     last_gc_result: asString(raw.last_gc_result) ?? null,
-    last_lodge_result: isRecord(raw.last_lodge_result)
-      ? {
-          ok: typeof raw.last_lodge_result.ok === 'boolean' ? raw.last_lodge_result.ok : undefined,
-          message: asString(raw.last_lodge_result.message) ?? undefined,
-        }
-      : null,
   }
 }
 
@@ -540,15 +485,6 @@ export function normalizeSocialRuntimeStatus(raw: unknown): SocialRuntimeStatus 
           last_pass_reason: asString(lastResult.last_pass_reason) ?? null,
           last_system_skip_reason: asString(lastResult.last_system_skip_reason) ?? null,
           activity_report: asString(lastResult.activity_report) ?? null,
-          checkins: Array.isArray(lastResult.checkins)
-            ? lastResult.checkins.map((item) => ({
-                name: asString((item as Record<string, unknown>).agent_name) ?? '',
-                trigger: asString((item as Record<string, unknown>).trigger) ?? undefined,
-                outcome: asString((item as Record<string, unknown>).outcome) ?? undefined,
-                summary: asString((item as Record<string, unknown>).summary) ?? undefined,
-                reason: asString((item as Record<string, unknown>).reason) ?? undefined,
-              })).filter((item) => item.name !== '')
-            : [],
         }
       : null,
   }
@@ -560,7 +496,6 @@ export function normalizeServerStatus(raw: unknown, generatedAt?: string): Serve
     ...(raw as ServerStatus),
     generated_at: generatedAt ?? toIsoTimestamp(raw.generated_at) ?? undefined,
     build: normalizeBuildIdentity(raw.build),
-    lodge: normalizeLodgeRuntimeStatus(raw.lodge) ?? undefined,
     social_runtime: normalizeSocialRuntimeStatus(raw.social_runtime),
     gardener: normalizeGardenerRuntimeStatus(raw.gardener) ?? undefined,
     guardian: normalizeGuardianRuntimeStatus(raw.guardian) ?? undefined,

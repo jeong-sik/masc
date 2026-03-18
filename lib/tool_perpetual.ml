@@ -277,7 +277,7 @@ let handle_inject args =
     match Hashtbl.find_opt active_agents id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Agent %s not found" id))]
     | Some (state, _config) ->
-      let msg = Llm_client.user_msg message in
+      let msg = Agent_sdk.Types.user_msg message in
       state.context <- Context_manager.append state.context msg;
       Context_manager.persist_message state.session msg;
       state.idle_turns <- 0;  (* Reset idle counter *)

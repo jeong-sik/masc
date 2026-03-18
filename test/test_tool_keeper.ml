@@ -119,29 +119,29 @@ let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
         expected labels)
 
 let test_llm_client_sanitize_message_utf8_repairs_invalid_fields () =
-  let raw : Masc_mcp.Llm_client.message =
+  let raw : Agent_sdk.Types.message =
     { Agent_sdk.Types.role = User;
       content = [Agent_sdk.Types.Text "hello\x80.world"] }
   in
   let sanitized = Masc_mcp.Llm_client.sanitize_message_utf8 raw in
   check bool "role preserved" true (sanitized.role = raw.role);
-  let sanitized_text = Masc_mcp.Llm_client.text_of_message sanitized in
-  let raw_text = Masc_mcp.Llm_client.text_of_message raw in
+  let sanitized_text = Agent_sdk.Types.text_of_message sanitized in
+  let raw_text = Agent_sdk.Types.text_of_message raw in
   check bool "content valid utf8" true (string_is_valid_utf8 sanitized_text);
   check bool "content changed" true (sanitized_text <> raw_text)
 
 let test_llm_client_sanitize_messages_utf8_preserves_message_count () =
   let msgs =
     [
-      Masc_mcp.Llm_client.user_msg "ok\x80";
-      Masc_mcp.Llm_client.assistant_msg "fine\xFF";
+      Agent_sdk.Types.user_msg "ok\x80";
+      Agent_sdk.Types.assistant_msg "fine\xFF";
     ]
   in
   let sanitized = Masc_mcp.Llm_client.sanitize_messages_utf8 msgs in
   check int "count preserved" 2 (List.length sanitized);
   check bool "all valid utf8" true
     (List.for_all
-       (fun (msg : Masc_mcp.Llm_client.message) -> string_is_valid_utf8 (Masc_mcp.Llm_client.text_of_message msg))
+       (fun (msg : Agent_sdk.Types.message) -> string_is_valid_utf8 (Agent_sdk.Types.text_of_message msg))
        sanitized)
 
 let test_resolved_keeper_skill_route_marks_agent_judgment () =

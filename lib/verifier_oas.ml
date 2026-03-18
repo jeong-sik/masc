@@ -155,14 +155,14 @@ let verify ~(model : Llm_client.model_spec) (req : verification_request) : verdi
     let prompt = build_prompt req in
     let completion_req : Llm_client.completion_request = {
       model;
-      messages = [Llm_client.user_msg prompt];
+      messages = [Agent_sdk.Types.user_msg prompt];
       temperature = 0.0;  (* Deterministic for verification *)
       max_tokens = 200;   (* Budget cap *)
       tools = [];
       response_format = `Text;
     } in
     match Llm_orchestration.complete completion_req with
-    | Ok resp -> parse_verdict (Llm_client.text_of_response resp)
+    | Ok resp -> parse_verdict (Llm_types.text_of_response resp)
     | Error e ->
       eprintf "[verifier] LLM call failed: %s (defaulting to WARN)\n%!" e;
       Warn ("verifier_unavailable: " ^ e)

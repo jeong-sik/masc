@@ -75,7 +75,7 @@ let make_request model_id =
   in
   ({
      model;
-     messages = [ Llm_client.user_msg ("prompt:" ^ model_id) ];
+     messages = [ Agent_sdk.Types.user_msg ("prompt:" ^ model_id) ];
      temperature = 0.0;
      max_tokens = 64;
      tools = [];
@@ -86,7 +86,7 @@ let make_request model_id =
 let make_request_for_model ?(temperature = 0.0) ~model ~prompt ~max_tokens () =
   ({
      model;
-     messages = [ Llm_client.user_msg prompt ];
+     messages = [ Agent_sdk.Types.user_msg prompt ];
      temperature;
      max_tokens;
      tools = [];

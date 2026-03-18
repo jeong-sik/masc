@@ -109,14 +109,14 @@ let tier1_check ~(model : Llm_client.model_spec) ~actor_name ~actor_persona
   let prompt = build_tier1_prompt ~actor_name ~actor_persona ~response_text in
   let req : Llm_client.completion_request = {
     model;
-    messages = [Llm_client.user_msg prompt];
+    messages = [Agent_sdk.Types.user_msg prompt];
     temperature = 0.0;
     max_tokens = 50;
     tools = [];
     response_format = `Text;
   } in
   match Llm_orchestration.complete req with
-  | Ok resp -> parse_tier1 (Llm_client.text_of_response resp)
+  | Ok resp -> parse_tier1 (Llm_types.text_of_response resp)
   | Error e ->
     eprintf "[trpg_harness] tier1 LLM call failed: %s\n%!" e;
     Fail ("tier1_unavailable: " ^ e)
@@ -204,14 +204,14 @@ let tier2_evaluate ~(model : Llm_client.model_spec) ~actor_name ~actor_persona
     ~scene_context ~response_text in
   let req : Llm_client.completion_request = {
     model;
-    messages = [Llm_client.user_msg prompt];
+    messages = [Agent_sdk.Types.user_msg prompt];
     temperature = 0.0;
     max_tokens = 200;
     tools = [];
     response_format = `Text;
   } in
   match Llm_orchestration.complete req with
-  | Ok resp -> parse_tier2 (Llm_client.text_of_response resp)
+  | Ok resp -> parse_tier2 (Llm_types.text_of_response resp)
   | Error e ->
     eprintf "[trpg_harness] tier2 LLM call failed: %s\n%!" e;
     List.map default_score all_dimensions

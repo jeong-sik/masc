@@ -15,10 +15,10 @@ let a2a_tasks_dir config = Filename.concat (masc_dir config) "a2a_tasks"
 let gen_a2a_task_id () =
   let now = Time_compat.now () in
   let tm = Unix.gmtime now in
-  Printf.sprintf "a2a-%04d%02d%02d%02d%02d%02d-%04d"
+  Printf.sprintf "a2a-%04d%02d%02d%02d%02d%02d-%04x"
     (tm.Unix.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
     tm.tm_hour tm.tm_min tm.tm_sec
-    (Random.int 10000)
+    (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF)
 
 (** Open portal - establish bidirectional A2A connection (Result version) *)
 let portal_open_r config ~agent_name ~target_agent ~initial_message : string masc_result =

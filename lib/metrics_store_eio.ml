@@ -68,8 +68,8 @@ let current_month_file config agent_id =
 (** Generate unique metric ID *)
 let generate_id () =
   let timestamp = Time_compat.now () in
-  let random = Random.int 100000 in
-  Printf.sprintf "metric-%d-%05d" (int_of_float (timestamp *. 1000.)) random
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
+  Printf.sprintf "metric-%d-%05x" (int_of_float (timestamp *. 1000.)) hash
 
 (** Record a new task metric - synchronous with file locking *)
 let record config (metric : task_metric) : unit =

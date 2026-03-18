@@ -197,12 +197,10 @@ let request_of_yojson = function
   | _ -> Error "verification request must be a JSON object"
 
 (** ID generation *)
-let () = Random.self_init ()
-
 let generate_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rand = Random.int 1_000_000 in
-  Printf.sprintf "vrf-%d-%06d" ts rand
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
+  Printf.sprintf "vrf-%d-%06x" ts hash
 
 (** Automated criterion evaluation *)
 let evaluate_criterion output criterion =

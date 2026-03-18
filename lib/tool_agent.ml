@@ -147,7 +147,7 @@ let handle_agent_fitness ctx args =
 
 (** Pick random from list *)
 let pick_random lst =
-  let idx = Random.int (List.length lst) in
+  let idx = Random.int (List.length lst) in  (* intentional: random selection *)
   List.nth lst idx
 
 (** Handle masc_select_agent *)
@@ -184,7 +184,7 @@ let handle_select_agent ctx args =
           let total = List.fold_left (fun acc (_, s, _) -> acc +. max 0.0 s) 0.0 scored in
           if total <= 0.0 then pick_random scored
           else
-            let target = Random.float total in
+            let target = Random.float total in  (* intentional: random selection *)
             let rec pick acc = function
               | [] -> (match scored with x :: _ -> x | [] -> pick_random scored)
               | (id, s, comp) :: rest ->

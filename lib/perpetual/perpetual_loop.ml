@@ -130,8 +130,8 @@ let default_config ~goal ~models ?verifier ?session_dir () =
 
 let generate_trace_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rnd = Random.int 99999 in
-  sprintf "trace-%d-%05d" ts rnd
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
+  sprintf "trace-%d-%05x" ts hash
 
 let create_state config =
   let system_prompt =

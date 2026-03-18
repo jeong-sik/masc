@@ -64,6 +64,7 @@ type t = {
 (** {1 Utilities} *)
 
 let generate_client_id () =
+  (* intentional: voice client IDs need randomness for distributed uniqueness *)
   Random.self_init ();
   let high = Random.int 0xFFFF in
   let mid = Random.int 0xFFFF in

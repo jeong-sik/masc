@@ -233,28 +233,22 @@ let event_buffers_mutex = Eio.Mutex.create ()
 (* Max events per subscription to prevent memory bloat *)
 let max_buffered_events = Env_config_governance.Timeouts.event_buffer_size
 
-(** Generate UUID using stdlib Random + timestamp (no Mirage_crypto dependency)
+(** Generate UUID-like ID using Hashtbl.hash of timestamp (no Mirage_crypto dependency).
     For A2A subscriptions, cryptographic randomness is not required.
 *)
 let generate_uuid () =
-  (* Initialize Random once with high-resolution timestamp *)
-  let () =
-    let now = Time_compat.now () in
-    let seed = int_of_float (now *. 1_000_000.) land 0x3FFFFFFF in
-    Random.init seed
-  in
-  let hex_char () =
-    let n = Random.int 16 in
-    if n < 10 then Char.chr (n + 48) else Char.chr (n + 87)
-  in
-  let buf = Buffer.create 36 in
-  for i = 0 to 35 do
-    if i = 8 || i = 13 || i = 18 || i = 23 then
-      Buffer.add_char buf '-'
-    else
-      Buffer.add_char buf (hex_char ())
-  done;
-  Buffer.contents buf
+  let t = Unix.gettimeofday () in
+  let h1 = Hashtbl.hash t in
+  let h2 = Hashtbl.hash (t *. 1000.0) in
+  let h3 = Hashtbl.hash (t *. 1_000_000.0) in
+  let h4 = Hashtbl.hash (h1 lxor h2) in
+  Printf.sprintf "%08x-%04x-%04x-%04x-%04x%08x"
+    (h1 land 0xFFFFFFFF)
+    (h2 land 0xFFFF)
+    (h3 land 0xFFFF)
+    (h4 land 0xFFFF)
+    ((h1 lxor h3) land 0xFFFF)
+    (h2 lxor h4)
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =

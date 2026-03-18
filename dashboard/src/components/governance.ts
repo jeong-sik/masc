@@ -370,7 +370,7 @@ function DecisionInbox() {
     <${Card} title="사건 수신함" class="section" semanticId="governance.inbox">
       <div class="council-list governance-inbox">
         ${items.length === 0
-          ? html`<div class="empty-state">지금 필터에 맞는 사건이 없습니다.</div>`
+          ? html`<div class="empty-state">이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.</div>`
           : items.map(item => {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`
@@ -459,7 +459,7 @@ function DecisionDetail() {
       ${detailLoading.value
         ? html`<div class="loading-indicator">거버넌스 상세 불러오는 중...</div>`
         : !item || !detail
-          ? html`<div class="empty-state">사건을 고르면 청원, 심의, 판정, 집행 기록을 볼 수 있습니다.</div>`
+          ? html`<div class="empty-state">왼쪽 수신함에서 사건을 선택하면 청원, 심의, 판정, 집행 기록이 여기에 표시됩니다.</div>`
           : html`
               <div class="governance-detail-head">
                 <div>
@@ -607,7 +607,7 @@ function ActivityRail() {
     <${Card} title="최근 활동" class="section" semanticId="governance.activity">
       <div class="governance-activity-list">
         ${events.length === 0
-          ? html`<div class="empty-state">기록된 활동이 아직 없습니다.</div>`
+          ? html`<div class="empty-state">거버넌스 활동이 아직 없습니다. 청원 접수, 심의, 판정이 이루어지면 여기에 기록됩니다.</div>`
           : events.map((event: GovernanceTimelineEvent) => html`
               <div class="governance-activity-row">
                 <div class="governance-ledger-head">

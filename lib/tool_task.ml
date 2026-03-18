@@ -227,6 +227,9 @@ let handle_transition ctx args =
   | Error e -> result_to_response (Error e)
   | Ok task_id ->
   let action = get_string args "action" "" in
+  if action = "" then
+    (false, "action is required (claim, start, done, cancel, release, block, unblock)")
+  else
   let notes = get_string args "notes" "" in
   let reason = get_string args "reason" "" in
   let expected_version = get_int_opt args "expected_version" in

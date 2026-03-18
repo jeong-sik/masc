@@ -190,8 +190,12 @@ let get_profile ~net:_ args =
     in
     let neo4j_info =
       try
-        let (_status, content) = sb_neo4j_query ~timeout_sec:60.0 cypher in
-        content
+        let (status, content) = sb_neo4j_query ~timeout_sec:15.0 cypher in
+        (match status with
+         | Unix.WEXITED 0 -> content
+         | Unix.WEXITED n -> Printf.sprintf "Neo4j query failed (exit %d)" n
+         | Unix.WSIGNALED _ -> "Neo4j query timed out"
+         | Unix.WSTOPPED _ -> "Neo4j unavailable")
       with Unix.Unix_error _ | Sys_error _ -> "Neo4j unavailable"
     in
 
@@ -221,10 +225,11 @@ let lodge_search ~net:_ args =
     in
     let agent_results =
       try
-        let (_status, output) = sb_neo4j_query ~timeout_sec:60.0 cypher in
-        if String.length output > 10 then
-          Printf.sprintf "\n\n👥 **에이전트 검색 결과:**\n%s" output
-        else ""
+        let (status, output) = sb_neo4j_query ~timeout_sec:15.0 cypher in
+        (match status with
+         | Unix.WEXITED 0 when String.length output > 10 ->
+             Printf.sprintf "\n\n👥 **에이전트 검색 결과:**\n%s" output
+         | _ -> "")
       with Unix.Unix_error _ | Sys_error _ -> ""
     in
 
@@ -261,7 +266,7 @@ let lodge_progress ~net:_ _args =
   in
   let agent_stats =
     try
-      let (status, output) = sb_neo4j_query ~timeout_sec:60.0 cypher in
+      let (status, output) = sb_neo4j_query ~timeout_sec:15.0 cypher in
       match status with
       | Unix.WEXITED 0 -> (
           try

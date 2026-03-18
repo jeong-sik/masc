@@ -14,11 +14,11 @@ module Time = struct
   (** Parse ISO 8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ") to Unix epoch.
 
       [Unix.mktime] interprets its argument as local time. To get the
-      correct UTC epoch we compute the local-UTC offset and subtract it.
+      correct UTC epoch we compute the local-UTC offset and add it.
 
-      The previous implementation added the offset instead of subtracting,
-      which on KST (UTC+9) made timestamps appear 9 h in the future —
-      causing [is_zombie] to always return [false]. *)
+      [tz_offset = local_epoch - utc_as_local] yields a positive value
+      for east-of-UTC zones (e.g. +32400 for KST/UTC+9).
+      [local_epoch + tz_offset] then recovers the true UTC epoch. *)
   let parse_iso8601_opt s =
     try
       Scanf.sscanf s "%04d-%02d-%02dT%02d:%02d:%02dZ"
@@ -32,7 +32,7 @@ module Time = struct
           let utc_of_local = Unix.gmtime local_epoch in
           let utc_as_local, _ = Unix.mktime utc_of_local in
           let tz_offset = local_epoch -. utc_as_local in
-          Some (local_epoch -. tz_offset))
+          Some (local_epoch +. tz_offset))
     with Scanf.Scan_failure _ | Failure _ | End_of_file ->
       Log.Misc.error "parse_iso8601_opt failed for: %S" s;
       None

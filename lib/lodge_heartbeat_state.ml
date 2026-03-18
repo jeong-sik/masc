@@ -73,11 +73,14 @@ let is_agent_active_unlocked ~name =
   | None -> false
 
 let is_agent_active ~name =
+  let name = String.lowercase_ascii name in
   with_lodge_lock (fun () -> is_agent_active_unlocked ~name)
 
 (** Try to activate agent - returns Some uuid if successful, None if already active.
-    Entire check-then-act is atomic under lodge_lock. *)
+    Entire check-then-act is atomic under lodge_lock.
+    Agent names are case-insensitive (e.g., "Claude" = "claude"). *)
 let try_activate_agent ~name : string option =
+  let name = String.lowercase_ascii name in
   with_lodge_lock (fun () ->
     if is_agent_active_unlocked ~name then begin
       Eio.traceln "   ⏸️ [%s] Already active, skipping" name;

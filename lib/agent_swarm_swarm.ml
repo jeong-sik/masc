@@ -409,14 +409,20 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
            | Error e -> Log.Swarm.warn "%s: MASC leave warning: %s" spec.name e);
           { agent_name = spec.name; result })
 
+(** Optional callback invoked after all agents complete.
+    Receives the list of agent results for fitness tracking,
+    metrics collection, etc. *)
+type on_complete_fn = agent_result list -> unit
+
 (** Run all agents in parallel using Eio fibers.
     A heartbeat daemon fiber runs alongside the agents and sends keepalive pings
     to the MASC room every 30 seconds. The heartbeat fiber is automatically
     cancelled when all agent fibers complete (daemon fibers are cancelled
     when the Switch.run body returns).
     If the coordinator fails to join MASC, heartbeat and post-run
-    broadcast/leave are skipped. *)
-let run ~sw ~net ~clock config ~goal =
+    broadcast/leave are skipped.
+    [on_complete] is called with all results before returning. *)
+let run ~sw ~net ~clock ?(on_complete : on_complete_fn option) config ~goal =
   let masc = Agent_swarm_client.create_managed ~net
     ~base_url:config.masc_url
     ~agent_name:"swarm-coordinator" in
@@ -465,4 +471,11 @@ let run ~sw ~net ~clock config ~goal =
      | Error e ->
        Log.Swarm.warn "MASC leave warning: %s" e)
   end;
+  (match on_complete with
+   | Some f ->
+       (try f results
+        with exn ->
+          Log.Swarm.error "on_complete callback failed: %s"
+            (Printexc.to_string exn))
+   | None -> ());
   results

@@ -344,7 +344,20 @@ let run ~sw ~net ~clock cfg =
       agents = List.map (worker_spec cfg) plans;
     }
   in
-  let results = Agent_swarm_swarm.run ~sw ~net ~clock swarm_config ~goal:(common_goal cfg) in
+  let on_complete (results : Agent_swarm_swarm.agent_result list) =
+    let success_count =
+      List.length (List.filter
+        (fun (r : Agent_swarm_swarm.agent_result) ->
+          match r.result with Ok _ -> true | Error _ -> false) results)
+    in
+    let total = List.length results in
+    Log.Swarm.info "swarm-live on_complete: %d/%d agents succeeded"
+      success_count total
+  in
+  let results =
+    Agent_swarm_swarm.run ~sw ~net ~clock ~on_complete swarm_config
+      ~goal:(common_goal cfg)
+  in
   let plan_by_name = List.map (fun worker -> (worker.name, worker)) plans in
   let rows =
     results

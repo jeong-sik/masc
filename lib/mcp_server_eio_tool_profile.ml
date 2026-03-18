@@ -199,11 +199,21 @@ let tool_output_schema_field = function
         (permissive_object_schema
            [
              ("status", `Assoc [ ("type", `String "string") ]);
-             ("message", `Assoc [ ("type", `String "string") ]);
              ("run_id", `Assoc [ ("type", `String "string") ]);
-             ("runtime_blocker", `Assoc [ ("type", `String "string") ]);
-             ("runtime_doctor_path", `Assoc [ ("type", `String "string") ]);
-             ("summary_path", `Assoc [ ("type", `String "string") ]);
+             ("pid", `Assoc [ ("type", `String "integer") ]);
+             ("worker_count", `Assoc [ ("type", `String "integer") ]);
+             ("monitor", `Assoc [ ("type", `String "string") ]);
+           ])
+  | "masc_swarm_live_status" ->
+      Some
+        (permissive_object_schema
+           [
+             ("status", `Assoc [ ("type", `String "string") ]);
+             ("run_id", `Assoc [ ("type", `String "string") ]);
+             ("pid", `Assoc [ ("type", `String "integer") ]);
+             ("summary", `Assoc [ ("type", `String "object") ]);
+             ("runtime_doctor", `Assoc [ ("type", `String "object") ]);
+             ("log_tail", `Assoc [ ("type", `String "string") ]);
              ("swarm", `Assoc [ ("type", `String "object") ]);
            ])
   | "masc_team_session_status" ->

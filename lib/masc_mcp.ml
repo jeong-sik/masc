@@ -112,7 +112,6 @@ module Auth = Auth
 module Institution_eio = Institution_eio
 module Telemetry_eio = Telemetry_eio
 module Swarm_eio = Swarm_eio
-module Swarm_behaviors_eio = Swarm_behaviors_eio
 module Handover_eio = Handover_eio
 module Backend = Backend
 module Backend_eio = Backend_eio

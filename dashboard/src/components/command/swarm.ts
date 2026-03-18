@@ -36,6 +36,7 @@ import {
   swarmFocusKey,
   toneClass,
 } from './helpers'
+import { formatMessageContent } from '../ops/helpers'
 import { TraceRow } from './topology'
 
 function previewText(value: unknown): string {
@@ -706,7 +707,7 @@ export function SwarmSurface() {
                       </div>
                       <div class="command-card-sub">seq ${message.seq}</div>
                     </div>
-                    <pre class="command-trace-detail">${message.content}</pre>
+                    <pre class="command-trace-detail">${formatMessageContent(message.content)}</pre>
                   </article>
                 `)}
               </div>`

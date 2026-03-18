@@ -1,4 +1,4 @@
-import { isRecord, asString, asNumber, asStringArray, toIsoTimestamp } from './components/common/normalize'
+import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { normalizeLodgeRuntimeStatus } from './keeper-runtime'
 import type {
   Agent, Task, Message, ServerStatus, SocialRuntimeStatus,
@@ -7,6 +7,7 @@ import type {
   DashboardExecutionOperationBrief, DashboardExecutionWorkerSupportBrief,
   DashboardExecutionLodgeTick, DashboardExecutionLodgeCheckin,
   DashboardExecutionContinuityBrief, MdalLoop, MdalIterationRecord,
+  OperatorAttentionItem, OperatorRecommendedAction,
 } from './types'
 
 // --- Data fetchers ---
@@ -341,6 +342,41 @@ export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecut
     last_proactive_preview: asString(raw.last_proactive_preview) ?? null,
     continuity_summary: asString(raw.continuity_summary) ?? null,
     skill_route_summary: asString(raw.skill_route_summary) ?? null,
+  }
+}
+
+export function normalizeAttentionItem(raw: unknown): OperatorAttentionItem | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  const summary = asString(raw.summary)
+  const targetType = asString(raw.target_type)
+  if (!kind || !summary || !targetType) return null
+  return {
+    kind,
+    severity: asString(raw.severity) ?? 'warn',
+    summary,
+    target_type: targetType,
+    target_id: asString(raw.target_id) ?? null,
+    actor: asString(raw.actor) ?? null,
+    evidence: raw.evidence,
+  }
+}
+
+export function normalizeRecommendedAction(raw: unknown): OperatorRecommendedAction | null {
+  if (!isRecord(raw)) return null
+  const actionType = asString(raw.action_type)
+  const targetType = asString(raw.target_type)
+  const reason = asString(raw.reason)
+  if (!actionType || !targetType || !reason) return null
+  return {
+    action_type: actionType,
+    target_type: targetType,
+    target_id: asString(raw.target_id) ?? null,
+    severity: asString(raw.severity) ?? 'warn',
+    reason,
+    confirm_required: asBoolean(raw.confirm_required),
+    suggested_payload: isRecord(raw.suggested_payload) ? raw.suggested_payload : undefined,
+    preview: raw.preview,
   }
 }
 

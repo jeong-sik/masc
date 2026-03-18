@@ -26,7 +26,9 @@ let handle_a2a_query_skill ctx args =
   | Error e -> (false, Printf.sprintf "❌ Query skill failed: %s" e)
 
 let handle_a2a_delegate ctx args =
-  let delegate_agent_name = get_string args "agent_name" ctx.agent_name in
+  (* Always use the authenticated caller's identity for the portal,
+     not a user-supplied override. The caller cannot impersonate another agent. *)
+  let delegate_agent_name = ctx.agent_name in
   let target = get_string args "target_agent" "" in
   let message = get_string args "message" "" in
   let task_type_str = get_string args "task_type" "async" in

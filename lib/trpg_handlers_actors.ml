@@ -170,7 +170,7 @@ let handle_actor_spawn ctx args : result =
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Actor_spawned
+          ~event_type:Trpg.Engine_event.Actor_spawned
           ~actor_id ~payload ()
       in
       let* next_derived = derive_state ~store ~room_id ~rule_module in
@@ -180,7 +180,7 @@ let handle_actor_spawn ctx args : result =
             ("ok", `Bool true);
             ("room_id", `String room_id);
             ("actor_id", `String actor_id);
-            ("event", Trpg_engine_event.to_yojson event);
+            ("event", Trpg.Engine_event.to_yojson event);
             ("state", state_of_derived next_derived);
           ])
   in
@@ -211,7 +211,7 @@ let handle_actor_update ctx args : result =
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Actor_updated
+          ~event_type:Trpg.Engine_event.Actor_updated
           ~actor_id ~payload ()
       in
       let* next_derived = derive_state ~store ~room_id ~rule_module in
@@ -221,7 +221,7 @@ let handle_actor_update ctx args : result =
             ("ok", `Bool true);
             ("room_id", `String room_id);
             ("actor_id", `String actor_id);
-            ("event", Trpg_engine_event.to_yojson event);
+            ("event", Trpg.Engine_event.to_yojson event);
             ("state", state_of_derived next_derived);
           ])
   in
@@ -252,7 +252,7 @@ let handle_actor_delete ctx args : result =
       in
       let* event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Actor_deleted
+          ~event_type:Trpg.Engine_event.Actor_deleted
           ~actor_id ~payload ()
       in
       let* next_derived = derive_state ~store ~room_id ~rule_module in
@@ -263,7 +263,7 @@ let handle_actor_delete ctx args : result =
             ("room_id", `String room_id);
             ("actor_id", `String actor_id);
             ("status", `String "deleted");
-            ("event", Trpg_engine_event.to_yojson event);
+            ("event", Trpg.Engine_event.to_yojson event);
             ("state", state_of_derived next_derived);
           ])
   in
@@ -358,7 +358,7 @@ let handle_actor_match ctx args : result =
                  let traits = get_string_list_field actor_json "traits" in
                  let persona = get_string_field actor_json "persona" in
                  let scores =
-                   Trpg_actor_match.rank ~keepers ~actor_id
+                   Trpg.Actor_match.rank ~keepers ~actor_id
                      ~actor_archetype:archetype ~actor_traits:traits
                      ~actor_persona:persona
                  in
@@ -368,7 +368,7 @@ let handle_actor_match ctx args : result =
                        ("actor_id", `String actor_id);
                        ("archetype", `String archetype);
                        ( "rankings",
-                         Trpg_actor_match.ranking_to_yojson scores );
+                         Trpg.Actor_match.ranking_to_yojson scores );
                        ( "best_keeper",
                          match scores with
                          | best :: _ -> `String best.keeper_name
@@ -471,7 +471,7 @@ let handle_actor_claim ctx args : result =
               in
               let* event =
                 append_event ~store ~room_id
-                  ~event_type:Trpg_engine_event.Actor_claimed
+                  ~event_type:Trpg.Engine_event.Actor_claimed
                   ~actor_id ~payload ()
               in
               let* next_derived = derive_state ~store ~room_id ~rule_module in
@@ -488,13 +488,13 @@ let handle_actor_claim ctx args : result =
                     let traits = get_string_list_field actor_json "traits" in
                     let persona = get_string_field actor_json "persona" in
                     let ms =
-                      Trpg_actor_match.score
+                      Trpg.Actor_match.score
                         ~keeper_name ~keeper_style:style
                         ~keeper_description:description
                         ~actor_id ~actor_archetype:archetype
                         ~actor_traits:traits ~actor_persona:persona
                     in
-                    [ ("match_score", Trpg_actor_match.to_yojson ms) ]
+                    [ ("match_score", Trpg.Actor_match.to_yojson ms) ]
                 | _ -> []
               in
               Ok
@@ -505,7 +505,7 @@ let handle_actor_claim ctx args : result =
                     ("actor_id", `String actor_id);
                     ("keeper_name", `String keeper_name);
                     ("status", `String "claimed");
-                    ("event", Trpg_engine_event.to_yojson event);
+                    ("event", Trpg.Engine_event.to_yojson event);
                     ("state", state_of_derived next_derived);
                   ] @ match_score_field)) )
   in
@@ -545,7 +545,7 @@ let handle_actor_release ctx args : result =
         in
         let* event =
           append_event ~store ~room_id
-            ~event_type:Trpg_engine_event.Actor_released
+            ~event_type:Trpg.Engine_event.Actor_released
             ~actor_id ~payload ()
         in
         let* next_derived = derive_state ~store ~room_id ~rule_module in
@@ -557,7 +557,7 @@ let handle_actor_release ctx args : result =
               ("actor_id", `String actor_id);
               ("keeper_name", `String owner);
               ("status", `String "released");
-              ("event", Trpg_engine_event.to_yojson event);
+              ("event", Trpg.Engine_event.to_yojson event);
               ("state", state_of_derived next_derived);
             ])
   in

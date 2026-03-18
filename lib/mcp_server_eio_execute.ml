@@ -272,6 +272,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let can_auto_join =
     if (not join_required) || agent_name = "unknown" then
       false
+    else if Option.is_none mcp_session_id then
+      (* Sessionless requests (no Mcp-Session-Id header) should not auto-join.
+         Without a session, each request gets a new ephemeral agent name,
+         causing orphan agent proliferation in the room. *)
+      false
     else if not auth_enabled then
       true
     else
@@ -435,7 +440,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
       in
       Voice_bridge.agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ()
     in
-    let trpg_store = Trpg_store.make_sqlite ~base_dir:config.base_path in
+    let trpg_store = Trpg.Store.make_sqlite ~base_dir:config.base_path in
     (trpg_store, trpg_keeper_call, trpg_keeper_probe, trpg_dm_voice_emit)
   in
 

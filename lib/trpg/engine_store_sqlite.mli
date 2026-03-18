@@ -1,30 +1,30 @@
 type snapshot = {
   last_seq : int;
   ts : string;
-  state : Trpg_engine_types.room_state;
+  state : Engine_types.room_state;
 }
 
 val db_path_of_base_dir : base_dir:string -> string
 val init : base_dir:string -> (unit, string) result
 
 val append_event :
-  base_dir:string -> event:Trpg_engine_event.t -> (unit, string) result
+  base_dir:string -> event:Engine_event.t -> (unit, string) result
 
 val read_events :
-  base_dir:string -> room_id:string -> (Trpg_engine_event.t list, string) result
+  base_dir:string -> room_id:string -> (Engine_event.t list, string) result
 
 val read_events_after :
   base_dir:string ->
   room_id:string ->
   after_seq:int ->
-  (Trpg_engine_event.t list, string) result
+  (Engine_event.t list, string) result
 
 val write_snapshot :
   base_dir:string ->
   room_id:string ->
   last_seq:int ->
   ts:string ->
-  state:Trpg_engine_types.room_state ->
+  state:Engine_types.room_state ->
   (unit, string) result
 
 val read_snapshot :
@@ -33,4 +33,4 @@ val read_snapshot :
 val load_recovery :
   base_dir:string ->
   room_id:string ->
-  ((snapshot option * Trpg_engine_event.t list), string) result
+  ((snapshot option * Engine_event.t list), string) result

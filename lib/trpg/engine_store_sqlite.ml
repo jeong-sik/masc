@@ -1,5 +1,5 @@
-open Trpg_engine_types
-open Trpg_engine_event
+open Engine_types
+open Engine_event
 
 let ( let* ) = Result.bind
 
@@ -22,7 +22,7 @@ let db_path_of_base_dir ~base_dir =
 let ensure_db_dir ~base_dir =
   let dir = Filename.concat base_dir "trpg" in
   try
-    Room_utils.mkdir_p dir;
+    Util.mkdir_p dir;
     Ok ()
   with e -> Error (Printf.sprintf "failed to create db dir: %s" (Printexc.to_string e))
 
@@ -32,9 +32,7 @@ let with_db ~base_dir f =
   | Ok () ->
       let path = db_path_of_base_dir ~base_dir in
       let db = Sqlite3.db_open path in
-      Common.protect
-        ~module_name:"trpg_engine_store_sqlite"
-        ~finally_label:"close_db"
+      Fun.protect
         ~finally:(fun () -> ignore (Sqlite3.db_close db))
         (fun () ->
           (* Reduce transient `SQLITE_BUSY` failures under read/write contention. *)
@@ -112,7 +110,7 @@ let int_of_data = function
   | Sqlite3.Data.TEXT s -> (try Some (int_of_string s) with Failure _ -> None)
   | _ -> None
 
-let append_event ~base_dir ~(event : Trpg_engine_event.t) =
+let append_event ~base_dir ~(event : Engine_event.t) =
   let* () = validate_room_id event.room_id in
   let* () = init ~base_dir in
   with_db ~base_dir (fun db ->
@@ -121,15 +119,13 @@ let append_event ~base_dir ~(event : Trpg_engine_event.t) =
           "INSERT INTO trpg_events(room_id, seq, ts, event_type, actor_id, payload) \
            VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
       in
-      Common.protect
-        ~module_name:"trpg_engine_store_sqlite"
-        ~finally_label:"finalize_insert_event"
+      Fun.protect
         ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
         (fun () ->
           let* () = bind_text stmt 1 event.room_id in
           let* () = bind_int stmt 2 event.seq in
           let* () = bind_text stmt 3 event.ts in
-          let* () = bind_text stmt 4 (Trpg_engine_event.string_of_event_type event.event_type) in
+          let* () = bind_text stmt 4 (Engine_event.string_of_event_type event.event_type) in
           let* () = bind_nullable_text stmt 5 event.actor_id in
           let payload_s = Yojson.Safe.to_string event.payload in
           let* () = bind_text stmt 6 payload_s in
@@ -143,7 +139,7 @@ let append_event ~base_dir ~(event : Trpg_engine_event.t) =
                    (Sqlite3.errmsg db))))
 
 let parse_event_row ~seq ~room_id ~ts ~event_type_s ~actor_id ~payload_s =
-  match Trpg_engine_event.event_type_of_string event_type_s with
+  match Engine_event.event_type_of_string event_type_s with
   | Error e ->
       Error
         (Printf.sprintf
@@ -179,9 +175,7 @@ let read_events_query ~base_dir ~room_id ~after_seq_opt =
       let stmt =
         Sqlite3.prepare db sql
       in
-      Common.protect
-        ~module_name:"trpg_engine_store_sqlite"
-        ~finally_label:"finalize_read_events"
+      Fun.protect
         ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
         (fun () ->
           let* () = bind_text stmt 1 room_id in
@@ -202,12 +196,12 @@ let read_events_query ~base_dir ~room_id ~after_seq_opt =
                 (match parse_event_row ~seq ~room_id ~ts ~event_type_s ~actor_id ~payload_s with
                 | Ok ev -> loop (ev :: acc) skipped
                 | Error e ->
-                    Log.Trpg.info "skipping malformed event row: %s"
+                    Util.log_info "skipping malformed event row: %s"
                       e;
                     loop acc (skipped + 1))
             | Sqlite3.Rc.DONE ->
                 if skipped > 0 then
-                  Log.Trpg.info "skipped %d malformed event row(s) for room %s"
+                  Util.log_info "skipped %d malformed event row(s) for room %s"
                     skipped room_id;
                 Ok (List.rev acc)
             | rc ->
@@ -236,15 +230,13 @@ let write_snapshot ~base_dir ~room_id ~last_seq ~ts ~state =
            ON CONFLICT(room_id) DO UPDATE SET \
              last_seq=excluded.last_seq, ts=excluded.ts, state=excluded.state"
       in
-      Common.protect
-        ~module_name:"trpg_engine_store_sqlite"
-        ~finally_label:"finalize_write_snapshot"
+      Fun.protect
         ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
         (fun () ->
           let* () = bind_text stmt 1 room_id in
           let* () = bind_int stmt 2 last_seq in
           let* () = bind_text stmt 3 ts in
-          let state_s = Yojson.Safe.to_string (Trpg_engine_types.room_state_to_yojson state) in
+          let state_s = Yojson.Safe.to_string (Engine_types.room_state_to_yojson state) in
           let* () = bind_text stmt 4 state_s in
           match Sqlite3.step stmt with
           | Sqlite3.Rc.DONE -> Ok ()
@@ -265,9 +257,7 @@ let read_snapshot ~base_dir ~room_id =
            FROM trpg_snapshots \
            WHERE room_id = ?1"
       in
-      Common.protect
-        ~module_name:"trpg_engine_store_sqlite"
-        ~finally_label:"finalize_read_snapshot"
+      Fun.protect
         ~finally:(fun () -> ignore (Sqlite3.finalize stmt))
         (fun () ->
           let* () = bind_text stmt 1 room_id in
@@ -278,7 +268,7 @@ let read_snapshot ~base_dir ~room_id =
               let state_s = Sqlite3.column stmt 2 |> string_of_data |> Option.value ~default:"{}" in
               (try
                  let state_json = Yojson.Safe.from_string state_s in
-                 (match Trpg_engine_types.room_state_of_yojson state_json with
+                 (match Engine_types.room_state_of_yojson state_json with
                  | Ok state -> Ok (Some { last_seq; ts; state })
                  | Error e -> Error (Printf.sprintf "snapshot state parse failed: %s" e))
                with Yojson.Json_error e ->

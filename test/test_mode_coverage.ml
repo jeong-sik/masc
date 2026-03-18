@@ -100,7 +100,7 @@ let test_mode_roundtrip () =
    ============================================================ *)
 
 let test_all_categories_count () =
-  check int "21 categories" 21 (List.length Mode.all_categories)
+  check int "22 categories" 22 (List.length Mode.all_categories)
 
 let test_all_categories_unique () =
   let rec has_duplicates = function
@@ -130,7 +130,8 @@ let test_categories_standard () =
   check bool "has plan" true (List.mem Mode.Plan cats);
   check bool "has board" true (List.mem Mode.Board cats);
   check bool "has consensus" true (List.mem Mode.Consensus cats);
-  check int "count" 10 (List.length cats)
+  check bool "has voice" true (List.mem Mode.Voice cats);
+  check int "count" 11 (List.length cats)
 
 let test_categories_parallel () =
   let cats = Mode.categories_for_mode Mode.Parallel in
@@ -146,7 +147,8 @@ let test_categories_parallel () =
   check bool "has plan" true (List.mem Mode.Plan cats);
   check bool "has board" true (List.mem Mode.Board cats);
   check bool "has consensus" true (List.mem Mode.Consensus cats);
-  check int "count" 14 (List.length cats)
+  check bool "has voice" true (List.mem Mode.Voice cats);
+  check int "count" 15 (List.length cats)
 
 let test_categories_coding () =
   let cats = Mode.categories_for_mode Mode.Coding in
@@ -165,7 +167,7 @@ let test_categories_agent () =
 
 let test_categories_full () =
   let cats = Mode.categories_for_mode Mode.Full in
-  check int "all categories" 21 (List.length cats)
+  check int "all categories" 22 (List.length cats)
 
 let test_categories_solo () =
   let cats = Mode.categories_for_mode Mode.Solo in
@@ -285,10 +287,10 @@ let test_tool_category_code () =
 let test_tool_category_ecosystem_voice () =
   check bool "gardener_status health" true
     (Mode.tool_category "masc_gardener_status" = Mode.Health);
-  check bool "voice_speak" true (Mode.tool_category "masc_voice_speak" = Mode.Ecosystem);
-  check bool "voice_sessions" true (Mode.tool_category "masc_voice_sessions" = Mode.Ecosystem);
+  check bool "voice_speak" true (Mode.tool_category "masc_voice_speak" = Mode.Voice);
+  check bool "voice_sessions" true (Mode.tool_category "masc_voice_sessions" = Mode.Voice);
   check bool "voice_conference_start" true
-    (Mode.tool_category "masc_voice_conference_start" = Mode.Ecosystem)
+    (Mode.tool_category "masc_voice_conference_start" = Mode.Voice)
 
 let test_tool_category_namespace_mapping () =
   (* lodge_ prefix removed — Lodge heartbeat deprecated (#1596) *)

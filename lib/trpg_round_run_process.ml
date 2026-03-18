@@ -166,7 +166,7 @@ let process_one rctx ~state_json ~role ~actor_id ~keeper_name =
         in
         let* event =
           append_event ~store ~room_id
-            ~event_type:Trpg_engine_event.Narration_posted
+            ~event_type:Trpg.Engine_event.Narration_posted
             ~actor_id ~payload ()
         in
         Ok [ event ]
@@ -204,9 +204,9 @@ let process_one rctx ~state_json ~role ~actor_id ~keeper_name =
   (* Phase 1: BDI state update after successful keeper reply.
      Observation-only — errors are logged but never block the main path. *)
   let update_bdi_after_reply ~reply_text ~sa =
-    let room_dir = store.Trpg_store.room_dir ~room_id in
-    let bdi0 = Trpg_bdi.load ~room_dir ~actor_id in
-    let bdi1 = Trpg_bdi.decay_beliefs ~current_turn:turn_before bdi0 in
+    let room_dir = store.Trpg.Store.room_dir ~room_id in
+    let bdi0 = Trpg.Bdi.load ~room_dir ~actor_id in
+    let bdi1 = Trpg.Bdi.decay_beliefs ~current_turn:turn_before bdi0 in
     (* Update belief: the keeper's reply reflects what the character now knows *)
     let belief_subject =
       Printf.sprintf "turn_%d_action" turn_before
@@ -217,7 +217,7 @@ let process_one rctx ~state_json ~role ~actor_id ~keeper_name =
       else String.sub reply_text 0 max_len ^ "..."
     in
     let bdi2 =
-      Trpg_bdi.update_belief
+      Trpg.Bdi.update_belief
         ~subject:belief_subject
         ~content:belief_content
         ~confidence:0.9
@@ -228,30 +228,30 @@ let process_one rctx ~state_json ~role ~actor_id ~keeper_name =
     let bdi3 =
       match sa.sa_type with
       | Attack | Defend ->
-          Trpg_bdi.update_desire
+          Trpg.Bdi.update_desire
             ~goal:"survive combat" ~priority:0.9 ~category:"survival" bdi2
       | Heal ->
-          Trpg_bdi.update_desire
+          Trpg.Bdi.update_desire
             ~goal:"recover health" ~priority:0.8 ~category:"survival" bdi2
       | Social ->
-          Trpg_bdi.update_desire
+          Trpg.Bdi.update_desire
             ~goal:"build relationships" ~priority:0.6 ~category:"social" bdi2
       | Investigate | Explore ->
-          Trpg_bdi.update_desire
+          Trpg.Bdi.update_desire
             ~goal:"discover information" ~priority:0.7 ~category:"quest" bdi2
       | QuestUpdate ->
-          Trpg_bdi.update_desire
+          Trpg.Bdi.update_desire
             ~goal:"advance quest" ~priority:0.8 ~category:"quest" bdi2
       | Magic | UseItem | SetFlag | SceneTransition -> bdi2
     in
     (* Save BDI state — ignore errors (observation-only) *)
-    let _save_result = Trpg_bdi.save ~room_dir bdi3 in
+    let _save_result = Trpg.Bdi.save ~room_dir bdi3 in
     (* Emit Bdi_updated event — ignore errors *)
     let _event_result =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Bdi_updated
+        ~event_type:Trpg.Engine_event.Bdi_updated
         ~actor_id
-        ~payload:(Trpg_bdi.to_yojson bdi3)
+        ~payload:(Trpg.Bdi.to_yojson bdi3)
         ()
     in
     ()
@@ -308,7 +308,7 @@ let process_one rctx ~state_json ~role ~actor_id ~keeper_name =
       in
       let _event_result =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Evaluation_scored
+          ~event_type:Trpg.Engine_event.Evaluation_scored
           ~actor_id
           ~payload:(Trpg_harness.result_to_yojson result)
           ()

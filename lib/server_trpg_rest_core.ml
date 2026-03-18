@@ -123,19 +123,19 @@ let trpg_normalize_events_json
   | _ -> json
 
 let trpg_rule_by_id (rule_id : string)
-  : ((module Trpg_rule.S), trpg_api_error_kind * string) result =
+  : ((module Trpg.Rule.S), trpg_api_error_kind * string) result =
   let normalized = String.trim rule_id |> String.lowercase_ascii in
   match normalized with
-  | "" | "dnd5e-lite" -> Ok (module Trpg_rule_dnd5e_lite : Trpg_rule.S)
+  | "" | "dnd5e-lite" -> Ok (module Trpg.Rule_dnd5e_lite : Trpg.Rule.S)
   | other -> Error (`Bad_request, Printf.sprintf "unsupported rule_module: %s" other)
 
-let trpg_extract_config_from_events (events : Trpg_engine_event.t list)
+let trpg_extract_config_from_events (events : Trpg.Engine_event.t list)
   : Yojson.Safe.t =
   let rec find_room_created = function
     | [] -> `Assoc []
     | ev :: tl ->
-        (match ev.Trpg_engine_event.event_type with
-        | Trpg_engine_event.Room_created ->
+        (match ev.Trpg.Engine_event.event_type with
+        | Trpg.Engine_event.Room_created ->
             (match ev.payload with
             | `Assoc fields -> (
                 match List.assoc_opt "config" fields with
@@ -212,13 +212,13 @@ let trpg_parse_event_type_filter event_type_filter =
   match event_type_filter with
   | None -> Ok None
   | Some raw -> (
-      match Trpg_engine_event.event_type_of_string raw with
+      match Trpg.Engine_event.event_type_of_string raw with
       | Ok et -> Ok (Some et)
       | Error _ ->
           Error (`Bad_request, Printf.sprintf "invalid event_type filter: %s" raw))
 
 let trpg_read_events_list ~base_dir ~room_id ~after_seq ~event_type_filter
-  : (Trpg_engine_event.t list, trpg_api_error_kind * string) result =
+  : (Trpg.Engine_event.t list, trpg_api_error_kind * string) result =
   try
     let room_id = String.trim room_id in
     if room_id = "" then
@@ -229,9 +229,9 @@ let trpg_read_events_list ~base_dir ~room_id ~after_seq ~event_type_filter
       | Ok event_type_opt ->
           let read_result =
             if after_seq > 0 then
-              Trpg_engine_store_sqlite.read_events_after ~base_dir ~room_id ~after_seq
+              Trpg.Engine_store_sqlite.read_events_after ~base_dir ~room_id ~after_seq
             else
-              Trpg_engine_store_sqlite.read_events ~base_dir ~room_id
+              Trpg.Engine_store_sqlite.read_events ~base_dir ~room_id
           in
           (match read_result with
           | Error e ->
@@ -244,7 +244,7 @@ let trpg_read_events_list ~base_dir ~room_id ~after_seq ~event_type_filter
                 | None -> events
                 | Some et ->
                     List.filter
-                      (fun (ev : Trpg_engine_event.t) -> ev.event_type = et)
+                      (fun (ev : Trpg.Engine_event.t) -> ev.event_type = et)
                       events
               in
               Ok events)
@@ -266,16 +266,16 @@ let trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter : trp
             ("room_id", `String room_id);
             ("after_seq", `Int after_seq);
             ("count", `Int (List.length events));
-            ("events", `List (List.map Trpg_engine_event.to_yojson events));
+            ("events", `List (List.map Trpg.Engine_event.to_yojson events));
           ])
 
 let trpg_next_seq ~base_dir ~room_id =
-  match Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+  match Trpg.Engine_store_sqlite.read_events ~base_dir ~room_id with
   | Ok events ->
       Ok
         (1
         + List.fold_left
-            (fun acc (ev : Trpg_engine_event.t) -> max acc ev.seq)
+            (fun acc (ev : Trpg.Engine_event.t) -> max acc ev.seq)
             0 events)
   | Error e -> Error (`Internal_server_error, e)
 
@@ -295,10 +295,10 @@ let trpg_append_event
     | Ok seq ->
         let ts = Option.value ~default:(Types.now_iso ()) ts in
         let event =
-          Trpg_engine_event.make
+          Trpg.Engine_event.make
             ~seq ~room_id ~ts ~event_type ?actor_id ~payload ()
         in
-        (match Trpg_engine_store_sqlite.append_event ~base_dir ~event with
+        (match Trpg.Engine_store_sqlite.append_event ~base_dir ~event with
         | Ok () -> Ok event
         | Error e -> Error (`Internal_server_error, e))
 
@@ -311,7 +311,7 @@ let trpg_append_event_json ~base_dir ~body_str : trpg_api_result =
     match trpg_parse_required_string "event_type" json with
     | Error _ as e -> e
     | Ok event_type_str -> (
-      match Trpg_engine_event.event_type_of_string event_type_str with
+      match Trpg.Engine_event.event_type_of_string event_type_str with
       | Error e -> Error (`Bad_request, e)
       | Ok event_type -> (
           match trpg_parse_optional_string "actor_id" json with
@@ -345,7 +345,7 @@ let trpg_append_event_json ~base_dir ~body_str : trpg_api_result =
                             (`Assoc
                               [
                                 ("ok", `Bool true);
-                                ("event", Trpg_engine_event.to_yojson event);
+                                ("event", Trpg.Engine_event.to_yojson event);
                               ]))))))
       )
   with Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
@@ -360,7 +360,7 @@ let trpg_derive_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
       | Error _ as e -> e
       | Ok rule ->
           let events, read_failed =
-            match Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+            match Trpg.Engine_store_sqlite.read_events ~base_dir ~room_id with
             | Ok events -> (events, false)
             | Error e ->
                 Log.Trpg.error "derive_state read_events failed room=%s: %s; deriving from empty events"
@@ -369,9 +369,9 @@ let trpg_derive_state_json ~base_dir ~room_id ~rule_module : trpg_api_result =
           in
           let config = trpg_extract_config_from_events events in
           let state =
-            Trpg_engine_replay.derive_state ~rule ~config ~events
+            Trpg.Engine_replay.derive_state ~rule ~config ~events
           in
-          let module R = (val rule : Trpg_rule.S) in
+          let module R = (val rule : Trpg.Rule.S) in
           let warning_fields =
             if read_failed then
               [

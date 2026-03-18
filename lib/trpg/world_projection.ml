@@ -17,7 +17,7 @@ type world_state = {
   round : int;
   phase : string;
   agents : agent_state list;
-  recent_events : Trpg_engine_event.t list;
+  recent_events : Engine_event.t list;
   source_counts : source_counts;
 }
 
@@ -26,17 +26,17 @@ let string_of_agent_status = function
   | `Idle -> "idle"
   | `Unknown -> "unknown"
 
-let event_sort (a : Trpg_engine_event.t) (b : Trpg_engine_event.t) =
+let event_sort (a : Engine_event.t) (b : Engine_event.t) =
   let by_seq = Int.compare a.seq b.seq in
   if by_seq <> 0 then by_seq else String.compare a.ts b.ts
 
-let dedupe_events (events : Trpg_engine_event.t list) : Trpg_engine_event.t list =
+let dedupe_events (events : Engine_event.t list) : Engine_event.t list =
   let seen = Hashtbl.create 64 in
-  let key (ev : Trpg_engine_event.t) =
+  let key (ev : Engine_event.t) =
     Printf.sprintf
       "%d|%s|%s|%s|%s"
       ev.seq
-      (Trpg_engine_event.string_of_event_type ev.event_type)
+      (Engine_event.string_of_event_type ev.event_type)
       (Option.value ~default:"" ev.actor_id)
       ev.ts
       (Yojson.Safe.to_string ev.payload)
@@ -51,16 +51,16 @@ let dedupe_events (events : Trpg_engine_event.t list) : Trpg_engine_event.t list
     [] events
   |> List.rev
 
-let phase_from_payload (ev : Trpg_engine_event.t) : string option =
+let phase_from_payload (ev : Engine_event.t) : string option =
   match ev.event_type, ev.payload with
-  | Trpg_engine_event.Phase_changed, `Assoc fields -> (
+  | Engine_event.Phase_changed, `Assoc fields -> (
       match List.assoc_opt "phase" fields with
       | Some (`String p) when String.trim p <> "" -> Some p
       | _ -> None)
   | _ -> None
 
-let action_label_of_event (ev : Trpg_engine_event.t) : string =
-  Trpg_engine_event.string_of_event_type ev.event_type
+let action_label_of_event (ev : Engine_event.t) : string =
+  Engine_event.string_of_event_type ev.event_type
 
 let upsert_agent
     (agents : (string, agent_state) Hashtbl.t)
@@ -76,12 +76,12 @@ let upsert_agent
 
 let build ~base_dir ~room_id =
   let jsonl_events =
-    match Trpg_engine_store.read_events ~base_dir ~room_id with
+    match Engine_store.read_events ~base_dir ~room_id with
     | Ok events -> events
     | Error _ -> []
   in
   let sqlite_events =
-    match Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+    match Engine_store_sqlite.read_events ~base_dir ~room_id with
     | Ok events -> events
     | Error _ -> []
   in
@@ -92,8 +92,8 @@ let build ~base_dir ~room_id =
   let round =
     combined
     |> List.fold_left
-         (fun acc (ev : Trpg_engine_event.t) ->
-           if ev.event_type = Trpg_engine_event.Turn_started then acc + 1 else acc)
+         (fun acc (ev : Engine_event.t) ->
+           if ev.event_type = Engine_event.Turn_started then acc + 1 else acc)
          0
     |> max 1
   in
@@ -106,7 +106,7 @@ let build ~base_dir ~room_id =
   in
   let agent_table : (string, agent_state) Hashtbl.t = Hashtbl.create 16 in
   List.iter
-    (fun (ev : Trpg_engine_event.t) ->
+    (fun (ev : Engine_event.t) ->
       match ev.actor_id with
       | Some actor when String.trim actor <> "" ->
           upsert_agent agent_table actor (Some (action_label_of_event ev))

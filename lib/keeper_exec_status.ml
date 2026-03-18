@@ -519,8 +519,8 @@ let string_contains_ci haystack needle =
 
 let quiet_hours_active () =
   let current_hour =
-    let tm = Unix.localtime (Time_compat.now ()) in
-    (* KST = UTC+9 *)
+    let tm = Unix.gmtime (Time_compat.now ()) in
+    (* KST = UTC+9; must use gmtime, not localtime *)
     (tm.Unix.tm_hour + 9) mod 24
   in
   let quiet_start = Env_config.LodgeV2.quiet_start in

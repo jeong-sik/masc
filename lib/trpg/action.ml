@@ -1,7 +1,7 @@
-(** Trpg_action — structured action parsing/validation, combat
+(** Action — structured action parsing/validation, combat
     semantics, NPC bestiary, and round-level combat event helpers. *)
 
-include Trpg_types
+include Types
 open Yojson.Safe.Util
 
 let action_type_of_string = function

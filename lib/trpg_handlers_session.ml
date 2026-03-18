@@ -127,7 +127,7 @@ let handle_mid_join_request ctx args : result =
     in
     let* requested_event =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Mid_join_requested ~actor_id
+        ~event_type:Trpg.Engine_event.Mid_join_requested ~actor_id
         ~payload:requested_payload ()
     in
     let reject ~reason_code ~reason ~importance_score =
@@ -144,7 +144,7 @@ let handle_mid_join_request ctx args : result =
       in
       let* rejected_event =
         append_event ~store ~room_id
-          ~event_type:Trpg_engine_event.Mid_join_rejected ~actor_id
+          ~event_type:Trpg.Engine_event.Mid_join_rejected ~actor_id
           ~payload:rejected_payload ()
       in
       let* memory_event =
@@ -180,9 +180,9 @@ let handle_mid_join_request ctx args : result =
             ( "events",
               `List
                 [
-                  Trpg_engine_event.to_yojson requested_event;
-                  Trpg_engine_event.to_yojson rejected_event;
-                  Trpg_engine_event.to_yojson memory_event;
+                  Trpg.Engine_event.to_yojson requested_event;
+                  Trpg.Engine_event.to_yojson rejected_event;
+                  Trpg.Engine_event.to_yojson memory_event;
                 ] );
             ("state", state_of_derived next_derived);
           ])
@@ -217,7 +217,7 @@ let handle_mid_join_request ctx args : result =
           in
           let* spawn_event =
             append_event ~store ~room_id
-              ~event_type:Trpg_engine_event.Actor_spawned ~actor_id
+              ~event_type:Trpg.Engine_event.Actor_spawned ~actor_id
               ~payload:spawn_payload ()
           in
           let* d = derive_state ~store ~room_id ~rule_module in
@@ -258,7 +258,7 @@ let handle_mid_join_request ctx args : result =
                 in
                 let* claim_event =
                   append_event ~store ~room_id
-                    ~event_type:Trpg_engine_event.Actor_claimed ~actor_id
+                    ~event_type:Trpg.Engine_event.Actor_claimed ~actor_id
                     ~payload:claim_payload ()
                 in
                 let* d = derive_state ~store ~room_id ~rule_module in
@@ -304,7 +304,7 @@ let handle_mid_join_request ctx args : result =
               in
               let* penalty_event =
                 append_event ~store ~room_id
-                  ~event_type:Trpg_engine_event.Actor_updated ~actor_id
+                  ~event_type:Trpg.Engine_event.Actor_updated ~actor_id
                   ~payload ()
               in
               let* d = derive_state ~store ~room_id ~rule_module in
@@ -324,7 +324,7 @@ let handle_mid_join_request ctx args : result =
           in
           let* granted_event =
             append_event ~store ~room_id
-              ~event_type:Trpg_engine_event.Mid_join_granted ~actor_id
+              ~event_type:Trpg.Engine_event.Mid_join_granted ~actor_id
               ~payload:granted_payload ()
           in
           let* memory_event =
@@ -352,7 +352,7 @@ let handle_mid_join_request ctx args : result =
               Some memory_event;
             ]
             |> List.filter_map (fun x -> x)
-            |> List.map Trpg_engine_event.to_yojson
+            |> List.map Trpg.Engine_event.to_yojson
           in
           Ok
             (`Assoc
@@ -416,7 +416,7 @@ let handle_intervention_submit ctx args : result =
     in
     let* event =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Intervention_submitted
+        ~event_type:Trpg.Engine_event.Intervention_submitted
         ~actor_id:ctx.agent_name ~payload ()
     in
     Ok
@@ -426,7 +426,7 @@ let handle_intervention_submit ctx args : result =
           ("room_id", `String room_id);
           ("intervention_id", `String intervention_id);
           ("status", `String "pending");
-          ("event", Trpg_engine_event.to_yojson event);
+          ("event", Trpg.Engine_event.to_yojson event);
         ])
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
@@ -550,16 +550,16 @@ let status_non_ok_detail_list_for_role ~role ~max_items
   in
   loop [] max_items statuses
 
-let count_event_type_in_list event_type (events : Trpg_engine_event.t list) =
+let count_event_type_in_list event_type (events : Trpg.Engine_event.t list) =
   List.fold_left
-    (fun acc (event : Trpg_engine_event.t) ->
+    (fun acc (event : Trpg.Engine_event.t) ->
       if event.event_type = event_type then acc + 1 else acc)
     0 events
 
-let count_npc_attacks_in_list (events : Trpg_engine_event.t list) =
+let count_npc_attacks_in_list (events : Trpg.Engine_event.t list) =
   List.fold_left
-    (fun acc (event : Trpg_engine_event.t) ->
-      if event.event_type <> Trpg_engine_event.Combat_attack then acc
+    (fun acc (event : Trpg.Engine_event.t) ->
+      if event.event_type <> Trpg.Engine_event.Combat_attack then acc
       else
         let actor_id =
           json_member_nonempty_string event.payload "actor_id"
@@ -573,9 +573,9 @@ let count_npc_attacks_in_list (events : Trpg_engine_event.t list) =
         if String.starts_with ~prefix:"npc-" actor_id then acc + 1 else acc)
     0 events
 
-let structured_memory_decision_of_event (event : Trpg_engine_event.t) :
+let structured_memory_decision_of_event (event : Trpg.Engine_event.t) :
     Yojson.Safe.t option =
-  if event.event_type <> Trpg_engine_event.Memory_signal then None
+  if event.event_type <> Trpg.Engine_event.Memory_signal then None
   else
     match event.payload |> member "entity_refs" with
     | `Assoc _ as refs -> (
@@ -604,7 +604,7 @@ let structured_memory_decision_of_event (event : Trpg_engine_event.t) :
         | _ -> None)
     | _ -> None
 
-let memory_status_fields_of_action_events (events : Trpg_engine_event.t list) :
+let memory_status_fields_of_action_events (events : Trpg.Engine_event.t list) :
     (string * Yojson.Safe.t) list =
   let decision =
     events |> List.find_map structured_memory_decision_of_event
@@ -625,11 +625,11 @@ let memory_status_fields_of_action_events (events : Trpg_engine_event.t list) :
         ("memory_guardrail_applied", memory_json |> member "guardrail_applied");
       ]
 
-let memory_observability_from_events (events : Trpg_engine_event.t list) :
+let memory_observability_from_events (events : Trpg.Engine_event.t list) :
     int * int =
   List.fold_left
-    (fun (total, escalated) (event : Trpg_engine_event.t) ->
-      if event.event_type <> Trpg_engine_event.Memory_signal then
+    (fun (total, escalated) (event : Trpg.Engine_event.t) ->
+      if event.event_type <> Trpg.Engine_event.Memory_signal then
         (total, escalated)
       else
         let escalated' =
@@ -640,15 +640,15 @@ let memory_observability_from_events (events : Trpg_engine_event.t list) :
         (total + 1, escalated'))
     (0, 0) events
 
-let build_round_roll_audit (events : Trpg_engine_event.t list) : Yojson.Safe.t list =
+let build_round_roll_audit (events : Trpg.Engine_event.t list) : Yojson.Safe.t list =
   let to_json_opt_string = function Some value -> `String value | None -> `Null in
   let to_json_opt_int = function Some value -> `Int value | None -> `Null in
   let to_json_opt_bool = function Some value -> `Bool value | None -> `Null in
   let rec collect acc = function
     | [] -> List.rev acc
-    | (event : Trpg_engine_event.t) :: tl -> (
+    | (event : Trpg.Engine_event.t) :: tl -> (
         match event.event_type with
-        | Trpg_engine_event.Dice_rolled ->
+        | Trpg.Engine_event.Dice_rolled ->
             let payload = event.payload in
             let actor_id =
               json_member_nonempty_string payload "actor_id"
@@ -669,7 +669,7 @@ let build_round_roll_audit (events : Trpg_engine_event.t list) : Yojson.Safe.t l
                 ]
             in
             collect (row :: acc) tl
-        | Trpg_engine_event.Combat_attack ->
+        | Trpg.Engine_event.Combat_attack ->
             let payload = event.payload in
             let actor_id =
               json_member_nonempty_string payload "actor_id"

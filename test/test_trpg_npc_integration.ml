@@ -48,7 +48,7 @@ let make_npc_actor ?(hp = 15) ?(alive = true) name =
 
 let test_npc_spawns_when_no_npc_alive () =
   let base_dir = make_base_dir () in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let room_id = "room-spawn-1" in
   let state =
     make_state
@@ -59,11 +59,11 @@ let test_npc_spawns_when_no_npc_alive () =
   in
   match get_ok result with
   | None -> Alcotest.fail "expected an NPC spawn event, got None"
-  | Some (event : Trpg_engine_event.t) ->
+  | Some (event : Trpg.Engine_event.t) ->
       Alcotest.(check string)
         "event_type is actor.spawned"
         "actor.spawned"
-        (Trpg_engine_event.string_of_event_type event.event_type);
+        (Trpg.Engine_event.string_of_event_type event.event_type);
       (* Verify spawned actor has positive HP *)
       let open Yojson.Safe.Util in
       let actor = event.payload |> member "actor" in
@@ -76,7 +76,7 @@ let test_npc_spawns_when_no_npc_alive () =
 
 let test_npc_not_spawned_when_npc_alive () =
   let base_dir = make_base_dir () in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let room_id = "room-spawn-2" in
   let tmpl = Tool_trpg.npc_bestiary.(0) in
   let state =
@@ -95,7 +95,7 @@ let test_npc_not_spawned_when_npc_alive () =
 
 let test_spawned_npc_has_scaled_hp () =
   let base_dir = make_base_dir () in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let room_id = "room-spawn-3" in
   let turn = 10 in
   let state =
@@ -107,7 +107,7 @@ let test_spawned_npc_has_scaled_hp () =
   in
   match get_ok result with
   | None -> Alcotest.fail "expected spawn at turn 10"
-  | Some (event : Trpg_engine_event.t) ->
+  | Some (event : Trpg.Engine_event.t) ->
       let open Yojson.Safe.Util in
       let actor = event.payload |> member "actor" in
       let hp = actor |> member "hp" |> to_int in
@@ -129,7 +129,7 @@ let test_spawned_npc_has_scaled_hp () =
 
 let test_counterattack_produces_attack_and_hp_events () =
   let base_dir = make_base_dir () in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let room_id = "room-counter-1" in
   let tmpl = Tool_trpg.npc_bestiary.(0) in
   (* Use odd turn to avoid skill effects for a skirmisher (NoSkill on odd turns) *)
@@ -151,12 +151,12 @@ let test_counterattack_produces_attack_and_hp_events () =
   (* Find the combat.attack and hp.changed events *)
   let has_attack =
     List.exists
-      (fun (e : Trpg_engine_event.t) -> e.event_type = Trpg_engine_event.Combat_attack)
+      (fun (e : Trpg.Engine_event.t) -> e.event_type = Trpg.Engine_event.Combat_attack)
       events
   in
   let has_hp_changed =
     List.exists
-      (fun (e : Trpg_engine_event.t) -> e.event_type = Trpg_engine_event.Hp_changed)
+      (fun (e : Trpg.Engine_event.t) -> e.event_type = Trpg.Engine_event.Hp_changed)
       events
   in
   Alcotest.(check bool) "has combat.attack event" true has_attack;
@@ -164,7 +164,7 @@ let test_counterattack_produces_attack_and_hp_events () =
 
 let test_counterattack_damage_uses_template_range () =
   let base_dir = make_base_dir () in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let room_id = "room-counter-2" in
   let tmpl = Tool_trpg.npc_bestiary.(0) in
   let state =
@@ -187,8 +187,8 @@ let test_counterattack_damage_uses_template_range () =
     (* Find the combat.attack event *)
     let attack_opt =
       List.find_opt
-        (fun (e : Trpg_engine_event.t) ->
-          e.event_type = Trpg_engine_event.Combat_attack)
+        (fun (e : Trpg.Engine_event.t) ->
+          e.event_type = Trpg.Engine_event.Combat_attack)
         events
     in
     match attack_opt with
@@ -221,7 +221,7 @@ let test_counterattack_damage_uses_template_range () =
 
 let test_counterattack_narration_from_template () =
   let base_dir = make_base_dir () in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let room_id = "room-counter-3" in
   let tmpl = Tool_trpg.npc_bestiary.(0) in
   let state =
@@ -239,7 +239,7 @@ let test_counterattack_narration_from_template () =
   let events = get_ok result in
   let attack_opt =
     List.find_opt
-      (fun (e : Trpg_engine_event.t) -> e.event_type = Trpg_engine_event.Combat_attack)
+      (fun (e : Trpg.Engine_event.t) -> e.event_type = Trpg.Engine_event.Combat_attack)
       events
   in
   match attack_opt with
@@ -270,7 +270,7 @@ let test_counterattack_narration_from_template () =
 
 let test_full_round_spawn_and_counterattack () =
   let base_dir = make_base_dir () in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let room_id = "room-full-1" in
   let turn = 3 in
 
@@ -295,7 +295,7 @@ let test_full_round_spawn_and_counterattack () =
   Alcotest.(check string)
     "spawn event type"
     "actor.spawned"
-    (Trpg_engine_event.string_of_event_type spawn_event.event_type);
+    (Trpg.Engine_event.string_of_event_type spawn_event.event_type);
 
   (* Step 3: Build updated state with spawned NPC *)
   let open Yojson.Safe.Util in
@@ -325,12 +325,12 @@ let test_full_round_spawn_and_counterattack () =
   (* Step 5: Verify event types and consistency *)
   let attack_event =
     List.find
-      (fun (e : Trpg_engine_event.t) -> e.event_type = Trpg_engine_event.Combat_attack)
+      (fun (e : Trpg.Engine_event.t) -> e.event_type = Trpg.Engine_event.Combat_attack)
       counter_events
   in
   let hp_events =
     List.filter
-      (fun (e : Trpg_engine_event.t) -> e.event_type = Trpg_engine_event.Hp_changed)
+      (fun (e : Trpg.Engine_event.t) -> e.event_type = Trpg.Engine_event.Hp_changed)
       counter_events
   in
   Alcotest.(check bool) "at least one hp.changed event" true
@@ -343,7 +343,7 @@ let test_full_round_spawn_and_counterattack () =
   (* Find the hp.changed event targeting a player (reason = "combat.attack") *)
   let player_hp_event =
     List.find
-      (fun (e : Trpg_engine_event.t) ->
+      (fun (e : Trpg.Engine_event.t) ->
         let reason = e.payload |> member "reason" |> to_string_option in
         reason = Some "combat.attack")
       hp_events
@@ -364,7 +364,7 @@ let test_full_round_spawn_and_counterattack () =
 
   (* Step 6: Verify all events are in the store *)
   let stored_events =
-    get_ok (Trpg_engine_store_sqlite.read_events ~base_dir ~room_id)
+    get_ok (Trpg.Engine_store_sqlite.read_events ~base_dir ~room_id)
   in
   (* At minimum: spawn (1) + attack (1) + hp_changed (1) = 3.
      Skill effects may add more events. *)
@@ -372,7 +372,7 @@ let test_full_round_spawn_and_counterattack () =
     (List.length stored_events >= 3);
 
   (* Verify seq ordering *)
-  let seqs = List.map (fun (e : Trpg_engine_event.t) -> e.seq) stored_events in
+  let seqs = List.map (fun (e : Trpg.Engine_event.t) -> e.seq) stored_events in
   let sorted = List.sort compare seqs in
   Alcotest.(check (list int)) "seqs are ascending" sorted seqs;
 

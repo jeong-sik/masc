@@ -49,6 +49,15 @@ let publish_event name payload =
 let enabled = Env_config.Guardian.enabled
 let masc_enabled = enabled
 
+(* Warn if legacy Lodge mode is configured *)
+let () =
+  match String.lowercase_ascii Env_config.Guardian.mode with
+  | "lodge" | "both" | "all" ->
+      Log.Guardian.warn
+        "MASC_GUARDIAN_MODE=%s is deprecated; Lodge heartbeat removed (#1596). Running MASC loops only."
+        Env_config.Guardian.mode
+  | _ -> ()
+
 let zombie_interval_s = Env_config.Guardian.zombie_interval_seconds
 let gc_interval_s = Env_config.Guardian.gc_interval_seconds
 let gc_days = Env_config.Guardian.gc_days
@@ -141,14 +150,17 @@ let make_gc_consumer config : (module Pulse.Consumer) =
     let on_beat _beat =
       try
         let result = Room.gc config ~days:gc_days () in
+        (* Periodic cache eviction — piggyback on GC cycle *)
+        let cache_evicted = Cache_eio.evict_expired config in
         last_gc_result := Some result;
         set_last last_gc;
-        log_debug (sprintf "gc: %s" result);
+        log_debug (sprintf "gc: %s (cache evicted: %d)" result cache_evicted);
         publish_event "masc:guardian:gc"
           (`Assoc [
             ("agent_name", `String "guardian");
             ("result", `String result);
             ("gc_days", `Int gc_days);
+            ("cache_evicted", `Int cache_evicted);
             ("timestamp", `Float (Time_compat.now ()));
           ]);
         Ok ()

@@ -4,11 +4,13 @@
     Scene, quest, and world event handlers plus the dispatch table
     are defined here.
 
-    Include chain: Trpg_types -> Trpg_action -> Trpg_round
+    Include chain: Trpg.Types -> Trpg.Action -> Trpg_round
     -> Trpg_handlers -> Trpg_round_run_handler -> Tool_trpg. *)
 
 include Trpg_round_run_handler
 open Yojson.Safe.Util
+
+let schemas = Trpg_schema.schemas
 
 let handle_scene_transition ctx args : result =
   let ( let* ) = Result.bind in
@@ -32,13 +34,13 @@ let handle_scene_transition ctx args : result =
     in
     let* event =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Scene_transition ~payload ()
+        ~event_type:Trpg.Engine_event.Scene_transition ~payload ()
     in
     Ok
       (`Assoc
         [
           ("ok", `Bool true);
-          ("event", Trpg_engine_event.to_yojson event);
+          ("event", Trpg.Engine_event.to_yojson event);
         ])
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
@@ -72,13 +74,13 @@ let handle_quest_update ctx args : result =
     in
     let* event =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.Quest_update ~payload ()
+        ~event_type:Trpg.Engine_event.Quest_update ~payload ()
     in
     Ok
       (`Assoc
         [
           ("ok", `Bool true);
-          ("event", Trpg_engine_event.to_yojson event);
+          ("event", Trpg.Engine_event.to_yojson event);
         ])
   in
   match result_json with Ok j -> ok_json j | Error e -> err e
@@ -113,13 +115,13 @@ let handle_world_event ctx args : result =
     in
     let* event =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.World_event ~payload ()
+        ~event_type:Trpg.Engine_event.World_event ~payload ()
     in
     Ok
       (`Assoc
         [
           ("ok", `Bool true);
-          ("event", Trpg_engine_event.to_yojson event);
+          ("event", Trpg.Engine_event.to_yojson event);
         ])
   in
   match result_json with Ok j -> ok_json j | Error e -> err e

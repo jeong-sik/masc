@@ -4,7 +4,7 @@
     action validation, NPC responses, outcome detection, and state updates.
 
     All types, utilities, and prior handlers are provided via
-    the include chain: Trpg_types -> Trpg_action -> Trpg_round
+    the include chain: Trpg.Types -> Trpg.Action -> Trpg_round
     -> Trpg_handlers -> Trpg_round_run_handler. *)
 
 include Trpg_handlers
@@ -80,8 +80,8 @@ let handle_round_run (ctx : context) args : result =
       in
       let* () = validate_rule_module rule_module in
       let* phase =
-        match Trpg_engine_types.phase_of_string phase_input with
-        | Ok phase -> Ok (Trpg_engine_types.string_of_phase phase)
+        match Trpg.Engine_types.phase_of_string phase_input with
+        | Ok phase -> Ok (Trpg.Engine_types.string_of_phase phase)
         | Error e -> Error e
       in
       let* () = validate_unique_keeper_assignments ~dm_keeper ~player_keepers in
@@ -107,10 +107,10 @@ let handle_round_run (ctx : context) args : result =
       in
       let state = state_of_derived derived in
       let room_already_ended =
-        has_event_type session_events_before Trpg_engine_event.Room_ended
+        has_event_type session_events_before Trpg.Engine_event.Room_ended
       in
       let outcome_already_emitted =
-        has_event_type session_events_before Trpg_engine_event.Session_outcome
+        has_event_type session_events_before Trpg.Engine_event.Session_outcome
       in
       let end_rules =
         resolve_end_rules_for_room ~store ~events:existing_events_before
@@ -332,7 +332,7 @@ let handle_round_run (ctx : context) args : result =
         append_event
           ~store
           ~room_id
-          ~event_type:Trpg_engine_event.Join_window_closed
+          ~event_type:Trpg.Engine_event.Join_window_closed
           ~payload:
             (`Assoc
               [
@@ -347,7 +347,7 @@ let handle_round_run (ctx : context) args : result =
         append_event
           ~store
           ~room_id
-          ~event_type:Trpg_engine_event.Phase_changed
+          ~event_type:Trpg.Engine_event.Phase_changed
           ~payload:(`Assoc [ ("phase", `String phase) ])
           ()
       in
@@ -537,7 +537,7 @@ let handle_round_run (ctx : context) args : result =
             append_event
               ~store
               ~room_id
-              ~event_type:Trpg_engine_event.Turn_started
+              ~event_type:Trpg.Engine_event.Turn_started
               ~payload:(`Assoc [ ("turn", `Int next_turn) ])
               ()
           in
@@ -606,7 +606,7 @@ let handle_round_run (ctx : context) args : result =
                   in
                   let* pressure_event =
                     append_event ~store ~room_id
-                      ~event_type:Trpg_engine_event.World_event
+                      ~event_type:Trpg.Engine_event.World_event
                       ~payload:pressure_payload ()
                   in
                   stagnation_pressure_emitted := true;
@@ -668,14 +668,14 @@ let handle_round_run (ctx : context) args : result =
               else
                 let* room_end_event =
                   append_event ~store ~room_id
-                    ~event_type:Trpg_engine_event.Room_ended
+                    ~event_type:Trpg.Engine_event.Room_ended
                     ~payload:room_end_payload ()
                 in
                 Ok (Some room_end_event)
             in
             let* outcome_event =
               append_event ~store ~room_id
-                ~event_type:Trpg_engine_event.Session_outcome
+                ~event_type:Trpg.Engine_event.Session_outcome
                 ~payload:outcome_payload ()
             in
             (match room_end_event_opt with
@@ -720,7 +720,7 @@ let handle_round_run (ctx : context) args : result =
             append_event
               ~store
               ~room_id
-              ~event_type:Trpg_engine_event.Join_window_opened
+              ~event_type:Trpg.Engine_event.Join_window_opened
               ~payload:
                 (`Assoc
                   [
@@ -776,7 +776,7 @@ let handle_round_run (ctx : context) args : result =
         memory_observability_from_events !appended_events
       in
       let npc_spawned =
-        count_event_type_in_list Trpg_engine_event.Actor_spawned !appended_events
+        count_event_type_in_list Trpg.Engine_event.Actor_spawned !appended_events
       in
       let npc_attacks = count_npc_attacks_in_list !appended_events in
       let dm_style =
@@ -806,7 +806,7 @@ let handle_round_run (ctx : context) args : result =
       in
       response_outcome_source := resolved_outcome_source;
       response_stagnation_level := resolved_stagnation_level;
-      let events_json = List.map Trpg_engine_event.to_yojson !appended_events in
+      let events_json = List.map Trpg.Engine_event.to_yojson !appended_events in
       Ok
         (`Assoc
           [

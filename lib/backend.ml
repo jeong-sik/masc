@@ -21,21 +21,16 @@ module FileSystemBackend : BACKEND = struct
        runs under Eio where Eio.Mutex is preferred.
        Two-phase: if Eio.Mutex fails (Effect.Unhandled), use Stdlib.Mutex.
        If f() fails inside the lock, re-raise. *)
-    let acquired = ref false in
     match
-      Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
-        acquired := true;
-        f ()
-      )
+      Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> f ())
     with
     | result -> result
-    | exception exn ->
-        if !acquired then raise exn  (* f() failed inside lock, propagate *)
-        else begin
-          (* Eio.Mutex unavailable — use Stdlib.Mutex for serialization *)
-          Stdlib.Mutex.lock stdlib_mutex;
-          Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock stdlib_mutex) f
-        end
+    | exception Effect.Unhandled _ ->
+        (* No Eio runtime (e.g. tests) — fall back to Stdlib.Mutex.
+           Only catches Effect.Unhandled; Eio exceptions (Cancel, etc.)
+           propagate normally to avoid blocking the scheduler. *)
+        Stdlib.Mutex.lock stdlib_mutex;
+        Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock stdlib_mutex) f
 
   (* Security: validate key with strict allowlist (parse, don't sanitize) *)
   let validate_key key =

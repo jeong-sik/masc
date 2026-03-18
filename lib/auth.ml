@@ -310,8 +310,9 @@ let permission_for_tool = function
   | "masc_board_post" | "masc_board_comment" | "masc_board_vote"
   | "masc_board_comment_vote" -> Some CanBroadcast
   (* Auth tools - special handling *)
-  | "masc_auth_enable" | "masc_auth_disable" | "masc_auth_create_token"
+  | "masc_auth_enable" | "masc_auth_disable"
   | "masc_auth_revoke" -> Some CanInit  (* Admin only *)
+  | "masc_auth_create_token" -> Some CanAdmin  (* Allowed when auth is enabled *)
   | "masc_auth_status" | "masc_auth_refresh" -> Some CanReadState
   | "masc_tool_stats" | "masc_tool_help" | "masc_keeper_tool_catalog"
   | "masc_tool_list" -> Some CanReadState

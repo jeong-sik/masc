@@ -1,15 +1,10 @@
-(** Lodge Cascade — local heartbeat model-pool loader.
+(** Lodge Cascade — thin wrapper over OAS Cascade_config.
 
-    Reads provider:model arrays from config/llm_cascade.json.
-    Entries requiring API keys are skipped when the key is not set.
-    Invalid entries are ignored with a warning.
+    MASC defines cascade name -> model list policy (default_model_strings).
+    OAS handles config loading, model parsing, health filtering, and execution.
 
-    The file is hot-reloaded via a simple mtime cache.
-    When the file or requested key is missing, built-in defaults are used.
-
-    @since 2.114.0 *)
-
-open Printf
+    @since 2.114.0 — original
+    @since 2.115.0 — delegated to OAS Cascade_config *)
 
 type cascade_result = {
   response : string;
@@ -17,26 +12,9 @@ type cascade_result = {
   duration_ms : int;
 }
 
-let config_cache : (string, float * Yojson.Safe.t) Hashtbl.t = Hashtbl.create 4
-
-let load_json_file path =
-  try
-    let st = Unix.stat path in
-    let mtime = st.Unix.st_mtime in
-    match Hashtbl.find_opt config_cache path with
-    | Some (cached_mtime, json) when Float.equal cached_mtime mtime -> Ok json
-    | _ ->
-        let content = Fs_compat.load_file path in
-        let json = Yojson.Safe.from_string content in
-        Hashtbl.replace config_cache path (mtime, json);
-        Ok json
-  with
-  | Sys_error msg -> Error msg
-  | Unix.Unix_error (err, fn, arg) ->
-      Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err))
-  | exn -> Error (Printexc.to_string exn)
-
-let default_config_path () =
+(** Locate config/llm_cascade.json via CWD or ME_ROOT.
+    Returns [Some path] when the file exists on disk. *)
+let default_config_path () : string option =
   let candidates =
     let cwd_candidate =
       Filename.concat (Sys.getcwd ()) "config/llm_cascade.json"
@@ -53,12 +31,7 @@ let default_config_path () =
     in
     [ cwd_candidate; me_root_candidate ]
   in
-  match List.find_opt Sys.file_exists candidates with
-  | Some path -> path
-  | None -> (
-      match candidates with
-      | first :: _ -> first
-      | [] -> Filename.concat (Sys.getcwd ()) "config/llm_cascade.json")
+  List.find_opt Sys.file_exists candidates
 
 (** Build a provider:model label, filtering out empty models. *)
 let label provider model =
@@ -125,86 +98,107 @@ let default_model_strings ~cascade_name =
   (* unregistered cascade: llama + glm as safety net *)
   | _ -> llama_glm
 
-let model_key_of_cascade cascade_name = cascade_name ^ "_models"
-
-let read_model_strings ~config_path ~cascade_name =
-  let key = model_key_of_cascade cascade_name in
-  match load_json_file config_path with
-  | Error msg ->
-      eprintf
-        "[cascade] config load failed for %s: %s — using built-in defaults\n%!"
-        key msg;
-      default_model_strings ~cascade_name
-  | Ok json -> (
-      let open Yojson.Safe.Util in
-      match json |> member key with
-      | `List items ->
-          let parsed =
-            List.filter_map
-              (function
-                | `String s -> Some (String.trim s)
-                | other ->
-                    eprintf
-                      "[cascade] %s: ignoring non-string entry %s\n%!"
-                      key (Yojson.Safe.to_string other);
-                    None)
-              items
-          in
-          if parsed = [] then (
-            eprintf
-              "[cascade] %s: empty model list — using built-in defaults\n%!" key;
-            default_model_strings ~cascade_name)
-          else parsed
-      | `Null ->
-          eprintf
-            "[cascade] %s not found in %s — using built-in defaults\n%!" key
-            config_path;
-          default_model_strings ~cascade_name
-      | other ->
-          eprintf
-            "[cascade] %s must be a string list, got %s — using built-in defaults\n%!"
-            key (Yojson.Safe.to_string other);
-          default_model_strings ~cascade_name)
-
+(** Backward compat: return MASC model_spec list for callers that need
+    to pass specs to Llm_orchestration directly. Uses OAS Cascade_config
+    for config loading, then maps back to Llm_types. *)
 let get_cascade ?(config_path = "") ~cascade_name () :
     Llm_types.model_spec list =
-  let path =
-    if String.length config_path > 0 then config_path else default_config_path ()
+  let defaults = default_model_strings ~cascade_name in
+  let configured =
+    if String.length config_path > 0 then
+      let from_file =
+        Llm_provider.Cascade_config.load_profile
+          ~config_path ~name:cascade_name
+      in
+      if from_file <> [] then from_file else defaults
+    else
+      match default_config_path () with
+      | Some path ->
+        let from_file =
+          Llm_provider.Cascade_config.load_profile
+            ~config_path:path ~name:cascade_name
+        in
+        if from_file <> [] then from_file else defaults
+      | None -> defaults
   in
-  let configured = read_model_strings ~config_path:path ~cascade_name in
   let specs = Llm_types.available_model_specs_of_strings configured in
   if specs <> [] then specs
   else
-    let defaults = default_model_strings ~cascade_name in
-    if configured = defaults then (
-      eprintf
+    let fallback = default_model_strings ~cascade_name in
+    if configured = fallback then (
+      Printf.eprintf
         "[cascade] %s: no callable models from built-in defaults\n%!"
         cascade_name;
       [])
     else (
-      eprintf
+      Printf.eprintf
         "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!"
         cascade_name;
-      Llm_types.available_model_specs_of_strings defaults)
+      Llm_types.available_model_specs_of_strings fallback)
 
-(** Call LLM cascade. Routes through [Llm_orchestration.run_prompt_cascade]
-    which uses OAS-inlined provider calls (no global semaphore after v2.114). *)
+(** Bridge MASC accept validator (completion_response -> bool)
+    to OAS accept validator (api_response -> bool).
+    Constructs a minimal completion_response from the OAS api_response. *)
+let adapt_accept (masc_accept : Llm_types.completion_response -> bool) :
+    Llm_provider.Types.api_response -> bool =
+ fun (oas_resp : Llm_provider.Types.api_response) ->
+  let usage : Agent_sdk.Types.api_usage =
+    match oas_resp.usage with
+    | Some u -> u
+    | None ->
+      { input_tokens = 0; output_tokens = 0;
+        cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
+  in
+  let fake_resp : Llm_types.completion_response =
+    { content = oas_resp.content;
+      tool_calls = [];
+      usage;
+      model_used = oas_resp.model;
+      latency_ms = 0;
+    }
+  in
+  masc_accept fake_resp
+
+(** Call LLM cascade. Routes directly through OAS Cascade_config.complete_named,
+    bypassing MASC's Llm_orchestration. *)
 let call ~cascade_name ~prompt
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
     ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
-  let specs = get_cascade ~config_path ~cascade_name () in
-  if specs = [] then
-    Error (Printf.sprintf "[cascade] no callable models for %s" cascade_name)
-  else
-    match
-      Llm_orchestration.run_prompt_cascade ~temperature
-        ~timeout_sec ~model_specs:specs ~max_tokens ~accept ?system ~prompt ()
-    with
-    | Ok resp ->
-        Ok
-          {
-            response = Llm_types.text_of_response resp;
-            llm_used = resp.Llm_types.model_used;
-            duration_ms = resp.Llm_types.latency_ms;
-          }
-    | Error msg -> Error msg
+  ignore timeout_sec;
+  let env = Llm_eio_env.get () in
+  let defaults = default_model_strings ~cascade_name in
+  let config_path_opt =
+    if String.length config_path > 0 then Some config_path
+    else default_config_path ()
+  in
+  let messages : Llm_provider.Types.message list =
+    (match system with
+     | Some s -> [ Llm_provider.Types.system_msg s ]
+     | None -> [])
+    @ [ Llm_provider.Types.user_msg prompt ]
+  in
+  let oas_accept = adapt_accept accept in
+  let t0 = Time_compat.now () in
+  match
+    Llm_provider.Cascade_config.complete_named
+      ~sw:env.sw ~net:env.net ?clock:env.clock
+      ?config_path:config_path_opt
+      ~name:cascade_name ~defaults ~messages
+      ~temperature ~max_tokens ~accept:oas_accept ()
+  with
+  | Ok resp ->
+    let t1 = Time_compat.now () in
+    let duration_ms = int_of_float ((t1 -. t0) *. 1000.0) in
+    Ok
+      {
+        response = Llm_provider.Cascade_config.text_of_response resp;
+        llm_used = resp.Llm_provider.Types.model;
+        duration_ms;
+      }
+  | Error (Llm_provider.Http_client.HttpError { code; body }) ->
+    Error (Printf.sprintf "[cascade] %s: HTTP %d: %s" cascade_name code
+             (if String.length body > 200
+              then String.sub body 0 200 ^ "..."
+              else body))
+  | Error (Llm_provider.Http_client.NetworkError { message }) ->
+    Error (Printf.sprintf "[cascade] %s: %s" cascade_name message)

@@ -1,6 +1,7 @@
 open Alcotest
 
 module Llm = Masc_mcp.Llm_types
+module Llm_orch = Masc_mcp.Llm_orchestration
 
 let _sample_request provider =
   {
@@ -68,7 +69,11 @@ let test_available_model_specs_of_strings_llama () =
       check string "model id" "qwen3.5-32b" spec.model_id
   | _ -> fail "expected one available llama model"
 
-(* test_cache_key_of_request_deterministic removed — Llm_client dissolved in #1617 *)
+let test_cache_key_of_request_deterministic () =
+  let request = sample_request Llm.Llama in
+  let key_a = Llm_orch.cache_key_of_request request in
+  let key_b = Llm_orch.cache_key_of_request request in
+  check string "same request -> same key" key_a key_b
 
 let () =
   Alcotest.run "llm_client coverage"

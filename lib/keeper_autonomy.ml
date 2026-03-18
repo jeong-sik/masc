@@ -245,6 +245,6 @@ let generate_action_plan ~model ~goal ~keeper_context =
     tools = [];
     response_format = `Text;
   } in
-  match Llm_client.complete req with
+  match Llm_orchestration.complete req with
   | Ok resp -> Ok (Llm_types.text_of_response resp)
   | Error e -> Error (sprintf "plan generation failed: %s" e)

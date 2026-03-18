@@ -784,6 +784,11 @@ a:hover {
   color: var(--text-muted);
 }
 
+.empty-state.ok {
+  border-color: rgba(74, 222, 128, 0.3);
+  color: var(--text-secondary, var(--text-muted));
+}
+
 .loading-indicator {
   text-align: center;
   border: 1px dashed var(--card-border);

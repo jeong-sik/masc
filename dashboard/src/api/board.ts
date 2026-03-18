@@ -1,6 +1,6 @@
-import { get, post, postRaw, withRetries, defaultBoardVoter } from '../api'
+import { get, post, withRetries, defaultBoardVoter } from './core'
 import { isRecord } from '../components/common/normalize'
-import { asString, asNumber, asStringList } from './trpg'
+import { asString, asNumber, asInt, asStringList } from './trpg'
 import type {
   BoardPost, BoardComment, BoardHearth, BoardFlair, BoardSortMode,
   GovernanceCaseBrief, GovernanceCaseBundle, GovernanceContextRef,
@@ -13,14 +13,14 @@ import type {
 
 const SYSTEM_BOARD_AUTHORS = new Set(['lodge-system', 'team-session'])
 
-function toIsoTimestamp(value: unknown): string {
+export function toIsoTimestamp(value: unknown): string {
   if (typeof value === 'string' && value.trim()) return value
   if (typeof value !== 'number' || Number.isNaN(value)) return new Date().toISOString()
   const ms = value < 1_000_000_000_000 ? value * 1000 : value
   return new Date(ms).toISOString()
 }
 
-function asNullableIsoTimestamp(value: unknown): string | null {
+export function asNullableIsoTimestamp(value: unknown): string | null {
   if (typeof value === 'string') {
     const trimmed = value.trim()
     return trimmed ? trimmed : null
@@ -38,7 +38,7 @@ function asNullableString(value: unknown): string | null {
   return trimmed ? trimmed : null
 }
 
-function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
+export function normalizePendingConfirmation(raw: unknown): PendingConfirmation | null {
   if (!isRecord(raw)) return null
   const confirmToken = asString(raw.confirm_token ?? raw.token, '').trim()
   if (!confirmToken) return null
@@ -135,7 +135,7 @@ function normalizeGovernanceJudgment(raw: unknown): GovernanceJudgment | null {
   }
 }
 
-function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisionItem | null {
+export function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisionItem | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
   const topic = asString(raw.topic ?? raw.title, '').trim()
@@ -254,7 +254,7 @@ export function normalizeGovernanceCaseBundle(raw: unknown): GovernanceCaseBundl
   }
 }
 
-function normalizeGovernanceTimelineEvent(raw: unknown): GovernanceTimelineEvent | null {
+export function normalizeGovernanceTimelineEvent(raw: unknown): GovernanceTimelineEvent | null {
   if (!isRecord(raw)) return null
   const kind = asString(raw.kind, '').trim()
   if (!kind) return null
@@ -271,7 +271,7 @@ function normalizeGovernanceTimelineEvent(raw: unknown): GovernanceTimelineEvent
   }
 }
 
-function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSummary | undefined {
+export function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSummary | undefined {
   if (!isRecord(raw)) return undefined
   return {
     judge_online: typeof raw.judge_online === 'boolean' ? raw.judge_online : undefined,

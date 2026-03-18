@@ -285,22 +285,45 @@ let detect_intervention_rule_based ~config ~health : decision_snapshot =
   let backlog = health.task_backlog in
 
   (* Task pressure takes priority over Board gaps *)
-  if backlog.todo_count > 0 && backlog.high_priority_todo > 0 && health.active_agents < 2 then
-    {
-      intervention = NeedWorker backlog;
-      source = "fallback";
-      reason = "high-priority backlog exceeds active worker capacity";
-      target = "";
-      error = "";
-    }
-  else if backlog.orphan_count > 0 then
-    {
-      intervention = NeedWorker backlog;
-      source = "fallback";
-      reason = "orphan tasks detected in backlog";
-      target = "";
-      error = "";
-    }
+  if backlog.todo_count > 0 && backlog.high_priority_todo > 0 && health.active_agents < 2 then begin
+    if health.room_active_agents = 0 then
+      {
+        intervention = Balanced;
+        source = "fallback";
+        reason = Printf.sprintf
+          "backlog has %d high-pri tasks but 0 active agents in room; waiting"
+          backlog.high_priority_todo;
+        target = "";
+        error = "";
+      }
+    else
+      {
+        intervention = NeedWorker backlog;
+        source = "fallback";
+        reason = "high-priority backlog exceeds active worker capacity";
+        target = "";
+        error = "";
+      }
+  end
+  else if backlog.orphan_count > 0 then begin
+    if health.room_active_agents = 0 then
+      {
+        intervention = Balanced;
+        source = "fallback";
+        reason = Printf.sprintf
+          "orphan tasks detected but 0 active agents in room; waiting";
+        target = "";
+        error = "";
+      }
+    else
+      {
+        intervention = NeedWorker backlog;
+        source = "fallback";
+        reason = "orphan tasks detected in backlog";
+        target = "";
+        error = "";
+      }
+  end
   else begin
     (* Board gap detection — existing logic *)
     let mature_gaps = Lodge_heartbeat.check_gap_threshold () in
@@ -388,6 +411,10 @@ let decide_intervention_with_llm ~config ~health : decision_snapshot =
 고아 태스크: %d개
 진행중: %d개
 
+== Room 에이전트 상태 ==
+Room 내 활성 에이전트: %d
+마지막 triage 결과: %s
+
 == 시스템 ==
 에러율: %.1f%%, 오늘 spawn: %d/%d
 
@@ -397,6 +424,8 @@ let decide_intervention_with_llm ~config ~health : decision_snapshot =
     health.posts_24h health.unanswered_questions
     backlog.todo_count backlog.oldest_todo_age_hours
     backlog.high_priority_todo backlog.orphan_count backlog.in_progress_count
+    health.room_active_agents
+    (let state = get_state () in string_of_triage_outcome state.last_triage_outcome)
     (health.system_error_rate *. 100.0) health.spawns_today config.max_daily_spawns
   in
 
@@ -597,6 +626,9 @@ let status_json () : Yojson.Safe.t =
                 ("orphan_count", `Int state.last_orphan_count);
                 ("homeostatic_score", `Float state.last_homeostatic_score);
                 ("needs_workers", `Bool state.last_needs_workers);
+                ("room_active_agents", `Int state.last_room_active_agents);
+                ("last_triage_outcome", `String (string_of_triage_outcome state.last_triage_outcome));
+                ("last_triage_started_at", json_string_of_float_ts state.last_triage_started_at);
                 ("data_source", `String "room_filesystem");
                 ("staleness_warning", `String
                   (if state.last_health_check > 0.0 then

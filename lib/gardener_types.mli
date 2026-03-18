@@ -102,6 +102,7 @@ type ecosystem_health = {
   task_backlog: task_backlog_summary;  (** MASC task backlog state *)
   system_error_rate: float;    (** Error rate from telemetry (0.0-1.0) *)
   needs_workers: bool;         (** todo > 0 AND no available workers *)
+  room_active_agents: int;     (** Non-Inactive agents currently in room *)
 }
 
 val ecosystem_health_to_yojson : ecosystem_health -> Yojson.Safe.t
@@ -190,6 +191,19 @@ val retirement_decision_to_yojson : retirement_decision -> Yojson.Safe.t
 val pp_retirement_decision : Format.formatter -> retirement_decision -> unit
 val show_retirement_decision : retirement_decision -> string
 
+(** {1 Triage Outcome} *)
+
+(** Outcome of the last backlog triage session *)
+type triage_outcome =
+  | Triage_none       (** No triage attempted yet *)
+  | Triage_productive (** Triage resulted in claimed tasks *)
+  | Triage_noop       (** Triage completed but no tasks claimed *)
+
+val string_of_triage_outcome : triage_outcome -> string
+val pp_triage_outcome : Format.formatter -> triage_outcome -> unit
+val show_triage_outcome : triage_outcome -> string
+val equal_triage_outcome : triage_outcome -> triage_outcome -> bool
+
 (** {1 Gardener State} *)
 
 (** Persistent state for the Gardener Agent.
@@ -224,7 +238,10 @@ type gardener_state = {
   mutable last_orphan_count: int;
   mutable last_homeostatic_score: float;
   mutable last_needs_workers: bool;
+  mutable last_room_active_agents: int;
   mutable day_start: float;  (** Start of current "day" for budget tracking *)
+  mutable last_triage_started_at: float;
+  mutable last_triage_outcome: triage_outcome;
 }
 
 val make_gardener_state : unit -> gardener_state

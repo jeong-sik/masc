@@ -115,6 +115,19 @@ let calculate_health ~config ~room_config : ecosystem_health =
     | None -> empty_task_backlog
   in
 
+  (* Count non-Inactive agents in room (realtime, not Lodge 24h) *)
+  let room_active_agents = match room_config with
+    | Some rc ->
+        let room_id = Room.current_room_id rc in
+        let agents = Room.get_agents_raw_in_room rc room_id in
+        List.length (List.filter (fun (agent : Types.agent) ->
+          match agent.status with
+          | Types.Active | Types.Busy | Types.Listening -> true
+          | Types.Inactive -> false
+        ) agents)
+    | None -> 0
+  in
+
   (* No heuristic gates — these fields are purely informational summaries.
      All decision-making is delegated to LLM (primary) or rule-based inline (fallback).
      Raw signals (agent counts, task_backlog, Board data) flow directly to the decision layer. *)
@@ -150,6 +163,7 @@ let calculate_health ~config ~room_config : ecosystem_health =
     task_backlog;
     system_error_rate = 0.0;
     needs_workers;
+    room_active_agents;
   }
 
 let backlog_goal_prefix = "[Gardener] Backlog triage"
@@ -171,16 +185,11 @@ let backlog_triage_session_agents ~(room_config : Room_utils.config) ~(room_id :
     |> Team_session_types.dedup_strings
     |> List.sort String.compare
   in
-  if active_agents <> [] then
-    active_agents
-  else
-    (* get_agents_raw_in_room filters out Inactive agents, so fall back to
-       get_all_agents_in_room which includes them.  Backlog triage should
-       still enroll inactive agents when no active ones are available. *)
-    Room.get_all_agents_in_room room_config room_id
-    |> List.map (fun (agent : Types.agent) -> agent.name)
-    |> Team_session_types.dedup_strings
-    |> List.sort String.compare
+  (* No Inactive fallback: if no Active/Busy/Listening agents exist,
+     return [] so callers hit the error path. Enrolling Inactive agents
+     in triage sessions produces sessions with no consumer, which is
+     the root cause of duplicate task accumulation (Issue #1439). *)
+  active_agents
 
 let existing_backlog_session ~(room_config : Room_utils.config) ~(room_id : string) =
   Team_session_store.list_sessions room_config
@@ -320,6 +329,18 @@ let start_backlog_triage_session ~sw ~clock ~(room_config : Room_utils.config)
     | Ok _ -> Error "unexpected backlog triage session response"
     | Error err -> Error err
   in
+  (* Triage cooldown: after a noop triage, wait before retrying *)
+  let state = get_state () in
+  let now = Time_compat.now () in
+  let config = load_config () in
+  let cooldown_sec = config.check_interval_sec *. 2.0 in
+  if state.last_triage_outcome = Triage_noop
+     && state.last_triage_started_at > 0.0
+     && (now -. state.last_triage_started_at) < cooldown_sec then begin
+    Eio.traceln "[Gardener] Triage cooldown active (%.0fs remaining)"
+      (cooldown_sec -. (now -. state.last_triage_started_at));
+    Error "triage cooldown active"
+  end else
   match existing_backlog_session ~room_config ~room_id with
   | Some session ->
       Eio.traceln "[Gardener] Reusing backlog triage session %s" session.session_id;
@@ -408,8 +429,11 @@ let tick ~sw ~clock ~config ~room_config : unit =
     | NeedWorker backlog ->
         Eio.traceln "[Gardener] Task pressure: %d TODO, %d high-pri, %d orphans"
           backlog.todo_count backlog.high_priority_todo backlog.orphan_count;
+        let triage_state = get_state () in
+        triage_state.last_triage_started_at <- Time_compat.now ();
         (match start_backlog_triage_session ~sw ~clock ~room_config ~backlog with
          | Ok session_id ->
+             triage_state.last_triage_outcome <- Triage_productive;
              record_action "worker_session_started" ~target:session_id
                ~reason:"started backlog triage session";
              Eio.traceln "[Gardener] Started backlog triage session: %s" session_id;
@@ -423,6 +447,7 @@ let tick ~sw ~clock ~config ~room_config : unit =
                    ("orphan_count", `Int backlog.orphan_count);
                  ])
          | Error err ->
+             triage_state.last_triage_outcome <- Triage_noop;
              record_action "worker_request_posted"
                ~reason:"backlog triage session failed; posted worker request"
                ~error:err;

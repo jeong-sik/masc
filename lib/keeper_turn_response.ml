@@ -414,7 +414,7 @@ let finalize_handoff_turn ctx ~session ~now_ts ~specs ~primary ~base_dir
     | m0 :: _ -> m0
     | [] -> primary
   in
-  let metrics = Succession.{
+  let metrics = Succession_oas.{
     total_turns = meta_turn.total_turns;
     total_tokens_used = meta_turn.total_tokens;
     total_cost_usd = meta_turn.total_cost_usd;
@@ -424,7 +424,7 @@ let finalize_handoff_turn ctx ~session ~now_ts ~specs ~primary ~base_dir
   } in
   let successor_trace = generate_trace_id () in
   let next_generation = meta_turn.generation + 1 in
-  let dna = Succession.extract_dna
+  let dna = Succession_oas.extract_dna
     ~working_ctx:env.ctx_work
     ~session_ctx:session
     ~goal:meta_turn.goal
@@ -432,12 +432,12 @@ let finalize_handoff_turn ctx ~session ~now_ts ~specs ~primary ~base_dir
     ~trace_id:successor_trace
     ~metrics
   in
-  let spec = Succession.{
+  let spec = Succession_oas.{
     model = next_model;
     inherit_tools = false;
     context_budget = meta_turn.context_budget;
   } in
-  let successor_ctx = Succession.hydrate dna spec in
+  let successor_ctx = Succession_oas.hydrate dna spec in
   let successor_session = Context_manager.create_session
     ~session_id:successor_trace ~base_dir in
   (try ignore (save_checkpoint successor_session successor_ctx ~generation:next_generation)

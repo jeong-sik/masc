@@ -450,7 +450,7 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
               ("recheck_stability", `Float 1.0);
             ]
         | Ok model ->
-            let req = Verifier.{
+            let req = Verifier_oas.{
               action_description =
                 Printf.sprintf "masc_mitosis_handoff outcome review (%s)" perspective;
               action_result = evidence_text;
@@ -463,9 +463,9 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
                   match ctx.clock with
                   | Some (Clock clock) when judge_timeout_sec > 0.0 ->
                       Eio.Time.with_timeout_exn clock judge_timeout_sec (fun () ->
-                        Verifier.verify ~model req)
+                        Verifier_oas.verify ~model req)
                   | _ ->
-                      Verifier.verify ~model req
+                      Verifier_oas.verify ~model req
                 in
                 `Verdict verdict
               with
@@ -476,14 +476,14 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
                   `Error (Printexc.to_string exn)
             in
             let status_of = function
-              | `Verdict Verifier.Pass -> "pass"
-              | `Verdict (Verifier.Warn _) -> "warn"
-              | `Verdict (Verifier.Fail _) -> "fail"
+              | `Verdict Verifier_oas.Pass -> "pass"
+              | `Verdict (Verifier_oas.Warn _) -> "warn"
+              | `Verdict (Verifier_oas.Fail _) -> "fail"
               | `Timeout -> "warn"
               | `Error _ -> "warn"
             in
             let verdict_text_of = function
-              | `Verdict v -> Verifier.verdict_to_string v
+              | `Verdict v -> Verifier_oas.verdict_to_string v
               | `Timeout -> "WARN: verifier_timeout"
               | `Error _ -> "WARN: verifier_error"
             in

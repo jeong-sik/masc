@@ -234,7 +234,7 @@ let handle_cancel_task ctx args =
   result_to_response result
 
 let transition_known_args =
-  ["task_id"; "action"; "notes"; "reason"; "expected_version"]
+  ["task_id"; "action"; "notes"; "reason"; "expected_version"; "agent_name"]
 
 let handle_transition ctx args =
   let unknown = match args with

@@ -625,7 +625,7 @@ let test_operator_mcp_supervises_team_session () =
 
   let tools_list_res =
     run_curl_json ~token:supervisor_token ~port ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~payload:(tools_list_payload ~id:10) ()
+      ~session_id:"supervisor-root" ~payload:(tools_list_payload ~id:10) ()
   in
   let tools_list_json = parse_json_body "operator tools/list" tools_list_res in
   require_jsonrpc_ok "operator tools/list" tools_list_json;
@@ -645,7 +645,7 @@ let test_operator_mcp_supervises_team_session () =
 
   let snapshot_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~id:11 ~name:"masc_operator_snapshot"
+      ~session_id:"supervisor-root" ~id:11 ~name:"masc_operator_snapshot"
       (`Assoc [ ("actor", `String supervisor_nickname); ("view", `String "full") ])
   in
   let snapshot_result = extract_tool_payload_json "operator_snapshot" snapshot_json in
@@ -659,7 +659,7 @@ let test_operator_mcp_supervises_team_session () =
 
   let digest_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~id:105 ~name:"masc_operator_digest"
+      ~session_id:"supervisor-root" ~id:105 ~name:"masc_operator_digest"
       (`Assoc
         [
           ("actor", `String supervisor_nickname);
@@ -681,7 +681,7 @@ let test_operator_mcp_supervises_team_session () =
 
   let note_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~id:12 ~name:"masc_operator_action"
+      ~session_id:"supervisor-root" ~id:12 ~name:"masc_operator_action"
       (`Assoc
         [
           ("actor", `String supervisor_nickname);
@@ -700,7 +700,7 @@ let test_operator_mcp_supervises_team_session () =
 
   let preview_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~id:13 ~name:"masc_operator_action"
+      ~session_id:"supervisor-root" ~id:13 ~name:"masc_operator_action"
       (`Assoc
         [
           ("actor", `String supervisor_nickname);
@@ -722,7 +722,7 @@ let test_operator_mcp_supervises_team_session () =
 
   let confirm_json =
     call_tool ~token:supervisor_token ~path:"/mcp/operator"
-      ~session_id:"operator-supervisor" ~id:14 ~name:"masc_operator_confirm"
+      ~session_id:"supervisor-root" ~id:14 ~name:"masc_operator_confirm"
       (`Assoc
         [
           ("actor", `String supervisor_nickname);

@@ -648,6 +648,7 @@ let test_client_snapshot_get () =
         ((json |> member "payload" |> member "trpg" |> member "event_count" |> to_int) >= 2))
 
 let () =
+  Eio_main.run @@ fun _env ->
   Alcotest.run "Protocol GAME-VIEW"
     [
       ( "protocol",

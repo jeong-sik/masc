@@ -1140,6 +1140,7 @@ let suite = [
 ]
 
 let () =
+  Eio_main.run @@ fun _env ->
   Alcotest.run "Gardener" [
     "gardener", suite;
   ]

@@ -139,7 +139,7 @@
 (test
  (name test_social_motion)
  (modules test_social_motion)
- (libraries masc_mcp alcotest unix yojson))
+ (libraries masc_mcp alcotest eio eio_main unix yojson))
 
 (test
  (name test_ci_hardening_source)
@@ -246,7 +246,7 @@
 (test
  (name test_lodge_cascade)
  (modules test_lodge_cascade)
- (libraries masc_mcp alcotest unix))
+ (libraries masc_mcp alcotest eio eio_main unix))
 
 (test
  (name test_llm_client_cascade)
@@ -416,7 +416,7 @@
 (test
  (name test_tool_trpg_coverage)
  (modules test_tool_trpg_coverage)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 ; Narrative Intelligence tests (inventory, relationships, dedup, JSON recovery)
 (test
@@ -509,7 +509,7 @@
 (test
  (name test_protocol_game_view)
  (modules test_protocol_game_view)
- (libraries masc_mcp alcotest yojson unix))
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
  (name test_tool_keeper)

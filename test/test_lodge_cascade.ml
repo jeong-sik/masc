@@ -140,6 +140,7 @@ let test_model_key_format () =
   check string "key format" "heartbeat_action_models" key
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "lodge_cascade"
     [
       ( "loader",

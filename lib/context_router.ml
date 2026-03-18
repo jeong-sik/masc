@@ -187,7 +187,7 @@ let parse_intent_response (text : string) : (query_intent * float) option =
 
 (** Validate that an LLM response contains a parseable intent. *)
 let intent_response_is_valid (resp : Llm_client.completion_response) : bool =
-  parse_intent_response (Llm_client.text_of_response resp) <> None
+  parse_intent_response (Llm_types.text_of_response resp) <> None
 
 (** Classify query intent using LLM semantic understanding.
     Returns (intent, confidence) or falls back to low-confidence default. *)

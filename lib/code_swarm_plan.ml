@@ -336,7 +336,7 @@ let verify_worker ~model ~pattern (worker : worker_plan) diff =
     let req : Llm_client.completion_request =
       {
         model;
-        messages = [ Llm_client.user_msg prompt ];
+        messages = [ Agent_sdk.Types.user_msg prompt ];
         temperature = 0.0;
         max_tokens = 200;
         tools = [];
@@ -345,7 +345,7 @@ let verify_worker ~model ~pattern (worker : worker_plan) diff =
     in
     let verdict =
       match Llm_orchestration.complete req with
-      | Ok resp -> Verifier_oas.parse_verdict (Llm_client.text_of_response resp)
+      | Ok resp -> Verifier_oas.parse_verdict (Llm_types.text_of_response resp)
       | Error e -> Verifier_oas.Warn ("verifier_unavailable: " ^ e)
     in
     let our_verdict =

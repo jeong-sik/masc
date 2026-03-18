@@ -688,7 +688,7 @@ let generate_code_change ~goal ~baseline ~history ~insights
   | Result.Ok model ->
     let req : Llm_client.completion_request = {
       model;
-      messages = [Llm_client.user_msg prompt];
+      messages = [Agent_sdk.Types.user_msg prompt];
       temperature = 0.7;
       max_tokens = 4096;
       tools = [];
@@ -696,7 +696,7 @@ let generate_code_change ~goal ~baseline ~history ~insights
     } in
     (match Llm_orchestration.complete ~timeout_sec:120 req with
     | Result.Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
-    | Result.Ok resp -> parse_llm_code_response (Llm_client.text_of_response resp))
+    | Result.Ok resp -> parse_llm_code_response (Llm_types.text_of_response resp))
 
 (* ================================================================ *)
 (* Loop State Management                                            *)

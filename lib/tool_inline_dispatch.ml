@@ -61,8 +61,6 @@ let safe_exec args =
   | Unix.WEXITED 0, output -> (true, output)
   | _, output -> (false, if output = "" then "Command failed" else output)
 
-let schemas = Tool_schemas_inline.schemas
-
 (** Dispatch a tool call.
     Returns [Some (success, message)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)

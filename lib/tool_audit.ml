@@ -41,7 +41,13 @@ let read_audit_events (config : Room.config) ~since : audit_event list =
       try
         let json = Yojson.Safe.from_string line in
         let module U = Yojson.Safe.Util in
-        let timestamp = json |> U.member "timestamp" |> U.to_float in
+        let timestamp =
+          match U.member "timestamp" json with
+          | `Float f -> f
+          | `Int i -> float_of_int i
+          | `String s -> (try float_of_string s with Failure _ -> 0.0)
+          | _ -> 0.0
+        in
         if timestamp < since then None
         else
           (* Try rich format first (agent_id/action/outcome), fall back to legacy *)
@@ -92,6 +98,8 @@ let handle_audit_query ctx args =
     |> List.filter (fun e ->
         if event_type = "all" then true
         else e.event_type = event_type)
+    (* Sort newest-first so limit returns the most recent events *)
+    |> List.sort (fun a b -> Float.compare b.timestamp a.timestamp)
   in
   let limited =
     let rec take n xs =
@@ -111,9 +119,10 @@ let handle_audit_query ctx args =
 (* Handle masc_audit_stats *)
 let handle_audit_stats ctx args =
   let agent_filter = get_string_opt args "agent" in
+  let max_agents = get_int args "limit" 50 in
   let since = Time_compat.now () -. (24.0 *. 3600.0) in
   let events = read_audit_events ctx.config ~since in
-  let agents =
+  let all_agents =
     let from_events = List.map (fun e -> e.agent) events in
     let from_metrics = Metrics_store_eio.get_all_agents ctx.config in
     let combined = from_events @ from_metrics in
@@ -121,7 +130,18 @@ let handle_audit_stats ctx args =
   in
   let agents = match agent_filter with
     | Some a -> [a]
-    | None -> agents
+    | None -> all_agents
+  in
+  let total_agent_count = List.length agents in
+  (* Truncate to max_agents to prevent oversized responses *)
+  let truncated = total_agent_count > max_agents in
+  let agents =
+    let rec take n xs = match xs with
+      | [] -> []
+      | _ when n <= 0 -> []
+      | x :: rest -> x :: take (n - 1) rest
+    in
+    take max_agents agents
   in
   let stats_for agent_id =
     let agent_events = List.filter (fun e -> e.agent = agent_id) events in
@@ -156,6 +176,8 @@ let handle_audit_stats ctx args =
   in
   let json = `Assoc [
     ("count", `Int (List.length agents));
+    ("total_agents", `Int total_agent_count);
+    ("truncated", `Bool truncated);
     ("agents", `List (List.map stats_for agents));
   ] in
   (true, Yojson.Safe.pretty_to_string json)
@@ -347,6 +369,11 @@ Pair with masc_audit_query for detailed event logs, masc_agent_fitness for perfo
         ("agent", `Assoc [
           ("type", `String "string");
           ("description", `String "Specific agent to analyze (optional, shows all if omitted)");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum number of agents to include (default: 50)");
+          ("default", `Int 50);
         ]);
       ]);
     ];

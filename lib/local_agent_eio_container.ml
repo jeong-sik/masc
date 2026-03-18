@@ -464,18 +464,22 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
   | Error e, _ | _, Error e -> Error e
 
 let oas_provider_of_model (model : Llm_client.model_spec) : Oas.Provider.config =
-  {
-    Oas.Provider.provider =
-      Oas.Provider.OpenAICompat
-        {
-          base_url = model.api_url;
-          auth_header = None;
-          path = "/v1/chat/completions";
-          static_token = None;
-        };
-    model_id = model.model_id;
-    api_key_env = Option.value ~default:"DUMMY_KEY" model.api_key_env;
-  }
+  match Llm_client.to_oas_provider model with
+  | Some config -> config
+  | None ->
+      (* Fallback for Custom providers — use OpenAICompat with model's api_url *)
+      {
+        Oas.Provider.provider =
+          Oas.Provider.OpenAICompat
+            {
+              base_url = model.api_url;
+              auth_header = None;
+              path = "/v1/chat/completions";
+              static_token = None;
+            };
+        model_id = model.model_id;
+        api_key_env = Option.value ~default:"DUMMY_KEY" model.api_key_env;
+      }
 
 let oas_tool_names (tools : Oas.Tool.t list) =
   List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools

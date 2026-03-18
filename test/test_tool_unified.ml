@@ -53,8 +53,8 @@ let () =
               let open Yojson.Safe.Util in
               let dist = report |> member "tier_distribution" in
               let _ = dist |> member "essential" |> to_int in
-              let _ = dist |> member "standard" |> to_int in
-              let _ = dist |> member "full" |> to_int in
+              let _ = dist |> member "standard_only" |> to_int in
+              let _ = dist |> member "full_only" |> to_int in
               ());
         ] );
     ]

@@ -30,7 +30,7 @@ module Oas = Agent_sdk
 (* Feature Flag                                                      *)
 (* ================================================================ *)
 
-let use_oas_workers () = true
+(* OAS workers path is always active. *)
 
 (* ================================================================ *)
 (* worker_container_meta -> OAS Types.model                          *)

@@ -27,7 +27,6 @@ module Oas = Agent_sdk
 (* Feature Flag                                                      *)
 (* ================================================================ *)
 
-let use_oas_perpetual () = true
 
 (* ================================================================ *)
 (* Run perpetual loop via OAS Agent.run                              *)
@@ -220,9 +219,6 @@ let run
     ~(config : Perpetual_loop.loop_config)
     ~(state : Perpetual_loop.loop_state)
   : unit =
-  if use_oas_perpetual () then
-    run_perpetual_via_oas ~sw ~config ~state
-    |> Result.iter_error (fun e ->
-      eprintf "[perpetual_oas] OAS path aborted: %s\n%!" e)
-  else
-    Perpetual_loop.run ~config ~state
+  run_perpetual_via_oas ~sw ~config ~state
+  |> Result.iter_error (fun e ->
+    eprintf "[perpetual_oas] OAS path aborted: %s\n%!" e)

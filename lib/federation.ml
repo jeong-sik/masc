@@ -82,8 +82,7 @@ let ensure_federation_dir (config : config) : (unit, string) result =
   | Error e -> Error e
   | Ok dir ->
     try
-      if not (Sys.file_exists dir) then
-        Unix.mkdir dir 0o700;
+      Fs_compat.mkdir_p dir;
       Ok ()
     with
     | Unix.Unix_error (err, _, _) -> Error (Printf.sprintf "Failed to create directory: %s" (Unix.error_message err))

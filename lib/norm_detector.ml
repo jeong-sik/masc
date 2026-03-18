@@ -54,13 +54,7 @@ let norms_path () =
   Filename.concat (norms_dir ()) "norms.jsonl"
 
 let ensure_dir path =
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
+  Fs_compat.mkdir_p path
 
 (* ================================================================ *)
 (* JSON                                                             *)
@@ -115,32 +109,21 @@ let of_json (json : Yojson.Safe.t) : norm option =
 
 let load_norms () : norm list =
   let path = norms_path () in
-  if not (Sys.file_exists path) then []
-  else begin
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let norms = ref [] in
-      (try while true do
-        let line = input_line ic in
-        if String.length line > 0 then
-          match Yojson.Safe.from_string line |> of_json with
-          | Some n -> norms := n :: !norms
-          | None -> ()
-      done with End_of_file -> ());
-      List.rev !norms)
-  end
+  Fs_compat.load_jsonl path
+  |> List.filter_map of_json
 
 let save_norms (norms : norm list) =
   let dir = norms_dir () in
   ensure_dir dir;
   let path = norms_path () in
+  let content =
+    norms
+    |> List.map (fun n -> Yojson.Safe.to_string (to_json n))
+    |> String.concat "\n"
+    |> fun s -> if s = "" then "" else s ^ "\n"
+  in
   let tmp = path ^ ".tmp" in
-  let oc = open_out tmp in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    List.iter (fun n ->
-      output_string oc (Yojson.Safe.to_string (to_json n));
-      output_char oc '\n'
-    ) norms);
+  Fs_compat.save_file tmp content;
   Sys.rename tmp path
 
 (* ================================================================ *)

@@ -57,11 +57,8 @@ let read_current_room config =
 (** Write current room ID *)
 let write_current_room config room_id =
   let write_to path =
-    mkdir_p (Filename.dirname path);
-    let oc = open_out path in
-    output_string oc room_id;
-    output_char oc '\n';
-    close_out oc
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Fs_compat.save_file path (room_id ^ "\n")
   in
   (* Canonical location inside .masc/ *)
   write_to (current_room_path config);

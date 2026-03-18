@@ -24,12 +24,7 @@ let store_path () =
   | _ -> default_store_path ()
 
 let ensure_dir path =
-  let rec ensure current =
-    if not (Sys.file_exists current) then (
-      ensure (Filename.dirname current);
-      try Unix.mkdir current 0o755 with Unix.Unix_error _ -> ())
-  in
-  ensure path
+  Fs_compat.mkdir_p path
 
 let read_lines_tail ~max_bytes:_ ~max_lines path =
   let content = Fs_compat.load_file path in

@@ -53,13 +53,7 @@ let create ?(base_dir = default_base_dir ()) () =
 
 (** Ensure the checkpoint directory exists *)
 let ensure_dir path =
-  let rec ensure p =
-    if not (Sys.file_exists p) then begin
-      ensure (Filename.dirname p);
-      try Unix.mkdir p 0o755 with Unix.Unix_error _ -> ()
-    end
-  in
-  ensure path
+  Fs_compat.mkdir_p path
 
 (** Generate a unique run ID *)
 let generate_run_id () =

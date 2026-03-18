@@ -124,15 +124,7 @@ let permanence_dir () =
   Filename.concat me_root ".masc/permanence"
 
 let ensure_dir dir =
-  if not (Sys.file_exists dir) then
-    let rec mkdir_p path =
-      let parent = Filename.dirname path in
-      if parent <> path && not (Sys.file_exists parent) then
-        mkdir_p parent;
-      if not (Sys.file_exists path) then
-        Unix.mkdir path 0o755
-    in
-    mkdir_p dir
+  Fs_compat.mkdir_p dir
 
 (** Save permanent_id to JSONL file (append). *)
 let save_to_jsonl pid =

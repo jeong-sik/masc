@@ -68,8 +68,7 @@ let stats_path () =
         Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"."
   in
   let masc_dir = Filename.concat base ".masc" in
-  if not (Sys.file_exists masc_dir) then
-    Unix.mkdir masc_dir 0o755;
+  Fs_compat.mkdir_p masc_dir;
   Filename.concat masc_dir "lodge_stats.jsonl"
 
 (** {1 Beta Distribution Sampling} *)
@@ -255,24 +254,16 @@ let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
 
 let load_stats () =
   let path = stats_path () in
-  if Sys.file_exists path then begin
+  if Fs_compat.file_exists path then begin
     try
-      let ic = open_in path in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        try
-          while true do
-            let line = input_line ic in
-            if String.length line > 0 then begin
-              let json = Yojson.Safe.from_string line in
-              match stats_of_json json with
-              | Some s ->
-                  Hashtbl.replace stats_table s.name s
-              | None ->
-                  Log.Lodge.error "Failed to parse stats line"
-            end
-          done
-        with End_of_file -> ()
-      );
+      let entries = Fs_compat.load_jsonl path in
+      List.iter (fun json ->
+        match stats_of_json json with
+        | Some s ->
+            Hashtbl.replace stats_table s.name s
+        | None ->
+            Log.Lodge.error "Failed to parse stats line"
+      ) entries;
       Printf.printf "[lodge_selection] Loaded stats for %d agents\n%!"
         (Hashtbl.length stats_table)
     with e ->
@@ -283,13 +274,12 @@ let load_stats () =
 let save_stats () =
   let path = stats_path () in
   try
-    let oc = open_out path in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      Hashtbl.iter (fun _ s ->
-        let json = stats_to_json s in
-        output_string oc (Yojson.Safe.to_string json ^ "\n")
-      ) stats_table
-    );
+    let content =
+      Hashtbl.fold (fun _ s acc ->
+        acc ^ Yojson.Safe.to_string (stats_to_json s) ^ "\n"
+      ) stats_table ""
+    in
+    Fs_compat.save_file path content;
     Printf.printf "[lodge_selection] Saved stats for %d agents\n%!"
       (Hashtbl.length stats_table)
   with e ->

@@ -24,18 +24,10 @@ let make_audio_file ~agent_id =
     (Printf.sprintf "%d_%s.mp3" timestamp (safe_agent_id agent_id))
 
 let write_text path content =
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content)
+  Fs_compat.save_file path content
 
 let read_file path =
-  let ic = open_in_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-      let len = in_channel_length ic in
-      really_input_string ic len)
+  Fs_compat.load_file path
 
 let show_process_status = function
   | Unix.WEXITED code -> Printf.sprintf "exit %d" code

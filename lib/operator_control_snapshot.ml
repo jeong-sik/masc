@@ -73,33 +73,21 @@ let action_log_entry_to_yojson (entry : action_log_entry) =
 
 let append_action_log config (entry : action_log_entry) =
   Room_utils.mkdir_p (operator_dir config);
-  let oc =
-    open_out_gen [ Open_creat; Open_text; Open_append ] 0o644
-      (action_log_path config)
-  in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      output_string oc (Yojson.Safe.to_string (action_log_entry_to_yojson entry));
-      output_char oc '\n')
+  Fs_compat.append_jsonl (action_log_path config) (action_log_entry_to_yojson entry)
 
 let recent_actions_json config =
-  if not (Sys.file_exists (action_log_path config)) then
+  let path = action_log_path config in
+  if not (Sys.file_exists path) then
     `List []
   else
-    let lines =
-      In_channel.with_open_text (action_log_path config) In_channel.input_lines
-    in
+    let all = Fs_compat.load_jsonl path in
+    let len = List.length all in
     let tail =
-      let rev = List.rev lines in
-      rev |> List.to_seq |> Seq.take 20 |> List.of_seq |> List.rev
+      if len <= 20 then all
+      else
+        all |> List.to_seq |> Seq.drop (len - 20) |> List.of_seq
     in
-    let items =
-      tail
-      |> List.filter_map (fun line ->
-             try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
-    in
-    `List items
+    `List tail
 
 let recent_messages_json config =
   Room.get_messages_raw config ~since_seq:0 ~limit:20

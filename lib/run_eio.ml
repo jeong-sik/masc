@@ -92,15 +92,13 @@ let now_iso () = Types.now_iso ()
 
 let read_text_file path =
   if Sys.file_exists path then
-    In_channel.with_open_text path In_channel.input_all
+    Fs_compat.load_file path
   else
     ""
 
 let write_text_file path content =
   mkdir_p (Filename.dirname path);
-  Out_channel.with_open_text path (fun oc ->
-    Out_channel.output_string oc content
-  )
+  Fs_compat.save_file path content
 
 let write_run config (run : run_record) =
   let path = run_json_path config run.task_id in
@@ -139,7 +137,7 @@ let init config ~task_id ~agent_name : (run_record, string) result =
     let log_file = log_path config task_id in
     if not (path_exists config log_file) then begin
       mkdir_p (Filename.dirname log_file);
-      Out_channel.with_open_text log_file (fun oc -> Out_channel.output_string oc "")
+      Fs_compat.save_file log_file ""
     end;
     write_run config run;
     Ok run
@@ -165,11 +163,8 @@ let append_log config ~task_id ~note : (log_entry, string) result =
     ensure_run_dir config task_id;
     let entry = { timestamp = now_iso (); note } in
     let file = log_path config task_id in
-    let line = Yojson.Safe.to_string (log_entry_to_json entry) ^ "\n" in
     with_file_lock config file (fun () ->
-      let oc = open_out_gen [Open_creat; Open_append; Open_wronly] 0o600 file in
-      Common.protect ~module_name:"run_eio" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-        output_string oc line)
+      Fs_compat.append_jsonl file (log_entry_to_json entry)
     );
     Ok entry
   with e -> Error (Printexc.to_string e)
@@ -192,13 +187,10 @@ let read_logs config ~task_id ?limit () : log_entry list =
   let file = log_path config task_id in
   if not (Sys.file_exists file) then []
   else
-    let content = In_channel.with_open_text file In_channel.input_all in
-    let lines = String.split_on_char '\n' content |> List.filter (fun s -> String.trim s <> "") in
-    let entries = List.filter_map (fun line ->
-      match Safe_ops.parse_json_safe ~context:"run_log" line with
-      | Ok json -> log_entry_of_json json
-      | Error _ -> None
-    ) lines in
+    let entries =
+      Fs_compat.load_jsonl file
+      |> List.filter_map log_entry_of_json
+    in
     match limit with
     | None -> entries
     | Some n ->

@@ -4,6 +4,7 @@ import {
   fetchDashboardMissionBriefing,
   fetchDashboardMissionSession,
 } from './api'
+import { isRecord, asString, asNumber, asBoolean, extractArray } from './components/common/normalize'
 import type {
   DashboardMissionAgentBrief,
   DashboardMissionAttentionQueueItem,
@@ -59,31 +60,6 @@ function scheduleMissionBriefingPoll(delayMs = 1500): void {
   }, delayMs)
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() !== '' ? value : undefined
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function asBoolean(value: unknown): boolean | undefined {
-  return typeof value === 'boolean' ? value : undefined
-}
-
-function extractArray(value: unknown, keys: string[] = []): unknown[] {
-  if (Array.isArray(value)) return value
-  if (!isRecord(value)) return []
-  for (const key of keys) {
-    const candidate = value[key]
-    if (Array.isArray(candidate)) return candidate
-  }
-  return []
-}
 
 function normalizeAttentionItem(raw: unknown): OperatorAttentionItem | null {
   if (!isRecord(raw)) return null

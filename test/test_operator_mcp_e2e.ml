@@ -440,7 +440,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   Mirage_crypto_rng_unix.use_default ();
   let supervisor_token, planner_token, implementer_a_token, implementer_b_token =
     if enable_auth then begin
-      ignore (Masc_mcp.Auth.enable_auth config.base_path ~require_token:true);
+      ignore (Masc_mcp.Auth.enable_auth config.base_path ~require_token:true ~agent_name:"test-supervisor");
       let supervisor_token =
         match
           Masc_mcp.Auth.create_token config.base_path ~agent_name:supervisor_nickname

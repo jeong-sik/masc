@@ -158,3 +158,73 @@
   background: rgba(74,222,128,0.12);
   color: var(--ok);
 }
+
+/* ── Keeper Comms Section (chat + diagnostics) ────────── */
+.keeper-comms-section {
+  margin-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 20px;
+}
+
+.keeper-comms-heading {
+  margin: 0 0 14px;
+  color: var(--accent-cyan, #22d3ee);
+  font-family: var(--font-display, inherit);
+  font-size: 15px;
+}
+
+.keeper-comms-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.keeper-comms-chat {
+  width: 100%;
+}
+
+.keeper-comms-diagnostics {
+  border: 1px solid rgba(138, 163, 211, 0.14);
+  border-radius: 10px;
+  background: rgba(5, 14, 31, 0.5);
+}
+
+.keeper-comms-diagnostics-toggle {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #8ca8d5;
+  letter-spacing: 0.03em;
+  list-style: none;
+  user-select: none;
+}
+
+.keeper-comms-diagnostics-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.keeper-comms-diagnostics-toggle::before {
+  content: ">";
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform 0.15s ease;
+  font-size: 11px;
+}
+
+.keeper-comms-diagnostics[open] > .keeper-comms-diagnostics-toggle::before {
+  transform: rotate(90deg);
+}
+
+.keeper-comms-diagnostics-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+/* Shell wrapper for conversation panel inside comms section */
+.keeper-conversation-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

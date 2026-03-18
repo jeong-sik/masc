@@ -3,7 +3,7 @@
   flex-direction: column;
   gap: 10px;
   min-height: 200px;
-  max-height: 360px;
+  max-height: 480px;
   overflow: auto;
   padding: 12px;
   border-radius: 14px;
@@ -302,7 +302,7 @@
 }
 
 .chat-composer-input {
-  min-height: 112px;
+  min-height: 72px;
 }
 
 .chat-composer-actions {

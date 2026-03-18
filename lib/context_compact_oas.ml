@@ -17,12 +17,13 @@
 open Printf
 
 (* ================================================================ *)
-(* Strategy Type (mirrors Context_manager.compaction_strategy)       *)
+(* Strategy Type (shared via Compaction_types)                       *)
 (* ================================================================ *)
 
-(** Local copy of compaction strategies to avoid Context_manager dependency.
-    Must stay in sync with Context_manager.compaction_strategy. *)
-type strategy =
+(** Re-export from [Compaction_types] for backward compatibility.
+    Consumers that used [Context_compact_oas.PruneToolOutputs] etc.
+    continue to work without changes. *)
+type strategy = Compaction_types.compaction_strategy =
   | PruneToolOutputs
   | MergeContiguous
   | DropLowImportance

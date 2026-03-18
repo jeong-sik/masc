@@ -388,6 +388,9 @@ module Trpg_actor_match = Trpg_actor_match
 module Autoresearch = Autoresearch
 module Tool_autoresearch = Tool_autoresearch
 
+(* Compaction strategy type — shared SSOT *)
+module Compaction_types = Compaction_types
+
 (* OAS Integration — Agent SDK v0.24+ bridge *)
 module Oas_events = Oas_events
 module Oas_checkpoint_bridge = Oas_checkpoint_bridge

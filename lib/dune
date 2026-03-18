@@ -549,6 +549,7 @@
    llm_provider_oas
    llm_response_cache
    context_scoring
+   compaction_types
    context_manager
    context_compact_oas
    verifier
@@ -557,6 +558,9 @@
    succession_oas
    perpetual_loop
    perpetual_loop_types
+   perpetual_oas_state
+   perpetual_oas_hooks
+   perpetual_oas_build
    perpetual_oas
    procedural_memory
    oas_events
@@ -795,6 +799,9 @@
   autoresearch_types
   backend_eio_compression
   perpetual_loop_types
+  perpetual_oas_state
+  perpetual_oas_hooks
+  perpetual_oas_build
   room_multi
   dashboard_proof_helpers
   keeper_alerting_path)

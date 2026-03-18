@@ -632,9 +632,11 @@ let list_org_rooms ~org_id : Yojson.Safe.t =
               ("error", `String (Printf.sprintf "Fetch stopped: %s" rooms_url));
             ]
         with exn ->
+          Log.Misc.error "federation remote room list error: %s"
+            (Printexc.to_string exn);
           `Assoc [
             ("success", `Bool false);
-            ("error", `String (Printf.sprintf "Remote room list error: %s" (Printexc.to_string exn)));
+            ("error", `String "Remote room list fetch failed (internal error)");
           ])
 
 (** Cross-room message type *)

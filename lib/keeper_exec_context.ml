@@ -594,9 +594,11 @@ let run_proactive_generation
          let output =
            try execute_keeper_tool_call ~config ~meta ~ctx_work tc
            with exn ->
+             Log.Keeper.error "tool exec failed (%s): %s"
+               tc.call_name (Printexc.to_string exn);
              Yojson.Safe.to_string
                (`Assoc [
-                 ("error", `String (Printexc.to_string exn));
+                 ("error", `String "Tool execution failed (internal error)");
                  ("tool", `String tc.call_name);
                ])
          in

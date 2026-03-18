@@ -273,7 +273,11 @@ let parse_iso_timestamp iso =
             Unix.tm_isdst = false;
           }
         in
-        Some (fst (Unix.mktime tm)))
+        let local_epoch, _ = Unix.mktime tm in
+        let utc_of_local = Unix.gmtime local_epoch in
+        let utc_as_local, _ = Unix.mktime utc_of_local in
+        let tz_offset = local_epoch -. utc_as_local in
+        Some (local_epoch +. tz_offset))
   with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
 
 let stop_words =

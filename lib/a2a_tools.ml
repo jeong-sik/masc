@@ -140,6 +140,10 @@ type subscription = {
 (* Global subscription store *)
 let subscriptions : (string, subscription) Hashtbl.t = Hashtbl.create 16
 
+(* Mutex protecting subscriptions, event_buffers, subscriptions_file,
+   and heartbeat snapshot tables from concurrent fiber access. *)
+let a2a_mutex = Eio.Mutex.create ()
+
 (* Persistence file path - set by init *)
 let subscriptions_file = ref ""
 
@@ -182,8 +186,9 @@ let subscription_of_json (json : Yojson.Safe.t) : subscription option =
     Log.Misc.warn "subscription_of_json: %s" msg;
     None
 
-(** Save subscriptions to file *)
-let save_subscriptions () =
+(** Save subscriptions to file.
+    Must be called under [a2a_mutex] — callers are responsible. *)
+let save_subscriptions_unlocked () =
   if !subscriptions_file = "" then ()
   else
     let subs = Hashtbl.fold (fun _k v acc -> subscription_to_json v :: acc) subscriptions [] in
@@ -204,15 +209,17 @@ let load_subscriptions () =
       let module U = Yojson.Safe.Util in
       let subs = try json |> U.member "subscriptions" |> U.to_list
                  with U.Type_error _ -> [] in
-      List.iter (fun j ->
-        match subscription_of_json j with
-        | Some sub -> Hashtbl.replace subscriptions sub.id sub
-        | None -> ()
-      ) subs
+      Eio.Mutex.use_rw ~protect:true a2a_mutex (fun () ->
+        List.iter (fun j ->
+          match subscription_of_json j with
+          | Some sub -> Hashtbl.replace subscriptions sub.id sub
+          | None -> ()
+        ) subs)
 
 (** Initialize A2A tools with MASC directory *)
 let init ~masc_dir =
-  subscriptions_file := Filename.concat masc_dir "subscriptions.json";
+  Eio.Mutex.use_rw ~protect:true a2a_mutex (fun () ->
+    subscriptions_file := Filename.concat masc_dir "subscriptions.json");
   load_subscriptions ()
 
 (** Event record for buffering *)
@@ -300,10 +307,12 @@ let next_heartbeat_snapshot_seq () =
   !heartbeat_snapshot_seq
 
 let latest_heartbeat_task agent =
-  Hashtbl.find_opt latest_heartbeat_tasks agent
+  Eio.Mutex.use_ro a2a_mutex (fun () ->
+    Hashtbl.find_opt latest_heartbeat_tasks agent)
 
 let latest_heartbeat_result agent =
-  Hashtbl.find_opt latest_heartbeat_results agent
+  Eio.Mutex.use_ro a2a_mutex (fun () ->
+    Hashtbl.find_opt latest_heartbeat_results agent)
 
 let remote_agent_card_paths =
   [ "/.well-known/agent.json"; "/.well-known/agent-card.json" ]
@@ -559,8 +568,9 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
       event_types = List.rev event_types;
       created_at = now_iso8601 ();
     } in
-    Hashtbl.add subscriptions sub_id sub;
-    save_subscriptions ();
+    Eio.Mutex.use_rw ~protect:true a2a_mutex (fun () ->
+      Hashtbl.add subscriptions sub_id sub;
+      save_subscriptions_unlocked ());
     Ok (`Assoc [
       ("subscription_id", `String sub_id);
       ("agent_filter", match agent_filter with
@@ -577,40 +587,42 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
     @param subscription_id Subscription ID to remove
 *)
 let unsubscribe ~subscription_id : (Yojson.Safe.t, string) result =
-  if Hashtbl.mem subscriptions subscription_id then begin
-    Hashtbl.remove subscriptions subscription_id;
-    (* Also clean up buffered events *)
-    Hashtbl.remove event_buffers subscription_id;
-    save_subscriptions ();
-    Ok (`Assoc [
-      ("unsubscribed", `Bool true);
-      ("subscription_id", `String subscription_id);
-    ])
-  end else
-    Error (Printf.sprintf "Subscription '%s' not found" subscription_id)
+  Eio.Mutex.use_rw ~protect:true a2a_mutex (fun () ->
+    if Hashtbl.mem subscriptions subscription_id then begin
+      Hashtbl.remove subscriptions subscription_id;
+      (* Also clean up buffered events *)
+      Hashtbl.remove event_buffers subscription_id;
+      save_subscriptions_unlocked ();
+      Stdlib.Ok (`Assoc [
+        ("unsubscribed", `Bool true);
+        ("subscription_id", `String subscription_id);
+      ])
+    end else
+      Stdlib.Error (Printf.sprintf "Subscription '%s' not found" subscription_id))
 
 (** List active subscriptions *)
 let list_subscriptions () : Yojson.Safe.t =
-  let subs = Hashtbl.fold (fun _k v acc ->
-    let sub_json = `Assoc [
-      ("id", `String v.id);
-      ("agent_filter", match v.agent_filter with
-        | None -> `String "*"
-        | Some a -> `String a);
-      ("events", `List (List.map (fun e -> `String (show_event_type e)) v.event_types));
-      ("created_at", `String v.created_at);
-      ("buffered_count", `Int (
-        match Hashtbl.find_opt event_buffers v.id with
-        | None -> 0
-        | Some events -> List.length events
-      ));
-    ] in
-    sub_json :: acc
-  ) subscriptions [] in
-  `Assoc [
-    ("count", `Int (List.length subs));
-    ("subscriptions", `List subs);
-  ]
+  Eio.Mutex.use_ro a2a_mutex (fun () ->
+    let subs = Hashtbl.fold (fun _k v acc ->
+      let sub_json = `Assoc [
+        ("id", `String v.id);
+        ("agent_filter", match v.agent_filter with
+          | None -> `String "*"
+          | Some a -> `String a);
+        ("events", `List (List.map (fun e -> `String (show_event_type e)) v.event_types));
+        ("created_at", `String v.created_at);
+        ("buffered_count", `Int (
+          match Hashtbl.find_opt event_buffers v.id with
+          | None -> 0
+          | Some events -> List.length events
+        ));
+      ] in
+      sub_json :: acc
+    ) subscriptions [] in
+    `Assoc [
+      ("count", `Int (List.length subs));
+      ("subscriptions", `List subs);
+    ])
 
 (** Poll buffered events for a subscription
 
@@ -626,33 +638,35 @@ let list_subscriptions () : Yojson.Safe.t =
 *)
 let poll_events ~subscription_id ?(clear = true) ()
     : (Yojson.Safe.t, string) result =
-  if not (Hashtbl.mem subscriptions subscription_id) then
-    Error (Printf.sprintf "Subscription '%s' not found" subscription_id)
-  else
-    let events = match Hashtbl.find_opt event_buffers subscription_id with
-      | None -> []
-      | Some events -> events
-    in
-    (* Optionally clear buffer *)
-    if clear then Hashtbl.replace event_buffers subscription_id [];
-    (* Convert to JSON *)
-    let events_json = List.map (fun e ->
-      `Assoc [
-        ("type", `String (show_event_type e.event_type));
-        ("agent", `String e.agent);
-        ("data", e.data);
-        ("timestamp", `Float e.timestamp);
-      ]
-    ) events in
-    Ok (`Assoc [
-      ("subscription_id", `String subscription_id);
-      ("event_count", `Int (List.length events));
-      ("events", `List events_json);
-      ("cleared", `Bool clear);
-    ])
+  Eio.Mutex.use_rw ~protect:true a2a_mutex (fun () ->
+    if not (Hashtbl.mem subscriptions subscription_id) then
+      Stdlib.Error (Printf.sprintf "Subscription '%s' not found" subscription_id)
+    else
+      let events = match Hashtbl.find_opt event_buffers subscription_id with
+        | None -> []
+        | Some events -> events
+      in
+      (* Optionally clear buffer *)
+      if clear then Hashtbl.replace event_buffers subscription_id [];
+      (* Convert to JSON *)
+      let events_json = List.map (fun e ->
+        `Assoc [
+          ("type", `String (show_event_type e.event_type));
+          ("agent", `String e.agent);
+          ("data", e.data);
+          ("timestamp", `Float e.timestamp);
+        ]
+      ) events in
+      Stdlib.Ok (`Assoc [
+        ("subscription_id", `String subscription_id);
+        ("event_count", `Int (List.length events));
+        ("events", `List events_json);
+        ("cleared", `Bool clear);
+      ]))
 
-(** Buffer an event for a subscription (with max limit enforcement) *)
-let buffer_event sub_id event =
+(** Buffer an event for a subscription (with max limit enforcement).
+    Must be called under [a2a_mutex] — callers are responsible. *)
+let buffer_event_unlocked sub_id event =
   let current = match Hashtbl.find_opt event_buffers sub_id with
     | None -> []
     | Some events -> events
@@ -671,38 +685,43 @@ let buffer_event sub_id event =
     Now also buffers events for polling in addition to SSE broadcast *)
 let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Safe.t) : unit =
   let timestamp = Time_compat.now () in
-  Hashtbl.iter (fun _id sub ->
-    (* Check agent filter *)
-    let agent_match = match sub.agent_filter with
-      | None -> true
-      | Some filter -> filter = "*" || filter = agent
-          || event_type = HeartbeatTask (* System event: bypass agent filter *)
-    in
-    (* Check event type *)
-    let event_match = List.mem event_type sub.event_types in
-    if agent_match && event_match then begin
-      (* Buffer event for polling *)
-      let event = { event_type; agent; data; timestamp } in
-      buffer_event sub.id event;
-
-      (* Push event as MCP JSON-RPC Notification (no id = notification) *)
-      let event_params = `Assoc [
-        ("type", `String (show_event_type event_type));
-        ("agent", `String agent);
-        ("data", data);
-        ("timestamp", `Float timestamp);
-        ("subscription_id", `String sub.id);
-      ] in
-      let mcp_notification = `Assoc [
-        ("jsonrpc", `String "2.0");
-        ("method", `String "masc/event");
-        ("params", event_params);
-      ] in
-      Sse.broadcast mcp_notification;
-      Log.debug ~ctx:"a2a" "Event %s from %s buffered+SSE (sub: %s)"
-        (show_event_type event_type) agent sub.id
-    end
-  ) subscriptions
+  (* Collect matching subscriptions under read lock, then broadcast outside *)
+  let to_notify =
+    Eio.Mutex.use_rw ~protect:true a2a_mutex (fun () ->
+      let acc = ref [] in
+      Hashtbl.iter (fun _id sub ->
+        let agent_match = match sub.agent_filter with
+          | None -> true
+          | Some filter -> filter = "*" || filter = agent
+              || event_type = HeartbeatTask
+        in
+        let event_match = List.mem event_type sub.event_types in
+        if agent_match && event_match then begin
+          let event = { event_type; agent; data; timestamp } in
+          buffer_event_unlocked sub.id event;
+          acc := sub.id :: !acc
+        end
+      ) subscriptions;
+      !acc)
+  in
+  (* SSE broadcast outside mutex to avoid holding the lock during I/O *)
+  List.iter (fun sub_id ->
+    let event_params = `Assoc [
+      ("type", `String (show_event_type event_type));
+      ("agent", `String agent);
+      ("data", data);
+      ("timestamp", `Float timestamp);
+      ("subscription_id", `String sub_id);
+    ] in
+    let mcp_notification = `Assoc [
+      ("jsonrpc", `String "2.0");
+      ("method", `String "masc/event");
+      ("params", event_params);
+    ] in
+    Sse.broadcast mcp_notification;
+    Log.debug ~ctx:"a2a" "Event %s from %s buffered+SSE (sub: %s)"
+      (show_event_type event_type) agent sub_id
+  ) to_notify
 
 (** {1 Heartbeat Task Events — Soul + Tool Loop Pattern}
 
@@ -731,16 +750,17 @@ let emit_heartbeat_task
     ?(decision_confidence : float option)
     ?(auth_token : string option)
     () : unit =
-  Hashtbl.replace latest_heartbeat_tasks agent
-    {
-      seq = next_heartbeat_snapshot_seq ();
-      goal;
-      context;
-      worker_mode;
-      allowed_tools;
-      decision_reason;
-      created_at = now_iso8601 ();
-    };
+  Eio.Mutex.use_rw ~protect:true a2a_mutex (fun () ->
+    Hashtbl.replace latest_heartbeat_tasks agent
+      {
+        seq = next_heartbeat_snapshot_seq ();
+        goal;
+        context;
+        worker_mode;
+        allowed_tools;
+        decision_reason;
+        created_at = now_iso8601 ();
+      });
   let data = `Assoc ([
     ("agent", `String agent);
     ("goal", `String goal);
@@ -825,19 +845,20 @@ let submit_heartbeat_result
   (* Broadcast completion event *)
   (match result with
    | Ok _ ->
-       Hashtbl.replace latest_heartbeat_results agent
-         {
-           seq = next_heartbeat_snapshot_seq ();
-           status = normalized_status;
-           summary;
-           worker_name;
-           tool_call_count;
-           tool_names;
-           decision_reason;
-           decision_confidence;
-           failure_reason;
-           updated_at = now_iso8601 ();
-         };
+       Eio.Mutex.use_rw ~protect:true a2a_mutex (fun () ->
+         Hashtbl.replace latest_heartbeat_results agent
+           {
+             seq = next_heartbeat_snapshot_seq ();
+             status = normalized_status;
+             summary;
+             worker_name;
+             tool_call_count;
+             tool_names;
+             decision_reason;
+             decision_confidence;
+             failure_reason;
+             updated_at = now_iso8601 ();
+           });
        notify_event ~event_type:Completion ~agent
          ~data:(`Assoc [
            ("worker", `String worker_name);

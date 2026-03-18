@@ -445,9 +445,19 @@ let compute_live_done_delta (config : Room.config)
     (session : Team_session_types.session) =
   let backlog = Room.read_backlog config in
   let current_done = Team_session_types.done_counts_from_backlog backlog in
+  (* Include backlog assignee names alongside session agent names.
+     Room.join generates nicknames (e.g. "owner-jolly-llama") stored in
+     session.agent_names, but task assignees use the raw name ("owner").
+     Merging both sets ensures delta counts are not lost to name mismatch. *)
+  let agents =
+    Team_session_types.dedup_strings
+      (session.agent_names
+       @ List.map fst current_done
+       @ List.map fst session.baseline_done_counts)
+  in
   let deltas =
     Team_session_types.done_delta_by_agent ~baseline:session.baseline_done_counts
-      ~current:current_done ~agents:session.agent_names
+      ~current:current_done ~agents
   in
   let done_total = List.fold_left (fun acc (_, n) -> acc + n) 0 deltas in
   (deltas, done_total)

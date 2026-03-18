@@ -1,7 +1,7 @@
 {
   "version": 1,
   "counts": {
-    "lib_failwith": 21,
+    "lib_failwith": 22,
     "lib_list_hd": 16,
     "lib_list_tl": 4,
     "lib_option_get": 0,

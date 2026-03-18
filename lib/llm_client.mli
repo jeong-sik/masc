@@ -10,10 +10,12 @@
 
     @since 2.61.0 *)
 
-(** {1 Provider Types} *)
+(** {1 Provider Types}
 
-(** Supported LLM providers. *)
-type provider =
+    All types are re-exported from {!Llm_types} to ensure nominal
+    equality across [Llm_client], [Llm_types], and [Llm_provider_oas]. *)
+
+type provider = Llm_types.provider =
   | Llama
   | Claude
   | OpenAI
@@ -22,50 +24,40 @@ type provider =
   | OpenRouter
   | Custom of string
 
-(** Model specification — everything needed to call a specific model. *)
-type model_spec = {
+type model_spec = Llm_types.model_spec = {
   provider : provider;
-  model_id : string;           (** e.g. "glm-4.7-flash", "claude-opus-4-6" *)
-  max_context : int;           (** Max context window in tokens *)
-  api_url : string;            (** Base API URL *)
-  api_key_env : string option; (** Env var name for API key *)
-  cost_per_1k_input : float;   (** USD per 1K input tokens *)
-  cost_per_1k_output : float;  (** USD per 1K output tokens *)
+  model_id : string;
+  max_context : int;
+  api_url : string;
+  api_key_env : string option;
+  cost_per_1k_input : float;
+  cost_per_1k_output : float;
 }
 
 (** {1 Message Types} *)
 
-(** Role in a conversation. *)
-type role = Agent_sdk.Types.role = System | User | Assistant | Tool
+type role = Llm_types.role = System | User | Assistant | Tool
+type message = Llm_types.message
 
-(** A single message in a conversation.
-    [content] uses {!Agent_sdk.Types.content_block} list for OAS type convergence. *)
-type message = Agent_sdk.Types.message
-
-(** Tool/function definition for function calling. *)
-type tool_def = {
+type tool_def = Llm_types.tool_def = {
   tool_name : string;
   tool_description : string;
-  parameters : Yojson.Safe.t;  (** JSON Schema for parameters *)
+  parameters : Yojson.Safe.t;
 }
 
-(** A tool call requested by the model. *)
-type tool_call = {
+type tool_call = Llm_types.tool_call = {
   call_id : string;
   call_name : string;
-  call_arguments : string;     (** JSON string of arguments *)
+  call_arguments : string;
 }
 
-(** Token usage — unified with OAS api_usage. *)
-type token_usage = Agent_sdk.Types.api_usage
+type token_usage = Llm_types.token_usage
 
-(** Compute total tokens (input + output). *)
 val total_tokens : token_usage -> int
 
 (** {1 Request/Response} *)
 
-(** Completion request. *)
-type completion_request = {
+type completion_request = Llm_types.completion_request = {
   model : model_spec;
   messages : message list;
   temperature : float;
@@ -74,10 +66,7 @@ type completion_request = {
   response_format : [ `Text | `Json ];
 }
 
-(** Completion response.
-    [content] is a list of {!Agent_sdk.Types.content_block} for type convergence
-    with OAS api_response. Use {!text_of_response} to extract text. *)
-type completion_response = {
+type completion_response = Llm_types.completion_response = {
   content : Agent_sdk.Types.content_block list;
   tool_calls : tool_call list;
   usage : token_usage;

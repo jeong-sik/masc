@@ -682,6 +682,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                 ("trace_id", `String updated.trace_id);
                                 ("generation", `Int updated.generation);
                                 ("model_used", `String model_used);
+                                ("llm_backend", `String "oas");
                                 ( "usage",
                                   `Assoc
                                     [

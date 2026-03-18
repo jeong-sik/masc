@@ -298,7 +298,7 @@ let build_successor_prompt (h : handover_record) ~additional_instructions : stri
 Begin work now.|} dna instructions
 
 (** Claim a handover and spawn the successor agent *)
-let claim_and_spawn ~sw ~fs ~proc_mgr config ~handover_id ~agent_name ?additional_instructions ?timeout_seconds () 
+let claim_and_spawn ~sw ~fs ~proc_mgr:_ config ~handover_id ~agent_name ?additional_instructions ?timeout_seconds () 
     : (Spawn_eio.spawn_result, string) result =
   match claim_handover ~fs config ~handover_id ~agent_name with
   | Error e -> Error e
@@ -306,7 +306,6 @@ let claim_and_spawn ~sw ~fs ~proc_mgr config ~handover_id ~agent_name ?additiona
       let prompt = build_successor_prompt h ~additional_instructions in
       let result = Spawn_eio.spawn
         ~sw
-        ~proc_mgr
         ~agent_name
         ~prompt
         ?timeout_seconds

@@ -57,9 +57,9 @@ let spawn_eio_to_spawn (r : Spawn_eio.spawn_result) : Spawn.spawn_result =
 (** Create non-blocking spawn_fn when Eio context is available *)
 let make_spawn_fn ~ctx ~agent_name ~timeout_seconds : (prompt:string -> Spawn.spawn_result) =
   match ctx.sw, ctx.proc_mgr with
-  | Some sw, Some pm ->
+  | Some sw, Some _pm ->
       (fun ~prompt ->
-        let result = Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name ~prompt
+        let result = Spawn_eio.spawn ~sw ~agent_name ~prompt
           ~timeout_seconds ~room_config:ctx.config ()
         in
         spawn_eio_to_spawn result)

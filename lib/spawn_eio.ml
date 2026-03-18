@@ -7,15 +7,6 @@
 
 module Oas = Agent_sdk
 
-(** Spawn configuration for an agent *)
-type spawn_config = {
-  agent_name: string;
-  command: string;
-  timeout_seconds: int;
-  working_dir: string option;
-  mcp_tools: string list;
-}
-
 (** Structured termination reason for subagent lifecycle tracking *)
 type termination_reason =
   | Task_completed
@@ -190,7 +181,7 @@ let make_error_result ~agent_name ~start_time ~exit_code ~output ~timeout_second
     - When room_config is provided, loads institution memory and injects it
     - New agents inherit: mission, values, patterns, onboarding steps
 *)
-let spawn ~sw ~proc_mgr:_ ~agent_name ~prompt ?timeout_seconds ?working_dir
+let spawn ~sw ~agent_name ~prompt ?timeout_seconds ?working_dir
     ?room_config ?runtime_agent_name ?runtime_model ?runtime_role
     ?runtime_session_id ?runtime_selection_note ?worker_run_id ?worker_class ?worker_size
     ?execution_scope ?thinking_enabled ?max_turns ?model_override:_ () : spawn_result =

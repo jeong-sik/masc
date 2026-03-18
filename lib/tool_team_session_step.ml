@@ -60,7 +60,7 @@ let execute_spawn_pipeline
               in
               fail_all_prepared prepared_spawns ~error:msg;
               Some (`Assoc [ ("error", `String msg) ])
-          | Some pm ->
+          | Some _pm ->
               let rec ensure_all = function
                 | [] -> Ok ()
                 | prepared :: rest -> (
@@ -81,7 +81,7 @@ let execute_spawn_pipeline
                | Ok () ->
                    let execute_spawn index prepared =
                      let spawn_result =
-                       Spawn_eio.spawn ~sw:ctx.sw ~proc_mgr:pm
+                       Spawn_eio.spawn ~sw:ctx.sw
                          ~agent_name:prepared.spec.spawn_agent
                          ~prompt:prepared.spec.spawn_prompt
                          ~timeout_seconds:

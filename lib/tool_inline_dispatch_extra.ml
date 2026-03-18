@@ -155,9 +155,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           match state.Mcp_server.proc_mgr with
           | None ->
               Some (false, "Process manager not available for mitosis spawn")
-          | Some pm ->
+          | Some _pm ->
               let spawn_fn ~prompt =
-                let result = Spawn_eio.spawn ~sw ~proc_mgr:pm ~agent_name:target_agent
+                let result = Spawn_eio.spawn ~sw ~agent_name:target_agent
                   ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds
                   ~room_config:state.Mcp_server.room_config () in
                 { Spawn.success = result.Spawn_eio.success;

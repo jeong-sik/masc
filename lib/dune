@@ -550,6 +550,7 @@
    llm_types
    llm_eio_env
    llm_provider_bridge
+   llm_discovery_cache
    llm_orchestration
    llm_client
    llm_provider_oas

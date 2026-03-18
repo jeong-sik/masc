@@ -266,10 +266,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               ) specs
             in
             let run_cascade_batch requests =
-              match timeout_sec_opt with
-              | Some timeout_sec ->
-                  Llm_orchestration.cascade ~timeout_sec requests
-              | None -> Llm_orchestration.cascade requests
+              Keeper_oas_adapter.run_cascade ?timeout_sec:timeout_sec_opt requests
             in
             (* Streaming-aware cascade: when on_text_delta is provided,
                try streaming the first request. Text deltas are forwarded
@@ -287,19 +284,11 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         delta_cb text
                     | _ -> ()
                   in
-                  (match
-                     Llm_orchestration.call_provider_stream
-                       ?timeout_sec:timeout_f
-                       first_req
-                       ~on_event:stream_on_event
-                   with
-                   | Ok _ as ok -> ok
-                   | Error e ->
-                       Log.Keeper.warn
-                         "keeper stream: streaming failed (%s), \
-                          falling back to batch"
-                         e;
-                       run_cascade_batch requests)
+                  Keeper_oas_adapter.run_cascade_stream
+                    ?timeout_sec:timeout_f
+                    ~on_event:stream_on_event
+                    first_req
+                    ~fallback:requests
               | _ -> run_cascade_batch requests
             in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in

@@ -92,7 +92,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               specs
           in
           let (cascade_result, cascade_latency) = Llm_types.timed (fun () ->
-              Llm_orchestration.cascade requests) in
+              Keeper_oas_adapter.run_cascade requests) in
           match cascade_result with
           | Error e -> Error e
           | Ok resp ->
@@ -262,7 +262,7 @@ let run_social_board_event_turn
               specs
           in
           let (cascade_result0, latency0) = Llm_types.timed (fun () ->
-              Llm_orchestration.cascade requests) in
+              Keeper_oas_adapter.run_cascade requests) in
           match cascade_result0 with
           | Error e -> Error e
           | Ok resp0 ->
@@ -332,7 +332,7 @@ let run_social_board_event_turn
                       specs
                   in
                   let (followup_result, round_latency) = Llm_types.timed (fun () ->
-                      Llm_orchestration.cascade followup_requests) in
+                      Keeper_oas_adapter.run_cascade followup_requests) in
                   match followup_result with
                   | Error _ ->
                       ( Llm_types.text_of_response last_resp,

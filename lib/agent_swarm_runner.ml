@@ -31,8 +31,8 @@ let default_config = {
 }
 
 let local_qwen_config () : Provider.config =
-  { provider = Local { base_url = "http://127.0.0.1:8085" };
-    model_id = "qwen3.5-35b-a3b-ud-q8-xl";
+  { provider = Local { base_url = Env_config_runtime.Llama.server_url };
+    model_id = Env_config_runtime.Llama.default_model;
     api_key_env = "DUMMY_KEY" }
 
 let local_mlx_config () : Provider.config =

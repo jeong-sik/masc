@@ -118,23 +118,6 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = [
   },
 ]
 
-// Legacy compatibility: old section types used by SideRail
-export type DashboardNavGroupLegacy = 'now' | 'why' | 'act' | 'lab'
-
-export interface DashboardNavSection {
-  id: DashboardNavGroupLegacy
-  label: string
-  description: string
-}
-
-// Kept for backward compat — unused in the new nav but referenced by semantic-layer
-export const DASHBOARD_NAV_SECTIONS: DashboardNavSection[] = [
-  { id: 'now', label: '\uC9C0\uAE08', description: '\uD604\uC7AC \uC0C1\uD0DC' },
-  { id: 'why', label: '\uC774\uC720', description: '\uADFC\uAC70\uC640 \uB9E5\uB77D' },
-  { id: 'act', label: '\uAC1C\uC785', description: '\uC6B4\uC601 \uC561\uC158' },
-  { id: 'lab', label: '\uC2E4\uD5D8', description: '\uC2E4\uD5D8 \uD654\uBA74' },
-]
-
 // Surface lookup by tab id
 export function surfaceForTab(tabId: TabId): SurfaceId {
   for (const surface of DASHBOARD_SURFACES) {

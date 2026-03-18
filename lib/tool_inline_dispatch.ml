@@ -979,5 +979,3 @@ Call masc_listen again to continue listening.
         ]))
 
   | _ -> Tool_inline_dispatch_extra.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name
-
-let schemas = Tool_schemas_inline.schemas

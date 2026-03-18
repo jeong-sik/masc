@@ -302,16 +302,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_hearths" | "masc_board_migrate" ->
       Some (Tool_board.handle_tool name arguments)
 
-  | "lodge_heartbeat" | "lodge_classify" | "lodge_react" | "lodge_cycle"
-  | "lodge_discussion" | "lodge_orchestrate" | "lodge_auto_chain"
-  | "lodge_evolve" | "lodge_spawn" | "lodge_agents"
-  | "lodge_agent_patrol" | "lodge_autonomous_loop"
-  | "lodge_propose_project" | "lodge_join_project" | "lodge_share_code"
-  | "lodge_research" | "lodge_profile"
-  | "lodge_search" | "lodge_comment_like" | "lodge_progress" ->
-      (match state.Mcp_server.net with
-       | Some net -> Some (Tool_lodge.handle_tool ~net name arguments)
-       | None -> Some (false, "lodge tools require net (server_state.net is None)"))
+  (* Lodge tools removed -- Lodge heartbeat deprecated (#1596) *)
 
   | "masc_convo_start" ->
       let topic = arg_get_string "topic" "" in

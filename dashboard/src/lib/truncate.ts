@@ -1,6 +1,4 @@
 // Unified text truncation utilities.
-// Consolidates truncate/trimText from mission-utils, goals, agent-observatory,
-// agent-motion, war-room-panels, war-room.
 
 /** Truncate text, collapsing whitespace. Returns null for empty input. Uses ellipsis. */
 export function trimText(value: string | null | undefined, max = 120): string | null {

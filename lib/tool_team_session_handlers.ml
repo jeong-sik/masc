@@ -159,7 +159,7 @@ let step_deps : Tool_team_session_step.step_deps =
     float_opt_to_json;
     truncate_for_event;
     make_worker_run_id;
-    derived_llama_runtime_actor;
+    derived_local_runtime_actor;
     is_local_spawn_agent;
     effective_execution_scope_of_spec;
     worker_size_of_spec;

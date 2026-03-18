@@ -114,10 +114,10 @@ let runtime_port base_url =
 
 let runtime_id_of_base_url base_url =
   match runtime_port base_url with
-  | Some port -> sprintf "llama-%d" port
+  | Some port -> sprintf "local-%d" port
   | None ->
       let digest = Digest.string base_url |> Digest.to_hex in
-      sprintf "llama-%s" (String.sub digest 0 8)
+      sprintf "local-%s" (String.sub digest 0 8)
 
 let runtime_to_snapshot (runtime : runtime) =
   {

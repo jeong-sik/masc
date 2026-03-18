@@ -1,5 +1,5 @@
 [@@@warning "-32-33-69"]
-(** Tool_llama core — types, helpers, process discovery, model fetching. *)
+(** Tool_local_runtime core — types, helpers, process discovery, model fetching. *)
 
 open Types
 

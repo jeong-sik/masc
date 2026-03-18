@@ -120,17 +120,17 @@ let test_reconcile_failed_spawn_actor_detaches_without_turn () =
       ~planned_end_at:(now +. 120.0)
       ~fallback_policy:Team_session_types.Fallback_none ~model_cascade:[]
   in
-  ignore (unwrap_ok (Tool_team_session.ensure_session_actor config session.session_id "llama-local-failed"));
+  ignore (unwrap_ok (Tool_team_session.ensure_session_actor config session.session_id "local-failed"));
   let outcome =
     unwrap_ok
       (Tool_team_session.reconcile_failed_spawn_actor config session.session_id
-         "llama-local-failed")
+         "local-failed")
   in
   Alcotest.(check string) "failed spawn actor detached" "detached"
     (match outcome with `Detached -> "detached" | `Retained -> "retained");
   let reloaded = Team_session_store.load_session config session.session_id |> Option.get in
   Alcotest.(check bool) "actor removed from participants" false
-    (List.mem "llama-local-failed" reloaded.agent_names);
+    (List.mem "local-failed" reloaded.agent_names);
   let detached_events =
     Team_session_store.read_events config session.session_id
     |> List.filter (fun json ->
@@ -154,24 +154,24 @@ let test_reconcile_failed_spawn_actor_retains_after_turn () =
   ignore
     (unwrap_ok
        (Tool_team_session.ensure_session_actor config session_id
-          "llama-local-turned"));
+          "local-turned"));
   ignore
     (unwrap_ok
        (Team_session_engine_eio.record_turn ~config ~session_id
-          ~actor:"llama-local-turned" ~turn_kind:Team_session_types.Turn_note
+          ~actor:"local-turned" ~turn_kind:Team_session_types.Turn_note
           ~message:(Some "worker left one turn before failing")
           ~target_agent:None ~task_title:None ~task_description:None
           ~task_priority:3));
   let outcome =
     unwrap_ok
       (Tool_team_session.reconcile_failed_spawn_actor config session_id
-         "llama-local-turned")
+         "local-turned")
   in
   Alcotest.(check string) "actor retained after emitting a turn" "retained"
     (match outcome with `Detached -> "detached" | `Retained -> "retained");
   let reloaded = Team_session_store.load_session config session_id |> Option.get in
   Alcotest.(check bool) "actor still authorized" true
-    (List.mem "llama-local-turned" reloaded.agent_names);
+    (List.mem "local-turned" reloaded.agent_names);
   let detached_events =
     Team_session_store.read_events config session_id
     |> List.filter (fun json ->
@@ -201,7 +201,7 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
         [
           ("actor", `String "tester");
           ("spawn_agent", `String "llama");
-          ("runtime_actor", `String "llama-local-failed");
+          ("runtime_actor", `String "local-failed");
           ("spawn_role", `String "implementer-a");
           ("spawn_model", `String "qwen3.5-35b-a3b-ud-q8-xl");
           ("success", `Bool false);
@@ -215,7 +215,7 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
     ~detail:
       (`Assoc
         [
-          ("actor", `String "llama-local-failed");
+          ("actor", `String "local-failed");
           ("reason", `String "spawn_failed_without_turn");
           ("agent_count", `Int 1);
           ("ts_iso", `String (Types.now_iso ()));
@@ -285,7 +285,7 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
     List.hd detached_actor_roster |> Yojson.Safe.Util.member "reason"
     |> Yojson.Safe.Util.to_string
   in
-  Alcotest.(check string) "proof failed runtime actor recorded" "llama-local-failed"
+  Alcotest.(check string) "proof failed runtime actor recorded" "local-failed"
     failed_runtime_actor;
   Alcotest.(check string) "proof failed spawn role recorded" "implementer-a"
     failed_role;
@@ -339,7 +339,7 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
   Alcotest.(check bool) "markdown includes failed actor roster" true
     (try
        let _ =
-         Str.search_forward (Str.regexp_string "llama-local-failed | agent=llama | role=implementer-a")
+         Str.search_forward (Str.regexp_string "local-failed | agent=llama | role=implementer-a")
            proof_md 0
        in
        true
@@ -347,7 +347,7 @@ let test_proof_exposes_failed_spawn_and_detach_counts () =
   Alcotest.(check bool) "markdown includes detached reason" true
     (try
        let _ =
-         Str.search_forward (Str.regexp_string "llama-local-failed | reason=spawn_failed_without_turn")
+         Str.search_forward (Str.regexp_string "local-failed | reason=spawn_failed_without_turn")
            proof_md 0
        in
        true
@@ -371,7 +371,7 @@ let test_report_and_proof_expose_empty_note_turn_evidence () =
         [
           ("turn_no", `Int 1);
           ("kind", `String "note");
-          ("actor", `String "llama-local-empty");
+          ("actor", `String "local-empty");
           ("message", `Null);
           ("ts_iso", `String (Types.now_iso ()));
         ]);
@@ -416,7 +416,7 @@ let test_report_and_proof_expose_empty_note_turn_evidence () =
   Alcotest.(check int) "proof empty note actors length" 1
     (List.length empty_note_turn_actors);
   Alcotest.(check string) "proof empty note actor recorded"
-    "llama-local-empty"
+    "local-empty"
     (List.hd empty_note_turn_actors |> Yojson.Safe.Util.to_string);
   let report_json_path = Team_session_store.report_json_path config session_id in
   let report_doc = Room_utils.read_json config report_json_path in
@@ -448,7 +448,7 @@ let test_report_and_proof_expose_empty_note_turn_evidence () =
   Alcotest.(check bool) "proof markdown includes empty actor" true
     (try
        let _ =
-         Str.search_forward (Str.regexp_string "- llama-local-empty") proof_md 0
+         Str.search_forward (Str.regexp_string "- local-empty") proof_md 0
        in
        true
      with Not_found -> false);

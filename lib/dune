@@ -410,8 +410,8 @@
    tool_verification
    tool_misc
    tool_agent_timeline
-   tool_llama
-   tool_llama_core
+   tool_local_runtime
+   tool_local_runtime_core
    tool_llm_catalog
    tool_board
    tool_command_plane

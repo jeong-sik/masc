@@ -82,7 +82,7 @@ type step_deps = {
   float_opt_to_json : float option -> Yojson.Safe.t;
   truncate_for_event : ?max_len:int -> string -> string;
   make_worker_run_id : unit -> string;
-  derived_llama_runtime_actor : session_id:string -> prompt:string -> string;
+  derived_local_runtime_actor : session_id:string -> prompt:string -> string;
   is_local_spawn_agent : string -> bool;
   effective_execution_scope_of_spec :
     spawn_spec -> Team_session_types.execution_scope option;

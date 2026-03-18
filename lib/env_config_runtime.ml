@@ -133,8 +133,11 @@ end
 
 (** {1 Local LLM Server Configuration} *)
 
+(** Local LLM runtime config.  Module kept as [Llama] for env-var
+    backward compatibility (LLAMA_SERVER_URL, LLAMA_DEFAULT_MODEL, etc.).
+    Rename to [Local_runtime] deferred to avoid breaking external consumers. *)
 module Llama = struct
-  (** OpenAI-compatible llama.cpp server URL *)
+  (** OpenAI-compatible local LLM server URL *)
   let server_url =
     get_string ~default:"http://127.0.0.1:8085" "LLAMA_SERVER_URL"
 

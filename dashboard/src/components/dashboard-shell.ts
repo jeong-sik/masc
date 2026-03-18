@@ -15,7 +15,7 @@ import { Governance } from './governance'
 import { Lab } from './lab'
 import { Live } from './live'
 import { Overview } from './overview/overview'
-import { AgentRoster } from './agent-roster'
+import { AgentsUnified } from './agents-unified'
 import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
 import {
@@ -189,7 +189,7 @@ export function TabContent() {
     case 'situation':
       return html`<${Mission} />`
     case 'agents':
-      return html`<${AgentRoster} />`
+      return html`<${AgentsUnified} />`
     case 'activity':
       return html`<${Live} />`
     case 'work': {

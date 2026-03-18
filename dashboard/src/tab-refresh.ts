@@ -31,6 +31,7 @@ export function refreshForTab(tab: string) {
   if (tab === 'agents') {
     refreshRoomTruth()
     refreshExecution()
+    refreshMissionSnapshot()
   }
 
   if (tab === 'activity') {

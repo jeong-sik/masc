@@ -29,6 +29,7 @@ import {
   taskDescription,
   taskPriority,
   taskTitle,
+  formatMessageContent,
 } from './helpers'
 import { selectPendingConfirmState } from '../../pending-confirm'
 
@@ -272,7 +273,7 @@ export function OpsRoomColumn() {
                   <strong>${message.from}</strong>
                   <span>${message.timestamp}</span>
                 </div>
-                <div class="ops-feed-content">${message.content}</div>
+                <div class="ops-feed-content">${formatMessageContent(message.content)}</div>
               </article>
             `)}
           </div>

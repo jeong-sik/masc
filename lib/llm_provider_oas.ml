@@ -24,12 +24,7 @@ open Llm_types
 (* Feature flag                                                      *)
 (* ================================================================ *)
 
-let use_oas_llm () =
-  match Sys.getenv_opt "MASC_USE_OAS_LLM" with
-  | Some v ->
-      let v = String.lowercase_ascii (String.trim v) in
-      v = "true" || v = "1" || v = "yes"
-  | None -> false
+let use_oas_llm () = true
 
 (* ================================================================ *)
 (* model_spec → Agent_sdk.Provider.config                           *)

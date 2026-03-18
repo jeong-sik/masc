@@ -22,9 +22,7 @@ open Printf
 (* Feature Flag                                                      *)
 (* ================================================================ *)
 
-let use_oas_checkpoint =
-  try Sys.getenv "MASC_USE_OAS_CHECKPOINT" = "true"
-  with Not_found -> false
+let use_oas_checkpoint = true
 
 (* ================================================================ *)
 (* DNA Scope — Custom scope for succession metadata in Context.t     *)

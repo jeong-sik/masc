@@ -180,3 +180,10 @@ let call ~cascade_name ~prompt
               else body))
   | Error (Llm_provider.Http_client.NetworkError { message }) ->
     Error (Printf.sprintf "[cascade] %s: %s" cascade_name message)
+
+(** Single-model completion via Llm_orchestration (cache + metrics + dispatch).
+    Thin proxy for callers migrating away from direct Llm_orchestration.complete.
+    Phase 3 will inline the logic when Llm_orchestration is deleted. *)
+let complete_request ?timeout_sec (req : Llm_types.completion_request)
+    : (Llm_provider.Types.api_response, string) result =
+  Llm_orchestration.complete ?timeout_sec req

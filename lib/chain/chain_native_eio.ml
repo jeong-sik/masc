@@ -309,7 +309,7 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
           response_format = `Text;
         }
       in
-      (match Llm_orchestration.complete ~timeout_sec req with
+      (match Llm_cascade.complete_request ~timeout_sec req with
       | Ok resp when trim (Llm_types.text_of_response resp) <> "" -> Ok (Llm_types.text_of_response resp)
       | Ok resp when Llm_types.has_tool_calls resp ->
           Ok (Yojson.Safe.to_string (llm_tool_calls_json (Llm_types.tool_calls_of_response resp)))

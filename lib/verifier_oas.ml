@@ -161,7 +161,7 @@ let verify ~(model : Llm_types.model_spec) (req : verification_request) : verdic
       tools = [];
       response_format = `Text;
     } in
-    match Llm_orchestration.complete completion_req with
+    match Llm_cascade.complete_request completion_req with
     | Ok resp -> parse_verdict (Llm_types.text_of_response resp)
     | Error e ->
       eprintf "[verifier] LLM call failed: %s (defaulting to WARN)\n%!" e;

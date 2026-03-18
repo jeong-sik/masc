@@ -286,23 +286,20 @@ let parse_session_judgment ~config ~generated_at ~generated_at_unix ~model_used 
   | _ -> None
 
 let compute_judgments ~facts_json =
-  let specs = Llm_cascade.get_cascade ~cascade_name:"operator_judge" () in
-  if specs = [] then Error "No operator_judge model is available."
-  else
-    let timeout_sec = Env_config.Llm.operator_judge_timeout_seconds in
-    let prompt = prompt_for_facts facts_json in
-    match
-      Llm_orchestration.run_prompt_cascade ~temperature:0.2 ~timeout_sec ~model_specs:specs
-        ~max_tokens:4096 ~prompt ()
-    with
-    | Error message -> Error message
-    | Ok response -> (
-        try Ok (response.Llm_provider.Types.model, Yojson.Safe.from_string (Llm_types.text_of_response response))
-        with
-        | Yojson.Json_error msg ->
-            Error (Printf.sprintf "Operator judge returned invalid JSON: %s" msg)
-        | exn ->
-            Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
+  let timeout_sec = Env_config.Llm.operator_judge_timeout_seconds in
+  let prompt = prompt_for_facts facts_json in
+  match
+    Llm_cascade.call ~cascade_name:"operator_judge" ~prompt ~temperature:0.2
+      ~timeout_sec ~max_tokens:4096 ()
+  with
+  | Error message -> Error message
+  | Ok result -> (
+      try Ok (result.Llm_cascade.llm_used, Yojson.Safe.from_string result.Llm_cascade.response)
+      with
+      | Yojson.Json_error msg ->
+          Error (Printf.sprintf "Operator judge returned invalid JSON: %s" msg)
+      | exn ->
+          Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
 let refresh_once ~(config : Room.config) ~build_facts =
   let st = get_state config.base_path in

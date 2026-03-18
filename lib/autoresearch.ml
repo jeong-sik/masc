@@ -694,7 +694,7 @@ let generate_code_change ~goal ~baseline ~history ~insights
       tools = [];
       response_format = `Text;
     } in
-    (match Llm_orchestration.complete ~timeout_sec:120 req with
+    (match Llm_cascade.complete_request ~timeout_sec:120 req with
     | Result.Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
     | Result.Ok resp -> parse_llm_code_response (Llm_types.text_of_response resp))
 

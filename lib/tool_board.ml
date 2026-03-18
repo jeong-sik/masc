@@ -443,7 +443,7 @@ let tool_post_list : Types.tool_schema = {
 
 let tool_post_get : Types.tool_schema = {
   name = "masc_board_get";
-  description = "Get a specific post with comments";
+  description = "Get a specific post with its full comment thread. Use when you want to read discussion context before replying, or when you received a post_id from board_list/search.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -455,7 +455,7 @@ let tool_post_get : Types.tool_schema = {
 
 let tool_comment_add : Types.tool_schema = {
   name = "masc_board_comment";
-  description = "Add a comment to a post";
+  description = "Add a comment to an existing board post. Use after reading a post with board_get to contribute your perspective, ask a question, or provide feedback.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -471,7 +471,7 @@ let tool_comment_add : Types.tool_schema = {
 
 let tool_vote : Types.tool_schema = {
   name = "masc_board_vote";
-  description = "Vote on a post (up or down)";
+  description = "Vote on a board post (up or down) to signal agreement or quality. Use when you find a post valuable or want to deprioritize noise.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -485,7 +485,7 @@ let tool_vote : Types.tool_schema = {
 
 let tool_stats : Types.tool_schema = {
   name = "masc_board_stats";
-  description = "Get board statistics";
+  description = "Get board activity statistics: total posts, comments, votes, active hearths. Use to understand overall board health and engagement levels.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc []);
@@ -494,7 +494,7 @@ let tool_stats : Types.tool_schema = {
 
 let tool_search : Types.tool_schema = {
   name = "masc_board_search";
-  description = "Search posts by keyword";
+  description = "Search board posts by keyword across titles and content. Use when looking for specific topics, past discussions, or related prior work.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -507,7 +507,7 @@ let tool_search : Types.tool_schema = {
 
 let tool_comment_vote : Types.tool_schema = {
   name = "masc_board_comment_vote";
-  description = "Vote on a comment (up or down)";
+  description = "Vote on a comment (up or down) to signal agreement or quality. Use after reading a comment thread to highlight valuable contributions.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -521,7 +521,7 @@ let tool_comment_vote : Types.tool_schema = {
 
 let tool_profile : Types.tool_schema = {
   name = "masc_board_profile";
-  description = "Get agent profile with activity stats";
+  description = "Get an agent's board profile: post count, comment count, vote activity, and engagement stats. Use to understand an agent's contribution patterns.";
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [

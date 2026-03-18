@@ -483,6 +483,7 @@
    keeper_memory_policy
    keeper_memory_bank
    keeper_memory_recall
+   keeper_skill_routing
    keeper_alerting
    keeper_alerting_path
    keeper_exec_tools
@@ -717,6 +718,7 @@
   dashboard_proof_actors
   dashboard_proof_verdict
   dashboard_proof_helpers
+  keeper_skill_routing
   keeper_alerting_path)
  (libraries
    yojson

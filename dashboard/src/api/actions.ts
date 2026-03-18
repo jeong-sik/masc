@@ -1,4 +1,5 @@
-import { get, post, callMcpTool, fetchWithTimeout } from '../api'
+import { get, post, fetchWithTimeout } from './core'
+import { callMcpTool } from './mcp'
 import { isRecord } from '../components/common/normalize'
 import { asString } from './trpg'
 import { normalizeGovernanceCaseBundle, normalizeGovernanceExecutionOrder } from './board'

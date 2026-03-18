@@ -1,4 +1,5 @@
-import { get, post, callMcpTool } from '../api'
+import { get, post } from './core'
+import { callMcpTool } from './mcp'
 import { isRecord } from '../components/common/normalize'
 import type { TrpgState, TrpgEvent } from '../types'
 
@@ -177,7 +178,7 @@ export function asNumber(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
-function asInt(value: unknown): number | undefined {
+export function asInt(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value)
   if (typeof value === 'string') {
     const parsed = Number.parseInt(value.trim(), 10)

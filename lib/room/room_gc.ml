@@ -86,8 +86,6 @@ let heartbeat config ~agent_name =
     Printf.sprintf "⚠ Agent %s not found" agent_name
 
 (** Cleanup zombie agents - removes stale agents *)
-let is_keeper_runtime_agent_name = Resilience.Zombie.is_keeper_name
-
 let cleanup_zombies config =
   ensure_initialized config;
 
@@ -99,9 +97,8 @@ let cleanup_zombies config =
   if scan_paths = [] then
     "📋 No agents directory"
   else begin
-    let zombies = ref [] in
-
-    (* Find zombie agents across all agent directories *)
+    (* Phase 1: Detect zombie agents (no side effects) *)
+    let zombie_entries = ref [] in (* (name, path) list *)
     List.iter (fun agents_path ->
       Sys.readdir agents_path |> Array.iter (fun name ->
         if Filename.check_suffix name ".json" then begin
@@ -109,72 +106,96 @@ let cleanup_zombies config =
           let json = read_json config path in
           match agent_of_yojson json with
           | Ok agent
-            when (not (List.mem agent.name !zombies)) &&
+            when (not (List.exists (fun (n, _) -> n = agent.name) !zombie_entries)) &&
                  (let threshold =
-                    if is_keeper_runtime_agent_name agent.name
+                    if Resilience.Zombie.is_keeper ~name:agent.name ~agent_type:agent.agent_type
                     then Env_config.Zombie.keeper_threshold_seconds
                     else Env_config.Zombie.threshold_seconds
                   in
                   Resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
-              (* Stop heartbeats owned by this zombie agent *)
-              let _stopped = Heartbeat.stop_by_agent ~agent_name:agent.name in
-              (* Remove agent file — only add to zombies list on success *)
-              (try
-                Sys.remove path;
-                zombies := agent.name :: !zombies
-              with Sys_error msg ->
-                Log.Gc.warn "failed to remove zombie agent file %s: %s (agent kept in state)" path msg)
+              zombie_entries := (agent.name, path) :: !zombie_entries
           | _ -> ()
         end
       )
     ) scan_paths;
 
-    (* Cascade: release tasks claimed by zombie agents *)
-    let released_tasks = ref [] in
-    let failed_release_agents = ref [] in
-    if !zombies <> [] then begin
+    if !zombie_entries = [] then
+      "✅ No zombie agents found"
+    else begin
+      (* Phase 2: Transition status to Inactive + stop heartbeats *)
+      List.iter (fun (name, path) ->
+        (try
+          let json = read_json config path in
+          match agent_of_yojson json with
+          | Ok agent ->
+              let updated = { agent with status = Inactive; last_seen = now_iso () } in
+              write_json config path (agent_to_yojson updated)
+          | Error _ -> ()
+        with Sys_error _ -> ());
+        let _stopped = Heartbeat.stop_by_agent ~agent_name:name in
+        ()
+      ) !zombie_entries;
+
+      (* Phase 3: Release tasks — track failures per agent *)
+      let release_failed_agents = ref [] in
+      let released_tasks = ref [] in
       let backlog = read_backlog config in
       List.iter (fun (task : task) ->
         match task.task_status with
         | Types.Claimed { assignee; _ }
-        | Types.InProgress { assignee; _ } when List.mem assignee !zombies ->
+        | Types.InProgress { assignee; _ }
+          when List.exists (fun (n, _) -> n = assignee) !zombie_entries ->
             (match !force_release_task_fn config ~agent_name:"gardener" ~task_id:task.id () with
              | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
              | Error e ->
-                 (* Track agents whose tasks failed to release — keep them in state *)
-                 if not (List.mem assignee !failed_release_agents) then
-                   failed_release_agents := assignee :: !failed_release_agents;
+                 if not (List.mem assignee !release_failed_agents) then
+                   release_failed_agents := assignee :: !release_failed_agents;
                  log_event config (Printf.sprintf
-                   "{\"type\":\"zombie_cascade_error\",\"task_id\":\"%s\",\"assignee\":\"%s\",\"error\":\"%s\",\"ts\":\"%s\"}"
+                   "{\"type\":\"zombie_cascade_error\",\"task_id\":\"%s\",\"agent\":\"%s\",\"error\":\"%s\",\"ts\":\"%s\"}"
                    task.id assignee (Types.masc_error_to_string e) (now_iso ())))
         | _ -> ()
-      ) backlog.tasks
-    end;
+      ) backlog.tasks;
 
-    (* Exclude agents with failed task releases from removal *)
-    let safe_zombies = List.filter
-      (fun a -> not (List.mem a !failed_release_agents)) !zombies in
+      (* Phase 4: Delete files — skip agents with release failures *)
+      let successfully_cleaned = ref [] in
+      List.iter (fun (name, path) ->
+        if List.mem name !release_failed_agents then
+          Log.Gc.warn "skipping file removal for %s: task release failed" name
+        else begin
+          match Sys.remove path with
+          | () -> successfully_cleaned := name :: !successfully_cleaned
+          | exception Sys_error msg ->
+              Log.Gc.warn "failed to remove zombie agent file %s: %s" path msg
+        end
+      ) !zombie_entries;
 
-    (* Update state to remove zombie agents (only those with clean release) *)
-    if safe_zombies <> [] then begin
-      let _ = update_state config (fun s ->
-        { s with active_agents = List.filter (fun a -> not (List.mem a safe_zombies)) s.active_agents }
-      ) in
+      (* Phase 5: Update state — only remove successfully cleaned agents *)
+      if !successfully_cleaned <> [] then begin
+        let _ = update_state config (fun s ->
+          { s with active_agents =
+              List.filter (fun a -> not (List.mem a !successfully_cleaned)) s.active_agents }
+        ) in
+        log_event config (Printf.sprintf
+          "{\"type\":\"zombie_cleanup\",\"agents\":%s,\"released_tasks\":%d,\"skipped\":%d,\"ts\":\"%s\"}"
+          (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) !successfully_cleaned)))
+          (List.length !released_tasks)
+          (List.length !zombie_entries - List.length !successfully_cleaned)
+          (now_iso ()))
+      end;
 
-      (* Log event *)
-      log_event config (Printf.sprintf
-        "{\"type\":\"zombie_cleanup\",\"agents\":%s,\"released_tasks\":%d,\"ts\":\"%s\"}"
-        (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) safe_zombies)))
-        (List.length !released_tasks)
-        (now_iso ()));
-
+      let total = List.length !zombie_entries in
+      let cleaned = List.length !successfully_cleaned in
+      let skipped = total - cleaned in
       let task_note = if !released_tasks = [] then ""
         else Printf.sprintf ", released %d orphan task(s)" (List.length !released_tasks)
       in
-      Printf.sprintf "🧟 Cleaned up %d zombie agent(s): %s%s"
-        (List.length !zombies) (String.concat ", " !zombies) task_note
-    end else
-      "✅ No zombie agents found"
+      if skipped > 0 then
+        Printf.sprintf "🧟 Cleaned %d/%d zombie(s): %s%s (⚠ %d skipped due to errors)"
+          cleaned total (String.concat ", " !successfully_cleaned) task_note skipped
+      else
+        Printf.sprintf "🧟 Cleaned up %d zombie agent(s): %s%s"
+          cleaned (String.concat ", " !successfully_cleaned) task_note
+    end
   end
 
 (** Garbage collection - cleanup zombies, stale tasks, old messages *)

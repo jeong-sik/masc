@@ -266,7 +266,7 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
                         void document.exitFullscreen?.()
                       }
                       setCommandPlaneSurface('warroom')
-                      navigate('command', surfaceRouteParams('warroom'))
+                      navigate('lab', surfaceRouteParams('warroom'))
                     }}
                   >
                     표준 보기

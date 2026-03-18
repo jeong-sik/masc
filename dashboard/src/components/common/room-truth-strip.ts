@@ -9,10 +9,10 @@ function openFocus(): void {
   if (!focus?.suggested_tab) return
   const params = focus.suggested_params ?? {}
   if (focus.suggested_tab === 'intervene') {
-    navigate('intervene', params)
+    navigate('control', params)
     return
   }
-  navigate('command', {
+  navigate('lab', {
     ...(focus.suggested_surface ? { surface: focus.suggested_surface } : {}),
     ...params,
   })

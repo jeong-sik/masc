@@ -104,10 +104,10 @@ let parse_tier1 (text : string) : tier1_result =
   else
     Fail "unparseable response"
 
-let tier1_check ~(model : Llm_client.model_spec) ~actor_name ~actor_persona
+let tier1_check ~(model : Llm_types.model_spec) ~actor_name ~actor_persona
     ~response_text : tier1_result =
   let prompt = build_tier1_prompt ~actor_name ~actor_persona ~response_text in
-  let req : Llm_client.completion_request = {
+  let req : Llm_types.completion_request = {
     model;
     messages = [Agent_sdk.Types.user_msg prompt];
     temperature = 0.0;
@@ -198,11 +198,11 @@ let parse_tier2 (text : string) : dimension_score list =
     find_dim Narrative_consistency "NARRATIVE_CONSISTENCY";
   ]
 
-let tier2_evaluate ~(model : Llm_client.model_spec) ~actor_name ~actor_persona
+let tier2_evaluate ~(model : Llm_types.model_spec) ~actor_name ~actor_persona
     ~actor_traits ~scene_context ~response_text : dimension_score list =
   let prompt = build_tier2_prompt ~actor_name ~actor_persona ~actor_traits
     ~scene_context ~response_text in
-  let req : Llm_client.completion_request = {
+  let req : Llm_types.completion_request = {
     model;
     messages = [Agent_sdk.Types.user_msg prompt];
     temperature = 0.0;

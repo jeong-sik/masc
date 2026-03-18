@@ -166,7 +166,7 @@ let register (entry : prompt_entry) : unit =
     (* Persist to file if enabled *)
     match !prompts_dir with
     | Some dir ->
-        if not (Sys.file_exists dir) then Unix.mkdir dir 0o755;
+        Fs_compat.mkdir_p dir;
         let filename = Printf.sprintf "%s_%s.json" entry.id entry.version in
         let path = Filename.concat dir filename in
         let json = prompt_entry_to_yojson entry in

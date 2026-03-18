@@ -8,15 +8,7 @@ include Keeper_config
 
 (* Duplicated from Keeper_types to avoid circular dependency. *)
 let mkdir_p_ path =
-  let rec go p =
-    if p = "" || p = "/" then ()
-    else if Sys.file_exists p then ()
-    else begin
-      go (Filename.dirname p);
-      (try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  go path
+  Fs_compat.mkdir_p path
 
 let keeper_dir_ (config : Room.config) =
   let d = Filename.concat (Filename.concat config.base_path ".masc") "perpetual-keepers" in

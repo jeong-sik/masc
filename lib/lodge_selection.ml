@@ -68,8 +68,7 @@ let stats_path () =
         Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"."
   in
   let masc_dir = Filename.concat base ".masc" in
-  if not (Sys.file_exists masc_dir) then
-    Unix.mkdir masc_dir 0o755;
+  Fs_compat.mkdir_p masc_dir;
   Filename.concat masc_dir "lodge_stats.jsonl"
 
 (** {1 Beta Distribution Sampling} *)

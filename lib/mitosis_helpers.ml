@@ -98,7 +98,7 @@ let queue_episode ~base_path ~session_id ~agent_name ~generation
     ?parent_episode ~event_type ~summary ?dna () =
   let dir = pending_episodes_dir base_path in
   (* Create directory if not exists *)
-  let () = try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> () in
+  Fs_compat.mkdir_p dir;
   let ep_id = generate_episode_id () in
   let json = `Assoc [
     ("ep_id", `String ep_id);

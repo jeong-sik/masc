@@ -122,15 +122,7 @@ let take n xs =
   go n [] xs
 
 let mkdir_p path =
-  let rec go p =
-    if p = "" || p = "/" then ()
-    else if Sys.file_exists p then ()
-    else begin
-      go (Filename.dirname p);
-      (try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  go path
+  Fs_compat.mkdir_p path
 
 let dedupe_keep_order items =
   let seen = Hashtbl.create (List.length items) in

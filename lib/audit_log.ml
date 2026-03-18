@@ -169,14 +169,8 @@ let read_entries (config : Room.config) : audit_entry list =
         with Yojson.Json_error _ -> None)
 
 (** Recursively create directory (no shell, safe) *)
-let rec ensure_dir_safe dir =
-  if Sys.file_exists dir then ()
-  else begin
-    let parent = Filename.dirname dir in
-    if parent <> dir then ensure_dir_safe parent;
-    try Unix.mkdir dir 0o755
-    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()  (* Race-safe: another process created it *)
-  end
+let ensure_dir_safe dir =
+  Fs_compat.mkdir_p dir
 
 let ensure_dir path =
   let dir = Filename.dirname path in

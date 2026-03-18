@@ -107,14 +107,8 @@ let ensure_initialized_r config : (unit, masc_error) result =
 (* File I/O helpers                             *)
 (* ============================================ *)
 
-let rec mkdir_p path =
-  if path = "" || path = "/" then ()
-  else if Sys.file_exists path then ()
-  else begin
-    mkdir_p (Filename.dirname path);
-    (try Unix.mkdir path 0o755
-     with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-  end
+let mkdir_p path =
+  Fs_compat.mkdir_p path
 
 let read_json_local path =
   match Safe_ops.read_json_file_safe path with

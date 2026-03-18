@@ -30,8 +30,8 @@ let auth_config_file config = Filename.concat (auth_dir config) "config.json"
 let ensure_auth_dirs config =
   let auth = auth_dir config in
   let agents = agents_dir config in
-  if not (Sys.file_exists auth) then Unix.mkdir auth 0o700;
-  if not (Sys.file_exists agents) then Unix.mkdir agents 0o700
+  Fs_compat.mkdir_p auth;
+  Fs_compat.mkdir_p agents
 
 (* ============================================ *)
 (* Auth config management                       *)

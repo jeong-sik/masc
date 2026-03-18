@@ -40,13 +40,7 @@ let plan_path ~agent_name ~date =
   sprintf "%s/%s.json" (plans_dir ~agent_name) date
 
 let ensure_dir path =
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
+  Fs_compat.mkdir_p path
 
 (* ---------- Date helpers ---------- *)
 

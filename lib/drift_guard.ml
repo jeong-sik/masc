@@ -234,14 +234,7 @@ let drift_log_file (config : Room.config) =
   Filename.concat (Room.masc_dir config) "drift_guard.jsonl"
 
 let ensure_dir path =
-  let rec loop current =
-    if Sys.file_exists current then ()
-    else
-      let parent = Filename.dirname current in
-      if not (String.equal parent current) then loop parent;
-      try Unix.mkdir current 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  in
-  loop path
+  Fs_compat.mkdir_p path
 
 let append_json_line path json =
   Fs_compat.append_jsonl path json

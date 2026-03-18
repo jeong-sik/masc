@@ -130,8 +130,7 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
           in
 
           (* Create .worktrees directory if not exists *)
-          if not (Sys.file_exists worktrees_dir) then
-            Unix.mkdir worktrees_dir 0o755;
+          Fs_compat.mkdir_p worktrees_dir;
 
           (* Check if worktree already exists *)
           if Sys.file_exists worktree_path then begin

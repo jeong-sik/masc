@@ -140,6 +140,11 @@ type subscription = {
 (* Global subscription store *)
 let subscriptions : (string, subscription) Hashtbl.t = Hashtbl.create 16
 
+(* Mutex protecting subscriptions, event_buffers, and heartbeat tables.
+   All Hashtbl access in this module MUST go through this mutex. *)
+let a2a_mutex = Eio.Mutex.create ()
+let with_a2a_lock f = Eio.Mutex.use_rw ~protect:true a2a_mutex f
+
 (* Persistence file path - set by init *)
 let subscriptions_file = ref ""
 
@@ -559,8 +564,9 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
       event_types = List.rev event_types;
       created_at = now_iso8601 ();
     } in
-    Hashtbl.add subscriptions sub_id sub;
-    save_subscriptions ();
+    with_a2a_lock (fun () ->
+      Hashtbl.add subscriptions sub_id sub;
+      save_subscriptions ());
     Ok (`Assoc [
       ("subscription_id", `String sub_id);
       ("agent_filter", match agent_filter with
@@ -577,17 +583,17 @@ let subscribe ?(agent_filter : string option) ~(events : string list) ()
     @param subscription_id Subscription ID to remove
 *)
 let unsubscribe ~subscription_id : (Yojson.Safe.t, string) result =
-  if Hashtbl.mem subscriptions subscription_id then begin
-    Hashtbl.remove subscriptions subscription_id;
-    (* Also clean up buffered events *)
-    Hashtbl.remove event_buffers subscription_id;
-    save_subscriptions ();
-    Ok (`Assoc [
-      ("unsubscribed", `Bool true);
-      ("subscription_id", `String subscription_id);
-    ])
-  end else
-    Error (Printf.sprintf "Subscription '%s' not found" subscription_id)
+  with_a2a_lock (fun () ->
+    if Hashtbl.mem subscriptions subscription_id then begin
+      Hashtbl.remove subscriptions subscription_id;
+      Hashtbl.remove event_buffers subscription_id;
+      save_subscriptions ();
+      Ok (`Assoc [
+        ("unsubscribed", `Bool true);
+        ("subscription_id", `String subscription_id);
+      ])
+    end else
+      Error (Printf.sprintf "Subscription '%s' not found" subscription_id))
 
 (** List active subscriptions *)
 let list_subscriptions () : Yojson.Safe.t =
@@ -651,13 +657,13 @@ let poll_events ~subscription_id ?(clear = true) ()
       ("cleared", `Bool clear);
     ])
 
-(** Buffer an event for a subscription (with max limit enforcement) *)
-let buffer_event sub_id event =
+(** Buffer an event for a subscription (with max limit enforcement).
+    Internal: caller must hold a2a_mutex. *)
+let buffer_event_unlocked sub_id event =
   let current = match Hashtbl.find_opt event_buffers sub_id with
     | None -> []
     | Some events -> events
   in
-  (* Keep only last (max - 1) events + new one *)
   let trimmed =
     if List.length current >= max_buffered_events then
       match current with
@@ -667,10 +673,15 @@ let buffer_event sub_id event =
   in
   Hashtbl.replace event_buffers sub_id (trimmed @ [event])
 
+(** Public locked version *)
+let buffer_event sub_id event =
+  with_a2a_lock (fun () -> buffer_event_unlocked sub_id event)
+
 (** Notify subscribers of an event (internal use)
     Now also buffers events for polling in addition to SSE broadcast *)
 let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Safe.t) : unit =
   let timestamp = Time_compat.now () in
+  with_a2a_lock (fun () ->
   Hashtbl.iter (fun _id sub ->
     (* Check agent filter *)
     let agent_match = match sub.agent_filter with
@@ -683,7 +694,7 @@ let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Sa
     if agent_match && event_match then begin
       (* Buffer event for polling *)
       let event = { event_type; agent; data; timestamp } in
-      buffer_event sub.id event;
+      buffer_event_unlocked sub.id event;
 
       (* Push event as MCP JSON-RPC Notification (no id = notification) *)
       let event_params = `Assoc [
@@ -702,7 +713,7 @@ let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Sa
       Log.debug ~ctx:"a2a" "Event %s from %s buffered+SSE (sub: %s)"
         (show_event_type event_type) agent sub.id
     end
-  ) subscriptions
+  ) subscriptions)
 
 (** {1 Heartbeat Task Events — Soul + Tool Loop Pattern}
 

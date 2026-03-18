@@ -4,11 +4,8 @@
     operations and session persistence (Tier 2) via JSONL files.
     Tier 3 (semantic/pgvector) is accessed externally.
 
-    Compaction pipeline:
-    1. PruneToolOutputs — truncate verbose tool results
-    2. MergeContiguous  — collapse consecutive same-role messages
-    3. DropLowImportance — remove low-scored messages
-    4. SummarizeOld — LLM-compress oldest messages (most aggressive)
+    Compaction is delegated to {!Context_compact_oas} which routes
+    through OAS [Context_reducer].
 
     @since 2.61.0 *)
 
@@ -168,118 +165,8 @@ let score_importance ctx =
   { ctx with importance_scores = scores }
 
 (* ================================================================ *)
-(* Compaction Strategies                                            *)
-(* ================================================================ *)
-
-(** Truncate tool output messages longer than max_len.
-    Keeps first keep_len and last keep_len characters with "[...truncated...]". *)
-let prune_tool_outputs ?(max_len=500) ?(keep_len=100) ctx =
-  let messages = List.map (fun (m : Agent_sdk.Types.message) ->
-    match m.role with
-    | Agent_sdk.Types.Tool when String.length (text_of_message m) > max_len ->
-      let mc = text_of_message m in
-      let head = String.sub mc 0 keep_len in
-      let tail_start = String.length mc - keep_len in
-      let tail = String.sub mc tail_start keep_len in
-      { m with content = [Agent_sdk.Types.Text (sprintf "%s\n[...truncated %d chars...]\n%s"
-          head (String.length mc - 2 * keep_len) tail)] }
-    | _ -> m
-  ) ctx.messages in
-  let token_count = count_tokens ctx.system_prompt messages in
-  { ctx with messages; token_count }
-
-(** Merge consecutive messages with the same role. *)
-let merge_contiguous ctx =
-  let rec merge = function
-    | [] -> []
-    | [m] -> [m]
-    | (m1 : Agent_sdk.Types.message) :: (m2 :: rest as tail) ->
-      if m1.role = m2.role then
-        let merged = { m1 with content = [Agent_sdk.Types.Text (text_of_message m1 ^ "\n" ^ text_of_message m2)] } in
-        merge (merged :: rest)
-      else
-        m1 :: merge tail
-  in
-  let messages = merge ctx.messages in
-  let token_count = count_tokens ctx.system_prompt messages in
-  { ctx with messages; token_count; importance_scores = [] }
-
-(** Drop messages with importance score below threshold. *)
-let drop_low_importance ?(threshold=0.3) ctx =
-  let scored = if ctx.importance_scores = [] then
-    (score_importance ctx).importance_scores
-  else ctx.importance_scores in
-  let messages = List.filteri (fun i _m ->
-    match List.assoc_opt i scored with
-    | Some score -> score >= threshold
-    | None -> true  (* Keep if no score *)
-  ) ctx.messages in
-  let token_count = count_tokens ctx.system_prompt messages in
-  { ctx with messages; token_count; importance_scores = [] }
-
-(** Summarize oldest N% of messages into a single summary message.
-    This is the most aggressive strategy — uses token estimation
-    rather than actual LLM call (LLM summarization done externally). *)
-let summarize_old ?(oldest_pct=0.3) ctx =
-  let n = List.length ctx.messages in
-  let split_at = max 1 (int_of_float (float_of_int n *. oldest_pct)) in
-  if n <= 2 then ctx  (* Not enough messages to summarize *)
-  else
-    let old_msgs, recent_msgs = List.filteri (fun i _ -> i < split_at) ctx.messages,
-                                 List.filteri (fun i _ -> i >= split_at) ctx.messages in
-    (* Prefer structured continuity: keep recent [STATE] snapshots if present.
-       Important: do NOT emit this as a System message. For Claude, system-role
-       messages are concatenated into the system prompt, turning summaries into
-       "instructions" and breaking behavior. *)
-    let blocks =
-      old_msgs
-      |> List.concat_map (fun (m : Agent_sdk.Types.message) -> extract_state_blocks (text_of_message m))
-    in
-    let take_last n lst =
-      let len = List.length lst in
-      if len <= n then lst
-      else List.filteri (fun i _ -> i >= (len - n)) lst
-    in
-    let blocks_tail = take_last 3 blocks in
-    let summary =
-      if blocks_tail <> [] then
-        let rendered =
-          blocks_tail
-          |> List.map (fun b -> sprintf "%s\n%s\n%s" state_block_start b state_block_end)
-          |> String.concat "\n\n"
-        in
-        sprintf "%s\n(Extracted continuity snapshots; reference only.)\n\n%s"
-          memory_summary_prefix rendered
-      else
-        (* Fallback heuristic: role-tagged truncation. *)
-        let summary_parts = List.map (fun (m : Agent_sdk.Types.message) ->
-          let role_str = match m.role with
-            | System -> "SYS" | User -> "USR"
-            | Assistant -> "AST" | Tool -> "TOOL"
-          in
-          let mc = text_of_message m in
-          let truncated = if String.length mc > 80
-            then String.sub mc 0 80 ^ "..."
-            else mc in
-          sprintf "[%s] %s" role_str truncated
-        ) old_msgs in
-        sprintf "%s\n(Fallback summary of %d earlier messages; reference only.)\n%s"
-          memory_summary_prefix (List.length old_msgs) (String.concat "\n" summary_parts)
-    in
-    let summary_msg = Agent_sdk.Types.assistant_msg summary in
-    let messages = summary_msg :: recent_msgs in
-    let token_count = count_tokens ctx.system_prompt messages in
-    { ctx with messages; token_count; importance_scores = [] }
-
-(* ================================================================ *)
 (* Compaction Pipeline                                              *)
 (* ================================================================ *)
-
-let apply_strategy ctx = function
-  | PruneToolOutputs -> prune_tool_outputs ctx
-  | MergeContiguous -> merge_contiguous ctx
-  | DropLowImportance -> drop_low_importance ctx
-  | SummarizeOld -> summarize_old ctx
 
 (** Sync working context stats into OAS Context scoped keys.
     Called after compaction so OAS consumers see current state. *)
@@ -406,114 +293,6 @@ let compact_with_offload
   in
   let compacted = sync_oas_context compacted in
   { context = compacted; offloaded_path }
-
-(* ================================================================ *)
-(* OAS Context_reducer Integration                                  *)
-(* ================================================================ *)
-
-(** Role tag sentinel: uses \x00 prefix to prevent collision with user content.
-    No valid UTF-8 user text starts with a null byte. *)
-let system_role_tag = "\x00__MASC_ROLE:system__\x00"
-let tool_role_tag = "\x00__MASC_ROLE:tool__\x00"
-
-let masc_msg_to_oas_tagged (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
-  let role, tag = match m.role with
-    | Agent_sdk.Types.System -> Agent_sdk.Types.User, Some system_role_tag
-    | Agent_sdk.Types.Tool -> Agent_sdk.Types.User, Some tool_role_tag
-    | Agent_sdk.Types.User -> Agent_sdk.Types.User, None
-    | Agent_sdk.Types.Assistant -> Agent_sdk.Types.Assistant, None
-  in
-  let text = match tag with
-    | Some t -> t ^ text_of_message m
-    | None -> text_of_message m
-  in
-  let content = match m.role with
-    | Agent_sdk.Types.Tool ->
-      let tool_use_id =
-        List.find_map (function Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id | _ -> None) m.content
-        |> Option.value ~default:"masc-tool"
-      in
-      [Agent_sdk.Types.ToolResult { tool_use_id; content = text; is_error = false }]
-    | _ -> [Agent_sdk.Types.Text text]
-  in
-  { Agent_sdk.Types.role; content }
-
-let oas_msg_to_masc_tagged (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
-  (* Extract text and tool_use_id from content blocks *)
-  let text, tool_id =
-    let parts = List.filter_map (fun (block : Agent_sdk.Types.content_block) ->
-      match block with
-      | Agent_sdk.Types.Text s -> Some (s, None)
-      | Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ->
-        Some (content, Some tool_use_id)
-      | _ -> None
-    ) m.content in
-    let texts = List.map fst parts in
-    let ids = List.filter_map snd parts in
-    (String.concat "\n" texts, List.nth_opt ids 0)
-  in
-  let role, content =
-    if starts_with ~prefix:system_role_tag text then
-      Agent_sdk.Types.System,
-      String.sub text (String.length system_role_tag)
-        (String.length text - String.length system_role_tag)
-    else if starts_with ~prefix:tool_role_tag text then
-      Agent_sdk.Types.Tool,
-      String.sub text (String.length tool_role_tag)
-        (String.length text - String.length tool_role_tag)
-    else
-      (match m.role with
-       | Agent_sdk.Types.User -> Agent_sdk.Types.User
-       | Agent_sdk.Types.Assistant -> Agent_sdk.Types.Assistant
-       | Agent_sdk.Types.System -> Agent_sdk.Types.System
-       | Agent_sdk.Types.Tool -> Agent_sdk.Types.Tool),
-      text
-  in
-  let content_blocks = match role with
-    | Agent_sdk.Types.Tool ->
-      let tool_use_id = Option.value ~default:"masc-tool" tool_id in
-      [Agent_sdk.Types.ToolResult { tool_use_id; content; is_error = false }]
-    | _ -> [Agent_sdk.Types.Text content]
-  in
-  { Agent_sdk.Types.role; content = content_blocks }
-
-let oas_strategy_of_compaction (s : compaction_strategy) : Agent_sdk.Context_reducer.strategy =
-  match s with
-  | PruneToolOutputs ->
-    Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 }
-  | MergeContiguous ->
-    Agent_sdk.Context_reducer.Merge_contiguous
-  | DropLowImportance ->
-    Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
-      let masc_msgs = List.map oas_msg_to_masc_tagged oas_msgs in
-      let dummy_ctx = {
-        system_prompt = ""; messages = masc_msgs;
-        token_count = 0; max_tokens = 0;
-        importance_scores = []; oas_context = Agent_sdk.Context.create ()
-      } in
-      let result = drop_low_importance dummy_ctx in
-      List.map masc_msg_to_oas_tagged result.messages)
-  | SummarizeOld ->
-    Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
-      let masc_msgs = List.map oas_msg_to_masc_tagged oas_msgs in
-      let dummy_ctx = {
-        system_prompt = ""; messages = masc_msgs;
-        token_count = 0; max_tokens = 0;
-        importance_scores = []; oas_context = Agent_sdk.Context.create ()
-      } in
-      let result = summarize_old dummy_ctx in
-      List.map masc_msg_to_oas_tagged result.messages)
-
-let compact_via_oas ctx strategies =
-  let oas_strategies = List.map oas_strategy_of_compaction strategies in
-  let reducer = Agent_sdk.Context_reducer.compose
-    (List.map (fun s -> { Agent_sdk.Context_reducer.strategy = s }) oas_strategies) in
-  let oas_msgs = List.map masc_msg_to_oas_tagged ctx.messages in
-  let reduced = Agent_sdk.Context_reducer.reduce reducer oas_msgs in
-  let messages = List.map oas_msg_to_masc_tagged reduced in
-  let token_count = count_tokens ctx.system_prompt messages in
-  let ctx = { ctx with messages; token_count; importance_scores = [] } in
-  sync_oas_context ctx
 
 (* ================================================================ *)
 (* Checkpointing                                                    *)

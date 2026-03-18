@@ -503,105 +503,304 @@ button.council-row.selected {
   gap: 8px;
 }
 
-/* ── Agent Profile Page ──────────────────────────────────── */
-.agent-profile {
+/* ── FF Character Sheet — Agent Profile ──────────────────── */
+
+.ff-profile {
   padding: 0 4px;
 }
 
-.agent-profile__back {
+.ff-profile__toolbar {
   display: flex;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
-.agent-profile__header {
-  display: flex;
+/* --- Character Plate (top section) --- */
+
+.ff-plate {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   gap: 16px;
-  align-items: flex-start;
-  margin-bottom: 20px;
-  padding: 16px;
-  border-radius: 12px;
-  background: rgba(16, 25, 45, 0.7);
-  border: 1px solid rgba(138, 163, 211, 0.2);
+  padding: 18px;
+  margin-bottom: 16px;
+  border-radius: 10px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(10, 22, 40, 0.95) 0%,
+      rgba(16, 28, 52, 0.88) 100%
+    );
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.15));
+  box-shadow:
+    0 0 20px rgba(200, 168, 78, 0.04),
+    inset 0 1px 0 rgba(200, 168, 78, 0.08);
 }
 
-.agent-profile__avatar {
-  flex-shrink: 0;
+.ff-plate__portrait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
 }
 
-.agent-profile__identity {
-  flex: 1;
+.ff-plate__class-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--ff-gold-bright, #c8a84e);
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.ff-plate__info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
 }
 
-.agent-profile__name {
-  margin: 0;
-  font-size: 22px;
-  color: var(--text-strong);
+.ff-plate__name-row {
   display: flex;
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.agent-profile__korean {
-  font-size: 0.7em;
-  color: #888;
+.ff-plate__name {
+  margin: 0;
+  font-size: 20px;
+  color: var(--ff-gold-bright, #c8a84e);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.agent-profile__secondary {
-  font-size: 0.65em;
-  color: #888;
+.ff-plate__emoji {
+  font-size: 1.4em;
 }
 
-.agent-profile__badges {
+.ff-plate__sub {
+  font-size: 13px;
+  color: #8ca8d5;
+}
+
+.ff-plate__level {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ff-crystal, #47b8ff);
+  background: rgba(71, 184, 255, 0.1);
+  border: 1px solid rgba(71, 184, 255, 0.25);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ff-plate__badges {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  margin-top: 8px;
 }
 
-.agent-profile__meta {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-  color: #9ab3de;
-  font-size: 13px;
+.ff-plate__model {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: #8ca8d5;
+  background: rgba(71, 184, 255, 0.08);
+  border: 1px solid rgba(71, 184, 255, 0.15);
+  border-radius: 4px;
+  padding: 1px 5px;
 }
 
-.agent-profile__ctx-section {
+.ff-plate__autonomy {
+  font-size: 11px;
+  color: var(--ff-gold-bright, #c8a84e);
+  background: rgba(200, 168, 78, 0.1);
+  border: 1px solid rgba(200, 168, 78, 0.2);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.ff-plate__signal {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.ff-plate__signal--live {
+  color: var(--ff-hp-full, var(--ok));
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+}
+
+.ff-plate__signal--stale {
+  color: var(--ff-gold-bright, #c8a84e);
+  background: rgba(200, 168, 78, 0.1);
+  border: 1px solid rgba(200, 168, 78, 0.2);
+}
+
+.ff-plate__signal--archived {
+  color: #8888;
+  background: rgba(128, 128, 128, 0.1);
+  border: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+/* CTX bar row */
+.ff-plate__bar-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 10px 16px;
-  border-radius: 10px;
-  background: rgba(16, 25, 45, 0.5);
-  border: 1px solid rgba(138, 163, 211, 0.15);
+  gap: 8px;
+  margin-top: 2px;
 }
 
-.agent-profile__ctx-label {
-  font-size: 13px;
+.ff-plate__bar-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ff-gold-bright, #c8a84e);
+  letter-spacing: 1px;
+  width: 28px;
+}
+
+.ff-plate__bar-value {
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-strong);
-  white-space: nowrap;
+  min-width: 36px;
+  text-align: right;
 }
 
-.agent-profile__grid {
+/* Status line */
+.ff-plate__status-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ff-plate__work {
+  font-size: 13px;
+  color: #c8daf7;
+}
+
+.ff-plate__work--idle {
+  color: #6b7fa0;
+  font-style: italic;
+}
+
+.ff-plate__worker-state {
+  font-size: 11px;
+  color: var(--ff-crystal, #47b8ff);
+  background: rgba(71, 184, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.ff-plate__worker-focus {
+  font-size: 11px;
+  color: #9ab3de;
+}
+
+.ff-plate__meta-line {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #8ca8d5;
+}
+
+/* Stats panel (right side) */
+.ff-plate__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  align-self: center;
+  min-width: 100px;
+}
+
+.ff-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(200, 168, 78, 0.05);
+  border: 1px solid rgba(200, 168, 78, 0.1);
+}
+
+.ff-stat__value {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-strong);
+}
+
+.ff-stat__label {
+  font-size: 10px;
+  color: var(--ff-gold-bright, #c8a84e);
+  letter-spacing: 0.5px;
+}
+
+/* --- Grid and Cards --- */
+
+.ff-profile__grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+  margin-bottom: 14px;
+}
+
+.ff-card--wide {
+  grid-column: 1 / -1;
+}
+
+/* Timeline events - compact FF style */
+.ff-event-type {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ff-gold-bright, #c8a84e);
+  min-width: 32px;
+}
+
+.ff-event-detail {
+  flex: 1;
+  font-size: 12px;
+  color: #c8daf7;
+}
+
+/* Mention bar */
+.ff-profile__mention {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(10, 22, 40, 0.8);
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.15));
+}
+
+.ff-profile__mention-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ff-gold-bright, #c8a84e);
+  white-space: nowrap;
+}
+
+.ff-profile__mention .control-input {
+  flex: 1;
 }
 
 @media (max-width: 800px) {
-  .agent-profile__grid {
+  .ff-plate {
     grid-template-columns: 1fr;
+    text-align: center;
   }
-  .agent-profile__header {
-    flex-direction: column;
-  }
+  .ff-plate__portrait { justify-self: center; }
+  .ff-plate__stats { grid-template-columns: repeat(4, 1fr); justify-self: stretch; }
+  .ff-plate__name-row { justify-content: center; }
+  .ff-plate__badges { justify-content: center; }
+  .ff-profile__grid { grid-template-columns: 1fr; }
 }
 
 /* ── Keeper Rich Card (Overview) ──────────────────────────── */

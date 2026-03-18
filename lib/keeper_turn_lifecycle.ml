@@ -29,7 +29,7 @@ let handle_keeper_model_set ctx args : tool_result =
             let runtime_ok =
               match spec.provider with
               | Llm_client.Llama -> (
-                  match Tool_llama.fetch_models () with
+                  match Tool_local_runtime.fetch_models () with
                   | Ok (_, models) -> List.mem spec.model_id models
                   | Error _ -> false)
               | _ -> true

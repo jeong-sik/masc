@@ -62,18 +62,20 @@ let keeper_fallback_model_labels () =
     | Provider_adapter.Gemini_vertex_adc _ -> true
     | Provider_adapter.Gemini_auth_missing _ -> false
   in
-  let candidates =
+  let families_with_availability =
     [
-      (env_present "ZAI_API_KEY",
-       Printf.sprintf "glm:%s" Env_config.Llm.default_model);
-      (gemini_available,
-       Printf.sprintf "gemini:%s" Env_config.Gemini.default_model);
-      (env_present "ANTHROPIC_API_KEY",
-       Printf.sprintf "claude:%s" Env_config.Claude.default_model);
+      (env_present "ZAI_API_KEY", Provider_adapter.Glm_family);
+      (gemini_available, Provider_adapter.Gemini_family);
+      (env_present "ANTHROPIC_API_KEY", Provider_adapter.Claude_family);
     ]
   in
-  candidates
-  |> List.filter_map (fun (enabled, label) -> if enabled then Some label else None)
+  families_with_availability
+  |> List.filter_map (fun (enabled, family) ->
+    if enabled then
+      match Provider_adapter.default_model_label_for_family family with
+      | Ok label -> Some label
+      | Error _ -> None
+    else None)
 
 let maybe_append_keeper_fallback_models (models : string list) =
   match model_specs_of_strings models with

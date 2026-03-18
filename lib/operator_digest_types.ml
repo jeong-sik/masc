@@ -375,7 +375,7 @@ let aggregated_local_runtime_json (sessions : Team_session_types.session list) =
       (fun (session : Team_session_types.session) ->
         session.scale_profile = Team_session_types.Scale_local64)
       sessions
-  then Tool_llama.runtime_status_json ()
+  then Tool_local_runtime.runtime_status_json ()
   else `Null
 
 let session_card_to_yojson ~actor (digest : session_digest) =

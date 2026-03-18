@@ -498,6 +498,31 @@ let provider_model_label provider model =
   if model = "" then None
   else Some (Printf.sprintf "%s:%s" provider model)
 
+(** Centralized family → model label mapping.
+    Vendor-specific env var resolution happens here only. *)
+let default_model_label_for_family = function
+  | Claude_family ->
+      let m = Env_config.Claude.default_model in
+      if m = "" then Error "No Claude model configured (MASC_CLAUDE_DEFAULT_MODEL)"
+      else Ok ("claude:" ^ m)
+  | Gemini_family ->
+      let m = Env_config.Gemini.default_model in
+      if m = "" then Error "No Gemini model configured (MASC_GEMINI_DEFAULT_MODEL)"
+      else Ok ("gemini:" ^ m)
+  | OpenAI_family ->
+      let m = Env_config.OpenAI.default_model in
+      if m = "" then Error "No OpenAI model configured (MASC_OPENAI_DEFAULT_MODEL)"
+      else Ok ("openai:" ^ m)
+  | Glm_family ->
+      let m = Env_config.Llm.default_model in
+      Ok ("glm:" ^ (if m = "" then "auto" else m))
+  | Llama_family ->
+      explicit_llama_model_label_result ()
+  | OpenRouter_family ->
+      Error "OpenRouter requires explicit runtime_model"
+  | Custom_family _ ->
+      Error "Custom provider requires explicit runtime_model"
+
 let preferred_execution_model_labels () =
   dedupe_keep_order
     (List.filter_map

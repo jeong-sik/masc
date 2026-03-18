@@ -119,7 +119,12 @@ let readiness_check agent =
   | "gemini" ->
       if command_available "gemini" then Ok () else Error "gemini CLI not found"
   | "llama" ->
-      if not (port_listening 8085) then Error "llama port 8085 not listening"
+      let port = Env_config_runtime.Llama.server_url
+        |> Uri.of_string |> Uri.port
+        |> Option.value ~default:8085
+      in
+      if not (port_listening port) then
+        Error (Printf.sprintf "llama port %d not listening" port)
       else Ok ()
   | _ -> Ok ()
 

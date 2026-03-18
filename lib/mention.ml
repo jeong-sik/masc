@@ -20,7 +20,7 @@ let mode_to_string = function
   | Broadcast s -> Printf.sprintf "Broadcast(%s)" s
   | None -> "None"
 
-(** Extract agent type from mention (e.g., "llama-gentle-gecko" → "llama") *)
+(** Extract agent type from mention (e.g., "local-gentle-gecko" → "local") *)
 let agent_type_of_mention mention =
   let parts = String.split_on_char '-' mention in
   match parts with

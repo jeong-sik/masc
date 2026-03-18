@@ -401,7 +401,7 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
   let runtime_actor_name =
     if env.deps.is_local_spawn_agent spec.spawn_agent then
       Some
-        (env.deps.derived_llama_runtime_actor ~session_id:env.session_id
+        (env.deps.derived_local_runtime_actor ~session_id:env.session_id
            ~prompt:spec.spawn_prompt)
     else
       None

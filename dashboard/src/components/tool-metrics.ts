@@ -60,27 +60,29 @@ function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount:
   `
 }
 
-function TierDistribution({ dist }: { dist: { essential: number; standard: number; full: number } }) {
-  const total = dist.full
-  const essentialPct = total > 0 ? ((dist.essential / total) * 100).toFixed(1) : '0'
-  const standardPct = total > 0 ? ((dist.standard / total) * 100).toFixed(1) : '0'
-  const fullOnlyCount = total - dist.standard
-  const fullOnlyPct = total > 0 ? ((fullOnlyCount / total) * 100).toFixed(1) : '0'
+function TierDistribution({ dist }: { dist: Record<string, number> }) {
+  const total = dist.total ?? dist.full ?? 0
+  const essential = dist.essential ?? 0
+  const standardOnly = dist.standard_only ?? dist.standard ?? 0
+  const fullOnly = dist.full_only ?? (total - standardOnly) ?? 0
+  const essentialPct = total > 0 ? ((essential / total) * 100).toFixed(1) : '0'
+  const standardPct = total > 0 ? ((standardOnly / total) * 100).toFixed(1) : '0'
+  const fullOnlyPct = total > 0 ? ((fullOnly / total) * 100).toFixed(1) : '0'
   return html`
     <div class="tier-dist">
       <div class="tier-dist-row">
         <span class="tier-dist-label badge-essential">필수</span>
-        <span class="tier-dist-count">${dist.essential}</span>
+        <span class="tier-dist-count">${essential}</span>
         <span class="tier-dist-pct">${essentialPct}%</span>
       </div>
       <div class="tier-dist-row">
         <span class="tier-dist-label badge-standard">표준</span>
-        <span class="tier-dist-count">${dist.standard}</span>
+        <span class="tier-dist-count">${standardOnly}</span>
         <span class="tier-dist-pct">${standardPct}%</span>
       </div>
       <div class="tier-dist-row">
         <span class="tier-dist-label badge-full">전체 전용</span>
-        <span class="tier-dist-count">${fullOnlyCount}</span>
+        <span class="tier-dist-count">${fullOnly}</span>
         <span class="tier-dist-pct">${fullOnlyPct}%</span>
       </div>
     </div>

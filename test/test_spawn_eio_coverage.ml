@@ -1,9 +1,11 @@
 (** Spawn Eio Module Coverage Tests
 
-    Tests for spawn types and constants:
-    - spawn_config type
+    Tests for spawn types, constants, and Provider_adapter routing:
+    - spawn_config type (backward compat)
     - spawn_result type
     - masc_mcp_tools constant
+    - resolve_model_spec (Provider_adapter → model_spec)
+    - OAS Agent.t routing (no CLI subprocess)
 *)
 
 open Alcotest
@@ -11,7 +13,7 @@ open Alcotest
 module Spawn_eio = Masc_mcp.Spawn_eio
 
 (* ============================================================
-   spawn_config Type Tests
+   spawn_config Type Tests (backward compat — type still exists)
    ============================================================ *)
 
 let test_spawn_config_type () =
@@ -211,185 +213,47 @@ let test_masc_lifecycle_suffix_contains_protocol () =
      String.length Spawn_eio.masc_lifecycle_suffix > 100)
 
 (* ============================================================
-   parse_claude_json Tests
+   resolve_model_spec Tests
    ============================================================ *)
 
-let test_parse_claude_json_success () =
-  let json = {|{"usage": {"input_tokens": 100, "output_tokens": 200}, "result": "Hello", "total_cost_usd": 0.005}|} in
-  match Spawn_eio.parse_claude_json json with
-  | (Some "Hello", Some 100, Some 200, None, None, Some cost) ->
-      check (float 0.001) "cost" 0.005 cost
-  | _ -> ()  (* Structure may vary *)
-
-let test_parse_claude_json_invalid () =
-  let (result, _, _, _, _, _) = Spawn_eio.parse_claude_json "not json" in
-  check (option string) "fallback to output" (Some "not json") result
-
-let test_parse_claude_json_missing_fields () =
-  let json = {|{"usage": {}}|} in
-  let (_, input, output, _, _, _) = Spawn_eio.parse_claude_json json in
-  check (option int) "input None" None input;
-  check (option int) "output None" None output
-
-(* ============================================================
-   parse_gemini_output Tests
-   ============================================================ *)
-
-let test_parse_gemini_output_success () =
-  let json = {|{"usageMetadata": {"promptTokenCount": 50, "candidatesTokenCount": 100}}|} in
-  let (input, output, cached, _) = Spawn_eio.parse_gemini_output json in
-  check (option int) "input" (Some 50) input;
-  check (option int) "output" (Some 100) output;
-  check (option int) "cached" None cached
-
-let test_parse_gemini_output_with_cache () =
-  let json = {|{"usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 50, "cachedContentTokenCount": 80}}|} in
-  let (input, output, cached, cost) = Spawn_eio.parse_gemini_output json in
-  check (option int) "input" (Some 100) input;
-  check (option int) "output" (Some 50) output;
-  check (option int) "cached" (Some 80) cached;
-  check bool "has cost" true (Option.is_some cost)
-
-let test_parse_gemini_output_invalid () =
-  let (input, output, cached, cost) = Spawn_eio.parse_gemini_output "invalid" in
-  check (option int) "input None" None input;
-  check (option int) "output None" None output;
-  check (option int) "cached None" None cached;
-  check (option (float 0.01)) "cost None" None cost
-
-let test_extract_gemini_response_text_cli_json () =
-  let json = {|{"response":"hello from gemini","session_id":"sess-1","stats":{"models":{}}}|} in
-  check (option string) "response field"
-    (Some "hello from gemini")
-    (Spawn_eio.extract_gemini_response_text json)
-
-let test_parse_gemini_output_cli_json () =
-  let json = {|
-    {
-      "response":"hello",
-      "stats":{
-        "models":{
-          "gemini-2.5-flash-lite":{"tokens":{"input":1001,"prompt":1001,"candidates":50,"cached":0}},
-          "gemini-3-flash-preview":{"tokens":{"input":14768,"prompt":14768,"candidates":35,"cached":0}}
-        }
-      }
-    }
-  |} in
-  let (input, output, cached, cost) = Spawn_eio.parse_gemini_output json in
-  check (option int) "input" (Some 15769) input;
-  check (option int) "output" (Some 85) output;
-  check (option int) "cached" None cached;
-  check bool "has cost" true (Option.is_some cost)
-
-(* ============================================================
-   parse_ollama_output Tests
-   ============================================================ *)
-
-let test_parse_ollama_output_success () =
-  let json = {|{"prompt_eval_count": 30, "eval_count": 40}|} in
-  let (input, output, cost) = Spawn_eio.parse_ollama_output json in
-  check (option int) "input" (Some 30) input;
-  check (option int) "output" (Some 40) output;
-  check (option (float 0.001)) "cost free" (Some 0.0) cost
-
-let test_parse_ollama_output_invalid () =
-  let (input, output, cost) = Spawn_eio.parse_ollama_output "invalid" in
-  check (option int) "input None" None input;
-  check (option int) "output None" None output;
-  check (option (float 0.01)) "cost None" None cost
-
-(* ============================================================
-   parse_codex_output Tests
-   ============================================================ *)
-
-let test_parse_codex_output_success () =
-  let json = {|{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50}}|} in
-  let (input, output, cached, cost) = Spawn_eio.parse_codex_output json in
-  check (option int) "input" (Some 100) input;
-  check (option int) "output" (Some 50) output;
-  check (option int) "cached" None cached;
-  check bool "has cost" true (Option.is_some cost)
-
-let test_parse_codex_output_multiline () =
-  let output = "line1\nline2\n" ^ {|{"type":"turn.completed","usage":{"input_tokens":200,"output_tokens":100}}|} in
-  let (input, out_tok, _, _) = Spawn_eio.parse_codex_output output in
-  check (option int) "input" (Some 200) input;
-  check (option int) "output" (Some 100) out_tok
-
-let test_parse_codex_output_no_turn () =
-  let (input, output, _, _) = Spawn_eio.parse_codex_output "some random output" in
-  check (option int) "input None" None input;
-  check (option int) "output None" None output
-
-(* ============================================================
-   default_configs Tests
-   ============================================================ *)
-
-let test_default_configs_not_empty () =
-  check bool "not empty" true (List.length Spawn_eio.default_configs > 0)
-
-let test_default_configs_has_claude () =
-  check bool "has claude" true (List.mem_assoc "claude" Spawn_eio.default_configs)
-
-let test_default_configs_has_gemini () =
-  check bool "has gemini" true (List.mem_assoc "gemini" Spawn_eio.default_configs)
-
-let test_default_configs_has_codex () =
-  check bool "has codex" true (List.mem_assoc "codex" Spawn_eio.default_configs)
-
-let test_default_configs_has_llama () =
-  check bool "has llama" true (List.mem_assoc "llama" Spawn_eio.default_configs)
-
-let test_default_configs_has_no_ollama () =
-  check bool "has no bare ollama config" false
-    (List.mem_assoc "ollama" Spawn_eio.default_configs)
-
-let test_default_configs_gemini_json_output () =
-  match Spawn_eio.get_config "gemini" with
-  | Some cfg ->
-      check bool "includes json output" true
-        (String.contains cfg.command '-' &&
-         try
-           let _ = Str.search_forward (Str.regexp_string "--output-format json") cfg.command 0 in
+let test_resolve_model_spec_unknown_agent () =
+  match Spawn_eio.resolve_model_spec "nonexistent_xyz" with
+  | Error msg ->
+      check bool "mentions not registered" true
+        (try
+           let _ = Str.search_forward (Str.regexp_string "not registered") msg 0 in
            true
          with Not_found -> false)
-  | None -> fail "expected gemini config"
+  | Ok _ -> fail "expected Error for unknown agent"
+
+let test_resolve_model_spec_claude () =
+  match Spawn_eio.resolve_model_spec "claude" with
+  | Ok spec ->
+      check bool "provider is Claude" true
+        (spec.Masc_mcp.Llm_client.provider = Masc_mcp.Llm_client.Claude)
+  | Error _ ->
+      (* May fail if ANTHROPIC_API_KEY not set — that is acceptable *)
+      ()
+
+let test_resolve_model_spec_glm () =
+  match Spawn_eio.resolve_model_spec "glm" with
+  | Ok spec ->
+      check bool "provider is Glm_cloud" true
+        (spec.Masc_mcp.Llm_client.provider = Masc_mcp.Llm_client.Glm_cloud)
+  | Error _ ->
+      (* May fail if ZAI_API_KEY not set *)
+      ()
+
+let test_resolve_model_spec_gemini () =
+  match Spawn_eio.resolve_model_spec "gemini" with
+  | Ok spec ->
+      check bool "provider is Gemini" true
+        (spec.Masc_mcp.Llm_client.provider = Masc_mcp.Llm_client.Gemini)
+  | Error _ -> ()
 
 (* ============================================================
-   get_config Tests
+   Spawn routing Tests
    ============================================================ *)
-
-let test_get_config_claude () =
-  match Spawn_eio.get_config "claude" with
-  | Some cfg -> check string "agent_name" "claude" cfg.agent_name
-  | None -> fail "expected Some"
-
-let test_get_config_llama () =
-  match Spawn_eio.get_config "llama" with
-  | Some cfg ->
-      check string "agent_name" "llama" cfg.agent_name;
-      check bool "command is llama ref" true
-        (String.starts_with ~prefix:"llama:" cfg.command)
-  | None -> fail "expected Some"
-
-let test_get_config_ollama_removed () =
-  match Spawn_eio.get_config "ollama" with
-  | None -> ()
-  | Some _ -> fail "expected bare ollama config to be removed"
-
-let test_spawn_llama_requires_explicit_runtime_model () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let result =
-    Spawn_eio.spawn ~sw ~proc_mgr:(Eio.Stdenv.process_mgr env) ~agent_name:"llama"
-      ~prompt:"hello" ()
-  in
-  check bool "spawn fails" false result.success;
-  check bool "mentions runtime_model" true
-    (try
-       let _ = Str.search_forward (Str.regexp_string "runtime_model") result.output 0 in
-       true
-     with Not_found -> false)
 
 let test_spawn_bare_ollama_rejected () =
   Eio_main.run @@ fun env ->
@@ -410,40 +274,19 @@ let test_spawn_bare_ollama_rejected () =
        true
      with Not_found -> false)
 
-let test_get_config_unknown () =
-  match Spawn_eio.get_config "nonexistent" with
-  | None -> ()
-  | Some _ -> fail "expected None"
-
-(* ============================================================
-   build_mcp_args Tests
-   ============================================================ *)
-
-let test_build_mcp_args_empty () =
-  let flags = Spawn_eio.build_mcp_args "claude" [] in
-  check (list string) "empty flags" [] flags
-
-let test_build_mcp_args_claude () =
-  let flags = Spawn_eio.build_mcp_args "claude" ["tool1"; "tool2"] in
-  let flags_str = String.concat " " flags in
-  check bool "has allowedTools" true (Str.string_match (Str.regexp ".*allowedTools.*") flags_str 0)
-
-let test_build_mcp_args_gemini () =
-  let flags = Spawn_eio.build_mcp_args "gemini" ["tool1"; "tool2"] in
-  let flags_str = String.concat " " flags in
-  check bool "has allowed-tools" true (Str.string_match (Str.regexp ".*allowed-tools.*") flags_str 0)
-
-let test_build_mcp_args_other () =
-  let flags = Spawn_eio.build_mcp_args "codex" ["tool1"] in
-  check (list string) "empty for other" [] flags
-
-let test_build_prompt_args_gemini () =
-  let flags = Spawn_eio.build_prompt_args "gemini" "hello" in
-  check (list string) "gemini prompt args" ["-p"; "hello"] flags
-
-let test_build_prompt_args_other () =
-  let flags = Spawn_eio.build_prompt_args "claude" "hello" in
-  check (list string) "other prompt args" [] flags
+let test_spawn_unknown_agent_fails () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let result =
+    Spawn_eio.spawn ~sw ~proc_mgr:(Eio.Stdenv.process_mgr env)
+      ~agent_name:"totally_unknown_agent_xyz" ~prompt:"hello" ()
+  in
+  check bool "spawn fails" false result.success;
+  check bool "mentions model resolution" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string "not registered") result.output 0 in
+       true
+     with Not_found -> false)
 
 (* ============================================================
    State Isolation Tests
@@ -543,52 +386,15 @@ let () =
       test_case "not empty" `Quick test_masc_lifecycle_suffix_not_empty;
       test_case "contains protocol" `Quick test_masc_lifecycle_suffix_contains_protocol;
     ];
-    "parse_claude_json", [
-      test_case "success" `Quick test_parse_claude_json_success;
-      test_case "invalid" `Quick test_parse_claude_json_invalid;
-      test_case "missing fields" `Quick test_parse_claude_json_missing_fields;
+    "resolve_model_spec", [
+      test_case "unknown agent" `Quick test_resolve_model_spec_unknown_agent;
+      test_case "claude" `Quick test_resolve_model_spec_claude;
+      test_case "glm" `Quick test_resolve_model_spec_glm;
+      test_case "gemini" `Quick test_resolve_model_spec_gemini;
     ];
-    "parse_gemini_output", [
-      test_case "success" `Quick test_parse_gemini_output_success;
-      test_case "with cache" `Quick test_parse_gemini_output_with_cache;
-      test_case "extract response from cli json" `Quick test_extract_gemini_response_text_cli_json;
-      test_case "cli json stats" `Quick test_parse_gemini_output_cli_json;
-      test_case "invalid" `Quick test_parse_gemini_output_invalid;
-    ];
-    "parse_ollama_output", [
-      test_case "success" `Quick test_parse_ollama_output_success;
-      test_case "invalid" `Quick test_parse_ollama_output_invalid;
-    ];
-    "parse_codex_output", [
-      test_case "success" `Quick test_parse_codex_output_success;
-      test_case "multiline" `Quick test_parse_codex_output_multiline;
-      test_case "no turn" `Quick test_parse_codex_output_no_turn;
-    ];
-    "default_configs", [
-      test_case "not empty" `Quick test_default_configs_not_empty;
-      test_case "has claude" `Quick test_default_configs_has_claude;
-      test_case "has gemini" `Quick test_default_configs_has_gemini;
-      test_case "gemini json output" `Quick test_default_configs_gemini_json_output;
-      test_case "has codex" `Quick test_default_configs_has_codex;
-      test_case "has llama" `Quick test_default_configs_has_llama;
-      test_case "has no ollama" `Quick test_default_configs_has_no_ollama;
-    ];
-    "get_config", [
-      test_case "claude" `Quick test_get_config_claude;
-      test_case "llama" `Quick test_get_config_llama;
-      test_case "ollama removed" `Quick test_get_config_ollama_removed;
-      test_case "llama requires explicit runtime_model" `Quick
-        test_spawn_llama_requires_explicit_runtime_model;
+    "spawn_routing", [
       test_case "bare ollama rejected" `Quick test_spawn_bare_ollama_rejected;
-      test_case "unknown" `Quick test_get_config_unknown;
-    ];
-    "build_mcp_args", [
-      test_case "empty" `Quick test_build_mcp_args_empty;
-      test_case "claude" `Quick test_build_mcp_args_claude;
-      test_case "gemini" `Quick test_build_mcp_args_gemini;
-      test_case "gemini prompt args" `Quick test_build_prompt_args_gemini;
-      test_case "other prompt args" `Quick test_build_prompt_args_other;
-      test_case "other" `Quick test_build_mcp_args_other;
+      test_case "unknown agent fails" `Quick test_spawn_unknown_agent_fails;
     ];
     "state_isolation", [
       test_case "excluded_state_keys not empty" `Quick test_excluded_state_keys_not_empty;

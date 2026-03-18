@@ -55,7 +55,11 @@ let score_messages (msgs : Llm_client.message list) : (int * float) list =
       else if len < 500 then 0.8
       else 0.7
     in
-    let tool_w = match m.tool_call_id with Some _ -> 0.8 | None -> 0.5 in
+    let has_tool_content = List.exists (function
+      | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
+      | _ -> false) m.content
+    in
+    let tool_w = if has_tool_content then 0.8 else 0.5 in
     let score = 0.4 *. recency +. 0.25 *. role_w +. 0.2 *. content_w +. 0.15 *. tool_w in
     let score =
       if starts_with ~prefix:memory_summary_prefix msg_text

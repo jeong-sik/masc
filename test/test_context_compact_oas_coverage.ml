@@ -11,14 +11,12 @@ module Types = Agent_sdk.Types
 module Compact = Masc_mcp.Context_compact_oas
 module Scoring = Masc_mcp.Context_scoring
 
-let msg role text =
-  { Llm.role; content = [Types.Text text];
-    name = None; tool_call_id = None }
+let msg role text : Llm.message =
+  { role; content = [Types.Text text] }
 
-let tool_msg ?(id = "tool-1") text =
-  { Llm.role = Llm.Tool;
-    content = [Types.Text text];
-    name = None; tool_call_id = Some id }
+let tool_msg ?(id = "tool-1") text : Llm.message =
+  { role = Types.Tool;
+    content = [Types.ToolResult { tool_use_id = id; content = text; is_error = false }] }
 
 (* ================================================================ *)
 (* Sentinel Roundtrip Tests (C2)                                    *)
@@ -59,8 +57,11 @@ let test_roundtrip_tool () =
     (match back.role with Llm.Tool -> "Tool" | _ -> "other");
   check string "text preserved" "Result data"
     (Llm.text_of_message back);
-  check (option string) "tool_call_id preserved" (Some "call-42")
-    back.tool_call_id
+  let tool_id = List.find_map (function
+    | Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+    | _ -> None) back.content
+  in
+  check (option string) "tool_use_id preserved" (Some "call-42") tool_id
 
 let test_roundtrip_empty_text () =
   let m = msg Llm.System "" in

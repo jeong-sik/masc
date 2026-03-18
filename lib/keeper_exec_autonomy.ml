@@ -147,7 +147,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
          (tc, result))
       tcs
   in
-  let run_cascade requests = Llm_client.cascade requests in
+  let run_cascade requests = Llm_orchestration.cascade requests in
   let max_rounds = 3 in
   let initial_request =
     { Llm_client.model = primary;

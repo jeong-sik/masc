@@ -200,7 +200,6 @@ module Dashboard_mission_briefing = Dashboard_mission_briefing
 module Server_utils = Server_utils
 module Server_auth = Server_auth
 module Server_tts_proxy = Server_tts_proxy
-module Server_trpg_rest = Server_trpg_rest
 module Server_dashboard_http = Server_dashboard_http
 module Server_routes_http = Server_routes_http
 module Server_h2_gateway = Server_h2_gateway
@@ -316,9 +315,6 @@ module Lodge_reaction = Lodge_reaction
 module Lodge_topic = Lodge_topic
 module Lodge_tom = Lodge_tom
 
-module Game_view_state = Game_view_state
-module Tool_protocol_game_view = Tool_protocol_game_view
-
 (* Gardener — Self-Organizing Agent Ecosystem *)
 module Gardener_types = Gardener_types
 module Gardener = Gardener
@@ -369,23 +365,6 @@ module Keeper_runtime = Keeper_runtime
 module Autonomy_adjuster = Autonomy_adjuster
 
 module Tool_goals = Tool_goals
-module Tool_trpg = Tool_trpg
-module Trpg_store = Trpg_store
-module Trpg_preset_store = Trpg_preset_store
-module Trpg_engine_types = Trpg_engine_types
-module Trpg_engine_event = Trpg_engine_event
-module Trpg_engine_state_machine = Trpg_engine_state_machine
-module Trpg_engine_store = Trpg_engine_store
-module Trpg_engine_store_sqlite = Trpg_engine_store_sqlite
-module Trpg_world_projection = Trpg_world_projection
-module Trpg_visibility = Trpg_visibility
-module Trpg_rule = Trpg_rule
-module Trpg_rule_dnd5e_lite = Trpg_rule_dnd5e_lite
-module Trpg_engine_replay = Trpg_engine_replay
-module Trpg_bdi = Trpg_bdi
-module Trpg_harness = Trpg_harness
-module Trpg_dm_intent = Trpg_dm_intent
-module Trpg_actor_match = Trpg_actor_match
 
 (* Autoresearch — Karpathy-inspired autonomous experiment loop *)
 module Autoresearch = Autoresearch

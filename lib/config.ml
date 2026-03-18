@@ -124,8 +124,7 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_goals.schemas
     @ Tool_team_session.schemas
     @ Tool_voice.schemas
-    @ Tool_protocol_game_view.schemas
-    @ Tool_trpg.schemas
+    (* Tool_protocol_game_view.schemas + Tool_trpg.schemas — archived *)
     @ Tool_compact.schemas
     @ Tool_async_spawn.schemas
     )

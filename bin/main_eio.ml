@@ -60,7 +60,6 @@ module Server_mcp_transport_http = Masc_mcp.Server_mcp_transport_http
 include Masc_mcp.Server_utils
 include Masc_mcp.Server_auth
 include Masc_mcp.Server_tts_proxy
-include Masc_mcp.Server_trpg_rest
 include Masc_mcp.Server_dashboard_http
 module Server_h2_gateway = Masc_mcp.Server_h2_gateway
 module Server_runtime_bootstrap = Masc_mcp.Server_runtime_bootstrap

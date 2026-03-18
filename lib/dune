@@ -78,12 +78,6 @@
    server_utils
    server_auth
    server_tts_proxy
-   server_trpg_rest_core
-   server_trpg_rest_actor
-   server_trpg_rest_models
-   server_trpg_rest_views
-   server_trpg_rest_runtime
-   server_trpg_rest
    dashboard_http_helpers
    dashboard_http_monitoring
    dashboard_http_keeper_metrics
@@ -99,7 +93,6 @@
    server_routes_http_keeper_stream
    server_routes_http_routes_frontend
    server_routes_http_routes_room
-   server_routes_http_routes_trpg
    server_routes_http_routes_dashboard
    server_routes_http_routes_command_plane_read
    server_routes_http_routes_command_plane_write
@@ -331,7 +324,7 @@
    team_session_engine_eio
    ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
    safe_ops
-   game_view_state
+   ;; game_view_state — archived with TRPG subsystem
    ;; sdp removed — in ocaml-webrtc
    session
    shutdown_hooks
@@ -457,9 +450,7 @@
    tool_code
    code_swarm_plan
    tool_code_swarm
-   tool_protocol_game_view_utils
-   tool_protocol_game_view_handlers
-   tool_protocol_game_view
+   ;; tool_protocol_game_view — archived with TRPG subsystem
    tool_suspend
    tool_notifications
    tool_voice
@@ -589,42 +580,7 @@
    tool_lodge_agents_ops
    tool_lodge_project
    tool_lodge_autonomous
-   trpg_schema
-   trpg_types_world
-   trpg_types_canon
-   trpg_types
-   trpg_bestiary
-   trpg_action
-   trpg_round_fallback
-   trpg_round_keeper_parse
-   trpg_round_prompt
-   trpg_round
-   trpg_handlers
-   trpg_handlers_core
-   trpg_handlers_actors
-   trpg_handlers_session
-   trpg_round_run_ctx
-   trpg_round_run_process
-   trpg_round_run_handler
-   tool_trpg
-   trpg_store
-   trpg_preset_store
-   trpg_engine_types
-   trpg_engine_event
-   trpg_engine_state_machine
-   trpg_engine_store
-   trpg_engine_store_sqlite
-   trpg_world_projection
-   trpg_visibility
-   trpg_rule
-   trpg_rule_dnd5e_lite
-   trpg_rule_dnd5e_lite_core
-   trpg_engine_replay
-   trpg_slot
-   trpg_dm_intent
-   trpg_bdi
-   trpg_harness
-   trpg_actor_match
+   ;; TRPG subsystem archived — see archive/trpg/
    json_util
    ;; Autoresearch — Karpathy-inspired autonomous experiment loop
    autoresearch
@@ -648,18 +604,11 @@
  gardener_state
  gardener_health
  gardener_decisions
- trpg_types_world
- trpg_types_canon
- tool_protocol_game_view_utils
- tool_protocol_game_view_handlers
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
  mitosis_helpers
  mitosis_spawn
  mitosis_defaults
- trpg_round_run_ctx
- trpg_round_run_process
- trpg_round_run_handler
  board_core
  board_votes
  cp_snapshot_core
@@ -674,7 +623,6 @@
  dashboard_mission_assembly
  keeper_types_profile
  keeper_types_resident
- trpg_bestiary
  cp_lifecycle_swarm_live
  tool_team_session_routing_workers
  cp_lifecycle_search
@@ -692,7 +640,6 @@
  server_routes_http_keeper_stream
  server_routes_http_routes_frontend
  server_routes_http_routes_room
- server_routes_http_routes_trpg
  server_routes_http_routes_dashboard
  server_routes_http_routes_command_plane_read
  server_routes_http_routes_command_plane_write
@@ -756,14 +703,6 @@
   chain_mermaid_parse
   chain_mermaid_node_content
   chain_mermaid_graph
-  ;; trpg_round sub-modules
-  trpg_round_fallback
-  trpg_round_keeper_parse
-  trpg_round_prompt
-  ;; trpg_handlers sub-modules
-  trpg_handlers_core
-  trpg_handlers_actors
-  trpg_handlers_session
   ;; local_agent_eio sub-modules
   local_agent_eio_types
   local_agent_eio_container

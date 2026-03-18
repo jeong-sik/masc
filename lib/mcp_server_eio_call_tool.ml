@@ -152,7 +152,16 @@ let tool_timeout_sec_opt ~(tool_name : string) ~(arguments : Yojson.Safe.t) : fl
   | "masc_keeper_msg" ->
       let requested_timeout_sec = coerce_tool_timeout_sec (Safe_ops.json_float_opt "timeout_sec" arguments) in
       Some (Option.value requested_timeout_sec ~default:default_timeout_sec)
-  | _ -> None
+  | _ ->
+      let global_default_sec =
+        float_of_int
+          (int_of_env_default
+             "MASC_TOOL_TIMEOUT_DEFAULT_SEC"
+             ~default:30
+             ~min_v:5
+             ~max_v:300)
+      in
+      Some global_default_sec
 
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =
@@ -224,7 +233,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
                (false,
                 Printf.sprintf
-                  "Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
+                  "Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_DEFAULT_SEC or MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
                   timeout_sec
                   name))
      with exn ->

@@ -106,7 +106,8 @@ let test_notification_body_relaxes_accept () =
     | Masc_mcp.Mcp_protocol.Http_negotiation.Legacy_accepted -> true
     | _ -> false)
 
-let test_request_body_stays_strict () =
+let test_request_json_only_accepted () =
+  (* JSON-only Accept is now Legacy_accepted per MCP Streamable HTTP spec (2025-03-26) *)
   let module Transport = Masc_mcp.Server_mcp_transport_http in
   let headers = Httpun.Headers.of_list [("accept", "application/json")] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
@@ -114,12 +115,13 @@ let test_request_body_stays_strict () =
     {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}|}
   in
   let mode = Transport.classify_mcp_accept_for_body request body in
-  check bool "request still rejected" true
+  check bool "json-only accept is legacy_accepted" true
     (match mode with
-    | Masc_mcp.Mcp_protocol.Http_negotiation.Rejected -> true
+    | Masc_mcp.Mcp_protocol.Http_negotiation.Legacy_accepted -> true
     | _ -> false)
 
-let test_initialize_body_stays_strict () =
+let test_initialize_json_only_accepted () =
+  (* JSON-only Accept is now Legacy_accepted per MCP Streamable HTTP spec (2025-03-26) *)
   let module Transport = Masc_mcp.Server_mcp_transport_http in
   let headers = Httpun.Headers.of_list [("accept", "application/json")] in
   let request = Httpun.Request.create ~headers `POST "/mcp" in
@@ -127,7 +129,21 @@ let test_initialize_body_stays_strict () =
     {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"0.1"}}}|}
   in
   let mode = Transport.classify_mcp_accept_for_body request body in
-  check bool "initialize remains rejected" true
+  check bool "initialize with json-only is legacy_accepted" true
+    (match mode with
+    | Masc_mcp.Mcp_protocol.Http_negotiation.Legacy_accepted -> true
+    | _ -> false)
+
+let test_no_accept_header_rejected () =
+  (* No Accept header at all should still be Rejected *)
+  let module Transport = Masc_mcp.Server_mcp_transport_http in
+  let headers = Httpun.Headers.of_list [] in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  let body =
+    {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}|}
+  in
+  let mode = Transport.classify_mcp_accept_for_body request body in
+  check bool "no accept header is rejected" true
     (match mode with
     | Masc_mcp.Mcp_protocol.Http_negotiation.Rejected -> true
     | _ -> false)
@@ -159,8 +175,9 @@ let () =
       ]);
       ("body_aware_accept", [
         test_case "notification relaxes accept" `Quick test_notification_body_relaxes_accept;
-        test_case "request remains strict" `Quick test_request_body_stays_strict;
-        test_case "initialize remains strict" `Quick test_initialize_body_stays_strict;
+        test_case "json-only accept is legacy_accepted" `Quick test_request_json_only_accepted;
+        test_case "initialize json-only is legacy_accepted" `Quick test_initialize_json_only_accepted;
+        test_case "no accept header rejected" `Quick test_no_accept_header_rejected;
         test_case "initialize disables sse" `Quick test_initialize_never_uses_sse;
       ]);
     ]

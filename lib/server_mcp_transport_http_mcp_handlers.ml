@@ -72,8 +72,13 @@ let handle_post_mcp ~(deps : deps) ?(profile = Mcp_eio.Full) request reqd =
           | Error msg ->
               Server_mcp_transport_http_headers.respond_mcp_auth_error ~deps
                 request reqd ~session_id ~protocol_version msg
-          | Ok () ->
-              Http.Request.read_body_async reqd (fun body_str ->
+          | Ok () -> (
+              match Http.Request.read_body_sync reqd with
+              | Error msg ->
+                  Server_mcp_transport_http_headers.respond_mcp_internal_error
+                    ~deps request reqd ~session_id ~protocol_version
+                    (Printf.sprintf "Body read error: %s" msg)
+              | Ok body_str ->
                   let accept_mode =
                     Server_mcp_transport_http_headers.classify_mcp_accept_for_body
                       request body_str

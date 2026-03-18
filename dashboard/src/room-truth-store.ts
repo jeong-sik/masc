@@ -1,18 +1,15 @@
 import { signal } from '@preact/signals'
 import { fetchDashboardRoomTruth } from './api'
 import type {
-  DashboardExecutionQueueItem,
-  DashboardExecutionSummary,
   DashboardRoomTruthAttentionSummary,
   DashboardRoomTruthFocus,
   DashboardRoomTruthRecommendationSummary,
   DashboardRoomTruthResponse,
-  OperatorAttentionItem,
-  OperatorRecommendedAction,
   PendingConfirmSummary,
   ServerStatus,
 } from './types'
 import { asBoolean, asNumber, asString, asStringArray, isRecord, extractArray } from './components/common/normalize'
+import { normalizeExecutionSummary, normalizeExecutionQueueItem, normalizeAttentionItem, normalizeRecommendedAction } from './store-normalizers'
 
 export const roomTruth = signal<DashboardRoomTruthResponse | null>(null)
 export const roomTruthLoading = signal(false)
@@ -31,82 +28,6 @@ function normalizeServerStatus(raw: unknown): ServerStatus | null {
     version: asString(raw.version),
     generated_at: asString(raw.generated_at),
     tempo_interval_s: asNumber(raw.tempo_interval_s),
-  }
-}
-
-function normalizeExecutionSummary(raw: unknown): DashboardExecutionSummary | null {
-  if (!isRecord(raw)) return null
-  return {
-    active_sessions: asNumber(raw.active_sessions),
-    blocked_sessions: asNumber(raw.blocked_sessions),
-    active_operations: asNumber(raw.active_operations),
-    blocked_operations: asNumber(raw.blocked_operations),
-    runtime_pressure: asNumber(raw.runtime_pressure),
-    worker_alerts: asNumber(raw.worker_alerts),
-    continuity_alerts: asNumber(raw.continuity_alerts),
-    priority_items: asNumber(raw.priority_items),
-    keepers: asNumber(raw.keepers),
-  }
-}
-
-function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQueueItem | null {
-  if (!isRecord(raw)) return null
-  const id = asString(raw.id)
-  const kind = asString(raw.kind)
-  const severity = asString(raw.severity)
-  const summary = asString(raw.summary)
-  const targetType = asString(raw.target_type)
-  const targetId = asString(raw.target_id)
-  if (!id || !kind || !severity || !summary || !targetType || !targetId) return null
-  return {
-    id,
-    kind: kind as DashboardExecutionQueueItem['kind'],
-    severity: severity as DashboardExecutionQueueItem['severity'],
-    summary,
-    target_type: targetType,
-    target_id: targetId,
-    status: asString(raw.status),
-    linked_session_id: asString(raw.linked_session_id) ?? null,
-    linked_operation_id: asString(raw.linked_operation_id) ?? null,
-    last_seen_at: asString(raw.last_seen_at) ?? null,
-    top_handoff: isRecord(raw.top_handoff) ? raw.top_handoff as unknown as DashboardExecutionQueueItem['top_handoff'] : null,
-    intervene_handoff: isRecord(raw.intervene_handoff) ? raw.intervene_handoff as unknown as DashboardExecutionQueueItem['intervene_handoff'] : null,
-    command_handoff: isRecord(raw.command_handoff) ? raw.command_handoff as unknown as DashboardExecutionQueueItem['command_handoff'] : null,
-  }
-}
-
-function normalizeAttentionItem(raw: unknown): OperatorAttentionItem | null {
-  if (!isRecord(raw)) return null
-  const kind = asString(raw.kind)
-  const summary = asString(raw.summary)
-  const targetType = asString(raw.target_type)
-  if (!kind || !summary || !targetType) return null
-  return {
-    kind,
-    severity: asString(raw.severity) ?? 'warn',
-    summary,
-    target_type: targetType,
-    target_id: asString(raw.target_id) ?? null,
-    actor: asString(raw.actor) ?? null,
-    evidence: raw.evidence,
-  }
-}
-
-function normalizeRecommendedAction(raw: unknown): OperatorRecommendedAction | null {
-  if (!isRecord(raw)) return null
-  const actionType = asString(raw.action_type)
-  const targetType = asString(raw.target_type)
-  const reason = asString(raw.reason)
-  if (!actionType || !targetType || !reason) return null
-  return {
-    action_type: actionType,
-    target_type: targetType,
-    target_id: asString(raw.target_id) ?? null,
-    severity: asString(raw.severity) ?? 'warn',
-    reason,
-    confirm_required: asBoolean(raw.confirm_required),
-    suggested_payload: isRecord(raw.suggested_payload) ? raw.suggested_payload : undefined,
-    preview: raw.preview,
   }
 }
 

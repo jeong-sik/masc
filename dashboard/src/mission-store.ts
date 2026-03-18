@@ -4,6 +4,7 @@ import {
   fetchDashboardMissionBriefing,
   fetchDashboardMissionSession,
 } from './api'
+import { normalizeAttentionItem, normalizeRecommendedAction } from './store-normalizers'
 import type {
   DashboardMissionAgentBrief,
   DashboardMissionAttentionQueueItem,
@@ -83,41 +84,6 @@ function extractArray(value: unknown, keys: string[] = []): unknown[] {
     if (Array.isArray(candidate)) return candidate
   }
   return []
-}
-
-function normalizeAttentionItem(raw: unknown): OperatorAttentionItem | null {
-  if (!isRecord(raw)) return null
-  const kind = asString(raw.kind)
-  const summary = asString(raw.summary)
-  const targetType = asString(raw.target_type)
-  if (!kind || !summary || !targetType) return null
-  return {
-    kind,
-    severity: asString(raw.severity) ?? 'warn',
-    summary,
-    target_type: targetType,
-    target_id: asString(raw.target_id) ?? null,
-    actor: asString(raw.actor) ?? null,
-    evidence: raw.evidence,
-  }
-}
-
-function normalizeRecommendedAction(raw: unknown): OperatorRecommendedAction | null {
-  if (!isRecord(raw)) return null
-  const actionType = asString(raw.action_type)
-  const targetType = asString(raw.target_type)
-  const reason = asString(raw.reason)
-  if (!actionType || !targetType || !reason) return null
-  return {
-    action_type: actionType,
-    target_type: targetType,
-    target_id: asString(raw.target_id) ?? null,
-    severity: asString(raw.severity) ?? 'warn',
-    reason,
-    confirm_required: asBoolean(raw.confirm_required),
-    suggested_payload: raw.suggested_payload,
-    preview: raw.preview,
-  }
 }
 
 function normalizeSessionCard(raw: unknown): OperatorSessionCard | null {

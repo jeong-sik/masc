@@ -281,7 +281,7 @@ let prompt_for_facts facts_json =
     (Yojson.Safe.to_string facts_json)
 
 let compute_judgments ~base_path:_ ~factual_json =
-  let specs = Lodge_cascade.get_cascade ~cascade_name:"governance_judge" () in
+  let specs = Llm_cascade.get_cascade ~cascade_name:"governance_judge" () in
   if specs = [] then Error "No governance_judge model is available."
   else
     let timeout_sec = Env_config.Llm.dashboard_governance_judge_timeout_seconds in

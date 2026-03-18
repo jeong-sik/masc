@@ -29,17 +29,16 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/.well-known/agent.json" (serve_agent_card ~host ~port)
   |> Http.Router.get "/.well-known/agent-card.json" (serve_agent_card ~host ~port)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
-  (* Dashboard sub-routes: credits and lodge must come before the SPA catchall *)
+  (* Dashboard sub-routes: must come before the SPA catchall *)
   |> Http.Router.get "/dashboard/credits" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          Http.Response.html (Credits_dashboard.html ()) reqd
        ) request reqd)
   |> Http.Router.get "/dashboard/lodge" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         Http.Response.html_cached
-           ~etag:(Lodge_dashboard.etag ())
-           ~request:req
-           (Lodge_dashboard.html ()) reqd
+       with_public_read (fun _state _req reqd ->
+         Http.Response.html
+           {|<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=/dashboard"></head><body>Redirecting to dashboard...</body></html>|}
+           reqd
        ) request reqd)
   |> Http.Router.get "/favicon.ico" (fun request reqd ->
        with_public_read (fun _state req reqd ->

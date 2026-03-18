@@ -161,10 +161,10 @@ let clamp v = Float.min 1.0 (Float.max 0.0 v)
 
 let adjust ~agent_name =
   ensure_loaded ();
-  let stats = Lodge_selection.get_stats agent_name in
+  let stats = Thompson_sampling.get_stats agent_name in
   let health = Agent_health.check_health ~agent_name in
-  let alpha = stats.Lodge_selection.alpha in
-  let beta_val = stats.Lodge_selection.beta in
+  let alpha = stats.Thompson_sampling.alpha in
+  let beta_val = stats.Thompson_sampling.beta in
   let quality_ratio =
     if alpha +. beta_val > 0.0 then alpha /. (alpha +. beta_val)
     else 0.5  (* no data — neutral *)

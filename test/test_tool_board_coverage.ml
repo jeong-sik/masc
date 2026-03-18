@@ -93,17 +93,17 @@ let test_board_error_to_string () =
   let s2 = Tool_board.board_error_to_string (Board.Validation_error "bad") in
   Alcotest.(check bool) "validation_error" true (String.contains s2 'b')
 
-let test_is_lodge_agent () =
+let test_is_agent () =
   Eio_main.run @@ fun _env ->
   cleanup ();
   Alcotest.(check bool) "lowercase no space = lodge" true
-    (Tool_board.is_lodge_agent "dreamer");
+    (Tool_board.is_agent "dreamer");
   Alcotest.(check bool) "with space = not lodge" false
-    (Tool_board.is_lodge_agent "John Smith");
+    (Tool_board.is_agent "John Smith");
   Alcotest.(check bool) "uppercase = not lodge" false
-    (Tool_board.is_lodge_agent "Dreamer");
+    (Tool_board.is_agent "Dreamer");
   Alcotest.(check bool) "empty = not lodge" false
-    (Tool_board.is_lodge_agent "")
+    (Tool_board.is_agent "")
 
 let test_format_timestamp_relative () =
   Eio_main.run @@ fun _env ->
@@ -441,7 +441,7 @@ let () =
           Alcotest.test_case "visibility_of_string" `Quick test_visibility_of_string;
           Alcotest.test_case "sort_order_of_string" `Quick test_sort_order_of_string;
           Alcotest.test_case "board_error_to_string" `Quick test_board_error_to_string;
-          Alcotest.test_case "is_lodge_agent" `Quick test_is_lodge_agent;
+          Alcotest.test_case "is_agent" `Quick test_is_agent;
           Alcotest.test_case "format_timestamp_relative" `Quick test_format_timestamp_relative;
         ] );
       ( "json_helpers",

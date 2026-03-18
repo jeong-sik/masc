@@ -1,4 +1,4 @@
-(** Post Verifier — 3-dimension output verification gate for Lodge agents.
+(** Post Verifier — 3-dimension output verification gate for agents.
 
     Pure deterministic heuristic checks across three dimensions:
 
@@ -10,7 +10,7 @@
     Overall verdict: any Fail → Fail, any Warn → Warn, all Pass → Pass.
 
     LLM-based G-Eval scoring is in Post_verifier_llm (separate module to
-    avoid dependency cycles through Board -> Lodge_selection -> here).
+    avoid dependency cycles through Board -> Thompson_sampling -> here).
 
     @since 2.71.0 *)
 

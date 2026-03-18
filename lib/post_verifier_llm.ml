@@ -1,7 +1,7 @@
 (** Post Verifier LLM — G-Eval rubric scoring via LLM cascade.
 
     Separated from Post_verifier to avoid dependency cycles:
-    Board -> Lodge_selection -> Post_verifier would pull in Llm_client,
+    Board -> Thompson_sampling -> Post_verifier would pull in Llm_client,
     creating a cycle through Llm_response_cache -> Board.
 
     Modes (MASC_VERIFIER_MODE env var):
@@ -119,7 +119,7 @@ let geval_response_is_valid (resp : Llm_types.api_response) : bool =
 let verify_llm ~content : (verification_result, string) result =
   let prompt = build_geval_prompt ~content in
   match
-    Lodge_cascade.call ~cascade_name:"verifier" ~prompt
+    Llm_cascade.call ~cascade_name:"verifier" ~prompt
       ~temperature:0.2 ~timeout_sec:15 ~max_tokens:150
       ~accept:geval_response_is_valid ()
   with

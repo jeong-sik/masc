@@ -54,7 +54,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                 (* Record vote for Thompson Sampling feedback *)
                 let author_name = Agent_id.to_string post.author in
                 let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir;
+                Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
                 (* No economy earn on flip: prevents down/up alternation abuse *)
                 Ok (flipped.votes_up - flipped.votes_down)
             | None ->
@@ -70,7 +70,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                 (* Record vote for Thompson Sampling feedback *)
                 let author_name = Agent_id.to_string post.author in
                 let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir;
+                Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
                 (* Agent Economy: earn credits for upvote received *)
                 (if direction = Up then
                    ignore (Agent_economy.earn
@@ -111,7 +111,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
                 (* Record vote for Thompson Sampling feedback *)
                 let author_name = Agent_id.to_string cmt.author in
                 let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir;
+                Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
                 Ok (flipped.votes_up - flipped.votes_down)
             | None ->
                 let updated = match direction with
@@ -126,7 +126,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
                 (* Record vote for Thompson Sampling feedback *)
                 let author_name = Agent_id.to_string cmt.author in
                 let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir;
+                Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
                 Ok (updated.votes_up - updated.votes_down)
       )
 

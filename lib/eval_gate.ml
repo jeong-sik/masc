@@ -327,8 +327,9 @@ let guarded_execute
       let result =
         try execute ()
         with exn ->
+          Log.info "eval_gate tool %s failed: %s" tool_name (Printexc.to_string exn);
           Yojson.Safe.to_string (`Assoc [
-            ("error", `String (Printexc.to_string exn));
+            ("error", `String "Tool execution failed (internal error)");
             ("tool", `String tool_name);
           ])
       in

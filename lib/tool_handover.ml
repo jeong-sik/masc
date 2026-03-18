@@ -16,6 +16,9 @@ type result = bool * string
 (* Individual handlers *)
 let handle_handover_create ctx args =
   let task_id = get_string args "task_id" "" in
+  if task_id = "" then
+    (false, "task_id is required")
+  else
   let session_id = get_string args "session_id" "" in
   let reason_str = get_string args "reason" "explicit" in
   let reason = match reason_str with
@@ -59,6 +62,9 @@ let handle_handover_list ctx args =
 
 let handle_handover_claim ctx args =
   let handover_id = get_string args "handover_id" "" in
+  if handover_id = "" then
+    (false, "handover_id is required")
+  else
   match ctx.fs with
   | Some fs ->
       (match Handover_eio.claim_handover ~fs ctx.config ~handover_id ~agent_name:ctx.agent_name with
@@ -68,6 +74,9 @@ let handle_handover_claim ctx args =
 
 let handle_handover_claim_and_spawn ctx args =
   let handover_id = get_string args "handover_id" "" in
+  if handover_id = "" then
+    (false, "handover_id is required")
+  else
   let additional_instructions = get_string_opt args "additional_instructions" in
   let timeout_seconds = get_int_opt args "timeout_seconds" in
   match ctx.fs, ctx.proc_mgr, ctx.sw with
@@ -82,6 +91,9 @@ let handle_handover_claim_and_spawn ctx args =
 
 let handle_handover_get ctx args =
   let handover_id = get_string args "handover_id" "" in
+  if handover_id = "" then
+    (false, "handover_id is required")
+  else
   match ctx.fs with
   | Some fs ->
       (match Handover_eio.load_handover ~fs ctx.config handover_id with

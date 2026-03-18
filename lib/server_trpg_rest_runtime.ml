@@ -54,7 +54,7 @@ let trpg_keeper_call_with_runtime
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Eio.Time.Timeout -> `Timeout
-  | exn -> `Error (Printexc.to_string exn)
+  | exn -> Log.Trpg.error "keeper_msg_with_runtime: %s" (Printexc.to_string exn); `Error "internal error"
 
 type trpg_round_run_guard_state = {
   mutex : Eio.Mutex.t;
@@ -94,7 +94,7 @@ let trpg_keeper_probe_with_runtime
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Eio.Time.Timeout -> `Error "timeout"
-  | exn -> `Error (Printexc.to_string exn)
+  | exn -> Log.Trpg.error "keeper_probe_with_runtime: %s" (Printexc.to_string exn); `Error "internal error"
 let trpg_round_run_json
     ~(state : Mcp_server.server_state)
     ~(agent_name : string)
@@ -233,7 +233,7 @@ let trpg_round_run_json
     | None -> run_with_single_flight ()
   with
   | Yojson.Json_error e -> Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
-  | exn -> Error (`Internal_server_error, Printexc.to_string exn)
+  | exn -> Log.Trpg.error "trpg_round_run_json: %s" (Printexc.to_string exn); Error (`Internal_server_error, "internal error")
 
 
 (* ============================================ *)

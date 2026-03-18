@@ -13,13 +13,19 @@ type result = bool * string
 (* Individual handlers *)
 let handle_portal_open ctx args =
   let target_agent = get_string args "target_agent" "" in
-  let initial_message = get_string_opt args "initial_message" in
-  match Room.portal_open_r ctx.config ~agent_name:ctx.agent_name ~target_agent ~initial_message with
+  if target_agent = "" then
+    (false, "target_agent is required")
+  else
+    let initial_message = get_string_opt args "initial_message" in
+    match Room.portal_open_r ctx.config ~agent_name:ctx.agent_name ~target_agent ~initial_message with
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
 
 let handle_portal_send ctx args =
   let message = get_string args "message" "" in
+  if message = "" then
+    (false, "message is required")
+  else begin
   (* macOS notification for portal message *)
   (match Room.get_portal_target ctx.config ~agent_name:ctx.agent_name with
    | Some target -> Notify.notify_portal ~from_agent:ctx.agent_name ~target_agent:target ~message ()
@@ -27,6 +33,7 @@ let handle_portal_send ctx args =
   match Room.portal_send_r ctx.config ~agent_name:ctx.agent_name ~message with
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
+  end
 
 let handle_portal_close ctx _args =
   (true, Room.portal_close ctx.config ~agent_name:ctx.agent_name)

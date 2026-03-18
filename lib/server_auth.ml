@@ -155,9 +155,9 @@ let trpg_tts_proxy ~body_str : (string, [> `Bad_request | `Internal_server_error
   with
   | Yojson.Json_error e ->
       Error (`Bad_request, Printf.sprintf "invalid json: %s" e)
-  | exn ->
-      Error (`Internal_server_error,
-        Printf.sprintf "TTS proxy error: %s" (Printexc.to_string exn))
+
+
+
 
 let voice_config_payload () =
   match Voice_bridge.public_config_json () with

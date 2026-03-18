@@ -669,10 +669,37 @@ let submit_petition base_path ~title ~origin ~subject_type ~risk_class
       if task_id_suffix = "" then base_key
       else base_key ^ "::" ^ task_id_suffix
     in
+    let all_cases = list_cases ~include_test:true base_path in
     let all_active_cases =
-      list_cases ~include_test:true base_path
-      |> List.filter (fun (case_ : case_record) -> not (is_terminal_case_status case_.status))
+      List.filter (fun (case_ : case_record) -> not (is_terminal_case_status case_.status))
+        all_cases
     in
+    (* BUG-1627/1608 FIX: Also check terminal (resolved/merged) cases.
+       If a case for this task already reached a terminal state, skip
+       creating a new petition to prevent unbounded petition accumulation. *)
+    let resolved_case =
+      if source_refs <> [] then
+        List.find_opt (fun (case_ : case_record) ->
+          is_terminal_case_status case_.status
+          && String.equal case_.subject_type subject_type
+          && List.exists (fun ref_ ->
+               List.mem ref_ case_.source_refs) source_refs)
+          all_cases
+      else
+        None
+    in
+    let now = now_unix () in
+    (* If a terminal case already exists for this subject, do not create
+       a new petition — the matter has been resolved. *)
+    match resolved_case with
+    | Some resolved ->
+        Ok { petition = {
+               id = ""; case_id = resolved.id; title; normalized_key;
+               origin; subject_type; risk_class; requested_action;
+               source_refs; created_by; created_at = now;
+             };
+             case_ = resolved; merged = true }
+    | None ->
     (* Primary dedup: exact normalized_key match *)
     let existing_case =
       List.find_opt (fun case_ ->
@@ -693,7 +720,6 @@ let submit_petition base_path ~title ~origin ~subject_type ~risk_class
             all_active_cases
       | None -> None
     in
-    let now = now_unix () in
     let case_, merged =
       match existing_case with
       | Some case_ -> (case_, true)

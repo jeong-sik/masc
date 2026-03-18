@@ -1,28 +1,15 @@
-(** Verifier_oas — Adapter bridging MASC verifier to OAS Guardrails and Hooks.
+(** Verifier_oas — Bridges MASC verifier to OAS Guardrails and Hooks.
 
     Maps MASC's verification flow (should_skip, verify, verdict) to OAS
     {!Agent_sdk.Guardrails.Custom} filter and {!Agent_sdk.Hooks.hook} callbacks.
 
     - [verdict_to_hook_decision]: MASC Pass/Warn/Fail -> OAS Continue/Continue/Skip
     - [make_pre_tool_hook]: wraps MASC verify_action as an OAS PreToolUse hook
-    - [guardrails_of_read_only_detection]: wraps MASC should_skip as OAS Custom filter
-
-    Enabled via [MASC_USE_OAS_GUARDRAILS=true] environment variable.
+    - [guardrails_with_read_only_tag]: wraps MASC should_skip as OAS Custom filter
 
     @since Phase 4 — OAS Guardrails adapter for verifier *)
 
 open Printf
-
-(* ================================================================ *)
-(* Feature Flag                                                      *)
-(* ================================================================ *)
-
-let use_oas_guardrails () =
-  match Sys.getenv_opt "MASC_USE_OAS_GUARDRAILS" with
-  | Some v ->
-    let v = String.lowercase_ascii (String.trim v) in
-    v = "true" || v = "1" || v = "yes"
-  | None -> false
 
 (* ================================================================ *)
 (* Verdict -> Hook Decision                                          *)

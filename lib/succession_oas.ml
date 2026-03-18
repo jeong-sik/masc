@@ -1,9 +1,8 @@
-(** Succession_oas — Adapter bridging MASC succession DNA to OAS Checkpoint.t.
+(** Succession_oas — Bridges MASC succession DNA to OAS Checkpoint.t.
 
     Converts between MASC's [succession_dna] (generation handoff payload) and
-    OAS [Checkpoint.t] (versioned state snapshot). This enables DNA extraction
-    and hydration to use OAS's serialization format instead of MASC's custom
-    JSON, providing version tracking and cross-agent portability.
+    OAS [Checkpoint.t] (versioned state snapshot). DNA extraction and hydration
+    use OAS serialization format for version tracking and cross-agent portability.
 
     This module is independent of [context_compact_oas] (Phase 1) and
     [oas_checkpoint_bridge] (basic state persistence). It specifically handles
@@ -17,15 +16,6 @@
     @since Phase 2 — OAS Checkpoint adapter for succession *)
 
 open Printf
-
-(* ================================================================ *)
-(* Feature Flag                                                      *)
-(* ================================================================ *)
-
-let use_oas_checkpoint () =
-  match Sys.getenv_opt "MASC_USE_OAS_CHECKPOINT" with
-  | Some v -> String.lowercase_ascii (String.trim v) = "true"
-  | None -> false
 
 (* ================================================================ *)
 (* DNA Scope — Custom scope for succession metadata in Context.t     *)
@@ -199,9 +189,6 @@ let dna_of_checkpoint (ckpt : Agent_sdk.Checkpoint.t)
     Wraps [Succession.extract_dna] and converts the result to an OAS
     [Checkpoint.t]. The caller can then use [Checkpoint.to_string] for
     persistence instead of [Succession.dna_to_json].
-
-    When [MASC_USE_OAS_CHECKPOINT] is not set, falls back to returning
-    the checkpoint alongside the original DNA for comparison.
 
     @return [(dna, checkpoint)] — the original DNA and its OAS checkpoint form. *)
 let extract_dna_via_checkpoint

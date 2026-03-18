@@ -332,7 +332,15 @@ let format_message_readable (m : Llm_client.message) : string =
     | Llm_client.Assistant -> "assistant"
     | Llm_client.Tool -> "tool"
   in
-  sprintf "%s: %s" role_str (text_of_message m)
+  let tool_suffix = match m.role with
+    | Llm_client.Tool ->
+      let tool_id = List.find_map (function
+        | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+        | _ -> None) m.content in
+      (match tool_id with Some id -> Printf.sprintf " (%s)" id | None -> "")
+    | _ -> ""
+  in
+  sprintf "%s%s: %s" role_str tool_suffix (text_of_message m)
 
 (** Offload messages to a markdown file for later retrieval.
     Returns [Some path] on success, [None] on failure (fail-safe). *)
@@ -544,10 +552,20 @@ let role_of_string = function
 
 let message_to_json (m : Llm_client.message) : Yojson.Safe.t =
   let m = Llm_client.sanitize_message_utf8 m in
-  `Assoc [
+  let base = [
     ("role", `String (role_to_string m.role));
     ("content", `String (text_of_message m));
-  ]
+  ] in
+  (* Preserve tool_use_id for backward compat with old "tool_call_id" JSON field *)
+  let with_tool_id = match m.role with
+    | Llm_client.Tool ->
+      let tool_id = List.find_map (function
+        | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+        | _ -> None) m.content in
+      (match tool_id with Some id -> ("tool_call_id", `String id) :: base | None -> base)
+    | _ -> base
+  in
+  `Assoc with_tool_id
 
 let message_of_json (json : Yojson.Safe.t) : Llm_client.message =
   let open Yojson.Safe.Util in

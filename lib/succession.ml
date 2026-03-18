@@ -277,9 +277,12 @@ let normalize_for_model (msgs : Llm_client.message list)
         match m.role with
         | Llm_client.Tool ->
           (* Convert tool messages to user messages for models without tool support *)
+          let tool_id = List.find_map (function
+            | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+            | _ -> None) m.content |> Option.value ~default:"unknown" in
           { Agent_sdk.Types.role = Llm_client.User;
-                   content = [Agent_sdk.Types.Text (sprintf "[Tool result]\n%s"
-                     (Llm_client.text_of_message m))] }
+                   content = [Agent_sdk.Types.Text (sprintf "[Tool result: %s]\n%s"
+                     tool_id (Llm_client.text_of_message m))] }
         | _ -> m
       ) msgs
     | Llm_client.Claude ->

@@ -426,7 +426,7 @@ export function workflowCommandSurfaceLabel(surface?: string | null): string {
 }
 
 export function clearWorkflowContextForTab(tab: TabId): void {
-  if (tab === 'mission') {
+  if (tab === 'situation') {
     persistWorkflowContext(null)
   }
 }

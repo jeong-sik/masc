@@ -9,11 +9,9 @@ import { Proof } from './proof'
 import { Command } from './command'
 import { Ops } from './ops'
 import { Memory } from './memory'
-import { Execution } from './agents'
 import { Tools } from './tools'
 import { Planning } from './goals'
 import { Governance } from './governance'
-import { Social } from './social'
 import { Lab } from './lab'
 import { Live } from './live'
 import { Overview } from './overview/overview'
@@ -188,34 +186,29 @@ export function TabContent() {
   switch (tab) {
     case 'home':
       return html`<${Overview} />`
-    case 'mission':
+    case 'situation':
       return html`<${Mission} />`
-    case 'proof':
-      return html`<${Proof} />`
-    case 'agent-roster':
+    case 'agents':
       return html`<${AgentRoster} />`
-    case 'keeper-roster':
-      return html`<${AgentRoster} />`
-    case 'execution':
-      return html`<${Execution} />`
-    case 'tools':
-      return html`<${Tools} />`
-    case 'live':
+    case 'activity':
       return html`<${Live} />`
-    case 'memory':
-      return html`<${Memory} />`
-    case 'governance':
-      return html`<${Governance} />`
-    case 'social':
-      return html`<${Social} />`
-    case 'planning':
-      return html`<${Planning} />`
-    case 'intervene':
-      return html`<${Ops} />`
-    case 'command':
-      return html`<${Command} />`
+    case 'work': {
+      const section = route.value.params.section
+      switch (section) {
+        case 'evidence': return html`<${Proof} />`
+        case 'governance': return html`<${Governance} />`
+        case 'planning': return html`<${Planning} />`
+        default: return html`<${Memory} />`
+      }
+    }
+    case 'control':
+      return route.value.params.section === 'tools'
+        ? html`<${Tools} />`
+        : html`<${Ops} />`
     case 'lab':
-      return html`<${Lab} />`
+      return route.value.params.surface === 'trpg'
+        ? html`<${Lab} />`
+        : html`<${Command} />`
     default:
       return html`<${Overview} />`
   }

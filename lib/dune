@@ -80,12 +80,6 @@
    server_utils
    server_auth
    server_tts_proxy
-   server_trpg_rest_core
-   server_trpg_rest_actor
-   server_trpg_rest_models
-   server_trpg_rest_views
-   server_trpg_rest_runtime
-   server_trpg_rest
    dashboard_http_helpers
    dashboard_http_monitoring
    dashboard_http_keeper_metrics
@@ -101,7 +95,6 @@
    server_routes_http_keeper_stream
    server_routes_http_routes_frontend
    server_routes_http_routes_room
-   server_routes_http_routes_trpg
    server_routes_http_routes_dashboard
    server_routes_http_routes_command_plane_read
    server_routes_http_routes_command_plane_write
@@ -315,7 +308,6 @@
    team_session_engine_eio
    ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
    safe_ops
-   game_view_state
    ;; sdp removed — in ocaml-webrtc
    session
    shutdown_hooks
@@ -439,9 +431,6 @@
    tool_code
    code_swarm_plan
    tool_code_swarm
-   tool_protocol_game_view_utils
-   tool_protocol_game_view_handlers
-   tool_protocol_game_view
    tool_suspend
    tool_notifications
    tool_voice
@@ -544,6 +533,8 @@
    procedural_memory
    oas_events
    oas_worker
+   tool_mitosis_oas
+   tool_council_oas
    oas_sse_bridge
    tool_schemas_plan
  tool_schemas_portal
@@ -564,21 +555,6 @@
    tool_compact
    tool_shard
    tool_keeper
-   trpg_schema
-   trpg_dm_intent
-   trpg_round_fallback
-   trpg_round_keeper_parse
-   trpg_round_prompt
-   trpg_round
-   trpg_handlers_core
-   trpg_handlers_actors
-   trpg_handlers_session
-   trpg_handlers
-   trpg_round_run_ctx
-   trpg_round_run_handler
-   trpg_round_run_process
-   trpg_harness
-   tool_trpg
    json_util
    ;; Autoresearch — Karpathy-inspired autonomous experiment loop
    autoresearch
@@ -592,6 +568,11 @@
    team_session_types_enums
    tool_schemas_room_core
    tool_schemas_room_extra
+   tool_schemas_inline_room
+   tool_schemas_inline_verify
+   tool_schemas_inline_infra
+   tool_schemas_inline_episodes
+   tool_schemas_inline_convo
    tool_schemas_inline
    ;; godsplit-phase1: file split sub-modules
    tool_council_schemas
@@ -600,19 +581,8 @@
 )
 (private_modules
  gardener_state
- trpg_round_run_ctx
- trpg_round_run_process
- trpg_round_run_handler
- trpg_round_fallback
- trpg_round_keeper_parse
- trpg_round_prompt
- trpg_handlers_core
- trpg_handlers_actors
- trpg_handlers_session
  gardener_health
  gardener_decisions
- tool_protocol_game_view_utils
- tool_protocol_game_view_handlers
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
  mitosis_helpers
@@ -649,7 +619,6 @@
  server_routes_http_keeper_stream
  server_routes_http_routes_frontend
  server_routes_http_routes_room
- server_routes_http_routes_trpg
  server_routes_http_routes_dashboard
  server_routes_http_routes_command_plane_read
  server_routes_http_routes_command_plane_write
@@ -798,8 +767,6 @@
    council
    ;; Jiphyeon - Episode storage for Agent Being Protocol
    jiphyeon
-   ;; TRPG engine (tabletop RPG sublibrary)
-   trpg
    ;; Neo4j Bolt native driver (OCaml 5.x Eio)
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))

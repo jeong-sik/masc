@@ -18,7 +18,6 @@ import { Lab } from './lab'
 import { Live } from './live'
 import { Overview } from './overview/overview'
 import { AgentRoster } from './agent-roster'
-import { KeeperRoster } from './keeper-roster'
 import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
 import {
@@ -196,7 +195,7 @@ export function TabContent() {
     case 'agent-roster':
       return html`<${AgentRoster} />`
     case 'keeper-roster':
-      return html`<${KeeperRoster} />`
+      return html`<${AgentRoster} />`
     case 'execution':
       return html`<${Execution} />`
     case 'tools':

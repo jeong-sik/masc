@@ -102,7 +102,7 @@ export function Overview() {
           ${keeperBriefs.length > 0 ? html`
             <div class="overview-section-header" style="margin-top: var(--space-md, 16px)">
               <span class="overview-section-label">키퍼</span>
-              <a class="overview-section-link" onClick=${() => navigate('keeper-roster')}>전체 보기</a>
+              <a class="overview-section-link" onClick=${() => navigate('agent-roster')}>전체 보기</a>
             </div>
             <div class="keeper-cards-v2">
               ${keeperBriefs.map(k => html`

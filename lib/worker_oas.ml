@@ -30,12 +30,7 @@ module Oas = Agent_sdk
 (* Feature Flag                                                      *)
 (* ================================================================ *)
 
-let use_oas_workers () =
-  match Sys.getenv_opt "MASC_USE_OAS_WORKERS" with
-  | Some v ->
-    let v = String.lowercase_ascii (String.trim v) in
-    v = "true" || v = "1" || v = "yes"
-  | None -> false
+let use_oas_workers () = true
 
 (* ================================================================ *)
 (* worker_container_meta -> OAS Types.model                          *)

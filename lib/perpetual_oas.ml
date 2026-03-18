@@ -27,12 +27,7 @@ module Oas = Agent_sdk
 (* Feature Flag                                                      *)
 (* ================================================================ *)
 
-let use_oas_perpetual () =
-  match Sys.getenv_opt "MASC_USE_OAS_PERPETUAL" with
-  | Some v ->
-    let v = String.lowercase_ascii (String.trim v) in
-    v = "true" || v = "1" || v = "yes"
-  | None -> false
+let use_oas_perpetual () = true
 
 (* ================================================================ *)
 (* Run perpetual loop via OAS Agent.run                              *)

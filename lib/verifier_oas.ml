@@ -17,12 +17,7 @@ open Printf
 (* Feature Flag                                                      *)
 (* ================================================================ *)
 
-let use_oas_guardrails () =
-  match Sys.getenv_opt "MASC_USE_OAS_GUARDRAILS" with
-  | Some v ->
-    let v = String.lowercase_ascii (String.trim v) in
-    v = "true" || v = "1" || v = "yes"
-  | None -> false
+let use_oas_guardrails () = true
 
 (* ================================================================ *)
 (* Verdict -> Hook Decision                                          *)

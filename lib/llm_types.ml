@@ -64,18 +64,46 @@ type completion_request = {
   response_format : [ `Text | `Json ];
 }
 
-type completion_response = {
-  content : Agent_sdk.Types.content_block list;
-  tool_calls : tool_call list;
-  usage : token_usage;
-  model_used : string;
-  latency_ms : int;
-}
+(** LLM completion result — OAS api_response directly.
+    No more MASC-specific wrapper; use helpers below for field access.
+    @since Phase 2 — OAS SDK Only *)
+type api_response = Llm_provider.Types.api_response
 
-(** Extract text content from a completion_response.
-    Delegates to Agent_sdk.Types.text_of_content for rich content_block list. *)
-let text_of_response (resp : completion_response) : string =
+(** Zero usage sentinel for api_response with [usage = None]. *)
+let zero_usage : token_usage =
+  { Agent_sdk.Types.input_tokens = 0;
+    output_tokens = 0;
+    cache_creation_input_tokens = 0;
+    cache_read_input_tokens = 0 }
+
+(** Extract usage from an api_response, defaulting to zero. *)
+let usage_of_response (resp : api_response) : token_usage =
+  match resp.usage with Some u -> u | None -> zero_usage
+
+(** Extract text content from an api_response. *)
+let text_of_response (resp : api_response) : string =
   Agent_sdk.Types.text_of_content resp.content
+
+(** Extract tool calls from content blocks. *)
+let tool_calls_of_content (blocks : Agent_sdk.Types.content_block list)
+    : tool_call list =
+  List.filter_map
+    (function
+      | Agent_sdk.Types.ToolUse { id; name; input } ->
+          Some { call_id = id; call_name = name;
+                 call_arguments = Yojson.Safe.to_string input }
+      | _ -> None)
+    blocks
+
+(** Extract tool calls from an api_response. *)
+let tool_calls_of_response (resp : api_response) : tool_call list =
+  tool_calls_of_content resp.content
+
+(** Check if an api_response has any tool calls. *)
+let has_tool_calls (resp : api_response) : bool =
+  List.exists
+    (function Agent_sdk.Types.ToolUse _ -> true | _ -> false)
+    resp.content
 
 let clamp_llama_max_tokens max_tokens =
   max 1 (min max_tokens Env_config.Llama.max_tokens)

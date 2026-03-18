@@ -642,13 +642,13 @@ let run_proactive_generation
       | Error _ -> None
       | Ok resp0 ->
           let used_model0 =
-            model_spec_for_used specs resp0.model_used
+            model_spec_for_used specs resp0.Llm_provider.Types.model
             |> Option.value ~default:primary
           in
-          let cost0 = cost_usd_of_usage resp0.usage used_model0 in
+          let cost0 = cost_usd_of_usage (Llm_types.usage_of_response resp0) used_model0 in
           let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
               ~acc_tools_used ~last_resp =
-            if last_resp.Llm_types.tool_calls = [] || round > max_tool_rounds then
+            if not (Llm_types.has_tool_calls last_resp) || round > max_tool_rounds then
               let content =
                 let c = String.trim (Llm_types.text_of_response last_resp) in
                 if c = "" && acc_tools_used <> [] then
@@ -658,19 +658,20 @@ let run_proactive_generation
               in
               ( content,
                 acc_usage,
-                last_resp.Llm_types.model_used,
+                last_resp.Llm_provider.Types.model,
                 acc_latency,
                 acc_cost,
                 acc_tools_used )
             else
+              let last_resp_tool_calls = Llm_types.tool_calls_of_response last_resp in
               let round_tools =
                 List.map
                   (fun (tc : Llm_types.tool_call) -> tc.call_name)
-                  last_resp.Llm_types.tool_calls
+                  last_resp_tool_calls
               in
               let all_tools_so_far = acc_tools_used @ round_tools in
               let tool_outputs =
-                execute_tool_calls ~ctx_work last_resp.Llm_types.tool_calls
+                execute_tool_calls ~ctx_work last_resp_tool_calls
               in
               let followup_prompt =
                 keeper_tool_followup_prompt
@@ -711,20 +712,21 @@ let run_proactive_generation
               | Error _ ->
                   ( Llm_types.text_of_response last_resp,
                     acc_usage,
-                    last_resp.Llm_types.model_used,
+                    last_resp.Llm_provider.Types.model,
                     acc_latency,
                     acc_cost,
                     acc_tools_used @ round_tools )
               | Ok resp_next ->
                   let used_model_next =
-                    model_spec_for_used specs resp_next.model_used
+                    model_spec_for_used specs resp_next.Llm_provider.Types.model
                     |> Option.value ~default:primary
                   in
-                  let cost_next = cost_usd_of_usage resp_next.usage used_model_next in
+                  let resp_next_usage = Llm_types.usage_of_response resp_next in
+                  let cost_next = cost_usd_of_usage resp_next_usage used_model_next in
                   tool_loop
                     ~round:(round + 1)
-                    ~acc_usage:(merge_usage acc_usage resp_next.usage)
-                    ~acc_latency:(acc_latency + resp_next.latency_ms)
+                    ~acc_usage:(merge_usage acc_usage resp_next_usage)
+                    ~acc_latency
                     ~acc_cost:(acc_cost +. cost_next)
                     ~acc_tools_used:(acc_tools_used @ round_tools)
                     ~last_resp:resp_next
@@ -733,8 +735,8 @@ let run_proactive_generation
                attempt_cost_usd, attempt_tools_used) =
             tool_loop
               ~round:1
-              ~acc_usage:resp0.usage
-              ~acc_latency:resp0.latency_ms
+              ~acc_usage:(Llm_types.usage_of_response resp0)
+              ~acc_latency:0
               ~acc_cost:cost0
               ~acc_tools_used:[]
               ~last_resp:resp0

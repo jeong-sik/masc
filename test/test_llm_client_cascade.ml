@@ -113,13 +113,13 @@ let test_cascade_uses_next_cached_response_when_validator_rejects () =
       cache_response second ~content:"accept me" ~model_used:"cached-2";
       match
         Llm_orchestration.cascade
-          ~accept:(fun (resp : Llm_types.completion_response) ->
+          ~accept:(fun (resp : Llm_types.api_response) ->
             not (String.equal (Llm_types.text_of_response resp) "reject me"))
           [ first; second ]
       with
       | Ok resp ->
           check string "content" "accept me" (Llm_types.text_of_response resp);
-          check string "winner" "cached-2" resp.model_used
+          check string "winner" "cached-2" resp.Llm_provider.Types.model
       | Error e -> fail ("unexpected cascade error: " ^ e))
 
 let test_cascade_returns_error_when_all_responses_rejected () =
@@ -129,7 +129,7 @@ let test_cascade_returns_error_when_all_responses_rejected () =
       cache_response first ~content:"reject me" ~model_used:"cached-only";
       match
         Llm_orchestration.cascade
-          ~accept:(fun (resp : Llm_types.completion_response) ->
+          ~accept:(fun (resp : Llm_types.api_response) ->
             not (String.equal (Llm_types.text_of_response resp) "reject me"))
           [ first ]
       with
@@ -205,13 +205,13 @@ let test_run_prompt_cascade_uses_same_request_shape () =
         ~content:"accept me" ~model_used:"run-prompt-2";
       match
         Llm_orchestration.run_prompt_cascade ~temperature:0.0 ~timeout_sec:30
-          ~accept:(fun (resp : Llm_types.completion_response) ->
+          ~accept:(fun (resp : Llm_types.api_response) ->
             not (String.equal (Llm_types.text_of_response resp) "reject me"))
           ~model_specs:[ model1; model2 ] ~max_tokens:32 ~prompt ()
       with
       | Ok resp ->
           check string "content" "accept me" (Llm_types.text_of_response resp);
-          check string "winner" "run-prompt-2" resp.model_used
+          check string "winner" "run-prompt-2" resp.Llm_provider.Types.model
       | Error e -> fail ("unexpected run_prompt_cascade error: " ^ e))
 
 let test_llama_cache_key_preserves_requested_budget_below_global_cap () =

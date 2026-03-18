@@ -6,30 +6,23 @@
 
     @since 2.107.0 *)
 
-(** Execute a single LLM completion via OAS provider path. *)
+(** Execute a single LLM completion via OAS provider path.
+    Returns OAS api_response directly — no MASC wrapper. *)
 val call_provider :
   ?timeout_sec:int ->
   ?cache:Llm_provider.Cache.t ->
   ?metrics:Llm_provider.Metrics.t ->
   Llm_types.completion_request ->
-  (Llm_types.completion_response, string) result
+  (Llm_provider.Types.api_response, string) result
 
-(** GLM Cloud with pool-based model selection. *)
+(** GLM Cloud with pool-based model selection.
+    Returns OAS api_response directly. *)
 val call_glm_cloud_with_pool :
   ?timeout_sec:int ->
   ?cache:Llm_provider.Cache.t ->
   ?metrics:Llm_provider.Metrics.t ->
   Llm_types.completion_request ->
-  (Llm_types.completion_response, string) result
-
-(** Convert OAS api_response to MASC completion_response. *)
-val completion_response_of_api_response :
-  Llm_provider.Types.api_response -> Llm_types.completion_response
-
-(** Convert MASC completion_response to OAS api_response (for cache serialization).
-    Sets [id] to ["cached"] and [stop_reason] to [EndTurn]. *)
-val api_response_of_completion_response :
-  Llm_types.completion_response -> Llm_provider.Types.api_response
+  (Llm_provider.Types.api_response, string) result
 
 (** Build a provider config, messages, and tools from a completion request.
     Used by {!Llm_orchestration.call_provider_stream}. *)

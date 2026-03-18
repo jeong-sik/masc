@@ -95,7 +95,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
           | Error e -> Error e
           | Ok resp ->
               let used_model =
-                model_spec_for_used specs resp.model_used |> Option.value ~default:primary
+                model_spec_for_used specs resp.Llm_provider.Types.model |> Option.value ~default:primary
               in
               let reply_raw = String.trim (Llm_types.text_of_response resp) in
               let reply =
@@ -110,7 +110,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
                with exn ->
                  log_keeper_exn ~label:"save_checkpoint (explicit room reply) failed" exn);
-              let usage = resp.usage in
+              let usage = Llm_types.usage_of_response resp in
               let now_ts = Time_compat.now () in
               let updated =
                 {
@@ -123,11 +123,11 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
                   total_cost_usd =
                     meta.total_cost_usd +. cost_usd_of_usage usage used_model;
                   last_turn_ts = now_ts;
-                  last_model_used = resp.model_used;
+                  last_model_used = resp.Llm_provider.Types.model;
                   last_input_tokens = usage.input_tokens;
                   last_output_tokens = usage.output_tokens;
                   last_total_tokens = Llm_types.total_tokens usage;
-                  last_latency_ms = resp.latency_ms;
+                  last_latency_ms = 0;
                 }
               in
               Ok (updated, reply))
@@ -264,13 +264,13 @@ let run_social_board_event_turn
           | Ok resp0 ->
               let max_tool_rounds = Keeper_config.keeper_max_tool_rounds () in
               let used_model0 =
-                model_spec_for_used specs resp0.model_used
+                model_spec_for_used specs resp0.Llm_provider.Types.model
                 |> Option.value ~default:primary
               in
-              let cost0 = cost_usd_of_usage resp0.usage used_model0 in
+              let cost0 = cost_usd_of_usage (Llm_types.usage_of_response resp0) used_model0 in
               let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
                   ~acc_tools_used ~last_resp =
-                if last_resp.Llm_types.tool_calls = [] || round > max_tool_rounds then
+                if not (Llm_types.has_tool_calls last_resp) || round > max_tool_rounds then
                   let content =
                     let trimmed = String.trim (Llm_types.text_of_response last_resp) in
                     if trimmed = "" && acc_tools_used <> [] then
@@ -281,19 +281,20 @@ let run_social_board_event_turn
                   in
                   ( content,
                     acc_usage,
-                    last_resp.Llm_types.model_used,
+                    last_resp.Llm_provider.Types.model,
                     acc_latency,
                     acc_cost,
                     acc_tools_used )
                 else
+                  let last_resp_tool_calls = Llm_types.tool_calls_of_response last_resp in
                   let round_tools =
                     List.map
                       (fun (tc : Llm_types.tool_call) -> tc.call_name)
-                      last_resp.Llm_types.tool_calls
+                      last_resp_tool_calls
                   in
                   let all_tools_so_far = acc_tools_used @ round_tools in
                   let tool_outputs =
-                    execute_tool_calls ~ctx_work last_resp.Llm_types.tool_calls
+                    execute_tool_calls ~ctx_work last_resp_tool_calls
                   in
                   let followup_prompt =
                     keeper_tool_followup_prompt
@@ -330,20 +331,21 @@ let run_social_board_event_turn
                   | Error _ ->
                       ( Llm_types.text_of_response last_resp,
                         acc_usage,
-                        last_resp.Llm_types.model_used,
+                        last_resp.Llm_provider.Types.model,
                         acc_latency,
                         acc_cost,
                         acc_tools_used @ round_tools )
                   | Ok resp_next ->
                       let used_model_next =
-                        model_spec_for_used specs resp_next.model_used
+                        model_spec_for_used specs resp_next.Llm_provider.Types.model
                         |> Option.value ~default:primary
                       in
-                      let cost_next = cost_usd_of_usage resp_next.usage used_model_next in
+                      let resp_next_usage = Llm_types.usage_of_response resp_next in
+                      let cost_next = cost_usd_of_usage resp_next_usage used_model_next in
                       tool_loop
                         ~round:(round + 1)
-                        ~acc_usage:(merge_usage acc_usage resp_next.usage)
-                        ~acc_latency:(acc_latency + resp_next.latency_ms)
+                        ~acc_usage:(merge_usage acc_usage resp_next_usage)
+                        ~acc_latency
                         ~acc_cost:(acc_cost +. cost_next)
                         ~acc_tools_used:(acc_tools_used @ round_tools)
                         ~last_resp:resp_next
@@ -352,8 +354,8 @@ let run_social_board_event_turn
                   final_cost_usd, final_tools_used =
                 tool_loop
                   ~round:1
-                  ~acc_usage:resp0.usage
-                  ~acc_latency:resp0.latency_ms
+                  ~acc_usage:(Llm_types.usage_of_response resp0)
+                  ~acc_latency:0
                   ~acc_cost:cost0
                   ~acc_tools_used:[]
                   ~last_resp:resp0

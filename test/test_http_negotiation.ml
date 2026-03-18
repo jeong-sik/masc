@@ -163,6 +163,7 @@ let test_initialize_never_uses_sse () =
        Masc_mcp.Mcp_protocol.Http_negotiation.Streamable)
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "http_negotiation"
     [
       ("accepts_sse_header", [test_case "parses Accept" `Quick test_accepts_sse_header]);

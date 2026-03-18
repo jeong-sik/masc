@@ -17,6 +17,8 @@ import {
   tasksByStatus,
 } from '../store'
 import type { Goal, MdalLoop, Task } from '../types'
+import { formatElapsedCompact } from '../lib/format-time'
+import { truncate } from '../lib/truncate'
 
 // -- Filter state ------------------------------------------------
 
@@ -95,12 +97,6 @@ function horizonColor(h: string): string {
   }
 }
 
-function formatElapsed(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
-}
-
 function formatMetric(value: number): string {
   return value.toFixed(4)
 }
@@ -137,11 +133,6 @@ function sortByTimeDesc(a: Task, b: Task): number {
   const ta = a.updated_at ?? a.created_at ?? ''
   const tb = b.updated_at ?? b.created_at ?? ''
   return tb.localeCompare(ta)
-}
-
-function truncate(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text
-  return text.slice(0, maxLen) + '...'
 }
 
 // -- Sub-components: Goals & MDAL (unchanged rendering logic) ----
@@ -281,7 +272,7 @@ function LoopRow({ loop }: { loop: MdalLoop }) {
           <span class=${formatMetricDelta(loop).startsWith('+') ? 'planning-loop-good' : 'planning-loop-bad'}>
             Delta ${formatMetricDelta(loop)}
           </span>
-          <span>Elapsed ${formatElapsed(loop.elapsed_seconds)}</span>
+          <span>Elapsed ${formatElapsedCompact(loop.elapsed_seconds)}</span>
         </div>
 
         <div class="planning-loop-target">${loop.target || '명시된 목표가 없습니다'}</div>

@@ -245,6 +245,7 @@
    norm_detector
    agent_planner
    reflection
+   relation_materializer
    prometheus
    rate_limit
    masc_mcp

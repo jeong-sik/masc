@@ -1,3 +1,5 @@
+(include_subdirs unqualified)
+
 (library
  (name masc_mcp)
  (public_name masc_mcp)
@@ -543,6 +545,7 @@
    perpetual_oas
    procedural_memory
    oas_events
+   oas_worker
    oas_sse_bridge
    tool_schemas_plan
  tool_schemas_portal

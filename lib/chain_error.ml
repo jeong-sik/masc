@@ -17,7 +17,6 @@ type llm_error =
   | GeminiError of gemini_error
   | ClaudeError of claude_error
   | CodexError of codex_error
-  | OllamaError of ollama_error
 [@@deriving yojson]
 
 and gemini_error =
@@ -42,13 +41,6 @@ and codex_error =
   | CodexSandboxViolation
   | CodexTimeout
   | CodexUnknown of string
-[@@deriving yojson]
-
-and ollama_error =
-  | OllamaNotRunning
-  | OllamaModelNotFound of string
-  | OllamaTimeout
-  | OllamaUnknown of string
 [@@deriving yojson]
 
 (** Chain execution errors *)
@@ -108,7 +100,6 @@ let is_recoverable = function
   | Llm (GeminiError GeminiRateLimit) -> true
   | Llm (ClaudeError ClaudeRateLimit) -> true
   | Llm (CodexError CodexRateLimit) -> true
-  | Llm (OllamaError OllamaTimeout) -> true
   | Process (ProcessTimeout _) -> true
   | Io (NetworkError _) -> true
   | _ -> false
@@ -136,12 +127,6 @@ let to_string = function
       | CodexSandboxViolation -> "Codex sandbox policy violated"
       | CodexTimeout -> "Codex request timed out"
       | CodexUnknown msg -> Printf.sprintf "Codex error: %s" msg)
-  | Llm (OllamaError e) -> (
-      match e with
-      | OllamaNotRunning -> "Ollama server not running"
-      | OllamaModelNotFound model -> Printf.sprintf "Ollama model not found: %s" model
-      | OllamaTimeout -> "Ollama request timed out"
-      | OllamaUnknown msg -> Printf.sprintf "Ollama error: %s" msg)
   | Chain e -> (
       match e with
       | ChainParseError msg -> Printf.sprintf "Chain parse error: %s" msg

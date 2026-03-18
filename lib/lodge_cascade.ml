@@ -5,7 +5,14 @@
     Invalid entries are ignored with a warning.
 
     The file is hot-reloaded via a simple mtime cache.
-    When the file or requested key is missing, built-in defaults are used. *)
+    When the file or requested key is missing, built-in defaults are used.
+
+    All LLM calls route through {!Llm_provider_oas} (OAS provider path).
+    This bypasses the legacy [Llm_orchestration] global semaphore,
+    eliminating the permit-contention bottleneck between sentinel,
+    heartbeat, and lodge subsystems.
+
+    @since 2.114.0 — OAS-native cascade *)
 
 open Printf
 
@@ -119,9 +126,7 @@ let default_model_strings ~cascade_name =
       labels_of [ ("glm", glm_model); ("glm", glm_flash) ]
       @ [ "glm:auto" ]
   (* topic extraction — fast local model, glm fallback *)
-  | "topic_extraction" ->
-      labels_of [ ("ollama", glm_flash) ]
-      @ [ "glm:auto" ]
+  | "topic_extraction" -> llama_glm
   (* unregistered cascade: llama + glm as safety net *)
   | _ -> llama_glm
 
@@ -187,6 +192,9 @@ let get_cascade ?(config_path = "") ~cascade_name () :
         cascade_name;
       Llm_client.available_model_specs_of_strings defaults)
 
+(** Call LLM cascade via OAS provider path (no global semaphore).
+    Bypasses [Llm_orchestration.cascade] and its global [Eio.Semaphore]
+    (max=2), routing directly through [Llm_provider_oas] instead. *)
 let call ~cascade_name ~prompt
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
     ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
@@ -195,7 +203,7 @@ let call ~cascade_name ~prompt
     Error (Printf.sprintf "[cascade] no callable models for %s" cascade_name)
   else
     match
-      Llm_client.run_prompt_cascade ~temperature
+      Llm_provider_oas.run_prompt_cascade ~temperature
         ~timeout_sec ~model_specs:specs ~max_tokens ~accept ?system ~prompt ()
     with
     | Ok resp ->

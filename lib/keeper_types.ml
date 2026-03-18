@@ -666,10 +666,7 @@ let write_resident_keeper config (spec : resident_keeper_spec) :
   let path = resident_keeper_path config spec.name in
   let content = Yojson.Safe.pretty_to_string (resident_keeper_to_json spec) in
   try
-    let oc = open_out path in
-    Common.protect ~module_name:"tool_keeper" ~finally_label:"close_out"
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc content);
+    Fs_compat.save_file path content;
     Ok ()
   with exn ->
     Error
@@ -760,10 +757,7 @@ let write_meta config (m : keeper_meta) : (unit, string) result =
   let path = keeper_meta_path config m.name in
   let content = Yojson.Safe.pretty_to_string (meta_to_json m) in
   try
-    let oc = open_out path in
-    Common.protect ~module_name:"tool_keeper" ~finally_label:"close_out"
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc content);
+    Fs_compat.save_file path content;
     Ok ()
   with exn ->
     Error (Printf.sprintf "failed to write meta %s: %s" path (Printexc.to_string exn))

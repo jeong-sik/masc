@@ -398,7 +398,7 @@ let plans_dir config = Filename.concat config.Room.base_path "plans"
 
 let ensure_plans_dir config =
   let dir = plans_dir config in
-  if not (Sys.file_exists dir) then Unix.mkdir dir 0o755
+  Fs_compat.mkdir_p dir
 
 let plan_path config task_id =
   Filename.concat (plans_dir config) (task_id ^ ".json")

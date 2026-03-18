@@ -270,8 +270,7 @@ let verifications_dir base_path =
   Filename.concat base_path "verifications"
 
 let ensure_dir path =
-  if not (Sys.file_exists path) then
-    Sys.mkdir path 0o755
+  Fs_compat.mkdir_p path
 
 let request_path base_path req_id =
   Filename.concat (verifications_dir base_path) (req_id ^ ".json")
@@ -281,9 +280,7 @@ let save_request base_path req =
   ensure_dir dir;
   let json = request_to_yojson req in
   let path = request_path base_path req.id in
-  let oc = open_out path in
-  output_string oc (Yojson.Safe.pretty_to_string json);
-  close_out oc;
+  Fs_compat.save_file path (Yojson.Safe.pretty_to_string json);
   Ok req.id
 
 let load_request base_path req_id =

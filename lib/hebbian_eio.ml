@@ -60,12 +60,8 @@ let synapses_lock_file (config : config) =
 
 (** Ensure synapses directory exists *)
 let ensure_synapses_dir config =
-  let masc_dir = Filename.concat config.Room_utils.base_path ".masc" in
-  let synapses_dir = Filename.concat masc_dir "synapses" in
-  List.iter (fun dir ->
-    if not (Sys.file_exists dir) then
-      Unix.mkdir dir 0o755
-  ) [masc_dir; synapses_dir]
+  let synapses_dir = Filename.concat (Filename.concat config.Room_utils.base_path ".masc") "synapses" in
+  Fs_compat.mkdir_p synapses_dir
 
 (** Lock contention metrics *)
 let lock_acquisitions = Atomic.make 0

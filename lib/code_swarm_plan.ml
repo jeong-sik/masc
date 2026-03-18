@@ -62,11 +62,7 @@ type merge_result = {
 
 let plans_dir base_path =
   let d = Filename.concat base_path ".masc/code_swarm_plans" in
-  if not (Sys.file_exists d) then (
-    try Unix.mkdir (Filename.concat base_path ".masc") 0o755
-    with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  (try Unix.mkdir d 0o755
-   with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fs_compat.mkdir_p d;
   d
 
 (** Validate plan_id: alphanumeric + dash only, no path separators. *)

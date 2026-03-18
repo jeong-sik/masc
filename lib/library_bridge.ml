@@ -20,8 +20,7 @@ let candidates_dir () =
 (** Ensure candidates directory exists *)
 let ensure_candidates_dir () =
   let dir = candidates_dir () in
-  if not (Sys.file_exists dir) then
-    Unix.mkdir dir 0o755
+  Fs_compat.mkdir_p dir
 
 (** Record a document to the Library.
     confidence < 0.5 → candidates/, >= 0.5 → library root. *)

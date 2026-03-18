@@ -33,26 +33,16 @@ let meta_path ~agent_name =
   sprintf "%s/.masc/memory/%s/reflection_meta.json" (me_root ()) agent_name
 
 let ensure_dir path =
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
+  Fs_compat.mkdir_p path
 
 let load_meta ~agent_name : float =
   let path = meta_path ~agent_name in
   if not (Sys.file_exists path) then 0.0
   else begin
     try
-      let ic = open_in path in
-      Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-        let n = in_channel_length ic in
-        let buf = Bytes.create n in
-        really_input ic buf 0 n;
-        let json = Yojson.Safe.from_string (Bytes.to_string buf) in
-                Json_util.get_float json "last_reflection" |> Option.value ~default:0.0)
+      let content = Fs_compat.load_file path in
+      let json = Yojson.Safe.from_string content in
+      Json_util.get_float json "last_reflection" |> Option.value ~default:0.0
     with exn ->
       Log.Misc.warn "reflection: meta load failed: %s" (Printexc.to_string exn);
       0.0
@@ -66,9 +56,7 @@ let save_meta ~agent_name ~timestamp =
     ("agent_name", `String agent_name);
     ("last_reflection", `Float timestamp);
   ] in
-  let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    output_string oc (Yojson.Safe.to_string ~std:true json))
+  Fs_compat.save_file path (Yojson.Safe.to_string ~std:true json)
 
 (* ---------- Public API ---------- *)
 

@@ -122,14 +122,8 @@ let masc_dir config =
 let debates_dir config =
   Filename.concat (masc_dir config) "debates"
 
-let rec ensure_dir path =
-  if not (Sys.file_exists path) then begin
-    let parent = Filename.dirname path in
-    if parent <> path && not (Sys.file_exists parent) then
-      ensure_dir parent;
-    try Unix.mkdir path 0o755
-    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
+let ensure_dir path =
+  Fs_compat.mkdir_p path
 
 let ensure_dirs config =
   ensure_dir (debates_dir config)

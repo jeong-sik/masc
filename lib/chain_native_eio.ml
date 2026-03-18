@@ -74,31 +74,24 @@ let putenv_default key value =
   | None -> Unix.putenv key value
 
 let ensure_dir path =
-  let rec ensure current =
-    if not (Sys.file_exists current) then (
-      ensure (Filename.dirname current);
-      try Unix.mkdir current 0o755 with Unix.Unix_error _ -> ())
-  in
-  ensure path
+  Fs_compat.mkdir_p path
 
 let read_lines_tail ~max_bytes:_ ~max_lines path =
-  let lines = ref [] in
-  let ic = open_in path in
-  Common.protect ~module_name:"chain_native_eio" ~finally_label:"close_in"
-    ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      (try
-         while true do
-           lines := input_line ic :: !lines
-         done
-       with End_of_file -> ());
-      let rec take n xs =
-        if n <= 0 then []
-        else
-          match xs with
-          | [] -> []
-          | hd :: tl -> hd :: take (n - 1) tl
-      in
-      List.rev !lines |> take max_lines)
+  if not (Fs_compat.file_exists path) then []
+  else
+    let content = Fs_compat.load_file path in
+    let lines =
+      String.split_on_char '\n' content
+      |> List.filter (fun s -> String.trim s <> "")
+    in
+    let rec take n xs =
+      if n <= 0 then []
+      else
+        match xs with
+        | [] -> []
+        | hd :: tl -> hd :: take (n - 1) tl
+    in
+    lines |> take max_lines
 
 let load_prompt_dir dir =
   if Sys.file_exists dir && Sys.is_directory dir then
@@ -107,7 +100,7 @@ let load_prompt_dir dir =
            if Filename.check_suffix file ".json" then (
              let path = Filename.concat dir file in
              try
-               let content = In_channel.with_open_text path In_channel.input_all in
+               let content = Fs_compat.load_file path in
                let json = Yojson.Safe.from_string content in
                match Prompt_registry.prompt_entry_of_yojson json with
                | Ok entry -> Prompt_registry.register entry

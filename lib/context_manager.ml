@@ -100,13 +100,7 @@ let extract_state_blocks (s : string) : string list =
 (* ================================================================ *)
 
 let ensure_dir path =
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir) then begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
+  Fs_compat.mkdir_p path
 
 (* ================================================================ *)
 (* Token Estimation                                                 *)

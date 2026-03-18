@@ -151,21 +151,11 @@ let comments_dir config =
 let votes_dir config =
   Filename.concat (social_dir config) "votes"
 
-let rec ensure_dir path =
-  if not (Sys.file_exists path) then begin
-    let parent = Filename.dirname path in
-    if parent <> path && not (Sys.file_exists parent) then
-      ensure_dir parent;
-    (* Handle race condition: directory might be created by another process *)
-    try Unix.mkdir path 0o755
-    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
 let ensure_dirs config =
-  ensure_dir (social_dir config);
-  ensure_dir (posts_dir config);
-  ensure_dir (comments_dir config);
-  ensure_dir (votes_dir config)
+  Fs_compat.mkdir_p (social_dir config);
+  Fs_compat.mkdir_p (posts_dir config);
+  Fs_compat.mkdir_p (comments_dir config);
+  Fs_compat.mkdir_p (votes_dir config)
 
 let post_path config post_id =
   Filename.concat (posts_dir config) (post_id ^ ".json")
@@ -183,22 +173,8 @@ let write_json path json =
   let dir = Filename.dirname path in
   let base = Filename.basename path in
   let tmp_path = Filename.concat dir (Printf.sprintf ".%s.tmp.%d" base (Unix.getpid ())) in
-  let oc = open_out tmp_path in
-  let closed = ref false in
-  Common.protect ~module_name:"social" ~finally_label:"finalizer" ~finally:(fun () ->
-    (* Only close if not already closed in protected block *)
-    if not !closed then (try close_out oc with Sys_error _ -> ());
-    (* Clean up temp file on error (won't exist after successful rename) *)
-    if Sys.file_exists tmp_path then
-      try Sys.remove tmp_path with Sys_error _ -> ()
-  ) (fun () ->
-    output_string oc content;
-    flush oc;
-    close_out oc;
-    closed := true;
-    (* Atomic rename *)
-    Sys.rename tmp_path path
-  )
+  Fs_compat.save_file tmp_path content;
+  Sys.rename tmp_path path
 
 (** Read JSON from file *)
 let read_json path =

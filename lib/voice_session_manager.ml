@@ -89,8 +89,7 @@ let create ~config_path =
 (** {1 Internal Helpers} *)
 
 let ensure_session_dir t =
-  if not (Sys.file_exists t.session_dir) then
-    Unix.mkdir t.session_dir 0o755
+  Fs_compat.mkdir_p t.session_dir
 
 let session_file t agent_id =
   Filename.concat t.session_dir (agent_id ^ ".json")
@@ -100,17 +99,13 @@ let save_session t session =
   let json = session_to_json session in
   let content = Yojson.Safe.pretty_to_string json in
   let filepath = session_file t session.agent_id in
-  let oc = open_out filepath in
-  Common.protect ~module_name:"voice_session_manager" ~finally_label:"finalizer" ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    output_string oc content)
+  Fs_compat.save_file filepath content
 
 let load_session t agent_id =
   let filepath = session_file t agent_id in
   if Sys.file_exists filepath then begin
-    let ic = open_in filepath in
-    let content = Common.protect ~module_name:"voice_session_manager" ~finally_label:"finalizer" ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      really_input_string ic (in_channel_length ic)) in
     try
+      let content = Fs_compat.load_file filepath in
       let json = Yojson.Safe.from_string content in
       Some (session_of_json json)
     with Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None

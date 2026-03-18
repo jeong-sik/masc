@@ -107,14 +107,8 @@ let ensure_initialized_r config : (unit, masc_error) result =
 (* File I/O helpers                             *)
 (* ============================================ *)
 
-let rec mkdir_p path =
-  if path = "" || path = "/" then ()
-  else if Sys.file_exists path then ()
-  else begin
-    mkdir_p (Filename.dirname path);
-    (try Unix.mkdir path 0o755
-     with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-  end
+let mkdir_p path =
+  Fs_compat.mkdir_p path
 
 let read_json_local path =
   match Safe_ops.read_json_file_safe path with
@@ -125,10 +119,7 @@ let write_json_local path json =
   mkdir_p (Filename.dirname path);
   let content = Yojson.Safe.pretty_to_string json in
   let tmp_path = path ^ ".tmp" in
-  Out_channel.with_open_text tmp_path (fun oc ->
-    Out_channel.output_string oc content;
-    Out_channel.flush oc
-  );
+  Fs_compat.save_file tmp_path content;
   Unix.rename tmp_path path
 
 (* Root-scoped JSON helpers for shared room registry/current_room metadata. *)
@@ -295,6 +286,4 @@ let log_event config event_json =
   in
   let log_file = Filename.concat month_dir day in
 
-  let oc = open_out_gen [Open_append; Open_creat] 0o644 log_file in
-  output_string oc (event_json ^ "\n");
-  close_out oc
+  Fs_compat.append_file log_file (event_json ^ "\n")

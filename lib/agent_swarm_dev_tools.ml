@@ -132,13 +132,8 @@ let validate_command cmd =
 
 (* --- Recursive mkdir --- *)
 
-let rec mkdir_p path perm =
-  if Sys.file_exists path then ()
-  else begin
-    let parent = Filename.dirname path in
-    if parent <> path then mkdir_p parent perm;
-    (try Unix.mkdir path perm with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-  end
+let mkdir_p path _perm =
+  Fs_compat.mkdir_p path
 
 type tool_exec_observer =
   tool_name:string -> success:bool -> duration_ms:int -> unit

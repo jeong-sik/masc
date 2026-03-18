@@ -310,14 +310,9 @@ let comments_path () =
   let base = board_base_path () in
   Filename.concat base ".masc/board_comments.jsonl"
 
-let rec ensure_dir path =
+let ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
-  else if Sys.file_exists path then ()
-  else begin
-    ensure_dir (Filename.dirname path);
-    try Unix.mkdir path 0o755
-    with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
+  else Fs_compat.mkdir_p path
 
 let ensure_masc_dir () =
   let base = board_base_path () in

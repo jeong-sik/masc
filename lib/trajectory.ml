@@ -141,14 +141,7 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
     (Printf.sprintf "%s.jsonl" trace_id)
 
 let ensure_dir path =
-  let rec mkdir_p dir =
-    if Sys.file_exists dir then ()
-    else begin
-      mkdir_p (Filename.dirname dir);
-      (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-    end
-  in
-  mkdir_p path
+  Fs_compat.mkdir_p path
 
 let append_entry ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
     (entry : tool_call_entry) : unit =
@@ -157,10 +150,7 @@ let append_entry ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
   let path = trajectory_path masc_root keeper_name trace_id in
   let json = entry_to_json entry in
   let line = Yojson.Safe.to_string json ^ "\n" in
-  let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-    let _ = Unix.write_substring fd line 0 (String.length line) in
-    ())
+  Fs_compat.append_file path line
 
 (** Write a trajectory summary line (appended after session ends). *)
 let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
@@ -181,10 +171,7 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     ("ended_at", `Float traj.ended_at);
   ] in
   let line = Yojson.Safe.to_string summary ^ "\n" in
-  let fd = Unix.openfile path [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND] 0o644 in
-  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-    let _ = Unix.write_substring fd line 0 (String.length line) in
-    ())
+  Fs_compat.append_file path line
 
 (* ================================================================ *)
 (* Trajectory accumulator (mutable, per-session)                    *)
@@ -275,39 +262,36 @@ let read_entries ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
   let path = trajectory_path masc_root keeper_name trace_id in
   if not (Sys.file_exists path) then []
   else
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
-      let entries = ref [] in
-      (try while true do
-         let line = input_line ic in
-         let json = Yojson.Safe.from_string line in
-         (* Skip summary lines *)
-         match Yojson.Safe.Util.member "type" json with
-         | `String "trajectory_summary" -> ()
-         | _ ->
-             let open Yojson.Safe.Util in
-             let entry = {
-               ts = json |> member "ts" |> to_float;
-               ts_iso = json |> member "ts_iso" |> to_string;
-               turn = json |> member "turn" |> to_int;
-               round = json |> member "round" |> to_int;
-               tool_name = json |> member "tool_name" |> to_string;
-               args_json = json |> member "args" |> Yojson.Safe.to_string;
-               gate_decision = Pass;  (* Simplified for replay *)
-               result =
-                 (match json |> member "result" with
-                  | `Null -> None
-                  | `String s -> Some s
-                  | _ -> None);
-               duration_ms = json |> member "duration_ms" |> to_int;
-               error =
-                 (match json |> member "error" with
-                  | `Null -> None
-                  | `String s -> Some s
-                  | _ -> None);
-               cost_usd = json |> member "cost_usd" |> to_float;
-             } in
-             entries := entry :: !entries
-       done
-       with End_of_file -> ());
-      List.rev !entries)
+    let content = Fs_compat.load_file path in
+    String.split_on_char '\n' content
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.filter_map (fun line ->
+        try
+          let json = Yojson.Safe.from_string line in
+          (* Skip summary lines *)
+          match Yojson.Safe.Util.member "type" json with
+          | `String "trajectory_summary" -> None
+          | _ ->
+              let open Yojson.Safe.Util in
+              Some {
+                ts = json |> member "ts" |> to_float;
+                ts_iso = json |> member "ts_iso" |> to_string;
+                turn = json |> member "turn" |> to_int;
+                round = json |> member "round" |> to_int;
+                tool_name = json |> member "tool_name" |> to_string;
+                args_json = json |> member "args" |> Yojson.Safe.to_string;
+                gate_decision = Pass;  (* Simplified for replay *)
+                result =
+                  (match json |> member "result" with
+                   | `Null -> None
+                   | `String s -> Some s
+                   | _ -> None);
+                duration_ms = json |> member "duration_ms" |> to_int;
+                error =
+                  (match json |> member "error" with
+                   | `Null -> None
+                   | `String s -> Some s
+                   | _ -> None);
+                cost_usd = json |> member "cost_usd" |> to_float;
+              }
+        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)

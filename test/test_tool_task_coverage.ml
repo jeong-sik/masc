@@ -9,7 +9,7 @@ let () = Printf.printf "\n=== Tool_task Coverage Tests ===\n"
 (* Test helper *)
 let test name f =
   try
-    f ();
+    Eio_main.run @@ (fun _env -> f ());
     Printf.printf "✓ %s passed\n" name
   with e ->
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);

@@ -741,6 +741,7 @@ let test_eio_fs_list_keys_empty () =
 (* ============================================================ *)
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "Backend Coverage" [
     "validate_ttl", [
       test_case "zero TTL" `Quick test_validate_ttl_zero;

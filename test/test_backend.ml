@@ -371,6 +371,7 @@ let test_corrupted_lock_recovery () =
 
 (* All tests *)
 let () =
+  Eio_main.run @@ fun _env ->
   run "Backend" [
     "config", [
       test_case "node ID generation" `Quick test_node_id_generation;

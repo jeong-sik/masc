@@ -34,6 +34,9 @@ type pattern = {
   usage_count: int;
   last_used: float;
   evolved_from: string option;
+  effectiveness_used: int;
+  effectiveness_unused: int;
+  effectiveness_last_check: float;
 }
 
 type cultural_value = {
@@ -193,6 +196,9 @@ and pattern_to_json (p : pattern) : Yojson.Safe.t =
     ("usage_count", `Int p.usage_count);
     ("last_used", `Float p.last_used);
     ("evolved_from", match p.evolved_from with Some e -> `String e | None -> `Null);
+    ("effectiveness_used", `Int p.effectiveness_used);
+    ("effectiveness_unused", `Int p.effectiveness_unused);
+    ("effectiveness_last_check", `Float p.effectiveness_last_check);
   ]
 
 and pattern_of_json json =
@@ -207,6 +213,15 @@ and pattern_of_json json =
     usage_count = json |> member "usage_count" |> to_int;
     last_used = json |> member "last_used" |> json_to_float;
     evolved_from = json |> member "evolved_from" |> to_string_option;
+    effectiveness_used =
+      (match json |> member "effectiveness_used" with
+       | `Int n -> n | _ -> 0);
+    effectiveness_unused =
+      (match json |> member "effectiveness_unused" with
+       | `Int n -> n | _ -> 0);
+    effectiveness_last_check =
+      (match json |> member "effectiveness_last_check" with
+       | `Null -> 0.0 | other -> json_to_float other);
   }
 
 and cultural_value_to_json (c : cultural_value) : Yojson.Safe.t =
@@ -370,6 +385,45 @@ module Pure = struct
         alumni = agent_id :: inst.alumni;
       }
     else inst
+
+  (** Record whether a pattern was used after injection.
+      Increments effectiveness_used or effectiveness_unused accordingly. *)
+  let record_effectiveness inst ~pattern_id ~used ~now =
+    let procedural = List.map (fun (p : pattern) ->
+      if p.id = pattern_id then
+        if used then
+          { p with effectiveness_used = p.effectiveness_used + 1;
+                   effectiveness_last_check = now }
+        else
+          { p with effectiveness_unused = p.effectiveness_unused + 1;
+                   effectiveness_last_check = now }
+      else p
+    ) inst.memory.procedural in
+    { inst with memory = { inst.memory with procedural } }
+
+  (** Compute effectiveness score with 30-day time decay.
+      Formula: (used / (used + unused)) * e^(-(now - last_used) / (30 * 86400))
+      Returns 0.0 if no effectiveness data has been recorded. *)
+  let effectiveness_score (p : pattern) ~now =
+    let total = p.effectiveness_used + p.effectiveness_unused in
+    if total = 0 then 0.0
+    else
+      let ratio = float_of_int p.effectiveness_used /. float_of_int total in
+      let decay_constant = 30.0 *. 86400.0 in
+      let elapsed = now -. p.last_used in
+      let decay = exp (-. elapsed /. decay_constant) in
+      ratio *. decay
+
+  (** Remove patterns whose effectiveness_score falls below threshold.
+      Patterns with no effectiveness data (score = 0.0) are kept
+      to avoid pruning newly created patterns. *)
+  let prune_ineffective inst ~threshold ~now =
+    let procedural = List.filter (fun (p : pattern) ->
+      let total = p.effectiveness_used + p.effectiveness_unused in
+      if total = 0 then true  (* keep patterns with no effectiveness data *)
+      else effectiveness_score p ~now >= threshold
+    ) inst.memory.procedural in
+    { inst with memory = { inst.memory with procedural } }
 end
 
 (** {1 Effectful Operations (Eio)} *)
@@ -407,6 +461,8 @@ let codify_pattern ~fs config inst ~name ~description ~trigger ~steps =
     id = Printf.sprintf "pat-%d" (Level4_config.random_int 100000);
     name; description; trigger; steps; success_rate = 0.5; usage_count = 0;
     last_used = Time_compat.now (); evolved_from = None;
+    effectiveness_used = 0; effectiveness_unused = 0;
+    effectiveness_last_check = 0.0;
   } in
   let inst' = Pure.add_pattern inst ~pattern in
   save_institution ~fs config inst';
@@ -458,11 +514,17 @@ let format_for_injection ?(include_patterns=true) ?(max_patterns=5) (inst : inst
     ) (List.sort (fun a b -> compare b.weight a.weight) inst.culture |> List.filteri (fun i _ -> i < 3))
   end;
 
-  (* Procedural Patterns - Top N by success rate *)
+  (* Procedural Patterns - Top N by success rate, filtered by effectiveness *)
   if include_patterns && inst.memory.procedural <> [] then begin
     Buffer.add_string buf "\n**Learned Patterns** (collective wisdom):\n";
+    let now = Time_compat.now () in
     let sorted_patterns =
-      List.sort (fun a b -> compare b.success_rate a.success_rate) inst.memory.procedural
+      inst.memory.procedural
+      |> List.filter (fun (p : pattern) ->
+           (* Keep patterns with no effectiveness data or score >= 0.2 *)
+           let total = p.effectiveness_used + p.effectiveness_unused in
+           total = 0 || Pure.effectiveness_score p ~now >= 0.2)
+      |> List.sort (fun a b -> compare b.success_rate a.success_rate)
       |> List.filteri (fun i _ -> i < max_patterns)
     in
     List.iter (fun (p : pattern) ->

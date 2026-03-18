@@ -66,6 +66,7 @@ let test_spawn_result_success () =
     cache_read_tokens = Some 50;
     cost_usd = Some 0.005;
     raw_trace_run = None;
+    termination = None;
   } in
   check bool "success" true r.success;
   check int "exit_code" 0 r.exit_code;
@@ -85,6 +86,7 @@ let test_spawn_result_failure () =
     cache_read_tokens = None;
     cost_usd = None;
     raw_trace_run = None;
+    termination = None;
   } in
   check bool "success" false r.success;
   check int "exit_code" 1 r.exit_code
@@ -103,6 +105,7 @@ let test_spawn_result_tokens () =
     cache_read_tokens = Some 300;
     cost_usd = Some 0.025;
     raw_trace_run = None;
+    termination = None;
   } in
   match r.input_tokens, r.output_tokens, r.cost_usd with
   | Some i, Some o, Some c ->

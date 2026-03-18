@@ -25,8 +25,8 @@ let make_ctx () : Tool_perpetual.context = {
 }
 
 (** Create a default model spec for testing. *)
-let test_model : Llm_client.model_spec = {
-  provider = Llm_client.Llama;
+let test_model : Masc_mcp.Llm_types.model_spec = {
+  provider = Masc_mcp.Llm_types.Llama;
   model_id = "test-model";
   max_context = 4000;
   api_url = "http://127.0.0.1:8085";

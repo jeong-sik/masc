@@ -677,26 +677,26 @@ let parse_llm_code_response response =
             in
             Result.ok (hypothesis, trimmed)
 
-(** Generate code change by calling Llm_client.complete.
+(** Generate code change by calling Llm_orchestration.complete.
     Returns Ok (hypothesis, new_code) or Error reason. *)
 let generate_code_change ~goal ~baseline ~history ~insights
     ~target_file ~file_content ~llm_model =
   let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
     ~file_content ~target_file in
-  match Llm_client.model_spec_of_string llm_model with
+  match Llm_types.model_spec_of_string llm_model with
   | Result.Error e -> Result.error (Printf.sprintf "Invalid model spec: %s" e)
   | Result.Ok model ->
-    let req : Llm_client.completion_request = {
+    let req : Llm_types.completion_request = {
       model;
-      messages = [Llm_client.user_msg prompt];
+      messages = [Llm_types.user_msg prompt];
       temperature = 0.7;
       max_tokens = 4096;
       tools = [];
       response_format = `Text;
     } in
-    (match Llm_client.complete ~timeout_sec:120 req with
+    (match Llm_orchestration.complete ~timeout_sec:120 req with
     | Result.Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
-    | Result.Ok resp -> parse_llm_code_response (Llm_client.text_of_response resp))
+    | Result.Ok resp -> parse_llm_code_response (Llm_types.text_of_response resp))
 
 (* ================================================================ *)
 (* Loop State Management                                            *)

@@ -195,16 +195,16 @@ let llm_tool_defs_of_json = function
                  in
                  Some
                    {
-                     Llm_client.tool_name = tool_name;
+                     Llm_types.tool_name = tool_name;
                      tool_description = tool_description;
                      parameters = parameters;
                    })
   | Some _ -> []
 
-let llm_tool_calls_json (calls : Llm_client.tool_call list) =
+let llm_tool_calls_json (calls : Llm_types.tool_call list) =
   `List
     (List.map
-       (fun (call : Llm_client.tool_call) ->
+       (fun (call : Llm_types.tool_call) ->
          `Assoc
            [
              ("id", `String call.call_id);
@@ -215,7 +215,7 @@ let llm_tool_calls_json (calls : Llm_client.tool_call list) =
 
 type llm_runner =
   | Stub
-  | Direct of Llm_client.model_spec
+  | Direct of Llm_types.model_spec
   | Spawn of string (* agent name *)
   | SpawnWithModel of { agent: string; model: string }
 
@@ -223,7 +223,7 @@ let model_runner_of_string raw =
   let model = trim raw in
   let lower = String.lowercase_ascii model in
   let direct spec =
-    match Llm_client.model_spec_of_string spec with
+    match Llm_types.model_spec_of_string spec with
     | Ok parsed -> Ok (Direct parsed)
     | Error msg -> Error msg
   in
@@ -245,7 +245,7 @@ let model_runner_of_string raw =
   | "codex" -> Ok (Spawn "codex")
   | value when starts_with ~prefix:"codex:" value -> Ok (Spawn "codex")
   | value -> (
-      match Llm_client.model_spec_of_string model with
+      match Llm_types.model_spec_of_string model with
       | Ok parsed -> Ok (Direct parsed)
       | Error _ when starts_with ~prefix:"llama:" value -> direct model
       | Error _ when starts_with ~prefix:"gemini:" value -> direct model
@@ -295,22 +295,22 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
       in
       call_spawn_model runtime ~agent_name ~model_override ~prompt:full_prompt ~timeout_sec ()
   | Ok (Direct spec) ->
-      let req : Llm_client.completion_request =
+      let req : Llm_types.completion_request =
         {
           model = spec;
           messages =
             (match system with
             | Some sys when trim sys <> "" ->
-                [ Llm_client.system_msg sys; Llm_client.user_msg prompt ]
-            | _ -> [ Llm_client.user_msg prompt ]);
+                [ Llm_types.system_msg sys; Llm_types.user_msg prompt ]
+            | _ -> [ Llm_types.user_msg prompt ]);
           temperature = 0.2;
           max_tokens = 4096;
           tools = llm_tool_defs_of_json tools;
           response_format = `Text;
         }
       in
-      (match Llm_client.complete ~timeout_sec req with
-      | Ok resp when trim (Llm_client.text_of_response resp) <> "" -> Ok (Llm_client.text_of_response resp)
+      (match Llm_orchestration.complete ~timeout_sec req with
+      | Ok resp when trim (Llm_types.text_of_response resp) <> "" -> Ok (Llm_types.text_of_response resp)
       | Ok resp when resp.tool_calls <> [] ->
           Ok (Yojson.Safe.to_string (llm_tool_calls_json resp.tool_calls))
       | Ok _ -> Error "empty completion"

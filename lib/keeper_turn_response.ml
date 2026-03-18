@@ -14,7 +14,7 @@ open Keeper_execution
 type turn_env = {
   meta_turn : keeper_meta;
   safe_reply : string;
-  final_usage : Llm_client.token_usage;
+  final_usage : Llm_types.token_usage;
   final_model_used : string;
   final_latency_ms : int;
   total_cost_usd_turn : float;
@@ -52,7 +52,7 @@ let build_turn_metrics_fields (env : turn_env) : (string * Yojson.Safe.t) list =
     ("usage", `Assoc [
       ("input_tokens", `Int env.final_usage.input_tokens);
       ("output_tokens", `Int env.final_usage.output_tokens);
-      ("total_tokens", `Int (Llm_client.total_tokens env.final_usage));
+      ("total_tokens", `Int (Llm_types.total_tokens env.final_usage));
     ]);
     ("latency_ms", `Int env.final_latency_ms);
     ("cost_usd", `Float env.total_cost_usd_turn);
@@ -163,7 +163,7 @@ let build_normal_turn_response_json (env : turn_env) : Yojson.Safe.t =
     ("usage", `Assoc [
       ("input_tokens", `Int env.final_usage.input_tokens);
       ("output_tokens", `Int env.final_usage.output_tokens);
-      ("total_tokens", `Int (Llm_client.total_tokens env.final_usage));
+      ("total_tokens", `Int (Llm_types.total_tokens env.final_usage));
     ]);
     ("latency_ms", `Int env.final_latency_ms);
     ("cost_usd", `Float env.total_cost_usd_turn);

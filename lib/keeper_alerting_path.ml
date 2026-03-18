@@ -66,9 +66,9 @@ let is_weather_text (s : string) : bool =
 
 let extract_user_messages (ctx_work : Context_manager.working_context) : string list =
   ctx_work.messages
-  |> List.filter_map (fun (m : Llm_client.message) ->
-       if m.role = Llm_client.User then
-         let c = String.trim (Llm_client.text_of_message m) in
+  |> List.filter_map (fun (m : Llm_types.message) ->
+       if m.role = Llm_types.User then
+         let c = String.trim (Llm_types.text_of_message m) in
          if c = "" then None else Some c
        else
          None)

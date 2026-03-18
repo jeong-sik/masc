@@ -14,7 +14,7 @@
 
 open Printf
 
-let text_of_message = Llm_client.text_of_message
+let text_of_message = Llm_types.text_of_message
 
 (* ================================================================ *)
 (* Types                                                            *)
@@ -22,7 +22,7 @@ let text_of_message = Llm_client.text_of_message
 
 type working_context = {
   system_prompt : string;
-  messages : Llm_client.message list;
+  messages : Llm_types.message list;
   token_count : int;
   max_tokens : int;
   importance_scores : (int * float) list;
@@ -41,7 +41,7 @@ type checkpoint = {
 type session_context = {
   session_id : string;
   session_dir : string;
-  mutable full_history : Llm_client.message list;
+  mutable full_history : Llm_types.message list;
   mutable checkpoints : checkpoint list;
 }
 
@@ -108,10 +108,10 @@ let ensure_dir path =
 (* ================================================================ *)
 
 (** Count tokens in a message (~4 chars/token + role overhead). *)
-let msg_tokens (m : Llm_client.message) =
+let msg_tokens (m : Llm_types.message) =
   (String.length (text_of_message m) / 4) + 4
 
-let count_tokens (system_prompt : string) (msgs : Llm_client.message list) =
+let count_tokens (system_prompt : string) (msgs : Llm_types.message list) =
   let sys_tokens = (String.length system_prompt / 4) + 4 in
   List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
 
@@ -140,14 +140,14 @@ let set_system_prompt (ctx : working_context) ~system_prompt =
   (* Avoid leaking prior compaction summaries into the "system prompt" channel for providers
      that treat all system-role messages as instructions (notably Claude). *)
   let messages =
-    List.map (fun (m : Llm_client.message) ->
-      if m.role = Llm_client.System then { m with role = Llm_client.Assistant } else m
+    List.map (fun (m : Llm_types.message) ->
+      if m.role = Llm_types.System then { m with role = Llm_types.Assistant } else m
     ) ctx.messages
   in
   let token_count = count_tokens system_prompt messages in
   { ctx with system_prompt; messages; token_count; importance_scores = [] }
 
-let append ctx (msg : Llm_client.message) =
+let append ctx (msg : Llm_types.message) =
   let new_tokens = msg_tokens msg in
   { ctx with
     messages = ctx.messages @ [msg];
@@ -174,9 +174,9 @@ let score_importance ctx =
 (** Truncate tool output messages longer than max_len.
     Keeps first keep_len and last keep_len characters with "[...truncated...]". *)
 let prune_tool_outputs ?(max_len=500) ?(keep_len=100) ctx =
-  let messages = List.map (fun (m : Llm_client.message) ->
+  let messages = List.map (fun (m : Llm_types.message) ->
     match m.role with
-    | Llm_client.Tool when String.length (text_of_message m) > max_len ->
+    | Llm_types.Tool when String.length (text_of_message m) > max_len ->
       let mc = text_of_message m in
       let head = String.sub mc 0 keep_len in
       let tail_start = String.length mc - keep_len in
@@ -193,7 +193,7 @@ let merge_contiguous ctx =
   let rec merge = function
     | [] -> []
     | [m] -> [m]
-    | (m1 : Llm_client.message) :: (m2 :: rest as tail) ->
+    | (m1 : Llm_types.message) :: (m2 :: rest as tail) ->
       if m1.role = m2.role then
         let merged = { m1 with content = [Agent_sdk.Types.Text (text_of_message m1 ^ "\n" ^ text_of_message m2)] } in
         merge (merged :: rest)
@@ -233,7 +233,7 @@ let summarize_old ?(oldest_pct=0.3) ctx =
        "instructions" and breaking behavior. *)
     let blocks =
       old_msgs
-      |> List.concat_map (fun (m : Llm_client.message) -> extract_state_blocks (text_of_message m))
+      |> List.concat_map (fun (m : Llm_types.message) -> extract_state_blocks (text_of_message m))
     in
     let take_last n lst =
       let len = List.length lst in
@@ -252,7 +252,7 @@ let summarize_old ?(oldest_pct=0.3) ctx =
           memory_summary_prefix rendered
       else
         (* Fallback heuristic: role-tagged truncation. *)
-        let summary_parts = List.map (fun (m : Llm_client.message) ->
+        let summary_parts = List.map (fun (m : Llm_types.message) ->
           let role_str = match m.role with
             | System -> "SYS" | User -> "USR"
             | Assistant -> "AST" | Tool -> "TOOL"
@@ -266,7 +266,7 @@ let summarize_old ?(oldest_pct=0.3) ctx =
         sprintf "%s\n(Fallback summary of %d earlier messages; reference only.)\n%s"
           memory_summary_prefix (List.length old_msgs) (String.concat "\n" summary_parts)
     in
-    let summary_msg = Llm_client.assistant_msg summary in
+    let summary_msg = Llm_types.assistant_msg summary in
     let messages = summary_msg :: recent_msgs in
     let token_count = count_tokens ctx.system_prompt messages in
     { ctx with messages; token_count; importance_scores = [] }
@@ -309,15 +309,15 @@ let compact ctx strategies =
 (* ================================================================ *)
 
 (** Format a single message as human-readable text: "role: content". *)
-let format_message_readable (m : Llm_client.message) : string =
+let format_message_readable (m : Llm_types.message) : string =
   let role_str = match m.role with
-    | Llm_client.System -> "system"
-    | Llm_client.User -> "user"
-    | Llm_client.Assistant -> "assistant"
-    | Llm_client.Tool -> "tool"
+    | Llm_types.System -> "system"
+    | Llm_types.User -> "user"
+    | Llm_types.Assistant -> "assistant"
+    | Llm_types.Tool -> "tool"
   in
   let tool_suffix = match m.role with
-    | Llm_client.Tool ->
+    | Llm_types.Tool ->
       let tool_id = List.find_map (function
         | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
         | _ -> None) m.content in
@@ -331,7 +331,7 @@ let format_message_readable (m : Llm_client.message) : string =
 let offload_messages
     ~(session_dir : string)
     ~(compaction_count : int)
-    (messages : Llm_client.message list) : string option =
+    (messages : Llm_types.message list) : string option =
   try
     let offload_dir = Filename.concat session_dir "offloaded" in
     ensure_dir offload_dir;
@@ -394,7 +394,7 @@ let compact_with_offload
   let compacted = match offloaded_path with
     | Some path ->
       let annotation = sprintf "[Full conversation history saved to %s]\n\n" path in
-      let messages = List.map (fun (m : Llm_client.message) ->
+      let messages = List.map (fun (m : Llm_types.message) ->
         let mt = text_of_message m in
         if starts_with ~prefix:memory_summary_prefix mt then
           { m with content = [Agent_sdk.Types.Text (annotation ^ mt)] }
@@ -416,19 +416,19 @@ let compact_with_offload
 let system_role_tag = "\x00__MASC_ROLE:system__\x00"
 let tool_role_tag = "\x00__MASC_ROLE:tool__\x00"
 
-let masc_msg_to_oas_tagged (m : Llm_client.message) : Agent_sdk.Types.message =
+let masc_msg_to_oas_tagged (m : Llm_types.message) : Agent_sdk.Types.message =
   let role, tag = match m.role with
-    | Llm_client.System -> Agent_sdk.Types.User, Some system_role_tag
-    | Llm_client.Tool -> Agent_sdk.Types.User, Some tool_role_tag
-    | Llm_client.User -> Agent_sdk.Types.User, None
-    | Llm_client.Assistant -> Agent_sdk.Types.Assistant, None
+    | Llm_types.System -> Agent_sdk.Types.User, Some system_role_tag
+    | Llm_types.Tool -> Agent_sdk.Types.User, Some tool_role_tag
+    | Llm_types.User -> Agent_sdk.Types.User, None
+    | Llm_types.Assistant -> Agent_sdk.Types.Assistant, None
   in
   let text = match tag with
     | Some t -> t ^ text_of_message m
     | None -> text_of_message m
   in
   let content = match m.role with
-    | Llm_client.Tool ->
+    | Llm_types.Tool ->
       let tool_use_id =
         List.find_map (function Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id | _ -> None) m.content
         |> Option.value ~default:"masc-tool"
@@ -438,7 +438,7 @@ let masc_msg_to_oas_tagged (m : Llm_client.message) : Agent_sdk.Types.message =
   in
   { Agent_sdk.Types.role; content }
 
-let oas_msg_to_masc_tagged (m : Agent_sdk.Types.message) : Llm_client.message =
+let oas_msg_to_masc_tagged (m : Agent_sdk.Types.message) : Llm_types.message =
   (* Extract text and tool_use_id from content blocks *)
   let text, tool_id =
     let parts = List.filter_map (fun (block : Agent_sdk.Types.content_block) ->
@@ -454,23 +454,23 @@ let oas_msg_to_masc_tagged (m : Agent_sdk.Types.message) : Llm_client.message =
   in
   let role, content =
     if starts_with ~prefix:system_role_tag text then
-      Llm_client.System,
+      Llm_types.System,
       String.sub text (String.length system_role_tag)
         (String.length text - String.length system_role_tag)
     else if starts_with ~prefix:tool_role_tag text then
-      Llm_client.Tool,
+      Llm_types.Tool,
       String.sub text (String.length tool_role_tag)
         (String.length text - String.length tool_role_tag)
     else
       (match m.role with
-       | Agent_sdk.Types.User -> Llm_client.User
-       | Agent_sdk.Types.Assistant -> Llm_client.Assistant
-       | Agent_sdk.Types.System -> Llm_client.System
-       | Agent_sdk.Types.Tool -> Llm_client.Tool),
+       | Agent_sdk.Types.User -> Llm_types.User
+       | Agent_sdk.Types.Assistant -> Llm_types.Assistant
+       | Agent_sdk.Types.System -> Llm_types.System
+       | Agent_sdk.Types.Tool -> Llm_types.Tool),
       text
   in
   let content_blocks = match role with
-    | Llm_client.Tool ->
+    | Llm_types.Tool ->
       let tool_use_id = Option.value ~default:"masc-tool" tool_id in
       [Agent_sdk.Types.ToolResult { tool_use_id; content; is_error = false }]
     | _ -> [Agent_sdk.Types.Text content]
@@ -523,23 +523,23 @@ let generate_checkpoint_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
   sprintf "ckpt-%d" ts
 
-let role_to_string (r : Llm_client.role) = match r with
+let role_to_string (r : Llm_types.role) = match r with
   | System -> "system" | User -> "user"
   | Assistant -> "assistant" | Tool -> "tool"
 
 let role_of_string = function
-  | "system" -> Llm_client.System | "user" -> Llm_client.User
-  | "assistant" -> Llm_client.Assistant | _ -> Llm_client.Tool
+  | "system" -> Llm_types.System | "user" -> Llm_types.User
+  | "assistant" -> Llm_types.Assistant | _ -> Llm_types.Tool
 
-let message_to_json (m : Llm_client.message) : Yojson.Safe.t =
-  let m = Llm_client.sanitize_message_utf8 m in
+let message_to_json (m : Llm_types.message) : Yojson.Safe.t =
+  let m = Llm_types.sanitize_message_utf8 m in
   let base = [
     ("role", `String (role_to_string m.role));
     ("content", `String (text_of_message m));
   ] in
   (* Preserve tool_use_id for backward compat with old "tool_call_id" JSON field *)
   let with_tool_id = match m.role with
-    | Llm_client.Tool ->
+    | Llm_types.Tool ->
       let tool_id = List.find_map (function
         | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
         | _ -> None) m.content in
@@ -548,12 +548,12 @@ let message_to_json (m : Llm_client.message) : Yojson.Safe.t =
   in
   `Assoc with_tool_id
 
-let message_of_json (json : Yojson.Safe.t) : Llm_client.message =
+let message_of_json (json : Yojson.Safe.t) : Llm_types.message =
   let open Yojson.Safe.Util in
   let role = json |> member "role" |> to_string |> role_of_string in
-  let text = json |> member "content" |> to_string |> Llm_client.sanitize_text_utf8 in
+  let text = json |> member "content" |> to_string |> Llm_types.sanitize_text_utf8 in
   match role with
-  | Llm_client.Tool ->
+  | Llm_types.Tool ->
     let tool_use_id = json |> member "tool_call_id" |> to_string_option |> Option.value ~default:"masc-tool" in
     { Agent_sdk.Types.role; content = [Agent_sdk.Types.ToolResult { tool_use_id; content = text; is_error = false }] }
   | _ ->
@@ -561,7 +561,7 @@ let message_of_json (json : Yojson.Safe.t) : Llm_client.message =
 
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [
-    ("system_prompt", `String (Llm_client.sanitize_text_utf8 ctx.system_prompt));
+    ("system_prompt", `String (Llm_types.sanitize_text_utf8 ctx.system_prompt));
     ("messages", `List (List.map message_to_json ctx.messages));
     ("token_count", `Int ctx.token_count);
     ("max_tokens", `Int ctx.max_tokens);
@@ -569,10 +569,10 @@ let serialize_context (ctx : working_context) : string =
   Yojson.Safe.to_string json
 
 let deserialize_context (s : string) ~max_tokens : working_context =
-  let json = Yojson.Safe.from_string (Llm_client.sanitize_text_utf8 s) in
+  let json = Yojson.Safe.from_string (Llm_types.sanitize_text_utf8 s) in
   let open Yojson.Safe.Util in
   let system_prompt =
-    json |> member "system_prompt" |> to_string |> Llm_client.sanitize_text_utf8
+    json |> member "system_prompt" |> to_string |> Llm_types.sanitize_text_utf8
   in
   let messages = json |> member "messages" |> to_list |> List.map message_of_json in
   let token_count = json |> member "token_count" |> to_int in
@@ -586,7 +586,7 @@ let create_checkpoint ctx ~generation =
     generation;
     message_count = List.length ctx.messages;
     token_count = ctx.token_count;
-    serialized = serialize_context ctx |> Llm_client.sanitize_text_utf8;
+    serialized = serialize_context ctx |> Llm_types.sanitize_text_utf8;
   }
 
 let restore_checkpoint ckpt ~max_tokens =
@@ -602,7 +602,7 @@ let create_session ~session_id ~base_dir =
   { session_id; session_dir; full_history = []; checkpoints = [] }
 
 let persist_message session msg =
-  let msg = Llm_client.sanitize_message_utf8 msg in
+  let msg = Llm_types.sanitize_message_utf8 msg in
   session.full_history <- session.full_history @ [msg];
   let path = Filename.concat session.session_dir "history.jsonl" in
   let now_ts = Time_compat.now () in
@@ -613,13 +613,13 @@ let persist_message session msg =
     | j -> j
   in
   let line =
-    (Yojson.Safe.to_string payload |> Llm_client.sanitize_text_utf8) ^ "\n"
+    (Yojson.Safe.to_string payload |> Llm_types.sanitize_text_utf8) ^ "\n"
   in
   Fs_compat.append_file path line
 
 let save_checkpoint session ckpt =
   let ckpt =
-    { ckpt with serialized = Llm_client.sanitize_text_utf8 ckpt.serialized }
+    { ckpt with serialized = Llm_types.sanitize_text_utf8 ckpt.serialized }
   in
   session.checkpoints <- session.checkpoints @ [ckpt];
   let path = Filename.concat session.session_dir
@@ -632,7 +632,7 @@ let save_checkpoint session ckpt =
     ("token_count", `Int ckpt.token_count);
     ("serialized", `String ckpt.serialized);
   ] in
-  let content = Yojson.Safe.to_string json |> Llm_client.sanitize_text_utf8 in
+  let content = Yojson.Safe.to_string json |> Llm_types.sanitize_text_utf8 in
   Fs_compat.save_file path content
 
 let load_latest_checkpoint session =
@@ -652,7 +652,7 @@ let load_latest_checkpoint session =
       let content = Fs_compat.load_file path in
       let json =
         content
-        |> Llm_client.sanitize_text_utf8
+        |> Llm_types.sanitize_text_utf8
         |> Yojson.Safe.from_string
       in
       let open Yojson.Safe.Util in
@@ -663,5 +663,5 @@ let load_latest_checkpoint session =
         message_count = json |> member "message_count" |> to_int;
         token_count = json |> member "token_count" |> to_int;
         serialized =
-          json |> member "serialized" |> to_string |> Llm_client.sanitize_text_utf8;
+          json |> member "serialized" |> to_string |> Llm_types.sanitize_text_utf8;
       }

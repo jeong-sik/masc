@@ -32,12 +32,12 @@ type event =
 (** Loop configuration — immutable after creation. *)
 type loop_config = {
   initial_goal : string;
-  model_cascade : Llm_client.model_spec list;   (** Ordered preference *)
-  tools : Llm_client.tool_def list;
+  model_cascade : Llm_types.model_spec list;   (** Ordered preference *)
+  tools : Llm_types.tool_def list;
   heartbeat_interval_s : float;                  (** Default: 30.0 *)
   max_idle_turns : int;                          (** Stop after N turns with no progress *)
   feedback_enabled : bool;                       (** Run verifier after each action *)
-  verifier_model : Llm_client.model_spec;        (** Cheap model for verification *)
+  verifier_model : Llm_types.model_spec;        (** Cheap model for verification *)
   compact_threshold : float;                     (** Default: 0.5 *)
   prepare_threshold : float;                     (** Default: 0.7 *)
   handoff_threshold : float;                     (** Default: 0.85 *)
@@ -70,7 +70,7 @@ type loop_state = {
   mutable started_at : float;
   mutable last_turn_ts : float;
   mutable last_model_used : string;
-  mutable last_usage : Llm_client.token_usage;
+  mutable last_usage : Llm_types.token_usage;
   mutable last_latency_ms : int;
   mutable compaction_count : int;
   mutable compaction_tokens_saved : int;
@@ -109,7 +109,7 @@ val status : config:loop_config -> loop_state -> Yojson.Safe.t
 (** Default configuration builder. *)
 val default_config :
   goal:string ->
-  models:Llm_client.model_spec list ->
-  ?verifier:Llm_client.model_spec ->
+  models:Llm_types.model_spec list ->
+  ?verifier:Llm_types.model_spec ->
   ?session_dir:string ->
   unit -> loop_config

@@ -50,7 +50,7 @@ let verdict_to_hook_decision (v : Verifier.verdict) : Agent_sdk.Hooks.hook_decis
     @param goal The current agent goal (for verification prompt context).
     @param context_summary Brief summary of agent state. *)
 let make_pre_tool_hook
-    ~(model : Llm_client.model_spec)
+    ~(model : Llm_types.model_spec)
     ~(goal : string)
     ~(context_summary : string)
   : Agent_sdk.Hooks.hook =
@@ -88,7 +88,7 @@ let make_pre_tool_hook
     @return Updated hooks record with the verifier installed in pre_tool_use. *)
 let install_hook
     ~(hooks : Agent_sdk.Hooks.hooks)
-    ~(model : Llm_client.model_spec)
+    ~(model : Llm_types.model_spec)
     ~(goal : string)
     ~(context_summary : string)
   : Agent_sdk.Hooks.hooks =

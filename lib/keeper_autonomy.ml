@@ -167,7 +167,7 @@ let evaluate_next_action ~config ~goal_ids ~keeper_name:_ =
           StartPerpetualAgent {
             goal_id = goal.id;
             goal_title = goal.title;
-            models = Llm_client.default_execution_model_labels ();
+            models = Llm_types.default_execution_model_labels ();
             coding_mode = true;
             coding_agent = "claude";
           }
@@ -237,14 +237,14 @@ Keep it concise — max 3 sentences per step.|}
 
 let generate_action_plan ~model ~goal ~keeper_context =
   let prompt = build_plan_prompt goal ~keeper_context in
-  let req : Llm_client.completion_request = {
+  let req : Llm_types.completion_request = {
     model;
-    messages = [Llm_client.user_msg prompt];
+    messages = [Llm_types.user_msg prompt];
     temperature = 0.3;
     max_tokens = 500;
     tools = [];
     response_format = `Text;
   } in
-  match Llm_client.complete req with
-  | Ok resp -> Ok (Llm_client.text_of_response resp)
+  match Llm_orchestration.complete req with
+  | Ok resp -> Ok (Llm_types.text_of_response resp)
   | Error e -> Error (sprintf "plan generation failed: %s" e)

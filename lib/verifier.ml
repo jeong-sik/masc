@@ -141,21 +141,21 @@ One line only.|}
 (* Core: verify                                                     *)
 (* ================================================================ *)
 
-let verify ~(model : Llm_client.model_spec) (req : verification_request) : verdict =
+let verify ~(model : Llm_types.model_spec) (req : verification_request) : verdict =
   if should_skip ~action_description:req.action_description then
     Pass
   else
     let prompt = build_prompt req in
-    let completion_req : Llm_client.completion_request = {
+    let completion_req : Llm_types.completion_request = {
       model;
-      messages = [Llm_client.user_msg prompt];
+      messages = [Llm_types.user_msg prompt];
       temperature = 0.0;  (* Deterministic for verification *)
       max_tokens = 200;   (* Budget cap *)
       tools = [];
       response_format = `Text;
     } in
-    match Llm_client.complete completion_req with
-    | Ok resp -> parse_verdict (Llm_client.text_of_response resp)
+    match Llm_orchestration.complete completion_req with
+    | Ok resp -> parse_verdict (Llm_types.text_of_response resp)
     | Error e ->
       eprintf "[verifier] LLM call failed: %s (defaulting to WARN)\n%!" e;
       Warn ("verifier_unavailable: " ^ e)

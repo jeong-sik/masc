@@ -1,17 +1,12 @@
-(** Llm_client — Vendor-agnostic LLM client for the Perpetual Agent Runtime.
+(** Llm_client — OAS type adapters.
 
-    Unified interface for calling any LLM provider. All providers are
-    normalized to an internal message format and results are parsed into
-    structured completion_response records.
+    After the Llm_client re-export removal, this module contains only
+    conversion functions between MASC {!Llm_types} and OAS {!Agent_sdk} types.
 
-    This module re-exports {!Llm_types} and {!Llm_orchestration} so that
-    existing callers can continue using [Llm_client.X] without changes.
+    @since 2.61.0
+    @since 2.114.0 — re-export removed, callers use Llm_types/Llm_orchestration directly *)
 
-    @since 2.61.0 *)
-
-(* Re-export sub-modules for backward compatibility *)
-include Llm_types
-include Llm_orchestration
+open Llm_types
 
 (* ================================================================ *)
 (* OAS Type Adapters                                                *)

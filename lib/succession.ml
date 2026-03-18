@@ -8,7 +8,7 @@
 
 open Printf
 
-let text_of_message = Llm_client.text_of_message
+let text_of_message = Llm_types.text_of_message
 
 (* ================================================================ *)
 (* Types                                                            *)
@@ -37,7 +37,7 @@ type succession_dna = {
 }
 
 type successor_spec = {
-  model : Llm_client.model_spec;
+  model : Llm_types.model_spec;
   inherit_tools : bool;
   context_budget : float;
 }
@@ -69,7 +69,7 @@ let merge_metrics a b = {
 (* ================================================================ *)
 
 (** Build a progress summary from the most recent assistant messages. *)
-let build_progress_summary (msgs : Llm_client.message list) : string =
+let build_progress_summary (msgs : Llm_types.message list) : string =
   let clip s max_len =
     if String.length s > max_len then String.sub s 0 max_len ^ "..." else s
   in
@@ -80,7 +80,7 @@ let build_progress_summary (msgs : Llm_client.message list) : string =
   let latest_state_block () =
     let rec loop = function
       | [] -> None
-      | (m : Llm_client.message) :: rest ->
+      | (m : Llm_types.message) :: rest ->
         let blocks = Context_manager.extract_state_blocks (text_of_message m) in
         (match last_opt blocks with
          | Some b -> Some b
@@ -94,8 +94,8 @@ let build_progress_summary (msgs : Llm_client.message list) : string =
     clip (Printf.sprintf "[STATE]\n%s\n[/STATE]" b) 3000
   | None ->
     (* Fallback heuristic: last assistant outputs, clipped. *)
-    let assistant_msgs = List.filter (fun (m : Llm_client.message) ->
-      m.role = Llm_client.Assistant
+    let assistant_msgs = List.filter (fun (m : Llm_types.message) ->
+      m.role = Llm_types.Assistant
     ) msgs in
     let recent = match List.length assistant_msgs with
       | n when n > 5 ->
@@ -103,13 +103,13 @@ let build_progress_summary (msgs : Llm_client.message list) : string =
         List.filteri (fun i _ -> i >= start) assistant_msgs
       | _ -> assistant_msgs
     in
-    let parts = List.map (fun (m : Llm_client.message) ->
+    let parts = List.map (fun (m : Llm_types.message) ->
       clip (text_of_message m) 200
     ) recent in
     String.concat "\n" parts
 
 (** Extract pending actions from user messages that haven't been addressed. *)
-let extract_pending_actions (msgs : Llm_client.message list) : string list =
+let extract_pending_actions (msgs : Llm_types.message list) : string list =
   let starts_with_ci ~prefix s =
     let prefix = String.lowercase_ascii prefix in
     let s = String.lowercase_ascii (String.trim s) in
@@ -145,7 +145,7 @@ let extract_pending_actions (msgs : Llm_client.message list) : string list =
   let latest_state_block () =
     let rec loop = function
       | [] -> None
-      | (m : Llm_client.message) :: rest ->
+      | (m : Llm_types.message) :: rest ->
         let blocks = Context_manager.extract_state_blocks (text_of_message m) in
         (match last_opt blocks with
          | Some b -> Some b
@@ -159,16 +159,16 @@ let extract_pending_actions (msgs : Llm_client.message list) : string list =
     if next <> [] then next else
       (match List.rev msgs with
        | [] -> []
-       | (last : Llm_client.message) :: _ when last.role = Llm_client.User -> [text_of_message last]
+       | (last : Llm_types.message) :: _ when last.role = Llm_types.User -> [text_of_message last]
        | _ -> [])
   | None ->
     (match List.rev msgs with
      | [] -> []
-     | (last : Llm_client.message) :: _ when last.role = Llm_client.User -> [text_of_message last]
+     | (last : Llm_types.message) :: _ when last.role = Llm_types.User -> [text_of_message last]
      | _ -> [])
 
 (** Extract key decisions from assistant messages containing decision markers. *)
-let extract_key_decisions (msgs : Llm_client.message list) : string list =
+let extract_key_decisions (msgs : Llm_types.message list) : string list =
   let starts_with_ci ~prefix s =
     let prefix = String.lowercase_ascii prefix in
     let s = String.lowercase_ascii (String.trim s) in
@@ -204,7 +204,7 @@ let extract_key_decisions (msgs : Llm_client.message list) : string list =
   let latest_state_block () =
     let rec loop = function
       | [] -> None
-      | (m : Llm_client.message) :: rest ->
+      | (m : Llm_types.message) :: rest ->
         let blocks = Context_manager.extract_state_blocks (text_of_message m) in
         (match last_opt blocks with
          | Some b -> Some b
@@ -219,8 +219,8 @@ let extract_key_decisions (msgs : Llm_client.message list) : string list =
   | None ->
     let decision_markers = ["decided"; "chosen"; "selected"; "using"; "approach:";
                             "strategy:"; "will use"; "going with"] in
-    List.filter_map (fun (m : Llm_client.message) ->
-      if m.role <> Llm_client.Assistant then None
+    List.filter_map (fun (m : Llm_types.message) ->
+      if m.role <> Llm_types.Assistant then None
       else
         let mc = text_of_message m in
         let lower = String.lowercase_ascii mc in
@@ -268,30 +268,30 @@ let extract_dna ~(working_ctx : Context_manager.working_context)
 (* ================================================================ *)
 
 (** Normalize messages for the target model's constraints. *)
-let normalize_for_model (msgs : Llm_client.message list)
-    (target : Llm_client.model_spec) : Llm_client.message list =
+let normalize_for_model (msgs : Llm_types.message list)
+    (target : Llm_types.model_spec) : Llm_types.message list =
   let msgs = match target.provider with
-    | Llm_client.Llama ->
+    | Llm_types.Llama ->
       (* Local llama runtimes: merge consecutive system messages, simplify tool messages *)
-      List.map (fun (m : Llm_client.message) ->
+      List.map (fun (m : Llm_types.message) ->
         match m.role with
-        | Llm_client.Tool ->
+        | Llm_types.Tool ->
           (* Convert tool messages to user messages for models without tool support *)
           let tool_id = List.find_map (function
             | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
             | _ -> None) m.content |> Option.value ~default:"unknown" in
-          { Agent_sdk.Types.role = Llm_client.User;
+          { Agent_sdk.Types.role = Llm_types.User;
                    content = [Agent_sdk.Types.Text (sprintf "[Tool result: %s]\n%s"
-                     tool_id (Llm_client.text_of_message m))] }
+                     tool_id (Llm_types.text_of_message m))] }
         | _ -> m
       ) msgs
-    | Llm_client.Claude ->
+    | Llm_types.Claude ->
       (* Claude: ensure alternating user/assistant, no consecutive same roles *)
       let rec fix_alternation = function
         | [] -> []
         | [m] -> [m]
-        | (m1 : Llm_client.message) :: ((m2 : Llm_client.message) :: rest as tail) ->
-          if m1.role = m2.role && m1.role <> Llm_client.System then
+        | (m1 : Llm_types.message) :: ((m2 : Llm_types.message) :: rest as tail) ->
+          if m1.role = m2.role && m1.role <> Llm_types.System then
             (* Merge consecutive same-role *)
             let merged = { m1 with content = [Agent_sdk.Types.Text (text_of_message m1 ^ "\n" ^ text_of_message m2)] } in
             fix_alternation (merged :: rest)
@@ -304,12 +304,12 @@ let normalize_for_model (msgs : Llm_client.message list)
   (* Trim to fit within target context budget *)
   let max_tokens = target.max_context * 8 / 10 in  (* Leave 20% for response *)
   let rec trim msgs =
-    let total = Llm_client.estimate_tokens msgs in
+    let total = Llm_types.estimate_tokens msgs in
     if total <= max_tokens || List.length msgs <= 2 then msgs
     else
       (* Remove oldest non-system message *)
       match msgs with
-      | (m : Llm_client.message) :: rest when m.role = Llm_client.System ->
+      | (m : Llm_types.message) :: rest when m.role = Llm_types.System ->
         m :: trim rest
       | _ :: rest -> trim rest
       | [] -> []
@@ -398,7 +398,7 @@ let hydrate (dna : succession_dna) (spec : successor_spec) : Context_manager.wor
       let rec take_up_to budget acc = function
         | [] -> List.rev acc
         | m :: rest ->
-          let tok = Llm_client.estimate_tokens [m] in
+          let tok = Llm_types.estimate_tokens [m] in
           if budget - tok < 0 then List.rev acc
           else take_up_to (budget - tok) (m :: acc) rest
       in

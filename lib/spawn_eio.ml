@@ -150,7 +150,7 @@ let resolve_model_spec agent_name =
         | Provider_adapter.Custom_family _ ->
             Error "Custom provider requires explicit runtime_model"
       in
-      Result.bind label_result Llm_client.model_spec_of_string
+      Result.bind label_result Llm_types.model_spec_of_string
 
 (** Build a spawn error result. Reduces boilerplate in spawn routing. *)
 let make_error_result ~agent_name ~start_time ~exit_code ~output ~timeout_seconds =

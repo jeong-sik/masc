@@ -343,7 +343,7 @@ let proactive_prompt_for_keeper
 
 type proactive_generation_result = {
   reply: string;
-  usage: Llm_client.token_usage;
+  usage: Llm_types.token_usage;
   model_used: string;
   latency_ms: int;
   attempts: int;
@@ -545,8 +545,8 @@ let looks_fragmentary_history_text (raw : string) : bool =
     hard_fragment || short_unterminated || trailing_connector
 
 let run_proactive_generation
-    ~(specs : Llm_client.model_spec list)
-    ~(primary : Llm_client.model_spec)
+    ~(specs : Llm_types.model_spec list)
+    ~(primary : Llm_types.model_spec)
     ~(config : Room.config)
     ~(ctx_work : Context_manager.working_context)
     ~(meta : keeper_meta)
@@ -556,7 +556,7 @@ let run_proactive_generation
   let base_prompt =
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
   in
-  let zero_usage : Llm_client.token_usage =
+  let zero_usage : Llm_types.token_usage =
     { Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
       cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
   in
@@ -588,9 +588,9 @@ let run_proactive_generation
   let max_tool_rounds = 3 in
   let execute_tool_calls
       ~(ctx_work : Context_manager.working_context)
-      (tcs : Llm_client.tool_call list) : (Llm_client.tool_call * string) list =
+      (tcs : Llm_types.tool_call list) : (Llm_types.tool_call * string) list =
     List.map
-      (fun (tc : Llm_client.tool_call) ->
+      (fun (tc : Llm_types.tool_call) ->
          let output =
            try execute_keeper_tool_call ~config ~meta ~ctx_work tc
            with exn ->
@@ -603,7 +603,7 @@ let run_proactive_generation
          (tc, output))
       tcs
   in
-  let run_cascade requests = Llm_client.cascade requests in
+  let run_cascade requests = Llm_orchestration.cascade requests in
   let rec loop attempt usage_acc latency_acc cost_acc retry_hint =
     if attempt > max_attempts then
       Some {
@@ -623,18 +623,18 @@ let run_proactive_generation
       in
       let requests =
         List.map
-          (fun (model : Llm_client.model_spec) ->
+          (fun (model : Llm_types.model_spec) ->
             ({
-               Llm_client.model;
+               Llm_types.model;
                messages =
-                 (Llm_client.system_msg turn_system_prompt)
-                 :: (ctx_work.messages @ [ Llm_client.user_msg prompt ]);
+                 (Llm_types.system_msg turn_system_prompt)
+                 :: (ctx_work.messages @ [ Llm_types.user_msg prompt ]);
                temperature = proactive_temperature attempt;
                max_tokens = 1024; (* increased from 220 to allow tool calls *)
                tools = keeper_allowed_llm_tools meta;
                response_format = `Text;
              }
-              : Llm_client.completion_request))
+              : Llm_types.completion_request))
           specs
       in
       match run_cascade requests with
@@ -647,34 +647,34 @@ let run_proactive_generation
           let cost0 = cost_usd_of_usage resp0.usage used_model0 in
           let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
               ~acc_tools_used ~last_resp =
-            if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
+            if last_resp.Llm_types.tool_calls = [] || round > max_tool_rounds then
               let content =
-                let c = String.trim (Llm_client.text_of_response last_resp) in
+                let c = String.trim (Llm_types.text_of_response last_resp) in
                 if c = "" && acc_tools_used <> [] then
                   Printf.sprintf "(tools executed: %s)"
                     (String.concat ", " acc_tools_used)
-                else Llm_client.text_of_response last_resp
+                else Llm_types.text_of_response last_resp
               in
               ( content,
                 acc_usage,
-                last_resp.Llm_client.model_used,
+                last_resp.Llm_types.model_used,
                 acc_latency,
                 acc_cost,
                 acc_tools_used )
             else
               let round_tools =
                 List.map
-                  (fun (tc : Llm_client.tool_call) -> tc.call_name)
-                  last_resp.Llm_client.tool_calls
+                  (fun (tc : Llm_types.tool_call) -> tc.call_name)
+                  last_resp.Llm_types.tool_calls
               in
               let all_tools_so_far = acc_tools_used @ round_tools in
               let tool_outputs =
-                execute_tool_calls ~ctx_work last_resp.Llm_client.tool_calls
+                execute_tool_calls ~ctx_work last_resp.Llm_types.tool_calls
               in
               let followup_prompt =
                 keeper_tool_followup_prompt
                   ~user_message:prompt
-                  ~draft_reply:(Llm_client.text_of_response last_resp)
+                  ~draft_reply:(Llm_types.text_of_response last_resp)
                   ~tool_outputs
                   ~already_executed:all_tools_so_far
               in
@@ -689,28 +689,28 @@ let run_proactive_generation
               in
               let followup_requests =
                 List.map
-                  (fun (model : Llm_client.model_spec) ->
+                  (fun (model : Llm_types.model_spec) ->
                      ({
-                        Llm_client.model;
+                        Llm_types.model;
                         messages = [
-                          Llm_client.system_msg
+                          Llm_types.system_msg
                             (keeper_tool_loop_system_prompt
                                ~character_context:turn_system_prompt);
-                          Llm_client.user_msg followup_prompt;
+                          Llm_types.user_msg followup_prompt;
                         ];
                         temperature = 0.3;
                         max_tokens = 1024; (* increased from 220 to allow tool calls *)
                         tools = next_tools;
                         response_format = `Text;
                       }
-                       : Llm_client.completion_request))
+                       : Llm_types.completion_request))
                   specs
               in
               match run_cascade followup_requests with
               | Error _ ->
-                  ( Llm_client.text_of_response last_resp,
+                  ( Llm_types.text_of_response last_resp,
                     acc_usage,
-                    last_resp.Llm_client.model_used,
+                    last_resp.Llm_types.model_used,
                     acc_latency,
                     acc_cost,
                     acc_tools_used @ round_tools )

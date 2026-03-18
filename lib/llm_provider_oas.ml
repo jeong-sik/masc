@@ -21,7 +21,7 @@ open Llm_types
 
     Inlined from the equivalent logic in [Llm_client.to_oas_provider]
     to avoid type incompatibility between [Llm_types.model_spec] and
-    [Llm_client.model_spec] (nominally distinct due to .mli re-declaration). *)
+    [Llm_types.model_spec] (nominally distinct due to .mli re-declaration). *)
 let provider_config_of_model_spec (spec : model_spec)
     : Agent_sdk.Provider.config option =
   match spec.provider with

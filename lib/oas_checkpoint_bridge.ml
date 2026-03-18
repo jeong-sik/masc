@@ -119,5 +119,5 @@ let from_oas_checkpoint (ckpt : Agent_sdk.Checkpoint.t)
   (goal, generation, ckpt.messages)
 
 (** Convert OAS messages back to MASC messages for working context init. *)
-let restore_messages (oas_msgs : Agent_sdk.Types.message list) : Llm_client.message list =
+let restore_messages (oas_msgs : Agent_sdk.Types.message list) : Llm_types.message list =
   List.map Llm_client.of_oas_message oas_msgs

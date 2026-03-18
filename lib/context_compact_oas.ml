@@ -4,7 +4,7 @@
     and converts back. This is Phase 1 of migrating MASC to use OAS properly.
 
     This module is deliberately independent of Context_manager to avoid circular
-    dependency. It operates on [Llm_client.message list] directly and uses its own
+    dependency. It operates on [Llm_types.message list] directly and uses its own
     strategy enum that mirrors Context_manager.compaction_strategy.
 
     MASC has 4 roles (System, User, Assistant, Tool) while OAS has the same 4.
@@ -49,16 +49,16 @@ let starts_with ~prefix s =
 (** Convert a MASC message to an OAS message with role tags for lossless roundtrip.
     System and Tool roles are mapped to User with a sentinel prefix so OAS
     strategies (which expect User/Assistant alternation) handle them correctly. *)
-let masc_msg_to_oas (m : Llm_client.message) : Agent_sdk.Types.message =
-  let text = Llm_client.text_of_message m in
+let masc_msg_to_oas (m : Llm_types.message) : Agent_sdk.Types.message =
+  let text = Llm_types.text_of_message m in
   let role, tagged_text = match m.role with
-    | Llm_client.System -> Agent_sdk.Types.User, system_role_tag ^ text
-    | Llm_client.Tool -> Agent_sdk.Types.User, tool_role_tag ^ text
-    | Llm_client.User -> Agent_sdk.Types.User, text
-    | Llm_client.Assistant -> Agent_sdk.Types.Assistant, text
+    | Llm_types.System -> Agent_sdk.Types.User, system_role_tag ^ text
+    | Llm_types.Tool -> Agent_sdk.Types.User, tool_role_tag ^ text
+    | Llm_types.User -> Agent_sdk.Types.User, text
+    | Llm_types.Assistant -> Agent_sdk.Types.Assistant, text
   in
   let content = match m.role with
-    | Llm_client.Tool ->
+    | Llm_types.Tool ->
       let tool_use_id =
         List.find_map (function Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id | _ -> None) m.content
         |> Option.value ~default:"masc-tool"
@@ -70,7 +70,7 @@ let masc_msg_to_oas (m : Llm_client.message) : Agent_sdk.Types.message =
 
 (** Recover a MASC message from a tagged OAS message.
     Strips sentinel prefixes and restores the original MASC role. *)
-let oas_msg_to_masc (m : Agent_sdk.Types.message) : Llm_client.message =
+let oas_msg_to_masc (m : Agent_sdk.Types.message) : Llm_types.message =
   let text, tool_id =
     let parts = List.filter_map (fun (block : Agent_sdk.Types.content_block) ->
       match block with
@@ -85,23 +85,23 @@ let oas_msg_to_masc (m : Agent_sdk.Types.message) : Llm_client.message =
   in
   let role, content =
     if starts_with ~prefix:system_role_tag text then
-      Llm_client.System,
+      Llm_types.System,
       String.sub text (String.length system_role_tag)
         (String.length text - String.length system_role_tag)
     else if starts_with ~prefix:tool_role_tag text then
-      Llm_client.Tool,
+      Llm_types.Tool,
       String.sub text (String.length tool_role_tag)
         (String.length text - String.length tool_role_tag)
     else
       (match m.role with
-       | Agent_sdk.Types.User -> Llm_client.User
-       | Agent_sdk.Types.Assistant -> Llm_client.Assistant
-       | Agent_sdk.Types.System -> Llm_client.System
-       | Agent_sdk.Types.Tool -> Llm_client.Tool),
+       | Agent_sdk.Types.User -> Llm_types.User
+       | Agent_sdk.Types.Assistant -> Llm_types.Assistant
+       | Agent_sdk.Types.System -> Llm_types.System
+       | Agent_sdk.Types.Tool -> Llm_types.Tool),
       text
   in
   let content_blocks = match role with
-    | Llm_client.Tool ->
+    | Llm_types.Tool ->
       let tool_use_id = Option.value ~default:"masc-tool" tool_id in
       [Agent_sdk.Types.ToolResult { tool_use_id; content; is_error = false }]
     | _ -> [Agent_sdk.Types.Text content]
@@ -116,10 +116,10 @@ let oas_msg_to_masc (m : Agent_sdk.Types.message) : Llm_client.message =
 (* Token Estimation                                                 *)
 (* ================================================================ *)
 
-let msg_tokens (m : Llm_client.message) =
-  (String.length (Llm_client.text_of_message m) / 4) + 4
+let msg_tokens (m : Llm_types.message) =
+  (String.length (Llm_types.text_of_message m) / 4) + 4
 
-let count_tokens (system_prompt : string) (msgs : Llm_client.message list) =
+let count_tokens (system_prompt : string) (msgs : Llm_types.message list) =
   let sys_tokens = (String.length system_prompt / 4) + 4 in
   List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
 
@@ -205,14 +205,14 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
     from strategies like Merge_contiguous or Summarize_old that may
     concatenate or truncate content containing \x00 sentinel bytes. *)
 let validate_roundtrip
-    ~(original : Llm_client.message list)
-    ~(reduced : Llm_client.message list)
+    ~(original : Llm_types.message list)
+    ~(reduced : Llm_types.message list)
   : bool =
   (* Count sentinel-tagged messages (System and Tool roles) in original *)
   let count_sentinels msgs =
-    List.fold_left (fun acc (m : Llm_client.message) ->
+    List.fold_left (fun acc (m : Llm_types.message) ->
       match m.role with
-      | Llm_client.System | Llm_client.Tool -> acc + 1
+      | Llm_types.System | Llm_types.Tool -> acc + 1
       | _ -> acc
     ) 0 msgs
   in
@@ -221,8 +221,8 @@ let validate_roundtrip
   if original_sentinel_count = 0 then true
   else begin
     (* Verify each reduced message with a sentinel tag can be cleanly parsed *)
-    let valid = List.for_all (fun (m : Llm_client.message) ->
-      let text = Llm_client.text_of_message m in
+    let valid = List.for_all (fun (m : Llm_types.message) ->
+      let text = Llm_types.text_of_message m in
       (* Check for corrupted sentinels: \x00 present but not as valid prefix *)
       if String.contains text '\x00' then
         starts_with ~prefix:system_role_tag text
@@ -252,9 +252,9 @@ let validate_roundtrip
     but routes through OAS Context_reducer, enabling A/B comparison. *)
 let compact
     ~(system_prompt : string)
-    ~(messages : Llm_client.message list)
+    ~(messages : Llm_types.message list)
     ~(strategies : strategy list)
-  : Llm_client.message list * int =
+  : Llm_types.message list * int =
   let oas_strategies = List.map oas_strategy_of strategies in
   let reducer = Agent_sdk.Context_reducer.compose
     (List.map (fun s -> { Agent_sdk.Context_reducer.strategy = s }) oas_strategies) in

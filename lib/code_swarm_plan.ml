@@ -333,10 +333,10 @@ let verify_worker ~model ~pattern (worker : worker_plan) diff =
     }
   else
     let prompt = build_verify_prompt ~pattern ~allowed_files:worker.files diff in
-    let req : Llm_client.completion_request =
+    let req : Llm_types.completion_request =
       {
         model;
-        messages = [ Llm_client.user_msg prompt ];
+        messages = [ Llm_types.user_msg prompt ];
         temperature = 0.0;
         max_tokens = 200;
         tools = [];
@@ -344,8 +344,8 @@ let verify_worker ~model ~pattern (worker : worker_plan) diff =
       }
     in
     let verdict =
-      match Llm_client.complete req with
-      | Ok resp -> Verifier.parse_verdict (Llm_client.text_of_response resp)
+      match Llm_orchestration.complete req with
+      | Ok resp -> Verifier.parse_verdict (Llm_types.text_of_response resp)
       | Error e -> Verifier.Warn ("verifier_unavailable: " ^ e)
     in
     let our_verdict =
@@ -387,13 +387,13 @@ let verify_plan ~base_path ~plan_id ~verify_model =
       let model =
         match verify_model with
         | Some m -> (
-            match Llm_client.model_spec_of_string m with
+            match Llm_types.model_spec_of_string m with
             | Ok spec -> spec
-            | Error _ -> Llm_client.glm_cloud)
+            | Error _ -> Llm_types.glm_cloud)
         | None -> (
-            match Llm_client.default_verifier_model_spec () with
+            match Llm_types.default_verifier_model_spec () with
             | Ok spec -> spec
-            | Error _ -> Llm_client.glm_cloud)
+            | Error _ -> Llm_types.glm_cloud)
       in
       let results =
         List.map

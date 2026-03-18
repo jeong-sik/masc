@@ -25,12 +25,12 @@ let default_config ~goal ~models ?verifier ?session_dir () =
   let verifier_model = match verifier with
     | Some v -> v
     | None -> (
-        match Llm_client.default_verifier_model_spec () with
+        match Llm_types.default_verifier_model_spec () with
         | Ok model -> model
         | Error _ -> (
             match models with
             | model :: _ -> model
-            | [] -> Llm_client.glm_cloud))
+            | [] -> Llm_types.glm_cloud))
   in
   let session_base = match session_dir with
     | Some d -> d
@@ -97,20 +97,20 @@ let create_state config =
   in
   let primary_model = match config.model_cascade with
     | m :: _ -> m
-    | [] -> Llm_client.default_local_model_spec ()
+    | [] -> Llm_types.default_local_model_spec ()
   in
   let context = Context_manager.create
     ~system_prompt
     ~max_tokens:primary_model.max_context in
   (* Inject goal as first user message with sticky prefix for compaction safety *)
-  let goal_msg = Llm_client.user_msg
+  let goal_msg = Llm_types.user_msg
     (sprintf "%s %s" Context_manager.goal_prefix config.initial_goal) in
   let context = Context_manager.append context goal_msg in
   let trace_id = generate_trace_id () in
   let session = Context_manager.create_session
     ~session_id:trace_id
     ~base_dir:config.session_base_dir in
-  let zero_usage : Llm_client.token_usage = {
+  let zero_usage : Llm_types.token_usage = {
     Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
     cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
   } in
@@ -162,16 +162,16 @@ let record_event (state : loop_state) (ev : event) =
 let build_requests (config : loop_config) (state : loop_state) =
   let tools = config.tools in
   List.map (fun model ->
-    let msgs = (Llm_client.system_msg state.context.system_prompt)
+    let msgs = (Llm_types.system_msg state.context.system_prompt)
                :: state.context.messages in
     ({
-      Llm_client.model;
+      Llm_types.model;
       messages = msgs;
       temperature = 0.7;
       max_tokens = 4096;
       tools;
       response_format = `Text;
-    } : Llm_client.completion_request)
+    } : Llm_types.completion_request)
   ) config.model_cascade
 
 (* ================================================================ *)
@@ -195,7 +195,7 @@ let is_stuck content =
   with Not_found -> false
 
 (** Calculate cost from token usage and model spec. *)
-let calculate_cost (usage : Llm_client.token_usage) (model : Llm_client.model_spec) =
+let calculate_cost (usage : Llm_types.token_usage) (model : Llm_types.model_spec) =
   let input_cost = float_of_int usage.input_tokens *. model.cost_per_1k_input /. 1000.0 in
   let output_cost = float_of_int usage.output_tokens *. model.cost_per_1k_output /. 1000.0 in
   input_cost +. output_cost
@@ -215,7 +215,7 @@ let coding_turn ~config ~state =
     let progress =
       let blocks =
         List.concat_map
-          (fun (m : Llm_client.message) -> Context_manager.extract_state_blocks (Llm_client.text_of_message m))
+          (fun (m : Llm_types.message) -> Context_manager.extract_state_blocks (Llm_types.text_of_message m))
           (List.rev state.context.messages)
       in
       match blocks with
@@ -343,7 +343,7 @@ let try_auto_claim ~config ~state ~emit =
           state.current_task_id <- Some task_id;
           state.claim_failure_count <- 0;
           state.idle_turns <- 0;
-          let msg = Llm_client.user_msg
+          let msg = Llm_types.user_msg
             (sprintf "[AUTO-CLAIMED] Task %s (P%d): %s" task_id priority title) in
           state.context <- Context_manager.append state.context msg;
           emit (TaskClaimed { task_id; title; priority });
@@ -431,7 +431,7 @@ let run_coding_turn ~config ~state =
         (String.sub raw (String.length raw - 1000) 1000)
       else raw
     in
-    let assistant_msg = Llm_client.assistant_msg
+    let assistant_msg = Llm_types.assistant_msg
       (sprintf "[Coding Agent: %s, exit=%d, elapsed=%dms]\n%s"
          config.coding_agent result.Spawn_eio.exit_code
          result.Spawn_eio.elapsed_ms output_summary) in
@@ -473,7 +473,7 @@ let run_coding_turn ~config ~state =
       let next_model = match config.model_cascade with
         | _ :: m :: _ -> m
         | [m] -> m
-        | [] -> Llm_client.default_local_model_spec ()
+        | [] -> Llm_types.default_local_model_spec ()
       in
       emit (Handoff {
         to_model = next_model.model_id;
@@ -538,7 +538,7 @@ let run_turn ~config ~state =
 
     (* 1. THINK + ACT: Call LLM *)
     let requests = build_requests config state in
-    let result = Llm_client.cascade requests in
+    let result = Llm_orchestration.cascade requests in
 
     match result with
     | Error e ->
@@ -564,7 +564,7 @@ let run_turn ~config ~state =
       let primary_model =
         match config.model_cascade with
         | m :: _ -> m
-        | [] -> Llm_client.default_local_model_spec ()
+        | [] -> Llm_types.default_local_model_spec ()
       in
       let used_model =
         let used =
@@ -574,14 +574,14 @@ let run_turn ~config ~state =
           else
             resp.model_used
         in
-        List.find_opt (fun (m : Llm_client.model_spec) ->
+        List.find_opt (fun (m : Llm_types.model_spec) ->
           m.model_id = resp.model_used || m.model_id = used
         ) config.model_cascade
         |> Option.value ~default:primary_model
       in
       let cost = calculate_cost resp.usage used_model in
       state.total_cost <- state.total_cost +. cost;
-      state.total_tokens <- state.total_tokens + Llm_client.total_tokens resp.usage;
+      state.total_tokens <- state.total_tokens + Llm_types.total_tokens resp.usage;
 
       (* Track activity: tool calls = active, text only = potentially idle *)
       if resp.tool_calls <> [] then
@@ -590,13 +590,13 @@ let run_turn ~config ~state =
         state.idle_turns <- state.idle_turns + 1;
 
       (* Add assistant response to context *)
-      let assistant_msg = Llm_client.assistant_msg (Llm_client.text_of_response resp) in
+      let assistant_msg = Llm_types.assistant_msg (Llm_types.text_of_response resp) in
       state.context <- Context_manager.append state.context assistant_msg;
       Context_manager.persist_message state.session assistant_msg;
 
       (* 3. VERIFY: If feedback enabled and action taken *)
       if config.feedback_enabled && resp.tool_calls <> [] then begin
-        let action_desc = List.map (fun (tc : Llm_client.tool_call) ->
+        let action_desc = List.map (fun (tc : Llm_types.tool_call) ->
           sprintf "%s(%s)" tc.call_name
             (if String.length tc.call_arguments > 100
              then String.sub tc.call_arguments 0 100 ^ "..."
@@ -604,7 +604,7 @@ let run_turn ~config ~state =
         ) resp.tool_calls |> String.concat ", " in
         let vreq = Verifier.{
           action_description = action_desc;
-          action_result = Llm_client.text_of_response resp;
+          action_result = Llm_types.text_of_response resp;
           goal = config.initial_goal;
           context_summary = sprintf "Turn %d, generation %d" turn state.generation;
         } in
@@ -616,7 +616,7 @@ let run_turn ~config ~state =
         (* On FAIL, inject feedback as user message *)
         match verdict with
         | Verifier.Fail reason ->
-          let feedback_msg = Llm_client.user_msg
+          let feedback_msg = Llm_types.user_msg
             (sprintf "[Verifier FAIL] %s — please retry with a different approach." reason) in
           state.context <- Context_manager.append state.context feedback_msg;
           Context_manager.persist_message state.session feedback_msg
@@ -703,7 +703,7 @@ let run_turn ~config ~state =
         let next_model = match config.model_cascade with
           | _ :: m :: _ -> m  (* Next model in cascade *)
           | [m] -> m          (* Same model *)
-          | [] -> Llm_client.default_local_model_spec ()
+          | [] -> Llm_types.default_local_model_spec ()
         in
         emit (Handoff {
           to_model = next_model.model_id;
@@ -729,14 +729,14 @@ let run_turn ~config ~state =
            P1-1: Skip when a task was just claimed this turn — resp.content
            predates the claim and may contain stale [TASK_DONE] signals. *)
         if not just_claimed then
-          check_task_completion ~config ~state ~emit (Llm_client.text_of_response resp);
+          check_task_completion ~config ~state ~emit (Llm_types.text_of_response resp);
 
         (* 8. Check termination conditions *)
-        if is_goal_complete (Llm_client.text_of_response resp) then begin
+        if is_goal_complete (Llm_types.text_of_response resp) then begin
           emit (Terminated "Goal complete");
           state.running <- false;
           false
-        end else if is_stuck (Llm_client.text_of_response resp) then begin
+        end else if is_stuck (Llm_types.text_of_response resp) then begin
           emit (Terminated "Agent stuck");
           state.running <- false;
           false
@@ -748,7 +748,7 @@ let run_turn ~config ~state =
         end else begin
           emit (TurnEnd {
             turn;
-            tokens_used = Llm_client.total_tokens resp.usage;
+            tokens_used = Llm_types.total_tokens resp.usage;
             cost;
           });
           true  (* Continue *)
@@ -904,7 +904,7 @@ let status ~config state : Yojson.Safe.t =
     ("last_usage", `Assoc [
       ("input_tokens", `Int state.last_usage.input_tokens);
       ("output_tokens", `Int state.last_usage.output_tokens);
-      ("total_tokens", `Int (Llm_client.total_tokens state.last_usage));
+      ("total_tokens", `Int (Llm_types.total_tokens state.last_usage));
     ]);
     ("last_latency_ms", `Int state.last_latency_ms);
     ("last_heartbeat_ts", `Float state.last_heartbeat);

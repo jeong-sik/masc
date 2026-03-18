@@ -5,7 +5,7 @@ open Printf
 include Local_agent_eio_container
 
 let run_worker_oas ~sw ~base_path ~worker_name
-    ~(model : Llm_client.model_spec) ~team_session_id
+    ~(model : Llm_types.model_spec) ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
     ?thinking_enabled ?max_turns ?worker_run_id
     ~role
@@ -423,7 +423,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                 }
               in
               let model =
-                let base_model = Llm_client.default_local_model_spec () in
+                let base_model = Llm_types.default_local_model_spec () in
                 match checkpoint.model with
                 | Oas.Types.Custom model_id ->
                     { base_model with model_id }
@@ -537,7 +537,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                   Error detail)))
 
 let run_worker_legacy ~sw ~base_path ~worker_name
-    ~(model : Llm_client.model_spec) ~team_session_id ~role
+    ~(model : Llm_types.model_spec) ~team_session_id ~role
     ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
@@ -603,16 +603,16 @@ let run_worker_legacy ~sw ~base_path ~worker_name
             else
               let zero_usage = make_usage () in
               let rec loop ~round ~usage_acc ~tools_used current_prompt =
-                let request : Llm_client.completion_request =
+                let request : Llm_types.completion_request =
                   {
                     model;
                     messages =
                       [
-                        Llm_client.system_msg
+                        Llm_types.system_msg
                           (default_system_prompt ~worker_name
                              ~model_id:model.model_id ?session_id:team_session_id
                              ?role ?selection_note ());
-                        Llm_client.user_msg current_prompt;
+                        Llm_types.user_msg current_prompt;
                       ];
                     temperature = 0.2;
                     max_tokens = local_worker_max_tokens ();
@@ -620,18 +620,18 @@ let run_worker_legacy ~sw ~base_path ~worker_name
                     response_format = `Text;
                   }
                 in
-                match Llm_client.complete ~timeout_sec request with
+                match Llm_orchestration.complete ~timeout_sec request with
                 | Error e -> Error e
                 | Ok resp ->
                     let tool_calls =
                       match resp.tool_calls with
-                      | [] -> parse_text_tool_calls (Llm_client.text_of_response resp)
+                      | [] -> parse_text_tool_calls (Llm_types.text_of_response resp)
                       | calls -> calls
                     in
                     let usage_acc = merge_usage usage_acc resp.usage in
                     if tool_calls = [] then
                       let output =
-                        let trimmed = String.trim (Llm_client.text_of_response resp) in
+                        let trimmed = String.trim (Llm_types.text_of_response resp) in
                         if trimmed <> "" then trimmed
                         else if tools_used <> [] then
                           sprintf "(tools executed: %s)"
@@ -655,7 +655,7 @@ let run_worker_legacy ~sw ~base_path ~worker_name
                     else
                       let tool_outputs =
                         List.map
-                          (fun (tc : Llm_client.tool_call) ->
+                          (fun (tc : Llm_types.tool_call) ->
                             let schema =
                               tool_schema_of_name tool_schemas tc.call_name
                             in
@@ -704,12 +704,12 @@ let run_worker_legacy ~sw ~base_path ~worker_name
                       in
                       let round_tools =
                         List.map
-                          (fun (tc : Llm_client.tool_call) -> tc.call_name)
+                          (fun (tc : Llm_types.tool_call) -> tc.call_name)
                           tool_calls
                       in
                       let tools_used = tools_used @ round_tools in
                       let output =
-                        let trimmed = String.trim (Llm_client.text_of_response resp) in
+                        let trimmed = String.trim (Llm_types.text_of_response resp) in
                         if trimmed <> "" then trimmed
                         else
                           sprintf "(tools executed: %s)"

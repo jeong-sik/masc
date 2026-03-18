@@ -287,13 +287,13 @@ let compute_judgments ~base_path:_ ~factual_json =
     let timeout_sec = Env_config.Llm.dashboard_governance_judge_timeout_seconds in
     let prompt = prompt_for_facts factual_json in
     match
-      Llm_client.run_prompt_cascade ~temperature:0.2 ~timeout_sec
+      Llm_orchestration.run_prompt_cascade ~temperature:0.2 ~timeout_sec
         ~model_specs:specs ~max_tokens:4096 ~prompt ()
     with
     | Error message -> Error message
     | Ok response -> (
         try
-          let parsed = Yojson.Safe.from_string (Llm_client.text_of_response response) in
+          let parsed = Yojson.Safe.from_string (Llm_types.text_of_response response) in
           let generated_at = now_iso () in
           let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
           let items =

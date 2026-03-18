@@ -44,7 +44,7 @@ type prepared_spawn = {
   worker_run_id : string;
   spec : spawn_spec;
   runtime_actor_name : string option;
-  runtime_model : Llm_client.model_spec;
+  runtime_model : Llm_types.model_spec;
   runtime_lease : Local_runtime_pool.lease option;
   assigned_runtime : string option;
 }

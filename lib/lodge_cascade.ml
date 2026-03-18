@@ -167,12 +167,12 @@ let read_model_strings ~config_path ~cascade_name =
           default_model_strings ~cascade_name)
 
 let get_cascade ?(config_path = "") ~cascade_name () :
-    Llm_client.model_spec list =
+    Llm_types.model_spec list =
   let path =
     if String.length config_path > 0 then config_path else default_config_path ()
   in
   let configured = read_model_strings ~config_path:path ~cascade_name in
-  let specs = Llm_client.available_model_specs_of_strings configured in
+  let specs = Llm_types.available_model_specs_of_strings configured in
   if specs <> [] then specs
   else
     let defaults = default_model_strings ~cascade_name in
@@ -185,7 +185,7 @@ let get_cascade ?(config_path = "") ~cascade_name () :
       eprintf
         "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!"
         cascade_name;
-      Llm_client.available_model_specs_of_strings defaults)
+      Llm_types.available_model_specs_of_strings defaults)
 
 let call ~cascade_name ~prompt
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
@@ -195,14 +195,14 @@ let call ~cascade_name ~prompt
     Error (Printf.sprintf "[cascade] no callable models for %s" cascade_name)
   else
     match
-      Llm_client.run_prompt_cascade ~temperature
+      Llm_orchestration.run_prompt_cascade ~temperature
         ~timeout_sec ~model_specs:specs ~max_tokens ~accept ?system ~prompt ()
     with
     | Ok resp ->
         Ok
           {
-            response = Llm_client.text_of_response resp;
-            llm_used = resp.Llm_client.model_used;
-            duration_ms = resp.Llm_client.latency_ms;
+            response = Llm_types.text_of_response resp;
+            llm_used = resp.Llm_types.model_used;
+            duration_ms = resp.Llm_types.latency_ms;
           }
     | Error msg -> Error msg

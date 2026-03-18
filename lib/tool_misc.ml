@@ -546,7 +546,10 @@ let handle_tool_admin_update ctx args =
           let room_secret =
             match enabled_opt with
             | Some true when not current.enabled ->
-                Some (Auth.enable_auth ctx.config.base_path ~require_token)
+                let (secret, _bootstrap) =
+                  Auth.enable_auth ctx.config.base_path ~require_token ~agent_name:ctx.agent_name
+                in
+                Some secret
             | Some false when current.enabled ->
                 Auth.disable_auth ctx.config.base_path;
                 None

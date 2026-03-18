@@ -192,11 +192,11 @@ let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
       period_start;
       period_end = now;
       total_tasks = total;
-      completed_tasks = List.length completed;
+      completed_tasks = List.length successful;
       failed_tasks = List.length failed;
       avg_completion_time_s = avg_time;
-      task_completion_rate = float_of_int (List.length successful) /. float_of_int total;
-      error_rate = float_of_int (List.length failed) /. float_of_int total;
+      task_completion_rate = if total > 0 then float_of_int (List.length successful) /. float_of_int total else 0.0;
+      error_rate = if total > 0 then float_of_int (List.length failed) /. float_of_int total else 0.0;
       handoff_success_rate = handoff_rate;
       unique_collaborators = unique_collabs;
     }

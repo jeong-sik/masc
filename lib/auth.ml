@@ -383,12 +383,21 @@ let verify_room_secret config secret : bool =
 (* High-level auth operations                   *)
 (* ============================================ *)
 
-(** Enable authentication for a room *)
-let enable_auth config ~require_token : string =
+(** Enable authentication for a room.
+    Creates a bootstrap admin token for the enabling agent to prevent
+    circular permission deadlock (BUG-025). *)
+let enable_auth config ~require_token ~agent_name : string * string option =
   let secret = init_room_secret config in
   let cfg = load_auth_config config in
   save_auth_config config { cfg with enabled = true; require_token };
-  secret
+  let bootstrap_token =
+    if agent_name <> "" then
+      match create_token config ~agent_name ~role:Admin with
+      | Ok (token, _cred) -> Some token
+      | Error _ -> None
+    else None
+  in
+  (secret, bootstrap_token)
 
 (** Disable authentication *)
 let disable_auth config =

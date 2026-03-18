@@ -839,6 +839,12 @@
  (modules test_tool_compact)
  (libraries masc_mcp fs_compat alcotest str yojson))
 
+; Async Spawn — non-blocking agent execution with job tracking (RFC #1443)
+(test
+ (name test_async_spawn)
+ (modules test_async_spawn)
+ (libraries masc_mcp alcotest eio eio_main yojson))
+
 ; LLM Pool tests (provider-based concurrency, no LLM calls)
 (test
  (name test_llm_pool)

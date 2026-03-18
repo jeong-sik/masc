@@ -346,6 +346,8 @@
    spawn
    spawn_eio
    spawn_registry
+   async_spawn
+   tool_async_spawn
    sse
    sse_client
    streamable_http

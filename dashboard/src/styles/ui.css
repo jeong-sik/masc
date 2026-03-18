@@ -15,17 +15,17 @@
   font-size: 13px;
   animation: slideIn 0.3s ease;
   background: rgba(30,30,50,0.95);
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid var(--white-10);
   color: #e0e0e0;
   max-width: 350px;
 }
-.toast.success { border-left: 4px solid #4ade80; }
-.toast.warning { border-left: 4px solid #fbbf24; }
-.toast.error { border-left: 4px solid #ef4444; }
+.toast.success { border-left: 4px solid var(--ok); }
+.toast.warning { border-left: 4px solid var(--warn); }
+.toast.error { border-left: 4px solid var(--bad); }
 
 /* ── Markdown Rendered Content ─────────────────────────────── */
 .markdown-content code {
-  background: rgba(255,255,255,0.08);
+  background: var(--white-8);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 12px;
@@ -38,7 +38,7 @@
   font-size: 12px;
 }
 .markdown-content blockquote {
-  border-left: 3px solid #22d3ee;
+  border-left: 3px solid var(--cyan);
   padding-left: 12px;
   color: #aaa;
 }
@@ -53,7 +53,7 @@
 }
 .think-block summary {
   cursor: pointer;
-  color: #a78bfa;
+  color: var(--purple);
   font-size: 12px;
 }
 
@@ -82,12 +82,12 @@
 .main-tab-btn.active {
   color: #c9ebff;
   border-color: rgba(71, 184, 255, 0.5);
-  background: rgba(71, 184, 255, 0.16);
+  background: var(--accent-soft);
 }
 
 .card {
-  border-color: rgba(138, 163, 211, 0.2);
-  background: rgba(19, 29, 51, 0.82);
+  border-color: var(--card-border);
+  background: var(--card);
 }
 
 .card-title {
@@ -105,8 +105,8 @@
   gap: 8px;
   padding: 8px 10px;
   border-radius: 9px;
-  border: 1px solid rgba(138, 163, 211, 0.2);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--card-border);
+  background: var(--white-3);
   color: inherit;
   font: inherit;
   text-align: left;
@@ -120,7 +120,7 @@ button.agent-card {
 
 button.agent:hover,
 button.agent-card:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-8);
 }
 
 .agent .agent-status {
@@ -131,11 +131,11 @@ button.agent-card:hover {
 }
 
 .agent .agent-status.active {
-  background: #4ade80;
+  background: var(--ok);
 }
 
 .agent .agent-status.busy {
-  background: #fbbf24;
+  background: var(--warn);
 }
 
 .agent .agent-status.listening {
@@ -175,7 +175,7 @@ button.agent-card:hover {
 }
 
 .live-agent-name {
-  color: #eaf1ff;
+  color: var(--text-strong);
   font-weight: 600;
 }
 
@@ -242,7 +242,7 @@ button.agent-card:hover {
   border: 1px solid rgba(138, 163, 211, 0.18);
   background:
     linear-gradient(180deg, rgba(40, 56, 92, 0.34), rgba(19, 29, 51, 0.9)),
-    rgba(19, 29, 51, 0.82);
+    var(--card);
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
@@ -310,7 +310,7 @@ button.agent-card:hover {
 .monitor-headline {
   margin: 0;
   font-size: 18px;
-  color: #eaf1ff;
+  color: var(--text-strong);
 }
 
 .monitor-subheadline {
@@ -329,7 +329,7 @@ button.agent-card:hover {
 
 .monitor-nested-card {
   border: 1px solid rgba(138, 163, 211, 0.14);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 12px;
@@ -339,7 +339,7 @@ button.monitor-alert,
 button.monitor-row {
   width: 100%;
   border: 1px solid rgba(138, 163, 211, 0.18);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
   color: inherit;
   font: inherit;
   text-align: left;
@@ -352,7 +352,7 @@ button.monitor-alert:hover,
 button.monitor-row:hover {
   transform: translateY(-1px);
   border-color: rgba(138, 163, 211, 0.35);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-6);
 }
 
 button.monitor-alert.ok,
@@ -381,7 +381,7 @@ button.monitor-row.bad {
 .execution-alert,
 .execution-task-row {
   border: 1px solid rgba(138, 163, 211, 0.18);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
   border-radius: 12px;
 }
 

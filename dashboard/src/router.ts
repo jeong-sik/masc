@@ -1,15 +1,24 @@
 // MASC Dashboard — Hash-based router
-// Reads location.hash for canonical dashboard routes only.
-// Legacy aliases were intentionally removed during the operator-console rewrite.
+// Reads location.hash for canonical dashboard routes.
+// Legacy tab IDs (pre-restructure) are transparently redirected to new 7-tab structure.
 
 import { signal, type ReadonlySignal } from '@preact/signals'
-import type { RouteState, TabId } from './types'
-import { VALID_TABS } from './types'
+import type { RouteState, TabId, AnyTabId, LegacyTabId } from './types'
+import { VALID_TABS, LEGACY_TAB_REDIRECTS } from './types'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'home', params: {}, postId: null }
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
+}
+
+/** Resolve a raw string to a new TabId, applying legacy redirects if needed. */
+function resolveTab(raw: string | null | undefined): { tab: TabId; params?: Record<string, string> } | null {
+  if (!raw) return null
+  if (isTabId(raw)) return { tab: raw }
+  const redirect = LEGACY_TAB_REDIRECTS[raw as LegacyTabId]
+  if (redirect) return { tab: redirect.tab, params: redirect.params }
+  return null
 }
 
 function decodeSafe(input: string): string {
@@ -42,14 +51,16 @@ function parseSegments(
   segments: string[],
   params: Record<string, string>,
 ): RouteState {
+  // Deep-link: /chains/operation/:id -> lab tab
   if (segments[0] === 'chains') {
     const nextParams: Record<string, string> = { ...params, surface: 'chains' }
     if (segments[1] === 'operation' && segments[2]) {
       nextParams.operation = decodeSafe(segments[2])
     }
-    return { tab: 'command', params: nextParams, postId: null }
+    return { tab: 'lab', params: nextParams, postId: null }
   }
 
+  // Deep-link: /lab/:surface -> lab tab
   if (segments[0] === 'lab') {
     const nextParams = { ...params }
     if (segments[1]) {
@@ -60,13 +71,12 @@ function parseSegments(
 
   const tabFromPath = segments[0]
   const tabFromQuery = params.tab
-  const tab: TabId = isTabId(tabFromPath)
-    ? tabFromPath
-    : isTabId(tabFromQuery)
-      ? tabFromQuery
-      : 'home'
 
-  return { tab, params, postId: null }
+  // Resolve with legacy redirect support
+  const resolved = resolveTab(tabFromPath) || resolveTab(tabFromQuery) || { tab: 'home' as TabId }
+  const mergedParams = { ...params, ...(resolved.params ?? {}) }
+
+  return { tab: resolved.tab, params: mergedParams, postId: null }
 }
 
 function parseHash(hash: string): RouteState {
@@ -128,20 +138,35 @@ function toHash(r: RouteState): string {
 
 export const route = signal<RouteState>(parseHash(window.location.hash))
 
-// Listen for hash changes
+// Listen for hash changes — silently replace legacy hashes with canonical form
 window.addEventListener('hashchange', () => {
-  route.value = parseHash(window.location.hash)
+  const parsed = parseHash(window.location.hash)
+  route.value = parsed
+  const canonical = toHash(parsed)
+  if (window.location.hash !== canonical) {
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${window.location.search}${canonical}`,
+    )
+  }
 })
 
 // --- Navigation helpers ---
 
-export function navigate(tab: TabId, params?: Record<string, string>): void {
-  const next = { tab, params: params ?? {}, postId: null } satisfies RouteState
+/** Navigate to a tab. Accepts both new and legacy tab IDs (legacy are silently redirected). */
+export function navigate(tab: AnyTabId, params?: Record<string, string>): void {
+  const redirect = LEGACY_TAB_REDIRECTS[tab as LegacyTabId]
+  const resolvedTab: TabId = redirect ? redirect.tab : tab as TabId
+  const resolvedParams = redirect?.params
+    ? { ...redirect.params, ...(params ?? {}) }
+    : params ?? {}
+  const next = { tab: resolvedTab, params: resolvedParams, postId: null } satisfies RouteState
   window.location.hash = toHash(next)
 }
 
 export function navigateToPost(postId: string): void {
-  window.location.hash = `#memory?post=${encodeURIComponent(postId)}`
+  window.location.hash = `#work?section=board&post=${encodeURIComponent(postId)}`
 }
 
 export function navigateBack(): void {
@@ -159,6 +184,15 @@ export function initRouter(): void {
   // Priority 1: explicit hash route
   if (window.location.hash && window.location.hash !== '#') {
     route.value = parseHash(window.location.hash)
+    // Replace legacy hash with canonical form
+    const canonical = toHash(route.value)
+    if (window.location.hash !== canonical) {
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}${canonical}`,
+      )
+    }
     return
   }
 

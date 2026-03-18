@@ -157,7 +157,7 @@ export function Tools() {
   }, [])
 
   useEffect(() => {
-    if (route.value.tab !== 'tools') return
+    if (route.value.tab !== 'control') return
     const q = route.value.params.q?.trim()
     if (q && q !== searchQuery.value) {
       searchQuery.value = q

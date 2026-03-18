@@ -37,8 +37,8 @@
 .tool-metrics-stat {
   padding: 12px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--white-8);
+  background: var(--white-3);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -116,16 +116,16 @@
 /* ── Tier badges ────────────────────────────────────────── */
 .badge-essential {
   background: rgba(74, 222, 128, 0.18);
-  color: #4ade80;
+  color: var(--ok);
 }
 
 .badge-standard {
   background: rgba(71, 184, 255, 0.18);
-  color: #47b8ff;
+  color: var(--accent);
 }
 
 .badge-full {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-8);
   color: var(--text-muted);
 }
 
@@ -164,7 +164,7 @@
 .tool-bar-track {
   height: 14px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-6);
   overflow: hidden;
 }
 

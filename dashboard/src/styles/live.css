@@ -5,7 +5,7 @@
   gap: 8px;
   padding: 12px 16px;
   background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--white-6);
   border-radius: 12px;
   overflow-x: auto;
   align-items: center;
@@ -25,7 +25,7 @@
   padding: 6px 10px;
   border-radius: 10px;
   border: 1.5px solid transparent;
-  background: rgba(255,255,255,0.04);
+  background: var(--white-4);
   cursor: pointer;
   transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
   min-width: 56px;
@@ -33,7 +33,7 @@
 }
 
 .pulse-bubble:hover {
-  background: rgba(255,255,255,0.08);
+  background: var(--white-8);
 }
 
 .pulse-working {
@@ -42,7 +42,7 @@
 }
 
 .pulse-idle {
-  border-color: rgba(255,255,255,0.1);
+  border-color: var(--white-10);
 }
 
 .pulse-stale {
@@ -118,7 +118,7 @@
 .activity-filter-btn {
   padding: 3px 10px;
   border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid var(--white-10);
   background: transparent;
   color: rgba(255,255,255,0.4);
   font-size: 0.72rem;
@@ -129,11 +129,11 @@
 .activity-filter-btn.active {
   color: rgba(255,255,255,0.85);
   border-color: rgba(255,255,255,0.2);
-  background: rgba(255,255,255,0.06);
+  background: var(--white-6);
 }
 
 .activity-filter-btn.live-event-broadcast.active { border-color: rgba(96,165,250,0.4); color: #60a5fa; }
-.activity-filter-btn.live-event-task.active { border-color: rgba(74,222,128,0.4); color: #4ade80; }
+.activity-filter-btn.live-event-task.active { border-color: rgba(74,222,128,0.4); color: var(--ok); }
 .activity-filter-btn.live-event-keeper.active { border-color: rgba(168,85,247,0.4); color: #a855f7; }
 .activity-filter-btn.live-event-system.active { border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7); }
 
@@ -162,7 +162,7 @@
 }
 
 .activity-item:hover {
-  background: rgba(255,255,255,0.04);
+  background: var(--white-4);
 }
 
 .activity-item.live-event-broadcast { border-left-color: rgba(96,165,250,0.5); }
@@ -196,9 +196,9 @@
 }
 
 .activity-kind-chip.live-event-broadcast { background: rgba(96,165,250,0.15); color: #60a5fa; }
-.activity-kind-chip.live-event-task { background: rgba(74,222,128,0.15); color: #4ade80; }
+.activity-kind-chip.live-event-task { background: rgba(74,222,128,0.15); color: var(--ok); }
 .activity-kind-chip.live-event-keeper { background: rgba(168,85,247,0.15); color: #a855f7; }
-.activity-kind-chip.live-event-system { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5); }
+.activity-kind-chip.live-event-system { background: var(--white-6); color: rgba(255,255,255,0.5); }
 
 .activity-agent {
   font-size: 0.75rem;
@@ -265,7 +265,7 @@
   padding: 10px 12px;
   border-radius: 10px;
   background: rgba(255,255,255,0.02);
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--white-6);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
   display: grid;
@@ -273,8 +273,8 @@
 }
 
 .focus-agent-card:hover {
-  background: rgba(255,255,255,0.04);
-  border-color: rgba(255,255,255,0.1);
+  background: var(--white-4);
+  border-color: var(--white-10);
 }
 
 .focus-agent-selected {
@@ -312,22 +312,22 @@
 }
 
 .focus-pressure-calm {
-  background: rgba(255,255,255,0.05);
+  background: var(--white-5);
   color: rgba(255,255,255,0.45);
 }
 
 .focus-pressure-normal {
   background: rgba(74,222,128,0.1);
-  color: #4ade80;
+  color: var(--ok);
 }
 
 .focus-pressure-hot {
   background: rgba(251,191,36,0.12);
-  color: #fbbf24;
+  color: var(--warn);
 }
 
 .focus-task-count {
-  background: rgba(255,255,255,0.1);
+  background: var(--white-10);
   border-radius: 4px;
   padding: 0 4px;
   font-size: 0.6rem;
@@ -337,9 +337,9 @@
   font-size: 0.75rem;
   color: rgba(255,255,255,0.55);
   padding: 3px 8px;
-  background: rgba(255,255,255,0.03);
+  background: var(--white-3);
   border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.05);
+  border: 1px solid var(--white-5);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -423,10 +423,10 @@
 }
 
 .live-stat-dot.connected {
-  background: #4ade80;
+  background: var(--ok);
   box-shadow: 0 0 4px rgba(74,222,128,0.6);
 }
 
 .live-stat-dot.disconnected {
-  background: #ef4444;
+  background: var(--bad);
 }

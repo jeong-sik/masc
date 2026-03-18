@@ -246,7 +246,7 @@
 (test
  (name test_lodge_cascade)
  (modules test_lodge_cascade)
- (libraries masc_mcp alcotest unix))
+ (libraries masc_mcp alcotest unix eio eio_main))
 
 (test
  (name test_llm_client_cascade)

@@ -69,6 +69,9 @@ let test_call_returns_error_when_no_models () =
   (* Force an empty cascade by using a config with an empty list and
      overriding so defaults also return empty via a provider that
      requires a missing API key. *)
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_mcp.Llm_eio_env.init ~sw ~net:(Eio.Stdenv.net env);
   with_env "ZAI_API_KEY" "" (fun () ->
     with_env "GEMINI_API_KEY" "" (fun () ->
       with_temp_json

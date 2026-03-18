@@ -212,8 +212,23 @@ module MemoryBackend : BACKEND = struct
     mutex: Eio.Mutex.t;
   }
 
+  let stdlib_mutex = Stdlib.Mutex.create ()
+
   let with_lock t f =
-    Eio.Mutex.use_rw ~protect:true t.mutex f
+    let acquired = ref false in
+    match
+      Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+        acquired := true;
+        f ()
+      )
+    with
+    | result -> result
+    | exception exn ->
+        if !acquired then raise exn
+        else begin
+          Stdlib.Mutex.lock stdlib_mutex;
+          Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock stdlib_mutex) f
+        end
 
   let create (_cfg : config) : (t, error) result =
     Ok {

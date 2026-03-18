@@ -87,24 +87,24 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
 
   const items: { label: string; value: string | number; hint?: string }[] = [
     {
-      label: 'Generation',
+      label: '세대',
       value: keeper.generation ?? '-',
-      hint: 'Succession count',
+      hint: '승계 횟수',
     },
     {
-      label: 'Turns',
+      label: '턴',
       value: keeper.turn_count ?? '-',
-      hint: 'Total loop turns',
+      hint: '총 루프 턴',
     },
     {
-      label: 'Context',
+      label: '컨텍스트',
       value: keeper.context_ratio != null ? `${Math.round(keeper.context_ratio * 100)}%` : '-',
-      hint: keeper.context_ratio != null && keeper.context_ratio > 0.8 ? 'Near limit' : undefined,
+      hint: keeper.context_ratio != null && keeper.context_ratio > 0.8 ? '한계 근접' : undefined,
     },
     {
-      label: 'Activity',
+      label: '활동도',
       value: keeper.activityLevel ?? '-',
-      hint: 'Level 0–5',
+      hint: '0–5 단계',
     },
   ]
 

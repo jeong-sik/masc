@@ -295,24 +295,24 @@ export function AgentDetailOverlay() {
           </div>
           <div class="agent-detail-actions">
             <button class="control-btn ghost" onClick=${() => { void refreshAgentDetail() }} disabled=${loading.value}>
-              ${loading.value ? 'Refreshing...' : 'Refresh'}
+              ${loading.value ? '새로고침 중...' : '새로고침'}
             </button>
-            <button class="control-btn ghost" onClick=${closeAgentDetail}>Close</button>
+            <button class="control-btn ghost" onClick=${closeAgentDetail}>닫기</button>
           </div>
         </div>
 
         ${detailError.value ? html`<div class="council-error">${detailError.value}</div>` : null}
 
         <div class="agent-detail-grid">
-          <${Card} title="Assigned Tasks">
+          <${Card} title="할당된 작업">
             ${ownedTasks.length === 0
-              ? html`<div class="empty-state">No assigned tasks</div>`
+              ? html`<div class="empty-state">할당된 작업이 없습니다</div>`
               : html`<div class="agent-detail-task-list">${ownedTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`}
           <//>
 
-          <${Card} title="Recent Activity">
+          <${Card} title="최근 활동">
             ${lines.length === 0
-              ? html`<div class="empty-state">No recent room activity match</div>`
+              ? html`<div class="empty-state">최근 활동 기록이 없습니다</div>`
               : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) => html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
           <//>
         </div>
@@ -320,18 +320,18 @@ export function AgentDetailOverlay() {
         <${AgentJournalStream} agentName=${agentName} />
         <${AgentTimelineSection} />
         <${AgentWorkerBrief} agentName=${agentName} />
-        <${Card} title="Task History">
+        <${Card} title="작업 이력">
           ${taskHistories.value.length === 0
-            ? html`<div class="empty-state">No task history loaded</div>`
+            ? html`<div class="empty-state">작업 이력이 없습니다</div>`
             : html`<div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`}
         <//>
 
-        <${Card} title="Direct Mention">
+        <${Card} title="직접 멘션">
           <div class="agent-mention-row">
             <input
               class="control-input"
               type="text"
-              placeholder="@mention message"
+              placeholder="@멘션 메시지"
               value=${mentionText.value}
               onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
               onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention() }}
@@ -342,7 +342,7 @@ export function AgentDetailOverlay() {
               onClick=${() => { void submitMention() }}
               disabled=${sendingMention.value || mentionText.value.trim() === ''}
             >
-              ${sendingMention.value ? 'Sending...' : 'Send'}
+              ${sendingMention.value ? '전송 중...' : '전송'}
             </button>
           </div>
         <//>

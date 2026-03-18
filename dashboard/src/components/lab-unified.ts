@@ -16,7 +16,7 @@ export function LabUnified() {
           class="tab-pill ${surface !== 'trpg' ? 'tab-pill--active' : ''}"
           onClick=${() => navigate('lab')}
         >
-          \uC9C0\uD718
+          지휘
         </button>
         <button
           class="tab-pill ${surface === 'trpg' ? 'tab-pill--active' : ''}"

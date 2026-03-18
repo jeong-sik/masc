@@ -43,8 +43,9 @@ type session_context = {
 
 (** {1 Compaction} *)
 
-(** Compaction strategies, applied in order of increasing aggressiveness. *)
-type compaction_strategy =
+(** Compaction strategies, applied in order of increasing aggressiveness.
+    Alias for {!Compaction_types.compaction_strategy} (shared SSOT). *)
+type compaction_strategy = Compaction_types.compaction_strategy =
   | PruneToolOutputs   (** Remove verbose tool results > 500 chars, keep first/last 100 *)
   | MergeContiguous    (** Merge consecutive same-role messages *)
   | DropLowImportance  (** Remove messages with importance < 0.3 *)

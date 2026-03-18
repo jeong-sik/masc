@@ -45,7 +45,10 @@ type session_context = {
   mutable checkpoints : checkpoint list;
 }
 
-type compaction_strategy =
+(** Re-export from [Compaction_types] for backward compatibility.
+    All consumers that used [Context_manager.PruneToolOutputs] etc.
+    continue to work without changes. *)
+type compaction_strategy = Compaction_types.compaction_strategy =
   | PruneToolOutputs
   | MergeContiguous
   | DropLowImportance
@@ -298,12 +301,9 @@ let use_oas_reducer () =
   | Some v -> String.lowercase_ascii (String.trim v) = "true"
   | None -> false
 
-(** Map MASC compaction_strategy to the adapter's local strategy type. *)
-let oas_adapter_strategy_of = function
-  | PruneToolOutputs -> Context_compact_oas.PruneToolOutputs
-  | MergeContiguous -> Context_compact_oas.MergeContiguous
-  | DropLowImportance -> Context_compact_oas.DropLowImportance
-  | SummarizeOld -> Context_compact_oas.SummarizeOld
+(** Identity mapping — both types are now [Compaction_types.compaction_strategy].
+    Kept as a named function for call-site readability. *)
+let oas_adapter_strategy_of (s : compaction_strategy) : Context_compact_oas.strategy = s
 
 let compact ctx strategies =
   if use_oas_reducer () then

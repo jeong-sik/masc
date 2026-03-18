@@ -100,7 +100,10 @@ let task_activities (config : Room.config) : activity_item list =
                      tm_mday = d; tm_mon = m - 1; tm_year = y - 1900;
                      tm_wday = 0; tm_yday = 0; tm_isdst = false;
                    } in
-                   let (t, _) = Unix.mktime tm in t)
+                   let local_epoch, _ = Unix.mktime tm in
+                   let utc_as_local, _ = Unix.mktime (Unix.gmtime local_epoch) in
+                   let tz_offset = local_epoch -. utc_as_local in
+                   local_epoch +. tz_offset)
             with
             | Scanf.Scan_failure _ | Failure _ | End_of_file -> 0.0
             | exn ->

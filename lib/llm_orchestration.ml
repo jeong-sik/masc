@@ -275,16 +275,18 @@ let complete ?timeout_sec (req : completion_request) : (completion_response, str
 (* ================================================================ *)
 
 (** Check whether local providers (Llama) have healthy endpoints.
-    Returns the request list with unhealthy local providers removed.
-    Cloud providers (Anthropic, Gemini, GLM, etc.) always pass through. *)
+    When cloud fallbacks exist in the cascade, unhealthy local providers
+    are removed so cloud takes over. When the cascade is local-only,
+    requests pass through unchanged — the provider returns a connection
+    error, which is more informative than a synthetic "unhealthy" error. *)
 let filter_by_provider_health (requests : completion_request list)
     : completion_request list =
-  let has_local_request =
-    List.exists (fun (r : completion_request) ->
-      r.model.provider = Llama) requests
-  in
-  if not has_local_request then requests
+  let has_local = List.exists (fun (r : completion_request) ->
+    r.model.provider = Llama) requests in
+  if not has_local then requests
   else
+    let has_cloud = List.exists (fun (r : completion_request) ->
+      r.model.provider <> Llama) requests in
     let endpoints = Llm_discovery_cache.get_cached_or_refresh () in
     let any_healthy = Llm_discovery_cache.any_local_healthy () in
     let idle = Llm_discovery_cache.idle_slot_count () in
@@ -292,9 +294,9 @@ let filter_by_provider_health (requests : completion_request list)
     Log.LlmClient.info
       "cascade capacity: local endpoints=%d healthy=%b idle=%d busy=%d"
       (List.length endpoints) any_healthy idle busy;
-    if not any_healthy then begin
+    if not any_healthy && has_cloud then begin
       Log.LlmClient.warn
-        "cascade: all local endpoints unhealthy, skipping local providers";
+        "cascade: local endpoints unhealthy, falling back to cloud providers";
       List.filter (fun (r : completion_request) ->
         r.model.provider <> Llama) requests
     end else
@@ -307,9 +309,6 @@ let filter_by_provider_health (requests : completion_request list)
 let cascade ?(accept = fun _ -> true) ?timeout_sec
     (requests : completion_request list) : (completion_response, string) result =
   let requests = filter_by_provider_health requests in
-  if requests = [] then
-    Error "All providers unhealthy (local endpoints down, no cloud fallback)"
-  else
   with_llm_permit (fun () ->
     let avail = Eio.Semaphore.get_value llm_semaphore in
     Log.LlmClient.debug "cascade: acquired permit (%d/%d available)"

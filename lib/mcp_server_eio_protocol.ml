@@ -212,6 +212,17 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
     |> List.sort (fun (a : Types.tool_schema) (b : Types.tool_schema) ->
            String.compare a.name b.name)
   in
+  let total_count = List.length tools in
+  let mode_str =
+    match mode with
+    | Some m -> m
+    | None -> (
+        match profile with
+        | Full -> "full"
+        | Managed_agent -> "managed_agent"
+        | Operator_remote -> "operator_remote"
+        | Role_filtered m -> Mode.mode_to_string m)
+  in
   match TP.page_items_with_cursor ~kind:"tools" tools cursor with
   | Error msg -> make_error ~id (-32602) msg
   | Ok (page, next_cursor) ->
@@ -223,6 +234,15 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
         ]
         @ TP.maybe_assoc_field "nextCursor"
             (Option.map (fun value -> `String value) next_cursor)
+        @ [
+            ( "_meta",
+              `Assoc
+                [
+                  ("totalCount", `Int total_count);
+                  ("mode", `String mode_str);
+                  ("pageSize", `Int TP.list_page_size);
+                ] );
+          ]
       in
       let result_fields =
         result_fields

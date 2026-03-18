@@ -343,12 +343,15 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                       let accept_warn_headers =
                         legacy_accept_warning_headers accept_mode
                       in
-                      try
-                        match request_runtime_result deps with
-                        | Error msg ->
-                            respond_mcp_internal_error ~deps request reqd
-                              ~session_id ~protocol_version msg
-                        | Ok (state, sw, clock) ->
+                      match request_runtime_result deps with
+                      | Error msg ->
+                          respond_mcp_internal_error ~deps request reqd
+                            ~session_id ~protocol_version msg
+                      | Ok (state, sw, clock) ->
+                          (* Fork a fiber so Eio I/O in handle_request does not
+                             block httpun's schedule_read callback chain. *)
+                          Eio.Fiber.fork ~sw (fun () ->
+                          try
                             let response_json =
                               Mcp_eio.handle_request ~clock ~sw ~profile
                                 ~mcp_session_id:session_id ?auth_token state body_str
@@ -448,7 +451,7 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                         in
                         respond_mcp_internal_error ~deps request reqd ~session_id
                           ~protocol_version
-                          ("Internal error: " ^ Printexc.to_string exn))
+                          ("Internal error: " ^ Printexc.to_string exn)))
 
 let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
     request reqd =
@@ -653,6 +656,7 @@ let handle_post_messages ~deps request reqd =
                   respond_mcp_internal_error ~extra_headers:legacy_headers
                     ~deps request reqd ~session_id ~protocol_version msg
               | Ok (state, sw, clock) ->
+                  Eio.Fiber.fork ~sw (fun () ->
                   let response_json =
                     Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:session_id
                       ?auth_token state body_str
@@ -666,7 +670,7 @@ let handle_post_messages ~deps request reqd =
                       :: (legacy_headers @ mcp_headers session_id protocol_version))
                   in
                   let response = Httpun.Response.create ~headers `Accepted in
-                  Httpun.Reqd.respond_with_string reqd response ""))
+                  Httpun.Reqd.respond_with_string reqd response "")))
 
 let handle_delete_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
   let base_path =

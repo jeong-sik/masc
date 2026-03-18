@@ -68,10 +68,16 @@ module Http_negotiation = struct
 
   (** Classify Accept header against streamable policy.
       - Streamable: Accept has both JSON + SSE
-      - Legacy_accepted: not streamable, but explicitly allowed
-      - Rejected: not streamable and legacy disabled *)
+      - Legacy_accepted: not streamable, but explicitly allowed or JSON-only
+      - Rejected: not streamable, no JSON, and legacy disabled *)
   let classify_mcp_accept ~allow_legacy accept_header =
     if accepts_streamable_mcp accept_header then Streamable
     else if allow_legacy then Legacy_accepted
-    else Rejected
+    else
+      (* MCP Streamable HTTP spec (2025-03-26) allows JSON-only Accept.
+         Clients like Claude Code may send Accept: application/json without
+         text/event-stream. Treat as Legacy_accepted rather than rejecting. *)
+      let media_types = parse_accept_header accept_header in
+      if is_media_type_accepted media_types json_content_type then Legacy_accepted
+      else Rejected
 end

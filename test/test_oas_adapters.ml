@@ -11,14 +11,14 @@ open Masc_mcp
 (* Helper: create MASC messages with all 4 roles                    *)
 (* ================================================================ *)
 
-let make_test_messages () : Llm_client.message list =
+let make_test_messages () : Agent_sdk.Types.message list =
   [
-    Llm_client.system_msg "You are a helpful assistant.";
-    Llm_client.user_msg "Hello, what is 2+2?";
-    Llm_client.assistant_msg "The answer is 4.";
+    Agent_sdk.Types.system_msg "You are a helpful assistant.";
+    Agent_sdk.Types.user_msg "Hello, what is 2+2?";
+    Agent_sdk.Types.assistant_msg "The answer is 4.";
     Llm_client.tool_msg ~name:"calculator" ~call_id:"call-1" "result: 4";
-    Llm_client.user_msg "Thanks, now solve x^2 = 9.";
-    Llm_client.assistant_msg "x = 3 or x = -3.";
+    Agent_sdk.Types.user_msg "Thanks, now solve x^2 = 9.";
+    Agent_sdk.Types.assistant_msg "x = 3 or x = -3.";
   ]
 
 (* ================================================================ *)
@@ -26,29 +26,29 @@ let make_test_messages () : Llm_client.message list =
 (* ================================================================ *)
 
 let test_roundtrip_user_msg () =
-  let msg = Llm_client.user_msg "hello world" in
+  let msg = Agent_sdk.Types.user_msg "hello world" in
   match Llm_client.to_oas_message msg with
   | None -> Alcotest.fail "user message should not be dropped"
   | Some oas ->
     let rt = Llm_client.of_oas_message oas in
     Alcotest.(check string) "role preserved" "user"
-      (match rt.role with Llm_client.User -> "user" | _ -> "other");
+      (match rt.role with Agent_sdk.Types.User -> "user" | _ -> "other");
     Alcotest.(check string) "content preserved"
-      "hello world" (Llm_client.text_of_message rt)
+      "hello world" (Agent_sdk.Types.text_of_message rt)
 
 let test_roundtrip_assistant_msg () =
-  let msg = Llm_client.assistant_msg "The answer is 42." in
+  let msg = Agent_sdk.Types.assistant_msg "The answer is 42." in
   match Llm_client.to_oas_message msg with
   | None -> Alcotest.fail "assistant message should not be dropped"
   | Some oas ->
     let rt = Llm_client.of_oas_message oas in
     Alcotest.(check string) "role preserved" "assistant"
-      (match rt.role with Llm_client.Assistant -> "assistant" | _ -> "other");
+      (match rt.role with Agent_sdk.Types.Assistant -> "assistant" | _ -> "other");
     Alcotest.(check string) "content preserved"
-      "The answer is 42." (Llm_client.text_of_message rt)
+      "The answer is 42." (Agent_sdk.Types.text_of_message rt)
 
 let test_roundtrip_system_msg_dropped () =
-  let msg = Llm_client.system_msg "system prompt" in
+  let msg = Agent_sdk.Types.system_msg "system prompt" in
   let result = Llm_client.to_oas_message msg in
   Alcotest.(check bool) "system message dropped (belongs in system_prompt)"
     true (Option.is_none result)
@@ -63,8 +63,8 @@ let test_roundtrip_tool_msg () =
        Context_compact_oas.masc_msg_to_oas uses sentinel-tagging instead. *)
     Alcotest.(check string) "tool role preserved"
       "tool"
-      (match rt.role with Llm_client.Tool -> "tool" | _ -> "other");
-    let text = Llm_client.text_of_message rt in
+      (match rt.role with Agent_sdk.Types.Tool -> "tool" | _ -> "other");
+    let text = Agent_sdk.Types.text_of_message rt in
     Alcotest.(check bool) "content preserved"
       true (String.length text > 0)
 
@@ -88,9 +88,9 @@ let test_compact_prune_tool_outputs () =
 let test_compact_merge_contiguous () =
   let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:4000 in
   let msgs = [
-    Llm_client.user_msg "part 1";
-    Llm_client.user_msg "part 2";
-    Llm_client.assistant_msg "response";
+    Agent_sdk.Types.user_msg "part 1";
+    Agent_sdk.Types.user_msg "part 2";
+    Agent_sdk.Types.assistant_msg "response";
   ] in
   let ctx = List.fold_left Context_manager.append ctx msgs in
   let compacted = Context_manager.compact ctx [Context_manager.MergeContiguous] in
@@ -103,9 +103,9 @@ let test_compact_summarize_old () =
   let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:8000 in
   let msgs = List.init 12 (fun i ->
     if i mod 2 = 0 then
-      Llm_client.user_msg (Printf.sprintf "user message %d with content" i)
+      Agent_sdk.Types.user_msg (Printf.sprintf "user message %d with content" i)
     else
-      Llm_client.assistant_msg (Printf.sprintf "assistant response %d" i)
+      Agent_sdk.Types.assistant_msg (Printf.sprintf "assistant response %d" i)
   ) in
   let ctx = List.fold_left Context_manager.append ctx msgs in
   let compacted = Context_manager.compact ctx [Context_manager.SummarizeOld] in
@@ -118,8 +118,8 @@ let test_compact_summarize_old () =
 let test_compact_small_list_unchanged () =
   let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:4000 in
   let msgs = [
-    Llm_client.user_msg "hello";
-    Llm_client.assistant_msg "world";
+    Agent_sdk.Types.user_msg "hello";
+    Agent_sdk.Types.assistant_msg "world";
   ] in
   let ctx = List.fold_left Context_manager.append ctx msgs in
   let compacted = Context_manager.compact ctx [Context_manager.SummarizeOld] in
@@ -142,12 +142,12 @@ let test_restore_messages_all_roles () =
   Alcotest.(check int) "2 messages restored" 2 (List.length masc_msgs);
   let first = List.hd masc_msgs in
   Alcotest.(check string) "first is user" "user"
-    (match first.role with Llm_client.User -> "user" | _ -> "other");
+    (match first.role with Agent_sdk.Types.User -> "user" | _ -> "other");
   Alcotest.(check string) "first content" "user question"
-    (Llm_client.text_of_message first);
+    (Agent_sdk.Types.text_of_message first);
   let second = List.nth masc_msgs 1 in
   Alcotest.(check string) "second is assistant" "assistant"
-    (match second.role with Llm_client.Assistant -> "assistant" | _ -> "other")
+    (match second.role with Agent_sdk.Types.Assistant -> "assistant" | _ -> "other")
 
 (* ================================================================ *)
 (* Runner                                                           *)

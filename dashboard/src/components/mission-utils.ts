@@ -21,8 +21,9 @@ import {
 } from '../workflow-context'
 import { relativeTime as relativeTimeBase, formatDuration } from '../lib/format-time'
 import { trimText } from '../lib/truncate'
+import { toneClass } from '../lib/tone'
 
-export { formatDuration, trimText }
+export { formatDuration, trimText, toneClass }
 
 export function relativeTime(iso?: string | null): string {
   return relativeTimeBase(iso, '방금')
@@ -54,12 +55,6 @@ export type EnrichedAgentRow = {
 
 export const selectedAttentionId = signal<string | null>(null)
 export const selectedSessionId = signal<string | null>(null)
-
-export function toneClass(tone?: string | null): string {
-  if (tone === 'bad' || tone === 'offline' || tone === 'critical' || tone === 'risk') return 'bad'
-  if (tone === 'warn' || tone === 'pending' || tone === 'degraded' || tone === 'interrupted' || tone === 'watch') return 'warn'
-  return 'ok'
-}
 
 export function statusLabel(value?: string | null): string {
   const normalized = (value ?? '').trim().toLowerCase()

@@ -39,6 +39,7 @@ import {
   workflowInterveneParams,
   persistWorkflowContext,
 } from '../workflow-context'
+import { toneClass } from '../lib/tone'
 
 const selectedQueueId = signal<string | null>(null)
 const selectedSessionId = signal<string | null>(null)
@@ -57,12 +58,6 @@ function partitionByTerminal<T>(items: T[], getStatus: (item: T) => string | nul
     ;(isTerminalStatus(getStatus(item)) ? terminal : active).push(item)
   }
   return [active, terminal]
-}
-
-function toneClass(tone?: string | null): string {
-  if (tone === 'bad' || tone === 'critical' || tone === 'offline') return 'bad'
-  if (tone === 'warn' || tone === 'paused' || tone === 'blocked' || tone === 'interrupted') return 'warn'
-  return 'ok'
 }
 
 function statusLabel(value?: string | null): string {

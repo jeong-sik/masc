@@ -2,13 +2,7 @@ import { html } from 'htm/preact'
 import { navigate } from '../../router'
 import { roomTruth, roomTruthError, roomTruthLoading } from '../../room-truth-store'
 import { ProvenanceChip } from './provenance-strip'
-
-function toneClass(value?: string | null): string {
-  const normalized = (value ?? '').trim().toLowerCase()
-  if (normalized === 'bad' || normalized === 'critical' || normalized === 'offline') return 'bad'
-  if (normalized === 'warn' || normalized === 'paused' || normalized === 'blocked') return 'warn'
-  return 'ok'
-}
+import { toneClass } from '../../lib/tone'
 
 function openFocus(): void {
   const focus = roomTruth.value?.focus

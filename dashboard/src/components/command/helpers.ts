@@ -19,10 +19,11 @@ import { operatorSnapshot } from '../../operator-store'
 import { route } from '../../router'
 import type { DashboardWorkflowContext } from '../../workflow-context'
 import { relativeTime, formatElapsed } from '../../lib/format-time'
+import { toneClass, chainStatusTone, sessionStatusTone, expiryTone } from '../../lib/tone'
 
 // ── Pure helpers ──────────────────────────────
 
-export { relativeTime, formatElapsed }
+export { relativeTime, formatElapsed, toneClass, chainStatusTone, sessionStatusTone, expiryTone }
 
 export function prettyJson(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -32,13 +33,6 @@ export function prettyJson(value: unknown): string {
   } catch {
     return String(value)
   }
-}
-
-export function expiryTone(iso?: string | null): string {
-  if (!iso) return 'warn'
-  const ts = Date.parse(iso)
-  if (Number.isNaN(ts)) return 'warn'
-  return ts <= Date.now() ? 'bad' : 'ok'
 }
 
 export function deadlineLabel(iso?: string | null): string {
@@ -51,12 +45,6 @@ export function deadlineLabel(iso?: string | null): string {
   if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 후`
   if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}시간 후`
   return `${Math.round(deltaSec / 86400)}일 후`
-}
-
-export function toneClass(tone?: string | null): string {
-  if (tone === 'bad') return 'bad'
-  if (tone === 'warn' || tone === 'pending') return 'warn'
-  return 'ok'
 }
 
 type MermaidApi = typeof import('mermaid')['default']
@@ -83,28 +71,6 @@ export async function getMermaid(): Promise<MermaidApi> {
   })
   mermaidConfigured = true
   return mermaid
-}
-
-export function chainStatusTone(status?: string | null): string {
-  if (!status) return 'warn'
-  const lowered = status.toLowerCase()
-  if (
-    lowered.includes('failed')
-    || lowered.includes('error')
-    || lowered.includes('disconnected')
-    || lowered.includes('stopped')
-  ) {
-    return 'bad'
-  }
-  if (
-    lowered.includes('running')
-    || lowered.includes('active')
-    || lowered.includes('degraded')
-    || lowered.includes('pending')
-  ) {
-    return 'warn'
-  }
-  return 'ok'
 }
 
 export function formatPercent(value?: number | null): string {
@@ -456,27 +422,6 @@ export async function fire(action: () => Promise<void>) {
 
 export function normalizedStatus(value?: string | null): string {
   return value?.trim().toLowerCase() ?? ''
-}
-
-export function sessionStatusTone(status?: string | null): string {
-  const normalized = normalizedStatus(status)
-  if (
-    normalized.includes('failed')
-    || normalized.includes('error')
-    || normalized.includes('stopped')
-    || normalized === 'paused'
-  ) {
-    return 'bad'
-  }
-  if (
-    normalized.includes('active')
-    || normalized.includes('running')
-    || normalized.includes('healthy')
-    || normalized.includes('ok')
-  ) {
-    return 'ok'
-  }
-  return 'warn'
 }
 
 export function displayStatus(status?: string | null): string {

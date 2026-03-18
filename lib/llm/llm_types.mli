@@ -86,6 +86,10 @@ val usage_of_response : api_response -> token_usage
 (** Extract text content from an api_response. *)
 val text_of_response : api_response -> string
 
+(** Measure wall-clock latency of a thunk in milliseconds.
+    Use at call sites that need per-call timing (keeper tool loops, etc.). *)
+val timed : (unit -> 'a) -> 'a * int
+
 (** Extract tool calls from content blocks. *)
 val tool_calls_of_content : Agent_sdk.Types.content_block list -> tool_call list
 

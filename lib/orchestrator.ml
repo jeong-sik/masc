@@ -154,6 +154,14 @@ let spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config =
     Log.Orchestrator.warn "failed (exit %d) in %dms"
       result.exit_code result.elapsed_ms;
 
+  (* Log structured termination reason when available *)
+  (match result.termination with
+   | Some t ->
+     Log.Orchestrator.info "termination: %s (agent=%s, elapsed=%dms, tools=%d)"
+       (Spawn_eio.termination_reason_to_string t.reason)
+       t.agent_name t.elapsed_ms t.tool_call_count
+   | None -> ());
+
   result
   end
 

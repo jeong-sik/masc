@@ -80,7 +80,7 @@
   background: #38bdf8;
 }
 .status-dot-inline.stopped {
-  background: #94a3b8;
+  background: var(--text-slate);
 }
 .status-dot-inline.error {
   background: #fb7185;
@@ -103,7 +103,7 @@
   min-width: 80px;
   border: 1px solid var(--card-border);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
@@ -127,22 +127,22 @@
   margin-top: 6px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-10);
 }
 
 .ctx-fill {
   height: 100%;
-  background: linear-gradient(90deg, #47b8ff, #4ade80);
+  background: linear-gradient(90deg, var(--accent), var(--ok));
   border-radius: 999px;
   transition: width 0.25s ease;
 }
 
 .ctx-fill.warn {
-  background: linear-gradient(90deg, #fbbf24, #f97316);
+  background: linear-gradient(90deg, var(--warn), #f97316);
 }
 
 .ctx-fill.bad {
-  background: linear-gradient(90deg, #ef4444, #f97316);
+  background: linear-gradient(90deg, var(--bad), #f97316);
 }
 
 /* Legacy alias for older code */

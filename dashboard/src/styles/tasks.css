@@ -5,13 +5,13 @@
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: rgba(255,255,255,0.03);
+  background: var(--white-3);
   border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.06);
+  border: 1px solid var(--white-6);
 }
 .task-info { flex: 1; }
 .task-title { font-size: 14px; }
-.task-assignee { font-size: 12px; color: #888; margin-left: 8px; }
+.task-assignee { font-size: 12px; color: var(--text-dim); margin-left: 8px; }
 
 /* Task Board (Kanban) */
 .task-board {
@@ -21,14 +21,14 @@
 }
 .task {
   padding: 10px 12px;
-  background: rgba(255,255,255,0.04);
+  background: var(--white-4);
   border-radius: 8px;
-  border-left: 3px solid #888;
+  border-left: 3px solid var(--text-dim);
   margin-bottom: 6px;
 }
-.task.todo { border-left-color: #888; }
-.task.in-progress { border-left-color: #fbbf24; }
-.task.done { border-left-color: #4ade80; opacity: 0.7; }
+.task.todo { border-left-color: var(--text-dim); }
+.task.in-progress { border-left-color: var(--warn); }
+.task.done { border-left-color: var(--ok); opacity: 0.7; }
 
 /* ── Messages ──────────────────────────────────────────────── */
 .message-list {
@@ -40,11 +40,11 @@
 }
 .message-row {
   padding: 8px 12px;
-  background: rgba(255,255,255,0.03);
+  background: var(--white-3);
   border-radius: 8px;
   font-size: 13px;
 }
-.message-agent { font-weight: 600; color: #22d3ee; margin-right: 8px; }
+.message-agent { font-weight: 600; color: var(--cyan); margin-right: 8px; }
 .message-text { color: #ccc; }
 .message-time { font-size: 11px; color: #666; float: right; }
 

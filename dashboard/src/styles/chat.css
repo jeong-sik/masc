@@ -27,7 +27,7 @@
   padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid rgba(138, 163, 211, 0.14);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
 }
 
@@ -92,7 +92,7 @@
 
 .chat-avatar.user {
   border-color: rgba(71, 184, 255, 0.28);
-  background: rgba(71, 184, 255, 0.16);
+  background: var(--accent-soft);
   color: #d8f0ff;
 }
 
@@ -133,7 +133,7 @@
   padding: 2px 8px;
   font-size: 11px;
   letter-spacing: 0.03em;
-  border: 1px solid rgba(138, 163, 211, 0.2);
+  border: 1px solid var(--card-border);
   color: #d8e8ff;
   background: rgba(138, 163, 211, 0.08);
 }
@@ -165,7 +165,7 @@
 .chat-disclosure-btn {
   flex: 0 0 auto;
   border: 1px solid rgba(138, 163, 211, 0.24);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
   color: #a8c3eb;
   border-radius: 999px;
   padding: 4px 10px;
@@ -229,7 +229,7 @@
   padding: 10px 11px;
   border-radius: 10px;
   border: 1px solid rgba(138, 163, 211, 0.12);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
 }
 
 .chat-overview-label,
@@ -277,7 +277,7 @@
 .chat-raw-toggle {
   align-self: flex-start;
   border: 1px solid rgba(138, 163, 211, 0.18);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-3);
   color: #9db7e2;
   border-radius: 999px;
   padding: 4px 10px;

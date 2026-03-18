@@ -394,3 +394,9 @@ module Compaction_types = Compaction_types
 (* OAS Integration — Agent SDK v0.24+ bridge *)
 module Oas_events = Oas_events
 module Oas_checkpoint_bridge = Oas_checkpoint_bridge
+module Context_compact_oas = Context_compact_oas
+module Succession_oas = Succession_oas
+module Llm_provider_oas = Llm_provider_oas
+module Verifier_oas = Verifier_oas
+module Worker_oas = Worker_oas
+module Perpetual_oas = Perpetual_oas

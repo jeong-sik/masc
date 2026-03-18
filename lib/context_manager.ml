@@ -293,32 +293,20 @@ let sync_oas_context (ctx : working_context) : working_context =
     "context_ratio" (`Float (context_ratio ctx));
   ctx
 
-(** Feature flag: route compaction through OAS Context_reducer adapter.
-    Set MASC_USE_OAS_REDUCER=true to enable A/B testing.
-    Evaluated per call (not module load) for runtime toggling consistency. *)
-let use_oas_reducer () =
-  match Sys.getenv_opt "MASC_USE_OAS_REDUCER" with
-  | Some v -> String.lowercase_ascii (String.trim v) = "true"
-  | None -> false
-
 (** Identity mapping — both types are now [Compaction_types.compaction_strategy].
     Kept as a named function for call-site readability. *)
 let oas_adapter_strategy_of (s : compaction_strategy) : Context_compact_oas.strategy = s
 
 let compact ctx strategies =
-  if use_oas_reducer () then
-    let oas_strategies = List.map oas_adapter_strategy_of strategies in
-    let messages, token_count =
-      Context_compact_oas.compact
-        ~system_prompt:ctx.system_prompt
-        ~messages:ctx.messages
-        ~strategies:oas_strategies
-    in
-    let ctx = { ctx with messages; token_count; importance_scores = [] } in
-    sync_oas_context ctx
-  else
-    let ctx = List.fold_left apply_strategy ctx strategies in
-    sync_oas_context ctx
+  let oas_strategies = List.map oas_adapter_strategy_of strategies in
+  let messages, token_count =
+    Context_compact_oas.compact
+      ~system_prompt:ctx.system_prompt
+      ~messages:ctx.messages
+      ~strategies:oas_strategies
+  in
+  let ctx = { ctx with messages; token_count; importance_scores = [] } in
+  sync_oas_context ctx
 
 (* ================================================================ *)
 (* Conversation History Offload                                     *)
@@ -395,19 +383,16 @@ let compact_with_offload
       ~compaction_count
       pre_messages
   in
-  (* Run the compaction pipeline (OAS adapter or legacy) *)
+  (* Run compaction via OAS Context_reducer *)
   let compacted =
-    if use_oas_reducer () then begin
-      let oas_strategies = List.map oas_adapter_strategy_of strategies in
-      let messages, token_count =
-        Context_compact_oas.compact
-          ~system_prompt:ctx.system_prompt
-          ~messages:ctx.messages
-          ~strategies:oas_strategies
-      in
-      { ctx with messages; token_count; importance_scores = [] }
-    end else
-      List.fold_left apply_strategy ctx strategies
+    let oas_strategies = List.map oas_adapter_strategy_of strategies in
+    let messages, token_count =
+      Context_compact_oas.compact
+        ~system_prompt:ctx.system_prompt
+        ~messages:ctx.messages
+        ~strategies:oas_strategies
+    in
+    { ctx with messages; token_count; importance_scores = [] }
   in
   (* If offload succeeded and SummarizeOld produced a summary, annotate it *)
   let compacted = match offloaded_path with

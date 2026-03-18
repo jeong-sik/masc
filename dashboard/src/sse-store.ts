@@ -30,6 +30,11 @@ export function registerOperatorRefresh(fn: () => void): void {
   _refreshOperatorFn = fn
 }
 
+let _refreshMissionFn: (() => void) | null = null
+export function registerMissionRefresh(fn: () => void): void {
+  _refreshMissionFn = fn
+}
+
 // --- SSE event reaction ---
 
 const _debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
@@ -166,6 +171,7 @@ export function startPeriodicRefresh(): void {
       invalidateDashboardCache()
     }
     refreshDashboard()
+    _refreshMissionFn?.()
   }, 30000)
 }
 

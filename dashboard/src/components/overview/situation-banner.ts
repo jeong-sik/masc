@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { HealthBeacon } from './health-beacon'
+import { missionError, missionLoading } from '../../mission-store'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionBrief,
@@ -26,7 +27,12 @@ interface SituationResult {
 type SessionItem = DashboardMissionSessionBrief | DashboardMissionSessionCard
 
 function synthesizeSituation(snap: DashboardMissionResponse | null): SituationResult {
-  if (!snap) return { text: '데이터 로딩 중...', tone: 'ok', reasons: [] }
+  if (!snap) {
+    const error = missionError.value
+    if (error) return { text: `데이터 로드 실패: ${error}`, tone: 'warn', reasons: [] }
+    if (missionLoading.value) return { text: '데이터 로딩 중...', tone: 'ok', reasons: [] }
+    return { text: '데이터 대기 중...', tone: 'ok', reasons: [] }
+  }
 
   const sessions: SessionItem[] =
     snap.sessions.length > 0 ? snap.sessions : snap.session_briefs

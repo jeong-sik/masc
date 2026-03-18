@@ -282,13 +282,21 @@ let dispatch (ctx : context) ~(name : string) : result option =
       if not (Sys.file_exists expanded && Sys.is_directory expanded) then
         Some (false, Printf.sprintf "Directory not found: %s" expanded)
       else
-        let masc_dir = Filename.concat expanded ".masc" in
+        (* Resolve to git root so worktree paths find the shared .masc/ directory *)
+        let resolved = Room_utils_backend_setup.resolve_masc_base_path expanded in
+        let masc_dir = Filename.concat resolved ".masc" in
         if not (Sys.file_exists masc_dir && Sys.is_directory masc_dir) then
-          Some (false, Printf.sprintf "No .masc/ directory found in: %s\nRun masc_init to initialize, or choose a MASC-enabled directory." expanded)
+          Some (false, Printf.sprintf "No .masc/ directory found in: %s\nRun masc_init to initialize, or choose a MASC-enabled directory." resolved)
         else begin
           state.Mcp_server.room_config <- Room.default_config expanded;
-          let status = if Room.is_initialized state.Mcp_server.room_config then "ok" else "(not initialized)" in
-          Some (true, Printf.sprintf "MASC room set to: %s\n   .masc/ status: %s" expanded status)
+          let rc = state.Mcp_server.room_config in
+          let status = if Room.is_initialized rc then "ok" else "(not initialized)" in
+          let workspace_note =
+            if rc.workspace_path <> rc.base_path then
+              Printf.sprintf "\n   workspace: %s (worktree)" rc.workspace_path
+            else ""
+          in
+          Some (true, Printf.sprintf "MASC room set to: %s\n   .masc/ status: %s%s" rc.base_path status workspace_note)
         end
 
   | "masc_join" ->

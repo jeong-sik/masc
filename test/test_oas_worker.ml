@@ -174,9 +174,11 @@ let reset_mitosis_state () =
   Mcp_server.current_cell := Mitosis.create_stem_cell ~generation:0;
   Mcp_server.stem_pool := Mitosis.init_pool ~config:Mitosis.default_config
 
+let noop_dispatch ~name:_ ~args:_ = (true, "{}")
+
 let make_mitosis_ctx ~base_path : Tool_mitosis_oas.context =
   let config = Room.default_config base_path in
-  { config; agent_name = "test-agent" }
+  { config; agent_name = "test-agent"; masc_tools = []; dispatch = noop_dispatch }
 
 let with_mitosis_base f =
   let base_path = temp_dir "test_mitosis_oas" in
@@ -308,8 +310,10 @@ let test_mitosis_handoff_no_action () =
 
 let test_mitosis_handoff_force () =
   Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
   Eio_context.set_net net;
+  Eio_context.set_switch sw;
   with_mitosis_base @@ fun base_path ->
   let ctx = make_mitosis_ctx ~base_path in
   let args = `Assoc [
@@ -327,7 +331,7 @@ let test_mitosis_handoff_force () =
       (json |> field "runtime" |> Yojson.Safe.Util.to_string);
     Alcotest.(check bool) "dna_length > 0" true
       (json |> field "dna_length" |> Yojson.Safe.Util.to_int > 0);
-    (* Generation should increment *)
+    (* Generation should increment regardless of run outcome *)
     let cell = !(Mcp_server.current_cell) in
     Alcotest.(check int) "generation incremented" 1 cell.Mitosis.generation
   | None -> Alcotest.fail "dispatch returned None"

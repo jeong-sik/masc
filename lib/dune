@@ -351,6 +351,7 @@
    mitosis_helpers
    mitosis_spawn
    tool_mitosis
+   tool_mitosis_oas
    tool_portal
    tool_worktree
    tool_vote

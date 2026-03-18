@@ -44,7 +44,7 @@ function quietReasonLabel(reason?: string | null): string {
 
 function nextActionLabel(path: string): string {
   switch (path) {
-    case 'manual_lodge_poke':
+    case 'manual_social_sweep':
       return '소셜 스윕 실행'
     case 'probe':
       return '프로브'
@@ -201,11 +201,11 @@ export function KeeperConversationPanel({
 export function KeeperRuntimeActions({
   actor,
   keeper,
-  onPokeLodge,
+  onSocialSweep,
 }: {
   actor: string
   keeper: Keeper | null | undefined
-  onPokeLodge: () => void
+  onSocialSweep: () => void
 }) {
   if (!keeper) return null
   const diagnostic = effectiveDiagnostic(keeper)
@@ -241,8 +241,8 @@ export function KeeperRuntimeActions({
         ${recovering ? '복구 중...' : '복구'}
       </button>
       <button
-        class=${`control-btn ghost ${recommended === 'manual_lodge_poke' ? 'is-active' : ''}`}
-        onClick=${onPokeLodge}
+        class=${`control-btn ghost ${recommended === 'manual_social_sweep' ? 'is-active' : ''}`}
+        onClick=${onSocialSweep}
       >
         소셜 스윕 실행
       </button>

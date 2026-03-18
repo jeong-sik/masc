@@ -253,7 +253,6 @@ function operatorActionTimeoutMs(body: OperatorActionRequest): number {
     case 'swarm_run_abandon':
       return 30_000
     case 'social_sweep':
-    case 'lodge_tick':
       return 45_000
     default:
       return DEFAULT_POST_TIMEOUT_MS

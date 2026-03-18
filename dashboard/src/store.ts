@@ -23,8 +23,6 @@ import type {
   DashboardExecutionSessionBrief,
   DashboardExecutionOperationBrief,
   DashboardExecutionWorkerSupportBrief,
-  DashboardExecutionLodgeTick,
-  DashboardExecutionLodgeCheckin,
   DashboardExecutionContinuityBrief,
 } from './types'
 import {
@@ -51,7 +49,6 @@ import {
   normalizeExecutionSummary,
   normalizeExecutionQueueItem, normalizeExecutionSessionBrief,
   normalizeExecutionOperationBrief, normalizeExecutionWorkerSupportBrief,
-  normalizeExecutionLodgeTick, normalizeExecutionLodgeCheckin,
   normalizeExecutionContinuityBrief,
   mergeMessages,
   normalizeServerStatus, mergeServerStatus,
@@ -108,8 +105,6 @@ export const executionQueue = signal<DashboardExecutionQueueItem[]>([])
 export const executionSessionBriefs = signal<DashboardExecutionSessionBrief[]>([])
 export const executionOperationBriefs = signal<DashboardExecutionOperationBrief[]>([])
 export const executionWorkerSupportBriefs = signal<DashboardExecutionWorkerSupportBrief[]>([])
-export const executionLodgeTick = signal<DashboardExecutionLodgeTick | null>(null)
-export const executionLodgeCheckins = signal<DashboardExecutionLodgeCheckin[]>([])
 export const executionContinuityBriefs = signal<DashboardExecutionContinuityBrief[]>([])
 export const executionOfflineWorkerBriefs = signal<DashboardExecutionWorkerSupportBrief[]>([])
 
@@ -440,12 +435,6 @@ export async function refreshExecution(): Promise<void> {
     messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
     keepers.value = normalizeKeepers(data.keepers)
     executionSummary.value = normalizeExecutionSummary(data.summary)
-    const socialCheckinsRaw = Array.isArray(data.social_checkins) ? data.social_checkins : []
-    const lodgeCheckinsRaw = Array.isArray(data.lodge_checkins) ? data.lodge_checkins : []
-    executionLodgeTick.value = normalizeExecutionLodgeTick(data.social_tick ?? data.lodge_tick)
-    executionLodgeCheckins.value = (socialCheckinsRaw.length > 0 ? socialCheckinsRaw : lodgeCheckinsRaw)
-      .map(normalizeExecutionLodgeCheckin)
-      .filter((row): row is DashboardExecutionLodgeCheckin => row !== null)
     executionQueue.value = (Array.isArray(data.execution_queue) ? data.execution_queue : Array.isArray(data.priority_queue) ? data.priority_queue : [])
       .map(normalizeExecutionQueueItem)
       .filter((row): row is DashboardExecutionQueueItem => row !== null)

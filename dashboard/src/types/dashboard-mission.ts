@@ -585,7 +585,6 @@ export type OperatorActionType =
   | 'room_pause'
   | 'room_resume'
   | 'social_sweep'
-  | 'lodge_tick'
   | 'task_inject'
   | 'team_note'
   | 'team_broadcast'

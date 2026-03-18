@@ -8,8 +8,6 @@ import {
   executionSessionBriefs,
   executionOperationBriefs,
   executionWorkerSupportBriefs,
-  executionLodgeTick,
-  executionLodgeCheckins,
   executionContinuityBriefs,
   executionOfflineWorkerBriefs,
   executionLoaded,
@@ -25,8 +23,6 @@ import { OperationBriefsBody } from './execution/operations'
 import {
   WorkerSupportRow,
   ContinuityRow,
-  LodgeTickCard,
-  LodgeCheckinRow,
 } from './execution/workers'
 
 export function Execution() {
@@ -34,8 +30,6 @@ export function Execution() {
   const sessionRowsAll = executionSessionBriefs.value
   const operationRowsAll = executionOperationBriefs.value
   const workerSupportAll = executionWorkerSupportBriefs.value
-  const lodgeTick = executionLodgeTick.value
-  const lodgeCheckinsAll = executionLodgeCheckins.value
   const continuityAll = executionContinuityBriefs.value
   const offlineRowsAll = executionOfflineWorkerBriefs.value
 
@@ -93,12 +87,6 @@ export function Execution() {
       ? continuityAll.filter(item => item.related_session_id === activeSessionId || item.tone !== 'ok')
       : continuityAll
 
-  const lodgeCheckins =
-    activeSessionId
-      ? lodgeCheckinsAll.filter(item =>
-          sessionRows.some(row => row.member_names.includes(item.agent_name)))
-      : lodgeCheckinsAll
-
   const offlineRows =
     activeSessionId || activeOperationId
       ? offlineRowsAll.filter(item =>
@@ -148,20 +136,6 @@ export function Execution() {
           testId="execution.operation-briefs"
         >
           <${OperationBriefsBody} operationRows=${operationRows} />
-        <//>
-
-        <${Card}
-          title="키퍼 활동"
-          class="section"
-          semanticId="execution.lodge"
-          testId="execution.lodge-checkins"
-        >
-          <${LodgeTickCard} tick=${lodgeTick} />
-          <div class="monitor-list">
-            ${lodgeCheckins.length === 0
-              ? html`<div class="empty-state">최근 키퍼 활동 기록이 없습니다.</div>`
-              : lodgeCheckins.map(row => html`<${LodgeCheckinRow} key=${`${row.agent_name}-${row.checked_at ?? row.outcome}`} row=${row} />`)}
-          </div>
         <//>
 
         <${Card}

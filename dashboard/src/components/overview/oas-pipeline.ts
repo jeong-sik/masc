@@ -1,4 +1,4 @@
-// OAS Agent Pipeline — real-time lodge agent lifecycle and keeper snapshot monitor.
+// OAS Agent Pipeline — real-time agent lifecycle and keeper snapshot monitor.
 // Shows recent agent selection/decision/execution events from OAS Event_bus.
 
 import { html } from 'htm/preact'

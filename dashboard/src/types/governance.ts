@@ -209,53 +209,7 @@ export interface SocialRuntimeStatus {
     last_pass_reason?: string | null
     last_system_skip_reason?: string | null
     activity_report?: string | null
-    checkins?: LodgeCheckinResult[]
   } | null
-}
-
-export interface LodgeCheckinResult {
-  name: string
-  trigger?: string
-  outcome?: 'acted' | 'passed' | 'skipped' | string
-  summary?: string
-  reason?: string
-}
-
-export interface LodgeTickResult {
-  hour?: number
-  checked: number
-  acted: number
-  acted_names: string[]
-  activity_report?: string
-  quiet_hours_overridden?: boolean
-  skipped_reason?: string | null
-  last_pass_reason?: string | null
-  last_system_skip_reason?: string | null
-  acted_rows?: Array<{ name: string; summary?: string }>
-  passed_rows?: Array<{ name: string; reason?: string }>
-  skipped_rows?: Array<{ name: string; reason?: string }>
-  checkins?: LodgeCheckinResult[]
-}
-
-export interface LodgeRuntimeStatus {
-  enabled: boolean
-  interval_s: number
-  quiet_start?: number
-  quiet_end?: number
-  quiet_active?: boolean
-  use_planner?: boolean
-  delegate_llm?: boolean
-  agent_count?: number
-  agents?: string[]
-  last_tick_ago_s?: number | null
-  last_tick_ago?: string
-  total_ticks?: number
-  total_checkins?: number
-  last_skip_reason?: string | null
-  last_pass_reason?: string | null
-  last_system_skip_reason?: string | null
-  last_tick_result?: LodgeTickResult | null
-  active_self_heartbeats?: string[]
 }
 
 export interface GardenerRuntimeStatus {
@@ -303,18 +257,10 @@ export interface GuardianRuntimeStatus {
   runtime_owner?: string | null
   zombie_loop_running?: boolean
   gc_loop_running?: boolean
-  lodge_enabled?: boolean
-  lodge_loop_started?: boolean
-  lodge_running?: boolean
   last_zombie_cleanup?: string | null
   last_gc?: string | null
-  last_lodge?: string | null
   last_zombie_result?: string | null
   last_gc_result?: string | null
-  last_lodge_result?: {
-    ok?: boolean
-    message?: string
-  } | null
 }
 
 export interface SentinelRuntimeStatus {

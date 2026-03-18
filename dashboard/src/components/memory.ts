@@ -72,7 +72,7 @@ function isAutomationBoardPost(post: BoardPost): boolean {
 }
 
 function isSystemBoardAuthor(author: string): boolean {
-  return author === 'lodge-system' || author === 'team-session'
+  return author === 'team-session'
 }
 
 function boardPostKind(post: BoardPost): 'human' | 'automation' | 'system' {

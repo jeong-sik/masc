@@ -111,21 +111,21 @@ let sanitize_room_id (s : string) =
   if out = "" then "session-default" else out
 
 let next_event_seq ~base_dir ~room_id =
-  match Trpg_engine_store.read_events ~base_dir ~room_id with
+  match Trpg.Engine_store.read_events ~base_dir ~room_id with
   | Ok [] -> 1
   | Ok events ->
       List.fold_left
-        (fun acc (ev : Trpg_engine_event.t) -> max acc ev.seq)
+        (fun acc (ev : Trpg.Engine_event.t) -> max acc ev.seq)
         0 events
       + 1
   | Error _ -> 1
 
 let append_event ~base_dir ~room_id ~seq ~event_type ~payload ?actor_id () =
   let event =
-    Trpg_engine_event.make ~seq ~room_id ~ts:(Types.now_iso ()) ~event_type
+    Trpg.Engine_event.make ~seq ~room_id ~ts:(Types.now_iso ()) ~event_type
       ?actor_id ~payload ()
   in
-  Trpg_engine_store.append_event ~base_dir ~event
+  Trpg.Engine_store.append_event ~base_dir ~event
 
 let handle_trpg_action_submit (ctx : context) ~canonical_tool args :
     (tool_result, tool_result) result =
@@ -182,7 +182,7 @@ let handle_trpg_action_submit (ctx : context) ~canonical_tool args :
     let seq = next_event_seq ~base_dir ~room_id in
     (match
        append_event ~base_dir ~room_id ~seq
-         ~event_type:Trpg_engine_event.Turn_action_proposed
+         ~event_type:Trpg.Engine_event.Turn_action_proposed
          ~actor_id:ctx.agent_name ~payload:proposed_payload ()
      with
     | Error e ->
@@ -193,7 +193,7 @@ let handle_trpg_action_submit (ctx : context) ~canonical_tool args :
     | Ok () -> (
         match
           append_event ~base_dir ~room_id ~seq:(seq + 1)
-            ~event_type:Trpg_engine_event.Turn_action_resolved
+            ~event_type:Trpg.Engine_event.Turn_action_resolved
             ~actor_id:ctx.agent_name ~payload:resolved_payload ()
         with
         | Error e ->
@@ -246,7 +246,7 @@ let handle_trpg_world_query (ctx : context) ~canonical_tool args :
           ~agent_name:ctx.agent_name
       in
       let skills = skills_for_world_query ctx.config ~agent_name:viewer_agent in
-      (match Trpg_world_projection.build ~base_dir:ctx.config.base_path ~room_id with
+      (match Trpg.World_projection.build ~base_dir:ctx.config.base_path ~room_id with
       | Error msg ->
           Error
             (err_json ~canonical_tool ~code:"IO_ERROR"
@@ -254,7 +254,7 @@ let handle_trpg_world_query (ctx : context) ~canonical_tool args :
                ())
       | Ok world ->
           let view =
-            Trpg_visibility.filter ~agent_name:viewer_agent ~after_seq
+            Trpg.Visibility.filter ~agent_name:viewer_agent ~after_seq
               ~event_limit ~available_skills:skills world
           in
           let payload =
@@ -268,7 +268,7 @@ let handle_trpg_world_query (ctx : context) ~canonical_tool args :
                 ("phase", `String view.phase);
                 ("self", world_agent_payload view.self);
                 ("visible_agents", `List (List.map world_agent_payload view.visible_agents));
-                ("events_since", `List (List.map Trpg_engine_event.to_yojson view.events_since));
+                ("events_since", `List (List.map Trpg.Engine_event.to_yojson view.events_since));
                 ("available_skills", json_string_list view.available_skills);
                 ( "source_counts",
                   `Assoc
@@ -487,7 +487,7 @@ let handle_client_snapshot_get (ctx : context) ~canonical_tool args :
       in
       let trpg_events =
         match
-          Trpg_engine_store.read_events ~base_dir:ctx.config.base_path
+          Trpg.Engine_store.read_events ~base_dir:ctx.config.base_path
             ~room_id:requested_room_id
         with
         | Ok events -> events
@@ -496,7 +496,7 @@ let handle_client_snapshot_get (ctx : context) ~canonical_tool args :
       let recent_events = take_last max_events trpg_events in
       let last_seq =
         match List.rev recent_events with
-        | (ev : Trpg_engine_event.t) :: _ -> ev.seq
+        | (ev : Trpg.Engine_event.t) :: _ -> ev.seq
         | [] -> 0
       in
       let payload =
@@ -528,8 +528,8 @@ let handle_client_snapshot_get (ctx : context) ~canonical_tool args :
                   ( "recent_events",
                     `List
                       (List.map
-                         (fun (ev : Trpg_engine_event.t) ->
-                           Trpg_engine_event.to_yojson ev)
+                         (fun (ev : Trpg.Engine_event.t) ->
+                           Trpg.Engine_event.to_yojson ev)
                          recent_events) );
                 ] );
             ("server_time", `Float (Time_compat.now ()));

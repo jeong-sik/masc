@@ -59,7 +59,7 @@ module type TRPG_SLOT = sig
   *)
   val apply_event :
     state:Yojson.Safe.t ->
-    event:Trpg_engine_event.t ->
+    event:Engine_event.t ->
     Yojson.Safe.t
 
   (** Compute derived state from current state.
@@ -133,12 +133,12 @@ end
 (** {1 Legacy Compatibility}
 
     [S] signature for backwards compatibility with existing
-    rule implementations like [Trpg_rule_dnd5e_lite].
+    rule implementations like [Rule_dnd5e_lite].
 *)
 module type S = sig
   val id : string
   val init_state : config:Yojson.Safe.t -> Yojson.Safe.t
-  val apply_event : state:Yojson.Safe.t -> event:Trpg_engine_event.t -> Yojson.Safe.t
+  val apply_event : state:Yojson.Safe.t -> event:Engine_event.t -> Yojson.Safe.t
   val derive_state : state:Yojson.Safe.t -> Yojson.Safe.t
 end
 

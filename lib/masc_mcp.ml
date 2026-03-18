@@ -370,22 +370,11 @@ module Autonomy_adjuster = Autonomy_adjuster
 
 module Tool_goals = Tool_goals
 module Tool_trpg = Tool_trpg
-module Trpg_store = Trpg_store
-module Trpg_preset_store = Trpg_preset_store
-module Trpg_engine_types = Trpg_engine_types
-module Trpg_engine_event = Trpg_engine_event
-module Trpg_engine_state_machine = Trpg_engine_state_machine
-module Trpg_engine_store = Trpg_engine_store
-module Trpg_engine_store_sqlite = Trpg_engine_store_sqlite
-module Trpg_world_projection = Trpg_world_projection
-module Trpg_visibility = Trpg_visibility
-module Trpg_rule = Trpg_rule
-module Trpg_rule_dnd5e_lite = Trpg_rule_dnd5e_lite
-module Trpg_engine_replay = Trpg_engine_replay
-module Trpg_bdi = Trpg_bdi
-module Trpg_harness = Trpg_harness
+module Trpg_schema = Trpg_schema
 module Trpg_dm_intent = Trpg_dm_intent
-module Trpg_actor_match = Trpg_actor_match
+module Trpg_harness = Trpg_harness
+module Trpg_round = Trpg_round
+module Trpg_handlers = Trpg_handlers
 
 (* Autoresearch — Karpathy-inspired autonomous experiment loop *)
 module Autoresearch = Autoresearch

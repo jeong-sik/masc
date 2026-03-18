@@ -182,7 +182,7 @@ let trpg_contribution_for_actor events actor_id =
     reasons := !reasons @ [ reason ]
   in
   List.iter
-    (fun (ev : Trpg_engine_event.t) ->
+    (fun (ev : Trpg.Engine_event.t) ->
       let payload = ev.payload in
       let event_actor_id =
         match payload |> Yojson.Safe.Util.member "actor_id" with
@@ -190,9 +190,9 @@ let trpg_contribution_for_actor events actor_id =
         | _ -> ev.actor_id
       in
       match ev.event_type with
-      | Trpg_engine_event.Turn_action_resolved ->
+      | Trpg.Engine_event.Turn_action_resolved ->
           if event_actor_id = Some actor_id then add 2 "turn.action.resolved +2"
-      | Trpg_engine_event.Intervention_applied ->
+      | Trpg.Engine_event.Intervention_applied ->
           let target_actor =
             match payload |> Yojson.Safe.Util.member "target_actor" with
             | `String v when String.trim v <> "" -> Some (String.trim v)
@@ -200,7 +200,7 @@ let trpg_contribution_for_actor events actor_id =
           in
           if target_actor = Some actor_id then
             add 1 "intervention.applied +1"
-      | Trpg_engine_event.Dice_rolled ->
+      | Trpg.Engine_event.Dice_rolled ->
           if event_actor_id = Some actor_id then
             let passed =
               match payload |> Yojson.Safe.Util.member "passed" with
@@ -234,10 +234,10 @@ let trpg_dice_roll_json ~base_dir ~body_str : trpg_api_result =
           else Ok i
       | None -> Ok (1 + Random.int 20)
     in
-    let bonus = Trpg_rule_dnd5e_lite.stat_bonus stat_value in
+    let bonus = Trpg.Rule_dnd5e_lite.stat_bonus stat_value in
     let total = raw_d20 + bonus in
     let classification =
-      Trpg_rule_dnd5e_lite.classify_roll ~raw_d20 ~total
+      Trpg.Rule_dnd5e_lite.classify_roll ~raw_d20 ~total
     in
     let payload =
       `Assoc
@@ -251,7 +251,7 @@ let trpg_dice_roll_json ~base_dir ~body_str : trpg_api_result =
           ("total", `Int total);
           ( "tier",
             `String
-              (Trpg_rule_dnd5e_lite.roll_tier_to_string
+              (Trpg.Rule_dnd5e_lite.roll_tier_to_string
                  classification.tier) );
           ("label", `String classification.label);
           ("passed", `Bool classification.passed);
@@ -261,7 +261,7 @@ let trpg_dice_roll_json ~base_dir ~body_str : trpg_api_result =
       trpg_append_event
         ~base_dir
         ~room_id
-        ~event_type:Trpg_engine_event.Dice_rolled
+        ~event_type:Trpg.Engine_event.Dice_rolled
         ~actor_id
         ~payload
         ()
@@ -271,7 +271,7 @@ let trpg_dice_roll_json ~base_dir ~body_str : trpg_api_result =
       (`Assoc
         [
           ("ok", `Bool true);
-          ("event", Trpg_engine_event.to_yojson event);
+          ("event", Trpg.Engine_event.to_yojson event);
           ( "roll",
             `Assoc
               [
@@ -463,7 +463,7 @@ let trpg_actor_spawn_json ~base_dir ~(idempotency_key : string option) ~body_str
           let payload = `Assoc payload_fields in
           let* _event =
             trpg_append_event ~base_dir ~room_id
-              ~event_type:Trpg_engine_event.Actor_spawned ~actor_id
+              ~event_type:Trpg.Engine_event.Actor_spawned ~actor_id
               ~payload ()
           in
           let* derived2 = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
@@ -511,7 +511,7 @@ let trpg_actor_claim_json ~base_dir ~body_str : trpg_api_result =
     let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
     let state = trpg_state_from_derived derived in
     let* events =
-      match Trpg_engine_store_sqlite.read_events ~base_dir ~room_id with
+      match Trpg.Engine_store_sqlite.read_events ~base_dir ~room_id with
       | Ok events -> Ok events
       | Error e ->
           Error
@@ -579,7 +579,7 @@ let trpg_actor_claim_json ~base_dir ~body_str : trpg_api_result =
               let payload = `Assoc [ ("keeper", `String keeper) ] in
               let* _event =
                 trpg_append_event ~base_dir ~room_id
-                  ~event_type:Trpg_engine_event.Actor_claimed
+                  ~event_type:Trpg.Engine_event.Actor_claimed
                   ~actor_id ~payload ()
               in
               let* derived2 =
@@ -622,7 +622,7 @@ let trpg_actor_release_json ~base_dir ~body_str : trpg_api_result =
           let payload = `Assoc [ ("keeper", `String keeper) ] in
           let* _event =
             trpg_append_event ~base_dir ~room_id
-              ~event_type:Trpg_engine_event.Actor_released
+              ~event_type:Trpg.Engine_event.Actor_released
               ~actor_id ~payload ()
           in
           let* derived2 =
@@ -652,9 +652,9 @@ let trpg_turn_advance_json ~base_dir ~body_str : trpg_api_result =
       match phase_opt_raw with
       | None -> Ok None
       | Some p -> (
-          match Trpg_engine_types.phase_of_string p with
+          match Trpg.Engine_types.phase_of_string p with
           | Ok phase ->
-              Ok (Some (Trpg_engine_types.string_of_phase phase))
+              Ok (Some (Trpg.Engine_types.string_of_phase phase))
           | Error e -> Error (`Bad_request, e))
     in
     let* derived = trpg_derive_state_json ~base_dir ~room_id ~rule_module in
@@ -665,7 +665,7 @@ let trpg_turn_advance_json ~base_dir ~body_str : trpg_api_result =
       trpg_append_event
         ~base_dir
         ~room_id
-        ~event_type:Trpg_engine_event.Turn_started
+        ~event_type:Trpg.Engine_event.Turn_started
         ~payload:turn_payload
         ()
     in
@@ -678,7 +678,7 @@ let trpg_turn_advance_json ~base_dir ~body_str : trpg_api_result =
             trpg_append_event
               ~base_dir
               ~room_id
-              ~event_type:Trpg_engine_event.Phase_changed
+              ~event_type:Trpg.Engine_event.Phase_changed
               ~payload
               ()
           in
@@ -688,7 +688,7 @@ let trpg_turn_advance_json ~base_dir ~body_str : trpg_api_result =
     let events_json =
       [ Some turn_event; phase_event_opt ]
       |> List.filter_map (fun x -> x)
-      |> List.map Trpg_engine_event.to_yojson
+      |> List.map Trpg.Engine_event.to_yojson
     in
     Ok
       (`Assoc
@@ -713,6 +713,6 @@ let trpg_stream_json ~base_dir ~room_id ~after_seq ~event_type_filter : trpg_api
             ("room_id", `String (String.trim room_id));
             ("after_seq", `Int after_seq);
             ("count", `Int (List.length events));
-            ("events", `List (List.map Trpg_engine_event.to_yojson events));
+            ("events", `List (List.map Trpg.Engine_event.to_yojson events));
           ])
 

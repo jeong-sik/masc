@@ -1,14 +1,13 @@
-open Masc_mcp
 open Yojson.Safe.Util
 
 let test_stat_bonus () =
-  Alcotest.(check int) "0 -> 0" 0 (Trpg_rule_dnd5e_lite.stat_bonus 0);
-  Alcotest.(check int) "2 -> 0" 0 (Trpg_rule_dnd5e_lite.stat_bonus 2);
-  Alcotest.(check int) "3 -> 1" 1 (Trpg_rule_dnd5e_lite.stat_bonus 3);
-  Alcotest.(check int) "8 -> 2" 2 (Trpg_rule_dnd5e_lite.stat_bonus 8)
+  Alcotest.(check int) "0 -> 0" 0 (Trpg.Rule_dnd5e_lite.stat_bonus 0);
+  Alcotest.(check int) "2 -> 0" 0 (Trpg.Rule_dnd5e_lite.stat_bonus 2);
+  Alcotest.(check int) "3 -> 1" 1 (Trpg.Rule_dnd5e_lite.stat_bonus 3);
+  Alcotest.(check int) "8 -> 2" 2 (Trpg.Rule_dnd5e_lite.stat_bonus 8)
 
 let test_classify_roll () =
-  let open Trpg_rule_dnd5e_lite in
+  let open Trpg.Rule_dnd5e_lite in
   let c1 = classify_roll ~raw_d20:1 ~total:99 in
   Alcotest.(check string) "nat1 tier" "critical_fail" (roll_tier_to_string c1.tier);
   Alcotest.(check bool) "nat1 passed" false c1.passed;
@@ -49,17 +48,17 @@ let test_hp_changed_event () =
       ]
   in
   let ev =
-    Trpg_engine_event.make
+    Trpg.Engine_event.make
       ~seq:1
       ~room_id:"room-1"
       ~ts:"2026-02-15T00:00:00Z"
-      ~event_type:Trpg_engine_event.Hp_changed
+      ~event_type:Trpg.Engine_event.Hp_changed
       ~payload:(`Assoc [ ("actor_id", `String "grimja"); ("delta", `Int (-40)) ])
       ()
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config
       ~events:[ ev ]
   in
@@ -77,11 +76,11 @@ let test_turn_action_proposed_added_to_narration_log () =
       ]
   in
   let ev =
-    Trpg_engine_event.make
+    Trpg.Engine_event.make
       ~seq:1
       ~room_id:"room-1"
       ~ts:"2026-02-15T00:00:00Z"
-      ~event_type:Trpg_engine_event.Turn_action_proposed
+      ~event_type:Trpg.Engine_event.Turn_action_proposed
       ~payload:
         (`Assoc
           [
@@ -94,8 +93,8 @@ let test_turn_action_proposed_added_to_narration_log () =
       ()
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config
       ~events:[ ev ]
   in
@@ -145,7 +144,7 @@ let test_room_restart_clears_previous_session_state () =
       ]
   in
   let mk_event ~seq ~event_type ~payload =
-    Trpg_engine_event.make
+    Trpg.Engine_event.make
       ~seq
       ~room_id:"room-1"
       ~ts:"2026-02-20T00:00:00Z"
@@ -157,11 +156,11 @@ let test_room_restart_clears_previous_session_state () =
     [
       mk_event
         ~seq:1
-        ~event_type:Trpg_engine_event.Dice_rolled
+        ~event_type:Trpg.Engine_event.Dice_rolled
         ~payload:(`Assoc [ ("actor_id", `String "p01"); ("total", `Int 14) ]);
       mk_event
         ~seq:2
-        ~event_type:Trpg_engine_event.Narration_posted
+        ~event_type:Trpg.Engine_event.Narration_posted
         ~payload:
           (`Assoc
             [
@@ -172,7 +171,7 @@ let test_room_restart_clears_previous_session_state () =
             ]);
       mk_event
         ~seq:3
-        ~event_type:Trpg_engine_event.Session_outcome
+        ~event_type:Trpg.Engine_event.Session_outcome
         ~payload:
           (`Assoc
             [
@@ -181,17 +180,17 @@ let test_room_restart_clears_previous_session_state () =
             ]);
       mk_event
         ~seq:4
-        ~event_type:Trpg_engine_event.Room_created
+        ~event_type:Trpg.Engine_event.Room_created
         ~payload:(`Assoc [ ("config", restarted_config) ]);
       mk_event
         ~seq:5
-        ~event_type:Trpg_engine_event.Room_started
+        ~event_type:Trpg.Engine_event.Room_started
         ~payload:(`Assoc []);
     ]
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config:initial_config
       ~events
   in
@@ -242,9 +241,9 @@ let combat_party_config =
 
 let test_combat_attack_damages_target () =
   let ev =
-    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+    Trpg.Engine_event.make ~seq:1 ~room_id:"room-1"
       ~ts:"2026-02-21T00:00:00Z"
-      ~event_type:Trpg_engine_event.Combat_attack
+      ~event_type:Trpg.Engine_event.Combat_attack
       ~payload:
         (`Assoc
           [
@@ -256,8 +255,8 @@ let test_combat_attack_damages_target () =
       ()
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config:combat_party_config ~events:[ ev ]
   in
   (* warrior ATK=12, bonus=12/3=4. raw_d20=15, total=15+4=19 => Great tier *)
@@ -283,9 +282,9 @@ let test_combat_attack_damages_target () =
 
 let test_combat_attack_critical_fail_misses () =
   let ev =
-    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+    Trpg.Engine_event.make ~seq:1 ~room_id:"room-1"
       ~ts:"2026-02-21T00:00:00Z"
-      ~event_type:Trpg_engine_event.Combat_attack
+      ~event_type:Trpg.Engine_event.Combat_attack
       ~payload:
         (`Assoc
           [
@@ -297,8 +296,8 @@ let test_combat_attack_critical_fail_misses () =
       ()
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config:combat_party_config ~events:[ ev ]
   in
   (* nat 1 = Critical_fail, damage multiplier 0.0 => damage = 0 *)
@@ -315,9 +314,9 @@ let test_combat_attack_critical_fail_misses () =
 
 let test_combat_defense_reduces_damage () =
   let ev =
-    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+    Trpg.Engine_event.make ~seq:1 ~room_id:"room-1"
       ~ts:"2026-02-21T00:00:00Z"
-      ~event_type:Trpg_engine_event.Combat_defense
+      ~event_type:Trpg.Engine_event.Combat_defense
       ~payload:
         (`Assoc
           [
@@ -328,8 +327,8 @@ let test_combat_defense_reduces_damage () =
       ()
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config:combat_party_config ~events:[ ev ]
   in
   (* warrior DEF=8, bonus=8/3=2. raw_d20=15, total=15+2=17 => Great tier *)
@@ -359,15 +358,15 @@ let test_turn_timeout_advances_turn () =
       ]
   in
   let ev =
-    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+    Trpg.Engine_event.make ~seq:1 ~room_id:"room-1"
       ~ts:"2026-02-21T00:00:00Z"
-      ~event_type:Trpg_engine_event.Turn_timeout
+      ~event_type:Trpg.Engine_event.Turn_timeout
       ~payload:(`Assoc [ ("actor_id", `String "p01") ])
       ()
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config ~events:[ ev ]
   in
   let narration_log = state |> member "narration_log" |> to_list in
@@ -399,15 +398,15 @@ let test_keeper_unavailable_sets_auto_pilot () =
       ]
   in
   let ev =
-    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+    Trpg.Engine_event.make ~seq:1 ~room_id:"room-1"
       ~ts:"2026-02-21T00:00:00Z"
-      ~event_type:Trpg_engine_event.Keeper_unavailable
+      ~event_type:Trpg.Engine_event.Keeper_unavailable
       ~payload:(`Assoc [ ("actor_id", `String "p01") ])
       ()
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config ~events:[ ev ]
   in
   let control =
@@ -454,17 +453,17 @@ let test_world_event_damages_all_alive () =
       ]
   in
   let ev =
-    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+    Trpg.Engine_event.make ~seq:1 ~room_id:"room-1"
       ~ts:"2026-02-21T00:00:00Z"
-      ~event_type:Trpg_engine_event.World_event
+      ~event_type:Trpg.Engine_event.World_event
       ~payload:
         (`Assoc
           [ ("effect_type", `String "earthquake"); ("damage", `Int 5) ])
       ()
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config ~events:[ ev ]
   in
   let p1_hp = state |> member "party" |> member "p1" |> member "hp" |> to_int in
@@ -488,15 +487,15 @@ let test_session_started_sets_timestamp () =
       ]
   in
   let ev =
-    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+    Trpg.Engine_event.make ~seq:1 ~room_id:"room-1"
       ~ts:"2026-02-21T12:00:00Z"
-      ~event_type:Trpg_engine_event.Session_started
+      ~event_type:Trpg.Engine_event.Session_started
       ~payload:(`Assoc [])
       ()
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config ~events:[ ev ]
   in
   let session_started_at =
@@ -506,7 +505,7 @@ let test_session_started_sets_timestamp () =
     session_started_at
 
 let test_advantage_takes_higher_roll () =
-  let open Trpg_rule_dnd5e_lite in
+  let open Trpg.Rule_dnd5e_lite in
   (* Advantage: max(5, 18) = 18. total = 18 + 10/3 + 0 = 18 + 3 = 21. Great. *)
   let result =
     roll_with_advantage ~d20_1:5 ~d20_2:18 ~stat:10 ~modifier:0
@@ -521,7 +520,7 @@ let test_advantage_takes_higher_roll () =
     (roll_tier_to_string result2.tier)
 
 let test_roll_with_modifier () =
-  let open Trpg_rule_dnd5e_lite in
+  let open Trpg.Rule_dnd5e_lite in
   (* raw_d20=10, stat=9 (bonus=3), modifier=2 => total = 10+3+2 = 15. Success. *)
   let r = roll_with_modifier ~raw_d20:10 ~stat:9 ~modifier:2 in
   Alcotest.(check string) "total 15 is success" "success"
@@ -534,9 +533,9 @@ let test_roll_with_modifier () =
 
 let test_combat_attack_with_advantage () =
   let ev =
-    Trpg_engine_event.make ~seq:1 ~room_id:"room-1"
+    Trpg.Engine_event.make ~seq:1 ~room_id:"room-1"
       ~ts:"2026-02-21T00:00:00Z"
-      ~event_type:Trpg_engine_event.Combat_attack
+      ~event_type:Trpg.Engine_event.Combat_attack
       ~payload:
         (`Assoc
           [
@@ -550,8 +549,8 @@ let test_combat_attack_with_advantage () =
       ()
   in
   let state =
-    Trpg_engine_replay.derive_state
-      ~rule:(module Trpg_rule_dnd5e_lite)
+    Trpg.Engine_replay.derive_state
+      ~rule:(module Trpg.Rule_dnd5e_lite)
       ~config:combat_party_config ~events:[ ev ]
   in
   (* Advantage: max(3,18)=18. ATK=12, bonus=4. total=18+4=22 => Great *)

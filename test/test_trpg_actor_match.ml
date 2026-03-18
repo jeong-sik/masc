@@ -1,6 +1,5 @@
-(** Tests for Trpg_actor_match — Actor-Keeper Compatibility Scoring. *)
+(** Tests for Trpg.Actor_match — Actor-Keeper Compatibility Scoring. *)
 
-open Masc_mcp
 
 let eps = 1e-6
 
@@ -14,7 +13,7 @@ let check_float msg expected actual =
 (* ---------- tokenize ---------- *)
 
 let test_tokenize_basic () =
-  let tokens = Trpg_actor_match.tokenize "The brave warrior fights" in
+  let tokens = Trpg.Actor_match.tokenize "The brave warrior fights" in
   (* "the" is a stop word, single-char filtered *)
   Alcotest.(check bool) "contains brave" true (List.mem "brave" tokens);
   Alcotest.(check bool) "contains warrior" true (List.mem "warrior" tokens);
@@ -22,75 +21,75 @@ let test_tokenize_basic () =
   Alcotest.(check bool) "no stop word 'the'" false (List.mem "the" tokens)
 
 let test_tokenize_punctuation () =
-  let tokens = Trpg_actor_match.tokenize "fire-breathing,dragon;slayer" in
+  let tokens = Trpg.Actor_match.tokenize "fire-breathing,dragon;slayer" in
   Alcotest.(check bool) "fire" true (List.mem "fire" tokens);
   Alcotest.(check bool) "breathing" true (List.mem "breathing" tokens);
   Alcotest.(check bool) "dragon" true (List.mem "dragon" tokens);
   Alcotest.(check bool) "slayer" true (List.mem "slayer" tokens)
 
 let test_tokenize_empty () =
-  let tokens = Trpg_actor_match.tokenize "" in
+  let tokens = Trpg.Actor_match.tokenize "" in
   Alcotest.(check int) "empty input" 0 (List.length tokens)
 
 let test_tokenize_dedup () =
-  let tokens = Trpg_actor_match.tokenize "brave brave brave" in
+  let tokens = Trpg.Actor_match.tokenize "brave brave brave" in
   Alcotest.(check int) "deduped to 1" 1 (List.length tokens)
 
 (* ---------- trait_overlap_score ---------- *)
 
 let test_trait_overlap_both_empty () =
-  let s = Trpg_actor_match.trait_overlap_score [] [] in
+  let s = Trpg.Actor_match.trait_overlap_score [] [] in
   check_float "both empty -> 0.5" 0.5 s
 
 let test_trait_overlap_identical () =
   let s =
-    Trpg_actor_match.trait_overlap_score [ "brave"; "wise" ] [ "brave"; "wise" ]
+    Trpg.Actor_match.trait_overlap_score [ "brave"; "wise" ] [ "brave"; "wise" ]
   in
   check_float "identical -> 1.0" 1.0 s
 
 let test_trait_overlap_disjoint () =
   let s =
-    Trpg_actor_match.trait_overlap_score [ "brave" ] [ "cunning" ]
+    Trpg.Actor_match.trait_overlap_score [ "brave" ] [ "cunning" ]
   in
   check_float "disjoint -> 0.0" 0.0 s
 
 let test_trait_overlap_partial () =
   (* {brave, wise} ∩ {brave, cunning} = {brave}, union = 3 *)
   let s =
-    Trpg_actor_match.trait_overlap_score
+    Trpg.Actor_match.trait_overlap_score
       [ "brave"; "wise" ] [ "brave"; "cunning" ]
   in
   check_float "partial -> 1/3" (1.0 /. 3.0) s
 
 let test_trait_overlap_case_insensitive () =
   let s =
-    Trpg_actor_match.trait_overlap_score [ "BRAVE" ] [ "brave" ]
+    Trpg.Actor_match.trait_overlap_score [ "BRAVE" ] [ "brave" ]
   in
   check_float "case insensitive -> 1.0" 1.0 s
 
 (* ---------- archetype_affinity_score ---------- *)
 
 let test_archetype_known_pair () =
-  let s = Trpg_actor_match.archetype_affinity_score "analytical" "wizard" in
+  let s = Trpg.Actor_match.archetype_affinity_score "analytical" "wizard" in
   check_float "analytical+wizard -> 0.9" 0.9 s
 
 let test_archetype_unknown_pair () =
-  let s = Trpg_actor_match.archetype_affinity_score "mysterious" "ranger" in
+  let s = Trpg.Actor_match.archetype_affinity_score "mysterious" "ranger" in
   check_float "unknown pair -> 0.5" 0.5 s
 
 let test_archetype_case_insensitive () =
-  let s = Trpg_actor_match.archetype_affinity_score "CREATIVE" "Bard" in
+  let s = Trpg.Actor_match.archetype_affinity_score "CREATIVE" "Bard" in
   check_float "case insensitive -> 0.9" 0.9 s
 
 (* ---------- semantic_alignment_score ---------- *)
 
 let test_semantic_both_empty () =
-  let s = Trpg_actor_match.semantic_alignment_score "" "" in
+  let s = Trpg.Actor_match.semantic_alignment_score "" "" in
   check_float "both empty -> 0.0" 0.0 s
 
 let test_semantic_identical () =
   let s =
-    Trpg_actor_match.semantic_alignment_score
+    Trpg.Actor_match.semantic_alignment_score
       "brave warrior fights evil"
       "brave warrior fights evil"
   in
@@ -98,7 +97,7 @@ let test_semantic_identical () =
 
 let test_semantic_partial () =
   let s =
-    Trpg_actor_match.semantic_alignment_score
+    Trpg.Actor_match.semantic_alignment_score
       "brave warrior"
       "brave wizard scholar"
   in
@@ -110,7 +109,7 @@ let test_semantic_partial () =
 
 let test_score_basic () =
   let ms =
-    Trpg_actor_match.score
+    Trpg.Actor_match.score
       ~keeper_name:"alice"
       ~keeper_style:"analytical"
       ~keeper_description:"wise scholarly researcher"
@@ -137,7 +136,7 @@ let test_rank_order () =
     ]
   in
   let results =
-    Trpg_actor_match.rank ~keepers ~actor_id:"actor-1"
+    Trpg.Actor_match.rank ~keepers ~actor_id:"actor-1"
       ~actor_archetype:"wizard" ~actor_traits:[ "wise" ]
       ~actor_persona:"A wise wizard"
   in
@@ -150,7 +149,7 @@ let test_rank_order () =
 
 let test_rank_empty_keepers () =
   let results =
-    Trpg_actor_match.rank ~keepers:[] ~actor_id:"actor-1"
+    Trpg.Actor_match.rank ~keepers:[] ~actor_id:"actor-1"
       ~actor_archetype:"wizard" ~actor_traits:[] ~actor_persona:""
   in
   Alcotest.(check int) "empty keepers -> empty results" 0 (List.length results)
@@ -160,7 +159,7 @@ let test_rank_empty_keepers () =
 let test_best_match_some () =
   let keepers = [ ("alice", "analytical", "wise researcher") ] in
   let result =
-    Trpg_actor_match.best_match ~keepers ~actor_id:"a1"
+    Trpg.Actor_match.best_match ~keepers ~actor_id:"a1"
       ~actor_archetype:"wizard" ~actor_traits:[] ~actor_persona:""
   in
   Alcotest.(check bool) "Some" true (Option.is_some result);
@@ -169,7 +168,7 @@ let test_best_match_some () =
 
 let test_best_match_none () =
   let result =
-    Trpg_actor_match.best_match ~keepers:[] ~actor_id:"a1"
+    Trpg.Actor_match.best_match ~keepers:[] ~actor_id:"a1"
       ~actor_archetype:"wizard" ~actor_traits:[] ~actor_persona:""
   in
   Alcotest.(check bool) "None" true (Option.is_none result)
@@ -178,12 +177,12 @@ let test_best_match_none () =
 
 let test_to_yojson () =
   let ms =
-    Trpg_actor_match.score
+    Trpg.Actor_match.score
       ~keeper_name:"alice" ~keeper_style:"analytical"
       ~keeper_description:"wise" ~actor_id:"a1"
       ~actor_archetype:"wizard" ~actor_traits:[] ~actor_persona:""
   in
-  let json = Trpg_actor_match.to_yojson ms in
+  let json = Trpg.Actor_match.to_yojson ms in
   let s = Yojson.Safe.to_string json in
   Alcotest.(check bool) "contains keeperName" true
     (String.length s > 0
@@ -193,12 +192,12 @@ let test_to_yojson () =
 
 let test_ranking_to_yojson () =
   let ms1 =
-    Trpg_actor_match.score
+    Trpg.Actor_match.score
       ~keeper_name:"alice" ~keeper_style:"analytical"
       ~keeper_description:"" ~actor_id:"a1"
       ~actor_archetype:"wizard" ~actor_traits:[] ~actor_persona:""
   in
-  let json = Trpg_actor_match.ranking_to_yojson [ ms1 ] in
+  let json = Trpg.Actor_match.ranking_to_yojson [ ms1 ] in
   match json with
   | `List [ _ ] -> ()  (* ok, single element *)
   | _ -> Alcotest.fail "expected JSON array with 1 element"
@@ -206,7 +205,7 @@ let test_ranking_to_yojson () =
 (* ---------- Test runner ---------- *)
 
 let () =
-  Alcotest.run "Trpg_actor_match"
+  Alcotest.run "Trpg.Actor_match"
     [
       ( "tokenize",
         [

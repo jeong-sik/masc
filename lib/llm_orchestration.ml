@@ -248,9 +248,19 @@ let complete ?timeout_sec (req : completion_request) : (completion_response, str
       let upstream_result =
           match req.model.provider with
           | Glm_cloud ->
-              Llm_provider_bridge.call_glm_cloud_with_pool ?timeout_sec req
+              (* GLM pool model routing preserved through OAS path *)
+              let preferred_model =
+                if Glm_pool.is_pool_model req.model.model_id then
+                  Some req.model.model_id
+                else None
+              in
+              Glm_pool.with_model preferred_model (fun pool_model_id ->
+                let modified_model = { req.model with model_id = pool_model_id } in
+                let modified_req = { req with model = modified_model } in
+                Llm_provider_oas.complete_via_oas ?timeout_sec modified_req
+                |> Result.map (fun resp -> { resp with model_used = pool_model_id }))
           | _ ->
-              Llm_provider_bridge.call ?timeout_sec req
+              Llm_provider_oas.complete_via_oas ?timeout_sec req
         in
         (match (cache_key, upstream_result) with
         | Some key, Ok resp -> (

@@ -1,18 +1,14 @@
-(** Perpetual_oas — Adapter bridging MASC perpetual_loop to OAS Agent.t.
+(** Perpetual_oas — OAS Agent.t adapter for the perpetual agent loop.
 
-    Demonstrates the complete migration path from MASC's bespoke perpetual
-    loop (think -> act -> observe -> verify -> compact -> heartbeat -> loop)
-    to OAS Agent.t with lifecycle hooks. Ties together all previous phases:
+    Bridges MASC's perpetual loop lifecycle to OAS Agent.t hooks:
+    - perpetual_loop thresholds -> OAS BeforeTurn hook
+    - idle detection -> OAS OnIdle hook
+    - heartbeat tick -> OAS periodic_callback
+    - verification -> OAS PreToolUse hook (Verifier_oas)
+    - compaction -> OAS Context_reducer (Context_compact_oas)
+    - DNA/handoff -> OAS Checkpoint (Succession_oas)
 
-    - Phase 1: Context_compact_oas (context reduction)
-    - Phase 2: Succession_oas / Oas_checkpoint_bridge (checkpoint/DNA)
-    - Phase 3: Llm_provider_oas (LLM cascade)
-    - Phase 4: Verifier_oas (guardrails/hooks)
-    - Phase 5: Worker_oas (Agent.run adapter)
-
-    Enabled via [MASC_USE_OAS_PERPETUAL=true] environment variable.
-
-    Split into sub-modules (H2):
+    Split into sub-modules:
     - {!Perpetual_oas_state}: mutable state + mutex ops
     - {!Perpetual_oas_hooks}: 4 lifecycle hooks + periodic callback
     - {!Perpetual_oas_build}: OAS Agent.t builder
@@ -210,10 +206,7 @@ let run_perpetual_via_oas
 (* Unified entry point — dispatch based on feature flag              *)
 (* ================================================================ *)
 
-(** Run the perpetual loop, dispatching to OAS or legacy path.
-
-    If [MASC_USE_OAS_PERPETUAL=true], uses {!run_perpetual_via_oas}.
-    Otherwise, delegates to {!Perpetual_loop.run}. *)
+(** Run the perpetual loop via OAS Agent.t. *)
 let run
     ~(sw : Eio.Switch.t)
     ~(config : Perpetual_loop.loop_config)

@@ -549,7 +549,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         let ctx : Tool_perpetual.context = { agent_name;
           start_loop = Some (fun loop_state loop_config ->
             Eio.Fiber.fork ~sw (fun () ->
-              try Perpetual_loop.run ~config:loop_config ~state:loop_state
+              try Perpetual_oas.run ~sw ~config:loop_config ~state:loop_state
               with exn ->
                 log_mcp_exn ~label:(Printf.sprintf "perpetual loop crashed for %s"
                   loop_state.Perpetual_loop.trace_id) exn));

@@ -299,17 +299,10 @@ let test_mcp_rejects_reconnect_then_recovers () =
   let first = run_curl ~headers ~max_time:0.6 ~port ~path:"/mcp" () in
   check_status "first /mcp connect accepted" 200 first;
 
+  (* MCP path no longer rate-limits SSE reconnects (rate limiting removed
+     during TRPG archival). Verify immediate reconnect is accepted. *)
   let second = run_curl ~headers ~max_time:0.6 ~port ~path:"/mcp" () in
-  check_status "immediate /mcp reconnect rejected" 429 second;
-  check bool "retry-after header present" true (Option.is_some (header_value second "retry-after"));
-
-  let json = Yojson.Safe.from_string second.body in
-  check string "error code" "sse_connection_rate_limited" (json |> member "error" |> to_string);
-  check string "reason is session cooldown" "session_cooldown" (json |> member "reason" |> to_string);
-
-  Unix.sleepf 1.7;
-  let third = run_curl ~headers ~max_time:0.6 ~port ~path:"/mcp" () in
-  check_status "post-cooldown /mcp reconnect accepted" 200 third
+  check_status "immediate /mcp reconnect accepted" 200 second
 
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ->

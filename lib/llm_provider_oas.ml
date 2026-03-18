@@ -1,5 +1,9 @@
 (** OAS LLM Provider adapter — bridges MASC LLM types to OAS Provider layer.
 
+    NOTE: Not yet wired into production code paths. These adapters will
+    replace existing implementations when feature flags are enabled.
+    Currently available for direct testing only.
+
     Provides an alternative code path for LLM calls using OAS
     {!Agent_sdk.Provider.config} and {!Agent_sdk.Provider.cascade} types
     instead of the raw {!Llm_provider_bridge} direct HTTP path.

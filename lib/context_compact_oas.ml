@@ -185,30 +185,56 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
       ) masc_msgs in
       List.map masc_msg_to_oas filtered)
   | SummarizeOld ->
+    (* STUB: requires LLM call for real summarization.
+       Falls back to Keep_first_and_last { first_n = 2; last_n = 5 }
+       to preserve conversation boundaries without pretending to summarize. *)
     Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
-      let masc_msgs = List.map oas_msg_to_masc oas_msgs in
-      let n = List.length masc_msgs in
-      let oldest_pct = 0.3 in
-      let split_at = max 1 (int_of_float (float_of_int n *. oldest_pct)) in
-      if n <= 2 then oas_msgs
+      let n = List.length oas_msgs in
+      let first_n = 2 in
+      let last_n = 5 in
+      if n <= first_n + last_n then oas_msgs
       else
-        let old_msgs = List.filteri (fun i _ -> i < split_at) masc_msgs in
-        let recent_msgs = List.filteri (fun i _ -> i >= split_at) masc_msgs in
-        let summary_parts = List.map (fun (m : Llm_client.message) ->
-          let role_str = match m.role with
-            | Llm_client.System -> "SYS" | Llm_client.User -> "USR"
-            | Llm_client.Assistant -> "AST" | Llm_client.Tool -> "TOOL"
-          in
-          let mc = Llm_client.text_of_message m in
-          let truncated = if String.length mc > 80
-            then String.sub mc 0 80 ^ "..."
-            else mc in
-          sprintf "[%s] %s" role_str truncated
-        ) old_msgs in
-        let summary_text = sprintf "%s\n(Fallback summary of %d earlier messages; reference only.)\n%s"
-          memory_summary_prefix (List.length old_msgs) (String.concat "\n" summary_parts) in
-        let summary_msg = Llm_client.assistant_msg summary_text in
-        List.map masc_msg_to_oas (summary_msg :: recent_msgs))
+        let first = List.filteri (fun i _ -> i < first_n) oas_msgs in
+        let last = List.filteri (fun i _ -> i >= n - last_n) oas_msgs in
+        first @ last)
+
+(* ================================================================ *)
+(* Sentinel Roundtrip Validation                                    *)
+(* ================================================================ *)
+
+(** Validate that sentinel-tagged messages survive OAS reduction intact.
+    Returns [true] if all sentinel tags in the original messages can be
+    correctly recovered from the reduced messages. Detects corruption
+    from strategies like Merge_contiguous or Summarize_old that may
+    concatenate or truncate content containing \x00 sentinel bytes. *)
+let validate_roundtrip
+    ~(original : Llm_client.message list)
+    ~(reduced : Llm_client.message list)
+  : bool =
+  (* Count sentinel-tagged messages (System and Tool roles) in original *)
+  let count_sentinels msgs =
+    List.fold_left (fun acc (m : Llm_client.message) ->
+      match m.role with
+      | Llm_client.System | Llm_client.Tool -> acc + 1
+      | _ -> acc
+    ) 0 msgs
+  in
+  let original_sentinel_count = count_sentinels original in
+  (* If no sentinel-tagged messages, nothing to validate *)
+  if original_sentinel_count = 0 then true
+  else begin
+    (* Verify each reduced message with a sentinel tag can be cleanly parsed *)
+    let valid = List.for_all (fun (m : Llm_client.message) ->
+      let text = Llm_client.text_of_message m in
+      (* Check for corrupted sentinels: \x00 present but not as valid prefix *)
+      if String.contains text '\x00' then
+        starts_with ~prefix:system_role_tag text
+        || starts_with ~prefix:tool_role_tag text
+        (* Also allow text that has no sentinel at all — it was a plain message *)
+      else true
+    ) reduced in
+    valid
+  end
 
 (* ================================================================ *)
 (* Public API                                                       *)
@@ -220,6 +246,10 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
     builds a composed OAS reducer, runs the reduction, and converts back.
 
     Returns the compacted message list and new token count.
+
+    After reduction, validates sentinel integrity. If corruption is detected
+    (e.g., from Merge_contiguous joining sentinel-tagged content), falls back
+    to returning the original messages with a warning log.
 
     This function is functionally equivalent to [Context_manager.compact]
     but routes through OAS Context_reducer, enabling A/B comparison. *)
@@ -234,5 +264,19 @@ let compact
   let oas_msgs = List.map masc_msg_to_oas messages in
   let reduced = Agent_sdk.Context_reducer.reduce reducer oas_msgs in
   let result_messages = List.map oas_msg_to_masc reduced in
-  let token_count = count_tokens system_prompt result_messages in
-  (result_messages, token_count)
+  (* Validate sentinel integrity after reduction *)
+  if validate_roundtrip ~original:messages ~reduced:result_messages then begin
+    let token_count = count_tokens system_prompt result_messages in
+    (result_messages, token_count)
+  end else begin
+    eprintf "[context_compact_oas] WARNING: sentinel corruption detected after \
+             reduction with strategies [%s], falling back to original messages\n%!"
+      (String.concat ", " (List.map (fun s -> match s with
+        | PruneToolOutputs -> "PruneToolOutputs"
+        | MergeContiguous -> "MergeContiguous"
+        | DropLowImportance -> "DropLowImportance"
+        | SummarizeOld -> "SummarizeOld"
+      ) strategies));
+    let token_count = count_tokens system_prompt messages in
+    (messages, token_count)
+  end

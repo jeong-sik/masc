@@ -1,5 +1,9 @@
 (** Worker_oas — Adapter bridging MASC worker_container_meta to OAS Agent.t.
 
+    NOTE: Not yet wired into production code paths. These adapters will
+    replace existing implementations when feature flags are enabled.
+    Currently available for direct testing only.
+
     Converts MASC worker metadata into OAS Agent configuration, using the
     OAS Builder pattern for agent construction. Wraps Agent.run with MASC
     worker lifecycle hooks (heartbeat, join/leave, board posting).

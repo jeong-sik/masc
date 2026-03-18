@@ -71,6 +71,10 @@ let create_perpetual_state ~trace_id =
     trace_id;
   }
 
+(** Mutex protecting all mutable [perpetual_state] fields from concurrent
+    access by Eio fibers (hook closures, periodic callbacks). *)
+let state_mutex = Eio.Mutex.create ()
+
 (* ================================================================ *)
 (* Perpetual Hooks — lifecycle via OAS hook events                   *)
 (* ================================================================ *)
@@ -97,7 +101,8 @@ let perpetual_hooks
   let before_turn : Oas.Hooks.hook = fun event ->
     match event with
     | Oas.Hooks.BeforeTurn { turn; _ } ->
-      pstate.turn_count <- turn;
+      Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+        pstate.turn_count <- turn);
       emit (TurnStart turn);
       (* Check thresholds against current context *)
       let ratio = Context_manager.context_ratio !ctx_ref in
@@ -128,7 +133,8 @@ let perpetual_hooks
           token_count = new_token_count;
         };
         let after = new_token_count in
-        pstate.compaction_count <- pstate.compaction_count + 1;
+        Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+          pstate.compaction_count <- pstate.compaction_count + 1);
         emit (Compacted {
           before_tokens = before;
           after_tokens = after;
@@ -143,8 +149,9 @@ let perpetual_hooks
           | [m] -> m
           | [] -> Llm_client.default_local_model_spec ()
         in
-        pstate.handoff_triggered <- true;
-        pstate.running <- false;
+        Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+          pstate.handoff_triggered <- true;
+          pstate.running <- false);
         emit (Handoff {
           to_model = next_model.model_id;
           generation = pstate.generation + 1;
@@ -161,16 +168,17 @@ let perpetual_hooks
         | Some u -> u.input_tokens + u.output_tokens
         | None -> 0
       in
-      pstate.total_tokens <- pstate.total_tokens + tokens_used;
       (* Check for tool calls to determine idle state *)
       let has_tool_use = List.exists (function
         | Oas.Types.ToolUse _ -> true
         | _ -> false
       ) response.content in
-      if has_tool_use then
-        pstate.idle_turns <- 0
-      else
-        pstate.idle_turns <- pstate.idle_turns + 1;
+      Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+        pstate.total_tokens <- pstate.total_tokens + tokens_used;
+        if has_tool_use then
+          pstate.idle_turns <- 0
+        else
+          pstate.idle_turns <- pstate.idle_turns + 1);
       (* Check for goal completion or stuck signals in response text *)
       let text = List.filter_map (function
         | Oas.Types.Text s -> Some s
@@ -180,13 +188,15 @@ let perpetual_hooks
       if (try ignore (Str.search_forward
             (Str.regexp_string "[GOAL_COMPLETE]") upper 0); true
           with Not_found -> false) then begin
-        pstate.running <- false;
+        Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+          pstate.running <- false);
         emit (Terminated "Goal complete (OAS)")
       end
       else if (try ignore (Str.search_forward
             (Str.regexp_string "[STUCK") upper 0); true
           with Not_found -> false) then begin
-        pstate.running <- false;
+        Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+          pstate.running <- false);
         emit (Terminated "Agent stuck (OAS)")
       end;
       emit (TurnEnd { turn; tokens_used; cost = 0.0 });
@@ -196,9 +206,11 @@ let perpetual_hooks
   let on_idle : Oas.Hooks.hook = fun event ->
     match event with
     | Oas.Hooks.OnIdle { consecutive_idle_turns; _ } ->
-      pstate.idle_turns <- consecutive_idle_turns;
+      Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+        pstate.idle_turns <- consecutive_idle_turns);
       if consecutive_idle_turns >= config.max_idle_turns then begin
-        pstate.running <- false;
+        Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+          pstate.running <- false);
         emit (IdleDetected consecutive_idle_turns);
         emit (Terminated "Max idle turns reached (OAS)");
         Oas.Hooks.Skip
@@ -248,9 +260,11 @@ let perpetual_periodic_callbacks
     Oas.Agent_types.interval_sec = config.heartbeat_interval_s;
     callback = (fun () ->
       let now = Time_compat.now () in
-      pstate.last_heartbeat <- now;
+      let turn = Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+        pstate.last_heartbeat <- now;
+        pstate.turn_count) in
       let pct = Context_manager.context_ratio !ctx_ref *. 100.0 in
-      emit (Heartbeat { turn = pstate.turn_count; context_pct = pct })
+      emit (Heartbeat { turn; context_pct = pct })
     );
   }]
 
@@ -420,7 +434,8 @@ let run_perpetual_via_oas
   in
   let trace_id = state.trace_id in
   let pstate = create_perpetual_state ~trace_id in
-  pstate.generation <- state.generation;
+  Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+    pstate.generation <- state.generation);
   let ctx_ref = ref state.context in
   eprintf "[perpetual_oas] Starting OAS loop: goal=%s, trace=%s, gen=%d\n%!"
     config.initial_goal trace_id pstate.generation;
@@ -507,12 +522,13 @@ let run_perpetual_via_oas
       pstate.generation (pstate.generation + 1)))
   end;
   (* Sync mutable state back to MASC loop_state *)
-  state.turn_count <- pstate.turn_count;
-  state.idle_turns <- pstate.idle_turns;
-  state.total_tokens <- pstate.total_tokens;
-  state.total_cost <- pstate.total_cost;
-  state.compaction_count <- pstate.compaction_count;
-  state.running <- false;
+  Eio.Mutex.use_rw ~protect:true state_mutex (fun () ->
+    state.turn_count <- pstate.turn_count;
+    state.idle_turns <- pstate.idle_turns;
+    state.total_tokens <- pstate.total_tokens;
+    state.total_cost <- pstate.total_cost;
+    state.compaction_count <- pstate.compaction_count;
+    state.running <- false);
   Oas.Agent.close agent;
   (* Log result *)
   (match result with

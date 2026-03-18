@@ -63,7 +63,7 @@ let health_handler _request reqd =
     else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
   in
   let build = Build_identity.current () in
-  let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let lodge_json = `Assoc [("status", `String "deprecated")] in
   let gardener_json = Gardener.status_json () in
   let guardian_json = Guardian.status_json () in
   let sentinel_json = Sentinel.status_json () in

@@ -302,36 +302,6 @@
  (modules test_guardian_sentinel)
  (libraries masc_mcp alcotest yojson unix))
 
-; Lodge_topic module tests (Heuristic/LLM/Hybrid Topic Extraction)
-(test
- (name test_lodge_topic)
- (modules test_lodge_topic)
- (libraries masc_mcp alcotest str yojson unix))
-
-; Lodge_personality module tests (mood → temperature mapping + OAS Context)
-(test
- (name test_lodge_personality)
- (modules test_lodge_personality)
- (libraries masc_mcp agent_sdk alcotest str yojson unix))
-
-; Lodge_reaction module tests (Emergent Identity System)
-(test
- (name test_lodge_reaction)
- (modules test_lodge_reaction)
- (libraries masc_mcp alcotest str yojson unix))
-
-; Lodge_tom module tests (SimToM Theory of Mind)
-(test
- (name test_lodge_tom)
- (modules test_lodge_tom)
- (libraries masc_mcp alcotest str yojson))
-
-; Lodge_decision module tests (structured LLM decision contract)
-(test
- (name test_lodge_decision)
- (modules test_lodge_decision)
- (libraries masc_mcp alcotest yojson))
-
 ; Safe_ops module tests (safe exception handling)
 (test
  (name test_safe_ops)
@@ -485,16 +455,6 @@
           test_tool_team_session_step_followup
           test_tool_team_session_misc)
  (libraries masc_mcp agent_sdk alcotest yojson unix eio eio_main))
-
-(test
- (name test_lodge_memory_local)
- (modules test_lodge_memory_local)
- (libraries masc_mcp alcotest unix))
-
-(test
- (name test_lodge_heartbeat_cleanup_coverage)
- (modules test_lodge_heartbeat_cleanup_coverage)
- (libraries masc_mcp alcotest unix))
 
 (test
  (name test_operator_control)

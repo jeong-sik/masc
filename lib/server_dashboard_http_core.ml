@@ -37,7 +37,7 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   let tasks = Room.get_tasks_raw_in_room config room_id in
   let agents = Room.get_agents_raw_in_room config room_id in
   let msgs = Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit:20 in
-  let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let lodge_json = `Assoc [("status", `String "deprecated")] in
   let social_runtime_json = Social_runtime.status_json ~config in
   let now_ts = Time_compat.now () in
   let (board_monitor_json, board_contract_ok) = board_monitoring_json ~now_ts in
@@ -415,7 +415,7 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
     Room.read_current_room config |> Option.value ~default:"default"
   in
   let tempo = Tempo.get_tempo config in
-  let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+  let lodge_json = `Assoc [("status", `String "deprecated")] in
   let social_runtime_json = Social_runtime.status_json ~config in
   let gardener_json = Gardener.status_json () in
   let guardian_json = Guardian.status_json () in

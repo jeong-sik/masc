@@ -127,6 +127,7 @@
    cp_microarch_summary
    cp_search_fabric
    lodge_dashboard
+   lodge_cascade
    ;; WebRTC modules removed — use ocaml-webrtc library directly
    eio_context
    encryption
@@ -213,24 +214,7 @@
    chain_run_store
    chain_native_eio
    log
-   lodge_broadcast
-   lodge_cascade
-   lodge_atmosphere
-   lodge_decision
-   lodge_personality
-   lodge_worker
-   lodge_agent_profile
-   lodge_ecosystem
-   lodge_heartbeat_state
-   lodge_heartbeat_agents
    lodge_heartbeat
-   lodge_rate_limit
-   lodge_trace
-   lodge_memory
-   lodge_memory_gc
-   lodge_reaction
-   lodge_topic
-   lodge_tom
    lodge_selection
    memory_stream
    agent_planner
@@ -427,7 +411,6 @@
    tool_lodge
    tool_mdal
    tool_mdal_schemas
-   lodge_daemon
    gardener_types
    gardener_state
    gardener_health
@@ -581,15 +564,6 @@
    tool_compact
    tool_shard
    tool_keeper
-   tool_lodge_config_http
-   tool_lodge_llm_cycle
-   tool_lodge_agents_cache
-   tool_lodge_react_core
-   tool_lodge_discussion_defs
-   tool_lodge_orchestrate
-   tool_lodge_agents_ops
-   tool_lodge_project
-   tool_lodge_autonomous
    trpg_schema
    trpg_types_world
    trpg_types_canon
@@ -723,15 +697,6 @@
  tool_command_plane_dispatch
  tool_command_plane_schemas_01
  tool_command_plane_schemas_02
- tool_lodge_config_http
- tool_lodge_llm_cycle
- tool_lodge_agents_cache
- tool_lodge_react_core
- tool_lodge_discussion_defs
- tool_lodge_orchestrate
- tool_lodge_agents_ops
- tool_lodge_project
- tool_lodge_autonomous
  env_config_core
  env_config_runtime
  env_config_governance
@@ -751,8 +716,6 @@
   team_session_engine_helpers
   team_session_engine_status
   team_session_engine_policy
-  lodge_heartbeat_state
-  lodge_heartbeat_agents
   ;; chain_mermaid_parser sub-modules
   chain_mermaid_parse
   chain_mermaid_node_content

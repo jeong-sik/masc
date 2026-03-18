@@ -268,8 +268,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             let run_cascade_batch requests =
               match timeout_sec_opt with
               | Some timeout_sec ->
-                  Llm_client.cascade ~timeout_sec requests
-              | None -> Llm_client.cascade requests
+                  Llm_orchestration.cascade ~timeout_sec requests
+              | None -> Llm_orchestration.cascade requests
             in
             (* Streaming-aware cascade: when on_text_delta is provided,
                try streaming the first request. Text deltas are forwarded

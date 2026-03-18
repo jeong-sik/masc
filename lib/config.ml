@@ -123,6 +123,8 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_goals.schemas
     @ Tool_team_session.schemas
     @ Tool_voice.schemas
+    (* Tool_protocol_game_view.schemas removed — module does not exist *)
+    (* Tool_trpg.schemas removed — module does not exist *)
     @ Tool_compact.schemas
     @ Tool_async_spawn.schemas
     )

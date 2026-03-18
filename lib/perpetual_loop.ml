@@ -247,6 +247,13 @@ let coding_turn ~config ~state =
       exit_code = result.Spawn_eio.exit_code;
       elapsed_ms = result.Spawn_eio.elapsed_ms;
     });
+    (* Log structured termination reason when available *)
+    (match result.Spawn_eio.termination with
+     | Some t ->
+       Log.Perpetual.info "coding spawn termination: %s (agent=%s, elapsed=%dms, tools=%d)"
+         (Spawn_eio.termination_reason_to_string t.reason)
+         t.agent_name t.elapsed_ms t.tool_call_count
+     | None -> ());
     Ok result
   | _ ->
     Error "coding_mode requires coding_sw and coding_proc_mgr to be set"
@@ -280,12 +287,17 @@ let publish_to_event_bus bus (ev : event) =
       (Agent_sdk.Event_bus.Custom ("masc:perpetual:terminated",
         `Assoc [("reason", `String reason);
                 ("timestamp", `Float (Time_compat.now ()))]))
-  | Compacted { before_tokens; after_tokens } ->
+  | Compacted { before_tokens; after_tokens; offloaded_path } ->
     Agent_sdk.Event_bus.publish bus
       (Agent_sdk.Event_bus.Custom ("masc:perpetual:compacted",
-        `Assoc [("before", `Int before_tokens);
-                ("after", `Int after_tokens);
-                ("timestamp", `Float (Time_compat.now ()))]))
+        `Assoc (List.concat [
+          [("before", `Int before_tokens);
+           ("after", `Int after_tokens);
+           ("timestamp", `Float (Time_compat.now ()))];
+          (match offloaded_path with
+           | Some p -> [("offloaded_path", `String p)]
+           | None -> [])
+        ])))
   | Handoff { to_model; generation } ->
     Agent_sdk.Event_bus.publish bus
       (Agent_sdk.Event_bus.Custom ("masc:perpetual:handoff",
@@ -432,19 +444,27 @@ let run_coding_turn ~config ~state =
     else
       state.idle_turns <- state.idle_turns + 1;
 
-    (* Context management: compact if needed *)
+    (* Context management: compact with offload if needed *)
     let ratio = Context_manager.context_ratio state.context in
     if ratio >= config.compact_threshold then begin
       let before = state.context.token_count in
-      state.context <- Context_manager.compact
-        state.context config.compact_strategies;
+      let result = Context_manager.compact_with_offload
+        ~session_ctx:state.session
+        ~compaction_count:state.compaction_count
+        state.context config.compact_strategies in
+      state.context <- result.context;
       let after = state.context.token_count in
       state.compaction_count <- state.compaction_count + 1;
       state.compaction_tokens_saved <- state.compaction_tokens_saved + max 0 (before - after);
       state.last_compaction_ts <- Time_compat.now ();
       state.last_compaction_before_tokens <- before;
       state.last_compaction_after_tokens <- after;
-      emit (Compacted { before_tokens = before; after_tokens = after })
+      (match result.offloaded_path with
+       | Some path ->
+         Log.Perpetual.info "compaction offloaded history to %s" path
+       | None -> ());
+      emit (Compacted { before_tokens = before; after_tokens = after;
+                         offloaded_path = result.offloaded_path })
     end;
 
     (* Handoff if context exhausted *)
@@ -603,19 +623,27 @@ let run_turn ~config ~state =
         | _ -> ()
       end;
 
-      (* 4. COMPACT: If context > threshold *)
+      (* 4. COMPACT: If context > threshold (with history offload) *)
       let ratio = Context_manager.context_ratio state.context in
       if ratio >= config.compact_threshold then begin
         let before = state.context.token_count in
-        state.context <- Context_manager.compact
-          state.context config.compact_strategies;
+        let result = Context_manager.compact_with_offload
+          ~session_ctx:state.session
+          ~compaction_count:state.compaction_count
+          state.context config.compact_strategies in
+        state.context <- result.context;
         let after = state.context.token_count in
         state.compaction_count <- state.compaction_count + 1;
         state.compaction_tokens_saved <- state.compaction_tokens_saved + max 0 (before - after);
         state.last_compaction_ts <- Time_compat.now ();
         state.last_compaction_before_tokens <- before;
         state.last_compaction_after_tokens <- after;
-        emit (Compacted { before_tokens = before; after_tokens = after })
+        (match result.offloaded_path with
+         | Some path ->
+           Log.Perpetual.info "compaction offloaded history to %s" path
+         | None -> ());
+        emit (Compacted { before_tokens = before; after_tokens = after;
+                           offloaded_path = result.offloaded_path })
       end;
 
       (* 5. PREPARE DNA: If context > prepare_threshold *)
@@ -793,12 +821,15 @@ let status ~config state : Yojson.Safe.t =
         ("tokens_used", `Int tokens_used);
         ("cost_usd", `Float cost);
       ]
-    | Compacted { before_tokens; after_tokens } ->
-      `Assoc [
-        ("kind", `String (event_kind ev));
-        ("before_tokens", `Int before_tokens);
-        ("after_tokens", `Int after_tokens);
-      ]
+    | Compacted { before_tokens; after_tokens; offloaded_path } ->
+      `Assoc (List.concat [
+        [("kind", `String (event_kind ev));
+         ("before_tokens", `Int before_tokens);
+         ("after_tokens", `Int after_tokens)];
+        (match offloaded_path with
+         | Some p -> [("offloaded_path", `String p)]
+         | None -> [])
+      ])
     | Prepared { dna_size } ->
       `Assoc [("kind", `String (event_kind ev)); ("dna_size", `Int dna_size)]
     | Handoff { to_model; generation } ->

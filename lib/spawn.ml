@@ -207,14 +207,32 @@ let default_configs = [
   });
 ]
 
-(** Get spawn config for agent *)
+(** Map CLI tool names and provider aliases to default_configs keys. *)
+let spawn_alias_map = [
+  ("claude-code", "claude");
+  ("claude-api", "claude");
+  ("anthropic", "claude");
+  ("gemini-cli", "gemini");
+  ("gemini-api", "gemini");
+  ("google", "gemini");
+  ("codex-cli", "codex");
+  ("codex-api", "codex");
+  ("openai", "codex");
+  ("llama.cpp", "llama");
+  ("llamacpp", "llama");
+]
+
+(** Get spawn config for agent.
+    Resolves CLI tool names (e.g. "claude-code") and provider canonical names
+    (e.g. "claude-api") to the short keys used in default_configs. *)
 let get_config agent_name =
-  let canonical =
-    match Provider_adapter.resolve_direct_canonical_name agent_name with
-    | Some value -> value
-    | None -> agent_name
-  in
-  List.assoc_opt canonical default_configs
+  let normalized = String.lowercase_ascii (String.trim agent_name) in
+  match List.assoc_opt normalized default_configs with
+  | Some _ as result -> result
+  | None ->
+    match List.assoc_opt normalized spawn_alias_map with
+    | Some key -> List.assoc_opt key default_configs
+    | None -> None
 
 (** Build MCP flags as argument list (no shell escaping needed) *)
 let build_mcp_args agent_name tools =

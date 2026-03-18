@@ -10,9 +10,9 @@ let truncate_for_event ?(max_len = 320) (s : string) =
   else
     String.sub s 0 max_len ^ "..."
 
-let derived_llama_runtime_actor ~session_id ~prompt =
+let derived_local_runtime_actor ~session_id ~prompt =
   let digest = Digest.string (session_id ^ "\n" ^ prompt) |> Digest.to_hex in
-  Printf.sprintf "llama-local-%s" (String.sub digest 0 8)
+  Printf.sprintf "local-%s" (String.sub digest 0 8)
 
 let normalize_spawn_agent agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in

@@ -1,8 +1,8 @@
 [@@@warning "-32-33-69"]
-(** Tool_llama — llama server runtime management and benchmarking tools. *)
+(** Tool_local_runtime — local LLM runtime management and benchmarking tools. *)
 
 open Types [@@warning "-33"]
-include Tool_llama_core
+include Tool_local_runtime_core
 
 
 let trim_to_option raw =
@@ -766,19 +766,23 @@ let handle_runtime_bench _ctx args : result =
 
 let dispatch ctx ~name ~args : result option =
   match name with
-  | "masc_llama_models" -> Some (handle_models ctx)
-  | "masc_llama_runtime_status" -> Some (handle_runtime_status ctx args)
+  (* Canonical names *)
+  | "masc_local_runtime_models" | "masc_llama_models" ->
+      Some (handle_models ctx)
+  | "masc_local_runtime_status" | "masc_llama_runtime_status" ->
+      Some (handle_runtime_status ctx args)
   | "masc_runtime_verify" ->
       Some (handle_runtime_verify ctx args)
-  | "masc_llama_runtime_bench" -> Some (handle_runtime_bench ctx args)
+  | "masc_local_runtime_bench" | "masc_llama_runtime_bench" ->
+      Some (handle_runtime_bench ctx args)
   | _ -> None
 
 let schemas : tool_schema list =
   [
     {
-      name = "masc_llama_models";
+      name = "masc_local_runtime_models";
       description =
-        "Read the llama.cpp model inventory from /v1/models. Use this before spawning llama workers so the leader can choose an explicit model id.";
+        "Read the local LLM runtime model inventory from /v1/models. Use this before spawning local workers so the leader can choose an explicit model id.";
       input_schema =
         `Assoc
           [
@@ -787,9 +791,9 @@ let schemas : tool_schema list =
           ];
     };
     {
-      name = "masc_llama_runtime_status";
+      name = "masc_local_runtime_status";
       description =
-        "Inspect the local llama.cpp runtime pool used for spawned local workers. Returns runtime inventory, matched llama-server processes, configured capacity, and current MASC LLM permit configuration.";
+        "Inspect the local LLM runtime pool used for spawned local workers. Returns runtime inventory, matched server processes, configured capacity, and current MASC LLM permit configuration.";
       input_schema =
         `Assoc
           [
@@ -820,9 +824,9 @@ let schemas : tool_schema list =
           ];
     };
     {
-      name = "masc_llama_runtime_bench";
+      name = "masc_local_runtime_bench";
       description =
-        "Run a direct concurrency benchmark against the configured local llama.cpp runtime pool to estimate current same-box parallel completion behavior.";
+        "Run a direct concurrency benchmark against the configured local LLM runtime pool to estimate current same-box parallel completion behavior.";
       input_schema =
         `Assoc
           [

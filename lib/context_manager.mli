@@ -92,10 +92,8 @@ val score_importance : working_context -> working_context
     (preserves prompt-cache prefix). *)
 val goal_prefix : string
 
-(** Apply a single compaction strategy. *)
-val apply_strategy : working_context -> compaction_strategy -> working_context
-
-(** Apply a pipeline of compaction strategies in order. *)
+(** Apply a pipeline of compaction strategies in order.
+    Delegates to {!Context_compact_oas.compact}. *)
 val compact : working_context -> compaction_strategy list -> working_context
 
 (** Format a single message as human-readable text: "role: content". *)
@@ -118,21 +116,6 @@ val compact_with_offload :
 (** Sync working context stats (message_count, token_count, context_ratio)
     into the OAS Context scoped keys. Called automatically by [compact]. *)
 val sync_oas_context : working_context -> working_context
-
-(** {1 OAS Context_reducer Integration} *)
-
-(** Convert a masc compaction_strategy to an OAS Context_reducer strategy. *)
-val oas_strategy_of_compaction : compaction_strategy -> Agent_sdk.Context_reducer.strategy
-
-(** Apply compaction via the OAS Context_reducer pipeline.
-    Functionally equivalent to [compact] but shares logic with OAS. *)
-val compact_via_oas : working_context -> compaction_strategy list -> working_context
-
-(** Convert a masc message to OAS message with role tag for lossless roundtrip. *)
-val masc_msg_to_oas_tagged : Llm_types.message -> Agent_sdk.Types.message
-
-(** Recover a masc message from a tagged OAS message. *)
-val oas_msg_to_masc_tagged : Agent_sdk.Types.message -> Llm_types.message
 
 (** Extract [STATE] ... [/STATE] blocks from free-form text.
     Returns the block bodies in appearance order. *)

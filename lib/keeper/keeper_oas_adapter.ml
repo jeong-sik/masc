@@ -149,18 +149,113 @@ let model_of_run_result (r : Oas_worker.run_result) : string =
   r.response.model
 
 (* ================================================================ *)
-(* Public: cascade compatibility wrappers                           *)
+(* Internal: extract OAS parameters from completion_request list    *)
+(* ================================================================ *)
+
+type cascade_params = {
+  primary_spec : Llm_types.model_spec;
+  fallback_specs : Llm_types.model_spec list;
+  system_prompt : string;
+  goal : string;
+  temperature : float;
+  max_tokens : int;
+}
+
+let separate_system_and_user (msgs : Agent_sdk.Types.message list) :
+    string * Agent_sdk.Types.message list =
+  let sys_parts = ref [] in
+  let rest = ref [] in
+  List.iter (fun (m : Agent_sdk.Types.message) ->
+    match m.role with
+    | Agent_sdk.Types.System -> sys_parts := Llm_types.text_of_message m :: !sys_parts
+    | _ -> rest := m :: !rest
+  ) msgs;
+  let sys = String.concat "\n" (List.rev !sys_parts) in
+  (sys, List.rev !rest)
+
+let messages_to_goal_text (msgs : Agent_sdk.Types.message list) : string =
+  msgs
+  |> List.map (fun (m : Agent_sdk.Types.message) -> Llm_types.text_of_message m)
+  |> List.filter (fun s -> String.length s > 0)
+  |> String.concat "\n"
+
+let cascade_config_of_requests
+    (requests : Llm_types.completion_request list)
+  : (cascade_params, string) result =
+  match requests with
+  | [] -> Error "empty cascade request list"
+  | first :: rest ->
+      let sys_prompt, user_msgs = separate_system_and_user first.messages in
+      let goal = messages_to_goal_text user_msgs in
+      if String.length goal = 0 then
+        Error "no user messages in cascade request"
+      else
+        Ok {
+          primary_spec = first.model;
+          fallback_specs =
+            List.map (fun (r : Llm_types.completion_request) -> r.model) rest;
+          system_prompt = sys_prompt;
+          goal;
+          temperature = first.temperature;
+          max_tokens = first.max_tokens;
+        }
+
+(* ================================================================ *)
+(* Public: cascade through OAS Agent.t                              *)
 (* ================================================================ *)
 
 let run_cascade ?timeout_sec requests =
-  Llm_orchestration.cascade ?timeout_sec requests
+  match cascade_config_of_requests requests with
+  | Error e -> Error e
+  | Ok params ->
+  match require_net (), require_switch () with
+  | Error e, _ | _, Error e -> Error e
+  | Ok net, Ok sw ->
+  let all_specs = params.primary_spec :: params.fallback_specs in
+  let rec try_specs errors = function
+    | [] ->
+        let all = String.concat "; " (List.rev errors) in
+        Error (Printf.sprintf "All OAS cascade models failed: %s" all)
+    | spec :: rest ->
+        let oas_config = { (Oas_worker.default_config
+          ~name:"keeper-cascade"
+          ~model_spec:spec
+          ~system_prompt:params.system_prompt
+          ~tools:[]) with
+          max_turns = 1;
+          max_tokens = params.max_tokens;
+          temperature = params.temperature;
+        } in
+        let deadline =
+          Option.map (fun sec -> Time_compat.now () +. float_of_int sec) timeout_sec
+        in
+        let past_deadline () =
+          match deadline with
+          | None -> false
+          | Some d -> Time_compat.now () >= d
+        in
+        if past_deadline () then
+          Error "OAS cascade timeout"
+        else
+        let result = Oas_worker.run ~sw ~net ~config:oas_config params.goal in
+        (match result with
+         | Ok r ->
+             Log.Keeper.info "oas cascade: success with %s" spec.model_id;
+             Ok r.Oas_worker.response
+         | Error e ->
+             Log.Keeper.warn "oas cascade: %s failed: %s" spec.model_id e;
+             try_specs (e :: errors) rest)
+  in
+  try_specs [] all_specs
 
 let run_cascade_stream ?timeout_sec ~on_event request ~fallback =
+  (* OAS Agent SDK does not support streaming — use Llm_orchestration
+     for the streaming path, fall back to OAS batch on failure. *)
   match
     Llm_orchestration.call_provider_stream ?timeout_sec request ~on_event
   with
   | Ok _ as ok -> ok
   | Error e ->
-      Log.Keeper.warn "oas adapter stream failed (%s), falling back to batch" e;
+      Log.Keeper.warn "oas adapter stream failed (%s), falling back to OAS batch" e;
       let timeout_int = Option.map int_of_float timeout_sec in
-      Llm_orchestration.cascade ?timeout_sec:timeout_int fallback
+      run_cascade ?timeout_sec:timeout_int (request :: fallback)

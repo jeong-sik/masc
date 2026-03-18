@@ -157,6 +157,7 @@ type module_tag =
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper | Mod_perpetual | Mod_compact | Mod_mdal
   | Mod_trpg | Mod_notifications | Mod_gardener | Mod_inline
+  | Mod_async_spawn
   | Mod_autoresearch
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512

@@ -74,6 +74,9 @@
    dashboard_mission_assembly
    dashboard_mission
    dashboard_proof
+   dashboard_proof_events
+   dashboard_proof_actors
+   dashboard_proof_verdict
    dashboard_proof_helpers
    dashboard_mission_briefing
    drift_guard
@@ -710,6 +713,9 @@
   perpetual_oas_hooks
   perpetual_oas_build
   room_multi
+  dashboard_proof_events
+  dashboard_proof_actors
+  dashboard_proof_verdict
   dashboard_proof_helpers
   keeper_alerting_path)
  (libraries

@@ -150,13 +150,13 @@ type module_tag =
   | Mod_local_runtime | Mod_team_session | Mod_voice | Mod_cache
   | Mod_tempo | Mod_mitosis | Mod_portal | Mod_worktree
   | Mod_code_swarm | Mod_code | Mod_vote | Mod_social
-  | Mod_council | Mod_protocol | Mod_a2a | Mod_handover
+  | Mod_council | Mod_a2a | Mod_handover
   | Mod_relay | Mod_goals | Mod_heartbeat | Mod_encryption
   | Mod_auth | Mod_hat | Mod_audit | Mod_rate_limit
   | Mod_cost | Mod_walph | Mod_agent | Mod_task | Mod_room
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper | Mod_perpetual | Mod_compact | Mod_mdal
-  | Mod_trpg | Mod_notifications | Mod_gardener | Mod_inline
+  | Mod_notifications | Mod_gardener | Mod_inline
   | Mod_async_spawn
   | Mod_autoresearch
   | Mod_llm_catalog

@@ -388,60 +388,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
      Only the matched module's context is created (1 out of 45+).
      Eliminates per-call 40+ context creation and ~210 Hashtbl.replace. *)
 
-  (* Helper: create keeper context (shared by goals, trpg, protocol) *)
+  (* Helper: create keeper context (shared by goals) *)
   let make_keeper_ctx () : _ Tool_keeper.context =
     { config; agent_name; sw; clock; proc_mgr = state.Mcp_server.proc_mgr }
-  in
-  let make_trpg_helpers () =
-    let keeper_ctx = make_keeper_ctx () in
-    let trpg_keeper_call ~name:keeper_name ~message ~timeout_sec :
-        Tool_trpg.keeper_call_result =
-      let keeper_args =
-        `Assoc
-          [ ("name", `String keeper_name);
-            ("message", `String message);
-            ("timeout_sec", `Float timeout_sec) ]
-      in
-      let eio_timeout = timeout_sec +. (Env_config_runtime.Timeout.llm_grace_sec *. 2.0) in
-      try
-        Eio.Time.with_timeout_exn clock eio_timeout (fun () ->
-            match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:keeper_args with
-            | None -> `Error "masc_keeper_msg dispatch unavailable"
-            | Some (true, body) ->
-                (try `Ok (Yojson.Safe.from_string body)
-                 with Yojson.Json_error e -> `Error (Printf.sprintf "keeper returned invalid json: %s" e))
-            | Some (false, msg) -> `Error msg)
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | Eio.Time.Timeout -> `Timeout
-      | exn -> `Error (Printexc.to_string exn)
-    in
-    let trpg_keeper_probe ~name:keeper_name : Tool_trpg.keeper_probe_result =
-      let keeper_args = `Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ] in
-      try
-        Eio.Time.with_timeout_exn clock 5.0 (fun () ->
-            match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_status" ~args:keeper_args with
-            | None -> `Error "masc_keeper_status dispatch unavailable"
-            | Some (true, _body) -> `Ok
-            | Some (false, msg) -> `Error msg)
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | Eio.Time.Timeout -> `Error "timeout"
-      | exn -> `Error (Printexc.to_string exn)
-    in
-    let trpg_dm_voice_emit ~agent_id ~message ~provider : Tool_trpg.dm_voice_emit_result =
-      match state.Mcp_server.net with
-      | None -> Error "trpg voice requires net (server_state.net is None)"
-      | Some net ->
-      let provider =
-        match provider |> Option.map String.trim with
-        | Some p when p <> "" && not (String.equal (String.lowercase_ascii p) "auto") -> Some p
-        | _ -> None
-      in
-      Voice_bridge.agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ()
-    in
-    let trpg_store = Trpg.Store.make_sqlite ~base_dir:config.base_path in
-    (trpg_store, trpg_keeper_call, trpg_keeper_probe, trpg_dm_voice_emit)
   in
 
   (* Dispatch a single module by tag — creates only that module's context *)
@@ -577,21 +526,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           agent_name = Some agent_name; start_operation = None;
           start_team_session = None } in
         Tool_autoresearch.dispatch ctx ~name ~args:arguments
-    | Mod_trpg ->
-        let (trpg_store, trpg_keeper_call, trpg_keeper_probe, trpg_dm_voice_emit) =
-          make_trpg_helpers () in
-        let ctx : Tool_trpg.context = { store = trpg_store; agent_name;
-          keeper_call = Some trpg_keeper_call; keeper_probe = Some trpg_keeper_probe;
-          dm_voice_emit = Some trpg_dm_voice_emit } in
-        Tool_trpg.dispatch ctx ~name ~args:arguments
-    | Mod_protocol ->
-        let (trpg_store, trpg_keeper_call, trpg_keeper_probe, trpg_dm_voice_emit) =
-          make_trpg_helpers () in
-        let ctx : Tool_protocol_game_view.context = { config; store = trpg_store;
-          agent_name; trpg_keeper_call = Some trpg_keeper_call;
-          trpg_keeper_probe = Some trpg_keeper_probe;
-          trpg_dm_voice_emit = Some trpg_dm_voice_emit } in
-        Tool_protocol_game_view.dispatch ctx ~name ~args:arguments
     | Mod_notifications ->
         Tool_notifications.dispatch state.Mcp_server.session_registry
           ~agent_name ~name arguments

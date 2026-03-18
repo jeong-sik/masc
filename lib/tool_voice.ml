@@ -26,7 +26,7 @@ let schemas : tool_schema list =
     {
       name = "masc_voice_speak";
       description =
-        "Send text to the voice bridge for an agent. Returns an error unless a reachable voice backend actually accepts the request.";
+        "Send text to the voice bridge for TTS playback. Requires an active voice session (call masc_voice_session_start first). provider: optional, one of 'elevenlabs', 'openai_compat'. priority: 1=normal, higher=urgent.";
       input_schema =
         `Assoc
           [
@@ -45,7 +45,7 @@ let schemas : tool_schema list =
     {
       name = "masc_voice_session_start";
       description =
-        "Start a voice session for an agent using the configured voice bridge.";
+        "Start a voice session for an agent. Call before masc_voice_speak. Requires voice_config.json with at least one TTS endpoint configured.";
       input_schema =
         `Assoc
           [
@@ -74,7 +74,7 @@ let schemas : tool_schema list =
     };
     {
       name = "masc_voice_sessions";
-      description = "List active voice sessions from the voice bridge.";
+      description = "List active voice sessions. Use to check existing sessions before starting a new one or debugging.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
     };
@@ -93,14 +93,14 @@ let schemas : tool_schema list =
     };
     {
       name = "masc_voice_transcript";
-      description = "Get the current transcript payload from the voice bridge.";
+      description = "Get the current transcript (STT output) from the voice bridge. Requires an active voice session.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
     };
     {
       name = "masc_voice_conference_start";
       description =
-        "Start a multi-agent voice conference for the given agents.";
+        "Start a multi-agent voice conference. All agent_ids should have active voice sessions first (call masc_voice_session_start for each).";
       input_schema =
         `Assoc
           [
@@ -122,7 +122,7 @@ let schemas : tool_schema list =
     {
       name = "masc_voice_conference_end";
       description =
-        "End a multi-agent voice conference for the given agents.";
+        "End a multi-agent voice conference. Releases the shared channel; individual agent sessions remain active.";
       input_schema =
         `Assoc
           [
@@ -145,7 +145,7 @@ let schemas : tool_schema list =
 let require_net_or_error (ctx : 'a context) =
   match ctx.net with
   | Some net -> Ok net
-  | None -> Error "voice bridge requires net (server_state.net is None)"
+  | None -> Error "Voice bridge unavailable: server started without network. Restart masc-mcp with --http flag to enable voice tools."
 
 let handle_voice_speak (ctx : 'a context) args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in

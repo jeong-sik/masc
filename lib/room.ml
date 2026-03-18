@@ -201,7 +201,9 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
            ) in
            let _ = broadcast scoped ~from_agent:nickname
                      ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname room_id) in
-           ()
+           log_event scoped (Printf.sprintf
+             "{\"type\":\"agent_join\",\"agent\":\"%s\",\"room\":\"%s\",\"rejoin\":true,\"scoped\":true,\"ts\":\"%s\"}"
+             nickname room_id (now_iso ()))
          end
      | Error _ -> ());
     Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname room_id

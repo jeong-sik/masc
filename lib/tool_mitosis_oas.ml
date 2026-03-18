@@ -4,10 +4,9 @@
     Same 10 MCP tool interface, ~50% less code.
 
     Key changes from legacy:
-    - Spawn uses [Oas_worker.build] instead of CLI [Spawn.spawn]
-    - Handoff uses [Oas_worker.run] with lifecycle hooks
-    - Verification delegates to OAS hooks (no inline LLM panel)
+    - Divide/Handoff use [Oas_worker.run_with_masc_tools] to spawn real agents
     - DNA extraction reuses [Succession_oas]
+    - Child agents receive MASC tools via dispatch adapter
 
     MASC L3 state ([Mcp_server.current_cell], [stem_pool]) is preserved.
     OAS manages agent lifecycle; MASC coordinates across agents.
@@ -23,6 +22,8 @@ module Oas = Agent_sdk
 type context = {
   config : Room_utils.config;
   agent_name : string;
+  masc_tools : Llm_types.tool_def list;
+  dispatch : name:string -> args:Yojson.Safe.t -> bool * string;
 }
 
 type result = bool * string
@@ -158,11 +159,11 @@ let handle_mitosis_prepare ctx args : result =
 
 (** Spawn a child agent via OAS Agent lifecycle.
 
-    Replaces the CLI spawn cascade with [Oas_worker.build]:
+    Uses [Oas_worker.run_with_masc_tools] to actually execute the child:
     1. Extract DNA from current context
-    2. Build OAS Agent.t with DNA as system prompt
+    2. Run OAS Agent with DNA + current_task as goal and MASC tools
     3. Update cell state (increment generation)
-    4. Return agent session info *)
+    4. Return actual execution results *)
 let handle_mitosis_divide ctx args : result =
   let summary = get_string args "summary" "" in
   let current_task = get_string args "current_task" "" in
@@ -177,39 +178,51 @@ let handle_mitosis_divide ctx args : result =
     else Printf.sprintf "Summary: %s\n\nCurrent Task: %s" summary current_task
   in
   let dna = Mitosis.extract_dna ~config ~parent_cell:cell ~full_context in
-  (* Build OAS agent config for the child *)
+  let next_gen = cell.Mitosis.generation + 1 in
   let model_spec = Llm_types.default_local_model_spec () in
   let oas_config = Oas_worker.default_config
-    ~name:(Printf.sprintf "mitosis-child-gen%d" (cell.Mitosis.generation + 1))
+    ~name:(Printf.sprintf "mitosis-child-gen%d" next_gen)
     ~model_spec
     ~system_prompt:(Printf.sprintf
       "You are a continuation agent (generation %d). Previous context DNA:\n\n%s"
-      (cell.Mitosis.generation + 1) dna)
+      next_gen dna)
     ~tools:[]
   in
-  (* Validate build (don't run — caller manages execution) *)
-  match Eio_context.get_net_opt () with
-  | None -> json_err "Eio net not available for OAS agent build"
-  | Some net ->
-  match Oas_worker.build ~net ~config:oas_config with
-  | Error e -> json_err (Printf.sprintf "OAS agent build failed: %s" e)
-  | Ok agent ->
-    let session_id = Printf.sprintf "mitosis-%d-%06d"
-      (int_of_float (Time_compat.now () *. 1000.0))
-      (Random.int 1_000_000) in
-    (* Update MASC L3 state — create new stem cell for the next generation *)
-    let new_cell = Mitosis.create_stem_cell ~generation:(cell.Mitosis.generation + 1) in
-    Mcp_server.current_cell := new_cell;
-    Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config;
-    (* Close agent — it was build-only validation.
-       Actual execution happens when the spawned session runs. *)
-    Oas.Agent.close agent;
+  let goal =
+    if current_task <> "" then
+      Printf.sprintf "Continue from generation %d. Task: %s\n\nContext: %s"
+        next_gen current_task summary
+    else
+      Printf.sprintf "Continue from generation %d. Context: %s" next_gen summary
+  in
+  match Eio_context.get_net_opt (), Eio_context.get_switch_opt () with
+  | None, _ -> json_err "Eio net not available for OAS agent"
+  | _, None -> json_err "Eio switch not available for OAS agent"
+  | Some net, Some sw ->
+  let run_result =
+    Oas_worker.run_with_masc_tools
+      ~sw ~net ~config:oas_config
+      ~masc_tools:ctx.masc_tools
+      ~dispatch:ctx.dispatch
+      goal
+  in
+  (* Update MASC L3 state regardless of run outcome *)
+  let new_cell = Mitosis.create_stem_cell ~generation:next_gen in
+  Mcp_server.current_cell := new_cell;
+  Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config;
+  match run_result with
+  | Error e ->
+    json_err (Printf.sprintf "OAS child agent failed: %s" e)
+  | Ok result ->
+    let response_text = Llm_types.text_of_response result.response in
     json_ok (`Assoc [
       ("divided", `Bool true);
-      ("session_id", `String session_id);
+      ("session_id", `String result.session_id);
       ("generation", `Int new_cell.Mitosis.generation);
       ("target_agent", `String target_agent);
       ("dna_length", `Int (String.length dna));
+      ("turns", `Int result.turns);
+      ("response", `String response_text);
       ("runtime", `String "oas");
     ])
 
@@ -220,9 +233,8 @@ let handle_mitosis_divide ctx args : result =
 (** Automated 2-phase handoff via OAS Agent lifecycle.
 
     1. Check thresholds (prepare at 50%, handoff at 80%)
-    2. If handoff needed: extract DNA, build successor via [Oas_worker]
-    3. Publish lifecycle events via Event_bus
-    4. Return handoff result *)
+    2. If handoff needed: extract DNA, run successor via [Oas_worker.run_with_masc_tools]
+    3. Return actual execution results *)
 let handle_mitosis_handoff ctx args : result =
   let force = match Yojson.Safe.Util.member "force" args with
     | `Bool b -> b | _ -> false in
@@ -245,39 +257,60 @@ let handle_mitosis_handoff ctx args : result =
     let dna = Mitosis.extract_dna ~config:config_m ~parent_cell:cell ~full_context in
     let prepared_cell = Mitosis.prepare_for_division ~config:config_m ~cell ~full_context in
     Mcp_server.current_cell := prepared_cell;
-    (* Phase 2: Build successor *)
+    (* Phase 2: Run successor agent *)
     let target = get_string args "target_agent" "claude" in
+    let next_gen = prepared_cell.Mitosis.generation + 1 in
     let model_spec = Llm_types.default_local_model_spec () in
     let successor_config = Oas_worker.default_config
-      ~name:(Printf.sprintf "mitosis-gen%d" (cell.Mitosis.generation + 1))
+      ~name:(Printf.sprintf "mitosis-gen%d" next_gen)
       ~model_spec
       ~system_prompt:(Printf.sprintf
         "You are generation %d. Continue from this DNA:\n\n%s"
-        (cell.Mitosis.generation + 1) dna)
+        next_gen dna)
       ~tools:[]
     in
-    let build_result = match Eio_context.get_net_opt () with
-      | None -> Error "Eio net not available"
-      | Some net -> Oas_worker.build ~net ~config:successor_config
+    let goal = Printf.sprintf
+      "You are the successor agent (generation %d). Resume work from the handoff DNA above. Context ratio was %.1f%%."
+      next_gen (context_ratio *. 100.0)
     in
-    (* Update state regardless of build outcome *)
-    let new_cell = Mitosis.create_stem_cell ~generation:(prepared_cell.Mitosis.generation + 1) in
+    let run_result = match Eio_context.get_net_opt (), Eio_context.get_switch_opt () with
+      | None, _ -> Error "Eio net not available"
+      | _, None -> Error "Eio switch not available"
+      | Some net, Some sw ->
+        Oas_worker.run_with_masc_tools
+          ~sw ~net ~config:successor_config
+          ~masc_tools:ctx.masc_tools
+          ~dispatch:ctx.dispatch
+          goal
+    in
+    (* Update state regardless of run outcome *)
+    let new_cell = Mitosis.create_stem_cell ~generation:next_gen in
     Mcp_server.current_cell := new_cell;
     Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_m;
-    let build_ok = match build_result with
-      | Ok agent -> Oas.Agent.close agent; true
-      | Error _ -> false
-    in
-    json_ok (`Assoc [
-      ("action", `String "handoff");
-      ("generation", `Int new_cell.Mitosis.generation);
-      ("dna_length", `Int (String.length dna));
-      ("successor_built", `Bool build_ok);
-      ("build_error", match build_result with
-        | Error e -> `String e | Ok _ -> `Null);
-      ("target_agent", `String target);
-      ("runtime", `String "oas");
-    ])
+    match run_result with
+    | Error e ->
+      json_ok (`Assoc [
+        ("action", `String "handoff");
+        ("generation", `Int new_cell.Mitosis.generation);
+        ("dna_length", `Int (String.length dna));
+        ("successor_ran", `Bool false);
+        ("error", `String e);
+        ("target_agent", `String target);
+        ("runtime", `String "oas");
+      ])
+    | Ok result ->
+      let response_text = Llm_types.text_of_response result.response in
+      json_ok (`Assoc [
+        ("action", `String "handoff");
+        ("generation", `Int new_cell.Mitosis.generation);
+        ("dna_length", `Int (String.length dna));
+        ("successor_ran", `Bool true);
+        ("session_id", `String result.session_id);
+        ("turns", `Int result.turns);
+        ("response", `String response_text);
+        ("target_agent", `String target);
+        ("runtime", `String "oas");
+      ])
   end
 
 (* ================================================================ *)

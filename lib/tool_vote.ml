@@ -1,4 +1,7 @@
-(** Vote tools - Consensus voting system *)
+(** Vote tools - Consensus voting system.
+
+    Provides both MASC dispatch convention and OAS [Tool.t] interface.
+    OAS tools are created via {!Tool_bridge.oas_tool_of_masc}. *)
 
 open Tool_args
 
@@ -40,3 +43,57 @@ let dispatch ctx ~name ~args : result option =
   | "masc_vote_status" -> Some (handle_vote_status ctx args)
   | "masc_votes" -> Some (handle_votes ctx args)
   | _ -> None
+
+(** {1 OAS Tool.t Interface}
+
+    Creates OAS [Agent_sdk.Tool.t] list from vote handlers.
+    Context is captured via closure at creation time. *)
+
+let[@warning "-32"] oas_tools (ctx : context) : Agent_sdk.Tool.t list =
+  let mk = Tool_bridge.oas_tool_of_masc in
+  [
+    mk ~name:"masc_vote_create"
+      ~description:"Create a vote for multi-agent consensus on a decision."
+      ~input_schema:(`Assoc [
+        ("type", `String "object");
+        ("properties", `Assoc [
+          ("proposer", `Assoc [("type", `String "string"); ("description", `String "Your agent name")]);
+          ("topic", `Assoc [("type", `String "string"); ("description", `String "What to vote on")]);
+          ("options", `Assoc [("type", `String "array"); ("items", `Assoc [("type", `String "string")]); ("description", `String "Vote options")]);
+          ("required_votes", `Assoc [("type", `String "integer"); ("description", `String "Votes needed to resolve"); ("default", `Int 2)]);
+        ]);
+        ("required", `List [`String "proposer"; `String "topic"; `String "options"]);
+      ])
+      (fun args -> handle_vote_create ctx args);
+
+    mk ~name:"masc_vote_cast"
+      ~description:"Cast your vote on an active proposal."
+      ~input_schema:(`Assoc [
+        ("type", `String "object");
+        ("properties", `Assoc [
+          ("vote_id", `Assoc [("type", `String "string"); ("description", `String "Vote ID")]);
+          ("choice", `Assoc [("type", `String "string"); ("description", `String "Your choice")]);
+        ]);
+        ("required", `List [`String "vote_id"; `String "choice"]);
+      ])
+      (fun args -> handle_vote_cast ctx args);
+
+    mk ~name:"masc_vote_status"
+      ~description:"Get the current tally and result of a specific vote."
+      ~input_schema:(`Assoc [
+        ("type", `String "object");
+        ("properties", `Assoc [
+          ("vote_id", `Assoc [("type", `String "string"); ("description", `String "Vote ID")]);
+        ]);
+        ("required", `List [`String "vote_id"]);
+      ])
+      (fun args -> handle_vote_status ctx args);
+
+    mk ~name:"masc_votes"
+      ~description:"List all votes in the current room."
+      ~input_schema:(`Assoc [
+        ("type", `String "object");
+        ("properties", `Assoc []);
+      ])
+      (fun args -> handle_votes ctx args);
+  ]

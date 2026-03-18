@@ -59,8 +59,8 @@ val can_retire : config:gardener_config -> bool
 (** Calculate comprehensive ecosystem health metrics.
 
     This queries:
-    - Agent list from Neo4j (via Lodge_heartbeat)
-    - Selection stats from Lodge_selection
+    - Agent list from Room (via room_config)
+    - Selection stats from Thompson_sampling
     - Recent posts/comments from Board
 
     @return Current health state with homeostatic score *)

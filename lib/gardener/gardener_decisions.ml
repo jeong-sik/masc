@@ -42,7 +42,7 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
     gap.maturity_hours
   in
 
-  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"gardener_spawn" () in
+  let model_specs = Llm_cascade.get_cascade ~cascade_name:"gardener_spawn" () in
   let response =
     match
       Llm_orchestration.run_prompt_cascade ~temperature:0.3
@@ -228,30 +228,12 @@ let decide_retire ~config ~health ~(agent_stats : agent_stats) : retirement_deci
 (** Execute an approved spawn *)
 let execute_spawn ~(decision : spawn_decision) : (string, string) result =
   match decision with
-  | SpawnApproved { topic; proposed_traits; proposed_hours; reason; _ } ->
+  | SpawnApproved { topic; proposed_traits = _; proposed_hours = _; reason; _ } ->
       Eio.traceln "[Gardener] Executing spawn: %s (reason: %s)" topic reason;
-      let signals = Lodge_heartbeat.get_signals_for_topic ~topic in
-      let success = Lodge_heartbeat.spawn_agent_from_gap ~topic ~signals in
-      if success then begin
-        record_spawn ();
-        reset_circuit ();
-        Lodge_heartbeat.clear_gap_signals ~topic;
-        (* Post announcement *)
-        let store = Board.global () in
-        let announcement = Printf.sprintf
-          "🌱 [Gardener] 새 에이전트 생성: %s\n특성: %s\n근무시간: %s"
-          topic
-          (String.concat ", " proposed_traits)
-          (String.concat ", " (List.map string_of_int proposed_hours))
-        in
-        (try ignore (Board.create_post store ~author:"gardener" ~content:announcement ~ttl_hours:168 ())
-         with exn -> Log.Spawn.error "Board.create_post(announcement) failed: %s" (Printexc.to_string exn));
-        Ok topic
-      end else begin
-        let config = load_config () in
-        trip_circuit ~config;
-        Error "spawn_agent_from_gap failed"
-      end
+      (* Lodge heartbeat spawn removed (#1596). Use Gardener Neo4j spawn directly. *)
+      let config = load_config () in
+      trip_circuit ~config;
+      Error "spawn_agent_from_gap not available (Lodge removed)"
   | SpawnDeferred { topic = _; reason; _ } ->
       Error (Printf.sprintf "Spawn deferred: %s" reason)
   | SpawnRejected { topic; reason } ->
@@ -329,12 +311,12 @@ let detect_intervention_rule_based ~config ~health : decision_snapshot =
   end
   else begin
     (* Board gap detection — existing logic *)
-    let mature_gaps = Lodge_heartbeat.check_gap_threshold () in
-    let agents = Lodge_heartbeat.get_agents () in
+    let mature_gaps = ([] : (string * int) list) in
+    let agents = ([] : agent list) in
 
     match mature_gaps with
     | (topic, _count) :: _ when health.total_agents < config.target_agents ->
-        let signals = Lodge_heartbeat.get_signals_for_topic ~topic in
+        let signals = ([] : gap_signal_t list) (* deprecated: gap signals removed *) in
         let gap = enrich_gap ~topic ~signals ~agents in
         if gap.maturity_hours >= config.gap_maturity_hours then
           {
@@ -359,13 +341,13 @@ let detect_intervention_rule_based ~config ~health : decision_snapshot =
     | _ ->
         (* Check for retirement candidates — inline condition, no pre-computed boolean *)
         if health.total_agents > config.target_agents && health.idle_agents > 0 then begin
-          let all_stats = Lodge_selection.get_all_stats () in
+          let all_stats = Thompson_sampling.get_all_stats () in
           let idle_candidates = all_stats
             |> List.filter (fun s ->
-                let idle_hours = (Time_compat.now () -. s.Lodge_selection.last_selected_at) /. 3600.0 in
+                let idle_hours = (Time_compat.now () -. s.Thompson_sampling.last_selected_at) /. 3600.0 in
                 idle_hours > config.idle_threshold_hours)
             |> List.sort (fun a b ->
-                compare b.Lodge_selection.last_selected_at a.Lodge_selection.last_selected_at) in
+                compare b.Thompson_sampling.last_selected_at a.Thompson_sampling.last_selected_at) in
           match idle_candidates with
           | candidate :: _ ->
               let stats = convert_stats candidate in
@@ -432,7 +414,7 @@ Room 내 활성 에이전트: %d
     (health.system_error_rate *. 100.0) health.spawns_today config.max_daily_spawns
   in
 
-  let model_specs = Lodge_cascade.get_cascade ~cascade_name:"gardener_spawn" () in
+  let model_specs = Llm_cascade.get_cascade ~cascade_name:"gardener_spawn" () in
   let response =
     match
       Llm_orchestration.run_prompt_cascade ~temperature:0.3
@@ -488,11 +470,11 @@ Room 내 활성 에이전트: %d
              error = "";
            }
        | "spawn_worker" | "spawn_agent" ->
-           let mature_gaps = Lodge_heartbeat.check_gap_threshold () in
-           let agents = Lodge_heartbeat.get_agents () in
+           let mature_gaps = ([] : (string * int) list) in
+           let agents = ([] : agent list) in
            (match mature_gaps with
             | (topic, _) :: _ ->
-                let signals = Lodge_heartbeat.get_signals_for_topic ~topic in
+                let signals = ([] : gap_signal_t list) (* deprecated: gap signals removed *) in
                 let gap = enrich_gap ~topic ~signals ~agents in
                 {
                   intervention = NeedSpawn gap;
@@ -514,17 +496,17 @@ Room 내 활성 에이전트: %d
                   error = "";
                 })
        | "retire" ->
-           let all_stats = Lodge_selection.get_all_stats () in
+           let all_stats = Thompson_sampling.get_all_stats () in
            let idle_candidates =
              all_stats
              |> List.filter (fun s ->
                     let idle_hours =
-                      (Time_compat.now () -. s.Lodge_selection.last_selected_at) /. 3600.0
+                      (Time_compat.now () -. s.Thompson_sampling.last_selected_at) /. 3600.0
                     in
                     idle_hours > config.idle_threshold_hours)
              |> List.sort (fun a b ->
-                    compare b.Lodge_selection.last_selected_at
-                      a.Lodge_selection.last_selected_at)
+                    compare b.Thompson_sampling.last_selected_at
+                      a.Thompson_sampling.last_selected_at)
            in
            (match idle_candidates with
             | candidate :: _ ->

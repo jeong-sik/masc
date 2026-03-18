@@ -374,20 +374,8 @@ let make_request_handler ~sw ~clock ~server_start_time =
           h2_respond_html h2_reqd (Credits_dashboard.html ()) ~extra_headers:cors
 
       | `GET, "/dashboard/lodge" ->
-          let etag_value = "\"" ^ Lodge_dashboard.etag () ^ "\"" in
-          let if_none_match = H2.Headers.get h2_headers "if-none-match" in
-          (match if_none_match with
-           | Some inm when String.equal inm etag_value ->
-               let resp_headers = H2.Headers.of_list ([
-                 ("etag", etag_value); ("cache-control", dashboard_index_cache_control);
-               ] @ cors) in
-               let response = H2.Response.create ~headers:resp_headers `Not_modified in
-               let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-               H2.Body.Writer.close writer
-           | _ ->
-               let body = Lodge_dashboard.html () in
-               let extra = [("etag", etag_value); ("cache-control", dashboard_index_cache_control)] @ cors in
-               h2_respond_html h2_reqd body ~extra_headers:extra)
+          let body = {|<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=/dashboard"></head><body>Redirecting to dashboard...</body></html>|} in
+          h2_respond_html h2_reqd body ~extra_headers:cors
 
       | `GET, p when is_dashboard_spa_deep_link p ->
           h2_respond_dashboard_index ()

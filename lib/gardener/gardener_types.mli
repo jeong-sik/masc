@@ -109,6 +109,24 @@ val ecosystem_health_to_yojson : ecosystem_health -> Yojson.Safe.t
 val pp_ecosystem_health : Format.formatter -> ecosystem_health -> unit
 val show_ecosystem_health : ecosystem_health -> string
 
+(** {1 Gap Signal Types} *)
+
+(** Gap signal detected by agents. *)
+type gap_signal_t = {
+  gs_topic : string;
+  gs_detected_by : string;
+  gs_context : string;
+  gs_timestamp : float;
+}
+
+(** Minimal agent record for topic similarity calculations. *)
+type agent = {
+  name : string;
+  traits : string list;
+  preferred_hours : int list;
+  activity_level : string;
+}
+
 (** {1 Enriched Gap Signal} *)
 
 (** Gap signal enriched with context for spawn decisions.

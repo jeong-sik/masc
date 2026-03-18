@@ -1,10 +1,10 @@
 open Alcotest
 
-module Lodge_cascade = Masc_mcp.Lodge_cascade
+module Llm_cascade = Masc_mcp.Llm_cascade
 module Llm_types = Masc_mcp.Llm_types
 
 let with_temp_json contents f =
-  let path = Filename.temp_file "lodge_cascade_" ".json" in
+  let path = Filename.temp_file "llm_cascade_" ".json" in
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () ->
@@ -29,7 +29,7 @@ let test_load_models_from_config () =
   with_temp_json
     {|{"heartbeat_action_models":["llama:qwen-local","llama:qwen-local-fallback"]}|}
     (fun path ->
-      let specs = Lodge_cascade.get_cascade ~config_path:path ~cascade_name:"heartbeat_action" () in
+      let specs = Llm_cascade.get_cascade ~config_path:path ~cascade_name:"heartbeat_action" () in
       check int "spec count" 2 (List.length specs);
       match specs with
       | [ first; second ] ->
@@ -44,7 +44,7 @@ let test_skips_invalid_and_missing_api_key () =
       with_temp_json
         {|{"heartbeat_action_models":["invalid","gemini:gemini-2.5-pro","llama:qwen-live"]}|}
         (fun path ->
-          let specs = Lodge_cascade.get_cascade ~config_path:path ~cascade_name:"heartbeat_action" () in
+          let specs = Llm_cascade.get_cascade ~config_path:path ~cascade_name:"heartbeat_action" () in
           check int "only llama survives" 1 (List.length specs);
           match specs with
           | [ only ] ->
@@ -55,7 +55,7 @@ let test_skips_invalid_and_missing_api_key () =
 
 let test_missing_config_uses_defaults () =
   let path = Filename.concat (Filename.get_temp_dir_name ()) "missing-llm-cascade.json" in
-  let specs = Lodge_cascade.get_cascade ~config_path:path ~cascade_name:"heartbeat_action" () in
+  let specs = Llm_cascade.get_cascade ~config_path:path ~cascade_name:"heartbeat_action" () in
   check bool "defaults available" true (List.length specs >= 1);
   match specs with
   | first :: _ ->
@@ -78,7 +78,7 @@ let test_call_returns_error_when_no_models () =
         {|{"heartbeat_action_models":["gemini:fake-model"]}|}
         (fun path ->
           let result =
-            Lodge_cascade.call
+            Llm_cascade.call
               ~cascade_name:"heartbeat_action"
               ~prompt:"test"
               ~timeout_sec:1
@@ -108,7 +108,7 @@ let known_cascade_names =
 let test_all_known_names_return_nonempty () =
   List.iter
     (fun name ->
-      let models = Lodge_cascade.default_model_strings ~cascade_name:name in
+      let models = Llm_cascade.default_model_strings ~cascade_name:name in
       check bool
         (Printf.sprintf "%s returns non-empty" name)
         true (models <> []))
@@ -116,7 +116,7 @@ let test_all_known_names_return_nonempty () =
 
 let test_unknown_name_returns_fallback () =
   let models =
-    Lodge_cascade.default_model_strings ~cascade_name:"nonexistent_xyz"
+    Llm_cascade.default_model_strings ~cascade_name:"nonexistent_xyz"
   in
   check bool "catch-all returns non-empty" true (models <> []);
   (* Always ends with glm:auto as safety net *)
@@ -124,7 +124,7 @@ let test_unknown_name_returns_fallback () =
   check string "last is glm:auto" "glm:auto" last
 
 let test_briefing_always_has_glm_auto () =
-  let models = Lodge_cascade.default_model_strings ~cascade_name:"briefing" in
+  let models = Llm_cascade.default_model_strings ~cascade_name:"briefing" in
   check bool "briefing is non-empty" true (List.length models >= 1);
   (* glm:auto is always the final fallback *)
   let last = List.nth models (List.length models - 1) in
@@ -132,14 +132,14 @@ let test_briefing_always_has_glm_auto () =
 
 let test_classification_uses_llama_first () =
   let models =
-    Lodge_cascade.default_model_strings ~cascade_name:"classification"
+    Llm_cascade.default_model_strings ~cascade_name:"classification"
   in
   let first = List.hd models in
   check bool "classification starts with llama:" true
     (String.length first > 6 && String.sub first 0 6 = "llama:")
 
 let () =
-  run "lodge_cascade"
+  run "llm_cascade"
     [
       ( "loader",
         [

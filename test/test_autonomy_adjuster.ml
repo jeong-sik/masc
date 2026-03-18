@@ -1,10 +1,10 @@
-(** Tests for Autonomy_adjuster module — Feedback Closure for Lodge Agent Selection *)
+(** Tests for Autonomy_adjuster module — Feedback Closure for Agent Selection *)
 
 open Alcotest
 open Masc_mcp
 
 module Aa = Autonomy_adjuster
-module Ls = Lodge_selection
+module Ls = Thompson_sampling
 module Ah = Agent_health
 
 (* Helper: unique agent name per test to avoid pollution *)

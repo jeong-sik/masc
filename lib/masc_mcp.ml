@@ -118,8 +118,7 @@ module Backend = Backend
 module Backend_eio = Backend_eio
 module Cache_eio = Cache_eio
 module Llm_response_cache = Llm_response_cache
-(* Lodge_cascade preserved — LLM cascade utility used across codebase *)
-module Lodge_cascade = Lodge_cascade
+module Llm_cascade = Llm_cascade
 module Prometheus = Prometheus
 module Rate_limit = Rate_limit
 module Circuit_breaker = Circuit_breaker
@@ -298,14 +297,11 @@ module Tool_local_runtime = Tool_local_runtime
 module Tool_llm_catalog = Tool_llm_catalog
 module Tool_board = Tool_board
 module Tool_command_plane = Tool_command_plane
-module Tool_lodge = Tool_lodge
 module Tool_mdal = Tool_mdal
 module Tool_notifications = Tool_notifications
 module Tool_voice = Tool_voice
 
-(* Lodge subsystem — deprecated (#1596), stubs + Selection preserved *)
-module Lodge_heartbeat = Lodge_heartbeat
-module Lodge_selection = Lodge_selection
+module Thompson_sampling = Thompson_sampling
 
 module Game_view_state = Game_view_state
 module Tool_protocol_game_view = Tool_protocol_game_view

@@ -4,7 +4,7 @@
     for gardener tools. Network-dependent handlers (health, propose_spawn
     with args, retire_agent with args, execute_spawn with args) are excluded
     because they call [Gardener.calculate_health] which invokes
-    [Lodge_heartbeat.get_agents] → GraphQL API (curl to Neo4j).
+    Room.get_agents_raw_in_room → GraphQL API (curl to Neo4j).
 
     Covered handlers:
     - masc_gardener_config (env vars only, no network)

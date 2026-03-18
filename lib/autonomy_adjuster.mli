@@ -1,7 +1,7 @@
-(** Autonomy Adjuster — Feedback Closure for Lodge Agent Selection (Phase 4).
+(** Autonomy Adjuster — Feedback Closure for Agent Selection (Phase 4).
 
-    Observes accumulated quality signals from Lodge agents (Thompson Sampling
-    stats from {!Lodge_selection} and health status from {!Agent_health}) and
+    Observes accumulated quality signals from agents (Thompson Sampling
+    stats from {!Thompson_sampling} and health status from {!Agent_health}) and
     automatically adjusts per-agent autonomy levels.
 
     Autonomy level is a continuous float in [0.0, 1.0], default 0.5.
@@ -50,7 +50,7 @@ val set_base_path : string -> unit
 val get_autonomy : agent_name:string -> autonomy_record
 
 (** Perform one adjustment tick for an agent.
-    Reads Thompson Sampling stats from {!Lodge_selection} and health status
+    Reads Thompson Sampling stats from {!Thompson_sampling} and health status
     from {!Agent_health}, then adjusts the autonomy level accordingly.
     Returns the updated record and persists to JSONL. *)
 val adjust : agent_name:string -> autonomy_record

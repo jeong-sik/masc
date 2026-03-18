@@ -7,8 +7,8 @@ open Gardener_types
 
 (** {1 Agent Statistics Conversion} *)
 
-(** Convert Lodge_selection stats to Gardener stats *)
-let convert_stats (ls : Lodge_selection.agent_stats) : agent_stats =
+(** Convert Thompson_sampling stats to Gardener stats *)
+let convert_stats (ls : Thompson_sampling.agent_stats) : agent_stats =
   let now = Time_compat.now () in
   let idle_hours = (now -. ls.last_selected_at) /. 3600.0 in
   {
@@ -25,14 +25,14 @@ let convert_stats (ls : Lodge_selection.agent_stats) : agent_stats =
 (** {1 Health Calculation} *)
 
 (** Calculate Shannon entropy of selection distribution *)
-let calculate_entropy (stats_list : Lodge_selection.agent_stats list) : float =
+let calculate_entropy (stats_list : Thompson_sampling.agent_stats list) : float =
   if List.length stats_list = 0 then 0.0
   else begin
-    let total_selections = List.fold_left (fun acc s -> acc + s.Lodge_selection.selections) 0 stats_list in
+    let total_selections = List.fold_left (fun acc s -> acc + s.Thompson_sampling.selections) 0 stats_list in
     if total_selections = 0 then 0.0
     else begin
       let probabilities = List.map (fun s ->
-        float_of_int s.Lodge_selection.selections /. float_of_int total_selections
+        float_of_int s.Thompson_sampling.selections /. float_of_int total_selections
       ) stats_list in
       let entropy = List.fold_left (fun acc p ->
         if p > 0.0 then acc -. (p *. Float.log2 p) else acc
@@ -243,21 +243,21 @@ let collect_task_signals ~(room_config : Room_utils.config) : task_backlog_summa
 (** {1 Gap Signal Processing} *)
 
 (** Enrich gap signals with context *)
-let enrich_gap ~topic ~(signals : Lodge_heartbeat.gap_signal_t list) ~agents : enriched_gap =
+let enrich_gap ~topic ~(signals : gap_signal_t list) ~agents : enriched_gap =
   let now = Time_compat.now () in
-  let first_detected = List.fold_left (fun min_t s -> Float.min min_t s.Lodge_heartbeat.gs_timestamp) now signals in
+  let first_detected = List.fold_left (fun min_t s -> Float.min min_t s.gs_timestamp) now signals in
   let maturity_hours = (now -. first_detected) /. 3600.0 in
 
   let proposers = signals
-    |> List.map (fun s -> s.Lodge_heartbeat.gs_detected_by)
+    |> List.map (fun s -> s.gs_detected_by)
     |> List.sort_uniq compare in
 
   let context_snippets = signals
-    |> List.map (fun s -> s.Lodge_heartbeat.gs_context)
+    |> List.map (fun s -> s.gs_context)
     |> List.filter (fun s -> String.length s > 0) in
 
   (* Calculate topic similarity using module-level string_similarity *)
-  let topic_similarity = List.fold_left (fun max_sim (agent : Lodge_heartbeat.agent) ->
+  let topic_similarity = List.fold_left (fun max_sim (agent : agent) ->
     (* Check name similarity *)
     let name_sim = string_similarity topic agent.name in
     (* Check trait similarity (best match) *)

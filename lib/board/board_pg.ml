@@ -462,7 +462,7 @@ let vote_post t ~voter ~post_id ~direction =
             | Some p ->
                 let author_name = Agent_id.to_string p.author in
                 let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir
+                Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir
             | None -> ())
        | None -> ());
       (* Notify vote event *)
@@ -518,7 +518,7 @@ let vote_comment t ~voter ~comment_id ~direction =
   | Ok (Ok (score, author_name)) ->
       (* Record Thompson Sampling feedback *)
       let vote_dir = match direction with Up -> `Up | Down -> `Down in
-      Lodge_selection.record_vote ~agent_name:author_name ~direction:vote_dir;
+      Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
       (* Notify vote event *)
       notify_event t (Comment_voted {
         comment_id;

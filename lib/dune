@@ -128,8 +128,7 @@
    credits_dashboard
    cp_microarch_summary
    cp_search_fabric
-   lodge_dashboard
-   lodge_cascade
+   llm_cascade
    ;; WebRTC modules removed — use ocaml-webrtc library directly
    eio_context
    encryption
@@ -216,8 +215,7 @@
    chain_run_store
    chain_native_eio
    log
-   lodge_heartbeat
-   lodge_selection
+   thompson_sampling
    memory_stream
    agent_planner
    reflection
@@ -410,7 +408,6 @@
    tool_command_plane_dispatch
    tool_command_plane_schemas_01
    tool_command_plane_schemas_02
-   tool_lodge
    tool_mdal
    tool_mdal_schemas
    gardener_types

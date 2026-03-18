@@ -458,6 +458,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_command_plane.dispatch ctx ~name ~args:arguments
     | Mod_llama ->
         Tool_llama.dispatch { Tool_llama.config; agent_name } ~name ~args:arguments
+    | Mod_llm_catalog ->
+        Tool_llm_catalog.dispatch () ~name ~args:arguments
     | Mod_team_session ->
         let ctx = { Tool_team_session.config; agent_name; sw; clock;
                     proc_mgr = state.Mcp_server.proc_mgr } in

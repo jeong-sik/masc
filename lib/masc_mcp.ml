@@ -296,6 +296,7 @@ module Tool_metrics = Tool_metrics
 module Tool_harness_health = Tool_harness_health
 module Tool_unified = Tool_unified
 module Tool_llama = Tool_llama
+module Tool_llm_catalog = Tool_llm_catalog
 module Tool_board = Tool_board
 module Tool_command_plane = Tool_command_plane
 module Tool_lodge = Tool_lodge

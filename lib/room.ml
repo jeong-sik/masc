@@ -290,6 +290,9 @@ let leave config ~agent_name =
         let _ = backend_delete config ~key:agent_key in ())
     end;
 
+    (* Capture active agents before removal for relationship materialization *)
+    let peers_before_leave = (read_state config).active_agents in
+
     let _ = update_state config (fun s ->
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
     ) in
@@ -300,6 +303,13 @@ let leave config ~agent_name =
     log_event config (Printf.sprintf
       "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
       actual_name (now_iso ()));
+
+    (* Record co-presence relationships to Neo4j (async, non-blocking) *)
+    (try Relation_materializer.on_agent_leave
+           ~leaving_agent:actual_name ~active_agents:peers_before_leave
+     with exn ->
+       Printf.eprintf "[relation-materializer] leave hook error: %s\n%!"
+         (Printexc.to_string exn));
 
     Printf.sprintf "✅ %s left the room" actual_name
   end else

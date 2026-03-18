@@ -157,7 +157,6 @@ let () =
   register_module_tag ~schemas:Tool_worktree.schemas ~tag:Mod_worktree;
   register_module_tag ~schemas:Tool_code_swarm.schemas ~tag:Mod_code_swarm;
   register_module_tag ~schemas:Tool_goals.schemas ~tag:Mod_goals;
-  register_module_tag ~schemas:Tool_protocol_game_view.schemas ~tag:Mod_protocol;
   register_module_tag ~schemas:Tool_auth.schemas ~tag:Mod_auth;
   register_module_tag ~schemas:Tool_agent.schemas ~tag:Mod_agent;
   register_module_tag ~schemas:Tool_room.schemas ~tag:Mod_room;

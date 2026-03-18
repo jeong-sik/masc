@@ -140,7 +140,7 @@ let _parse_error () =
       error_response
         ~id:(extract_id request)
         ~code:(-32603)
-        ~message:("Internal error: " ^ Printexc.to_string exn)
+        ~message:(Log.Server.error "streamable_http dispatch: %s" (Printexc.to_string exn); "Internal error")
 end
 
 (** Handle POST /mcp - JSON-RPC request processing *)

@@ -467,10 +467,12 @@ let handle_request
                        | Some params ->
                            (try
                              let name = Yojson.Safe.Util.(params |> member "name" |> to_string) in
-                             (* tools/call: allow discovered tools for local profiles,
-                                but preserve restrictions for remote/operator profiles. *)
+                             (* tools/call: respect each profile's allowed toolset.
+                                Managed_agent keeps its SDK alias tools.
+                                Operator_remote keeps its restricted tools.
+                                Full/Role_filtered use the full catalog for direct calls. *)
                              let call_profile = match profile with
-                               | Operator_remote -> profile
+                               | Operator_remote | Managed_agent -> profile
                                | _ -> Full
                              in
                             if not (TP.tool_allowed_in_profile state call_profile name) then

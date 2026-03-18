@@ -1419,7 +1419,7 @@ let test_handle_request_tools_call_trpg () =
     ("id", `Int 9);
     ("method", `String "tools/call");
     ("params", `Assoc [
-      ("name", `String "masc_trpg_dice_roll");
+      ("name", `String "trpg.dice.roll");
       ("arguments", `Assoc [
         ("room_id", `String "room-mcp-call");
         ("actor_id", `String "pc-1");

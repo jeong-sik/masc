@@ -11,46 +11,6 @@
 
 include Tool_protocol_game_view_handlers
 
-let legacy_alias_to_canonical = function
-  | "masc_trpg_dice_roll" -> Some "trpg.dice.roll"
-  | "masc_trpg_turn_advance" -> Some "trpg.turn.advance"
-  | "masc_trpg_stream" -> Some "trpg.stream.read"
-  | "masc_trpg_round_run" -> Some "trpg.round.run"
-  | "masc_trpg_preset_list" -> Some "trpg.preset.list"
-  | "masc_trpg_pool_generate" -> Some "trpg.pool.generate"
-  | "masc_trpg_party_select" -> Some "trpg.party.select"
-  | "masc_trpg_session_start" -> Some "trpg.session.start"
-  | "masc_trpg_actor_spawn" -> Some "trpg.actor.spawn"
-  | "masc_trpg_actor_update" -> Some "trpg.actor.update"
-  | "masc_trpg_actor_delete" -> Some "trpg.actor.delete"
-  | "masc_trpg_actor_claim" -> Some "trpg.actor.claim"
-  | "masc_trpg_actor_release" -> Some "trpg.actor.release"
-  | "masc_trpg_join_eligibility" -> Some "trpg.join.eligibility"
-  | "masc_trpg_mid_join_request" -> Some "trpg.mid_join.request"
-  | "masc_trpg_intervention_submit" -> Some "trpg.intervention.submit"
-  | "masc_trpg_scene_transition" -> Some "trpg.scene.transition"
-  | "masc_trpg_quest_update" -> Some "trpg.quest.update"
-  | "masc_trpg_world_event" -> Some "trpg.world.event"
-  | _ -> None
-
-let handle_legacy_alias (ctx : context) ~legacy_name ~canonical_tool args :
-    tool_result =
-  broadcast_deprecated_alias ~agent_name:ctx.agent_name ~legacy_tool:legacy_name
-    ~canonical_tool;
-  match legacy_name with
-  | name when String.starts_with ~prefix:"masc_trpg_" name -> (
-      match delegate_trpg ctx ~legacy_name:name ~args with
-      | Some r -> r
-      | None ->
-          (false, Printf.sprintf "legacy trpg dispatcher unavailable for %s" name))
-  | _ ->
-      Log.Dispatch.info "NOT_IMPLEMENTED: legacy alias %s -> %s"
-        legacy_name canonical_tool;
-      err_json ~canonical_tool ~legacy_alias:legacy_name ~code:"NOT_IMPLEMENTED"
-        ~message:
-          (Printf.sprintf "legacy alias not supported: %s -> %s. Use canonical tool names from dispatch table." legacy_name canonical_tool)
-        ()
-
 let dispatch (ctx : context) ~name ~args : tool_result option =
   match name with
   | "decision.create" ->
@@ -192,11 +152,7 @@ let dispatch (ctx : context) ~name ~args : tool_result option =
         (match handle_client_snapshot_get ctx ~canonical_tool:name args with
         | Ok r -> r
         | Error e -> e)
-  | legacy -> (
-      match legacy_alias_to_canonical legacy with
-      | Some canonical_tool ->
-          Some (handle_legacy_alias ctx ~legacy_name:legacy ~canonical_tool args)
-      | None -> None)
+  | _ -> None
 
 let string_schema = `Assoc [ ("type", `String "string") ]
 let number_schema = `Assoc [ ("type", `String "number") ]

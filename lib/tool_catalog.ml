@@ -143,16 +143,7 @@ let implementation_allows_public_visibility = function
 let metadata name =
   match List.assoc_opt name explicit_metadata with
   | Some meta -> meta
-  | None -> (
-      match name with
-      | "masc_swarm_live_run" -> default_metadata
-      | _ -> (
-          match Tool_protocol_game_view.legacy_alias_to_canonical name with
-          | Some canonical_name ->
-              deprecated ~canonical_name ~replacement:canonical_name
-                ~allow_direct_call_when_hidden:true
-                "Legacy compatibility alias hidden from the default tool list."
-          | None -> default_metadata))
+  | None -> default_metadata
 
 let implementation_status name =
   let meta = metadata name in

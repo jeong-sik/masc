@@ -56,7 +56,7 @@ let string_opt_to_json = function
   | None -> `Null
 
 let message_fingerprint_json (m : message) : Yojson.Safe.t =
-  let m = Llm_transport.sanitize_message_utf8 m in
+  let m = sanitize_message_utf8 m in
   `Assoc
     [
       ("role", `String (string_of_role m.role));

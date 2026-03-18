@@ -5,8 +5,8 @@
     (Claude, GLM, Gemini, OpenRouter) are supported through a unified
     interface.
 
-    Uses Process_eio subprocess calls for HTTP (proven pattern from
-    llm_direct.ml).  Native cohttp-eio upgrade is a future optimization.
+    Re-exports {!Llm_types} and {!Llm_orchestration} for backward
+    compatibility.
 
     @since 2.61.0 *)
 

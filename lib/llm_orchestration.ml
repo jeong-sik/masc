@@ -4,42 +4,33 @@ open Printf
 open Llm_types
 
 (* ================================================================ *)
-(* Concurrency limiter — throttle simultaneous LLM requests          *)
+(* Concurrency diagnostics (no throttling)                           *)
 (* ================================================================ *)
 
-(** Maximum concurrent cascade/LLM calls.
-    Default 2 is conservative for local llama.cpp runtimes on 128GB hosts. *)
+(** Maximum concurrent LLM calls — retained for diagnostics/dashboard.
+    No longer enforced via semaphore: llama-server handles slot-based
+    parallelism internally, and cloud APIs return rate-limit errors.
+    The old Eio.Semaphore (max=2) caused permit-contention stalls
+    between sentinel, heartbeat, and lodge subsystems. *)
 let max_concurrent_llm =
-  int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:2 ~min_v:1 ~max_v:128
+  int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:8 ~min_v:1 ~max_v:128
 
-let llm_semaphore = Eio.Semaphore.make max_concurrent_llm
+(** Atomic counter tracking in-flight LLM calls (observability only). *)
+let inflight = Atomic.make 0
 
-let llm_semaphore_available () = Eio.Semaphore.get_value llm_semaphore
+let llm_semaphore_available () = max_concurrent_llm - Atomic.get inflight
+let llm_permits_in_use () = Atomic.get inflight
 
-(** Outstanding permit counter for diagnostics.
-    Tracks how many LLM calls are currently holding a permit. *)
-let permits_outstanding = Atomic.make 0
-
-let [@warning "-32"] permits_outstanding_count () = Atomic.get permits_outstanding
-
-(** Eio-safe permit acquisition: explicit try/with ensures release on any
-    exception including Eio.Cancel.Cancelled.
-    Also tracks outstanding permits via Atomic counter for diagnostics. *)
-let with_llm_permit f =
-  Eio.Semaphore.acquire llm_semaphore;
-  Atomic.incr permits_outstanding;
+(** Track in-flight calls for diagnostics. No blocking. *)
+let with_inflight_tracking f =
+  Atomic.incr inflight;
   match f () with
   | result ->
-      Atomic.decr permits_outstanding;
-      Eio.Semaphore.release llm_semaphore;
+      Atomic.decr inflight;
       result
   | exception exn ->
-      Atomic.decr permits_outstanding;
-      Eio.Semaphore.release llm_semaphore;
+      Atomic.decr inflight;
       raise exn
-
-let llm_permits_in_use () =
-  max_concurrent_llm - Eio.Semaphore.get_value llm_semaphore
 
 (* ================================================================ *)
 (* Response cache helpers                                            *)
@@ -217,10 +208,8 @@ let filter_by_provider_health (requests : completion_request list)
 let cascade ?(accept = fun _ -> true) ?timeout_sec
     (requests : completion_request list) : (completion_response, string) result =
   let requests = filter_by_provider_health requests in
-  with_llm_permit (fun () ->
-    let avail = Eio.Semaphore.get_value llm_semaphore in
-    Log.LlmClient.debug "cascade: acquired permit (%d/%d available)"
-      avail max_concurrent_llm;
+  with_inflight_tracking (fun () ->
+    Log.LlmClient.debug "cascade: inflight=%d" (Atomic.get inflight);
     let deadline_opt =
       Option.map (fun sec -> Time_compat.now () +. float_of_int sec) timeout_sec
     in

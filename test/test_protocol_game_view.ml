@@ -543,6 +543,7 @@ let test_client_input_requires_open () =
         (json |> member "payload" |> member "code" |> to_string))
 
 let test_client_input_submit_and_approve () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   let _, ctx = mk_ctx base_dir in
   Fun.protect
@@ -594,6 +595,7 @@ let test_client_input_submit_and_approve () =
         (reapprove_body |> parse_json |> member "payload" |> member "code" |> to_string))
 
 let test_client_snapshot_get () =
+  Eio_main.run @@ fun _env ->
   let base_dir = temp_dir () in
   let _, ctx = mk_ctx base_dir in
   Fun.protect

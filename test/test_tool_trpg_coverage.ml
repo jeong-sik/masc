@@ -173,6 +173,7 @@ let with_env name value f =
     f
 
 let test_round_run_success_path () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -270,6 +271,7 @@ let test_round_run_success_path () =
   cleanup_dir base_dir
 
 let test_round_run_memory_hint_guardrail_escalates_tier () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -339,6 +341,7 @@ let test_round_run_memory_hint_guardrail_escalates_tier () =
   cleanup_dir base_dir
 
 let test_round_run_canon_check_strict_failure () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   write_world_contracts_json base_dir
@@ -457,6 +460,7 @@ let test_round_run_canon_check_strict_failure () =
   cleanup_dir base_dir
 
 let test_round_run_canon_any_of_passes_with_flag_set () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   write_world_contracts_json base_dir
@@ -550,6 +554,7 @@ let test_round_run_canon_any_of_passes_with_flag_set () =
   cleanup_dir base_dir
 
 let test_round_run_emits_combat_semantic_events () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -632,6 +637,7 @@ let test_round_run_emits_combat_semantic_events () =
   cleanup_dir base_dir
 
 let test_round_run_reinforces_pressure_after_wave_clear () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -705,6 +711,7 @@ let test_round_run_reinforces_pressure_after_wave_clear () =
   cleanup_dir base_dir
 
 let test_round_run_emits_session_outcome_event () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -773,6 +780,7 @@ let test_round_run_emits_session_outcome_event () =
   cleanup_dir base_dir
 
 let test_round_run_uses_current_session_for_outcome_gate () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -890,6 +898,7 @@ let test_round_run_uses_current_session_for_outcome_gate () =
   cleanup_dir base_dir
 
 let test_round_run_timeout_policy () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1033,6 +1042,7 @@ let test_round_run_timeout_policy () =
   cleanup_dir base_dir
 
 let test_round_run_local_fallback_progresses_round () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1136,6 +1146,7 @@ let test_round_run_local_fallback_progresses_round () =
   cleanup_dir base_dir
 
 let test_round_run_local_fallback_distributes_team_pressure () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1238,6 +1249,7 @@ let test_round_run_local_fallback_distributes_team_pressure () =
   cleanup_dir base_dir
 
 let test_round_run_unavailable_sampling_cap () =
+  Eio_main.run @@ fun _env ->
   with_env "MASC_TRPG_KEEPER_UNAVAILABLE_MAX_PER_TURN" "1" (fun () ->
     let base_dir = make_temp_dir () in
     let config = Room.default_config base_dir in
@@ -1330,6 +1342,7 @@ let test_round_run_unavailable_sampling_cap () =
     cleanup_dir base_dir)
 
 let test_round_run_uses_majority_player_quorum () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1412,6 +1425,7 @@ let test_round_run_uses_majority_player_quorum () =
   cleanup_dir base_dir
 
 let test_round_run_skips_dead_player_assignments () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1496,6 +1510,7 @@ let test_round_run_skips_dead_player_assignments () =
   cleanup_dir base_dir
 
 let test_round_run_short_circuits_when_session_already_ended () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1565,6 +1580,7 @@ let test_round_run_short_circuits_when_session_already_ended () =
   cleanup_dir base_dir
 
 let test_round_run_rejects_meta_only_keeper_reply () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1643,6 +1659,7 @@ let test_round_run_rejects_meta_only_keeper_reply () =
   cleanup_dir base_dir
 
 let test_round_run_requires_keeper_runtime () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1667,6 +1684,7 @@ let test_round_run_requires_keeper_runtime () =
   cleanup_dir base_dir
 
 let test_round_run_preflight_warning_is_non_blocking () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1738,6 +1756,7 @@ let test_round_run_preflight_warning_is_non_blocking () =
   cleanup_dir base_dir
 
 let test_round_run_lang_english_prompt () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1779,6 +1798,7 @@ let test_round_run_lang_english_prompt () =
   cleanup_dir base_dir
 
 let test_round_run_dm_prompt_reflects_player_action () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1826,6 +1846,7 @@ let test_round_run_dm_prompt_reflects_player_action () =
   cleanup_dir base_dir
 
 let test_round_run_rejects_non_unique_keepers () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1858,6 +1879,7 @@ let test_round_run_rejects_non_unique_keepers () =
   cleanup_dir base_dir
 
 let test_session_bootstrap_and_intervention_flow () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -1990,6 +2012,7 @@ let test_session_bootstrap_and_intervention_flow () =
   cleanup_dir base_dir
 
 let test_examples_scenario_visible_as_world_preset () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let scenario_dir = Filename.concat config.base_path "examples/trpg-mvp/scenarios" in
@@ -2052,6 +2075,7 @@ let test_examples_scenario_visible_as_world_preset () =
   cleanup_dir base_dir
 
 let test_actor_spawn_claim_release_flow () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -2202,6 +2226,7 @@ let test_actor_spawn_claim_release_flow () =
   cleanup_dir base_dir
 
 let test_actor_spawn_auto_generates_actor_id () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -2258,6 +2283,7 @@ let test_actor_spawn_auto_generates_actor_id () =
   cleanup_dir base_dir
 
 let test_actor_spawn_profile_fields () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -2341,6 +2367,7 @@ let test_actor_spawn_profile_fields () =
   cleanup_dir base_dir
 
 let test_actor_update_delete_flow () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -2460,6 +2487,7 @@ let test_actor_update_delete_flow () =
   cleanup_dir base_dir
 
 let test_actor_claim_rejects_dead_actor () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -2501,6 +2529,7 @@ let test_actor_claim_rejects_dead_actor () =
   cleanup_dir base_dir
 
 let test_mid_join_eligibility_and_request_flow () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -2602,6 +2631,7 @@ let test_mid_join_eligibility_and_request_flow () =
   cleanup_dir base_dir
 
 let test_mid_join_reject_when_window_closed () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -2778,6 +2808,7 @@ let test_extract_structured_action_invalid () =
     (Tool_trpg.extract_structured_action json_empty_sa = None)
 
 let test_apply_structured_action_emits_flag_set () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let room_id = "room-sa-flag" in
   Fun.protect
@@ -2824,6 +2855,7 @@ let test_apply_structured_action_emits_flag_set () =
           Alcotest.(check string) "flag key is outcome.victory" "outcome.victory" key)
 
 let test_apply_structured_action_emits_scene_transition () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let room_id = "room-sa-scene" in
   Fun.protect
@@ -2916,6 +2948,7 @@ let test_detect_stagnation_false () =
     (Tool_trpg.detect_stagnation ~events ~threshold:5)
 
 let test_fallback_tracked_separately () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -2966,6 +2999,7 @@ let test_fallback_tracked_separately () =
   cleanup_dir base_dir
 
 let test_end_to_end_victory_via_flags () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -3044,6 +3078,7 @@ let test_end_to_end_victory_via_flags () =
   cleanup_dir base_dir
 
 let test_round_run_reprompts_once_for_missing_structured_action () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
@@ -3122,6 +3157,7 @@ let test_round_run_reprompts_once_for_missing_structured_action () =
   cleanup_dir base_dir
 
 let test_round_run_dm_persona_override_in_prompt_and_summary () =
+  Eio_main.run @@ fun _env ->
   let base_dir = make_temp_dir () in
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in

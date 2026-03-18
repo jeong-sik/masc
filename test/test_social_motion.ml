@@ -57,6 +57,7 @@ let test_emit_and_list_events () =
       check int "task filter" 1 (List.length task_only))
 
 let test_filtered_client_receives_matching_events () =
+  Eio_main.run @@ fun _env ->
   with_config (fun config ->
       let received = ref [] in
       let push frame = received := frame :: !received in
@@ -82,6 +83,7 @@ let test_filtered_client_receives_matching_events () =
       check int "only matching frame delivered" 1 (List.length !received))
 
 let test_graph_json_summarizes_relationships () =
+  Eio_main.run @@ fun _env ->
   with_config (fun config ->
       ignore
         (Lib.Social_motion.emit config ~room_id:"default" ~kind:"agent.joined"

@@ -4,7 +4,6 @@ open Types
 open Server_utils
 open Server_auth
 open Server_tts_proxy
-open Server_trpg_rest
 open Server_dashboard_http
 open Server_routes_http
 
@@ -121,7 +120,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
       | Some o -> o | None -> "*"
     in
     let cors = cors_headers origin in
-    let base_path =
+    let _base_path =
       match !server_state with
       | Some s -> s.Mcp_server.room_config.base_path
       | None -> default_base_path ()
@@ -662,22 +661,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
           in
           h2_respond_json h2_reqd json ~extra_headers:cors
 
-      | `GET, "/api/v1/trpg/events" ->
-          let state = get_server_state () in
-          let base_dir = state.Mcp_server.room_config.base_path in
-          let room_id = Option.value ~default:"" (query_param httpun_request "room_id") in
-          let after_seq = int_query_param httpun_request "after_seq" ~default:0 in
-          let event_type_filter = query_param httpun_request "event_type" in
-          (match trpg_read_events_json ~base_dir ~room_id ~after_seq ~event_type_filter with
-          | Ok json ->
-              let normalized = trpg_normalize_events_json ~default_room_id:room_id json in
-              h2_respond_json h2_reqd (Yojson.Safe.to_string normalized) ~extra_headers:cors
-          | Error (`Bad_request, msg) ->
-              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
-                ~status:`Bad_request ~extra_headers:cors
-          | Error (`Internal_server_error, msg) ->
-              h2_respond_json h2_reqd (Yojson.Safe.to_string (trpg_error_json msg))
-                ~status:`Internal_server_error ~extra_headers:cors)
+      (* TRPG events route archived (#1668) *)
 
       | `GET, "/api/v1/room/current" ->
           let state = get_server_state () in
@@ -689,29 +673,28 @@ let make_request_handler ~sw ~clock ~server_start_time =
       | `POST, "/api/v1/room/current" ->
           let state = get_server_state () in
           let config = state.Mcp_server.room_config in
+          let error_json msg = `Assoc [("error", `String msg)] in
           h2_read_body h2_reqd (fun body_str ->
             try
               let json = Yojson.Safe.from_string body_str in
-              (match trpg_parse_required_string "room_id" json with
-               | Error (`Bad_request, msg) ->
-                   h2_respond_json h2_reqd
-                     (Yojson.Safe.to_string (trpg_error_json msg))
-                      ~status:`Bad_request ~extra_headers:cors
-               | Ok room_id ->
-                   let room_id = String.trim room_id in
-                   if room_id = "" then
-                     h2_respond_json h2_reqd
-                       (Yojson.Safe.to_string (trpg_error_json "room_id cannot be empty"))
-                       ~status:`Bad_request ~extra_headers:cors
-                   else (
-                     Room.write_current_room config room_id;
-                     Room.ensure_room_entry config room_id;
-                     let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
-                     h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors))
+              let room_id =
+                Yojson.Safe.Util.(member "room_id" json |> to_string_option)
+                |> Option.value ~default:""
+                |> String.trim
+              in
+              if room_id = "" then
+                h2_respond_json h2_reqd
+                  (Yojson.Safe.to_string (error_json "room_id is required"))
+                  ~status:`Bad_request ~extra_headers:cors
+              else (
+                Room.write_current_room config room_id;
+                Room.ensure_room_entry config room_id;
+                let response = `Assoc [("ok", `Bool true); ("room_id", `String room_id)] in
+                h2_respond_json h2_reqd (Yojson.Safe.to_string response) ~extra_headers:cors)
             with
             | Yojson.Json_error msg ->
                 h2_respond_json h2_reqd
-                  (Yojson.Safe.to_string (trpg_error_json (Printf.sprintf "invalid json: %s" msg)))
+                  (Yojson.Safe.to_string (error_json (Printf.sprintf "invalid json: %s" msg)))
                   ~status:`Bad_request ~extra_headers:cors
             )
 
@@ -731,18 +714,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
     in
     try
-      if
-        http_auth_strict_enabled ()
-        && httpun_meth <> `OPTIONS
-        && String.starts_with ~prefix:"/api/v1/trpg/" path
-      then
-        match authorize_read_request ~base_path httpun_request with
-        | Ok () -> dispatch_h2_route ()
-        | Error err ->
-            let status = http_status_of_auth_error err in
-            h2_respond_json h2_reqd (auth_error_json err) ~status ~extra_headers:cors
-      else
-        dispatch_h2_route ()
+      dispatch_h2_route ()
     with exn ->
       let msg = Printexc.to_string exn in
       Log.Http.error "Handler error: %s" msg;

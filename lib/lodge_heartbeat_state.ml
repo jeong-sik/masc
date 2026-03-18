@@ -135,7 +135,7 @@ let can_agent_comment = Lodge_rate_limit.can_agent_comment
 let record_agent_comment = Lodge_rate_limit.record_agent_comment
 let min_post_gap = Lodge_rate_limit.min_post_gap
 let min_comment_gap = Lodge_rate_limit.min_comment_gap
-let max_posts_per_day = Lodge_rate_limit.max_posts_per_day
+let max_posts_per_day = Lodge_rate_limit.max_posts_per_day ()
 let max_comments_per_day = Lodge_rate_limit.max_comments_per_day
 let max_comments_per_agent_per_post = Lodge_rate_limit.max_comments_per_agent_per_post
 
@@ -431,14 +431,17 @@ let default_config = {
   quiet_hours = (1, 6);
 }
 
-(** Load config from Env_config.LodgeV2 (SSOT: MASC_LODGE_* env vars) *)
+(** Load config — governable fields read from Runtime_params,
+    non-governable from Env_config directly. *)
 let load_config () =
   {
-    interval_s = Env_config.LodgeV2.tick_interval_seconds;
+    interval_s = Runtime_params.get Governance_registry.lodge_tick_interval;
     enabled = Env_config.LodgeV2.enabled;
-    agents_per_tick = Env_config.LodgeV2.agents_per_tick;
+    agents_per_tick = Runtime_params.get Governance_registry.lodge_agents_per_tick;
     min_checkin_gap_s = Env_config.LodgeV2.min_checkin_gap_seconds;
-    quiet_hours = (Env_config.LodgeV2.quiet_start, Env_config.LodgeV2.quiet_end);
+    quiet_hours =
+      ( Runtime_params.get Governance_registry.lodge_quiet_start,
+        Runtime_params.get Governance_registry.lodge_quiet_end );
   }
 
 (** {1 Types — Check-in Model v2} *)
@@ -704,7 +707,7 @@ let lodge_status () : lodge_status =
   let agents = !agents_cache in
   {
     ls_enabled = !_lodge_enabled;
-    ls_interval_s = Env_config.LodgeV2.tick_interval_seconds;
+    ls_interval_s = Runtime_params.get Governance_registry.lodge_tick_interval;
     ls_agent_count = List.length agents;
     ls_agent_names = List.map (fun a -> a.name) agents;
     ls_last_tick = !_lodge_last_tick;

@@ -29,8 +29,9 @@ val min_post_gap : float
 (** Minimum gap between comments in seconds. *)
 val min_comment_gap : float
 
-(** Maximum posts per day per agent. *)
-val max_posts_per_day : int
+(** Maximum posts per day per agent.
+    Reads from Runtime_params (governable via masc_set_param). *)
+val max_posts_per_day : unit -> int
 
 (** Maximum comments per day per agent. *)
 val max_comments_per_day : int

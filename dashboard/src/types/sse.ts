@@ -22,6 +22,7 @@ export type SSEEventType =
   | 'mdal_iteration'
   | 'mdal_completed'
   | 'mdal_stopped'
+  | 'governance_param_changed'
 
 export interface SSEEvent {
   type: SSEEventType

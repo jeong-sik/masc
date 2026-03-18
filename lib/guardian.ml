@@ -116,8 +116,8 @@ let is_quiet_hours () =
   else
     let tm = Unix.localtime (Time_compat.now ()) in
     let hour = tm.Unix.tm_hour in
-    let quiet_start = Env_config.LodgeV2.quiet_start in
-    let quiet_end = Env_config.LodgeV2.quiet_end in
+    let quiet_start = Runtime_params.get Governance_registry.lodge_quiet_start in
+    let quiet_end = Runtime_params.get Governance_registry.lodge_quiet_end in
     quiet_start < quiet_end && hour >= quiet_start && hour < quiet_end
 
 (* ── Pulse helpers ─────────────────────────────────────────── *)

@@ -81,7 +81,16 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Types.ma
     | Error e -> Error e
     | Ok _ ->
         let actual_name = resolve_agent_name config agent_name in
-        let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
+        let filename = safe_filename actual_name ^ ".json" in
+        (* Check room-scoped agents first, then root-scoped.
+           masc_join writes to room-scoped dir, but this function
+           previously only looked in root agents_dir. *)
+        let room_file = Filename.concat (agents_dir_in_room config (current_room_id config)) filename in
+        let root_file = Filename.concat (agents_dir config) filename in
+        let agent_file =
+          if Sys.file_exists room_file then room_file
+          else root_file
+        in
         if not (Sys.file_exists agent_file) then
           Error (Types.AgentNotFound actual_name)
         else

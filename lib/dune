@@ -471,6 +471,7 @@
    tool_registry
    library_bridge
    tool_council
+   tool_council_json
    tool_council_schemas
    tool_code
    code_swarm_plan
@@ -823,6 +824,7 @@
   tool_team_session_step_exec
   tool_schemas_room_extra
   tool_council_schemas
+  tool_council_json
   dashboard_http_shell
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules

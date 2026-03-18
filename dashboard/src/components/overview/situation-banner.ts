@@ -44,14 +44,18 @@ function synthesizeSituation(snap: DashboardMissionResponse | null): SituationRe
 
   const reasons: SituationReason[] = []
 
-  // Collect blocker reasons
+  // Collect blocker reasons (top 3 — full count shown in summary text)
+  let blockerCount = 0
   for (const s of sessions) {
     if (s.blocker_summary) {
-      reasons.push({
-        category: 'blocker',
-        text: `${s.goal ?? s.session_id}: ${s.blocker_summary.slice(0, 80)}`,
-        severity: 'bad',
-      })
+      blockerCount++
+      if (blockerCount <= 3) {
+        reasons.push({
+          category: 'blocker',
+          text: `${s.goal ?? s.session_id}: ${s.blocker_summary.slice(0, 80)}`,
+          severity: 'bad',
+        })
+      }
     }
   }
 
@@ -110,14 +114,19 @@ export function SituationBanner({ snap, roomHealth }: SituationBannerProps) {
       <span class="situation-banner__text">${text}</span>
     </div>
     ${showReasons ? html`
-      <div class="situation-reasons">
-        ${reasons.map((r, i) => html`
-          <div class="situation-reason situation-reason--${r.severity}" key=${i}>
-            <span class="situation-reason__tag">${CATEGORY_LABELS[r.category] ?? r.category}</span>
-            <span class="situation-reason__text">${r.text}</span>
-          </div>
-        `)}
-      </div>
+      <details class="situation-reasons-collapse" open=${reasons.length <= 5}>
+        <summary class="situation-reasons-collapse__summary">
+          상세 ${reasons.length}건
+        </summary>
+        <div class="situation-reasons">
+          ${reasons.map((r, i) => html`
+            <div class="situation-reason situation-reason--${r.severity}" key=${i}>
+              <span class="situation-reason__tag">${CATEGORY_LABELS[r.category] ?? r.category}</span>
+              <span class="situation-reason__text">${r.text}</span>
+            </div>
+          `)}
+        </div>
+      </details>
     ` : null}
   `
 }

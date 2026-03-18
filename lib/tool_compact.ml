@@ -83,17 +83,17 @@ type result = bool * string
 (* ================================================================ *)
 
 let role_of_string = function
-  | "system" -> Llm_client.System
-  | "user" -> Llm_client.User
-  | "assistant" -> Llm_client.Assistant
-  | "tool" -> Llm_client.Tool
-  | _ -> Llm_client.User
+  | "system" -> Agent_sdk.Types.System
+  | "user" -> Agent_sdk.Types.User
+  | "assistant" -> Agent_sdk.Types.Assistant
+  | "tool" -> Agent_sdk.Types.Tool
+  | _ -> Agent_sdk.Types.User
 
 let string_of_role = function
-  | Llm_client.System -> "system"
-  | Llm_client.User -> "user"
-  | Llm_client.Assistant -> "assistant"
-  | Llm_client.Tool -> "tool"
+  | Agent_sdk.Types.System -> "system"
+  | Agent_sdk.Types.User -> "user"
+  | Agent_sdk.Types.Assistant -> "assistant"
+  | Agent_sdk.Types.Tool -> "tool"
 
 let strategies_of_string = function
   | "prune_tool_outputs" -> Ok [Context_manager.PruneToolOutputs]
@@ -108,22 +108,22 @@ let strategies_of_string = function
     ]
   | s -> Error (Printf.sprintf "Unknown strategy: %s. Valid: prune_tool_outputs, merge_contiguous, drop_low_importance, summarize_old, all" s)
 
-(** Parse a JSON message object into an Llm_client.message. *)
-let parse_message (json : Yojson.Safe.t) : Llm_client.message =
+(** Parse a JSON message object into an Agent_sdk.Types.message. *)
+let parse_message (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let open Yojson.Safe.Util in
   let role = json |> member "role" |> to_string |> role_of_string in
   let content = json |> member "content" |> to_string in
   match role with
-  | Llm_client.Tool ->
+  | Agent_sdk.Types.Tool ->
     { Agent_sdk.Types.role; content = [Agent_sdk.Types.ToolResult { tool_use_id = "compact"; content; is_error = false }] }
   | _ ->
     { Agent_sdk.Types.role; content = [Agent_sdk.Types.Text content] }
 
-(** Serialize an Llm_client.message back to JSON. *)
-let message_to_json (m : Llm_client.message) : Yojson.Safe.t =
+(** Serialize an Agent_sdk.Types.message back to JSON. *)
+let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
   `Assoc [
     ("role", `String (string_of_role m.role));
-    ("content", `String (Llm_client.text_of_message m));
+    ("content", `String (Agent_sdk.Types.text_of_message m));
   ]
 
 (* ================================================================ *)

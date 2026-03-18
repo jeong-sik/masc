@@ -280,10 +280,10 @@ let test_execute_keeper_tool_call_readonly_branches () =
     in
     let ctx =
       Masc_mcp.Context_manager.append ctx
-        (Masc_mcp.Llm_client.user_msg "how is the weather today?")
+        (Agent_sdk.Types.user_msg "how is the weather today?")
     in
     Masc_mcp.Context_manager.append ctx
-      (Masc_mcp.Llm_client.user_msg "where are we meeting?")
+      (Agent_sdk.Types.user_msg "where are we meeting?")
   in
   let config = Masc_mcp.Room.default_config (Filename.get_temp_dir_name ()) in
   let run call_name args =
@@ -374,11 +374,11 @@ let test_keeper_execution_compaction_helpers () =
     let ctx = Masc_mcp.Context_manager.create ~system_prompt:"system" ~max_tokens:40 in
     let ctx =
       Masc_mcp.Context_manager.append ctx
-        (Masc_mcp.Llm_client.user_msg
+        (Agent_sdk.Types.user_msg
            "This is a deliberately long message that pushes the context ratio upward.")
     in
     Masc_mcp.Context_manager.append ctx
-      (Masc_mcp.Llm_client.assistant_msg
+      (Agent_sdk.Types.assistant_msg
          "This is another verbose response that keeps the working set large.")
   in
   let same_ctx, reason_opt, decision =

@@ -127,12 +127,12 @@ let run_perpetual_via_oas
       "trace_id" (`String trace_id);
     Oas.Context.set_scoped oas_ctx Oas.Context.App
       "masc_version" (`String Version.version);
-    let messages = List.filter_map Llm_client.to_oas_message ctx.messages in
+    let messages = List.filter_map Llm.to_oas_message ctx.messages in
     let masc_oas_ckpt : Oas.Checkpoint.t = {
       version = 3;
       session_id = trace_id;
       agent_name = "perpetual";
-      model = Oas.Types.Custom "masc-perpetual";
+      model = "masc-perpetual";
       system_prompt = Some ctx.system_prompt;
       messages;
       usage = {

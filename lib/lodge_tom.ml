@@ -5,7 +5,7 @@
 
     Supports three modes via MASC_TOM_MODE:
     - heuristic (default): Threshold-based prediction, zero latency
-    - llm: SimToM 2-stage prompting via Llm_client cascade
+    - llm: SimToM 2-stage prompting via Llm cascade
     - hybrid: LLM with heuristic fallback on failure
 
     Reference: SimToM (ACL 2024) — 2-stage perspective filter + reasoning
@@ -170,7 +170,7 @@ let parse_tom_response (text : string)
                     (String.sub s 0 (min 100 (String.length s)))))
 
 (** Validate that an LLM ToM response is parseable and non-trivial. *)
-let tom_response_is_valid (resp : Llm_client.completion_response) : bool =
+let tom_response_is_valid (resp : Llm.completion_response) : bool =
   match parse_tom_response (Llm_types.text_of_response resp) with
   | Ok _ -> true
   | Error _ -> false

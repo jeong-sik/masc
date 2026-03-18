@@ -24,8 +24,8 @@ module Oas = Agent_sdk
 (** Convert an effective_model string to an OAS model identifier.
     MASC workers use local Ollama/llama-server models, so all model IDs
     go through Custom. *)
-let oas_model_of_effective_model (model_id : string) : Oas.Types.model =
-  Oas.Types.Custom model_id
+let oas_model_of_effective_model (model_id : string) : string =
+  model_id
 
 (* ================================================================ *)
 (* worker_container_meta -> OAS Types.agent_config                   *)
@@ -136,7 +136,7 @@ let oas_provider_of_model = Local_agent_eio_container.oas_provider_of_model
 let build_agent
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(meta : Local_agent_eio_types.worker_container_meta)
-    ~(model : Llm_client.model_spec)
+    ~(model : Llm.model_spec)
     ~(system_prompt : string)
     ~(tools : Oas.Tool.t list)
     ~(hooks : Oas.Hooks.hooks)
@@ -222,7 +222,7 @@ let run_worker_via_oas
     ~(sw : Eio.Switch.t)
     ~(base_path : string)
     ~(meta : Local_agent_eio_types.worker_container_meta)
-    ~(model : Llm_client.model_spec)
+    ~(model : Llm.model_spec)
     ~(system_prompt : string)
     ~(prompt : string)
     ~(tools : Oas.Tool.t list)
@@ -355,7 +355,7 @@ let orchestrate_workers
     ~(sw : Eio.Switch.t)
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(workers : (Local_agent_eio_types.worker_container_meta
-                 * Llm_client.model_spec
+                 * Llm.model_spec
                  * string (* system_prompt *)
                  * Oas.Tool.t list
                  * Oas.Raw_trace.t

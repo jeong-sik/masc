@@ -213,7 +213,7 @@ let test_auto_responder_uses_shared_llm_client () =
     (file_contains_pattern "lib/auto_responder.ml"
        {|Lodge_cascade.call ~cascade_name|});
   check bool "no direct run_prompt_cascade" false
-    (file_contains_pattern "lib/auto_responder.ml" "Llm_client.run_prompt_cascade");
+    (file_contains_pattern "lib/auto_responder.ml" "Llm.run_prompt_cascade");
   check bool "legacy Llm_direct dispatch removed"
     false
     (file_contains_pattern "lib/auto_responder.ml" "Llm_direct.dispatch")

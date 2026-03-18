@@ -14,7 +14,7 @@
 (** Working context: the message window sent to the LLM. *)
 type working_context = {
   system_prompt : string;
-  messages : Llm_client.message list;
+  messages : Llm.message list;
   token_count : int;                (** Estimated tokens in window *)
   max_tokens : int;                 (** Model context limit *)
   importance_scores : (int * float) list;  (** msg_index → importance 0.0-1.0 *)
@@ -37,7 +37,7 @@ type checkpoint = {
 type session_context = {
   session_id : string;
   session_dir : string;            (** Path to session JSONL files *)
-  mutable full_history : Llm_client.message list;
+  mutable full_history : Llm.message list;
   mutable checkpoints : checkpoint list;
 }
 
@@ -75,10 +75,10 @@ val create : system_prompt:string -> max_tokens:int -> working_context
 val set_system_prompt : working_context -> system_prompt:string -> working_context
 
 (** Append a message to working context, updating token count. *)
-val append : working_context -> Llm_client.message -> working_context
+val append : working_context -> Llm.message -> working_context
 
 (** Append multiple messages. *)
-val append_many : working_context -> Llm_client.message list -> working_context
+val append_many : working_context -> Llm.message list -> working_context
 
 (** Score message importance (Stanford GAP formula adapted). *)
 val score_importance : working_context -> working_context
@@ -99,13 +99,13 @@ val apply_strategy : working_context -> compaction_strategy -> working_context
 val compact : working_context -> compaction_strategy list -> working_context
 
 (** Format a single message as human-readable text: "role: content". *)
-val format_message_readable : Llm_client.message -> string
+val format_message_readable : Llm.message -> string
 
 (** Offload messages to a markdown file in [{session_dir}/offloaded/{compaction_count}.md].
     Returns [Some path] on success, [None] on failure (fail-safe, never raises). *)
 val offload_messages :
   session_dir:string -> compaction_count:int ->
-  Llm_client.message list -> string option
+  Llm.message list -> string option
 
 (** Apply compaction with history offload.
     Before compaction, saves the full pre-compaction messages to a markdown file.
@@ -129,10 +129,10 @@ val oas_strategy_of_compaction : compaction_strategy -> Agent_sdk.Context_reduce
 val compact_via_oas : working_context -> compaction_strategy list -> working_context
 
 (** Convert a masc message to OAS message with role tag for lossless roundtrip. *)
-val masc_msg_to_oas_tagged : Llm_client.message -> Agent_sdk.Types.message
+val masc_msg_to_oas_tagged : Llm.message -> Agent_sdk.Types.message
 
 (** Recover a masc message from a tagged OAS message. *)
-val oas_msg_to_masc_tagged : Agent_sdk.Types.message -> Llm_client.message
+val oas_msg_to_masc_tagged : Agent_sdk.Types.message -> Llm.message
 
 (** Extract [STATE] ... [/STATE] blocks from free-form text.
     Returns the block bodies in appearance order. *)
@@ -160,7 +160,7 @@ val restore_checkpoint : checkpoint -> max_tokens:int -> working_context
 val create_session : session_id:string -> base_dir:string -> session_context
 
 (** Persist a message to session history (append to JSONL). *)
-val persist_message : session_context -> Llm_client.message -> unit
+val persist_message : session_context -> Llm.message -> unit
 
 (** Save checkpoint to session directory. *)
 val save_checkpoint : session_context -> checkpoint -> unit

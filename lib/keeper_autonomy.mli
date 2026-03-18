@@ -63,7 +63,7 @@ val should_auto_execute :
 
 (** Generate a concrete action plan using LLM, given a goal. *)
 val generate_action_plan :
-  model:Llm_client.model_spec ->
+  model:Llm.model_spec ->
   goal:Goal_store.goal ->
   keeper_context:string ->
   (string, string) result

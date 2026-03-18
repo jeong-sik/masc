@@ -333,7 +333,7 @@ let verify_worker ~model ~pattern (worker : worker_plan) diff =
     }
   else
     let prompt = build_verify_prompt ~pattern ~allowed_files:worker.files diff in
-    let req : Llm_client.completion_request =
+    let req : Llm.completion_request =
       {
         model;
         messages = [ Agent_sdk.Types.user_msg prompt ];
@@ -387,13 +387,13 @@ let verify_plan ~base_path ~plan_id ~verify_model =
       let model =
         match verify_model with
         | Some m -> (
-            match Llm_client.model_spec_of_string m with
+            match Llm.model_spec_of_string m with
             | Ok spec -> spec
-            | Error _ -> Llm_client.glm_cloud)
+            | Error _ -> Llm.glm_cloud)
         | None -> (
-            match Llm_client.default_verifier_model_spec () with
+            match Llm.default_verifier_model_spec () with
             | Ok spec -> spec
-            | Error _ -> Llm_client.glm_cloud)
+            | Error _ -> Llm.glm_cloud)
       in
       let results =
         List.map

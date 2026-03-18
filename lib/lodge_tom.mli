@@ -5,7 +5,7 @@
 
     Supports three modes via MASC_TOM_MODE:
     - heuristic (default): Threshold-based prediction, zero latency
-    - llm: SimToM 2-stage prompting via Llm_client cascade
+    - llm: SimToM 2-stage prompting via Llm cascade
     - hybrid: LLM with heuristic fallback on failure
 
     Reference: SimToM (ACL 2024) — 2-stage perspective filter + reasoning

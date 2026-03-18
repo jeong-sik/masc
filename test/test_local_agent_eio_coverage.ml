@@ -7,7 +7,7 @@ let test_parse_text_tool_calls_single () =
   in
   match Local_agent_eio.parse_text_tool_calls content with
   | [ call ] ->
-      check string "tool name" "masc_team_session_step" call.Llm_client.call_name;
+      check string "tool name" "masc_team_session_step" call.Llm.call_name;
       let json = Yojson.Safe.from_string call.call_arguments in
       check string "session id" "ts-123"
         Yojson.Safe.Util.(json |> member "session_id" |> to_string);
@@ -31,10 +31,10 @@ done:local64-smoke-02
   in
   match Local_agent_eio.parse_text_tool_calls content with
   | [ first; second ] ->
-      check string "first tool" "masc_heartbeat" first.Llm_client.call_name;
+      check string "first tool" "masc_heartbeat" first.Llm.call_name;
       check string "heartbeat args" "{}" first.call_arguments;
       check string "second tool" "masc_team_session_step"
-        second.Llm_client.call_name
+        second.Llm.call_name
   | _ -> fail "expected two parsed text tool calls"
 
 let () =

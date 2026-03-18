@@ -399,7 +399,7 @@ let heartbeat_response_is_valid ?(require_json = false) s =
   && ((not require_json) || Lodge_decision.contains_json_object s)
 
 let heartbeat_response_accepted ?(require_json = false)
-    (resp : Llm_client.completion_response) =
+    (resp : Llm.completion_response) =
   heartbeat_response_is_valid ~require_json (Llm_types.text_of_response resp)
 
 let run_heartbeat_llm_once ?(require_json = false) ?(temperature = 0.7) ~agent_name ~prompt () =

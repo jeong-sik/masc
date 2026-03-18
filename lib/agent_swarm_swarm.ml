@@ -343,7 +343,7 @@ let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
               let config = {
                 Types.default_config with
                 name = spec.name;
-                model = Types.Custom spec.provider.model_id;
+                model = spec.provider.model_id;
                 system_prompt = Some spec.system_prompt;
                 max_tokens =
                   Option.value spec.max_tokens

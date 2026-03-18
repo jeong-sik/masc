@@ -6,7 +6,7 @@
 
 open Alcotest
 
-module Llm = Masc_mcp.Llm_client
+module Llm = Masc_mcp.Llm
 module Types = Agent_sdk.Types
 module Compact = Masc_mcp.Context_compact_oas
 module Scoring = Masc_mcp.Context_scoring

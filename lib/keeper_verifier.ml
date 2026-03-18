@@ -98,7 +98,7 @@ let risk_guard ~(autonomy_level : Keeper_autonomy.autonomy_level)
     Layer 2: Risk guard (fast, no LLM)
     Layer 3: LLM verification via verifier.ml (cheap model, 200 tokens) *)
 let verify_action
-    ~(model : Llm_client.model_spec)
+    ~(model : Llm.model_spec)
     ~(autonomy_level : Keeper_autonomy.autonomy_level)
     (req : keeper_verification_request) : keeper_verdict =
   (* Layer 1: Cost guard *)
@@ -172,8 +172,8 @@ let run_pipeline
     ~(goal_ids : string list)
     ~(keeper_name : string)
     ~(keeper_context : string)
-    ~(plan_model : Llm_client.model_spec)
-    ~(verify_model : Llm_client.model_spec)
+    ~(plan_model : Llm.model_spec)
+    ~(verify_model : Llm.model_spec)
     ~(autonomy_level : Keeper_autonomy.autonomy_level)
     : pipeline_result =
   (* Step 1: Evaluate next action *)

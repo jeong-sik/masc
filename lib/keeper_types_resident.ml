@@ -19,11 +19,11 @@ let session_base_dir_ (config : Room.config) =
   Filename.concat (Filename.concat config.base_path ".masc") "perpetual"
 
 let model_specs_of_strings (model_strs : string list) :
-    (Llm_client.model_spec list, string) result =
+    (Llm.model_spec list, string) result =
   let rec go acc = function
     | [] -> Ok (List.rev acc)
     | s :: rest -> (
-        match Llm_client.model_spec_of_string s with
+        match Llm.model_spec_of_string s with
         | Ok spec -> go (spec :: acc) rest
         | Error e -> Error (Printf.sprintf "Bad model spec %s: %s" s e))
   in
@@ -45,14 +45,14 @@ let ollama_port_listening () =
   with Unix.Unix_error _ ->
     false
 
-let model_spec_is_local_runtime (model : Llm_client.model_spec) =
+let model_spec_is_local_runtime (model : Llm.model_spec) =
   match model.provider with
-  | Llm_client.Llama -> true
+  | Llm.Llama -> true
   | _ -> false
 
-let model_spec_is_available (model : Llm_client.model_spec) =
+let model_spec_is_available (model : Llm.model_spec) =
   match model.provider with
-  | Llm_client.Llama -> true
+  | Llm.Llama -> true
   | _ -> true
 
 let keeper_fallback_model_labels () =
@@ -92,9 +92,9 @@ let maybe_append_keeper_fallback_models (models : string list) =
         in
         if extra = [] then models else models @ extra
 
-let ensure_api_keys (models : Llm_client.model_spec list) : (unit, string) result =
+let ensure_api_keys (models : Llm.model_spec list) : (unit, string) result =
   let missing =
-    List.filter_map (fun (m : Llm_client.model_spec) ->
+    List.filter_map (fun (m : Llm.model_spec) ->
       match m.api_key_env with
       | None -> None
       | Some env ->

@@ -1,7 +1,7 @@
 (** Post Verifier LLM — G-Eval rubric scoring via LLM cascade.
 
     Separated from Post_verifier to avoid dependency cycles:
-    Board -> Lodge_selection -> Post_verifier would pull in Llm_client,
+    Board -> Lodge_selection -> Post_verifier would pull in Llm,
     creating a cycle through Llm_response_cache -> Board.
 
     Modes (MASC_VERIFIER_MODE env var):
@@ -109,7 +109,7 @@ let score_to_verdict ~(dim_name : string) (score : int) : verdict =
   else Pass
 
 (** Validate that an LLM response contains parseable G-Eval scores. *)
-let geval_response_is_valid (resp : Llm_client.completion_response) : bool =
+let geval_response_is_valid (resp : Llm.completion_response) : bool =
   match parse_geval_response (Llm_types.text_of_response resp) with
   | Ok _ -> true
   | Error _ -> false

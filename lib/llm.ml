@@ -1,11 +1,11 @@
-(** Llm_client — Vendor-agnostic LLM client for the Perpetual Agent Runtime.
+(** Llm — Vendor-agnostic LLM client for the Perpetual Agent Runtime.
 
     Unified interface for calling any LLM provider. All providers are
     normalized to an internal message format and results are parsed into
     structured completion_response records.
 
     This module re-exports {!Llm_types} and {!Llm_orchestration} so that
-    existing callers can continue using [Llm_client.X] without changes.
+    existing callers can continue using [Llm.X] without changes.
 
     @since 2.61.0 *)
 

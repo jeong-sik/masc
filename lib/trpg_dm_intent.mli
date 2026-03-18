@@ -3,7 +3,7 @@
     Extracts DM's narrative intent from their action text.
     Mode selection via MASC_TRPG_DM_INTENT_MODE:
     - keyword: Pure keyword matching, zero latency
-    - llm: LLM structured classification via Llm_client cascade
+    - llm: LLM structured classification via Llm cascade
     - hybrid (default): LLM with keyword fallback on failure
 
     @since 2.70.0 *)

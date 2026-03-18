@@ -1,4 +1,4 @@
-(** Llm_client — Vendor-agnostic LLM client for the Perpetual Agent Runtime.
+(** Llm — Vendor-agnostic LLM client for the Perpetual Agent Runtime.
 
     Provides structured chat/completion calls to any LLM provider via
     OpenAI-compatible API format. Local llama.cpp runtimes and remote APIs
@@ -13,7 +13,7 @@
 (** {1 Provider Types}
 
     All types are re-exported from {!Llm_types} to ensure nominal
-    equality across [Llm_client], [Llm_types], and [Llm_provider_oas]. *)
+    equality across [Llm], [Llm_types], and [Llm_provider_oas]. *)
 
 type provider = Llm_types.provider =
   | Llama

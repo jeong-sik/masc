@@ -119,7 +119,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          (match ensure_api_keys specs with
           | Error e -> (false, "❌ " ^ e)
           | Ok () ->
-            let primary = match specs with m0 :: _ -> m0 | [] -> Llm_client.default_local_model_spec () in
+            let primary = match specs with m0 :: _ -> m0 | [] -> Llm.default_local_model_spec () in
             let base_dir = session_base_dir ctx.config in
             mkdir_p base_dir;
             let (session, ctx_opt) = load_context_from_checkpoint
@@ -251,18 +251,18 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
 
             (* Single-turn LLM call with cascade *)
             let requests =
-	              List.map (fun (model : Llm_client.model_spec) ->
+	              List.map (fun (model : Llm.model_spec) ->
 	                let msgs =
 	                  (Agent_sdk.Types.system_msg turn_system_prompt) :: ctx_work.messages
 	                in
 	                ({
-                  Llm_client.model;
+                  Llm.model;
                   messages = msgs;
                   temperature = 0.7;
                   max_tokens = turn_max_tokens;
                   tools = keeper_allowed_llm_tools meta;
                   response_format = `Text;
-                } : Llm_client.completion_request)
+                } : Llm.completion_request)
               ) specs
             in
             let run_cascade_batch requests =
@@ -288,7 +288,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     | _ -> ()
                   in
                   (match
-                     Llm_client.call_provider_stream
+                     Llm.call_provider_stream
                        ?timeout_sec:timeout_f
                        first_req
                        ~on_event:stream_on_event
@@ -318,7 +318,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               let max_tool_rounds = 3 in
               let _trunc s n = if String.length s > n then String.sub s 0 n ^ "..." else s in
               let execute_tool_calls tcs =
-                List.map (fun (tc : Llm_client.tool_call) ->
+                List.map (fun (tc : Llm.tool_call) ->
                   Log.Trpg.info "Executing tool: %s args: %s"
                     tc.call_name (_trunc tc.call_arguments 200);
                   let (decision, result_opt, eval_opt, duration_ms) =
@@ -375,7 +375,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               in
               let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
                   ~acc_tools_used ~last_resp =
-                if last_resp.Llm_client.tool_calls = [] || round > max_tool_rounds then
+                if last_resp.Llm.tool_calls = [] || round > max_tool_rounds then
                   (* Terminal: no more tool calls or hit round limit *)
                   let content =
                     let c = String.trim (Llm_types.text_of_response last_resp) in
@@ -384,18 +384,18 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         (String.concat ", " acc_tools_used)
                     else Llm_types.text_of_response last_resp
                   in
-                  ( content, acc_usage, last_resp.Llm_client.model_used,
+                  ( content, acc_usage, last_resp.Llm.model_used,
                     acc_latency, acc_cost, acc_tools_used )
                 else begin
                   Log.Trpg.info "Tool round %d/%d: %d tool calls"
                     round max_tool_rounds
-                    (List.length last_resp.Llm_client.tool_calls);
+                    (List.length last_resp.Llm.tool_calls);
                   let round_tools =
-                    List.map (fun (tc : Llm_client.tool_call) -> tc.call_name)
-                      last_resp.Llm_client.tool_calls
+                    List.map (fun (tc : Llm.tool_call) -> tc.call_name)
+                      last_resp.Llm.tool_calls
                   in
                   let all_tools_so_far = acc_tools_used @ round_tools in
-                  let tool_outputs = execute_tool_calls last_resp.Llm_client.tool_calls in
+                  let tool_outputs = execute_tool_calls last_resp.Llm.tool_calls in
                   let followup_prompt =
                     keeper_tool_followup_prompt
                       ~user_message:message
@@ -421,9 +421,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     keeper_allowed_llm_tools ~write_done meta
                   in
                   let followup_requests =
-                    List.map (fun (model : Llm_client.model_spec) ->
+                    List.map (fun (model : Llm.model_spec) ->
                       ({
-                        Llm_client.model;
+                        Llm.model;
                         messages = [
                           Agent_sdk.Types.system_msg (keeper_tool_loop_system_prompt
                             ~character_context:ctx_work.system_prompt);
@@ -433,21 +433,21 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         max_tokens = followup_max_tokens;
                         tools = next_tools;
                         response_format = `Text;
-                      } : Llm_client.completion_request)
+                      } : Llm.completion_request)
                     ) specs
                   in
                   match run_cascade_batch followup_requests with
                   | Error _ ->
                     (* Cascade failed — return what we have *)
                     ( Llm_types.text_of_response last_resp, acc_usage,
-                      last_resp.Llm_client.model_used, acc_latency,
+                      last_resp.Llm.model_used, acc_latency,
                       acc_cost, acc_tools_used @ round_tools )
                   | Ok resp_next ->
                     Log.Trpg.info "Follow-up round %d resp: tool_calls=%d content_len=%d model=%s"
                       round
-                      (List.length resp_next.Llm_client.tool_calls)
+                      (List.length resp_next.Llm.tool_calls)
                       (String.length (Llm_types.text_of_response resp_next))
-                      resp_next.Llm_client.model_used;
+                      resp_next.Llm.model_used;
                     let used_model_next =
                       model_spec_for_used specs resp_next.model_used
                       |> Option.value ~default:primary
@@ -500,9 +500,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       ~expected_topic:eval0.expected_topic
                   in
                   let correction_requests =
-                    List.map (fun (model : Llm_client.model_spec) ->
+                    List.map (fun (model : Llm.model_spec) ->
 	                      ({
-	                        Llm_client.model;
+	                        Llm.model;
 	                        messages = [
 	                          Agent_sdk.Types.system_msg turn_system_prompt;
 	                          Agent_sdk.Types.user_msg correction_prompt;
@@ -511,7 +511,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         max_tokens = correction_max_tokens;
                         tools = [];
                         response_format = `Text;
-                      } : Llm_client.completion_request)
+                      } : Llm.completion_request)
                     ) specs
                   in
                   match run_cascade_batch correction_requests with
@@ -564,9 +564,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       ~expected_topic:eval_after_correction.expected_topic
                   in
                   let forced_requests =
-                    List.map (fun (model : Llm_client.model_spec) ->
+                    List.map (fun (model : Llm.model_spec) ->
 	                      ({
-	                        Llm_client.model;
+	                        Llm.model;
 	                        messages = [
 	                          Agent_sdk.Types.system_msg turn_system_prompt;
 	                          Agent_sdk.Types.user_msg forced_prompt;
@@ -575,7 +575,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         max_tokens = correction_max_tokens;
                         tools = [];
                         response_format = `Text;
-                      } : Llm_client.completion_request)
+                      } : Llm.completion_request)
                     ) specs
                   in
                   match run_cascade_batch forced_requests with

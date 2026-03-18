@@ -4,20 +4,20 @@ open Keeper_types
 
 include Keeper_memory_bank
 
-let cost_usd_of_usage (usage : Agent_sdk.Types.api_usage) (model : Llm_client.model_spec) : float =
+let cost_usd_of_usage (usage : Agent_sdk.Types.api_usage) (model : Llm.model_spec) : float =
   let input_cost = float_of_int usage.input_tokens *. model.cost_per_1k_input /. 1000.0 in
   let output_cost = float_of_int usage.output_tokens *. model.cost_per_1k_output /. 1000.0 in
   input_cost +. output_cost
 
-let model_spec_for_used (specs : Llm_client.model_spec list) (model_used : string) :
-  Llm_client.model_spec option =
+let model_spec_for_used (specs : Llm.model_spec list) (model_used : string) :
+  Llm.model_spec option =
   let used =
     if String.ends_with ~suffix:":latest" model_used then
       String.sub model_used 0 (String.length model_used - String.length ":latest")
     else
       model_used
   in
-  List.find_opt (fun (m : Llm_client.model_spec) ->
+  List.find_opt (fun (m : Llm.model_spec) ->
     m.model_id = model_used || m.model_id = used
   ) specs
 

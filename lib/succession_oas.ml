@@ -47,7 +47,7 @@ type succession_dna = {
 }
 
 type successor_spec = {
-  model : Llm_client.model_spec;
+  model : Llm.model_spec;
   inherit_tools : bool;
   context_budget : float;
 }
@@ -279,9 +279,9 @@ let extract_dna ~(working_ctx : Context_manager.working_context)
 
 (** Normalize messages for the target model's constraints. *)
 let normalize_for_model (msgs : Agent_sdk.Types.message list)
-    (target : Llm_client.model_spec) : Agent_sdk.Types.message list =
+    (target : Llm.model_spec) : Agent_sdk.Types.message list =
   let msgs = match target.provider with
-    | Llm_client.Llama ->
+    | Llm.Llama ->
       (* Local llama runtimes: merge consecutive system messages, simplify tool messages *)
       List.map (fun (m : Agent_sdk.Types.message) ->
         match m.role with
@@ -295,7 +295,7 @@ let normalize_for_model (msgs : Agent_sdk.Types.message list)
                      tool_id (Agent_sdk.Types.text_of_message m))] }
         | _ -> m
       ) msgs
-    | Llm_client.Claude ->
+    | Llm.Claude ->
       (* Claude: ensure alternating user/assistant, no consecutive same roles *)
       let rec fix_alternation = function
         | [] -> []
@@ -314,7 +314,7 @@ let normalize_for_model (msgs : Agent_sdk.Types.message list)
   (* Trim to fit within target context budget *)
   let max_tokens = target.max_context * 8 / 10 in  (* Leave 20% for response *)
   let rec trim msgs =
-    let total = Llm_client.estimate_tokens msgs in
+    let total = Llm.estimate_tokens msgs in
     if total <= max_tokens || List.length msgs <= 2 then msgs
     else
       (* Remove oldest non-system message *)
@@ -408,7 +408,7 @@ let hydrate (dna : succession_dna) (spec : successor_spec) : Context_manager.wor
       let rec take_up_to budget acc = function
         | [] -> List.rev acc
         | m :: rest ->
-          let tok = Llm_client.estimate_tokens [m] in
+          let tok = Llm.estimate_tokens [m] in
           if budget - tok < 0 then List.rev acc
           else take_up_to (budget - tok) (m :: acc) rest
       in
@@ -512,7 +512,7 @@ let set_metrics ctx (m : succession_metrics) =
 (** Convert a [succession_dna] into an OAS [Checkpoint.t].
 
     The DNA's compressed_context messages are stored in the checkpoint's
-    message list (converted via [Llm_client.to_oas_message]). All other
+    message list (converted via [Llm.to_oas_message]). All other
     DNA fields are stored in the checkpoint's context under the
     [Custom "masc_dna"] scope.
 
@@ -540,12 +540,12 @@ let checkpoint_of_dna
   set_str_list oas_ctx "memory_refs" dna.memory_refs;
   set_str_list oas_ctx "warnings" dna.warnings;
   set_metrics oas_ctx dna.metrics;
-  let messages = List.filter_map Llm_client.to_oas_message working_ctx.messages in
+  let messages = List.filter_map Llm.to_oas_message working_ctx.messages in
   {
     Agent_sdk.Checkpoint.version = 3;
     session_id = sprintf "succession-%s-gen%d" dna.trace_id dna.generation;
     agent_name = "perpetual-successor";
-    model = Agent_sdk.Types.Custom "masc-perpetual";
+    model = "masc-perpetual";
     system_prompt = Some working_ctx.system_prompt;
     messages;
     usage = {

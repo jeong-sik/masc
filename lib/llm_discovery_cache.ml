@@ -5,7 +5,7 @@
     - Convenience queries (any_local_healthy, idle/busy counts)
     - Eio capability injection (set_env at server init)
 
-    No dependency on Llm_client or Llm_orchestration.
+    No dependency on Llm or Llm_orchestration.
 
     @since 2.113.0 *)
 

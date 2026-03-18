@@ -268,14 +268,14 @@ let test_schemas_names () =
    ============================================================ *)
 
 let test_base_tools_names () =
-  let names = List.map (fun (t : Masc_mcp.Llm_client.tool_def) -> t.tool_name)
+  let names = List.map (fun (t : Masc_mcp.Llm.tool_def) -> t.tool_name)
     Tool_shard.base_tools in
   Alcotest.(check bool) "has time_now" true (List.mem "keeper_time_now" names);
   Alcotest.(check bool) "has context_status" true (List.mem "keeper_context_status" names);
   Alcotest.(check bool) "has memory_search" true (List.mem "keeper_memory_search" names)
 
 let test_board_tools_names () =
-  let names = List.map (fun (t : Masc_mcp.Llm_client.tool_def) -> t.tool_name)
+  let names = List.map (fun (t : Masc_mcp.Llm.tool_def) -> t.tool_name)
     Tool_shard.board_tools in
   Alcotest.(check bool) "has board_post" true (List.mem "keeper_board_post" names);
   Alcotest.(check bool) "has board_list" true (List.mem "keeper_board_list" names);

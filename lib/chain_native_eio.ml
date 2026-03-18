@@ -195,16 +195,16 @@ let llm_tool_defs_of_json = function
                  in
                  Some
                    {
-                     Llm_client.tool_name = tool_name;
+                     Llm.tool_name = tool_name;
                      tool_description = tool_description;
                      parameters = parameters;
                    })
   | Some _ -> []
 
-let llm_tool_calls_json (calls : Llm_client.tool_call list) =
+let llm_tool_calls_json (calls : Llm.tool_call list) =
   `List
     (List.map
-       (fun (call : Llm_client.tool_call) ->
+       (fun (call : Llm.tool_call) ->
          `Assoc
            [
              ("id", `String call.call_id);
@@ -215,7 +215,7 @@ let llm_tool_calls_json (calls : Llm_client.tool_call list) =
 
 type llm_runner =
   | Stub
-  | Direct of Llm_client.model_spec
+  | Direct of Llm.model_spec
   | Spawn of string (* agent name *)
   | SpawnWithModel of { agent: string; model: string }
 
@@ -223,7 +223,7 @@ let model_runner_of_string raw =
   let model = trim raw in
   let lower = String.lowercase_ascii model in
   let direct spec =
-    match Llm_client.model_spec_of_string spec with
+    match Llm.model_spec_of_string spec with
     | Ok parsed -> Ok (Direct parsed)
     | Error msg -> Error msg
   in
@@ -245,7 +245,7 @@ let model_runner_of_string raw =
   | "codex" -> Ok (Spawn "codex")
   | value when starts_with ~prefix:"codex:" value -> Ok (Spawn "codex")
   | value -> (
-      match Llm_client.model_spec_of_string model with
+      match Llm.model_spec_of_string model with
       | Ok parsed -> Ok (Direct parsed)
       | Error _ when starts_with ~prefix:"llama:" value -> direct model
       | Error _ when starts_with ~prefix:"gemini:" value -> direct model
@@ -295,7 +295,7 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
       in
       call_spawn_model runtime ~agent_name ~model_override ~prompt:full_prompt ~timeout_sec ()
   | Ok (Direct spec) ->
-      let req : Llm_client.completion_request =
+      let req : Llm.completion_request =
         {
           model = spec;
           messages =

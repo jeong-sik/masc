@@ -148,12 +148,12 @@ One line only.|}
 (* Core: verify                                                     *)
 (* ================================================================ *)
 
-let verify ~(model : Llm_client.model_spec) (req : verification_request) : verdict =
+let verify ~(model : Llm.model_spec) (req : verification_request) : verdict =
   if should_skip ~action_description:req.action_description then
     Pass
   else
     let prompt = build_prompt req in
-    let completion_req : Llm_client.completion_request = {
+    let completion_req : Llm.completion_request = {
       model;
       messages = [Agent_sdk.Types.user_msg prompt];
       temperature = 0.0;  (* Deterministic for verification *)
@@ -206,7 +206,7 @@ let verdict_to_hook_decision (v : verdict) : Agent_sdk.Hooks.hook_decision =
     @param goal The current agent goal (for verification prompt context).
     @param context_summary Brief summary of agent state. *)
 let make_pre_tool_hook
-    ~(model : Llm_client.model_spec)
+    ~(model : Llm.model_spec)
     ~(goal : string)
     ~(context_summary : string)
   : Agent_sdk.Hooks.hook =
@@ -244,7 +244,7 @@ let make_pre_tool_hook
     @return Updated hooks record with the verifier installed in pre_tool_use. *)
 let install_hook
     ~(hooks : Agent_sdk.Hooks.hooks)
-    ~(model : Llm_client.model_spec)
+    ~(model : Llm.model_spec)
     ~(goal : string)
     ~(context_summary : string)
   : Agent_sdk.Hooks.hooks =

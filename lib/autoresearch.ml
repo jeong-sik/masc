@@ -683,10 +683,10 @@ let generate_code_change ~goal ~baseline ~history ~insights
     ~target_file ~file_content ~llm_model =
   let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
     ~file_content ~target_file in
-  match Llm_client.model_spec_of_string llm_model with
+  match Llm.model_spec_of_string llm_model with
   | Result.Error e -> Result.error (Printf.sprintf "Invalid model spec: %s" e)
   | Result.Ok model ->
-    let req : Llm_client.completion_request = {
+    let req : Llm.completion_request = {
       model;
       messages = [Agent_sdk.Types.user_msg prompt];
       temperature = 0.7;

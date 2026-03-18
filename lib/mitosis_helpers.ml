@@ -180,7 +180,7 @@ let set_bool_arg args key value =
       `Assoc [ (key, `Bool value) ]
 
 let default_verifier_models =
-  Llm_client.default_verifier_model_labels ()
+  Llm.default_verifier_model_labels ()
 
 let default_verifier_perspectives = [
   "A: continuity archivist (value-neutral)";
@@ -435,7 +435,7 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
     let checks =
       List.mapi (fun idx model_str ->
         let perspective = perspective_at perspectives idx in
-        match Llm_client.model_spec_of_string model_str with
+        match Llm.model_spec_of_string model_str with
         | Error err ->
             incr warn_count;
             `Assoc [

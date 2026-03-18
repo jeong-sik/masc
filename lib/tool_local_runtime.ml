@@ -160,8 +160,8 @@ let runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_mo
            acc + runtime.max_concurrency)
          0
   in
-  let configured_max_concurrent_llm = Llm_client.max_concurrent_llm in
-  let available_llm_permits = Llm_client.llm_semaphore_available () in
+  let configured_max_concurrent_llm = Llm.max_concurrent_llm in
+  let available_llm_permits = Llm.llm_semaphore_available () in
   let runtime_rows, provider_reachable, slot_reachable, actual_slots_total,
       active_slots_now, actual_ctxs, actual_models =
     List.fold_left
@@ -493,9 +493,9 @@ let runtime_status_json ?(include_models = true) () =
       ("source", `String "llama.cpp runtime");
       ("models", `List (List.map (fun model -> `String model) models));
       ("model_count", `Int (List.length models));
-      ("configured_max_concurrent_llm", `Int Llm_client.max_concurrent_llm);
-      ("available_llm_permits", `Int (Llm_client.llm_semaphore_available ()));
-      ("llm_permits_in_use", `Int (Llm_client.llm_permits_in_use  ()));
+      ("configured_max_concurrent_llm", `Int Llm.max_concurrent_llm);
+      ("available_llm_permits", `Int (Llm.llm_semaphore_available ()));
+      ("llm_permits_in_use", `Int (Llm.llm_permits_in_use  ()));
       ("target_parallelism", `Int configured_capacity);
       ("managed_gap_to_target", `Int 0);
       ("runtime_count", `Int (List.length runtime_snapshots));
@@ -654,7 +654,7 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
         ("p50_latency_ms", int_opt_to_json (pctl 0.50 latencies));
         ("p95_latency_ms", int_opt_to_json (pctl 0.95 latencies));
         ("max_latency_ms", int_opt_to_json (pctl 1.0 latencies));
-        ("configured_max_concurrent_llm", `Int Llm_client.max_concurrent_llm);
+        ("configured_max_concurrent_llm", `Int Llm.max_concurrent_llm);
         ("configured_capacity", `Int (Local_runtime_pool.configured_capacity ()));
         ("measured_ceiling", int_opt_to_json (Local_runtime_pool.measured_ceiling ()));
         ("per_runtime_breakdown", `List runtime_breakdown);

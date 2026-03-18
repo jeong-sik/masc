@@ -20,12 +20,12 @@ type event =
 
 type loop_config = {
   initial_goal : string;
-  model_cascade : Llm_client.model_spec list;
-  tools : Llm_client.tool_def list;
+  model_cascade : Llm.model_spec list;
+  tools : Llm.tool_def list;
   heartbeat_interval_s : float;
   max_idle_turns : int;
   feedback_enabled : bool;
-  verifier_model : Llm_client.model_spec;
+  verifier_model : Llm.model_spec;
   compact_threshold : float;
   prepare_threshold : float;
   handoff_threshold : float;
@@ -57,7 +57,7 @@ type loop_state = {
   mutable started_at : float;
   mutable last_turn_ts : float;
   mutable last_model_used : string;
-  mutable last_usage : Llm_client.token_usage;
+  mutable last_usage : Llm.token_usage;
   mutable last_latency_ms : int;
   mutable compaction_count : int;
   mutable compaction_tokens_saved : int;

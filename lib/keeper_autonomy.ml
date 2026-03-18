@@ -167,7 +167,7 @@ let evaluate_next_action ~config ~goal_ids ~keeper_name:_ =
           StartPerpetualAgent {
             goal_id = goal.id;
             goal_title = goal.title;
-            models = Llm_client.default_execution_model_labels ();
+            models = Llm.default_execution_model_labels ();
             coding_mode = true;
             coding_agent = "claude";
           }
@@ -237,7 +237,7 @@ Keep it concise — max 3 sentences per step.|}
 
 let generate_action_plan ~model ~goal ~keeper_context =
   let prompt = build_plan_prompt goal ~keeper_context in
-  let req : Llm_client.completion_request = {
+  let req : Llm.completion_request = {
     model;
     messages = [Agent_sdk.Types.user_msg prompt];
     temperature = 0.3;

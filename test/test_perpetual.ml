@@ -49,121 +49,121 @@ let test_llm_client () = group "LLM Client" (fun () ->
 
   (* 1. Provider string roundtrip *)
   assert_equal "provider_string:llama"
-    "llama" (Llm_client.string_of_provider Llama);
+    "llama" (Llm.string_of_provider Llama);
   assert_equal "provider_string:claude"
-    "claude" (Llm_client.string_of_provider Claude);
+    "claude" (Llm.string_of_provider Claude);
   assert_equal "provider_string:openai"
-    "openai" (Llm_client.string_of_provider OpenAI);
+    "openai" (Llm.string_of_provider OpenAI);
   assert_equal "provider_string:gemini"
-    "gemini" (Llm_client.string_of_provider Gemini);
+    "gemini" (Llm.string_of_provider Gemini);
 
   (* 2. Model spec parsing *)
-  (match Llm_client.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl" with
+  (match Llm.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl" with
    | Ok m ->
      assert_equal "parse_model:llama_local_id" "qwen3.5-35b-a3b-ud-q8-xl" m.model_id;
      assert_true "parse_model:llama_local_provider"
-       (m.provider = Llm_client.Llama)
+       (m.provider = Llm.Llama)
    | Error _ -> assert_true "parse_model:llama_local" false);
 
-  (match Llm_client.model_spec_of_string "claude:opus" with
+  (match Llm.model_spec_of_string "claude:opus" with
    | Ok m ->
      assert_equal "parse_model:claude_id" Masc_mcp.Env_config.Claude.default_model m.model_id;
      assert_true "parse_model:claude_provider"
-       (m.provider = Llm_client.Claude);
+       (m.provider = Llm.Claude);
      (* Verify opus cost tier to distinguish from sonnet routing *)
      assert_true "parse_model:claude_opus_cost"
        (m.cost_per_1k_input > 0.01)
    | Error _ -> assert_true "parse_model:claude" false);
 
-  (match Llm_client.model_spec_of_string "gemini:gemini-2.5-flash" with
+  (match Llm.model_spec_of_string "gemini:gemini-2.5-flash" with
    | Ok m ->
      assert_equal "parse_model:gemini_id" "gemini-2.5-flash" m.model_id;
      assert_true "parse_model:gemini_provider"
-       (m.provider = Llm_client.Gemini)
+       (m.provider = Llm.Gemini)
    | Error _ -> assert_true "parse_model:gemini" false);
 
-  (match Llm_client.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl:latest" with
+  (match Llm.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl:latest" with
    | Ok m ->
      assert_equal "parse_model:llama_tagged_id" "qwen3.5-35b-a3b-ud-q8-xl:latest" m.model_id;
      assert_true "parse_model:llama_tagged_provider"
-       (m.provider = Llm_client.Llama)
+       (m.provider = Llm.Llama)
    | Error _ -> assert_true "parse_model:llama_tagged" false);
 
-  (match Llm_client.model_spec_of_string "llama:qwen3.5-coder" with
+  (match Llm.model_spec_of_string "llama:qwen3.5-coder" with
    | Ok m ->
      assert_equal "parse_model:llama_id" "qwen3.5-coder" m.model_id;
      assert_true "parse_model:llama_provider"
-       (m.provider = Llm_client.Llama);
+       (m.provider = Llm.Llama);
      assert_equal "parse_model:llama_url"
        Masc_mcp.Env_config.Llama.server_url m.api_url
    | Error e -> assert_true ("parse_model:llama_failed: " ^ e) false);
 
-  (match Llm_client.model_spec_of_string "anthropic:sonnet" with
+  (match Llm.model_spec_of_string "anthropic:sonnet" with
    | Ok m ->
      assert_equal "parse_model:anthropic_alias_id" Masc_mcp.Env_config.Claude.default_model m.model_id;
      assert_true "parse_model:anthropic_alias_provider"
-       (m.provider = Llm_client.Claude)
+       (m.provider = Llm.Claude)
    | Error _ -> assert_true "parse_model:anthropic_alias" false);
 
-  (match Llm_client.model_spec_of_string "google:flash" with
+  (match Llm.model_spec_of_string "google:flash" with
    | Ok m ->
      assert_equal "parse_model:google_alias_id" Masc_mcp.Env_config.Gemini.flash_model m.model_id;
      assert_true "parse_model:google_alias_provider"
-       (m.provider = Llm_client.Gemini)
+       (m.provider = Llm.Gemini)
    | Error _ -> assert_true "parse_model:google_alias" false);
 
-  (match Llm_client.model_spec_of_string "claude-api:sonnet" with
+  (match Llm.model_spec_of_string "claude-api:sonnet" with
    | Ok m ->
      assert_equal "parse_model:claude_api_id" Masc_mcp.Env_config.Claude.default_model m.model_id;
      assert_true "parse_model:claude_api_provider"
-       (m.provider = Llm_client.Claude)
+       (m.provider = Llm.Claude)
    | Error _ -> assert_true "parse_model:claude_api" false);
 
-  (match Llm_client.model_spec_of_string "gemini-api:gemini-2.5-flash" with
+  (match Llm.model_spec_of_string "gemini-api:gemini-2.5-flash" with
    | Ok m ->
      assert_equal "parse_model:gemini_api_id" "gemini-2.5-flash" m.model_id;
      assert_true "parse_model:gemini_api_provider"
-       (m.provider = Llm_client.Gemini)
+       (m.provider = Llm.Gemini)
    | Error _ -> assert_true "parse_model:gemini_api" false);
 
-  (match Llm_client.model_spec_of_string "codex-api:gpt-5-mini" with
+  (match Llm.model_spec_of_string "codex-api:gpt-5-mini" with
    | Ok m ->
      assert_equal "parse_model:codex_api_id" "gpt-5-mini" m.model_id;
      assert_true "parse_model:codex_api_provider"
-       (m.provider = Llm_client.OpenAI)
+       (m.provider = Llm.OpenAI)
    | Error _ -> assert_true "parse_model:codex_api" false);
 
   (* 3. Invalid model spec *)
-  (match Llm_client.model_spec_of_string "invalid" with
+  (match Llm.model_spec_of_string "invalid" with
    | Error _ -> assert_true "parse_model:invalid" true
    | Ok _ -> assert_true "parse_model:invalid_should_fail" false);
 
-  (match Llm_client.model_spec_of_string "llama:" with
+  (match Llm.model_spec_of_string "llama:" with
    | Error _ -> assert_true "parse_model:empty_model_rejected" true
    | Ok _ -> assert_true "parse_model:empty_model_should_fail" false);
 
   (* 3b. MLX and Custom provider parsing *)
-  (match Llm_client.model_spec_of_string "mlx:qwen3.5-35b" with
+  (match Llm.model_spec_of_string "mlx:qwen3.5-35b" with
    | Ok m ->
      assert_equal "parse_model:mlx_id" "qwen3.5-35b" m.model_id;
      assert_true "parse_model:mlx_provider"
-       (m.provider = Llm_client.Custom "mlx");
+       (m.provider = Llm.Custom "mlx");
      assert_equal "parse_model:mlx_url" "http://127.0.0.1:8091" m.api_url
    | Error e -> assert_true ("parse_model:mlx_failed: " ^ e) false);
 
-  (match Llm_client.model_spec_of_string "custom:mymodel@http://localhost:9999" with
+  (match Llm.model_spec_of_string "custom:mymodel@http://localhost:9999" with
    | Ok m ->
      assert_equal "parse_model:custom_with_url_id" "mymodel" m.model_id;
      assert_true "parse_model:custom_with_url_provider"
-       (m.provider = Llm_client.Custom "mymodel");
+       (m.provider = Llm.Custom "mymodel");
      assert_equal "parse_model:custom_with_url_url" "http://localhost:9999" m.api_url
    | Error e -> assert_true ("parse_model:custom_url_failed: " ^ e) false);
 
-  (match Llm_client.model_spec_of_string "custom:bare-model" with
+  (match Llm.model_spec_of_string "custom:bare-model" with
    | Ok m ->
      assert_equal "parse_model:custom_bare_id" "bare-model" m.model_id;
      assert_true "parse_model:custom_bare_provider"
-       (m.provider = Llm_client.Custom "bare-model");
+       (m.provider = Llm.Custom "bare-model");
      assert_equal "parse_model:custom_bare_url" "http://127.0.0.1:8080" m.api_url
    | Error e -> assert_true ("parse_model:custom_bare_failed: " ^ e) false);
 
@@ -172,28 +172,28 @@ let test_llm_client () = group "LLM Client" (fun () ->
   assert_true "msg:system_role" (msg.role = Agent_sdk.Types.System);
   assert_equal "msg:system_content" "hello" (Agent_sdk.Types.text_of_message msg);
 
-  let msg2 = Llm_client.tool_msg ~name:"grep" ~call_id:"c1" "results" in
+  let msg2 = Llm.tool_msg ~name:"grep" ~call_id:"c1" "results" in
   assert_true "msg:tool_role" (msg2.role = Agent_sdk.Types.Tool);
   let has_tool_result = List.exists (function Agent_sdk.Types.ToolResult { tool_use_id = "c1"; _ } -> true | _ -> false) msg2.content in
   assert_true "msg:tool_call_id_in_content" has_tool_result;
 
   (* 5. Token estimation *)
   let msgs = [Agent_sdk.Types.user_msg "hello world"] in
-  let tokens = Llm_client.estimate_tokens msgs in
+  let tokens = Llm.estimate_tokens msgs in
   assert_true "token_estimate:positive" (tokens > 0);
   assert_true "token_estimate:reasonable" (tokens < 100);
 
   (* 6. Built-in model specs *)
   assert_true "builtin:llama_default_context"
-    (Llm_client.llama_default.max_context = 128000);
+    (Llm.llama_default.max_context = 128000);
   assert_true "builtin:claude_opus_cost"
-    (Llm_client.claude_opus.cost_per_1k_input > 0.0);
+    (Llm.claude_opus.cost_per_1k_input > 0.0);
   assert_true "builtin:gemini_pro_provider"
-    (Llm_client.gemini_pro.provider = Llm_client.Gemini);
+    (Llm.gemini_pro.provider = Llm.Gemini);
   assert_true "builtin:openai_default_provider"
-    (Llm_client.openai_default.provider = Llm_client.OpenAI);
+    (Llm.openai_default.provider = Llm.OpenAI);
   assert_true "builtin:llama_default_provider"
-    (Llm_client.llama_default.provider = Llm_client.Llama);
+    (Llm.llama_default.provider = Llm.Llama);
   (* Set env vars so default_local_model_spec resolves llama regardless of CI env *)
   let prev_provider = Sys.getenv_opt "MASC_DEFAULT_PROVIDER" in
   let prev_model = Sys.getenv_opt "MASC_DEFAULT_MODEL" in
@@ -201,9 +201,9 @@ let test_llm_client () = group "LLM Client" (fun () ->
   Unix.putenv "MASC_DEFAULT_PROVIDER" "llama";
   Unix.putenv "MASC_DEFAULT_MODEL" "default-model";
   Unix.putenv "LLAMA_DEFAULT_MODEL" "default-model";
-  let default_local = Llm_client.default_local_model_spec () in
+  let default_local = Llm.default_local_model_spec () in
   assert_true "builtin:default_local_provider"
-    (default_local.provider = Llm_client.Llama);
+    (default_local.provider = Llm.Llama);
   assert_equal "builtin:default_local_model_id"
     "default-model" default_local.model_id;
   (* Restore env vars *)
@@ -267,7 +267,7 @@ let test_context_manager () = group "Context Manager" (fun () ->
   assert_true "importance:recency" (score_2 > score_0);
 
   (* 7. PruneToolOutputs *)
-  let long_tool_msg = { (Llm_client.tool_msg ~name:"t" ~call_id:"c" (String.make 1000 'x'))
+  let long_tool_msg = { (Llm.tool_msg ~name:"t" ~call_id:"c" (String.make 1000 'x'))
     with role = Agent_sdk.Types.Tool } in
   let ctx5 = Context_manager.append ctx long_tool_msg in
   let pruned = Context_manager.apply_strategy ctx5 PruneToolOutputs in
@@ -451,10 +451,10 @@ let test_succession () = group "Succession" (fun () ->
   (* 5. Cross-model normalization: Llama *)
   let msgs = [
     Agent_sdk.Types.user_msg "hello";
-    Llm_client.tool_msg ~name:"grep" ~call_id:"c1" "results";
+    Llm.tool_msg ~name:"grep" ~call_id:"c1" "results";
     Agent_sdk.Types.assistant_msg "done";
   ] in
-  let normalized = Succession_oas.normalize_for_model msgs Llm_client.llama_default in
+  let normalized = Succession_oas.normalize_for_model msgs Llm.llama_default in
   (* Tool messages should be converted to user messages for local llama runtimes *)
   let tool_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
     m.role = Agent_sdk.Types.Tool) normalized in
@@ -466,13 +466,13 @@ let test_succession () = group "Succession" (fun () ->
     Agent_sdk.Types.user_msg "part2";
     Agent_sdk.Types.assistant_msg "response";
   ] in
-  let normalized2 = Succession_oas.normalize_for_model msgs2 Llm_client.claude_opus in
+  let normalized2 = Succession_oas.normalize_for_model msgs2 Llm.claude_opus in
   assert_true "normalize:claude_merged"
     (List.length normalized2 <= List.length msgs2);
 
   (* 7. Hydrate from DNA *)
   let spec = Succession_oas.{
-    model = Llm_client.llama_default;
+    model = Llm.llama_default;
     inherit_tools = true;
     context_budget = 0.3;
   } in
@@ -492,7 +492,7 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
 
   (* 1. Default config *)
   let config = Perpetual_loop.default_config
-    ~goal:"test" ~models:[Llm_client.llama_default] () in
+    ~goal:"test" ~models:[Llm.llama_default] () in
   assert_equal "config:goal" "test" config.initial_goal;
   assert_float_near "config:compact" 0.5 config.compact_threshold 0.01;
   assert_float_near "config:handoff" 0.85 config.handoff_threshold 0.01;
@@ -522,7 +522,7 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
 
   (* 5. Stopped state is reflected in status *)
   let fresh_config = Perpetual_loop.default_config
-    ~goal:"test" ~models:[Llm_client.llama_default] () in
+    ~goal:"test" ~models:[Llm.llama_default] () in
   let fresh_state = Perpetual_loop.create_state fresh_config in
   Perpetual_loop.stop fresh_state;
   assert_true "stop:running_false" (not fresh_state.running);
@@ -567,8 +567,8 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
     ~goal:"multi"
     ~models:
       [
-        Llm_client.llama_default;
-        { Llm_client.llama_default with model_id = "qwen3.5-9b" };
+        Llm.llama_default;
+        { Llm.llama_default with model_id = "qwen3.5-9b" };
       ]
     () in
   assert_equal "cascade:model_count" 2
@@ -625,7 +625,7 @@ let test_auto_claim () = group "Auto-Claim" (fun () ->
 
   (* 1. Auto-claim disabled when no room_config *)
   let config = Perpetual_loop.default_config
-    ~goal:"test" ~models:[Llm_client.llama_default] () in
+    ~goal:"test" ~models:[Llm.llama_default] () in
   assert_true "auto_claim:disabled_by_default" (config.room_config = None);
   let state = Perpetual_loop.create_state config in
   assert_true "auto_claim:no_current_task" (state.current_task_id = None);
@@ -749,7 +749,7 @@ let test_integration () = group "Integration" (fun () ->
   assert_equal "integration:dna_goal" "integration test" dna.goal;
 
   let spec = Succession_oas.{
-    model = Llm_client.llama_default;
+    model = Llm.llama_default;
     inherit_tools = true;
     context_budget = 0.5;
   } in
@@ -781,7 +781,7 @@ let test_integration () = group "Integration" (fun () ->
     (after_oas.token_count <= after_ctx.token_count * 3);
 
   (* 3c. OAS tagged roundtrip preserves role information *)
-  let tool_msg_rt = Llm_client.tool_msg ~name:"grep" ~call_id:"tc1" "search results" in
+  let tool_msg_rt = Llm.tool_msg ~name:"grep" ~call_id:"tc1" "search results" in
   let sys_msg_rt = Agent_sdk.Types.system_msg "you are a helper" in
   let user_msg_rt = Agent_sdk.Types.user_msg "hello" in
   let asst_msg_rt = Agent_sdk.Types.assistant_msg "hi there" in
@@ -798,7 +798,7 @@ let test_integration () = group "Integration" (fun () ->
   let ctx_with_tools = Context_manager.append_many
     (Context_manager.create ~system_prompt:"test" ~max_tokens:10000)
     [Agent_sdk.Types.user_msg "run grep";
-     Llm_client.tool_msg ~name:"grep" ~call_id:"c1" (String.make 800 'r');
+     Llm.tool_msg ~name:"grep" ~call_id:"c1" (String.make 800 'r');
      Agent_sdk.Types.assistant_msg "found results"] in
   let pruned_oas = Context_manager.compact_via_oas ctx_with_tools [PruneToolOutputs] in
   let tool_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
@@ -808,7 +808,7 @@ let test_integration () = group "Integration" (fun () ->
   assert_true "oas_prune:tool_truncated" (String.length tool_content < 800);
 
   (* 3d2. Tagged roundtrip preserves tool_call_id *)
-  let tool_with_id = Llm_client.tool_msg ~name:"grep" ~call_id:"tc-42" "result" in
+  let tool_with_id = Llm.tool_msg ~name:"grep" ~call_id:"tc-42" "result" in
   let oas_t = Context_manager.masc_msg_to_oas_tagged tool_with_id in
   let back_t = Context_manager.oas_msg_to_masc_tagged oas_t in
   let has_tc42 = List.exists (function
@@ -821,26 +821,26 @@ let test_integration () = group "Integration" (fun () ->
   let back_tricky = Context_manager.oas_msg_to_masc_tagged oas_tricky in
   assert_true "roundtrip:no_tag_collision" (back_tricky.role = Agent_sdk.Types.User);
 
-  (* 3e. Llm_client OAS type adapters *)
-  let provider_config = Llm_client.to_oas_provider Llm_client.claude_opus in
+  (* 3e. Llm OAS type adapters *)
+  let provider_config = Llm.to_oas_provider Llm.claude_opus in
   assert_true "oas_adapter:claude_mapped" (Option.is_some provider_config);
-  let provider_config_custom = Llm_client.to_oas_provider
-    { Llm_client.llama_default with provider = Llm_client.Custom "test" } in
+  let provider_config_custom = Llm.to_oas_provider
+    { Llm.llama_default with provider = Llm.Custom "test" } in
   assert_true "oas_adapter:custom_mapped" (Option.is_some provider_config_custom);
 
-  (* 3f. Llm_client message/usage roundtrip *)
+  (* 3f. Llm message/usage roundtrip *)
   let test_msg = Agent_sdk.Types.user_msg "test" in
-  (match Llm_client.to_oas_message test_msg with
+  (match Llm.to_oas_message test_msg with
    | None -> assert_true "oas_adapter:msg_roundtrip" false
    | Some oas_m ->
-     let back_m = Llm_client.of_oas_message oas_m in
+     let back_m = Llm.of_oas_message oas_m in
      assert_true "oas_adapter:msg_roundtrip" (Agent_sdk.Types.text_of_message back_m = "test"));
 
   let test_usage : Agent_sdk.Types.api_usage =
     { Agent_sdk.Types.input_tokens = 100; output_tokens = 50;
       cache_creation_input_tokens = 10; cache_read_input_tokens = 20 } in
-  let oas_u = Llm_client.to_oas_usage test_usage in
-  let back_u = Llm_client.of_oas_usage oas_u in
+  let oas_u = Llm.to_oas_usage test_usage in
+  let back_u = Llm.of_oas_usage oas_u in
   assert_equal "oas_adapter:usage_input" 100 back_u.input_tokens;
   assert_equal "oas_adapter:usage_output" 50 back_u.output_tokens;
 
@@ -874,7 +874,7 @@ let test_history_offload () = group "History Offload" (fun () ->
   let formatted = Context_manager.format_message_readable user_msg in
   assert_true "format:user" (formatted = "user: hello world");
 
-  let tool_msg = Llm_client.tool_msg ~name:"grep" ~call_id:"c1" "search results" in
+  let tool_msg = Llm.tool_msg ~name:"grep" ~call_id:"c1" "search results" in
   let formatted_tool = Context_manager.format_message_readable tool_msg in
   assert_true "format:tool_with_name"
     (String.length formatted_tool > 0

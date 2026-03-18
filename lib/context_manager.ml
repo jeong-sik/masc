@@ -532,7 +532,7 @@ let role_of_string = function
   | "assistant" -> Agent_sdk.Types.Assistant | _ -> Agent_sdk.Types.Tool
 
 let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
-  let m = Llm_client.sanitize_message_utf8 m in
+  let m = Llm.sanitize_message_utf8 m in
   let base = [
     ("role", `String (role_to_string m.role));
     ("content", `String (text_of_message m));
@@ -551,7 +551,7 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
 let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let open Yojson.Safe.Util in
   let role = json |> member "role" |> to_string |> role_of_string in
-  let text = json |> member "content" |> to_string |> Llm_client.sanitize_text_utf8 in
+  let text = json |> member "content" |> to_string |> Llm.sanitize_text_utf8 in
   match role with
   | Agent_sdk.Types.Tool ->
     let tool_use_id = json |> member "tool_call_id" |> to_string_option |> Option.value ~default:"masc-tool" in
@@ -561,7 +561,7 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
 
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [
-    ("system_prompt", `String (Llm_client.sanitize_text_utf8 ctx.system_prompt));
+    ("system_prompt", `String (Llm.sanitize_text_utf8 ctx.system_prompt));
     ("messages", `List (List.map message_to_json ctx.messages));
     ("token_count", `Int ctx.token_count);
     ("max_tokens", `Int ctx.max_tokens);
@@ -569,10 +569,10 @@ let serialize_context (ctx : working_context) : string =
   Yojson.Safe.to_string json
 
 let deserialize_context (s : string) ~max_tokens : working_context =
-  let json = Yojson.Safe.from_string (Llm_client.sanitize_text_utf8 s) in
+  let json = Yojson.Safe.from_string (Llm.sanitize_text_utf8 s) in
   let open Yojson.Safe.Util in
   let system_prompt =
-    json |> member "system_prompt" |> to_string |> Llm_client.sanitize_text_utf8
+    json |> member "system_prompt" |> to_string |> Llm.sanitize_text_utf8
   in
   let messages = json |> member "messages" |> to_list |> List.map message_of_json in
   let token_count = json |> member "token_count" |> to_int in
@@ -586,7 +586,7 @@ let create_checkpoint ctx ~generation =
     generation;
     message_count = List.length ctx.messages;
     token_count = ctx.token_count;
-    serialized = serialize_context ctx |> Llm_client.sanitize_text_utf8;
+    serialized = serialize_context ctx |> Llm.sanitize_text_utf8;
   }
 
 let restore_checkpoint ckpt ~max_tokens =
@@ -602,7 +602,7 @@ let create_session ~session_id ~base_dir =
   { session_id; session_dir; full_history = []; checkpoints = [] }
 
 let persist_message session msg =
-  let msg = Llm_client.sanitize_message_utf8 msg in
+  let msg = Llm.sanitize_message_utf8 msg in
   session.full_history <- session.full_history @ [msg];
   let path = Filename.concat session.session_dir "history.jsonl" in
   let now_ts = Time_compat.now () in
@@ -613,13 +613,13 @@ let persist_message session msg =
     | j -> j
   in
   let line =
-    (Yojson.Safe.to_string payload |> Llm_client.sanitize_text_utf8) ^ "\n"
+    (Yojson.Safe.to_string payload |> Llm.sanitize_text_utf8) ^ "\n"
   in
   Fs_compat.append_file path line
 
 let save_checkpoint session ckpt =
   let ckpt =
-    { ckpt with serialized = Llm_client.sanitize_text_utf8 ckpt.serialized }
+    { ckpt with serialized = Llm.sanitize_text_utf8 ckpt.serialized }
   in
   session.checkpoints <- session.checkpoints @ [ckpt];
   let path = Filename.concat session.session_dir
@@ -632,7 +632,7 @@ let save_checkpoint session ckpt =
     ("token_count", `Int ckpt.token_count);
     ("serialized", `String ckpt.serialized);
   ] in
-  let content = Yojson.Safe.to_string json |> Llm_client.sanitize_text_utf8 in
+  let content = Yojson.Safe.to_string json |> Llm.sanitize_text_utf8 in
   Fs_compat.save_file path content
 
 let load_latest_checkpoint session =
@@ -652,7 +652,7 @@ let load_latest_checkpoint session =
       let content = Fs_compat.load_file path in
       let json =
         content
-        |> Llm_client.sanitize_text_utf8
+        |> Llm.sanitize_text_utf8
         |> Yojson.Safe.from_string
       in
       let open Yojson.Safe.Util in
@@ -663,5 +663,5 @@ let load_latest_checkpoint session =
         message_count = json |> member "message_count" |> to_int;
         token_count = json |> member "token_count" |> to_int;
         serialized =
-          json |> member "serialized" |> to_string |> Llm_client.sanitize_text_utf8;
+          json |> member "serialized" |> to_string |> Llm.sanitize_text_utf8;
       }

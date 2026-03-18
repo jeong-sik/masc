@@ -53,36 +53,36 @@ let worker_name_for_state (state : Mdal.loop_state) =
   sprintf "mdal-%s-%02d" safe_loop (state.current_iteration + 1)
 
 let model_provider_label = function
-  | Llm_client.Llama -> "llama"
-  | Llm_client.Claude -> "claude"
-  | Llm_client.OpenAI -> "openai"
-  | Llm_client.Gemini -> "gemini"
-  | Llm_client.Glm_cloud -> "glm"
-  | Llm_client.OpenRouter -> "openrouter"
-  | Llm_client.Custom name -> "custom:" ^ name
+  | Llm.Llama -> "llama"
+  | Llm.Claude -> "claude"
+  | Llm.OpenAI -> "openai"
+  | Llm.Gemini -> "gemini"
+  | Llm.Glm_cloud -> "glm"
+  | Llm.OpenRouter -> "openrouter"
+  | Llm.Custom name -> "custom:" ^ name
 
-let model_label (spec : Llm_client.model_spec) =
+let model_label (spec : Llm.model_spec) =
   sprintf "%s:%s" (model_provider_label spec.provider) spec.model_id
 
-let validate_model_spec (spec : Llm_client.model_spec) :
-    (Llm_client.model_spec, string) result =
+let validate_model_spec (spec : Llm.model_spec) :
+    (Llm.model_spec, string) result =
   match spec.provider with
-  | Llm_client.Claude
-  | Llm_client.OpenAI
-  | Llm_client.Gemini
-  | Llm_client.Llama
-  | Llm_client.Glm_cloud -> Ok spec
-  | Llm_client.OpenRouter
-  | Llm_client.Custom _ ->
+  | Llm.Claude
+  | Llm.OpenAI
+  | Llm.Gemini
+  | Llm.Llama
+  | Llm.Glm_cloud -> Ok spec
+  | Llm.OpenRouter
+  | Llm.Custom _ ->
       Error
         (sprintf
            "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
            (model_provider_label spec.provider))
 
 let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
-    (Llm_client.model_spec * string, string) result =
+    (Llm.model_spec * string, string) result =
   let parse_worker_model raw =
-    match Llm_client.model_spec_of_string raw with
+    match Llm.model_spec_of_string raw with
     | Error _ as e -> e
     | Ok spec -> (
         match validate_model_spec spec with
@@ -96,14 +96,14 @@ let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
       if String.contains normalized ':' then parse_worker_model normalized
       else
         match normalized with
-        | "claude" -> Ok (Llm_client.claude_opus, model_label Llm_client.claude_opus)
+        | "claude" -> Ok (Llm.claude_opus, model_label Llm.claude_opus)
         | "openai" | "codex-api" ->
-            Ok (Llm_client.openai_default, model_label Llm_client.openai_default)
-        | "gemini" -> Ok (Llm_client.gemini_pro, model_label Llm_client.gemini_pro)
+            Ok (Llm.openai_default, model_label Llm.openai_default)
+        | "gemini" -> Ok (Llm.gemini_pro, model_label Llm.gemini_pro)
         | "ollama" ->
             Error (Provider_adapter.bare_ollama_migration_message ())
         | "glm" ->
-            Ok (Llm_client.glm_cloud, model_label Llm_client.glm_cloud)
+            Ok (Llm.glm_cloud, model_label Llm.glm_cloud)
         | "llama" ->
             Error
               "MDAL strict worker requires `worker_model` for llama providers, e.g. `llama:<model-id>`."
@@ -157,7 +157,7 @@ let run ~(sw : Eio.Switch.t) ~(config : Room.config) (state : Mdal.loop_state)
         raise (Invalid_argument message)
   in
   let model_spec =
-    match Llm_client.model_spec_of_string model_label with
+    match Llm.model_spec_of_string model_label with
     | Ok spec -> spec
     | Error message -> raise (Invalid_argument message)
   in

@@ -1,6 +1,6 @@
 open Alcotest
 
-module Llm = Masc_mcp.Llm_client
+module Llm = Masc_mcp.Llm
 
 let sample_request provider =
   {

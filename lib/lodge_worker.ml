@@ -61,13 +61,13 @@ let worker_model_spec () =
     | _ -> None
   in
   match explicit with
-  | Some spec -> Llm_client.model_spec_of_string spec
+  | Some spec -> Llm.model_spec_of_string spec
   | None -> (
       match Sys.getenv_opt "LLAMA_SWARM_MODEL" with
       | Some raw when String.trim raw <> "" ->
-          Llm_client.model_spec_of_string ("llama:" ^ String.trim raw)
+          Llm.model_spec_of_string ("llama:" ^ String.trim raw)
       | _ ->
-          Llm_client.model_spec_of_string
+          Llm.model_spec_of_string
             ("llama:" ^ Env_config.Llama.default_model))
 
 let base_path () =

@@ -70,9 +70,10 @@ export function AgentRoster() {
   }
 
   return html`
-    <div class="roster-page">
+    <div class="roster-page agent-page">
       <div class="roster-header">
         <h2 class="roster-title">에이전트 (${agentList.length})</h2>
+        <p class="agent-page__subtitle">등록된 에이전트 — 상태, 작업, 활동 이력</p>
         <div class="roster-controls">
           <input
             type="text"

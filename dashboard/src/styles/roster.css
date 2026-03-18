@@ -24,6 +24,12 @@
   text-shadow: 0 1px 4px rgba(212, 169, 75, 0.2);
 }
 
+.agent-page__subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-top: 4px;
+}
+
 .roster-controls {
   display: flex;
   gap: var(--space-md, 16px);
@@ -245,66 +251,173 @@
 }
 
 /* ============================================
-   Keeper Roster — HP/MP bar style
+   Keeper Roster — Blue/MP accent, gauge-centric
+   Visually distinct from Agent Roster (gold/avatar)
    ============================================ */
 
-.keeper-roster-card {
-  flex-direction: column;
-  padding: 14px 20px;
+.keeper-page {
+  --keeper-accent: #4a9ef5;
+  --keeper-accent-dim: rgba(74, 158, 245, 0.12);
+  --keeper-accent-border: rgba(74, 158, 245, 0.25);
+  --keeper-panel-bg: rgba(10, 18, 36, 0.95);
 }
 
-.keeper-roster__main {
+.keeper-page__title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--keeper-accent, #4a9ef5);
+  margin: 0;
+  letter-spacing: 0.5px;
+  text-shadow: 0 1px 4px rgba(74, 158, 245, 0.2);
+}
+
+.keeper-page__subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.3);
+  margin-top: 4px;
+}
+
+.keeper-grid {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+.keeper-panel {
+  padding: 16px 20px;
+  background: var(--keeper-panel-bg);
+  border: 1px solid var(--keeper-accent-border);
+  border-radius: 6px;
+  border-left: 3px solid var(--keeper-accent);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all 0.2s;
+}
+
+.keeper-panel:hover {
+  background: rgba(14, 24, 48, 0.95);
+  box-shadow: 0 0 12px rgba(74, 158, 245, 0.08);
+}
+
+.keeper-panel__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.keeper-panel__identity {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 
-.keeper-roster__header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm, 8px);
+.keeper-panel__name {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 600;
 }
 
-.keeper-roster__gen {
+.keeper-panel__gen {
   font-size: 10px;
   padding: 2px 7px;
   border-radius: 3px;
-  background: rgba(74, 158, 245, 0.12);
-  color: var(--ff-mp, #4a9ef5);
-  border: 1px solid rgba(74, 158, 245, 0.2);
+  background: var(--keeper-accent-dim);
+  color: var(--keeper-accent);
+  border: 1px solid var(--keeper-accent-border);
   font-weight: 700;
   letter-spacing: 0.5px;
 }
 
-/* Context pressure — FF HP bar */
-.keeper-roster__pressure {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.keeper-panel__model {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: rgba(74, 158, 245, 0.06);
+  border: 1px solid rgba(74, 158, 245, 0.12);
+  border-radius: 3px;
+  color: rgba(74, 158, 245, 0.5);
 }
 
-.keeper-roster__pressure-track {
-  flex: 1;
-  height: 10px;
-  background: rgba(255, 255, 255, 0.04);
+/* Keeper status badges — blue tones */
+.keeper-badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.keeper-badge--active {
+  background: rgba(74, 158, 245, 0.12);
+  color: var(--keeper-accent);
+  border: 1px solid var(--keeper-accent-border);
+}
+
+.keeper-badge--idle {
+  background: rgba(180, 180, 200, 0.08);
+  color: #8899bb;
+  border: 1px solid rgba(180, 180, 200, 0.15);
+}
+
+.keeper-badge--offline {
+  background: rgba(100, 100, 120, 0.1);
+  color: #667;
+  border: 1px solid rgba(100, 100, 120, 0.15);
+}
+
+/* Context gauge — the hero element */
+.keeper-panel__gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.keeper-panel__gauge-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.keeper-panel__gauge-pct {
+  color: rgba(255, 255, 255, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+.keeper-panel__gauge-pct--na {
+  color: rgba(255, 255, 255, 0.15);
+}
+
+.keeper-panel__gauge-track {
+  height: 12px;
+  background: rgba(255, 255, 255, 0.03);
   border-radius: 2px;
   overflow: hidden;
-  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border: 1px solid rgba(74, 158, 245, 0.1);
 }
 
-.keeper-roster__pressure-bar {
+.keeper-panel__gauge-bar {
   height: 100%;
   border-radius: 1px;
   transition: width 0.3s ease;
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
 }
 
-.keeper-roster__pressure-label {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+.keeper-panel__work {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 60px;
-  font-variant-numeric: tabular-nums;
+}
+
+.keeper-panel__activity {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.25);
 }
 
 /* ============================================

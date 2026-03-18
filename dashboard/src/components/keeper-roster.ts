@@ -1,5 +1,6 @@
 // MASC Dashboard — Keeper Roster
-// Full-page scrollable keeper list with context pressure and generation info.
+// Full-page scrollable keeper list — dashboard panel style.
+// Distinct from Agent Roster: context gauge is the hero, blue/MP accent.
 
 import { html } from 'htm/preact'
 import { keepers } from '../store'
@@ -25,9 +26,9 @@ function keeperStatusLabel(status?: string): string {
 
 function keeperStatusClass(status?: string): string {
   const s = (status ?? '').toLowerCase()
-  if (s === 'active' || s === 'running' || s === 'ok') return 'roster-badge--active'
-  if (s === 'idle' || s === 'listening') return 'roster-badge--idle'
-  return 'roster-badge--offline'
+  if (s === 'active' || s === 'running' || s === 'ok') return 'keeper-badge--active'
+  if (s === 'idle' || s === 'listening') return 'keeper-badge--idle'
+  return 'keeper-badge--offline'
 }
 
 export function KeeperRoster() {
@@ -35,10 +36,8 @@ export function KeeperRoster() {
   const snap = missionSnapshot.value
   const briefs = snap?.keeper_briefs ?? []
 
-  // Use briefs if available (richer data), fall back to keeper signal
   const items = briefs.length > 0 ? briefs : keeperList
 
-  // Sort: active first, then by context pressure (high first)
   const sorted = [...items].sort((a, b) => {
     const aActive = (a.status ?? '').match(/active|running|ok/i) ? 0 : 1
     const bActive = (b.status ?? '').match(/active|running|ok/i) ? 0 : 1
@@ -49,58 +48,72 @@ export function KeeperRoster() {
   })
 
   return html`
-    <div class="roster-page">
+    <div class="roster-page keeper-page">
       <div class="roster-header">
-        <h2 class="roster-title">키퍼 (${items.length})</h2>
+        <h2 class="keeper-page__title">키퍼 (${items.length})</h2>
+        <p class="keeper-page__subtitle">자율 에이전트 런타임 — 컨텍스트 압력과 세대 관리</p>
       </div>
 
-      <div class="roster-list">
-        ${sorted.map(k => html`
-          <div class="roster-card keeper-roster-card" key=${k.name}>
-            <div class="keeper-roster__main">
-              <div class="keeper-roster__header">
-                <strong class="roster-card__name">${k.name}</strong>
-                ${k.generation != null ? html`
-                  <span class="keeper-roster__gen">G${k.generation}</span>
-                ` : null}
-                <span class="roster-badge ${keeperStatusClass(k.status)}">
-                  ${keeperStatusLabel(k.status)}
-                </span>
-              </div>
+      <div class="keeper-grid">
+        ${sorted.map(k => {
+          const ctxPct = k.context_ratio != null ? Math.round(k.context_ratio * 100) : null
 
-              ${k.context_ratio != null ? html`
-                <div class="keeper-roster__pressure">
-                  <div class="keeper-roster__pressure-track">
-                    <div
-                      class="keeper-roster__pressure-bar ${pressureClass(k.context_ratio)}"
-                      style=${{ width: `${Math.round(k.context_ratio * 100)}%` }}
-                    />
-                  </div>
-                  <span class="keeper-roster__pressure-label">
-                    ctx ${Math.round(k.context_ratio * 100)}%
+          return html`
+            <div class="keeper-panel" key=${k.name}>
+              <div class="keeper-panel__top">
+                <div class="keeper-panel__identity">
+                  <strong class="keeper-panel__name">${k.name}</strong>
+                  ${k.generation != null ? html`
+                    <span class="keeper-panel__gen">G${k.generation}</span>
+                  ` : null}
+                  <span class="keeper-badge ${keeperStatusClass(k.status)}">
+                    ${keeperStatusLabel(k.status)}
                   </span>
                 </div>
-              ` : null}
-
-              ${k.current_work ? html`
-                <div class="roster-card__work">${k.current_work}</div>
-              ` : null}
-
-              <div class="roster-card__meta">
-                ${k.last_turn_ago_s != null ? html`
-                  <span>${formatDuration(k.last_turn_ago_s)} 전</span>
-                ` : null}
                 ${k.model ? html`
-                  <span class="roster-card__model">${k.model}</span>
+                  <span class="keeper-panel__model">${k.model}</span>
                 ` : null}
               </div>
+
+              ${ctxPct != null ? html`
+                <div class="keeper-panel__gauge">
+                  <div class="keeper-panel__gauge-label">
+                    <span>CTX</span>
+                    <span class="keeper-panel__gauge-pct">${ctxPct}%</span>
+                  </div>
+                  <div class="keeper-panel__gauge-track">
+                    <div
+                      class="keeper-panel__gauge-bar ${pressureClass(k.context_ratio)}"
+                      style=${{ width: `${ctxPct}%` }}
+                    />
+                  </div>
+                </div>
+              ` : html`
+                <div class="keeper-panel__gauge">
+                  <div class="keeper-panel__gauge-label">
+                    <span>CTX</span>
+                    <span class="keeper-panel__gauge-pct keeper-panel__gauge-pct--na">--</span>
+                  </div>
+                  <div class="keeper-panel__gauge-track">
+                    <div class="keeper-panel__gauge-bar" style=${{ width: '0%' }} />
+                  </div>
+                </div>
+              `}
+
+              ${k.current_work ? html`
+                <div class="keeper-panel__work">${k.current_work}</div>
+              ` : null}
+
+              ${k.last_turn_ago_s != null ? html`
+                <div class="keeper-panel__activity">${formatDuration(k.last_turn_ago_s)} 전</div>
+              ` : null}
             </div>
-          </div>
-        `)}
-        ${sorted.length === 0 ? html`
-          <div class="roster-empty">활성 키퍼가 없습니다.</div>
-        ` : null}
+          `
+        })}
       </div>
+      ${sorted.length === 0 ? html`
+        <div class="roster-empty">활성 키퍼가 없습니다.</div>
+      ` : null}
     </div>
   `
 }

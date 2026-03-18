@@ -5,7 +5,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_gardener_execute_spawn";
-    description = "Execute an approved spawn: create agent in Neo4j and post announcement. Use masc_gardener_propose_spawn first to check if spawn is allowed. This action consumes daily spawn budget and resets the cooldown timer.";
+    description = "Create a new agent in Neo4j and post an announcement after spawn approval. \
+Call when masc_gardener_propose_spawn returned approval. \
+After propose_spawn approval; consumes daily spawn budget and resets the cooldown timer.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -30,7 +32,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_gardener_execute_retire";
-    description = "Execute an approved retirement: initiate grace period and post warning. The agent is warned but not immediately removed — they have a grace period to increase activity. Use masc_gardener_retire_agent first to check if retirement is allowed.";
+    description = "Initiate grace period for an agent retirement after approval, posting a warning (not immediate removal). \
+Call when masc_gardener_retire_agent returned approval. \
+After retire_agent approval; the agent has a grace period to increase activity before final removal.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -45,7 +49,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_gardener_reset_circuit";
-    description = "Manually reset the circuit breaker if it's stuck open due to consecutive failures. Use with caution — only when you've addressed the root cause of the failures.";
+    description = "Manually reset the gardener circuit breaker that is stuck open after consecutive failures. \
+Use when the root cause of gardener failures has been fixed and the breaker needs clearing. \
+Pair with masc_gardener_config to verify breaker state before and after reset.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -58,7 +64,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_library_list";
-    description = "List all documents in the agent knowledge library. Returns title, confidence, source, and tags for each document.";
+    description = "List all documents in the agent knowledge library with title, confidence, source, and tags. \
+Use when browsing available knowledge or checking if a topic is already documented. \
+Pair with masc_library_read to fetch a specific document or masc_library_search to query by content.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -72,7 +80,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_library_read";
-    description = "Read a specific library document by topic name.";
+    description = "Read a specific library document by topic name or partial match. \
+Use when you need the full content of a known knowledge document. \
+After masc_library_list or masc_library_search to find the topic name.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -87,7 +97,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_library_add";
-    description = "Add a new document to the library. Documents with confidence < 0.5 go to candidates/.";
+    description = "Add a new document to the agent knowledge library (confidence < 0.5 goes to candidates/ for review). \
+Use when recording a new finding, experiment result, or pattern that other agents should know about. \
+Follow up with masc_library_promote to move candidates to the main library after verification.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -120,7 +132,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_library_promote";
-    description = "Promote a candidate document to the main library after verification.";
+    description = "Promote a candidate document to the main library after verification (new confidence must be >= 0.5). \
+Use when a candidate document has been reviewed and confirmed as accurate. \
+After masc_library_add placed the document in candidates/.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -139,7 +153,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_library_search";
-    description = "Search library documents by content or tags.";
+    description = "Search the agent knowledge library by content keywords or tags. \
+Use when looking for documents on a specific topic without knowing the exact title. \
+Pair with masc_library_read to fetch matching documents in full.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -154,7 +170,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_verify_request";
-    description = "Request verification of task output.";
+    description = "Request peer verification of a task's output against optional criteria. \
+Use when a completed task needs quality sign-off from another agent. \
+Follow up with masc_verify_submit to provide a verdict or masc_verify_auto for automated checks.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -184,7 +202,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_verify_submit";
-    description = "Submit a verification verdict for a task request.";
+    description = "Submit a pass/fail/partial verdict for a pending verification request. \
+Use when you have reviewed a task output and are ready to provide your assessment. \
+After masc_verify_request creates the verification; pair with masc_verify_status to confirm submission.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -212,7 +232,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_verify_status";
-    description = "Check verification status by request ID.";
+    description = "Check the current status of a verification request by its ID. \
+Use when waiting for a verification verdict or confirming a submission was recorded. \
+After masc_verify_request or masc_verify_submit.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -227,7 +249,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_verify_pending";
-    description = "List pending verification requests for the current agent.";
+    description = "List pending verification requests assigned to the current agent. \
+Use when checking your verification inbox for tasks awaiting review. \
+Follow up with masc_verify_submit to provide a verdict for each pending request.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -236,7 +260,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_verify_auto";
-    description = "Run automated verification for a request.";
+    description = "Run automated verification checks for a pending verification request. \
+Use when a task output can be verified programmatically instead of manual review. \
+After masc_verify_request creates the request; alternative to manual masc_verify_submit.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -253,7 +279,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_code_search";
-    description = "Search code using ripgrep with regex support. Returns structured results with file path, line number, and matched content. Use for finding specific patterns, function names, or text across the codebase.";
+    description = "Search code using ripgrep with regex support, returning structured results (file, line, content). \
+Use when finding function names, patterns, or text across the codebase from within MASC. \
+Pair with masc_code_symbols for file-level symbol outlines or masc_code_read for targeted line ranges.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -288,7 +316,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_code_symbols";
-    description = "Extract symbols (functions, types, classes) from a file using heuristics. Token-efficient alternative to reading full file content. Saves ~70% tokens by returning only symbol names and line numbers.";
+    description = "Extract symbols (functions, types, classes) from a file as a token-efficient outline (~70% savings vs full read). \
+Use when you need to understand a file's structure without reading all content. \
+Pair with masc_code_read to then read specific line ranges of interest.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -303,7 +333,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_code_read";
-    description = "Read file with offset/limit pagination. Token-efficient way to read specific sections of large files. Use with masc_code_symbols to determine relevant line ranges.";
+    description = "Read a file with offset/limit pagination for token-efficient access to specific sections. \
+Use when you know the line range you need, especially for large files. \
+After masc_code_symbols identifies the relevant line numbers.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -328,7 +360,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_tool_stats";
-    description = "In-memory tool usage statistics for the current server session. Returns top-20 tools by call count, tools unused for 30+ days, and tools never called. Data resets on server restart; telemetry.jsonl is the durable store.";
+    description = "Return in-memory tool usage statistics: top tools by call count, stale tools (30+ days unused), and never-called tools. \
+Use when auditing tool adoption or identifying dead tools for cleanup. \
+Pair with masc_tool_help for details on specific tools. Data resets on server restart.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -343,7 +377,9 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_tool_help";
-    description = "Return canonical help and metadata for a specific MASC tool.";
+    description = "Return canonical help text, parameters, and metadata for a specific MASC tool by name. \
+Use when you need detailed usage guidance for a tool beyond its short description. \
+Pair with masc_tool_stats to discover which tools exist.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -357,7 +393,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_tool_admin_snapshot";
-    description = "Return a unified admin snapshot of tool inventory, auth/RBAC, mode gates, keeper policy, and command-plane policy surfaces.";
+    description = "Return a unified admin snapshot of tool inventory, auth/RBAC, mode gates, keeper policy, and command-plane surfaces. \
+Use when auditing the full server configuration or diagnosing tool visibility issues. \
+Pair with masc_tool_admin_update to apply changes based on the snapshot.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -376,7 +414,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_tool_admin_update";
-    description = "Apply mode, auth, unit-policy, or keeper-policy updates through a single admin entrypoint.";
+    description = "Apply mode, auth, unit-policy, or keeper-policy updates through a single admin entrypoint. \
+Use when changing server mode, toggling auth, or updating unit/keeper policies. \
+After masc_tool_admin_snapshot to review current state before making changes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

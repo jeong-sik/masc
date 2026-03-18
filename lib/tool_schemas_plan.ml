@@ -3,7 +3,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_plan_init";
-    description = "Initialize a planning context for a task. Creates task_plan.md, notes.md, and deliverable.md structure. Works with file or PostgreSQL backend.";
+    description = "Initialize a planning context for a task, creating task_plan.md, notes.md, and deliverable.md structure. \
+Use when starting structured work on a claimed task that needs planning artifacts. \
+After masc_claim_next or masc_add_task; follow up with masc_plan_update to write the plan.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -17,7 +19,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_plan_update";
-    description = "Update the task plan (main execution plan). Overwrites the current plan.";
+    description = "Overwrite the current task plan with new content (markdown). \
+Use when refining or replacing the execution plan for your current task. \
+After masc_plan_init creates the structure; pair with masc_plan_get to review.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -35,7 +39,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_plan_get";
-    description = "Get the full planning context for a task as markdown (for LLM context).";
+    description = "Retrieve the full planning context for a task as markdown (plan, notes, deliverable). \
+Use when loading task context into your working memory before starting work. \
+After masc_plan_init; omit task_id if masc_plan_set_task was called.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -49,7 +55,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_plan_set_task";
-    description = "Set the current task for the session. After this, you can omit task_id in subsequent planning calls.";
+    description = "Set the current task for your session so you can omit task_id in subsequent planning calls. \
+Use when starting work on a task after claiming it. \
+After masc_claim_next; auto-cleared on masc_leave.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -64,8 +72,7 @@ let schemas : tool_schema list = [
   {
     name = "masc_plan_get_task";
     description = "Get the task_id you're currently working on (session-scoped). \
-Returns null if no task is set. Useful for: resuming work after context switch, \
-verifying current assignment, debugging session state. \
+Use when resuming work after a context switch or verifying your current assignment. \
 Set via masc_plan_set_task. Auto-cleared on masc_leave.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -75,10 +82,9 @@ Set via masc_plan_set_task. Auto-cleared on masc_leave.";
   };
   {
     name = "masc_plan_clear_task";
-    description = "Clear your current task assignment without completing it. \
-Use when: switching to different task, abandoning work, resetting session. \
-Does NOT change task status (use masc_transition for that). \
-Auto-called on masc_leave.";
+    description = "Clear your current task assignment without completing it (does not change task status). \
+Use when switching to a different task, abandoning work, or resetting session state. \
+Use masc_transition to change task status separately. Auto-called on masc_leave.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

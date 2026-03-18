@@ -5,7 +5,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_keeper_tool_catalog";
-    description = "List visible server-side masc_* tools alongside keeper-internal wrapper coverage.";
+    description = "List all visible masc_* tools alongside keeper-internal wrapper coverage, with optional tier/hidden/deprecated filters. \
+Use when auditing which tools the keeper can wrap or checking tool visibility by tier. \
+Pair with masc_tool_admin_snapshot for a broader admin view including auth and mode gates.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

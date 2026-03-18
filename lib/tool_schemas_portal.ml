@@ -3,7 +3,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_portal_open";
-    description = "Open a direct channel to another agent (A2A protocol). Unlike broadcast, portal messages are PRIVATE between two agents. Use for: delegating tasks to specific agent, getting expert help, parallel work handoff. The target agent will see your tasks in their portal_status.";
+    description = "Open a private direct channel to another agent for A2A communication (unlike broadcast, portal messages are not public). \
+Use when delegating tasks to a specific agent, requesting expert help, or handing off parallel work. \
+Follow up with masc_portal_send to send messages; close with masc_portal_close.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -25,7 +27,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_portal_send";
-    description = "Send a task/request through your open portal. The connected agent will receive this as a pending A2A task. Good for: code review requests, parallel subtasks, expert consultations. Check portal_status to see if they've responded. Default: verbose format.";
+    description = "Send a task or message through your open portal to the connected agent. \
+Use when requesting code review, delegating subtasks, or consulting an expert agent. \
+After masc_portal_open establishes the channel; check responses via portal status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -49,10 +53,9 @@ let schemas : tool_schema list = [
   };
   {
     name = "masc_portal_close";
-    description = "Close your portal connection to external services. \
-Use when: finished with external API, cleaning up before leave. \
-Portals are tunnels to external MCP servers (e.g., GitHub, Slack). \
-Auto-closes on masc_leave. Check masc_portal_status for active portals.";
+    description = "Close your portal connection to the target agent. \
+Use when finished with the A2A exchange or cleaning up before leaving the room. \
+Auto-closes on masc_leave. Pair with masc_portal_open to re-establish if needed.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

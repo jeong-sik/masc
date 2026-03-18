@@ -5,10 +5,7 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_run_get";
-    description = "Get full execution history for a task as markdown. \
-Returns: plan, logs (timestamped), and deliverable if completed. \
-Use when: resuming work, reviewing progress, preparing handoff. \
-Example: masc_run_get({task_id: 'task-001'}) → '## Plan\\n...\\n## Logs\\n- 10:00 Started...'";
+    description = "Retrieve full execution history (plan, timestamped logs, deliverable) for a task as markdown. \\nUse when resuming work on a task, reviewing progress, or preparing a handoff. \\nPair with masc_run_list to find task IDs, masc_run_log to add entries.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -23,10 +20,7 @@ Example: masc_run_get({task_id: 'task-001'}) → '## Plan\\n...\\n## Logs\\n- 10
 
   {
     name = "masc_run_list";
-    description = "List all task runs with status (active/completed). \
-Shows: task_id, has_plan, log_count, has_deliverable. \
-Use to find: abandoned work, completed runs for review, active executions. \
-Example response: [{task_id: 'task-001', status: 'active', logs: 5}]";
+    description = "List all task runs with their status (active/completed), plan presence, and log count. \\nUse when starting a session to find abandoned work or review completed runs. \\nAfter finding a run, call masc_run_get for full details or masc_run_init to start a new one.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -36,7 +30,9 @@ Example response: [{task_id: 'task-001', status: 'active', logs: 5}]";
   (* ===== Cache Tools (Phase 11) ===== *)
   {
     name = "masc_cache_set";
-    description = "Set a cache entry for sharing context between agents. Useful for caching file contents, API responses, or expensive computations.";
+    description = "Store a key-value pair in shared cache with optional TTL and tags for cross-agent data sharing. \
+Use when caching file contents, API responses, or expensive computations for reuse by other agents. \
+Retrieve with masc_cache_get. Browse entries with masc_cache_list.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -64,7 +60,9 @@ Example response: [{task_id: 'task-001', status: 'active', logs: 5}]";
 
   {
     name = "masc_cache_get";
-    description = "Get a cached entry by key. Returns null if not found or expired.";
+    description = "Retrieve a cached entry by key; returns null if not found or expired. \
+Use when you need data previously stored by yourself or another agent via masc_cache_set. \
+If miss, check masc_cache_list to verify the key exists or re-populate with masc_cache_set.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -79,9 +77,7 @@ Example response: [{task_id: 'task-001', status: 'active', logs: 5}]";
 
   {
     name = "masc_cache_delete";
-    description = "Delete a specific cache entry. \
-Use when: invalidating stale data, clearing specific key, freeing memory. \
-No error if key doesn't exist. Use masc_cache_list to find keys.";
+    description = "Remove a specific cache entry by key; no error if key does not exist. \\nUse when invalidating stale data, clearing a specific key, or freeing memory. \\nFind keys first with masc_cache_list. For bulk cleanup, use masc_cache_clear instead.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -96,10 +92,7 @@ No error if key doesn't exist. Use masc_cache_list to find keys.";
 
   {
     name = "masc_cache_list";
-    description = "List cache entries with keys, TTL remaining, and tags. \
-Filter by tag to find related entries. Shows creation time and expiry. \
-Use before: cache cleanup, debugging stale data, finding specific entries. \
-Example: masc_cache_list({tag: 'api'}) → [{key: 'user_123', ttl: 3600, tags: ['api']}]";
+    description = "List cache entries with keys, TTL remaining, and tags; optionally filter by tag. \\nUse when browsing cached data before cleanup or looking for specific entries across agents. \\nPair with masc_cache_delete for targeted removal or masc_cache_stats for aggregate health.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -113,9 +106,7 @@ Example: masc_cache_list({tag: 'api'}) → [{key: 'user_123', ttl: 3600, tags: [
 
   {
     name = "masc_cache_clear";
-    description = "Delete ALL cache entries. DESTRUCTIVE - cannot be undone. \
-Use only when: resetting room state, debugging cache issues, fresh start. \
-Consider masc_cache_delete for targeted cleanup instead.";
+    description = "Delete ALL cache entries (destructive, cannot undo). \\nUse only when resetting room state, debugging persistent cache issues, or starting fresh. \\nPrefer masc_cache_delete for targeted cleanup. Check masc_cache_stats before clearing.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -124,9 +115,7 @@ Consider masc_cache_delete for targeted cleanup instead.";
 
   {
     name = "masc_cache_stats";
-    description = "Get cache usage statistics. \
-Shows: total entries, memory size, oldest/newest entry age, hit/miss ratio. \
-Use to: monitor cache health, decide when to clear, debug performance.";
+    description = "Get aggregate cache statistics: total entries, memory size, oldest/newest entry age, hit/miss ratio. \\nUse when monitoring cache health, deciding whether to clear, or debugging performance issues. \\nPair with masc_cache_list for per-entry details, masc_cache_clear for full reset.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -137,7 +126,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
 
   {
     name = "masc_tempo_get";
-    description = "Get current orchestrator tempo (check interval). Shows adaptive tempo status.";
+    description = "Read the current orchestrator check interval and adaptive tempo status. \
+Use when checking how frequently the orchestrator polls before adjusting tempo. \
+Pair with masc_tempo_set to change interval or masc_tempo_adjust for auto-tuning.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -146,7 +137,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
 
   {
     name = "masc_tempo_set";
-    description = "Set orchestrator tempo manually. Interval is clamped between 60s (fast) and 600s (slow).";
+    description = "Set the orchestrator check interval manually (clamped 60s-600s). \
+Use when you need a specific polling frequency for intensive or idle work phases. \
+Check current value with masc_tempo_get first. Use masc_tempo_reset to return to default 300s.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -165,7 +158,9 @@ Use to: monitor cache health, decide when to clear, debug performance.";
 
   {
     name = "masc_tempo_adjust";
-    description = "Automatically adjust tempo based on pending task urgency. Fast for urgent tasks, slow when idle.";
+    description = "Auto-tune orchestrator tempo based on pending task urgency: fast for urgent, slow when idle. \
+Call when you want the system to pick the right interval without manual calculation. \
+Pair with masc_tempo_get to see the resulting interval after adjustment.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -174,11 +169,7 @@ Use to: monitor cache health, decide when to clear, debug performance.";
 
   {
     name = "masc_tempo_reset";
-    description = "Reset room tempo to default 300s (5 minutes). \
-Tempo controls SSE heartbeat interval and agent timeout detection. \
-Use after: intensive work phase complete, debugging tempo issues. \
-Lower tempo = faster detection but more overhead. Default balances both. \
-Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
+    description = "Reset room tempo to the default 300s (5 minutes) interval. \\nUse after an intensive work phase or when debugging tempo-related issues. \\nTempo controls SSE heartbeat interval and agent timeout detection. Pair with masc_tempo_get to verify.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -188,7 +179,7 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
   (* ===== Dashboard Tools (Phase 13) ===== *)
   {
     name = "masc_dashboard";
-    description = "Show the MASC dashboard. By default it summarizes all rooms, and you can filter to the current room with scope='current'. Use with 'watch -n 1' for real-time updates.";
+    description = "Render the MASC dashboard summarizing rooms, agents, and tasks in one view. \\nUse when you need a quick overview of cluster state; set scope='current' for this room only. \\nPair with masc_agents for agent details, masc_run_list for task details.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -210,7 +201,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
   (* Fitness Selection *)
   {
     name = "masc_agent_fitness";
-    description = "Get fitness scores for agents based on performance metrics. Higher scores indicate better performance (completion rate, reliability, speed). Use for understanding agent capabilities.";
+    description = "Get fitness scores for agents based on completion rate, reliability, and speed metrics. \
+Use when evaluating agent capabilities before assigning tasks or reviewing team performance. \
+Pair with masc_select_agent to pick the best agent, masc_get_metrics for raw data.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -229,7 +222,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
 
   {
     name = "masc_select_agent";
-    description = "Select the best agent for a task based on fitness scores. Uses weighted scoring: completion (35%), reliability (25%), speed (15%), handoff (15%), collaboration (10%).";
+    description = "Pick the best agent for a task using weighted fitness scoring (completion, reliability, speed, handoff, collaboration). \
+Use when dispatching work and multiple agents are available. \
+Pair with masc_agent_fitness to review scores, masc_spawn to launch the selected agent.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -257,7 +252,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
   (* Hebbian Learning *)
   {
     name = "masc_collaboration_graph";
-    description = "View the Hebbian collaboration graph showing learned agent relationships. Stronger connections indicate successful collaboration patterns.";
+    description = "View the Hebbian collaboration graph showing learned agent-to-agent relationship strengths. \
+Use when analyzing which agent pairs collaborate well or planning team composition. \
+Pair with masc_consolidate_learning to prune weak connections, masc_select_agent for dispatch.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -273,7 +270,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
 
   {
     name = "masc_consolidate_learning";
-    description = "Trigger Hebbian consolidation - apply decay to old collaboration patterns and prune weak connections. Mimics memory consolidation during sleep.";
+    description = "Apply decay to old collaboration patterns and prune weak Hebbian connections. \
+Trigger periodically (e.g., weekly) or after major team changes to keep the graph current. \
+Pair with masc_collaboration_graph to review the graph before and after consolidation.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -289,7 +288,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
   (* Drift Guard *)
   {
     name = "masc_verify_handoff";
-    description = "Verify handoff context integrity. Compares original and received context to detect semantic drift, information loss, or distortion. Threshold: 0.85 similarity.";
+    description = "Compare original and received context to detect semantic drift, information loss, or distortion after handoff. \
+Call after claiming a handoff to verify context integrity (default threshold: 0.85 similarity). \
+Pair with masc_handover_get for the original context, masc_handover_claim for the received.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -314,7 +315,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
   (* Metrics *)
   {
     name = "masc_get_metrics";
-    description = "Get raw performance metrics for an agent. Returns task completion data, timing, error rates, and collaboration history.";
+    description = "Fetch raw performance metrics for an agent: task completion data, timing, error rates, and collaboration history. \
+Use when investigating agent performance issues or preparing data for masc_metrics_compare. \
+Pair with masc_agent_fitness for computed scores, masc_audit_stats for security-focused metrics.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -338,7 +341,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
 
   {
     name = "masc_rooms_list";
-    description = "List all available MASC rooms. Returns rooms with agent/task counts and current active room. Use to see available coordination spaces before entering one.";
+    description = "List all MASC rooms with agent/task counts and identify the current active room. \
+Use when starting a session to find the right coordination space or checking cross-room state. \
+After finding a room, call masc_room_enter to switch into it.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -347,7 +352,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
 
   {
     name = "masc_room_create";
-    description = "Create a new MASC room for coordination. Room ID is auto-generated from name (slugified). Use to create separate spaces for different projects or teams.";
+    description = "Create a new MASC room for coordination; room ID is auto-generated from name (slugified). \
+Use when you need a separate coordination space for a different project or team. \
+After creation, call masc_room_enter to switch into the new room.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -366,7 +373,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
 
   {
     name = "masc_room_enter";
-    description = "Enter a specific MASC room. Switches context to the selected room and auto-joins with a unique nickname. Use after masc_rooms_list to switch between coordination spaces.";
+    description = "Switch context to a specific MASC room and auto-join with a unique nickname. \
+Use after masc_rooms_list to move between coordination spaces for different projects. \
+All subsequent tool calls operate in this room until you enter a different one.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -386,7 +395,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
 
   {
     name = "masc_room_strategy_get";
-    description = "Read the current room-level search and speculation defaults. Use this before changing routing behavior so you know whether best_first_v1 or speculation is already enabled for the room.";
+    description = "Read current room-level defaults for search strategy and speculative routing. \
+Use before changing routing behavior to see what is already configured for this room. \
+Pair with masc_room_strategy_set to update search_strategy_default or speculation settings.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -395,7 +406,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
 
   {
     name = "masc_room_strategy_set";
-    description = "Update room-level search and speculation defaults. Use this to set the default command-plane search strategy and to enable or disable speculative routing for the current room.";
+    description = "Update room-level defaults for command-plane search strategy and speculative routing. \
+Use when optimizing task dispatch behavior for this room (e.g., enabling best_first_v1 or speculation). \
+Check current settings with masc_room_strategy_get before making changes.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -422,7 +435,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
 
   {
     name = "masc_audit_query";
-    description = "Query audit logs to inspect agent actions and security events. Returns recent security events: auth success/failure, anomalies, violations. Use for trust verification and debugging collaboration issues.";
+    description = "Search audit logs for security events: auth success/failure, anomalies, violations, tool calls. \
+Use when investigating suspicious activity, verifying trust, or debugging collaboration issues. \
+Pair with masc_audit_stats for aggregate trust metrics, masc_auth_list for credential status.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -459,7 +474,9 @@ Example: masc_tempo_reset() → {tempo: 300, message: 'Reset to default'}";
 
   {
     name = "masc_audit_stats";
-    description = "Get security statistics and trust metrics for agents. Shows auth success rate, anomaly count, task completion rate per agent. Use to evaluate agent reliability before delegation.";
+    description = "Get aggregate security and trust metrics per agent: auth success rate, anomaly count, task completion rate. \
+Use when evaluating agent reliability before delegating sensitive tasks. \
+Pair with masc_audit_query for detailed event logs, masc_agent_fitness for performance scores.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

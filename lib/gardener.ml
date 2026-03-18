@@ -416,7 +416,7 @@ let tick ~sw ~clock ~config ~room_config : unit =
     | NeedSpawn gap ->
         Eio.traceln "[Gardener] Intervention needed: spawn %s" gap.topic;
         let spawn_decision = decide_spawn ~config ~health ~gap in
-        (match execute_spawn ~decision:spawn_decision with
+        (match execute_spawn ~sw ~room_config ~decision:spawn_decision () with
          | Ok name ->
              record_action "spawned" ~target:name
                ~reason:(Printf.sprintf "spawned from gap '%s'" gap.topic);
@@ -551,6 +551,7 @@ let start_sentinel_reactor_fiber ~sw ~clock ~sub =
 let start ?bus ~sw ~clock ~room_config () =
   let config = load_config () in
   room_config_ref := Some room_config;
+  sw_ref := Some sw;
   bus_ref := bus;
   if config.enabled then begin
     gardener_lock := Some (Eio.Mutex.create ());

@@ -28,14 +28,15 @@ type category =
   | Plan        (* plan_*, goal_*, intent_* *)
   | Consensus   (* debate_*, consensus_*, walph_*, convo_*, decision_*, council_status *)
   | Ecosystem   (* gardener_*, keeper_*, perpetual_*, mdal_*, handover_*, library_* *)
+  | Voice       (* masc_voice_*: TTS, STT, sessions, conferences *)
   | TRPG        (* masc_trpg_*, trpg_* *)
   | Unknown     (* unmapped namespace/tool *)
 
 (** Mode presets *)
 type mode =
   | Minimal   (* core_room, core_task, health *)
-  | Standard  (* core, comm, worktree, health, plan, board, consensus *)
-  | Parallel  (* core, comm, portal, worktree, health, discovery, plan, board, consensus, voting, interrupt *)
+  | Standard  (* core, comm, worktree, health, plan, board, consensus, voice *)
+  | Parallel  (* core, comm, portal, worktree, health, discovery, plan, board, consensus, voting, interrupt, voice *)
   | Coding    (* core, worktree, code, health, plan *)
   | Full      (* all categories *)
   | Solo      (* core_room, core_task, worktree *)
@@ -65,6 +66,7 @@ let category_to_string = function
   | Plan -> "plan"
   | Consensus -> "consensus"
   | Ecosystem -> "ecosystem"
+  | Voice -> "voice"
   | TRPG -> "trpg"
   | Unknown -> "unknown"
 
@@ -91,6 +93,7 @@ let category_of_string = function
   | "plan" -> Some Plan
   | "consensus" -> Some Consensus
   | "ecosystem" -> Some Ecosystem
+  | "voice" -> Some Voice
   | "trpg" -> Some TRPG
   | _ -> None
 
@@ -125,15 +128,15 @@ let all_categories =
   core_all @ [
   Comm; Portal; Worktree; Code; Health; Discovery;
   Voting; Interrupt; Cost; Auth; RateLimit; Encryption;
-  Board; Plan; Consensus; Ecosystem; TRPG
+  Board; Plan; Consensus; Ecosystem; Voice; TRPG
 ]
 
 (** Categories for each mode preset *)
 let categories_for_mode = function
   | Minimal -> [Core_Room; Core_Task; Health]
-  | Standard -> core_all @ [Comm; Worktree; Health; Plan; Board; Consensus]
+  | Standard -> core_all @ [Comm; Worktree; Health; Plan; Board; Consensus; Voice]
   | Parallel -> core_all @ [Comm; Portal; Worktree; Health; Discovery;
-                 Plan; Board; Consensus; Voting; Interrupt]
+                 Plan; Board; Consensus; Voting; Interrupt; Voice]
   | Coding -> core_all @ [Worktree; Code; Health; Plan; Consensus]
   | Full -> all_categories
   | Solo -> [Core_Room; Core_Task; Worktree]
@@ -367,10 +370,6 @@ let tool_category tool_name =
   | "masc_persistent_agent_dataset_export"
   | "masc_persistent_agent_action_explain"
   | "masc_persistent_agent_eval_replay"
-  | "masc_voice_speak" | "masc_voice_session_start"
-  | "masc_voice_session_end" | "masc_voice_sessions"
-  | "masc_voice_agent" | "masc_voice_transcript"
-  | "masc_voice_conference_start" | "masc_voice_conference_end"
   | "masc_keeper_goals"
   | "masc_keeper_autonomy"
   | "masc_persistent_agent_goals"
@@ -392,6 +391,12 @@ let tool_category tool_name =
   (* Spawn *)
   | "masc_spawn"
   | "masc_async_spawn" | "masc_job_status" | "masc_job_list" -> Ecosystem
+
+  (* ── Voice: TTS, STT, sessions, conferences ── *)
+  | "masc_voice_speak" | "masc_voice_session_start"
+  | "masc_voice_session_end" | "masc_voice_sessions"
+  | "masc_voice_agent" | "masc_voice_transcript"
+  | "masc_voice_conference_start" | "masc_voice_conference_end" -> Voice
 
   (* ── TRPG (canonical + legacy masc_trpg_* names) ── *)
   | "trpg_roleplay"
@@ -461,8 +466,8 @@ let is_tool_enabled enabled_categories tool_name =
 (** Mode descriptions for help text *)
 let mode_description = function
   | Minimal -> "Room + task + health only (~20 tools)"
-  | Standard -> "Core, communication, worktree, health, plan, board, and consensus"
-  | Parallel -> "Multi-agent: adds portal, discovery, plan, board, consensus, voting, and interrupt"
+  | Standard -> "Core, communication, worktree, health, plan, board, consensus, and voice"
+  | Parallel -> "Multi-agent: adds portal, discovery, plan, board, consensus, voting, interrupt, and voice"
   | Coding -> "Core, worktree, code navigation, health, plan, and consensus for agent development"
   | Full -> "All categories enabled (~322 tools)"
   | Solo -> "Room + task + worktree (~23 tools)"
@@ -492,6 +497,7 @@ let category_description = function
   | Plan -> "Plan and goal management: plan_*, goal_*, intent_*"
   | Consensus -> "Multi-agent consensus: debate, WALPH, convo, decision"
   | Ecosystem -> "Agent lifecycle: gardener, keeper, perpetual, MDAL, handover, library"
+  | Voice -> "Voice bridge: TTS, STT, sessions, conferences (8 tools)"
   | TRPG -> "Tabletop RPG engine: sessions, actors, dice, quests"
   | Unknown -> "Unmapped tool (excluded from all presets)"
 

@@ -4,6 +4,7 @@ open Alcotest
 
 module Tool_voice = Masc_mcp.Tool_voice
 module Voice_bridge = Masc_mcp.Voice_bridge
+module Mode = Masc_mcp.Mode
 
 let contains haystack needle =
   let text = String.lowercase_ascii haystack in
@@ -576,6 +577,82 @@ let test_local_playback_argv_falls_back_to_open () =
         (Some [ open_cmd; "/tmp/sample.mp3" ])
         argv)
 
+let voice_tools =
+  [
+    "masc_voice_speak";
+    "masc_voice_session_start";
+    "masc_voice_session_end";
+    "masc_voice_sessions";
+    "masc_voice_agent";
+    "masc_voice_transcript";
+    "masc_voice_conference_start";
+    "masc_voice_conference_end";
+  ]
+
+let test_voice_tools_in_voice_category () =
+  List.iter
+    (fun name ->
+      check bool (name ^ " -> Voice") true
+        (Mode.tool_category name = Mode.Voice))
+    voice_tools
+
+let test_voice_enabled_in_standard_mode () =
+  let cats = Mode.categories_for_mode Mode.Standard in
+  List.iter
+    (fun name ->
+      check bool (name ^ " enabled in Standard") true
+        (Mode.is_tool_enabled cats name))
+    voice_tools
+
+let test_voice_enabled_in_parallel_mode () =
+  let cats = Mode.categories_for_mode Mode.Parallel in
+  List.iter
+    (fun name ->
+      check bool (name ^ " enabled in Parallel") true
+        (Mode.is_tool_enabled cats name))
+    voice_tools
+
+let test_voice_disabled_in_agent_mode () =
+  let cats = Mode.categories_for_mode Mode.Agent in
+  List.iter
+    (fun name ->
+      check bool (name ^ " disabled in Agent") false
+        (Mode.is_tool_enabled cats name))
+    voice_tools
+
+let test_voice_progressive_disclosure_in_agent_mode () =
+  let cats = Mode.categories_for_mode Mode.Agent in
+  let tool = "masc_voice_speak" in
+  check bool "disabled before enable" false
+    (Mode.is_tool_enabled cats tool);
+  Mode.tool_enable tool;
+  check bool "enabled after tool_enable" true
+    (Mode.is_tool_enabled cats tool);
+  Mode.tool_disable tool;
+  check bool "disabled after tool_disable" false
+    (Mode.is_tool_enabled cats tool)
+
+let test_error_message_contains_restart_guide () =
+  with_ctx_no_net (fun ctx ->
+      let _ok, body =
+        dispatch_exn ctx ~name:"masc_voice_speak"
+          ~args:
+            (`Assoc
+              [
+                ("agent_id", `String "test");
+                ("message", `String "hello");
+              ])
+      in
+      check bool "contains Restart" true (contains body "Restart");
+      check bool "contains --http" true (contains body "--http"))
+
+let test_voice_category_string_roundtrip () =
+  check string "to_string" "voice" (Mode.category_to_string Mode.Voice);
+  check (option string) "of_string" (Some "voice")
+    (match Mode.category_of_string "voice" with
+     | Some Mode.Voice -> Some "voice"
+     | _ -> None)
+
 let () =
   run "Tool_voice"
     [
@@ -583,6 +660,23 @@ let () =
         [
           test_case "unknown" `Quick test_dispatch_unknown;
           test_case "known tools" `Quick test_dispatch_known_tools;
+        ] );
+      ( "category",
+        [
+          test_case "voice tools in Voice category" `Quick
+            test_voice_tools_in_voice_category;
+          test_case "voice enabled in Standard" `Quick
+            test_voice_enabled_in_standard_mode;
+          test_case "voice enabled in Parallel" `Quick
+            test_voice_enabled_in_parallel_mode;
+          test_case "voice disabled in Agent" `Quick
+            test_voice_disabled_in_agent_mode;
+          test_case "progressive disclosure in Agent" `Quick
+            test_voice_progressive_disclosure_in_agent_mode;
+          test_case "category string roundtrip" `Quick
+            test_voice_category_string_roundtrip;
+          test_case "error message contains restart guide" `Quick
+            test_error_message_contains_restart_guide;
         ] );
       ( "handlers",
         [

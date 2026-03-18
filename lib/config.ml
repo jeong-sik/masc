@@ -11,11 +11,11 @@ type t = {
   enabled_categories : category list;
 }
 
-(** Default configuration — Coding mode (~80 tools) balances usability with
-    context efficiency. Use masc_switch_mode(mode:"full") for all 371+ tools. *)
+(** Default configuration — Full mode exposes all tools.
+    Agents can switch to a narrower mode via masc_switch_mode. *)
 let default = {
-  mode = Coding;
-  enabled_categories = categories_for_mode Coding;
+  mode = Full;
+  enabled_categories = categories_for_mode Full;
 }
 
 (** Config file name *)

@@ -18,6 +18,7 @@ import {
 } from '../store'
 import type { Goal, MdalLoop, Task } from '../types'
 import { formatElapsedCompact } from '../lib/format-time'
+import { truncate } from '../lib/truncate'
 
 // -- Filter state ------------------------------------------------
 
@@ -132,11 +133,6 @@ function sortByTimeDesc(a: Task, b: Task): number {
   const ta = a.updated_at ?? a.created_at ?? ''
   const tb = b.updated_at ?? b.created_at ?? ''
   return tb.localeCompare(ta)
-}
-
-function truncate(text: string, maxLen: number): string {
-  if (text.length <= maxLen) return text
-  return text.slice(0, maxLen) + '...'
 }
 
 // -- Sub-components: Goals & MDAL (unchanged rendering logic) ----

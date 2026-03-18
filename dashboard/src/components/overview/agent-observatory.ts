@@ -3,6 +3,7 @@
 // Stale agents are visually dimmed; all-stale state shows an honest summary.
 
 import { html } from 'htm/preact'
+import { trimText } from '../../lib/truncate'
 import { AgentAvatar } from './agent-avatar'
 import { StatusBadge } from '../common/status-badge'
 import { TimeAgo } from '../common/time-ago'
@@ -67,13 +68,6 @@ function toolChips(tools: string[]) {
   `
 }
 
-function truncate(text: string | null, max = 60): string | null {
-  if (!text) return null
-  const clean = text.replace(/\s+/g, ' ').trim()
-  if (!clean) return null
-  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean
-}
-
 /** Determine if an agent's signal is stale (no fresh data in 10+ minutes) */
 function isStaleAgent(agent: ObservatoryAgent): boolean {
   if (agent.signalTruth === 'stale' || agent.signalTruth === 'archived') return true
@@ -89,8 +83,8 @@ function staleDurationLabel(ageSec: number | null): string | null {
 }
 
 function AgentRow({ agent, onAgentClick }: { agent: ObservatoryAgent; onAgentClick?: (name: string) => void }) {
-  const focusText = truncate(agent.focus ?? agent.currentTask)
-  const previewText = truncate(agent.recentOutputPreview, 80)
+  const focusText = trimText(agent.focus ?? agent.currentTask)
+  const previewText = trimText(agent.recentOutputPreview, 80)
   const stale = isStaleAgent(agent)
   const staleLabel = stale ? staleDurationLabel(agent.lastSignalAgeSec) : null
 

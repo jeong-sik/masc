@@ -58,11 +58,7 @@ import { SwarmBlockerCard, SwarmHealthBar, SwarmRunResolutionCard, SwarmStoryboa
 import { TraceRow } from './topology'
 import { WarRoomWorkerCard, WarRoomPresenceCard, WarRoomFeedCard } from './war-room-panels'
 import type { WarRoomWorkerView, WarRoomPresenceView, WarRoomFeedItem } from './war-room-panels'
-
-function truncate(value: string, limit = 260): string {
-  if (value.length <= limit) return value
-  return `${value.slice(0, limit - 1)}…`
-}
+import { truncate } from '../../lib/truncate'
 
 function timestampSortValue(iso?: string | null): number {
   if (!iso) return 0

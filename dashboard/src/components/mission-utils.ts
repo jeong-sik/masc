@@ -20,8 +20,9 @@ import {
   workflowTargetLabel,
 } from '../workflow-context'
 import { relativeTime as relativeTimeBase, formatDuration } from '../lib/format-time'
+import { trimText } from '../lib/truncate'
 
-export { formatDuration }
+export { formatDuration, trimText }
 
 export function relativeTime(iso?: string | null): string {
   return relativeTimeBase(iso, '방금')
@@ -53,12 +54,6 @@ export type EnrichedAgentRow = {
 
 export const selectedAttentionId = signal<string | null>(null)
 export const selectedSessionId = signal<string | null>(null)
-
-export function trimText(value: string | null | undefined, max = 120): string | null {
-  const text = (value ?? '').replace(/\s+/g, ' ').trim()
-  if (!text) return null
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text
-}
 
 export function toneClass(tone?: string | null): string {
   if (tone === 'bad' || tone === 'offline' || tone === 'critical' || tone === 'risk') return 'bad'

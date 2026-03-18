@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { displayStatus, relativeTime, sessionStatusTone, toneClass } from './helpers'
+import { truncate } from '../../lib/truncate'
 
 type WarRoomWorkerView = {
   key: string
@@ -38,11 +39,6 @@ type WarRoomFeedItem = {
   tone: 'ok' | 'warn' | 'bad'
   timestamp?: string | null
   sortTs: number
-}
-
-function truncate(value: string, limit = 260): string {
-  if (value.length <= limit) return value
-  return `${value.slice(0, limit - 1)}…`
 }
 
 function warRoomSourceLabel(source: WarRoomWorkerView['source']): string {

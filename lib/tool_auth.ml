@@ -11,17 +11,24 @@ type result = bool * string
 
 let handle_auth_enable ctx args =
   let require_token = get_bool args "require_token" false in
-  let secret = Auth.enable_auth ctx.config.base_path ~require_token in
+  let (secret, bootstrap_token) =
+    Auth.enable_auth ctx.config.base_path ~require_token ~agent_name:ctx.agent_name
+  in
+  let token_msg = match bootstrap_token with
+    | Some token ->
+        Printf.sprintf "\nBootstrap Admin Token for `%s` (SAVE THIS):\n`%s`\n" ctx.agent_name token
+    | None -> ""
+  in
   let msg = Printf.sprintf {|🔐 **Authentication Enabled**
 
 Room Secret (SAVE THIS - shown only once):
 `%s`
-
+%s
 Share this secret securely with authorized agents.
 Require token for actions: %b
 
 Use `masc_auth_create_token` to create agent tokens.
-|} secret require_token in
+|} secret token_msg require_token in
   (true, msg)
 
 let handle_auth_disable ctx _args =

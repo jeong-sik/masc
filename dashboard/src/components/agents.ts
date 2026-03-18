@@ -12,6 +12,7 @@ import {
   executionLodgeCheckins,
   executionContinuityBriefs,
   executionOfflineWorkerBriefs,
+  executionLoaded,
 } from '../store'
 import {
   selectedQueueId,
@@ -107,7 +108,8 @@ export function Execution() {
       : offlineRowsAll
 
   const allClear =
-    queueRows.length === 0
+    executionLoaded.value
+    && queueRows.length === 0
     && sessionRowsAll.length === 0
     && operationRowsAll.length === 0
 

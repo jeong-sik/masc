@@ -171,8 +171,11 @@ let canonical_voice_channel = function
   | "text_only" -> "text_only"
   | _ -> "voice_text"
 
-let default_voice_enabled_for name =
-  String.equal (String.lowercase_ascii (String.trim name)) "sangsu"
+let default_voice_enabled_for _name =
+  (* Voice enabled for all keepers when voice_config.json is present *)
+  match Voice_config.load () with
+  | Ok _ -> true
+  | Error _ -> false
 
 let default_voice_channel_for name =
   if default_voice_enabled_for name then "voice_text" else "text_only"

@@ -267,7 +267,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       Safe_ops.json_string ~default:"" "policy_reward_model_path" json
     in
     let policy_voice_enabled =
-      Safe_ops.json_bool ~default:false "policy_voice_enabled" json
+      Safe_ops.json_bool ~default:(default_voice_enabled_for name) "policy_voice_enabled" json
     in
     let policy_shell_mode =
       Safe_ops.json_string ~default:"disabled" "policy_shell_mode" json

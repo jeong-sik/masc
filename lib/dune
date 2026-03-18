@@ -576,6 +576,7 @@
    succession_oas
    perpetual_loop
    perpetual_loop_types
+   perpetual_oas
    procedural_memory
    oas_events
    oas_checkpoint_bridge

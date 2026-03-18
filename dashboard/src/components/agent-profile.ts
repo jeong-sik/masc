@@ -195,14 +195,14 @@ function CharacterPlate({ name }: { name: string }) {
   const koreanName = agent?.koreanName ?? keeper?.koreanName
   const headerStatus = agent?.status ?? brief?.status ?? 'unknown'
   const agentEmoji = agent?.emoji ?? keeper?.emoji
-  const currentWork = keeper?.current_work ?? brief?.current_work ?? agent?.current_task ?? null
+  const currentWork = brief?.current_work ?? agent?.current_task ?? null
   const lastSeenAt = agent?.last_seen ?? brief?.last_activity_at ?? null
-  const lastActivity = keeper?.last_turn_ago_s ?? brief?.last_turn_ago_s ?? null
+  const lastActivity = keeper?.last_turn_ago_s ?? brief?.last_activity_age_sec ?? null
   const ctxRatio = keeper?.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
   const generation = keeper?.generation
   const autonomy = keeper?.autonomy_level
-  const model = agent?.model ?? brief?.model ?? keeper?.model
+  const model = agent?.model ?? keeper?.model ?? null
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   const signalTruth = brief?.signal_truth
   const continuitySummary =

@@ -1,8 +1,6 @@
 import { signal } from '@preact/signals'
 import { fetchDashboardRoomTruth } from './api'
 import type {
-  DashboardExecutionQueueItem,
-  DashboardExecutionSummary,
   DashboardRoomTruthAttentionSummary,
   DashboardRoomTruthFocus,
   DashboardRoomTruthRecommendationSummary,

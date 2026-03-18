@@ -16,7 +16,6 @@ import {
   displayStatus,
   formatElapsed,
   formatPercent,
-  hasSwarmActivity,
   historySummary,
   prettyJson,
   relativeTime,

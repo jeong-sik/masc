@@ -543,7 +543,7 @@ let stats t =
       ]
   | Error err ->
       Log.BoardPg.error "stats error: %s" (Caqti_error.show err);
-      `Assoc [("error", `String (Caqti_error.show err))]
+      `Assoc [("error", `String "Database operation failed")]
 
 (** {1 Search} *)
 

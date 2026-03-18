@@ -146,6 +146,15 @@ export interface DashboardSemanticsResponse {
 
 export type TabId =
   | 'home'
+  | 'situation'
+  | 'agents'
+  | 'activity'
+  | 'work'
+  | 'control'
+  | 'lab'
+
+/** Pre-restructure tab IDs kept for redirect aliases. */
+export type LegacyTabId =
   | 'mission'
   | 'proof'
   | 'execution'
@@ -156,28 +165,39 @@ export type TabId =
   | 'planning'
   | 'intervene'
   | 'command'
-  | 'lab'
   | 'social'
   | 'agent-roster'
   | 'keeper-roster'
 
+/** Accepts both new and legacy tab IDs (for navigate() backward compat). */
+export type AnyTabId = TabId | LegacyTabId
+
 export const VALID_TABS: TabId[] = [
   'home',
-  'mission',
-  'proof',
-  'execution',
-  'tools',
-  'live',
-  'memory',
-  'governance',
-  'planning',
-  'intervene',
-  'command',
+  'situation',
+  'agents',
+  'activity',
+  'work',
+  'control',
   'lab',
-  'social',
-  'agent-roster',
-  'keeper-roster',
 ]
+
+/** Maps legacy tab IDs to new tab + optional section params. */
+export const LEGACY_TAB_REDIRECTS: Record<LegacyTabId, { tab: TabId; params?: Record<string, string> }> = {
+  'mission': { tab: 'situation' },
+  'agent-roster': { tab: 'agents' },
+  'execution': { tab: 'agents' },
+  'keeper-roster': { tab: 'agents' },
+  'live': { tab: 'activity' },
+  'social': { tab: 'activity' },
+  'proof': { tab: 'work', params: { section: 'evidence' } },
+  'memory': { tab: 'work', params: { section: 'board' } },
+  'governance': { tab: 'work', params: { section: 'governance' } },
+  'planning': { tab: 'work', params: { section: 'planning' } },
+  'tools': { tab: 'control', params: { section: 'tools' } },
+  'intervene': { tab: 'control' },
+  'command': { tab: 'lab' },
+}
 
 // --- Social Graph types ---
 

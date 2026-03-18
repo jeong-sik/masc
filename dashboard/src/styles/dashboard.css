@@ -202,49 +202,7 @@
   border-top: 1px solid rgba(138, 163, 211, 0.1);
 }
 
-/* ── Collapsible Stats Extra (Phase 1) ── */
-
-.overview-stats-extra {
-  margin-top: 8px;
-  border: 1px solid rgba(138, 163, 211, 0.1);
-  border-radius: 8px;
-  padding: 0;
-}
-
-.overview-stats-extra > summary {
-  padding: 8px 12px;
-  font-size: 12px;
-  color: #64748b;
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-}
-
-.overview-stats-extra > summary::-webkit-details-marker {
-  display: none;
-}
-
-.overview-stats-extra > summary::before {
-  content: '▸ ';
-  font-size: 10px;
-  margin-right: 4px;
-  transition: transform 0.15s;
-  display: inline-block;
-}
-
-.overview-stats-extra[open] > summary::before {
-  transform: rotate(90deg);
-}
-
-.overview-stats-extra[open] {
-  padding-bottom: 8px;
-}
-
-.overview-stats-extra .stats-grid {
-  padding: 4px 12px 0;
-}
-
-/* ── Collapsible Sections (Phase 1) ── */
+/* ── Collapsible Sections ── */
 
 .overview-section-collapsible {
   border: 1px solid rgba(138, 163, 211, 0.12);
@@ -456,11 +414,6 @@
 }
 
 /* ── Density Modes (Agents + Board) ───────────────────────── */
-.app-shell.density-compact .agent-grid,
-.app-shell.density-compact .agents-grid {
-  gap: 10px;
-}
-
 .app-shell.density-compact .live-agent-list,
 .app-shell.density-compact .board-post-list {
   gap: 7px;
@@ -486,11 +439,6 @@
 .app-shell.density-compact .post-meta {
   font-size: 11px;
   gap: 8px;
-}
-
-.app-shell.density-comfortable .agent-grid,
-.app-shell.density-comfortable .agents-grid {
-  gap: 14px;
 }
 
 .app-shell.density-comfortable .live-agent-list,

@@ -1,3 +1,5 @@
+(include_subdirs unqualified)
+
 (library
  (name masc_mcp)
  (public_name masc_mcp)

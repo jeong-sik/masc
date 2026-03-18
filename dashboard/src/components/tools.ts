@@ -139,22 +139,88 @@ function InventoryRow({ item }: { item: DashboardToolInventoryItem }) {
 }
 
 const showBackToTop = signal(false)
+const showFullInventory = signal(false)
 
 export { loadTools as refreshTools }
 
-export function Tools() {
-  const data = toolsData.value
-  const loading = toolsLoading.value
-  const error = toolsError.value
-  const inventory = data?.tool_inventory.tools ?? []
-  const usage = data?.tool_usage ?? null
-  const listContainerRef = useRef<HTMLDivElement>(null)
+// --- Summary View: Top 10 most essential + Top 5 never-used ---
 
-  useEffect(() => {
-    if (!toolsData.value && !toolsLoading.value) {
-      void loadTools()
-    }
-  }, [])
+function ToolSummaryView({ inventory }: { inventory: DashboardToolInventoryItem[] }) {
+  const essential = inventory
+    .filter(item => item.tier === 'essential' && item.enabled_in_current_mode)
+    .slice(0, 10)
+
+  const neverUsed = inventory
+    .filter(item => item.lifecycle !== 'deprecated' && item.visibility !== 'hidden')
+    .slice(-5)
+    .reverse()
+
+  const totalCount = inventory.length
+  const enabledCount = inventory.filter(item => item.enabled_in_current_mode).length
+  const deprecatedCount = inventory.filter(item => item.lifecycle === 'deprecated').length
+
+  return html`
+    <div class="tool-summary">
+      <div class="tool-inventory-summary">
+        <div class="tool-inventory-stat">
+          <span class="stat-value">${totalCount}</span>
+          <span class="stat-label">전체 도구</span>
+        </div>
+        <div class="tool-inventory-stat">
+          <span class="stat-value">${enabledCount}</span>
+          <span class="stat-label">활성화됨</span>
+        </div>
+        <div class="tool-inventory-stat">
+          <span class="stat-value">${deprecatedCount}</span>
+          <span class="stat-label">폐기 예정</span>
+        </div>
+      </div>
+
+      ${essential.length > 0 ? html`
+        <div class="tool-summary-section">
+          <h4 class="tool-summary-heading">필수 도구 (상위 ${essential.length}개)</h4>
+          <div class="tool-summary-list">
+            ${essential.map(item => html`
+              <div class="tool-summary-row" key=${item.name}>
+                <span class="tool-summary-name">${item.name}</span>
+                <span class="tool-summary-desc">${item.description?.slice(0, 60) ?? ''}</span>
+                ${(item.surfaces ?? []).map(s => toolBadge(s, 'surface'))}
+              </div>
+            `)}
+          </div>
+        </div>
+      ` : null}
+
+      ${neverUsed.length > 0 ? html`
+        <div class="tool-summary-section">
+          <h4 class="tool-summary-heading">미사용 도구 (${neverUsed.length}개)</h4>
+          <div class="tool-summary-list">
+            ${neverUsed.map(item => html`
+              <div class="tool-summary-row" key=${item.name}>
+                <span class="tool-summary-name">${item.name}</span>
+                <span class="tool-summary-desc">${item.description?.slice(0, 60) ?? ''}</span>
+                ${toolBadge(item.category)}
+              </div>
+            `)}
+          </div>
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
+// --- Full Inventory View (existing) ---
+
+function FullInventoryView({
+  inventory,
+  loading,
+  error,
+}: {
+  inventory: DashboardToolInventoryItem[]
+  loading: boolean
+  error: string | null
+}) {
+  const listContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (route.value.tab !== 'control') return
@@ -204,142 +270,178 @@ export function Tools() {
   const directCallCount = inventory.filter(item => item.direct_call_allowed).length
 
   return html`
+    <div class="tool-inventory-sticky-header">
+      <div class="tool-inventory-summary">
+        <div class="tool-inventory-stat">
+          <span class="stat-value">${totalCount}</span>
+          <span class="stat-label">Total tools</span>
+        </div>
+        <div class="tool-inventory-stat">
+          <span class="stat-value">${enabledCount}</span>
+          <span class="stat-label">Mode enabled</span>
+        </div>
+        <div class="tool-inventory-stat">
+          <span class="stat-value">${hiddenCount}</span>
+          <span class="stat-label">Hidden</span>
+        </div>
+        <div class="tool-inventory-stat">
+          <span class="stat-value">${deprecatedCount}</span>
+          <span class="stat-label">Deprecated</span>
+        </div>
+        <div class="tool-inventory-stat">
+          <span class="stat-value">${directCallCount}</span>
+          <span class="stat-label">Direct call</span>
+        </div>
+        <div class="tool-inventory-stat">
+          <span class="stat-value">${filtered.length}</span>
+          <span class="stat-label">Filtered</span>
+        </div>
+      </div>
+
+      <div class="tool-surface-tabs">
+        ${(Object.keys(SURFACE_LABELS) as SurfaceFilter[]).map(key => html`
+          <button
+            class=${`control-btn${surfaceFilter.value === key ? ' is-active' : ''}`}
+            onClick=${() => { surfaceFilter.value = key }}
+          >
+            ${SURFACE_LABELS[key]}
+            <span class="tool-surface-count">${surfaceCountForFilter(inventory, key)}</span>
+          </button>
+        `)}
+      </div>
+
+      <div class="tool-inventory-filters">
+        <input
+          class="control-input"
+          type="text"
+          placeholder="Search tools, docs, permission, replacement..."
+          value=${searchQuery.value}
+          onInput=${(e: Event) => {
+            searchQuery.value = (e.target as HTMLInputElement).value
+          }}
+        />
+        <select
+          class="control-select"
+          value=${categoryFilter.value}
+          onChange=${(e: Event) => {
+            categoryFilter.value = (e.target as HTMLSelectElement).value
+          }}
+        >
+          <option value="all">All categories</option>
+          ${categories.map(category => html`<option value=${category}>${category}</option>`)}
+        </select>
+        <label class="tool-inventory-toggle">
+          <input
+            type="checkbox"
+            checked=${enabledOnly.value}
+            onChange=${(e: Event) => {
+              enabledOnly.value = (e.target as HTMLInputElement).checked
+            }}
+          />
+          <span>Enabled only</span>
+        </label>
+        <label class="tool-inventory-toggle">
+          <input
+            type="checkbox"
+            checked=${directOnly.value}
+            onChange=${(e: Event) => {
+              directOnly.value = (e.target as HTMLInputElement).checked
+            }}
+          />
+          <span>Direct-call only</span>
+        </label>
+        <label class="tool-inventory-toggle">
+          <input
+            type="checkbox"
+            checked=${showHidden.value}
+            onChange=${(e: Event) => {
+              showHidden.value = (e.target as HTMLInputElement).checked
+            }}
+          />
+          <span>Show hidden</span>
+        </label>
+        <label class="tool-inventory-toggle">
+          <input
+            type="checkbox"
+            checked=${showDeprecated.value}
+            onChange=${(e: Event) => {
+              showDeprecated.value = (e.target as HTMLInputElement).checked
+            }}
+          />
+          <span>Show deprecated</span>
+        </label>
+        <button class="control-btn ghost" onClick=${() => { void loadTools() }} disabled=${loading}>
+          ${loading ? 'Refreshing...' : 'Refresh inventory'}
+        </button>
+      </div>
+    </div>
+
+    ${error ? html`<div class="tool-metrics-error">${error}</div>` : null}
+
+    <div ref=${listContainerRef} class="tool-inventory-virtual-container">
+      ${filtered.length > 0
+        ? html`<${VirtualList}
+            items=${filtered}
+            itemHeight=${130}
+            renderItem=${(item: DashboardToolInventoryItem) => html`<${InventoryRow} item=${item} />`}
+            getKey=${(item: DashboardToolInventoryItem) => item.name}
+            className="tool-inventory-list"
+          />`
+        : html`<div class="empty-state">No tools matched the current filters.</div>`}
+    </div>
+
+    <button
+      class=${`tool-back-to-top${showBackToTop.value ? ' visible' : ''}`}
+      onClick=${scrollToTop}
+      title="Back to top"
+    >
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <path d="M10 15V5M10 5L5 10M10 5L15 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  `
+}
+
+export function Tools() {
+  const data = toolsData.value
+  const loading = toolsLoading.value
+  const error = toolsError.value
+  const inventory = data?.tool_inventory.tools ?? []
+  const usage = data?.tool_usage ?? null
+
+  useEffect(() => {
+    if (!toolsData.value && !toolsLoading.value) {
+      void loadTools()
+    }
+  }, [])
+
+  return html`
     <div>
       <${Card} title="System Tool Inventory" class="section">
-        <div class="tool-inventory-sticky-header">
-          <div class="monitor-section-head">
-            <h2 class="monitor-headline">System Tool Inventory</h2>
-            <p class="monitor-subheadline">Allowed tools는 runtime allowlist이고, 여기서는 시스템이 가진 전체 도구 surface를 hidden/deprecated 포함 기준으로 봅니다.</p>
-          </div>
-
-          <div class="tool-inventory-summary">
-            <div class="tool-inventory-stat">
-              <span class="stat-value">${totalCount}</span>
-              <span class="stat-label">Total tools</span>
-            </div>
-            <div class="tool-inventory-stat">
-              <span class="stat-value">${enabledCount}</span>
-              <span class="stat-label">Mode enabled</span>
-            </div>
-            <div class="tool-inventory-stat">
-              <span class="stat-value">${hiddenCount}</span>
-              <span class="stat-label">Hidden</span>
-            </div>
-            <div class="tool-inventory-stat">
-              <span class="stat-value">${deprecatedCount}</span>
-              <span class="stat-label">Deprecated</span>
-            </div>
-            <div class="tool-inventory-stat">
-              <span class="stat-value">${directCallCount}</span>
-              <span class="stat-label">Direct call</span>
-            </div>
-            <div class="tool-inventory-stat">
-              <span class="stat-value">${filtered.length}</span>
-              <span class="stat-label">Filtered</span>
-            </div>
-          </div>
-
-          <div class="tool-surface-tabs">
-            ${(Object.keys(SURFACE_LABELS) as SurfaceFilter[]).map(key => html`
-              <button
-                class=${`control-btn${surfaceFilter.value === key ? ' is-active' : ''}`}
-                onClick=${() => { surfaceFilter.value = key }}
-              >
-                ${SURFACE_LABELS[key]}
-                <span class="tool-surface-count">${surfaceCountForFilter(inventory, key)}</span>
-              </button>
-            `)}
-          </div>
-
-          <div class="tool-inventory-filters">
-            <input
-              class="control-input"
-              type="text"
-              placeholder="Search tools, docs, permission, replacement..."
-              value=${searchQuery.value}
-              onInput=${(e: Event) => {
-                searchQuery.value = (e.target as HTMLInputElement).value
-              }}
-            />
-            <select
-              class="control-select"
-              value=${categoryFilter.value}
-              onChange=${(e: Event) => {
-                categoryFilter.value = (e.target as HTMLSelectElement).value
-              }}
-            >
-              <option value="all">All categories</option>
-              ${categories.map(category => html`<option value=${category}>${category}</option>`)}
-            </select>
-            <label class="tool-inventory-toggle">
-              <input
-                type="checkbox"
-                checked=${enabledOnly.value}
-                onChange=${(e: Event) => {
-                  enabledOnly.value = (e.target as HTMLInputElement).checked
-                }}
-              />
-              <span>Enabled only</span>
-            </label>
-            <label class="tool-inventory-toggle">
-              <input
-                type="checkbox"
-                checked=${directOnly.value}
-                onChange=${(e: Event) => {
-                  directOnly.value = (e.target as HTMLInputElement).checked
-                }}
-              />
-              <span>Direct-call only</span>
-            </label>
-            <label class="tool-inventory-toggle">
-              <input
-                type="checkbox"
-                checked=${showHidden.value}
-                onChange=${(e: Event) => {
-                  showHidden.value = (e.target as HTMLInputElement).checked
-                }}
-              />
-              <span>Show hidden</span>
-            </label>
-            <label class="tool-inventory-toggle">
-              <input
-                type="checkbox"
-                checked=${showDeprecated.value}
-                onChange=${(e: Event) => {
-                  showDeprecated.value = (e.target as HTMLInputElement).checked
-                }}
-              />
-              <span>Show deprecated</span>
-            </label>
-            <button class="control-btn ghost" onClick=${() => { void loadTools() }} disabled=${loading}>
-              ${loading ? 'Refreshing...' : 'Refresh inventory'}
-            </button>
-          </div>
+        <div class="monitor-section-head">
+          <h2 class="monitor-headline">System Tool Inventory</h2>
+          <p class="monitor-subheadline">
+            ${showFullInventory.value
+              ? 'hidden/deprecated 포함 전체 도구 surface를 봅니다.'
+              : '필수 도구와 사용 현황 요약입니다.'}
+          </p>
+          <button
+            class="control-btn ghost"
+            style="margin-top: 8px;"
+            onClick=${() => { showFullInventory.value = !showFullInventory.value }}
+          >
+            ${showFullInventory.value ? '요약 보기' : '전체 인벤토리 보기'}
+          </button>
         </div>
 
-        ${error ? html`<div class="tool-metrics-error">${error}</div>` : null}
-
-        <div ref=${listContainerRef} class="tool-inventory-virtual-container">
-          ${filtered.length > 0
-            ? html`<${VirtualList}
-                items=${filtered}
-                itemHeight=${130}
-                renderItem=${(item: DashboardToolInventoryItem) => html`<${InventoryRow} item=${item} />`}
-                getKey=${(item: DashboardToolInventoryItem) => item.name}
-                className="tool-inventory-list"
-              />`
-            : html`<div class="empty-state">No tools matched the current filters.</div>`}
-        </div>
-
-        <button
-          class=${`tool-back-to-top${showBackToTop.value ? ' visible' : ''}`}
-          onClick=${scrollToTop}
-          title="Back to top"
-        >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <path d="M10 15V5M10 5L5 10M10 5L15 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </button>
+        ${showFullInventory.value
+          ? html`<${FullInventoryView}
+              inventory=${inventory}
+              loading=${loading}
+              error=${error}
+            />`
+          : html`<${ToolSummaryView} inventory=${inventory} />`
+        }
       <//>
 
       <${Card} title="Tool Usage" class="section">

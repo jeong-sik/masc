@@ -224,7 +224,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
           새로고침
         </button>
         <button class="rail-secondary-btn" onClick=${() => navigate('control')}>
-          개입 열기
+          운영 패널 열기
         </button>
       </div>
       ${build
@@ -279,7 +279,7 @@ export function InterveneRailCard() {
           개입 데이터 갱신
         </button>
         <button class="rail-secondary-btn" onClick=${() => navigate('control')}>
-          개입 열기
+          운영 패널 열기
         </button>
       </div>
     </section>

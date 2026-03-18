@@ -272,6 +272,11 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let can_auto_join =
     if (not join_required) || agent_name = "unknown" then
       false
+    else if Option.is_none mcp_session_id then
+      (* Sessionless requests (no Mcp-Session-Id header) should not auto-join.
+         Without a session, each request gets a new ephemeral agent name,
+         causing orphan agent proliferation in the room. *)
+      false
     else if not auth_enabled then
       true
     else

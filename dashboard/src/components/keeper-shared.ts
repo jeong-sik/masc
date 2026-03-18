@@ -156,7 +156,11 @@ export function KeeperConversationPanel({
     }
   }, [keeperName])
 
-  const thread = keeperThreads.value[keeperName] ?? []
+  const rawThread = keeperThreads.value[keeperName] ?? []
+  // Filter out system/tool messages — only show user and assistant conversation
+  const thread = rawThread.filter(
+    entry => entry.role === 'user' || entry.role === 'assistant',
+  )
   const sending = keeperSending.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
 

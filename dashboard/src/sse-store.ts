@@ -11,6 +11,7 @@ import {
   refreshBoard,
   refreshMdal,
 } from './store'
+import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 
 // --- Governance/CommandPlane/Operator refresh registration (avoids circular import) ---
 
@@ -91,6 +92,18 @@ export function setupSSEReaction(): () => void {
     ) {
       scheduleRefresh('execution', refreshExecution)
       scheduleRefresh('operator', () => _refreshOperatorFn?.(), 600)
+
+      // Re-hydrate conversation thread for the active keeper so chat
+      // updates without a manual page refresh.
+      if (event.type === 'keeper_turn_complete') {
+        const keeperName = event.name ?? ''
+        const viewing = activeKeeperName.value
+        if (keeperName && keeperName === viewing) {
+          scheduleRefresh(`keeper_thread_${keeperName}`, () => {
+            void hydrateKeeperStatus(keeperName, true)
+          }, 800)
+        }
+      }
     }
 
     // Client input approval/rejection → operator refresh

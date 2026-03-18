@@ -246,7 +246,7 @@ let parse_llm_score (text : string) : float option =
 
 (** Validate that an LLM response contains a parseable score. *)
 let llm_score_is_valid (resp : Llm_client.completion_response) : bool =
-  parse_llm_score (Llm_client.text_of_response resp) <> None
+  parse_llm_score (Llm_types.text_of_response resp) <> None
 
 (** Call LLM to score agent-task compatibility.
     Returns Ok float or Error string. *)

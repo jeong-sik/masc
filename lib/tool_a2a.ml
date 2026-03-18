@@ -35,14 +35,16 @@ let handle_a2a_delegate ctx args =
   let*! message = get_string_required args "message" in
   let task_type_str = get_string args "task_type" "async" in
   let timeout = get_int args "timeout" 300 in
-  let artifacts = match Yojson.Safe.Util.member "artifacts" args with
-    | `Null -> []
-    | `List items ->
-        List.filter_map (fun item ->
-          match A2a_tools.artifact_of_yojson item with
-          | Ok a -> Some a
-          | Error _ -> None) items
-    | _ -> []
+  let artifacts =
+    try match Yojson.Safe.Util.member "artifacts" args with
+      | `Null -> []
+      | `List items ->
+          List.filter_map (fun item ->
+            match A2a_tools.artifact_of_yojson item with
+            | Ok a -> Some a
+            | Error _ -> None) items
+      | _ -> []
+    with Yojson.Safe.Util.Type_error _ -> []
   in
   match A2a_tools.delegate ctx.config ~agent_name:delegate_agent_name ~target ~message
            ~task_type_str ~artifacts ~timeout () with
@@ -51,9 +53,11 @@ let handle_a2a_delegate ctx args =
 
 let handle_a2a_subscribe _ctx args =
   let agent_filter = get_string_opt args "agent_name" in
-  let events = match Yojson.Safe.Util.member "events" args with
-    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
-    | _ -> []
+  let events =
+    try match Yojson.Safe.Util.member "events" args with
+      | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+      | _ -> []
+    with Yojson.Safe.Util.Type_error _ -> []
   in
   (try
     match A2a_tools.subscribe ?agent_filter ~events () with
@@ -64,12 +68,18 @@ let handle_a2a_subscribe _ctx args =
 
 let handle_a2a_unsubscribe _ctx args =
   let subscription_id = get_string args "subscription_id" "" in
+  if subscription_id = "" then
+    (false, "subscription_id is required")
+  else
   match A2a_tools.unsubscribe ~subscription_id with
   | Ok json -> (true, Yojson.Safe.pretty_to_string json)
   | Error e -> (false, Printf.sprintf "❌ Unsubscribe failed: %s" e)
 
 let handle_poll_events _ctx args =
   let subscription_id = get_string args "subscription_id" "" in
+  if subscription_id = "" then
+    (false, "subscription_id is required")
+  else
   let clear = get_bool args "clear" true in
   match A2a_tools.poll_events ~subscription_id ~clear () with
   | Ok json -> (true, Yojson.Safe.pretty_to_string json)
@@ -83,16 +93,18 @@ let handle_heartbeat_result _ctx args =
   let summary = get_string args "summary" "" in
   let tool_call_count = get_int args "tool_call_count" 0 in
   let tool_names =
-    match Yojson.Safe.Util.member "tool_names" args with
-    | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
-    | _ -> []
+    try match Yojson.Safe.Util.member "tool_names" args with
+      | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+      | _ -> []
+    with Yojson.Safe.Util.Type_error _ -> []
   in
   let decision_reason = get_string args "decision_reason" "" in
   let decision_confidence =
-    match Yojson.Safe.Util.member "decision_confidence" args with
-    | `Float f -> f
-    | `Int n -> float_of_int n
-    | _ -> -1.0
+    try match Yojson.Safe.Util.member "decision_confidence" args with
+      | `Float f -> f
+      | `Int n -> float_of_int n
+      | _ -> -1.0
+    with Yojson.Safe.Util.Type_error _ -> -1.0
   in
   let failure_reason = get_string_opt args "failure_reason" in
   if worker_name = "" || agent = "" || status = "" || summary = "" || decision_reason = "" then

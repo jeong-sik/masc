@@ -1,4 +1,4 @@
-(** Trpg_types_world — string utilities, session outcome types, world contracts,
+(** Types_world — string utilities, session outcome types, world contracts,
     end rules, and session outcome evaluation. *)
 
 open Yojson.Safe.Util
@@ -92,7 +92,7 @@ let stagnation_level_from_payload (payload : Yojson.Safe.t) : int =
   | `Int n when n > 0 -> n
   | _ -> 0
 
-let default_end_rules_local : Trpg_preset_store.end_rules =
+let default_end_rules_local : Preset_store.end_rules =
   {
     max_turn = 40;
     defeat_if_all_players_dead = true;
@@ -286,7 +286,7 @@ let parse_world_contract_catalog_json (json : Yojson.Safe.t) :
   if contracts = [] then Error "world contracts file has empty contracts[]"
   else Ok { default_contract_id; contracts }
 
-let load_world_contract_catalog ~(store : Trpg_store.t) : world_contract_catalog =
+let load_world_contract_catalog ~(store : Store.t) : world_contract_catalog =
   match store.load_world_contracts () |> parse_world_contract_catalog_json with
   | Ok catalog -> catalog
   | Error _ -> default_world_contract_catalog
@@ -350,7 +350,7 @@ let string_list_member_or_default json key default =
       if parsed = [] then default else parsed
   | _ -> default
 
-let parse_end_rules_json (json : Yojson.Safe.t) : Trpg_preset_store.end_rules =
+let parse_end_rules_json (json : Yojson.Safe.t) : Preset_store.end_rules =
   {
     max_turn =
       (match json |> member "max_turn" with
@@ -376,7 +376,7 @@ let parse_end_rules_json (json : Yojson.Safe.t) : Trpg_preset_store.end_rules =
   }
 
 let extract_end_rules_from_room_created_payload (payload : Yojson.Safe.t) :
-    Trpg_preset_store.end_rules option =
+    Preset_store.end_rules option =
   match payload |> member "config" |> member "world" |> member "end_rules" with
   | `Assoc _ as end_rules_json -> Some (parse_end_rules_json end_rules_json)
   | _ -> None
@@ -389,13 +389,13 @@ let extract_world_preset_id_from_room_created_payload (payload : Yojson.Safe.t) 
       if trimmed = "" then None else Some trimmed
   | _ -> None
 
-let resolve_end_rules_for_room ~store ~(events : Trpg_engine_event.t list) :
-    Trpg_preset_store.end_rules =
+let resolve_end_rules_for_room ~store ~(events : Engine_event.t list) :
+    Preset_store.end_rules =
   match
     events
     |> List.fold_left
-         (fun acc (ev : Trpg_engine_event.t) ->
-           if ev.event_type = Trpg_engine_event.Room_created then Some ev else acc)
+         (fun acc (ev : Engine_event.t) ->
+           if ev.event_type = Engine_event.Room_created then Some ev else acc)
          None
   with
   | None -> default_end_rules_local
@@ -407,12 +407,12 @@ let resolve_end_rules_for_room ~store ~(events : Trpg_engine_event.t list) :
             extract_world_preset_id_from_room_created_payload room_created.payload
           with
           | Some world_preset_id -> (
-              match store.Trpg_store.load_catalog () with
+              match store.Store.load_catalog () with
               | Ok catalog -> (
                   match
-                    Trpg_preset_store.find_world_preset catalog ~id:world_preset_id
+                    Preset_store.find_world_preset catalog ~id:world_preset_id
                   with
-                  | Some preset -> preset.Trpg_preset_store.end_rules
+                  | Some preset -> preset.Preset_store.end_rules
                   | None -> default_end_rules_local)
               | Error _ -> default_end_rules_local)
           | None -> default_end_rules_local))
@@ -472,22 +472,22 @@ let evaluate_session_outcome ~end_rules ~max_turn_override
     (session_outcome * string) option =
   let story_flags = story_flags_from_state state in
   let draw_flag =
-    first_matching_flag ~story_flags end_rules.Trpg_preset_store.draw_flags
+    first_matching_flag ~story_flags end_rules.Preset_store.draw_flags
   in
   let defeat_flag =
-    first_matching_flag ~story_flags end_rules.Trpg_preset_store.defeat_flags
+    first_matching_flag ~story_flags end_rules.Preset_store.defeat_flags
   in
   let victory_flag =
-    first_matching_flag ~story_flags end_rules.Trpg_preset_store.victory_flags
+    first_matching_flag ~story_flags end_rules.Preset_store.victory_flags
   in
   let all_players_dead =
-    end_rules.Trpg_preset_store.defeat_if_all_players_dead
+    end_rules.Preset_store.defeat_if_all_players_dead
     && all_players_dead_in_state state
   in
   let effective_max_turn =
     match max_turn_override with
-    | Some n when n > 0 -> min end_rules.Trpg_preset_store.max_turn n
-    | _ -> end_rules.Trpg_preset_store.max_turn
+    | Some n when n > 0 -> min end_rules.Preset_store.max_turn n
+    | _ -> end_rules.Preset_store.max_turn
   in
   let max_turn_reached =
     let turn =
@@ -509,7 +509,7 @@ let evaluate_session_outcome ~end_rules ~max_turn_override
               if all_players_dead then
                 Some (Defeat, "all_players_dead")
               else (
-                match (end_rules.Trpg_preset_store.allow_dm_end_signal, dm_reply) with
+                match (end_rules.Preset_store.allow_dm_end_signal, dm_reply) with
                 | true, Some reply -> (
                     match dm_signal_outcome reply with
                     | Some outcome -> Some outcome

@@ -17,7 +17,7 @@ type world_state = {
   round : int;
   phase : string;
   agents : agent_state list;
-  recent_events : Trpg_engine_event.t list;
+  recent_events : Engine_event.t list;
   source_counts : source_counts;
 }
 

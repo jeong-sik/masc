@@ -1,4 +1,4 @@
-(** Trpg_rule_dnd5e_lite core — types, constants, helpers, basic event handlers. *)
+(** Rule_dnd5e_lite core — types, constants, helpers, basic event handlers. *)
 
 open Yojson.Safe.Util
 
@@ -74,9 +74,9 @@ let assoc_get key fields = List.assoc_opt key fields
 let assoc_put key value fields =
   (key, value) :: List.remove_assoc key fields
 
-let get_string_opt = Safe_ops.json_string_opt
-let get_int_opt = Safe_ops.json_int_opt
-let get_bool_opt = Safe_ops.json_bool_opt
+let get_string_opt = Util.json_string_opt
+let get_int_opt = Util.json_int_opt
+let get_bool_opt = Util.json_bool_opt
 
 let assoc_fields_or_empty = function
   | `Assoc fields -> fields
@@ -199,10 +199,10 @@ let update_actor_control state actor_id keeper_name_opt =
 let resolve_actor_id payload event =
   match get_string_opt "actor_id" payload with
   | Some id when String.trim id <> "" -> Some (String.trim id)
-  | _ -> event.Trpg_engine_event.actor_id
+  | _ -> event.Engine_event.actor_id
 
 let apply_hp_changed ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   let actor_id = resolve_actor_id payload event in
   match actor_id with
   | None -> state
@@ -233,7 +233,7 @@ let apply_hp_changed ~state ~event =
       else update_actor_control next_state actor_id None
 
 let apply_inventory_changed ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   let actor_id = resolve_actor_id payload event in
   match actor_id with
   | None -> state
@@ -266,7 +266,7 @@ let apply_inventory_changed ~state ~event =
             `Assoc (assoc_put "inventory" (`List updated) actor_fields))
 
 let apply_actor_spawned ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   match resolve_actor_id payload event with
   | None -> state
   | Some actor_id ->
@@ -314,7 +314,7 @@ let apply_actor_spawned ~state ~event =
                  | _ -> `List [])))
 
 let apply_actor_claimed ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   let actor_id = resolve_actor_id payload event in
   let keeper_name =
     match get_string_opt "keeper_name" payload with
@@ -330,13 +330,13 @@ let apply_actor_claimed ~state ~event =
   | _ -> state
 
 let apply_actor_released ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   match resolve_actor_id payload event with
   | Some actor_id -> update_actor_control state actor_id None
   | None -> state
 
 let apply_actor_updated ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   match resolve_actor_id payload event with
   | None -> state
   | Some actor_id ->
@@ -399,7 +399,7 @@ let apply_actor_updated ~state ~event =
         else update_actor_control next_state actor_id None
 
 let apply_actor_deleted ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   match resolve_actor_id payload event with
   | None -> state
   | Some actor_id ->
@@ -407,7 +407,7 @@ let apply_actor_deleted ~state ~event =
       update_actor_control s actor_id None
 
 let apply_flag_set ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   let scope = get_string_opt "scope" payload |> Option.value ~default:"world" in
   let key = get_string_opt "key" payload |> Option.value ~default:"" in
   if key = "" then state
@@ -436,7 +436,7 @@ let apply_flag_set ~state ~event =
   else state
 
 let apply_node_advanced ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   match state with
   | `Assoc fields ->
       let to_node = get_string_opt "to_node" payload |> Option.value ~default:"" in
@@ -456,7 +456,7 @@ let apply_join_window_state ~state ~event ~phase_open =
         state |> member "turn" |> to_int_option |> Option.value ~default:1
       in
       let turn_value =
-        get_int_opt "turn" event.Trpg_engine_event.payload
+        get_int_opt "turn" event.Engine_event.payload
         |> Option.value ~default:current_turn
       in
       let min_points =
@@ -477,12 +477,12 @@ let apply_join_window_state ~state ~event ~phase_open =
   | _ -> state
 
 let apply_contribution_delta ~state ~event =
-  let payload = event.Trpg_engine_event.payload in
+  let payload = event.Engine_event.payload in
   let actor_id =
     match get_string_opt "actor_id" payload with
     | Some actor when String.trim actor <> "" -> String.trim actor
     | _ ->
-        Option.value ~default:"" event.Trpg_engine_event.actor_id
+        Option.value ~default:"" event.Engine_event.actor_id
         |> String.trim
   in
   if actor_id = "" then state

@@ -19,7 +19,7 @@ type tool_result = bool * string
 
 type context = {
   config : Room.config;
-  store : Trpg_store.t;
+  store : Trpg.Store.t;
   agent_name : string;
   trpg_keeper_call :
     (name:string -> message:string -> timeout_sec:float -> Tool_trpg.keeper_call_result)
@@ -326,11 +326,11 @@ let client_input_payload (i : Game_view_state.client_input) =
       ("reject_reason", Option.fold ~none:`Null ~some:(fun v -> `String v) i.reject_reason);
     ]
 
-let world_agent_payload (a : Trpg_world_projection.agent_state) =
+let world_agent_payload (a : Trpg.World_projection.agent_state) =
   `Assoc
     [
       ("name", `String a.name);
-      ("status", `String (Trpg_world_projection.string_of_agent_status a.status));
+      ("status", `String (Trpg.World_projection.string_of_agent_status a.status));
       ("last_action", Option.fold ~none:`Null ~some:(fun v -> `String v) a.last_action);
     ]
 

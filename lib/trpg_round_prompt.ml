@@ -736,15 +736,15 @@ let build_dm_section_en (ctx : prompt_context) =
   in
   join_nonempty "\n" parts
 
-let build_keeper_prompt ~(store : Trpg_store.t) ~dm_persona_override ~room_id
+let build_keeper_prompt ~(store : Trpg.Store.t) ~dm_persona_override ~room_id
     ~phase ~turn ~role ~actor_id ~state_json ~lang =
   let role_s = role_to_string role in
   let ctx0 = extract_prompt_context ~actor_id ~dm_persona_override state_json in
   (* Phase 1-3: Inject BDI fragment from actor's memory state *)
   let bdi_frag =
     let room_dir = store.room_dir ~room_id in
-    let bdi = Trpg_bdi.load ~room_dir ~actor_id in
-    Trpg_bdi.to_prompt_fragment bdi ~max_len:800
+    let bdi = Trpg.Bdi.load ~room_dir ~actor_id in
+    Trpg.Bdi.to_prompt_fragment bdi ~max_len:800
   in
   (* Phase 3: Inject DM intent hint from recent narrative *)
   let dm_hint =

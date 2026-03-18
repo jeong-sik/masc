@@ -22,7 +22,7 @@ let cleanup_dir dir =
 let mk_ctx base_dir =
   let config = Room.default_config base_dir in
   let _ = Room.init config ~agent_name:(Some "tester") in
-  let store = Trpg_store.make_sqlite ~base_dir in
+  let store = Trpg.Store.make_sqlite ~base_dir in
   let ctx : Tool_protocol_game_view.context =
     {
       config;
@@ -106,7 +106,7 @@ let test_trpg_action_submit_persists_events () =
       in
       check bool "story_log has entries" true (story_len >= 1);
       let events =
-        match Trpg_engine_store.read_events ~base_dir:config.base_path ~room_id with
+        match Trpg.Engine_store.read_events ~base_dir:config.base_path ~room_id with
         | Ok ev -> ev
         | Error e -> fail ("read_events failed: " ^ e)
       in
@@ -158,11 +158,11 @@ let test_trpg_world_query_default_room_and_skills () =
       check bool "fallback skill includes observe" true (List.mem "observe" skills))
 
 let next_jsonl_seq_or_fail base_dir room_id =
-  match Trpg_engine_store.read_events ~base_dir ~room_id with
+  match Trpg.Engine_store.read_events ~base_dir ~room_id with
   | Ok [] -> 1
   | Ok events ->
       List.fold_left
-        (fun acc (ev : Trpg_engine_event.t) -> max acc ev.seq)
+        (fun acc (ev : Trpg.Engine_event.t) -> max acc ev.seq)
         0 events
       + 1
   | Error e -> fail ("read_events failed: " ^ e)
@@ -199,8 +199,8 @@ let test_trpg_world_query_merge_and_visibility () =
       check bool "action.submit ok" true ok_action;
       let injected_seq = next_jsonl_seq_or_fail config.base_path room_id in
       let injected =
-        Trpg_engine_event.make ~seq:injected_seq ~room_id ~ts:(Types.now_iso ())
-          ~event_type:Trpg_engine_event.World_event ~actor_id:"npc-1"
+        Trpg.Engine_event.make ~seq:injected_seq ~room_id ~ts:(Types.now_iso ())
+          ~event_type:Trpg.Engine_event.World_event ~actor_id:"npc-1"
           ~payload:
             (`Assoc
               [
@@ -211,7 +211,7 @@ let test_trpg_world_query_merge_and_visibility () =
               ])
           ()
       in
-      (match Trpg_engine_store.append_event ~base_dir:config.base_path ~event:injected with
+      (match Trpg.Engine_store.append_event ~base_dir:config.base_path ~event:injected with
       | Ok () -> ()
       | Error e -> fail ("append injected event failed: " ^ e));
       let ok, body =

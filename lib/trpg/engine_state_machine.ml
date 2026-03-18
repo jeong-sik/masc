@@ -1,4 +1,4 @@
-open Trpg_engine_types
+open Engine_types
 
 type transition_error =
   | Invalid_phase_transition of {

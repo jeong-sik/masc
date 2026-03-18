@@ -1,4 +1,4 @@
-(** Trpg_types — shared types, config, utilities, world contracts,
+(** Types — shared types, config, utilities, world contracts,
     session outcome, canon checks, and stagnation detection. *)
 
 (** Tool_trpg - Strict TRPG action tools for AI agents.
@@ -22,6 +22,13 @@
 
 open Yojson.Safe.Util
 
+let now_iso () =
+  let open Unix in
+  let tm = gmtime (gettimeofday ()) in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+    tm.tm_hour tm.tm_min tm.tm_sec
+
 type result = bool * string
 
 type keeper_call_result = [ `Ok of Yojson.Safe.t | `Timeout | `Error of string ]
@@ -29,7 +36,7 @@ type keeper_probe_result = [ `Ok | `Error of string ]
 type dm_voice_emit_result = (Yojson.Safe.t, string) Stdlib.result
 
 type context = {
-  store : Trpg_store.t;
+  store : Store.t;
   agent_name : string;
   keeper_call :
     (name:string -> message:string -> timeout_sec:float -> keeper_call_result)
@@ -242,8 +249,6 @@ let pool_member_to_yojson (m : pool_member) : Yojson.Safe.t =
       ("source_preset_id", `String m.source_preset_id);
     ]
 
-let schemas = Trpg_schema.schemas
-
 let ok_json json = (true, Yojson.Safe.to_string json)
 let err msg = (false, msg)
 
@@ -366,12 +371,12 @@ let validate_actor_role = function
   | "player" | "npc" | "dm" -> Ok ()
   | other -> Error (Printf.sprintf "role must be one of: player, npc, dm (got %s)" other)
 
-let extract_config_from_events (events : Trpg_engine_event.t list) : Yojson.Safe.t =
+let extract_config_from_events (events : Engine_event.t list) : Yojson.Safe.t =
   let rec loop = function
     | [] -> `Assoc []
-    | (ev : Trpg_engine_event.t) :: tl -> (
+    | (ev : Engine_event.t) :: tl -> (
         match ev.event_type with
-        | Trpg_engine_event.Room_created -> (
+        | Engine_event.Room_created -> (
             match ev.payload with
             | `Assoc fields -> (
                 match List.assoc_opt "config" fields with
@@ -383,13 +388,13 @@ let extract_config_from_events (events : Trpg_engine_event.t list) : Yojson.Safe
   loop events
 
 let next_seq ~store ~room_id =
-  match store.Trpg_store.read_events ~room_id with
+  match store.Store.read_events ~room_id with
   | Error e -> Error e
   | Ok events ->
       Ok
         (1
         + List.fold_left
-            (fun acc (ev : Trpg_engine_event.t) -> max acc ev.seq)
+            (fun acc (ev : Engine_event.t) -> max acc ev.seq)
             0 events)
 
 let append_event ~store ~room_id ~event_type ?actor_id ?ts ?seq ~payload () =
@@ -405,12 +410,12 @@ let append_event ~store ~room_id ~event_type ?actor_id ?ts ?seq ~payload () =
     match seq_result with
     | Error e -> Error e
     | Ok seq ->
-        let ts = Option.value ~default:(Types.now_iso ()) ts in
+        let ts = Option.value ~default:(now_iso ()) ts in
         let event =
-          Trpg_engine_event.make
+          Engine_event.make
             ~seq ~room_id ~ts ~event_type ?actor_id ~payload ()
         in
-        (match store.Trpg_store.append_event ~event with
+        (match store.Store.append_event ~event with
         | Ok () -> Ok event
         | Error e -> Error e)
 
@@ -418,12 +423,12 @@ let derive_state ~store ~room_id ~rule_module =
   match validate_rule_module rule_module with
   | Error e -> Error e
   | Ok () -> (
-      match store.Trpg_store.read_events ~room_id with
+      match store.Store.read_events ~room_id with
       | Error e -> Error e
       | Ok events ->
           let config = extract_config_from_events events in
-          let rule = (module Trpg_rule_dnd5e_lite : Trpg_rule.S) in
-          let state = Trpg_engine_replay.derive_state ~rule ~config ~events in
+          let rule = (module Rule_dnd5e_lite : Rule.S) in
+          let state = Engine_replay.derive_state ~rule ~config ~events in
           Ok
             (`Assoc
               [
@@ -623,7 +628,7 @@ let evaluate_keeper_bonus ctx ~keeper_name ~room_id ~actor_id ~server_score
             warning = Some (Printf.sprintf "keeper judge error: %s" err);
           })
 
-let contribution_actor_id_of_event (event : Trpg_engine_event.t) =
+let contribution_actor_id_of_event (event : Engine_event.t) =
   let payload = event.payload in
   let from_payload =
     match payload |> member "actor_id" with
@@ -662,16 +667,16 @@ let contribution_snapshot_from_events events =
   let score_tbl = Hashtbl.create 32 in
   let reasons_tbl = Hashtbl.create 32 in
   List.iter
-    (fun (event : Trpg_engine_event.t) ->
+    (fun (event : Engine_event.t) ->
       let payload = event.payload in
       match event.event_type with
-      | Trpg_engine_event.Turn_action_resolved -> (
+      | Engine_event.Turn_action_resolved -> (
           match contribution_actor_id_of_event event with
           | Some actor_id ->
               contribution_add score_tbl reasons_tbl ~actor_id ~delta:2
                 ~reason:"turn.action.resolved +2"
           | None -> ())
-      | Trpg_engine_event.Intervention_applied -> (
+      | Engine_event.Intervention_applied -> (
           let actor_id =
             match payload |> member "target_actor" with
             | `String v when String.trim v <> "" -> Some (String.trim v)
@@ -682,7 +687,7 @@ let contribution_snapshot_from_events events =
               contribution_add score_tbl reasons_tbl ~actor_id:id ~delta:1
                 ~reason:"intervention.applied +1"
           | None -> ())
-      | Trpg_engine_event.Dice_rolled -> (
+      | Engine_event.Dice_rolled -> (
           match contribution_actor_id_of_event event with
           | Some actor_id ->
               let passed =
@@ -720,7 +725,7 @@ let append_memory_signal_event ~store ~room_id ~event_tier ~importance_score
       ]
   in
   append_event ~store ~room_id
-    ~event_type:Trpg_engine_event.Memory_signal
+    ~event_type:Engine_event.Memory_signal
     ~payload ()
 
 let parse_player_keepers args =
@@ -741,7 +746,7 @@ let parse_player_keepers args =
   loop [] fields
 
 
-include Trpg_types_canon
+include Types_canon
 
 let append_canon_check_observability_events ~store ~room_id ~turn ~phase
     ~(check : canon_check) =
@@ -774,7 +779,7 @@ let append_canon_check_observability_events ~store ~room_id ~turn ~phase
     in
     let* world_event =
       append_event ~store ~room_id
-        ~event_type:Trpg_engine_event.World_event
+        ~event_type:Engine_event.World_event
         ~actor_id:"dm" ~payload ()
     in
     let importance_score = if check.status = "fail" then 84 else 61 in

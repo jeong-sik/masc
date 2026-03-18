@@ -479,77 +479,35 @@ let execute_keeper_tool_call
                 ("agent_id", `String meta.name);
                 ("message", `String err) ]))
   | "keeper_voice_sessions" ->
-      (match
-         ( Eio_context.get_switch_opt (),
-           Eio_context.get_clock_opt (),
-           Eio_context.get_net_opt () )
-       with
-      | Some sw, Some clock, Some net -> (
-          match Voice_bridge.list_voice_sessions ~sw ~clock ~net with
-          | Ok json -> Yojson.Safe.to_string json
-          | Error err ->
-              Yojson.Safe.to_string
-                (`Assoc
-                  [ ("status", `String "error");
-                    ("message", `String err) ]))
-      | _ ->
-          Yojson.Safe.to_string
-            (`Assoc
-              [ ("status", `String "error");
-                ("message", `String "net_unavailable") ]))
+      (* Local session manager — no net/MCP dependency *)
+      let mgr = Keeper_voice_local.get_session_manager () in
+      let sessions = Voice_session_manager.list_sessions mgr in
+      Yojson.Safe.to_string
+        (`Assoc
+          [ ("session_count", `Int (List.length sessions));
+            ("sessions",
+              `List (List.map Voice_session_manager.session_to_json sessions)) ])
   | "keeper_voice_session_start" ->
-      let session_name =
+      (* Local session manager — no net/MCP dependency *)
+      let voice =
         Safe_ops.json_string_opt "session_name" args
         |> Option.map String.trim
-        |> function
-        | Some s when s <> "" -> Some s
-        | _ -> None
+        |> function Some s when s <> "" -> Some s | _ -> None
       in
-      (match
-         ( Eio_context.get_switch_opt (),
-           Eio_context.get_clock_opt (),
-           Eio_context.get_net_opt () )
-       with
-      | Some sw, Some clock, Some net -> (
-          match
-            Voice_bridge.start_voice_session ~sw ~clock ~net
-              ~agent_id:meta.name ?session_name ()
-          with
-          | Ok json -> Yojson.Safe.to_string json
-          | Error err ->
-              Yojson.Safe.to_string
-                (`Assoc
-                  [ ("status", `String "error");
-                    ("agent_id", `String meta.name);
-                    ("message", `String err) ]))
-      | _ ->
-          Yojson.Safe.to_string
-            (`Assoc
-              [ ("status", `String "error");
-                ("message", `String "net_unavailable") ]))
+      let mgr = Keeper_voice_local.get_session_manager () in
+      let session =
+        Voice_session_manager.start_session mgr ~agent_id:meta.name ?voice ()
+      in
+      Yojson.Safe.to_string
+        (Voice_session_manager.session_to_json session)
   | "keeper_voice_session_end" ->
-      (match
-         ( Eio_context.get_switch_opt (),
-           Eio_context.get_clock_opt (),
-           Eio_context.get_net_opt () )
-       with
-      | Some sw, Some clock, Some net -> (
-          match
-            Voice_bridge.end_voice_session ~sw ~clock ~net
-              ~agent_id:meta.name
-          with
-          | Ok json -> Yojson.Safe.to_string json
-          | Error err ->
-              Yojson.Safe.to_string
-                (`Assoc
-                  [ ("status", `String "error");
-                    ("agent_id", `String meta.name);
-                    ("message", `String err) ]))
-      | _ ->
-          Yojson.Safe.to_string
-            (`Assoc
-              [ ("status", `String "error");
-                ("message", `String "net_unavailable") ]))
+      (* Local session manager — no net/MCP dependency *)
+      let mgr = Keeper_voice_local.get_session_manager () in
+      let ended = Voice_session_manager.end_session mgr ~agent_id:meta.name in
+      Yojson.Safe.to_string
+        (`Assoc
+          [ ("status", `String (if ended then "ended" else "no_active_session"));
+            ("agent_id", `String meta.name) ])
   | "keeper_github" ->
       let cmd = Safe_ops.json_string ~default:"" "cmd" args |> String.trim in
       let gh_args = Safe_ops.json_string_list "args" args in

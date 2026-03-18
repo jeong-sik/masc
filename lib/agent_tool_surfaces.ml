@@ -241,7 +241,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
     };
     {
       Types.name = "lodge_profile";
-      description = "Get an agent profile with recent lodge activity and stats.";
+      description = "Get an agent profile including recent lodge activity, stats, and interests. Use when reviewing an agent's contributions before collaboration or mentioning them.";
       input_schema =
         `Assoc
           [
@@ -253,7 +253,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
     };
     {
       Types.name = "lodge_search";
-      description = "Search lodge content and agents by keyword.";
+      description = "Search lodge content (posts, comments, code snippets) and agents by keyword. Use when looking for prior discussions on a topic or finding agents with relevant expertise.";
       input_schema =
         `Assoc
           [
@@ -307,7 +307,7 @@ let local_worker_code_schemas : Types.tool_schema list =
     {
       Types.name = "masc_code_read";
       description =
-        "Read file with offset/limit pagination.";
+        "Read a file with offset/limit pagination for large files. Use when inspecting source code during task execution without loading the entire file into context.";
       input_schema =
         `Assoc
           [
@@ -328,7 +328,7 @@ let local_worker_worktree_schemas : Types.tool_schema list =
   [
     {
       Types.name = "masc_worktree_create";
-      description = "Create an isolated Git worktree for your work.";
+      description = "Create an isolated Git worktree under .worktrees/{agent}-{task}/ with a new branch. Use when starting a task that modifies files, so other agents' work is not affected.";
       input_schema =
         `Assoc
           [
@@ -345,7 +345,7 @@ let local_worker_worktree_schemas : Types.tool_schema list =
     };
     {
       Types.name = "masc_worktree_remove";
-      description = "Remove a worktree after your work is merged.";
+      description = "Remove a worktree and its local branch after your work is merged. Use when your PR has been merged and the isolated worktree is no longer needed.";
       input_schema =
         `Assoc
           [
@@ -361,7 +361,7 @@ let local_worker_worktree_schemas : Types.tool_schema list =
     };
     {
       Types.name = "masc_worktree_list";
-      description = "List all active worktrees in the project.";
+      description = "List all active worktrees in the project with agent and task mappings. Use when checking for stale worktrees or seeing who is working in parallel.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
     };
@@ -371,7 +371,7 @@ let local_worker_run_schemas : Types.tool_schema list =
   [
     {
       Types.name = "masc_run_init";
-      description = "Initialize execution memory for a task.";
+      description = "Initialize execution memory (.masc/runs/{task_id}/) to track plan, logs, and deliverables. Use after claiming a task to enable structured progress tracking.";
       input_schema =
         `Assoc
           [
@@ -403,7 +403,7 @@ let local_worker_run_schemas : Types.tool_schema list =
     };
     {
       Types.name = "masc_run_log";
-      description = "Add a timestamped note to task execution log.";
+      description = "Append a timestamped note to a task's execution log for audit and handoff continuity. Use when reaching milestones, finding blockers, or making key decisions during execution.";
       input_schema =
         `Assoc
           [
@@ -435,7 +435,7 @@ let local_worker_run_schemas : Types.tool_schema list =
     };
     {
       Types.name = "masc_run_get";
-      description = "Get full execution history for a task.";
+      description = "Retrieve the full execution history for a task including plan revisions, log notes, and deliverables. Use when reviewing progress before handoff or for post-mortem analysis.";
       input_schema =
         `Assoc
           [
@@ -447,7 +447,7 @@ let local_worker_run_schemas : Types.tool_schema list =
     };
     {
       Types.name = "masc_run_list";
-      description = "List all task runs with status.";
+      description = "List all task runs with their current status (init, active, completed). Use when surveying execution state across tasks or finding abandoned runs to resume.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
     };
@@ -457,7 +457,7 @@ let local_worker_spawn_schemas : Types.tool_schema list =
   [
     {
       Types.name = "masc_spawn";
-      description = "Spawn an agent to execute a task.";
+      description = "Spawn a new agent to execute a specific task with configurable model, prompt, and execution scope. Use when work decomposition requires parallel execution by a dedicated worker.";
       input_schema =
         `Assoc
           [

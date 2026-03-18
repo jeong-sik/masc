@@ -786,7 +786,7 @@ let schemas : Types.tool_schema list = [
   };
   {
     name = "masc_ruling_status";
-    description = "Read the latest Governance V2 ruling for a case.";
+    description = "Read the latest Governance V2 ruling (approved, denied, pending) for a case. Use when checking whether a governance petition has been decided before proceeding with the action.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

@@ -1,36 +1,192 @@
-(** Verifier_oas — Bridges MASC verifier to OAS Guardrails and Hooks.
+(** Verifier_oas — Action verification engine with OAS Guardrails/Hooks bridge.
 
-    Maps MASC's verification flow (should_skip, verify, verdict) to OAS
-    {!Agent_sdk.Guardrails.Custom} filter and {!Agent_sdk.Hooks.hook} callbacks.
+    Cheap-model action verification for feedback loops.
+    Each action is sent to a cheap model with a structured prompt:
+    "Given goal X, action Y produced result Z. Is this correct?"
+    The model responds PASS/WARN/FAIL with a brief reason.
 
-    - [verdict_to_hook_decision]: MASC Pass/Warn/Fail -> OAS Continue/Continue/Skip
-    - [make_pre_tool_hook]: wraps MASC verify_action as an OAS PreToolUse hook
-    - [guardrails_with_read_only_tag]: wraps MASC should_skip as OAS Custom filter
+    Budget: max 200 output tokens per verification (~0.01 cents).
+    Skip: read-only actions (file reads, glob, grep, searches).
 
-    @since Phase 4 — OAS Guardrails adapter for verifier *)
+    OAS integration:
+    - [verdict_to_hook_decision]: Pass/Warn/Fail -> OAS Continue/Continue/Skip
+    - [make_pre_tool_hook]: wraps verify as an OAS PreToolUse hook
+    - [guardrails_with_read_only_tag]: wraps should_skip as OAS Custom filter
+
+    @since 2.61.0 (verifier core)
+    @since Phase 4 (OAS Guardrails adapter) *)
 
 open Printf
 
 (* ================================================================ *)
-(* Verdict -> Hook Decision                                          *)
+(* Types                                                            *)
 (* ================================================================ *)
 
-(** Map a MASC verdict to an OAS hook decision.
+type verification_request = {
+  action_description : string;
+  action_result : string;
+  goal : string;
+  context_summary : string;
+}
+
+type verdict =
+  | Pass
+  | Warn of string
+  | Fail of string
+
+(* ================================================================ *)
+(* Read-Only Detection                                              *)
+(* ================================================================ *)
+
+(** Actions that are safe and need no verification. *)
+let read_only_patterns = [
+  "read"; "glob"; "grep";
+  "search"; "find"; "list"; "ls"; "cat"; "head"; "tail";
+  "git status"; "git log"; "git diff";
+  "status"; "view"; "get"; "fetch"; "query";
+]
+
+let is_word_char c =
+  match c with
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
+  | _ -> false
+
+let has_pattern_with_word_boundary ~text ~pat =
+  let tlen = String.length text in
+  let plen = String.length pat in
+  if plen = 0 || tlen < plen then false
+  else
+    let rec loop i =
+      if i > tlen - plen then false
+      else if String.sub text i plen = pat then
+        let before_ok = i = 0 || not (is_word_char text.[i - 1]) in
+        let after_idx = i + plen in
+        let after_ok = after_idx >= tlen || not (is_word_char text.[after_idx]) in
+        if before_ok && after_ok then true else loop (i + 1)
+      else
+        loop (i + 1)
+    in
+    loop 0
+
+let should_skip ~action_description =
+  let text = String.lowercase_ascii action_description in
+  List.exists (fun pat ->
+    has_pattern_with_word_boundary ~text ~pat
+  ) read_only_patterns
+
+(* ================================================================ *)
+(* Verdict Parsing                                                  *)
+(* ================================================================ *)
+
+let verdict_to_string = function
+  | Pass -> "PASS"
+  | Warn reason -> sprintf "WARN: %s" reason
+  | Fail reason -> sprintf "FAIL: %s" reason
+
+(** Parse "PASS", "WARN: reason", "FAIL: reason" from LLM output. *)
+let parse_verdict (text : string) : verdict =
+  let trimmed = String.trim text in
+  let upper = String.uppercase_ascii trimmed in
+  if String.length upper >= 4 && String.sub upper 0 4 = "PASS" then
+    Pass
+  else if String.length upper >= 4 && String.sub upper 0 4 = "WARN" then
+    let reason = if String.length trimmed > 5 then
+      String.trim (String.sub trimmed 5 (String.length trimmed - 5))
+    else "unspecified concern" in
+    (* Strip leading colon/dash *)
+    let reason = if String.length reason > 0 &&
+      (reason.[0] = ':' || reason.[0] = '-') then
+      String.trim (String.sub reason 1 (String.length reason - 1))
+    else reason in
+    Warn reason
+  else if String.length upper >= 4 && String.sub upper 0 4 = "FAIL" then
+    let reason = if String.length trimmed > 5 then
+      String.trim (String.sub trimmed 5 (String.length trimmed - 5))
+    else "action did not achieve goal" in
+    let reason = if String.length reason > 0 &&
+      (reason.[0] = ':' || reason.[0] = '-') then
+      String.trim (String.sub reason 1 (String.length reason - 1))
+    else reason in
+    Fail reason
+  else
+    (* If model doesn't follow format, treat as warning *)
+    if String.length trimmed > 0 then Warn trimmed
+    else Pass
+
+(* ================================================================ *)
+(* Verification Prompt                                              *)
+(* ================================================================ *)
+
+let build_prompt (req : verification_request) : string =
+  sprintf
+{|You are a verification agent. Evaluate whether this action was correct.
+
+Goal: %s
+
+Context: %s
+
+Action taken: %s
+
+Result: %s
+
+Respond with exactly one of:
+PASS - if the action is correct and moves toward the goal
+WARN: <reason> - if the action is acceptable but has concerns
+FAIL: <reason> - if the action is wrong or harmful
+
+One line only.|}
+    req.goal
+    (if String.length req.context_summary > 300
+     then String.sub req.context_summary 0 300 ^ "..."
+     else req.context_summary)
+    req.action_description
+    (if String.length req.action_result > 500
+     then String.sub req.action_result 0 500 ^ "..."
+     else req.action_result)
+
+(* ================================================================ *)
+(* Core: verify                                                     *)
+(* ================================================================ *)
+
+let verify ~(model : Llm_client.model_spec) (req : verification_request) : verdict =
+  if should_skip ~action_description:req.action_description then
+    Pass
+  else
+    let prompt = build_prompt req in
+    let completion_req : Llm_client.completion_request = {
+      model;
+      messages = [Llm_client.user_msg prompt];
+      temperature = 0.0;  (* Deterministic for verification *)
+      max_tokens = 200;   (* Budget cap *)
+      tools = [];
+      response_format = `Text;
+    } in
+    match Llm_client.complete completion_req with
+    | Ok resp -> parse_verdict (Llm_client.text_of_response resp)
+    | Error e ->
+      eprintf "[verifier] LLM call failed: %s (defaulting to WARN)\n%!" e;
+      Warn ("verifier_unavailable: " ^ e)
+
+(* ================================================================ *)
+(* Verdict -> Hook Decision (OAS bridge)                            *)
+(* ================================================================ *)
+
+(** Map a verdict to an OAS hook decision.
 
     - Pass -> Continue (action proceeds normally)
     - Warn -> Continue (action proceeds; warning is logged, not blocking)
     - Fail -> Skip (action is blocked)
 
     Warn reasons are logged to stderr for observability but do not halt
-    execution, matching MASC's existing behavior where warnings are
+    execution, matching existing behavior where warnings are
     informational. *)
-let verdict_to_hook_decision (v : Verifier.verdict) : Agent_sdk.Hooks.hook_decision =
+let verdict_to_hook_decision (v : verdict) : Agent_sdk.Hooks.hook_decision =
   match v with
-  | Verifier.Pass -> Agent_sdk.Hooks.Continue
-  | Verifier.Warn reason ->
+  | Pass -> Agent_sdk.Hooks.Continue
+  | Warn reason ->
     eprintf "[verifier_oas] WARN: %s\n%!" reason;
     Agent_sdk.Hooks.Continue
-  | Verifier.Fail reason ->
+  | Fail reason ->
     eprintf "[verifier_oas] FAIL (skipping tool): %s\n%!" reason;
     Agent_sdk.Hooks.Skip
 
@@ -38,10 +194,10 @@ let verdict_to_hook_decision (v : Verifier.verdict) : Agent_sdk.Hooks.hook_decis
 (* PreToolUse Hook                                                   *)
 (* ================================================================ *)
 
-(** Create an OAS PreToolUse hook that wraps MASC's verify_action logic.
+(** Create an OAS PreToolUse hook that wraps the verify logic.
 
-    On PreToolUse events, builds a {!Verifier.verification_request} from
-    the tool name and input JSON, calls {!Verifier.verify} with the given
+    On PreToolUse events, builds a {!verification_request} from
+    the tool name and input JSON, calls {!verify} with the given
     model, and maps the verdict to a hook decision.
 
     For non-PreToolUse events, returns Continue (pass-through).
@@ -59,19 +215,19 @@ let make_pre_tool_hook
     | Agent_sdk.Hooks.PreToolUse { tool_name; input } ->
       let action_description = sprintf "tool:%s" tool_name in
       (* Skip read-only tools without calling the LLM *)
-      if Verifier.should_skip ~action_description then
+      if should_skip ~action_description then
         Agent_sdk.Hooks.Continue
       else
         let input_str =
           try Yojson.Safe.to_string input
           with _ -> "{}" in
-        let req : Verifier.verification_request = {
+        let req : verification_request = {
           action_description;
           action_result = input_str;
           goal;
           context_summary;
         } in
-        let verdict = Verifier.verify ~model req in
+        let verdict = verify ~model req in
         verdict_to_hook_decision verdict
     | _ -> Agent_sdk.Hooks.Continue
 
@@ -99,12 +255,12 @@ let install_hook
 (* Read-Only Detection as OAS Guardrails.Custom                      *)
 (* ================================================================ *)
 
-(** Create an OAS Guardrails config that uses MASC's read-only detection
+(** Create an OAS Guardrails config that uses read-only detection
     as a Custom tool filter.
 
-    Tools whose names match {!Verifier.read_only_patterns} (read, grep,
+    Tools whose names match {!read_only_patterns} (read, grep,
     search, git status, etc.) pass through. Tools that do NOT match are
-    also allowed — the filter itself does not block anything. Its purpose
+    also allowed -- the filter itself does not block anything. Its purpose
     is to tag tools for downstream hooks that may skip verification for
     read-only operations.
 
@@ -128,7 +284,7 @@ let guardrails_with_read_only_tag
 (** Create an OAS Guardrails.Custom filter that identifies read-only tools.
 
     Returns a predicate [tool_schema -> bool] that returns true when the
-    tool name matches MASC's read-only patterns. Can be used in custom
+    tool name matches read-only patterns. Can be used in custom
     guardrails pipelines for conditional verification bypass. *)
 let read_only_predicate (schema : Agent_sdk.Types.tool_schema) : bool =
-  Verifier.should_skip ~action_description:schema.name
+  should_skip ~action_description:schema.name

@@ -24,7 +24,7 @@ module Oas = Agent_sdk
 (** Convert an effective_model string to an OAS model identifier.
     MASC workers use local Ollama/llama-server models, so all model IDs
     go through Custom. *)
-let oas_model_of_effective_model (model_id : string) : Oas.Types.model =
+let oas_model_of_effective_model (model_id : string) : string =
   model_id
 
 (* ================================================================ *)

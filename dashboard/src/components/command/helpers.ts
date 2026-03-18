@@ -18,36 +18,13 @@ import {
 import { operatorSnapshot } from '../../operator-store'
 import { route } from '../../router'
 import type { DashboardWorkflowContext } from '../../workflow-context'
+import { relativeTime, formatElapsed } from '../../lib/format-time'
+import { toneClass, chainStatusTone, sessionStatusTone, expiryTone } from '../../lib/tone'
+import { prettyJson, displayStatus } from '../../lib/status-label'
 
 // ── Pure helpers ──────────────────────────────
 
-export function prettyJson(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
-
-export function relativeTime(iso?: string | null): string {
-  if (!iso) return '정보 없음'
-  const ts = Date.parse(iso)
-  if (Number.isNaN(ts)) return iso
-  const deltaSec = Math.max(0, Math.round((Date.now() - ts) / 1000))
-  if (deltaSec < 60) return `${deltaSec}초 전`
-  if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 전`
-  if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}시간 전`
-  return `${Math.round(deltaSec / 86400)}일 전`
-}
-
-export function expiryTone(iso?: string | null): string {
-  if (!iso) return 'warn'
-  const ts = Date.parse(iso)
-  if (Number.isNaN(ts)) return 'warn'
-  return ts <= Date.now() ? 'bad' : 'ok'
-}
+export { relativeTime, formatElapsed, toneClass, chainStatusTone, sessionStatusTone, expiryTone, prettyJson, displayStatus }
 
 export function deadlineLabel(iso?: string | null): string {
   if (!iso) return '정보 없음'
@@ -59,12 +36,6 @@ export function deadlineLabel(iso?: string | null): string {
   if (deltaSec < 3600) return `${Math.round(deltaSec / 60)}분 후`
   if (deltaSec < 86400) return `${Math.round(deltaSec / 3600)}시간 후`
   return `${Math.round(deltaSec / 86400)}일 후`
-}
-
-export function toneClass(tone?: string | null): string {
-  if (tone === 'bad') return 'bad'
-  if (tone === 'warn' || tone === 'pending') return 'warn'
-  return 'ok'
 }
 
 type MermaidApi = typeof import('mermaid')['default']
@@ -93,38 +64,9 @@ export async function getMermaid(): Promise<MermaidApi> {
   return mermaid
 }
 
-export function chainStatusTone(status?: string | null): string {
-  if (!status) return 'warn'
-  const lowered = status.toLowerCase()
-  if (
-    lowered.includes('failed')
-    || lowered.includes('error')
-    || lowered.includes('disconnected')
-    || lowered.includes('stopped')
-  ) {
-    return 'bad'
-  }
-  if (
-    lowered.includes('running')
-    || lowered.includes('active')
-    || lowered.includes('degraded')
-    || lowered.includes('pending')
-  ) {
-    return 'warn'
-  }
-  return 'ok'
-}
-
 export function formatPercent(value?: number | null): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '정보 없음'
   return `${Math.round(value * 100)}%`
-}
-
-export function formatElapsed(value?: number | null): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '정보 없음'
-  if (value < 60) return `${Math.round(value)}초`
-  if (value < 3600) return `${Math.round(value / 60)}분`
-  return `${Math.round(value / 3600)}시간`
 }
 
 export function clampPercent(value?: number | null): number {
@@ -471,37 +413,6 @@ export async function fire(action: () => Promise<void>) {
 
 export function normalizedStatus(value?: string | null): string {
   return value?.trim().toLowerCase() ?? ''
-}
-
-export function sessionStatusTone(status?: string | null): string {
-  const normalized = normalizedStatus(status)
-  if (
-    normalized.includes('failed')
-    || normalized.includes('error')
-    || normalized.includes('stopped')
-    || normalized === 'paused'
-  ) {
-    return 'bad'
-  }
-  if (
-    normalized.includes('active')
-    || normalized.includes('running')
-    || normalized.includes('healthy')
-    || normalized.includes('ok')
-  ) {
-    return 'ok'
-  }
-  return 'warn'
-}
-
-export function displayStatus(status?: string | null): string {
-  const normalized = normalizedStatus(status)
-  if (!normalized) return '확인 필요'
-  if (normalized === 'active' || normalized === 'running') return '진행 중'
-  if (normalized === 'paused') return '일시정지'
-  if (normalized === 'done' || normalized === 'ended' || normalized === 'completed') return '완료'
-  if (normalized === 'failed' || normalized === 'error' || normalized === 'stopped') return '문제'
-  return status?.trim() || '확인 필요'
 }
 
 export function hasSwarmActivity(): boolean {

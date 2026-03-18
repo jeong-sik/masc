@@ -2,6 +2,7 @@
 
 import { signal } from '@preact/signals'
 import { showToast } from '../common/toast'
+import { prettyJson, displayStatus } from '../../lib/status-label'
 import type {
   OperatorAttentionItem,
   OperatorGuidanceSummary,
@@ -53,15 +54,7 @@ export function persistActorName(value: string): void {
   localStorage.setItem(AGENT_NAME_KEY, trimmed)
 }
 
-export function prettyJson(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
+export { prettyJson, displayStatus }
 
 export function guidanceLayerLabel(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
@@ -209,29 +202,6 @@ export function targetTypeLabel(value?: string | null): string {
       return '스웜 실행'
     default:
       return value?.trim() || '대상'
-  }
-}
-
-export function displayStatus(value?: string | null): string {
-  const normalized = normalizeStatus(value)
-  switch (normalized) {
-    case 'running':
-    case 'active':
-      return '진행 중'
-    case 'paused':
-      return '일시정지'
-    case 'ended':
-    case 'done':
-      return '종료'
-    case 'offline':
-      return '오프라인'
-    case 'idle':
-      return '대기'
-    case 'unknown':
-    case '':
-      return '확인 필요'
-    default:
-      return value?.trim() || '확인 필요'
   }
 }
 

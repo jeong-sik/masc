@@ -29,11 +29,9 @@ import {
   runtimeJudgeTone,
 } from '../ops/helpers'
 import type { WarRoomWorkerView, WarRoomPresenceView, WarRoomFeedItem } from './war-room-panels'
+import { truncate } from '../../lib/truncate'
 
-export function truncate(value: string, limit = 260): string {
-  if (value.length <= limit) return value
-  return `${value.slice(0, limit - 1)}…`
-}
+export { truncate }
 
 export function timestampSortValue(iso?: string | null): number {
   if (!iso) return 0

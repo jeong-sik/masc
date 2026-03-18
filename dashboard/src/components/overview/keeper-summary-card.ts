@@ -3,21 +3,14 @@
 import { html } from 'htm/preact'
 import type { Keeper } from '../../types'
 import { navigate } from '../../router'
+import { relativeTime } from '../../lib/format-time'
 
 interface KeeperSummaryCardProps {
   keeper: Keeper
 }
 
 function timeAgo(iso: string | undefined): string {
-  if (!iso) return '-'
-  const ts = new Date(iso).getTime()
-  if (isNaN(ts)) return '-'
-  const diff = (Date.now() - ts) / 1000
-  if (diff < 0) return '방금'
-  if (diff < 60) return '방금'
-  if (diff < 3600) return `${Math.floor(diff / 60)}분 전`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`
-  return `${Math.floor(diff / 86400)}일 전`
+  return relativeTime(iso, '-')
 }
 
 function contextTier(ratio: number | undefined): string {

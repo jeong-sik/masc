@@ -6,6 +6,7 @@ import type {
   DashboardMissionSessionBrief,
   DashboardMissionSessionCard,
 } from '../../types'
+import { formatElapsedCompact } from '../../lib/format-time'
 
 type SessionItem = DashboardMissionSessionBrief | DashboardMissionSessionCard
 
@@ -19,13 +20,6 @@ function sessionHealthClass(session: SessionItem): string {
   if (h === 'warn' || h === 'degraded' || h === 'yellow') return 'warn'
   if (h === 'bad' || h === 'critical' || h === 'red') return 'bad'
   return ''
-}
-
-function formatElapsed(sec: number | null | undefined): string {
-  if (sec == null) return ''
-  if (sec < 60) return `${sec}s`
-  if (sec < 3600) return `${Math.floor(sec / 60)}m`
-  return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m`
 }
 
 export function SessionStrip({ sessions }: SessionStripProps) {
@@ -51,7 +45,7 @@ export function SessionStrip({ sessions }: SessionStripProps) {
           <div class="session-card-mini__meta">
             ${session.status ? html`<span>${session.status}</span>` : null}
             ${session.member_names?.length ? html`<span>${session.member_names.length}명</span>` : null}
-            ${session.elapsed_sec ? html`<span>${formatElapsed(session.elapsed_sec)}</span>` : null}
+            ${session.elapsed_sec ? html`<span>${formatElapsedCompact(session.elapsed_sec)}</span>` : null}
           </div>
         </div>
       `)}

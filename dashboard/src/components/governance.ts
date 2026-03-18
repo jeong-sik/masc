@@ -14,6 +14,7 @@ import {
 } from '../api'
 import type { RuntimeParam, RuntimeParamsSurface } from '../api'
 import { registerGovernanceRefresh } from '../sse-store'
+import { governanceToneClass } from '../lib/tone'
 import type {
   DashboardGovernanceResponse,
   GovernanceCaseBrief,
@@ -79,21 +80,6 @@ function serializePreview(value: unknown): string {
   } catch {
     return String(value)
   }
-}
-
-function toneClass(raw: string | null | undefined): string {
-  const value = (raw || '').toLowerCase()
-  if (value.includes('block') || value.includes('deny') || value.includes('closed')) return 'negative'
-  if (
-    value.includes('support') ||
-    value.includes('approve') ||
-    value.includes('ready') ||
-    value.includes('executed') ||
-    value.includes('done')
-  ) {
-    return 'positive'
-  }
-  return 'neutral'
 }
 
 function caseStatusLabel(value: string | null | undefined): string {
@@ -416,7 +402,7 @@ function DecisionInbox() {
                     </div>
                   </div>
                   <div class="governance-row-side">
-                    <span class="council-state ${toneClass(item.status)}">${caseStatusLabel(item.status)}</span>
+                    <span class="council-state ${governanceToneClass(item.status)}">${caseStatusLabel(item.status)}</span>
                     <span class="governance-vote-meter">${item.brief_count ?? 0}건</span>
                   </div>
                 </button>
@@ -447,7 +433,7 @@ function BriefEntry({ brief }: { brief: GovernanceCaseBrief }) {
   return html`
     <div class="governance-ledger-row">
       <div class="governance-ledger-head">
-        <span class="governance-badge ${toneClass(brief.stance)}">${stanceLabel(brief.stance)}</span>
+        <span class="governance-badge ${governanceToneClass(brief.stance)}">${stanceLabel(brief.stance)}</span>
         <strong>${brief.author}</strong>
         ${brief.created_at ? html`<span><${TimeAgo} timestamp=${brief.created_at} /></span>` : null}
       </div>
@@ -625,7 +611,7 @@ function ActivityRail() {
           : events.map((event: GovernanceTimelineEvent) => html`
               <div class="governance-activity-row">
                 <div class="governance-ledger-head">
-                  <span class="governance-badge ${toneClass(event.kind)}">${activityKindLabel(event.kind)}</span>
+                  <span class="governance-badge ${governanceToneClass(event.kind)}">${activityKindLabel(event.kind)}</span>
                   ${event.created_at ? html`<span><${TimeAgo} timestamp=${event.created_at} /></span>` : null}
                 </div>
                 <div class="governance-ledger-body">${event.summary || event.topic || '활동이 기록되었습니다.'}</div>

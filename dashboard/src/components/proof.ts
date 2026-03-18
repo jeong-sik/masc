@@ -127,9 +127,9 @@ function verdictReasonLines(
 }
 
 function verdictBasisLabel(basis?: string | null): string {
-  if (basis === 'historical_only') return 'historical only'
-  if (basis === 'live_and_historical') return 'live + historical'
-  return 'live'
+  if (basis === 'historical_only') return '과거 기록만'
+  if (basis === 'live_and_historical') return '실시간 + 과거'
+  return '실시간'
 }
 
 function selectionTone(selection?: DashboardProofSelection | null): string {
@@ -197,13 +197,13 @@ function SelectionCard({
       </div>
       <p>${selection.reason ?? '근거 컨텍스트 선택 정보가 없습니다.'}</p>
       ${historicalStronger
-        ? html`<p>선택된 최신 세션은 historical proof가 더 강하고 current live evidence는 더 약합니다.</p>`
+        ? html`<p>선택된 최신 세션은 과거 proof가 더 강하고 현재 live evidence는 더 약합니다.</p>`
         : null}
       <div class="command-card-grid">
         <span>선택된 세션</span><span>${selection.selected_session_id ?? '없음'}</span>
         <span>작성자</span><span>${selection.selected_created_by ?? '없음'}</span>
         <span>선택된 목표</span><span>${selection.selected_goal ?? '없음'}</span>
-        <span>가용 세션 수</span><span>${selection.available_session_count ?? 0}</span>
+        <span>선택 가능한 세션</span><span>${selection.available_session_count ?? 0}</span>
       </div>
     </div>
   `
@@ -581,7 +581,7 @@ export function Proof() {
           </div>
         <//>
 
-        <${Card} title="목표 연결" class="mission-list-card" semanticId="proof.goal_binding">
+        <${Card} title="증명 대상" class="mission-list-card" semanticId="proof.goal_binding">
           <div class="mission-section-head">
             <h3>무엇을 증명하려는가</h3>
             <p>이 화면이 어떤 세션과 목표를 기준으로 그려졌는지 먼저 고정합니다.</p>

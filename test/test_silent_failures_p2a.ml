@@ -192,20 +192,9 @@ let test_source_board_pg_vote_migration () =
     true (file_contains_pattern "lib/board_pg.ml"
       {|vote migration:|})
 
-let test_source_heartbeat_traits () =
-  check bool "lodge_heartbeat_state.ml has traits parse logging"
-    true (file_contains_pattern "lib/lodge_heartbeat_state.ml"
-      {|[heartbeat] traits parse:|})
-
-let test_source_heartbeat_preferred_hours () =
-  check bool "lodge_heartbeat_state.ml has preferred_hours parse logging"
-    true (file_contains_pattern "lib/lodge_heartbeat_state.ml"
-      {|[heartbeat] preferred_hours parse:|})
-
-let test_source_heartbeat_interests () =
-  check bool "lodge_heartbeat_state.ml has interests parse logging"
-    true (file_contains_pattern "lib/lodge_heartbeat_state.ml"
-      {|[heartbeat] interests parse:|})
+(* test_source_heartbeat_traits removed — lodge_heartbeat_state.ml deleted (#1596) *)
+(* test_source_heartbeat_preferred_hours removed — lodge_heartbeat_state.ml deleted (#1596) *)
+(* test_source_heartbeat_interests removed — lodge_heartbeat_state.ml deleted (#1596) *)
 
 let test_source_keeper_log_parse () =
   check bool "dashboard http has keeper log parse logging"
@@ -248,12 +237,7 @@ let () =
         `Quick test_source_social_vote_comment;
       test_case "MA-M3: board_pg vote migration logging present"
         `Quick test_source_board_pg_vote_migration;
-      test_case "MA-M4a: heartbeat traits logging present"
-        `Quick test_source_heartbeat_traits;
-      test_case "MA-M4b: heartbeat preferred_hours logging present"
-        `Quick test_source_heartbeat_preferred_hours;
-      test_case "MA-M4c: heartbeat interests logging present"
-        `Quick test_source_heartbeat_interests;
+      (* MA-M4a/b/c: heartbeat tests removed — lodge_heartbeat_state.ml deleted (#1596) *)
       test_case "MA-M5: keeper log parse logging present"
         `Quick test_source_keeper_log_parse;
       test_case "MA-M7: trpg npc heal logging present"

@@ -34,7 +34,6 @@ export function actionDescriptorLabel(actionType?: string): string {
     case 'room_resume':
       return 'resume'
     case 'social_sweep':
-    case 'lodge_tick':
       return 'social'
     default:
       return actionType?.trim() || 'action'

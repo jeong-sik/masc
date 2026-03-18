@@ -23,7 +23,7 @@ function shortCommit(commit: string | null | undefined): string {
 }
 
 function residentStatusLabel(
-  kind: 'social' | 'lodge' | 'gardener' | 'guardian' | 'sentinel',
+  kind: 'social' | 'gardener' | 'guardian' | 'sentinel',
   status: 'live' | 'quiet' | 'starting' | 'idle' | 'disabled',
 ) {
   if (status === 'live') return '가동 중'
@@ -65,43 +65,28 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
   const liveConnected = connected.value
   const build = serverStatus.value?.build
   const socialRuntime = serverStatus.value?.social_runtime
-  const lodge = serverStatus.value?.lodge
   const gardener = serverStatus.value?.gardener
   const guardian = serverStatus.value?.guardian
   const sentinel = serverStatus.value?.sentinel
   const residentCards: ComponentChildren[] = []
 
-  if (socialRuntime || lodge) {
-    const runtime = socialRuntime
-    const fallback = lodge
+  if (socialRuntime) {
     residentCards.push(
       renderResidentRuntimeCard(
         'Social Runtime',
-        runtime
-          ? (runtime.enabled
-              ? residentStatusLabel('social', 'live')
-              : residentStatusLabel('social', 'disabled'))
-          : fallback?.enabled
-            ? residentStatusLabel('lodge', fallback.quiet_active ? 'quiet' : 'live')
-            : residentStatusLabel('social', 'disabled'),
-        runtime
-          ? (runtime.enabled ? 'ok' : 'bad')
-          : fallback?.enabled
-            ? (fallback.quiet_active ? 'warn' : 'ok')
-            : 'bad',
+        socialRuntime.enabled
+          ? residentStatusLabel('social', 'live')
+          : residentStatusLabel('social', 'disabled'),
+        socialRuntime.enabled ? 'ok' : 'bad',
         [
-          renderRuntimeStat('전략', runtime?.strategy ?? 'legacy_fallback'),
-          renderRuntimeStat('대상 keeper', runtime?.active_keepers ?? fallback?.agent_count ?? 0),
-          renderRuntimeStat('큐', runtime?.queue_depth ?? 0),
+          renderRuntimeStat('전략', socialRuntime.strategy ?? 'unknown'),
+          renderRuntimeStat('대상 keeper', socialRuntime.active_keepers ?? 0),
+          renderRuntimeStat('큐', socialRuntime.queue_depth ?? 0),
           renderRuntimeStat(
             '최근 결과',
-            runtime?.last_result?.activity_report
-              ?? (runtime?.last_pass_reason ? `판단 패스: ${runtime.last_pass_reason}` : null)
-              ?? (runtime?.last_system_skip_reason ? `시스템 스킵: ${runtime.last_system_skip_reason}` : null)
-              ?? fallback?.last_tick_result?.activity_report
-              ?? (fallback?.last_pass_reason ? `판단 패스: ${fallback.last_pass_reason}` : null)
-              ?? (fallback?.last_system_skip_reason ? `시스템 스킵: ${fallback.last_system_skip_reason}` : null)
-              ?? fallback?.last_skip_reason
+            socialRuntime.last_result?.activity_report
+              ?? (socialRuntime.last_pass_reason ? `판단 패스: ${socialRuntime.last_pass_reason}` : null)
+              ?? (socialRuntime.last_system_skip_reason ? `시스템 스킵: ${socialRuntime.last_system_skip_reason}` : null)
               ?? '없음',
           ),
         ],
@@ -141,7 +126,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
   }
 
   if (guardian) {
-    const guardianLive = guardian.masc_loops_running || guardian.lodge_loop_started || guardian.lodge_running
+    const guardianLive = guardian.masc_loops_running === true
     residentCards.push(
       renderResidentRuntimeCard(
         'Guardian',
@@ -159,8 +144,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
           ),
           renderRuntimeStat('소유자', guardian.runtime_owner ?? '없음'),
         ],
-        guardian.last_lodge_result?.message
-          ?? guardian.last_gc_result
+        guardian.last_gc_result
           ?? guardian.last_zombie_result
           ?? undefined,
       ),

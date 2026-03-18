@@ -59,42 +59,7 @@ let test_snapshot_exposes_keeper_and_social_actions () =
           Alcotest.(check bool) "swarm continue confirm true" true
             Yojson.Safe.Util.(swarm_continue |> member "confirm_required" |> to_bool))
 
-let test_select_checkin_agents_manual_override_quiet_hours () =
-  let current_hour = Lodge_heartbeat.current_hour_kst () in
-  let config =
-    {
-      Lodge_heartbeat.default_config with
-      quiet_hours = (current_hour, current_hour + 1);
-      agents_per_tick = 1;
-      min_checkin_gap_s = 0.0;
-    }
-  in
-  let agent_name = "operator-lodge-quiet-override-test" in
-  let agents =
-    [
-      {
-        Lodge_heartbeat.name = agent_name;
-        preferred_hours = [];
-        peak_hour = None;
-        traits = [];
-        interests = [];
-        personality_hint = None;
-        activity_level = 0.7;
-      };
-    ]
-  in
-  let pending_triggers = [ (agent_name, Lodge_heartbeat.ManualTrigger) ] in
-  let blocked =
-    Lodge_heartbeat.select_checkin_agents ~ignore_quiet_hours:false ~config
-      ~agents ~pending_triggers
-  in
-  Alcotest.(check int) "quiet hours block selection" 0 (List.length blocked);
-  let overridden =
-    Lodge_heartbeat.select_checkin_agents ~ignore_quiet_hours:true ~config
-      ~agents ~pending_triggers
-  in
-  Alcotest.(check int) "manual override selects one agent" 1
-    (List.length overridden)
+(* test_select_checkin_agents_manual_override_quiet_hours removed — Lodge deprecated #1596 *)
 
 let test_keeper_status_exposes_summary_and_recoverable () =
   Eio_main.run @@ fun env ->
@@ -397,37 +362,4 @@ let test_keeper_msg_auto_team_session_bridge () =
         meta_after_down.team_session_start_count_total)
 
 
-let test_manual_lodge_tick_updates_observable_state () =
-  Eio_main.run @@ fun _env ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let before = Lodge_heartbeat.lodge_status () in
-      let result : Lodge_heartbeat.heartbeat_result =
-        {
-          timestamp = Unix.gettimeofday ();
-          current_hour = 11;
-          agents_checked = 2;
-          checkins =
-            [
-              ( "historian",
-                Lodge_heartbeat.ManualTrigger,
-                Lodge_heartbeat.Passed "no valuable contribution" );
-            ];
-          agents_woken = [];
-          encounter_rolled = None;
-          activity_report = "manual test tick";
-        }
-      in
-      Lodge_heartbeat.record_tick_result result;
-      let after = Lodge_heartbeat.lodge_status () in
-      Alcotest.(check int) "manual tick increments total ticks"
-        (before.ls_total_ticks + 1) after.ls_total_ticks;
-      Alcotest.(check int) "manual tick increments total checkins"
-        (before.ls_total_checkins + List.length result.Lodge_heartbeat.checkins)
-        after.ls_total_checkins;
-      Alcotest.(check bool) "manual tick stores last result" true
-        (Option.is_some after.ls_last_result);
-      Alcotest.(check bool) "manual tick running cleared" false
-        after.ls_manual_tick_running)
+(* test_manual_lodge_tick_updates_observable_state removed — Lodge deprecated #1596 *)

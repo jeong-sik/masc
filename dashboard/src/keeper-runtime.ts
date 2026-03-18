@@ -17,12 +17,9 @@ import type {
   KeeperProbeResult,
   KeeperRecoverResult,
   KeeperStatusDetail,
-  LodgeCheckinResult,
-  LodgeRuntimeStatus,
-  LodgeTickResult,
 } from './types'
 import { invalidateDashboardCache, refreshDashboard } from './store'
-import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
+import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './components/common/normalize'
 
 export const activeKeeperName = signal('')
 export const keeperStatusDetails = signal<Record<string, KeeperStatusDetail>>({})
@@ -62,33 +59,6 @@ function roleLabel(role: KeeperConversationRole): string {
       return 'Tool'
     default:
       return 'Event'
-  }
-}
-
-function normalizeNameRows(raw: unknown, key: 'summary' | 'reason'): Array<{ name: string; summary?: string; reason?: string }> {
-  if (!Array.isArray(raw)) return []
-  const rows: Array<{ name: string; summary?: string; reason?: string }> = []
-  for (const item of raw) {
-    if (!isRecord(item)) continue
-    const name = asString(item.name)
-    if (!name) continue
-    const detail = asString(item[key])
-    if (key === 'summary') rows.push({ name, summary: detail })
-    else rows.push({ name, reason: detail })
-  }
-  return rows
-}
-
-function normalizeCheckin(raw: unknown): LodgeCheckinResult | null {
-  if (!isRecord(raw)) return null
-  const name = asString(raw.name)
-  if (!name) return null
-  return {
-    name,
-    trigger: asString(raw.trigger),
-    outcome: asString(raw.outcome),
-    summary: asString(raw.summary),
-    reason: asString(raw.reason),
   }
 }
 
@@ -157,53 +127,6 @@ export function normalizeKeeperDiagnostic(raw: unknown): KeeperDiagnostic | null
   }
 }
 
-export function normalizeLodgeTickResult(raw: unknown): LodgeTickResult | null {
-  if (!isRecord(raw)) return null
-  const lastSystemSkipReason = asString(raw.last_system_skip_reason) ?? asString(raw.skipped_reason)
-  return {
-    hour: asNumber(raw.hour),
-    checked: asNumber(raw.checked) ?? 0,
-    acted: asNumber(raw.acted) ?? 0,
-    acted_names: asStringArray(raw.acted_names),
-    activity_report: asString(raw.activity_report),
-    quiet_hours_overridden: asBoolean(raw.quiet_hours_overridden),
-    skipped_reason: lastSystemSkipReason,
-    last_pass_reason: asString(raw.last_pass_reason) ?? null,
-    last_system_skip_reason: lastSystemSkipReason,
-    acted_rows: normalizeNameRows(raw.acted_rows, 'summary').map(row => ({ name: row.name, summary: row.summary })),
-    passed_rows: normalizeNameRows(raw.passed_rows, 'reason').map(row => ({ name: row.name, reason: row.reason })),
-    skipped_rows: normalizeNameRows(raw.skipped_rows, 'reason').map(row => ({ name: row.name, reason: row.reason })),
-    checkins: Array.isArray(raw.checkins)
-      ? raw.checkins.map(normalizeCheckin).filter((row): row is LodgeCheckinResult => row !== null)
-      : [],
-  }
-}
-
-export function normalizeLodgeRuntimeStatus(raw: unknown): LodgeRuntimeStatus | null {
-  if (!isRecord(raw)) return null
-  const lastSystemSkipReason = asString(raw.last_system_skip_reason) ?? asString(raw.last_skip_reason) ?? null
-  return {
-    enabled: asBoolean(raw.enabled) ?? false,
-    interval_s: asNumber(raw.interval_s) ?? 0,
-    quiet_start: asNumber(raw.quiet_start),
-    quiet_end: asNumber(raw.quiet_end),
-    quiet_active: asBoolean(raw.quiet_active),
-    use_planner: asBoolean(raw.use_planner),
-    delegate_llm: asBoolean(raw.delegate_llm),
-    agent_count: asNumber(raw.agent_count),
-    agents: asStringArray(raw.agents),
-    last_tick_ago_s: asNumber(raw.last_tick_ago_s) ?? null,
-    last_tick_ago: asString(raw.last_tick_ago),
-    total_ticks: asNumber(raw.total_ticks),
-    total_checkins: asNumber(raw.total_checkins),
-    last_skip_reason: lastSystemSkipReason,
-    last_pass_reason: asString(raw.last_pass_reason) ?? null,
-    last_system_skip_reason: lastSystemSkipReason,
-    last_tick_result: normalizeLodgeTickResult(raw.last_tick_result),
-    active_self_heartbeats: asStringArray(raw.active_self_heartbeats),
-  }
-}
-
 export function normalizeKeeperProbeResult(raw: unknown): KeeperProbeResult | null {
   if (!isRecord(raw)) return null
   return {
@@ -226,7 +149,6 @@ export function normalizeKeeperRecoverResult(raw: unknown): KeeperRecoverResult 
 
 export function deriveKeeperDiagnostic(
   keeper: Partial<Keeper> | null | undefined,
-  lodge: LodgeRuntimeStatus | null | undefined,
 ): KeeperDiagnostic | null {
   if (!keeper?.name) return null
 
@@ -270,23 +192,21 @@ export function deriveKeeperDiagnostic(
   const quietReason: KeeperDiagnostic['quiet_reason'] =
     lastError
       ? classifyKeeperErrorKind(lastError)
-      : lodge?.quiet_active && lastReplyStatus !== 'fresh'
-        ? 'quiet_hours'
-        : keepaliveExpected && !keepaliveRunning
-          ? 'disabled'
-          : totalTurns <= 0
-            ? 'never_started'
-            : nextEligibleAtS != null && nextEligibleAtS > 0
-              ? 'min_gap'
-              : lastReplyStatus === 'fresh' || lastReplyStatus === 'stale'
-                ? 'no_recent_activity'
-                : 'unknown'
+      : keepaliveExpected && !keepaliveRunning
+        ? 'disabled'
+        : totalTurns <= 0
+          ? 'never_started'
+          : nextEligibleAtS != null && nextEligibleAtS > 0
+            ? 'min_gap'
+            : lastReplyStatus === 'fresh' || lastReplyStatus === 'stale'
+              ? 'no_recent_activity'
+              : 'unknown'
 
   const nextActionPath: KeeperDiagnostic['next_action_path'] =
     healthState === 'offline' || healthState === 'degraded' || healthState === 'stale'
       ? 'recover'
       : quietReason === 'quiet_hours'
-        ? 'manual_lodge_poke'
+        ? 'manual_social_sweep'
         : quietReason === 'unknown'
           ? 'probe'
           : 'direct_message'

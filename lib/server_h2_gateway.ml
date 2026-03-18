@@ -168,7 +168,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
           in
           let state = get_server_state () in
           let build = Build_identity.current () in
-          let lodge_json = Lodge_heartbeat.(lodge_status () |> lodge_status_to_json) in
+          let lodge_json = `Assoc [("status", `String "deprecated")] in
           let social_runtime_json =
             Social_runtime.status_json ~config:state.Mcp_server.room_config
           in

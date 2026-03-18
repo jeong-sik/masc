@@ -114,7 +114,7 @@ function parsePathname(pathname: string, search: string): RouteState | null {
 
   const sub = segments.slice(1)
   if (sub.length === 0) return { ...DEFAULT_ROUTE, params: parseParams(search.replace(/^\?/, '')) }
-  if (sub[0] === 'assets' || sub[0] === 'credits' || sub[0] === 'lodge') return null
+  if (sub[0] === 'assets' || sub[0] === 'credits') return null
 
   const params = parseParams(search.replace(/^\?/, ''))
   return parseSegments(sub, params)

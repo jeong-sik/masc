@@ -111,8 +111,7 @@ let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   in
   (* OAS Event_bus → SSE bridge: relay masc:* events to dashboard *)
   Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
-  (* Inject Event_bus into Lodge and Keeper for lifecycle event publishing *)
-  Lodge_heartbeat.set_bus event_bus;
+  (* Inject Event_bus into Keeper for lifecycle event publishing *)
   Keeper_keepalive.set_bus event_bus;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
@@ -128,10 +127,9 @@ let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   fork_subsystem "gardener" (fun () ->
     Gardener.start ~bus:event_bus ~sw ~clock ~room_config:state.room_config ());
   fork_subsystem "sentinel_guardian" (fun () ->
-    if Env_config.Sentinel.enabled then begin
-      Sentinel.start ~bus:event_bus ~sw ~clock ~net state.room_config;
-      if Env_config.Guardian.enabled then Guardian.start_lodge_loop ~sw ~clock ~net
-    end else Guardian.start ~bus:event_bus ~sw ~clock ~net state.room_config);
+    if Env_config.Sentinel.enabled then
+      Sentinel.start ~bus:event_bus ~sw ~clock ~net state.room_config
+    else Guardian.start ~bus:event_bus ~sw ~clock state.room_config);
   fork_subsystem "governance_judge" (fun () ->
     Dashboard_governance_judge.start ~sw ~clock
       ~base_path:state.room_config.base_path
@@ -183,9 +181,7 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
         loop ()
       in
       loop ());
-  Eio.Fiber.fork ~sw (fun () ->
-      Eio.Time.sleep clock 1.0;
-      Tool_lodge.init ());
+  (* Lodge init removed -- Lodge heartbeat deprecated (#1596) *)
   let resolved_base = state.room_config.base_path in
   let masc_dir = Filename.concat resolved_base ".masc" in
   A2a_tools.init ~masc_dir;

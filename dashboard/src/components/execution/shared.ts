@@ -16,7 +16,6 @@ import type {
   DashboardExecutionHandoff,
   DashboardExecutionWorkerSupportBrief,
   DashboardExecutionContinuityBrief,
-  DashboardExecutionLodgeCheckin,
   DashboardExecutionQueueItem,
   Keeper,
 } from '../../types'
@@ -83,30 +82,6 @@ export function continuityStateLabel(state: DashboardExecutionContinuityBrief['s
     case 'critical': return '위험'
     case 'warning': return '주의'
     default: return '정상'
-  }
-}
-
-export function lodgeOutcomeLabel(outcome: DashboardExecutionLodgeCheckin['outcome']): string {
-  switch (outcome) {
-    case 'acted': return '행동'
-    case 'passed': return '판단 패스'
-    case 'skipped': return '시스템 스킵'
-    case 'failed': return '실패'
-    default: return outcome
-  }
-}
-
-export function lodgeActionKindLabel(value?: DashboardExecutionLodgeCheckin['action_kind'] | null): string {
-  switch (value) {
-    case 'post': return 'post'
-    case 'comment': return 'comment'
-    case 'vote': return 'vote'
-    case 'none':
-    case null:
-    case undefined:
-      return '없음'
-    default:
-      return value
   }
 }
 

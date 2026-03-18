@@ -185,7 +185,7 @@ export interface KeeperAutonomyInfo {
   autonomous_action_count: number
 }
 
-// --- Keeper / Lodge ---
+// --- Keeper ---
 
 export type KeeperHealthState = 'healthy' | 'idle' | 'stale' | 'degraded' | 'offline'
 
@@ -202,7 +202,7 @@ export type KeeperQuietReason =
 
 export type KeeperNextActionPath =
   | 'direct_message'
-  | 'manual_lodge_poke'
+  | 'manual_social_sweep'
   | 'probe'
   | 'recover'
 

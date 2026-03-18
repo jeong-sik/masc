@@ -102,7 +102,6 @@ module Task_pg = Task_pg
 module Task_dispatch = Task_dispatch
 module Web_dashboard = Web_dashboard
 module Credits_dashboard = Credits_dashboard
-module Lodge_dashboard = Lodge_dashboard
 module Progress = Progress
 module Pulse = Pulse
 module Cancellation = Cancellation
@@ -119,6 +118,7 @@ module Backend = Backend
 module Backend_eio = Backend_eio
 module Cache_eio = Cache_eio
 module Llm_response_cache = Llm_response_cache
+(* Lodge_cascade preserved — LLM cascade utility used across codebase *)
 module Lodge_cascade = Lodge_cascade
 module Prometheus = Prometheus
 module Rate_limit = Rate_limit
@@ -211,8 +211,7 @@ module Server_mcp_transport_http = Server_mcp_transport_http
 module Swarm_status = Swarm_status
 module Tempo = Tempo
 module Federation = Federation
-module Lodge_decision = Lodge_decision
-module Lodge_worker = Lodge_worker
+(* Lodge_decision, Lodge_worker removed — Lodge heartbeat deprecated (#1596) *)
 module Level2_config = Level2_config
 module Level4_config = Level4_config
 module Local_runtime_pool = Local_runtime_pool
@@ -304,17 +303,9 @@ module Tool_mdal = Tool_mdal
 module Tool_notifications = Tool_notifications
 module Tool_voice = Tool_voice
 
-(* Lodge subsystem *)
-module Lodge_atmosphere = Lodge_atmosphere
-module Lodge_broadcast = Lodge_broadcast
-module Lodge_daemon = Lodge_daemon
+(* Lodge subsystem — deprecated (#1596), stubs + Selection preserved *)
 module Lodge_heartbeat = Lodge_heartbeat
-module Lodge_memory = Lodge_memory
-module Lodge_personality = Lodge_personality
 module Lodge_selection = Lodge_selection
-module Lodge_reaction = Lodge_reaction
-module Lodge_topic = Lodge_topic
-module Lodge_tom = Lodge_tom
 
 module Game_view_state = Game_view_state
 module Tool_protocol_game_view = Tool_protocol_game_view

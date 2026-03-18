@@ -101,8 +101,9 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
   let ctx_work = Context_manager.create
     ~system_prompt:(Printf.sprintf "Keeper %s autonomous execution" meta.name)
     ~max_tokens:4000 in
-  (* TODO: migrate Eval_gate logic into OAS guardrails when
-     run_with_tools fully replaces the manual tool loop. *)
+  (* gate_config is now passed to OAS guardrails via run_with_tools.
+     The _execute_tool_calls below is dead code (kept as reference
+     for Eval_gate.guarded_execute pattern, remove in next PR). *)
   let _execute_tool_calls
       (tcs : Llm_types.tool_call list) : (Llm_types.tool_call * string) list =
     List.map
@@ -150,12 +151,15 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
       tcs
   in
   let max_rounds = 3 in
+  let guardrails = Verifier_oas.eval_gate_to_oas_guardrails gate_config in
   match Keeper_oas_adapter.run_with_tools
     ~config ~meta ~system_prompt
     ~goal:"Execute the first step of the plan now."
     ~max_turns:max_rounds
     ~temperature:0.3
     ~max_tokens:1024
+    ~guardrails
+    ()
   with
   | Error e ->
       (Printf.sprintf "OAS agent failed: %s" e, 0.0, [])

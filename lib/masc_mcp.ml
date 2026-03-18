@@ -199,7 +199,6 @@ module Dashboard_mission_briefing = Dashboard_mission_briefing
 module Server_utils = Server_utils
 module Server_auth = Server_auth
 module Server_tts_proxy = Server_tts_proxy
-module Server_trpg_rest = Server_trpg_rest
 module Server_dashboard_http = Server_dashboard_http
 module Server_routes_http = Server_routes_http
 module Server_h2_gateway = Server_h2_gateway
@@ -303,9 +302,6 @@ module Tool_voice = Tool_voice
 
 module Thompson_sampling = Thompson_sampling
 
-module Game_view_state = Game_view_state
-module Tool_protocol_game_view = Tool_protocol_game_view
-
 (* Gardener — Self-Organizing Agent Ecosystem *)
 module Gardener_types = Gardener_types
 module Gardener = Gardener
@@ -356,12 +352,6 @@ module Keeper_runtime = Keeper_runtime
 module Autonomy_adjuster = Autonomy_adjuster
 
 module Tool_goals = Tool_goals
-module Tool_trpg = Tool_trpg
-module Trpg_schema = Trpg_schema
-module Trpg_dm_intent = Trpg_dm_intent
-module Trpg_harness = Trpg_harness
-module Trpg_round = Trpg_round
-module Trpg_handlers = Trpg_handlers
 
 (* Autoresearch — Karpathy-inspired autonomous experiment loop *)
 module Autoresearch = Autoresearch

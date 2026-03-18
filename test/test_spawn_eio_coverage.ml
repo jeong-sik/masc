@@ -446,6 +446,50 @@ let test_build_prompt_args_other () =
   check (list string) "other prompt args" [] flags
 
 (* ============================================================
+   State Isolation Tests
+   ============================================================ *)
+
+let test_excluded_state_keys_not_empty () =
+  check bool "not empty" true (List.length Spawn_eio.excluded_state_keys > 0)
+
+let test_excluded_state_keys_contains_messages () =
+  check bool "contains messages" true
+    (List.mem "messages" Spawn_eio.excluded_state_keys)
+
+let test_excluded_state_keys_contains_full_history () =
+  check bool "contains full_history" true
+    (List.mem "full_history" Spawn_eio.excluded_state_keys)
+
+let test_excluded_state_keys_contains_todos () =
+  check bool "contains todos" true
+    (List.mem "todos" Spawn_eio.excluded_state_keys)
+
+let test_excluded_state_keys_contains_skills_metadata () =
+  check bool "contains skills_metadata" true
+    (List.mem "skills_metadata" Spawn_eio.excluded_state_keys)
+
+let test_excluded_state_keys_contains_memory_contents () =
+  check bool "contains memory_contents" true
+    (List.mem "memory_contents" Spawn_eio.excluded_state_keys)
+
+let test_state_isolation_notice_not_empty () =
+  check bool "not empty" true (String.length Spawn_eio.state_isolation_notice > 0)
+
+let test_state_isolation_notice_contains_isolated () =
+  check bool "contains isolated context" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string "isolated context") Spawn_eio.state_isolation_notice 0 in
+       true
+     with Not_found -> false)
+
+let test_state_isolation_notice_contains_focus () =
+  check bool "contains focus instruction" true
+    (try
+       let _ = Str.search_forward (Str.regexp_string "Focus on your assigned task") Spawn_eio.state_isolation_notice 0 in
+       true
+     with Not_found -> false)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -545,5 +589,16 @@ let () =
       test_case "gemini prompt args" `Quick test_build_prompt_args_gemini;
       test_case "other prompt args" `Quick test_build_prompt_args_other;
       test_case "other" `Quick test_build_mcp_args_other;
+    ];
+    "state_isolation", [
+      test_case "excluded_state_keys not empty" `Quick test_excluded_state_keys_not_empty;
+      test_case "excluded_state_keys contains messages" `Quick test_excluded_state_keys_contains_messages;
+      test_case "excluded_state_keys contains full_history" `Quick test_excluded_state_keys_contains_full_history;
+      test_case "excluded_state_keys contains todos" `Quick test_excluded_state_keys_contains_todos;
+      test_case "excluded_state_keys contains skills_metadata" `Quick test_excluded_state_keys_contains_skills_metadata;
+      test_case "excluded_state_keys contains memory_contents" `Quick test_excluded_state_keys_contains_memory_contents;
+      test_case "state_isolation_notice not empty" `Quick test_state_isolation_notice_not_empty;
+      test_case "state_isolation_notice contains isolated" `Quick test_state_isolation_notice_contains_isolated;
+      test_case "state_isolation_notice contains focus" `Quick test_state_isolation_notice_contains_focus;
     ];
   ]

@@ -87,6 +87,25 @@ let llama_mcp_tools = Agent_tool_surfaces.llama_worker_prefixed_tools
 let coding_worker_mcp_tools =
   [ "mcp__masc__masc_heartbeat"; "mcp__masc__masc_memento_mori" ]
 
+(** State isolation: keys excluded from parent context when spawning subagents.
+    Spawned agents receive only their explicit task prompt, institution memory,
+    and MASC lifecycle suffix. Parent's working context is excluded.
+    This follows Deep Agents' _EXCLUDED_STATE_KEYS pattern. *)
+let excluded_state_keys = [
+  "messages";
+  "full_history";
+  "todos";
+  "skills_metadata";
+  "memory_contents";
+]
+
+let state_isolation_notice = {|
+[State Isolation Notice]
+You are running in an isolated context. You do not have access to the parent agent's
+conversation history or working state. Focus on your assigned task and return results
+when complete.
+|}
+
 let masc_lifecycle_suffix = {|
 ---
 [MASC Capabilities — Available to you]
@@ -498,8 +517,17 @@ let spawn ~sw ~proc_mgr ~agent_name ~prompt ?timeout_seconds ?working_dir
         "\n" ^ Agent_swarm_prompts.masc_instructions_for_role ~role:"autonomous" ()
     | _ -> ""
   in
+  (* State isolation: spawned agents receive only:
+     - Their explicit task prompt
+     - Institution memory (cultural inheritance)
+     - MASC lifecycle suffix
+     - State isolation notice
+     Parent's working context, full history, todos, and skills are excluded.
+     This follows Deep Agents' _EXCLUDED_STATE_KEYS pattern.
+     See excluded_state_keys for the full exclusion list. *)
   let augmented_prompt =
     prompt ^ institution_memory ^ masc_lifecycle_suffix ^ role_instructions
+    ^ state_isolation_notice
   in
 
   (* GLM agents use Llm_client cascade (no chdir needed — direct HTTP).

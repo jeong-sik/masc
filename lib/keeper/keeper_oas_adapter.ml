@@ -123,6 +123,49 @@ let run_with_tools
   | Error e -> Error e
 
 (* ================================================================ *)
+(* Public: run_with_custom_dispatch                                  *)
+(* ================================================================ *)
+
+let run_with_custom_dispatch
+    ~(meta : keeper_meta)
+    ?(model_spec_override : Llm_types.model_spec option)
+    ~(system_prompt : string)
+    ~(goal : string)
+    ~(max_turns : int)
+    ~(temperature : float)
+    ~(max_tokens : int)
+    ~(masc_tools : Llm_types.tool_def list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ?(guardrails : Agent_sdk.Guardrails.t option)
+    ()
+  : (Oas_worker.run_result, string) result =
+  let model_spec_r = match model_spec_override with
+    | Some spec -> Ok spec
+    | None -> resolve_primary_model_spec meta
+  in
+  match model_spec_r with
+  | Error e -> Error e
+  | Ok model_spec ->
+  match require_net () with
+  | Error e -> Error e
+  | Ok net ->
+  match require_switch () with
+  | Error e -> Error e
+  | Ok sw ->
+  let oas_config = { (Oas_worker.default_config
+    ~name:(Printf.sprintf "keeper-%s-turn" meta.name)
+    ~model_spec
+    ~system_prompt
+    ~tools:[]) with
+    max_turns;
+    max_tokens;
+    temperature;
+    guardrails;
+  } in
+  Oas_worker.run_with_masc_tools
+    ~sw ~net ~config:oas_config ~masc_tools ~dispatch goal
+
+(* ================================================================ *)
 (* Public: run_simple                                                *)
 (* ================================================================ *)
 

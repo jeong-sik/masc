@@ -78,6 +78,8 @@ let run_with_tools
     ~(max_turns : int)
     ~(temperature : float)
     ~(max_tokens : int)
+    ?(guardrails : Agent_sdk.Guardrails.t option)
+    ()
   : (Oas_worker.run_result, string) result =
   match resolve_primary_model_spec meta with
   | Error e -> Error e
@@ -98,6 +100,7 @@ let run_with_tools
     max_turns;
     max_tokens;
     temperature;
+    guardrails;
   } in
   Oas_worker.run_with_masc_tools
     ~sw ~net ~config:oas_config ~masc_tools ~dispatch goal

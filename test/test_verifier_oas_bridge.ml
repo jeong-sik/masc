@@ -1,0 +1,304 @@
+(** test_verifier_oas_bridge — Pure tests for Verifier_oas bridge functions.
+
+    Covers eval_gate_to_oas_guardrails, verdict_to_hook_decision,
+    and read_only_predicate without any LLM or network calls.
+
+    @since OAS Integration Phase 2 *)
+
+open Masc_mcp
+
+module Oas = Agent_sdk
+
+(* ================================================================ *)
+(* Helpers                                                           *)
+(* ================================================================ *)
+
+let make_gate
+    ?(max_cost = 0.50)
+    ?(max_calls = 10)
+    ?(entropy = 3)
+    ?(destructive = true)
+    ?(allowlist_enabled = false)
+    ?(allowed = [])
+    ?(denied = [])
+    () : Eval_gate.gate_config =
+  {
+    max_cost_usd = max_cost;
+    max_tool_calls_per_turn = max_calls;
+    entropy_threshold = entropy;
+    destructive_check_enabled = destructive;
+    allowlist_enabled;
+    allowed_tools = allowed;
+    denied_tools = denied;
+  }
+
+let make_schema name : Oas.Types.tool_schema =
+  { name; description = ""; parameters = [] }
+
+(* ================================================================ *)
+(* eval_gate_to_oas_guardrails                                       *)
+(* ================================================================ *)
+
+let test_allowlist_maps_to_allowlist () =
+  let gate =
+    make_gate ~allowlist_enabled:true
+      ~allowed:["keeper_read"; "keeper_bash"]
+      ~denied:["keeper_edit"]
+      ()
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "allowlist takes priority"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowList names ->
+         List.sort String.compare names
+         = List.sort String.compare ["keeper_read"; "keeper_bash"]
+     | _ -> false);
+  Alcotest.(check (option int)) "max_tool_calls preserved"
+    (Some 10) g.max_tool_calls_per_turn
+
+let test_denylist_maps_to_denylist () =
+  let gate =
+    make_gate ~allowlist_enabled:false
+      ~denied:["keeper_bash"; "keeper_edit"]
+      ()
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "denied only -> DenyList"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.DenyList names ->
+         List.sort String.compare names
+         = List.sort String.compare ["keeper_bash"; "keeper_edit"]
+     | _ -> false)
+
+let test_neither_maps_to_allowall () =
+  let gate =
+    make_gate ~allowlist_enabled:false ~allowed:[] ~denied:[] ()
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "neither -> AllowAll"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowAll -> true
+     | _ -> false)
+
+let test_empty_allowlist_maps_to_empty_allowlist () =
+  let gate =
+    make_gate ~allowlist_enabled:true ~allowed:[] ()
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "empty allowlist -> AllowList []"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowList [] -> true
+     | _ -> false)
+
+let test_max_tool_calls_preserved () =
+  let gate = make_gate ~max_calls:5 () in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check (option int)) "max_tool_calls = 5"
+    (Some 5) g.max_tool_calls_per_turn
+
+let test_allowlist_ignores_denied_when_both () =
+  let gate =
+    make_gate ~allowlist_enabled:true
+      ~allowed:["keeper_read"]
+      ~denied:["keeper_bash"]
+      ()
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "allowlist wins over denylist"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowList ["keeper_read"] -> true
+     | _ -> false)
+
+(* ================================================================ *)
+(* verdict_to_hook_decision                                          *)
+(* ================================================================ *)
+
+let test_pass_to_continue () =
+  let decision = Verifier_oas.verdict_to_hook_decision Pass in
+  Alcotest.(check bool) "Pass -> Continue"
+    true
+    (decision = Oas.Hooks.Continue)
+
+let test_warn_to_continue () =
+  let decision = Verifier_oas.verdict_to_hook_decision (Warn "minor issue") in
+  Alcotest.(check bool) "Warn -> Continue"
+    true
+    (decision = Oas.Hooks.Continue)
+
+let test_fail_to_skip () =
+  let decision = Verifier_oas.verdict_to_hook_decision (Fail "critical error") in
+  Alcotest.(check bool) "Fail -> Skip"
+    true
+    (decision = Oas.Hooks.Skip)
+
+(* ================================================================ *)
+(* read_only_predicate                                               *)
+(* ================================================================ *)
+
+let test_read_tools_are_readonly () =
+  (* Word boundary matching: underscore IS a word char, so "keeper_read"
+     does NOT match "read". Only tools with standalone patterns match. *)
+  let read_tools = [
+    "read file"; "grep code"; "search files";
+    "find module"; "list dir"; "ls output";
+    "git status"; "git log"; "git diff";
+    "view file"; "get status";
+    "fetch data"; "query db";
+  ] in
+  List.iter (fun name ->
+    let schema = make_schema name in
+    Alcotest.(check bool) (Printf.sprintf "%s is read-only" name)
+      true
+      (Verifier_oas.read_only_predicate schema)
+  ) read_tools
+
+let test_write_tools_are_not_readonly () =
+  let write_tools = [
+    "keeper_bash"; "keeper_edit";
+    "keeper_fs_edit"; "keeper_github";
+    "write_file"; "delete_node";
+    (* underscore-joined: "read" is NOT at word boundary *)
+    "keeper_read"; "bulk_search";
+  ] in
+  List.iter (fun name ->
+    let schema = make_schema name in
+    Alcotest.(check bool) (Printf.sprintf "%s is NOT read-only" name)
+      false
+      (Verifier_oas.read_only_predicate schema)
+  ) write_tools
+
+(* ================================================================ *)
+(* Roundtrip: autonomous_gate_config -> guardrails                   *)
+(* ================================================================ *)
+
+let test_l3_gate_roundtrip () =
+  let gate =
+    Keeper_exec_autonomy.autonomous_gate_config
+      ~autonomy_level:Keeper_autonomy.L3_Guided
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "L3 -> AllowList (strict)"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowList names -> List.length names > 0
+     | _ -> false);
+  Alcotest.(check (option int)) "L3 max_tool_calls = 5"
+    (Some 5) g.max_tool_calls_per_turn
+
+let test_l4_gate_roundtrip () =
+  let gate =
+    Keeper_exec_autonomy.autonomous_gate_config
+      ~autonomy_level:Keeper_autonomy.L4_Autonomous
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "L4 -> AllowList (includes bash)"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowList names ->
+         List.mem "keeper_bash" names
+     | _ -> false)
+
+let test_l5_gate_roundtrip () =
+  let gate =
+    Keeper_exec_autonomy.autonomous_gate_config
+      ~autonomy_level:Keeper_autonomy.L5_Independent
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "L5 -> AllowAll"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowAll -> true
+     | _ -> false)
+
+(* ================================================================ *)
+(* execution_scope -> gate_config -> guardrails roundtrip             *)
+(* ================================================================ *)
+
+let test_observe_only_roundtrip () =
+  let gate =
+    Worker_oas.gate_config_of_execution_scope
+      Team_session_types.Observe_only
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "Observe_only -> AllowList (read-only)"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowList names -> List.length names > 0
+     | _ -> false);
+  Alcotest.(check (option int)) "Observe_only max_calls = 8"
+    (Some 8) g.max_tool_calls_per_turn
+
+let test_limited_code_change_roundtrip () =
+  let gate =
+    Worker_oas.gate_config_of_execution_scope
+      Team_session_types.Limited_code_change
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "Limited -> DenyList"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.DenyList names -> List.length names > 0
+     | _ -> false)
+
+let test_autonomous_roundtrip () =
+  let gate =
+    Worker_oas.gate_config_of_execution_scope
+      Team_session_types.Autonomous
+  in
+  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
+  Alcotest.(check bool) "Autonomous -> AllowAll"
+    true
+    (match g.tool_filter with
+     | Oas.Guardrails.AllowAll -> true
+     | _ -> false);
+  Alcotest.(check (option int)) "Autonomous max_calls = 20"
+    (Some 20) g.max_tool_calls_per_turn
+
+(* ================================================================ *)
+(* Test Suite                                                        *)
+(* ================================================================ *)
+
+let () =
+  Alcotest.run "verifier_oas_bridge" [
+    ("eval_gate_to_oas_guardrails", [
+      Alcotest.test_case "allowlist -> AllowList" `Quick
+        test_allowlist_maps_to_allowlist;
+      Alcotest.test_case "denylist -> DenyList" `Quick
+        test_denylist_maps_to_denylist;
+      Alcotest.test_case "neither -> AllowAll" `Quick
+        test_neither_maps_to_allowall;
+      Alcotest.test_case "empty allowlist -> AllowList []" `Quick
+        test_empty_allowlist_maps_to_empty_allowlist;
+      Alcotest.test_case "max_tool_calls preserved" `Quick
+        test_max_tool_calls_preserved;
+      Alcotest.test_case "allowlist ignores denied" `Quick
+        test_allowlist_ignores_denied_when_both;
+    ]);
+    ("verdict_to_hook_decision", [
+      Alcotest.test_case "Pass -> Continue" `Quick test_pass_to_continue;
+      Alcotest.test_case "Warn -> Continue" `Quick test_warn_to_continue;
+      Alcotest.test_case "Fail -> Skip" `Quick test_fail_to_skip;
+    ]);
+    ("read_only_predicate", [
+      Alcotest.test_case "read tools" `Quick test_read_tools_are_readonly;
+      Alcotest.test_case "write tools" `Quick test_write_tools_are_not_readonly;
+    ]);
+    ("autonomous_gate roundtrip", [
+      Alcotest.test_case "L3 -> AllowList (strict)" `Quick test_l3_gate_roundtrip;
+      Alcotest.test_case "L4 -> AllowList (with bash)" `Quick test_l4_gate_roundtrip;
+      Alcotest.test_case "L5 -> AllowAll" `Quick test_l5_gate_roundtrip;
+    ]);
+    ("execution_scope roundtrip", [
+      Alcotest.test_case "Observe_only -> AllowList" `Quick
+        test_observe_only_roundtrip;
+      Alcotest.test_case "Limited -> DenyList" `Quick
+        test_limited_code_change_roundtrip;
+      Alcotest.test_case "Autonomous -> AllowAll" `Quick
+        test_autonomous_roundtrip;
+    ]);
+  ]

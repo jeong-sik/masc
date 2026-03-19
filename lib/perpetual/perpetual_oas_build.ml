@@ -42,9 +42,9 @@ let build_perpetual_agent
   in
   let oas_model = primary_model.model_id in
   (* Build provider via Phase 3 adapter.
-     Uses Llm_provider_dispatch.to_oas_provider which handles the Llm_types.model_spec
+     Uses Oas_type_adapters.to_oas_provider which handles the Llm_types.model_spec
      -> Oas.Provider.config conversion (avoiding Llm_types nominality gap). *)
-  let provider = match Llm_provider_dispatch.to_oas_provider primary_model with
+  let provider = match Oas_type_adapters.to_oas_provider primary_model with
     | Some cfg -> cfg
     | None ->
       (* Fallback for Custom providers — use OpenAICompat *)

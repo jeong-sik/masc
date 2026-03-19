@@ -127,7 +127,7 @@ let run_perpetual_via_oas
       "trace_id" (`String trace_id);
     Oas.Context.set_scoped oas_ctx Oas.Context.App
       "masc_version" (`String Version.version);
-    let messages = List.filter_map Llm_provider_dispatch.to_oas_message ctx.messages in
+    let messages = List.filter_map Oas_type_adapters.to_oas_message ctx.messages in
     let masc_oas_ckpt : Oas.Checkpoint.t = {
       version = 3;
       session_id = trace_id;

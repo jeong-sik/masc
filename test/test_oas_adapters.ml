@@ -27,10 +27,10 @@ let make_test_messages () : Agent_sdk.Types.message list =
 
 let test_roundtrip_user_msg () =
   let msg = Agent_sdk.Types.user_msg "hello world" in
-  match Llm_provider_dispatch.to_oas_message msg with
+  match Oas_type_adapters.to_oas_message msg with
   | None -> Alcotest.fail "user message should not be dropped"
   | Some oas ->
-    let rt = Llm_provider_dispatch.of_oas_message oas in
+    let rt = Oas_type_adapters.of_oas_message oas in
     Alcotest.(check string) "role preserved" "user"
       (match rt.role with Agent_sdk.Types.User -> "user" | _ -> "other");
     Alcotest.(check string) "content preserved"
@@ -38,10 +38,10 @@ let test_roundtrip_user_msg () =
 
 let test_roundtrip_assistant_msg () =
   let msg = Agent_sdk.Types.assistant_msg "The answer is 42." in
-  match Llm_provider_dispatch.to_oas_message msg with
+  match Oas_type_adapters.to_oas_message msg with
   | None -> Alcotest.fail "assistant message should not be dropped"
   | Some oas ->
-    let rt = Llm_provider_dispatch.of_oas_message oas in
+    let rt = Oas_type_adapters.of_oas_message oas in
     Alcotest.(check string) "role preserved" "assistant"
       (match rt.role with Agent_sdk.Types.Assistant -> "assistant" | _ -> "other");
     Alcotest.(check string) "content preserved"
@@ -49,17 +49,17 @@ let test_roundtrip_assistant_msg () =
 
 let test_roundtrip_system_msg_dropped () =
   let msg = Agent_sdk.Types.system_msg "system prompt" in
-  let result = Llm_provider_dispatch.to_oas_message msg in
+  let result = Oas_type_adapters.to_oas_message msg in
   Alcotest.(check bool) "system message dropped (belongs in system_prompt)"
     true (Option.is_none result)
 
 let test_roundtrip_tool_msg () =
   let msg = Llm_types.tool_msg ~name:"calc" ~call_id:"tc-1" "tool output here" in
-  match Llm_provider_dispatch.to_oas_message msg with
+  match Oas_type_adapters.to_oas_message msg with
   | None -> Alcotest.fail "tool message should not be dropped"
   | Some oas ->
-    let rt = Llm_provider_dispatch.of_oas_message oas in
-    (* Llm_provider_dispatch.to_oas_message preserves Tool role directly (shared type).
+    let rt = Oas_type_adapters.of_oas_message oas in
+    (* Oas_type_adapters.to_oas_message preserves Tool role directly (shared type).
        Context_compact_oas.masc_msg_to_oas uses sentinel-tagging instead. *)
     Alcotest.(check string) "tool role preserved"
       "tool"
@@ -128,7 +128,7 @@ let test_compact_small_list_unchanged () =
     (List.length msgs) (List.length compacted.messages)
 
 (* ================================================================ *)
-(* Restore messages (direct Llm_provider_dispatch.of_oas_message)              *)
+(* Restore messages (direct Oas_type_adapters.of_oas_message)              *)
 (* ================================================================ *)
 
 let test_restore_messages_all_roles () =
@@ -138,7 +138,7 @@ let test_restore_messages_all_roles () =
     { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
       content = [Agent_sdk.Types.Text "assistant answer"]; name = None; tool_call_id = None };
   ] in
-  let masc_msgs = List.map Llm_provider_dispatch.of_oas_message oas_msgs in
+  let masc_msgs = List.map Oas_type_adapters.of_oas_message oas_msgs in
   Alcotest.(check int) "2 messages restored" 2 (List.length masc_msgs);
   let first = List.hd masc_msgs in
   Alcotest.(check string) "first is user" "user"

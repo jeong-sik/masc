@@ -149,6 +149,7 @@ let run
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
+    ?(on_event : (Oas.Types.sse_event -> unit) option)
     (goal : string)
   : (run_result, string) result =
   let session_id = match config.session_id with
@@ -169,7 +170,10 @@ let run
     ) config.event_bus;
     Error (Printf.sprintf "Agent build failed: %s" e)
   | Ok agent ->
-  let result = Oas.Agent.run ~sw agent goal in
+  let result = match on_event with
+    | Some cb -> Oas.Agent.run_stream ~sw ~on_event:cb agent goal
+    | None -> Oas.Agent.run ~sw agent goal
+  in
   let checkpoint = match config.checkpoint_dir with
     | Some dir ->
       let ckpt = Oas.Agent.checkpoint ~session_id agent in
@@ -202,6 +206,7 @@ let run_with_masc_tools
     ~(config : config)
     ~(masc_tools : Llm_types.tool_def list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ?on_event
     (goal : string)
   : (run_result, string) result =
   let oas_tools = List.map (fun (td : Llm_types.tool_def) ->
@@ -212,7 +217,7 @@ let run_with_masc_tools
       (fun input -> dispatch ~name:td.tool_name ~args:input)
   ) masc_tools in
   let config = { config with tools = oas_tools @ config.tools } in
-  run ~sw ~net ~config goal
+  run ~sw ~net ~config ?on_event goal
 
 (* ================================================================ *)
 (* Named cascade API — callers pass cascade_name, not model_spec    *)
@@ -239,6 +244,7 @@ let run_named
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
     ?guardrails
+    ?on_event
     ()
   : (run_result, string) result =
   match require_eio () with
@@ -255,7 +261,7 @@ let run_named
     guardrails;
     description = Some (Printf.sprintf "cascade:%s" cascade_name);
   } in
-  run ~sw ~net ~config goal
+  run ~sw ~net ~config ?on_event goal
 
 let run_named_with_masc_tools
     ~cascade_name
@@ -267,6 +273,7 @@ let run_named_with_masc_tools
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
     ?guardrails
+    ?on_event
     ()
   : (run_result, string) result =
   match require_eio () with
@@ -283,4 +290,4 @@ let run_named_with_masc_tools
     guardrails;
     description = Some (Printf.sprintf "cascade:%s" cascade_name);
   } in
-  run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch goal
+  run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event goal

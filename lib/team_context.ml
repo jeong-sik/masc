@@ -161,8 +161,8 @@ let planned_worker_to_participant
 (** Project a MASC team session into an OAS {!Agent_sdk.Collaboration.t}.
 
     This is a lossy projection: planned_worker (16 fields) compresses to
-    participant (6 fields).  MASC has no explicit votes or artifacts list
-    in the session record, so those are empty.
+    participant (6 fields).  MASC has no explicit contributions or artifacts
+    list in the session record, so those are empty.
 
     [shared_context] is populated from [shared_findings] if available. *)
 let collaboration_of_session

@@ -27,7 +27,7 @@ let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
   in
   let args_json = Yojson.Safe.to_string args in
   let execute () =
-    let tc : Masc_model.tool_call = {
+    let tc : Cascade.tool_call = {
       call_id = "";
       call_name = name;
       call_arguments = args_json;
@@ -118,13 +118,13 @@ let run_with_tools
     model resolution happens inside [Oas_worker.run_named_with_masc_tools]. *)
 let run_with_custom_dispatch
     ~(meta : keeper_meta)
-    ?(model_spec_override : Masc_model.model_spec option)
+    ?(model_spec_override : Cascade.model_spec option)
     ~(system_prompt : string)
     ~(goal : string)
     ~(max_turns : int)
     ~(temperature : float)
     ~(max_tokens : int)
-    ~(masc_tools : Masc_model.tool_def list)
+    ~(masc_tools : Cascade.tool_def list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(guardrails : Agent_sdk.Guardrails.t option)
     ()
@@ -158,10 +158,10 @@ let run_simple
 (* ================================================================ *)
 
 let text_of_run_result (r : Oas_worker.run_result) : string =
-  Masc_model.text_of_response r.response
+  Cascade.text_of_response r.response
 
-let usage_of_run_result (r : Oas_worker.run_result) : Masc_model.token_usage =
-  Masc_model.usage_of_response r.response
+let usage_of_run_result (r : Oas_worker.run_result) : Cascade.token_usage =
+  Cascade.usage_of_response r.response
 
 let model_of_run_result (r : Oas_worker.run_result) : string =
   r.response.model
@@ -183,7 +183,7 @@ let separate_system_and_user (msgs : Agent_sdk.Types.message list) :
   let rest = ref [] in
   List.iter (fun (m : Agent_sdk.Types.message) ->
     match m.role with
-    | Agent_sdk.Types.System -> sys_parts := Masc_model.text_of_message m :: !sys_parts
+    | Agent_sdk.Types.System -> sys_parts := Cascade.text_of_message m :: !sys_parts
     | _ -> rest := m :: !rest
   ) msgs;
   let sys = String.concat "\n" (List.rev !sys_parts) in
@@ -191,12 +191,12 @@ let separate_system_and_user (msgs : Agent_sdk.Types.message list) :
 
 let messages_to_goal_text (msgs : Agent_sdk.Types.message list) : string =
   msgs
-  |> List.map (fun (m : Agent_sdk.Types.message) -> Masc_model.text_of_message m)
+  |> List.map (fun (m : Agent_sdk.Types.message) -> Cascade.text_of_message m)
   |> List.filter (fun s -> String.length s > 0)
   |> String.concat "\n"
 
 let extract_prompt_params
-    (requests : Masc_model.completion_request list)
+    (requests : Cascade.completion_request list)
   : (prompt_params, string) result =
   match requests with
   | [] -> Error "empty cascade request list"
@@ -235,7 +235,7 @@ let run_cascade_stream ?(cascade_name = "keeper_turn") ?timeout_sec ~on_event re
   let timeout_int = Option.map int_of_float timeout_sec in
   match run_cascade ~cascade_name ?timeout_sec:timeout_int (request :: fallback) with
   | Ok resp ->
-      let text = Masc_model.text_of_response resp in
+      let text = Cascade.text_of_response resp in
       on_event (Llm_provider.Types.MessageStart {
         id = "batch-keeper"; model = resp.Llm_provider.Types.model; usage = None });
       if text <> "" then

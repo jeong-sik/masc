@@ -1,10 +1,10 @@
 (** Gardener OAS worker — 1-shot agents with real MASC tools.
     See {!gardener_worker.mli} for rationale. *)
 
-(** Build [Masc_model.tool_def list] from [gardener_worker_tool_names].
+(** Build [Cascade.tool_def list] from [gardener_worker_tool_names].
     Returns an empty list on schema-lookup failure so the caller can
     still attempt an LLM call (the model will simply have no tools). *)
-let worker_tools () : Masc_model.tool_def list =
+let worker_tools () : Cascade.tool_def list =
   match
     Agent_tool_surfaces.local_worker_tool_schemas
       ~names:Agent_tool_surfaces.gardener_worker_tool_names ()
@@ -13,7 +13,7 @@ let worker_tools () : Masc_model.tool_def list =
       List.map
         (fun (s : Types.tool_schema) ->
           {
-            Masc_model.tool_name = s.name;
+            Cascade.tool_name = s.name;
             tool_description = s.description;
             parameters = s.input_schema;
           })

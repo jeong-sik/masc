@@ -7,8 +7,8 @@ open Keeper_memory
 let keeper_llm_tools = Tool_shard.keeper_llm_tools
 
 let merge_usage
-    (a : Masc_model.token_usage)
-    (b : Masc_model.token_usage) : Masc_model.token_usage =
+    (a : Cascade.token_usage)
+    (b : Cascade.token_usage) : Cascade.token_usage =
   { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
     cache_creation_input_tokens =

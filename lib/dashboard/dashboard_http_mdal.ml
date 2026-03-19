@@ -16,9 +16,9 @@ let perpetual_dashboard_json () : Yojson.Safe.t =
         match base with
         | `Assoc fields ->
               let models =
-              `List (List.map (fun (m : Masc_model.model_spec) ->
+              `List (List.map (fun (m : Cascade.model_spec) ->
                 `Assoc [
-                  ("provider", `String (Masc_model.string_of_provider m.provider));
+                  ("provider", `String (Cascade.string_of_provider m.provider));
                   ("model_id", `String m.model_id);
                   ("max_context", `Int m.max_context);
                 ]

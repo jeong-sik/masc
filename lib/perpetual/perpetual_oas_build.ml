@@ -42,8 +42,8 @@ let build_perpetual_agent
   in
   let oas_model = primary_model.model_id in
   (* Build provider via Phase 3 adapter.
-     Uses Oas_type_adapters.to_oas_provider which handles the Masc_model.model_spec
-     -> Oas.Provider.config conversion (avoiding Masc_model nominality gap). *)
+     Uses Oas_type_adapters.to_oas_provider which handles the Cascade.model_spec
+     -> Oas.Provider.config conversion (avoiding Cascade nominality gap). *)
   let provider = match Oas_type_adapters.to_oas_provider primary_model with
     | Some cfg -> cfg
     | None ->
@@ -74,7 +74,7 @@ let build_perpetual_agent
      Tool_bridge.oas_tool_of_masc creates OAS Tool.t from name/desc/schema/handler.
      For the perpetual loop adapter, each tool delegates to a no-op handler since
      actual tool dispatch remains in MASC's perpetual_loop infrastructure. *)
-  let tools = List.map (fun (td : Masc_model.tool_def) ->
+  let tools = List.map (fun (td : Cascade.tool_def) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.tool_name
       ~description:td.tool_description

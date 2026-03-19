@@ -5,7 +5,7 @@ open Printf
 include Local_agent_eio_container
 
 let run_worker_oas ~sw ~base_path ~worker_name
-    ~(model : Masc_model.model_spec) ~team_session_id
+    ~(model : Cascade.model_spec) ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
     ?thinking_enabled ?max_turns ?worker_run_id
     ~role

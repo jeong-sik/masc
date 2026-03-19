@@ -28,13 +28,13 @@ let handle_keeper_model_set ctx args : tool_result =
         | Ok spec ->
             let runtime_ok =
               match spec.provider with
-              | Masc_model.Llama -> (
+              | Cascade.Llama -> (
                   match Tool_local_runtime.fetch_models () with
                   | Ok (_, models) -> List.mem spec.model_id models
                   | Error _ -> false)
               | _ -> true
             in
-            if spec.provider = Masc_model.Llama && not runtime_ok then
+            if spec.provider = Cascade.Llama && not runtime_ok then
               (false, Printf.sprintf "❌ model not present in llama inventory: %s" spec.model_id)
             else
               let allowed_models =

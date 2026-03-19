@@ -103,12 +103,12 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
                  | None -> ()
                  | Some c ->
                      let latest_user_message =
-                       latest_message_content_by_role ~role:Masc_model.User
+                       latest_message_content_by_role ~role:Cascade.User
                          c.messages
                      in
                      let latest_assistant_message =
                        latest_message_content_by_role
-                         ~role:Masc_model.Assistant c.messages
+                         ~role:Cascade.Assistant c.messages
                      in
                      let continuity_snapshot =
                        latest_state_snapshot_from_messages c.messages

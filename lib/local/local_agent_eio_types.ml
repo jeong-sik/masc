@@ -346,7 +346,7 @@ let tool_defs_of_schemas schemas =
   List.map
     (fun (schema : Types.tool_schema) ->
       {
-        Masc_model.tool_name = schema.name;
+        Cascade.tool_name = schema.name;
         tool_description = schema.description;
         parameters = schema.input_schema;
       })
@@ -360,7 +360,7 @@ let safe_text_for_followup text =
 let followup_prompt ~original_prompt ~tool_outputs ~already_used =
   let tool_lines =
     tool_outputs
-    |> List.mapi (fun idx ((tc : Masc_model.tool_call), output) ->
+    |> List.mapi (fun idx ((tc : Cascade.tool_call), output) ->
            sprintf "%d. %s(%s)\n%s" (idx + 1) tc.call_name tc.call_arguments
              (safe_text_for_followup output))
     |> String.concat "\n\n"
@@ -500,7 +500,7 @@ let parse_text_tool_args (args_text : string) =
     in
     build [] parts
 
-let parse_text_tool_calls (content : string) : Masc_model.tool_call list =
+let parse_text_tool_calls (content : string) : Cascade.tool_call list =
   let prefix = "mcp__masc__" in
   let prefix_len = String.length prefix in
   let len = String.length content in
@@ -556,7 +556,7 @@ let parse_text_tool_calls (content : string) : Masc_model.tool_call list =
             | Ok args_json ->
                 collect (close_idx + 1) (call_id + 1)
                   ({
-                     Masc_model.call_id = sprintf "text-fallback-%d" call_id;
+                     Cascade.call_id = sprintf "text-fallback-%d" call_id;
                      call_name = tool_name;
                      call_arguments = Yojson.Safe.to_string args_json;
                    }
@@ -568,13 +568,13 @@ let parse_text_tool_calls (content : string) : Masc_model.tool_call list =
   in
   collect 0 1 []
 
-let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Masc_model.token_usage =
+let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Cascade.token_usage =
   { Agent_sdk.Types.input_tokens;
     output_tokens;
     cache_creation_input_tokens = 0;
     cache_read_input_tokens = 0 }
 
-let merge_usage (a : Masc_model.token_usage) (b : Masc_model.token_usage) : Masc_model.token_usage =
+let merge_usage (a : Cascade.token_usage) (b : Cascade.token_usage) : Cascade.token_usage =
   { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
     cache_creation_input_tokens =
@@ -582,8 +582,8 @@ let merge_usage (a : Masc_model.token_usage) (b : Masc_model.token_usage) : Masc
     cache_read_input_tokens =
       a.cache_read_input_tokens + b.cache_read_input_tokens }
 
-let estimate_cost_usd (model : Masc_model.model_spec)
-    (usage : Masc_model.token_usage) : float option =
+let estimate_cost_usd (model : Cascade.model_spec)
+    (usage : Cascade.token_usage) : float option =
   let input_cost =
     (float_of_int usage.input_tokens /. 1000.0) *. model.cost_per_1k_input
   in

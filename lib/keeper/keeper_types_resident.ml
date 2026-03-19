@@ -19,7 +19,7 @@ let session_base_dir_ (config : Room.config) =
   Filename.concat (Filename.concat config.base_path ".masc") "perpetual"
 
 let model_specs_of_strings (model_strs : string list) :
-    (Masc_model.model_spec list, string) result =
+    (Cascade.model_spec list, string) result =
   let rec go acc = function
     | [] -> Ok (List.rev acc)
     | s :: rest -> (
@@ -45,14 +45,14 @@ let ollama_port_listening () =
   with Unix.Unix_error _ ->
     false
 
-let model_spec_is_local_runtime (model : Masc_model.model_spec) =
+let model_spec_is_local_runtime (model : Cascade.model_spec) =
   match model.provider with
-  | Masc_model.Llama -> true
+  | Cascade.Llama -> true
   | _ -> false
 
-let model_spec_is_available (model : Masc_model.model_spec) =
+let model_spec_is_available (model : Cascade.model_spec) =
   match model.provider with
-  | Masc_model.Llama -> true
+  | Cascade.Llama -> true
   | _ -> true
 
 let keeper_fallback_model_labels () =
@@ -92,9 +92,9 @@ let maybe_append_keeper_fallback_models (models : string list) =
         in
         if extra = [] then models else models @ extra
 
-let ensure_api_keys (models : Masc_model.model_spec list) : (unit, string) result =
+let ensure_api_keys (models : Cascade.model_spec list) : (unit, string) result =
   let missing =
-    List.filter_map (fun (m : Masc_model.model_spec) ->
+    List.filter_map (fun (m : Cascade.model_spec) ->
       match m.api_key_env with
       | None -> None
       | Some env ->

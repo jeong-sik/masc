@@ -14,7 +14,7 @@
 (** Working context: the message window sent to the LLM. *)
 type working_context = {
   system_prompt : string;
-  messages : Masc_model.message list;
+  messages : Cascade.message list;
   token_count : int;                (** Estimated tokens in window *)
   max_tokens : int;                 (** Model context limit *)
   importance_scores : (int * float) list;  (** msg_index → importance 0.0-1.0 *)
@@ -37,7 +37,7 @@ type checkpoint = {
 type session_context = {
   session_id : string;
   session_dir : string;            (** Path to session JSONL files *)
-  mutable full_history : Masc_model.message list;
+  mutable full_history : Cascade.message list;
   mutable checkpoints : checkpoint list;
 }
 
@@ -75,10 +75,10 @@ val create : system_prompt:string -> max_tokens:int -> working_context
 val set_system_prompt : working_context -> system_prompt:string -> working_context
 
 (** Append a message to working context, updating token count. *)
-val append : working_context -> Masc_model.message -> working_context
+val append : working_context -> Cascade.message -> working_context
 
 (** Append multiple messages. *)
-val append_many : working_context -> Masc_model.message list -> working_context
+val append_many : working_context -> Cascade.message list -> working_context
 
 (** Score message importance (Stanford GAP formula adapted). *)
 val score_importance : working_context -> working_context
@@ -97,13 +97,13 @@ val goal_prefix : string
 val compact : working_context -> compaction_strategy list -> working_context
 
 (** Format a single message as human-readable text: "role: content". *)
-val format_message_readable : Masc_model.message -> string
+val format_message_readable : Cascade.message -> string
 
 (** Offload messages to a markdown file in [{session_dir}/offloaded/{compaction_count}.md].
     Returns [Some path] on success, [None] on failure (fail-safe, never raises). *)
 val offload_messages :
   session_dir:string -> compaction_count:int ->
-  Masc_model.message list -> string option
+  Cascade.message list -> string option
 
 (** Apply compaction with history offload.
     Before compaction, saves the full pre-compaction messages to a markdown file.
@@ -143,7 +143,7 @@ val restore_checkpoint : checkpoint -> max_tokens:int -> working_context
 val create_session : session_id:string -> base_dir:string -> session_context
 
 (** Persist a message to session history (append to JSONL). *)
-val persist_message : session_context -> Masc_model.message -> unit
+val persist_message : session_context -> Cascade.message -> unit
 
 (** Save checkpoint to session directory. *)
 val save_checkpoint : session_context -> checkpoint -> unit

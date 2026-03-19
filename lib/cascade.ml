@@ -15,6 +15,261 @@
     @since 2.116.0 — call_raw, call_with_tools added *)
 
 (* ================================================================ *)
+(* Model types and helpers — absorbed from Masc_model               *)
+(* ================================================================ *)
+
+
+open Printf
+
+let int_of_env_default name ~default ~min_v ~max_v =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw ->
+      let v =
+        try int_of_string (String.trim raw)
+        with Failure _ -> default
+      in
+      max min_v (min max_v v)
+
+type provider =
+  | Llama
+  | Claude
+  | OpenAI
+  | Gemini
+  | Glm_cloud
+  | OpenRouter
+  | Custom of string
+
+type model_spec = {
+  provider : provider;
+  model_id : string;
+  max_context : int;
+  api_url : string;
+  api_key_env : string option;
+  cost_per_1k_input : float;
+  cost_per_1k_output : float;
+}
+
+type role = Agent_sdk.Types.role = System | User | Assistant | Tool
+
+(** Message type — now unified with OAS. No more MASC-specific name/tool_call_id fields. *)
+type message = Agent_sdk.Types.message
+
+type tool_def = {
+  tool_name : string;
+  tool_description : string;
+  parameters : Yojson.Safe.t;
+}
+
+type tool_call = {
+  call_id : string;
+  call_name : string;
+  call_arguments : string;
+}
+
+(** Token usage — now unified with OAS api_usage. Use [total_tokens] function
+    instead of the removed field. *)
+type token_usage = Agent_sdk.Types.api_usage
+
+(** Compute total tokens (was a record field, now derived). *)
+let total_tokens (u : token_usage) = u.input_tokens + u.output_tokens
+
+type completion_request = {
+  model : model_spec;
+  messages : message list;
+  temperature : float;
+  max_tokens : int;
+  tools : tool_def list;
+  response_format : [ `Text | `Json ];
+}
+
+(** LLM completion result — OAS api_response directly.
+    No more MASC-specific wrapper; use helpers below for field access.
+    @since Phase 2 — OAS SDK Only *)
+type api_response = Llm_provider.Types.api_response
+
+(** Zero usage sentinel for api_response with [usage = None]. *)
+let zero_usage : token_usage =
+  { Agent_sdk.Types.input_tokens = 0;
+    output_tokens = 0;
+    cache_creation_input_tokens = 0;
+    cache_read_input_tokens = 0 }
+
+(** Extract usage from an api_response, defaulting to zero. *)
+let usage_of_response (resp : api_response) : token_usage =
+  match resp.usage with Some u -> u | None -> zero_usage
+
+(** Extract text content from an api_response. *)
+let text_of_response (resp : api_response) : string =
+  Agent_sdk.Types.text_of_content resp.content
+
+(** Measure wall-clock latency of a thunk in milliseconds.
+    Use at call sites that need per-call timing (keeper tool loops, etc.). *)
+let timed (f : unit -> 'a) : 'a * int =
+  let t0 = Time_compat.now () in
+  let result = f () in
+  let ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+  (result, ms)
+
+(** Extract tool calls from content blocks. *)
+let tool_calls_of_content (blocks : Agent_sdk.Types.content_block list)
+    : tool_call list =
+  List.filter_map
+    (function
+      | Agent_sdk.Types.ToolUse { id; name; input } ->
+          Some { call_id = id; call_name = name;
+                 call_arguments = Yojson.Safe.to_string input }
+      | _ -> None)
+    blocks
+
+(** Extract tool calls from an api_response. *)
+let tool_calls_of_response (resp : api_response) : tool_call list =
+  tool_calls_of_content resp.content
+
+(** Check if an api_response has any tool calls. *)
+let has_tool_calls (resp : api_response) : bool =
+  List.exists
+    (function Agent_sdk.Types.ToolUse _ -> true | _ -> false)
+    resp.content
+
+let clamp_llama_max_tokens max_tokens =
+  max 1 (min max_tokens Env_config.Llama.max_tokens)
+
+let normalize_request (req : completion_request) =
+  match req.model.provider with
+  | Llama ->
+      let max_tokens = clamp_llama_max_tokens req.max_tokens in
+      if max_tokens = req.max_tokens then req else { req with max_tokens }
+  | _ -> req
+
+let string_of_provider = function
+  | Llama -> "llama"
+  | Claude -> "claude"
+  | OpenAI -> "openai"
+  | Gemini -> "gemini"
+  | Glm_cloud -> "glm_cloud"
+  | OpenRouter -> "openrouter"
+  | Custom s -> sprintf "custom(%s)" s
+
+let string_of_role = Agent_sdk.Types.role_to_string
+
+let llama_default = {
+  provider = Llama;
+  model_id = Env_config.Llama.default_model;
+  max_context = 128000;
+  api_url = Env_config.Llama.server_url;
+  api_key_env = None;
+  cost_per_1k_input = 0.0;
+  cost_per_1k_output = 0.0;
+}
+
+let claude_opus = {
+  provider = Claude;
+  model_id = Env_config.Claude.default_model;
+  max_context = 200000;
+  api_url = "https://api.anthropic.com";
+  api_key_env = Some "ANTHROPIC_API_KEY";
+  cost_per_1k_input = 0.015;
+  cost_per_1k_output = 0.075;
+}
+
+let claude_sonnet = {
+  provider = Claude;
+  model_id = Env_config.Claude.default_model;
+  max_context = 200000;
+  api_url = "https://api.anthropic.com";
+  api_key_env = Some "ANTHROPIC_API_KEY";
+  cost_per_1k_input = 0.003;
+  cost_per_1k_output = 0.015;
+}
+
+let openai_default = {
+  provider = OpenAI;
+  model_id = Env_config.OpenAI.default_model;
+  max_context = 400000;
+  api_url = "https://api.openai.com";
+  api_key_env = Some "OPENAI_API_KEY";
+  cost_per_1k_input = 0.0;
+  cost_per_1k_output = 0.0;
+}
+
+let glm_cloud = {
+  provider = Glm_cloud;
+  model_id = Env_config.Llm.default_model;
+  max_context = 128000;
+  api_url = "https://api.z.ai";
+  api_key_env = Some "ZAI_API_KEY";
+  cost_per_1k_input = 0.001;
+  cost_per_1k_output = 0.002;
+}
+
+let gemini_pro = {
+  provider = Gemini;
+  model_id = Env_config.Gemini.default_model;
+  max_context = 1000000;
+  api_url = "https://generativelanguage.googleapis.com";
+  api_key_env = Some "GEMINI_API_KEY";
+  cost_per_1k_input = 0.0;
+  cost_per_1k_output = 0.0;
+}
+
+let system_msg = Agent_sdk.Types.system_msg
+let user_msg = Agent_sdk.Types.user_msg
+let assistant_msg = Agent_sdk.Types.assistant_msg
+
+let tool_msg ~name:_ ~call_id text =
+  Agent_sdk.Types.tool_result_msg ~tool_use_id:call_id ~content:text ()
+
+(** Extract text content from a message.
+    Delegates to Agent_sdk.Types.text_of_content for rich content_block list. *)
+let text_of_message = Agent_sdk.Types.text_of_message
+
+(* ================================================================ *)
+(* UTF-8 Sanitization                                               *)
+(* ================================================================ *)
+
+let sanitize_text_utf8 (s : string) : string =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let rec loop i =
+    if i >= len then ()
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then (
+        Buffer.add_substring buf s i dlen;
+        loop (i + dlen))
+      else (
+        Buffer.add_string buf "\xEF\xBF\xBD";
+        loop (i + 1))
+  in
+  loop 0;
+  Buffer.contents buf
+
+let sanitize_message_utf8 (m : message) : message =
+  { m with
+    content = List.map (fun block ->
+      match block with
+      | Agent_sdk.Types.Text s -> Agent_sdk.Types.Text (sanitize_text_utf8 s)
+      | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error } ->
+          Agent_sdk.Types.ToolResult {
+            tool_use_id = sanitize_text_utf8 tool_use_id;
+            content = sanitize_text_utf8 content;
+            is_error }
+      | other -> other
+    ) m.content;
+  }
+
+let sanitize_messages_utf8 (msgs : message list) : message list =
+  List.map sanitize_message_utf8 msgs
+
+(** Heuristic: ~4 characters per token (conservative estimate). *)
+let estimate_tokens (msgs : message list) =
+  List.fold_left (fun acc (m : message) -> acc + (String.length (text_of_message m) / 4) + 4) 0 msgs
+
+
+
+(* ================================================================ *)
 (* Concurrency diagnostics (observability only, no throttling)       *)
 (* ================================================================ *)
 
@@ -22,7 +277,7 @@
     No longer enforced via semaphore: llama-server handles slot-based
     parallelism internally, and cloud APIs return rate-limit errors. *)
 let max_concurrent_llm =
-  Masc_model.int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:8 ~min_v:1 ~max_v:128
+  int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:8 ~min_v:1 ~max_v:128
 
 (** Atomic counter tracking in-flight LLM calls (observability only). *)
 let inflight = Atomic.make 0
@@ -183,24 +438,24 @@ let rec model_spec_of_string s =
       else
         match Provider_adapter.resolve_direct_adapter provider with
         | Some adapter when adapter.canonical_name = "llama" ->
-          Ok { Masc_model.llama_default with model_id }
+          Ok { llama_default with model_id }
         | Some adapter when adapter.canonical_name = "gemini-api" ->
-          if model_id = "pro" then Ok Masc_model.gemini_pro
+          if model_id = "pro" then Ok gemini_pro
           else if model_id = "flash" then
             let flash = Env_config_governance.Gemini.flash_model in
-            Ok { Masc_model.gemini_pro with model_id = (if flash = "" then "flash" else flash) }
+            Ok { gemini_pro with model_id = (if flash = "" then "flash" else flash) }
           else
-            Ok { Masc_model.gemini_pro with model_id }
+            Ok { gemini_pro with model_id }
         | Some adapter when adapter.canonical_name = "claude-api" ->
-          if model_id = "opus" then Ok Masc_model.claude_opus
-          else if model_id = "sonnet" then Ok Masc_model.claude_sonnet
-          else Ok { Masc_model.claude_opus with model_id }
+          if model_id = "opus" then Ok claude_opus
+          else if model_id = "sonnet" then Ok claude_sonnet
+          else Ok { claude_opus with model_id }
         | Some adapter when adapter.canonical_name = "codex-api" ->
-          Ok { Masc_model.openai_default with model_id }
+          Ok { openai_default with model_id }
         | Some adapter when adapter.canonical_name = "glm" ->
           (* "auto" or empty -> Glm_pool selects at runtime *)
           let effective_id = if model_id = "auto" then "" else model_id in
-          Ok { Masc_model.glm_cloud with model_id = effective_id }
+          Ok { glm_cloud with model_id = effective_id }
         | Some adapter when adapter.canonical_name = "openrouter" ->
           Ok {
             provider = OpenRouter;
@@ -293,16 +548,16 @@ let default_local_model_spec () =
       | Error _ -> (
           match default_execution_model_spec () with
           | Ok spec -> spec
-          | Error _ -> Masc_model.glm_cloud))
+          | Error _ -> glm_cloud))
   | None -> (
       match default_execution_model_spec () with
       | Ok spec -> spec
-      | Error _ -> Masc_model.glm_cloud)
+      | Error _ -> glm_cloud)
 
 (** Backward compat: return MASC model_spec list.
     Prefer {!call}, {!call_raw}, or {!call_with_tools} instead. *)
 let get_cascade ?(config_path = "") ~cascade_name () :
-    Masc_model.model_spec list =
+    model_spec list =
   let defaults = default_model_strings ~cascade_name in
   let configured =
     if String.length config_path > 0 then

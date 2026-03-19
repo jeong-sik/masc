@@ -458,8 +458,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     let (oas_result, oas_latency) = Llm_types.timed
                       (fun () ->
                         Keeper_oas_adapter.run_with_custom_dispatch
-                          ~meta
-                          ~model_spec_override:primary
+                          ~cascade_name:"keeper_turn"
                           ~system_prompt:(keeper_tool_loop_system_prompt
                             ~character_context:ctx_work.system_prompt)
                           ~goal:followup

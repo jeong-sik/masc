@@ -34,10 +34,10 @@ val run_with_tools :
 (** Tool loop with caller-provided dispatch closure.
     Unlike [run_with_tools], the caller controls tool execution
     (Eval_gate, Trajectory, custom logging). Returns raw OAS result;
-    caller manages tool tracking externally. *)
+    caller manages tool tracking externally.
+    [cascade_name] selects the model cascade (e.g. "keeper_turn"). *)
 val run_with_custom_dispatch :
-  meta:keeper_meta ->
-  ?model_spec_override:Llm_types.model_spec ->
+  cascade_name:string ->
   system_prompt:string ->
   goal:string ->
   max_turns:int ->

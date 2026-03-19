@@ -79,8 +79,7 @@ let run_with_tools
 (* ================================================================ *)
 
 let run_with_custom_dispatch
-    ~(meta : keeper_meta)
-    ?(model_spec_override : Llm_types.model_spec option)
+    ~(cascade_name : string)
     ~(system_prompt : string)
     ~(goal : string)
     ~(max_turns : int)
@@ -91,31 +90,9 @@ let run_with_custom_dispatch
     ?(guardrails : Agent_sdk.Guardrails.t option)
     ()
   : (Oas_worker.run_result, string) result =
-  let model_spec_r = match model_spec_override with
-    | Some spec -> Ok spec
-    | None -> resolve_primary_model_spec meta
-  in
-  match model_spec_r with
-  | Error e -> Error e
-  | Ok model_spec ->
-  match require_net () with
-  | Error e -> Error e
-  | Ok net ->
-  match require_switch () with
-  | Error e -> Error e
-  | Ok sw ->
-  let oas_config = { (Oas_worker.default_config
-    ~name:(Printf.sprintf "keeper-%s-turn" meta.name)
-    ~model_spec
-    ~system_prompt
-    ~tools:[]) with
-    max_turns;
-    max_tokens;
-    temperature;
-    guardrails;
-  } in
-  Oas_worker.run_with_masc_tools
-    ~sw ~net ~config:oas_config ~masc_tools ~dispatch goal
+  Oas_worker.run_named_with_masc_tools
+    ~cascade_name ~goal ~system_prompt ~masc_tools ~dispatch
+    ~max_turns ~temperature ~max_tokens ?guardrails ()
 
 (* ================================================================ *)
 (* Public: run_simple                                                *)

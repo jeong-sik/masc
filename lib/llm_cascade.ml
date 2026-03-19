@@ -189,7 +189,7 @@ let format_cascade_error ~cascade_name = function
 let complete_cascade ~cascade_name ~messages
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
     ?(max_tokens = 500) ?(accept = fun _ -> true) ?tools () =
-  let env = Llm_eio_env.get () in
+  let env = Masc_eio_env.get () in
   let defaults = default_model_strings ~cascade_name in
   let config_path_opt =
     if String.length config_path > 0 then Some config_path

@@ -342,7 +342,6 @@ module Keeper_deliberation = Keeper_deliberation
 module Keeper_types = Keeper_types
 module Keeper_memory = Keeper_memory
 module Keeper_alerting = Keeper_alerting
-module Keeper_oas_adapter = Keeper_oas_adapter
 module Oas_worker = Oas_worker
 module Keeper_exec_tools = Keeper_exec_tools
 module Keeper_exec_status = Keeper_exec_status
@@ -351,7 +350,6 @@ module Keeper_learning = Keeper_learning
 module Keeper_feedback_tool = Keeper_feedback_tool
 module Keeper_keepalive = Keeper_keepalive
 module Keeper_runtime = Keeper_runtime
-module Keeper_oas_adapter = Keeper_oas_adapter
 
 (* Autonomy Adjuster — Feedback Closure (Phase 4) *)
 module Autonomy_adjuster = Autonomy_adjuster
@@ -367,4 +365,3 @@ module Compaction_types = Compaction_types
 
 (* OAS Integration — Agent SDK v0.24+ bridge *)
 module Oas_events = Oas_events
-module Oas_worker = Oas_worker

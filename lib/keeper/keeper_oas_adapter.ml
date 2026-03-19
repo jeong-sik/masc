@@ -18,26 +18,58 @@ open Keeper_exec_tools
 let tool_dispatch_max_context = 8192
 
 let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
+    ~(gate_config : Eval_gate.gate_config option)
+    ~(accumulated_cost_ref : float ref)
     ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
   let ctx_work = Context_manager.create
     ~system_prompt:(Printf.sprintf "Keeper %s OAS tool dispatch" meta.name)
     ~max_tokens:tool_dispatch_max_context
   in
-  let tc : Llm_types.tool_call = {
-    call_id = "";
-    call_name = name;
-    call_arguments = Yojson.Safe.to_string args;
-  } in
-  try
-    let output = execute_keeper_tool_call ~config ~meta ~ctx_work tc in
-    (true, output)
-  with exn ->
-    Log.Keeper.error "oas adapter tool %s failed: %s" name (Printexc.to_string exn);
-    (false, Yojson.Safe.to_string
-       (`Assoc [
-         ("error", `String "Tool execution failed");
-         ("tool", `String name);
-       ]))
+  let args_json = Yojson.Safe.to_string args in
+  let execute () =
+    let tc : Llm_types.tool_call = {
+      call_id = "";
+      call_name = name;
+      call_arguments = args_json;
+    } in
+    execute_keeper_tool_call ~config ~meta ~ctx_work tc
+  in
+  match gate_config with
+  | None ->
+    (try (true, execute ())
+     with exn ->
+       Log.Keeper.error "oas adapter tool %s failed: %s"
+         name (Printexc.to_string exn);
+       (false, Yojson.Safe.to_string
+          (`Assoc [("error", `String "Tool execution failed");
+                   ("tool", `String name)])))
+  | Some gate ->
+    let (decision, result_opt, eval_opt, _duration) =
+      Eval_gate.guarded_execute
+        ~config:gate
+        ~accumulated_cost:!accumulated_cost_ref
+        ~trajectory_acc:None
+        ~tool_name:name
+        ~args_json
+        ~execute
+    in
+    (match decision with
+     | Trajectory.Reject reason ->
+       Log.Keeper.warn "eval_gate rejected %s: %s" name reason;
+       (false, Yojson.Safe.to_string
+          (`Assoc [("error", `String ("Gate rejected: " ^ reason));
+                   ("tool", `String name)]))
+     | Trajectory.Pass ->
+       let output = Option.value ~default:"{}" result_opt in
+       (match eval_opt with
+        | Some eval ->
+          accumulated_cost_ref :=
+            !accumulated_cost_ref +. eval.Eval_gate.cost_usd;
+          if eval.Eval_gate.should_warn then
+            Log.Keeper.warn "eval_gate warning for %s: %s"
+              name (Option.value ~default:"" eval.Eval_gate.warning)
+        | None -> ());
+       (true, output))
 
 (* ================================================================ *)
 (* Public: run_with_tools                                            *)
@@ -57,14 +89,16 @@ let run_with_tools
     ~(max_turns : int)
     ~(temperature : float)
     ~(max_tokens : int)
+    ?(gate_config : Eval_gate.gate_config option)
     ?(guardrails : Agent_sdk.Guardrails.t option)
     ()
   : (tools_run_result, string) result =
   let masc_tools = keeper_allowed_llm_tools meta in
   let tools_executed_ref = ref [] in
+  let accumulated_cost_ref = ref 0.0 in
   let dispatch ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
     tools_executed_ref := name :: !tools_executed_ref;
-    make_dispatch ~config ~meta ~name ~args
+    make_dispatch ~config ~meta ~gate_config ~accumulated_cost_ref ~name ~args
   in
   match Oas_worker.run_named_with_masc_tools
     ~cascade_name ~goal ~system_prompt ~masc_tools ~dispatch

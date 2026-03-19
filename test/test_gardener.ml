@@ -4,6 +4,16 @@ open Alcotest
 open Masc_mcp
 open Masc_mcp.Gardener_types
 
+let test_dir () =
+  let tmp = Filename.temp_file "masc_gardener_test" "" in
+  Sys.remove tmp;
+  Unix.mkdir tmp 0o755;
+  tmp
+
+let cleanup_dir dir =
+  try Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)) |> ignore
+  with _ -> ()
+
 (** {1 Configuration Tests} *)
 
 let test_load_config () =
@@ -934,9 +944,14 @@ let test_tick_opens_backlog_triage_session_with_inactive_joined_agent () =
     in_progress_count = 0; done_count = 1; orphan_count = 0;
     oldest_todo_age_hours = 2.0; high_priority_todo = 1;
   } in
-  match Gardener_worker.run_for_backlog ~backlog with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "expected Error for OAS worker without Eio context"
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room.default_config dir in
+      match Gardener_worker.run_for_backlog ~config ~backlog with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "expected Error for OAS worker without Eio context")
 
 (** {1 Duplicate Task Prevention Tests (Issue #1439)} *)
 

@@ -1,7 +1,8 @@
 // Pulse Strip — horizontal agent bubble bar with state-driven colors and animation
 
 import { html } from 'htm/preact'
-import { agentPulses, selectAgent, selectedAgent, type PulseState } from '../../live-store'
+import { agentPulses, type PulseState } from '../../live-store'
+import { openAgentDetail, selectedAgentName } from '../agent-detail'
 
 function pulseStateClass(state: PulseState): string {
   switch (state) {
@@ -13,7 +14,7 @@ function pulseStateClass(state: PulseState): string {
 
 export function PulseStrip() {
   const pulses = agentPulses.value
-  const selected = selectedAgent.value
+  const selected = selectedAgentName.value
 
   if (pulses.length === 0) {
     return html`
@@ -29,7 +30,7 @@ export function PulseStrip() {
         <button
           key=${p.name}
           class="pulse-bubble ${pulseStateClass(p.state)} ${selected === p.name ? 'pulse-selected' : ''}"
-          onClick=${() => selectAgent(selected === p.name ? null : p.name)}
+          onClick=${() => openAgentDetail(p.name)}
           title="${p.koreanName ? `${p.name} (${p.koreanName})` : p.name}${p.currentTask ? ` — ${p.currentTask}` : ''}"
         >
           <span class="pulse-emoji">${p.emoji || p.name.charAt(0).toUpperCase()}</span>

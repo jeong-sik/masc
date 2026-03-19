@@ -50,6 +50,24 @@ export function findKeeper(name?: string | null): Keeper | null {
   return keepers.value.find(keeper => keeper.name === name || keeper.agent_name === name) ?? null
 }
 
+/** Build a minimal Keeper from a continuity brief when the full Keeper object is not in the store.
+ *  This prevents silent click failures on keeper cards. */
+export function keeperFromBrief(brief: DashboardExecutionContinuityBrief): Keeper {
+  return {
+    name: brief.name,
+    agent_name: brief.agent_name ?? brief.name,
+    status: brief.status ?? 'unknown',
+    emoji: brief.emoji ?? '',
+    koreanName: brief.korean_name ?? null,
+    context_ratio: brief.context_ratio ?? null,
+  } as Keeper
+}
+
+/** Find a full Keeper from the store, or fall back to constructing one from a continuity brief. */
+export function findKeeperOrFallback(brief: DashboardExecutionContinuityBrief): Keeper {
+  return findKeeper(brief.name) ?? keeperFromBrief(brief)
+}
+
 export function agentStateLabel(state: DashboardExecutionWorkerSupportBrief['state']): string {
   switch (state) {
     case 'working': return '작업 중'

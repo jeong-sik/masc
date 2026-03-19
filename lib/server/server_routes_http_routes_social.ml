@@ -64,13 +64,14 @@ let add_routes router =
        with_public_read (fun state _req reqd ->
          let base_path = state.Mcp_server.room_config.base_path in
          let path = Http.Request.path request in
-         let prefix = "/api/v1/governance/cases/" in
-         let case_id =
-           String.sub path (String.length prefix)
-             (String.length path - String.length prefix)
-         in
-         let (status, json) = governance_case_detail_json ~base_path ~case_id in
-         respond_json_with_cors ~status request reqd (Yojson.Safe.to_string json)
+         (match extract_path_param ~prefix:"/api/v1/governance/cases/" path with
+          | None ->
+              Http.Response.json
+                (Yojson.Safe.to_string (`Assoc [("error", `String "case_id is required")]))
+                ~status:`Bad_request reqd
+          | Some case_id ->
+              let (status, json) = governance_case_detail_json ~base_path ~case_id in
+              respond_json_with_cors ~status request reqd (Yojson.Safe.to_string json))
        ) request reqd)
 
   |> Http.Router.get "/api/v1/governance/feed" (fun request reqd ->
@@ -203,44 +204,46 @@ let add_routes router =
   |> Http.Router.prefix_get "/api/v1/mentions/" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          let path = Http.Request.path request in
-         let prefix = "/api/v1/mentions/" in
-         let agent_name =
-           String.sub path (String.length prefix)
-             (String.length path - String.length prefix)
-         in
-         let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
-         let mentions =
-           Mention_inbox.read_mentions state.Mcp_server.room_config
-             ~target_agent:agent_name ~limit
-         in
-         let unread =
-           Mention_inbox.unread_count state.Mcp_server.room_config
-             ~target_agent:agent_name
-         in
-         let json = `Assoc [
-           ("agent", `String agent_name);
-           ("unread_count", `Int unread);
-           ("mentions", `List (List.map Mention_inbox.mention_record_to_json mentions));
-         ] in
-         Http.Response.json (Yojson.Safe.to_string json) reqd
+         (match extract_path_param ~prefix:"/api/v1/mentions/" path with
+          | None ->
+              Http.Response.json
+                (Yojson.Safe.to_string (`Assoc [("error", `String "agent_name is required")]))
+                ~status:`Bad_request reqd
+          | Some agent_name ->
+              let limit = standard_limit request in
+              let mentions =
+                Mention_inbox.read_mentions state.Mcp_server.room_config
+                  ~target_agent:agent_name ~limit
+              in
+              let unread =
+                Mention_inbox.unread_count state.Mcp_server.room_config
+                  ~target_agent:agent_name
+              in
+              let json = `Assoc [
+                ("agent", `String agent_name);
+                ("unread_count", `Int unread);
+                ("mentions", `List (List.map Mention_inbox.mention_record_to_json mentions));
+              ] in
+              Http.Response.json (Yojson.Safe.to_string json) reqd)
        ) request reqd)
 
   (* Agent Reputation API *)
   |> Http.Router.prefix_get "/api/v1/reputation/" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          let path = Http.Request.path request in
-         let prefix = "/api/v1/reputation/" in
-         let agent_name =
-           String.sub path (String.length prefix)
-             (String.length path - String.length prefix)
-         in
-         let rep =
-           Agent_reputation.compute_reputation
-             state.Mcp_server.room_config ~agent_name
-         in
-         Http.Response.json
-           (Yojson.Safe.to_string (Agent_reputation.reputation_to_json rep))
-           reqd
+         (match extract_path_param ~prefix:"/api/v1/reputation/" path with
+          | None ->
+              Http.Response.json
+                (Yojson.Safe.to_string (`Assoc [("error", `String "agent_name is required")]))
+                ~status:`Bad_request reqd
+          | Some agent_name ->
+              let rep =
+                Agent_reputation.compute_reputation
+                  state.Mcp_server.room_config ~agent_name
+              in
+              Http.Response.json
+                (Yojson.Safe.to_string (Agent_reputation.reputation_to_json rep))
+                reqd)
        ) request reqd)
 
   (* Activity Feed API *)

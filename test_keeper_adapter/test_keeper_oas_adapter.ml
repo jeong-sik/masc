@@ -13,6 +13,8 @@ let make_model_spec ?(model_id = "test-model") ?(provider = Llm_types.Llama) () 
   { provider;
     model_id;
     max_context = 4096;
+    api_url = "";
+    api_key_env = None;
     cost_per_1k_input = 0.0;
     cost_per_1k_output = 0.0;
   }
@@ -103,13 +105,14 @@ let test_cascade_config_preserves_temperature () =
 (* ================================================================ *)
 
 let make_run_result ?(model = "test") ?(text = "hello")
-    ?(input_tokens = 10) ?(output_tokens = 5) () : Oas_worker.run_result =
-  let open Masc_mcp in
+    ?(input_tokens = 10) ?(output_tokens = 5) () : Masc_mcp.Oas_worker.run_result =
   { response = {
       Llm_provider.Types.model;
-      content = [Llm_provider.Types.TextBlock { text }];
-      stop_reason = Some "end_turn";
-      usage = Some { input_tokens; output_tokens };
+      content = [Llm_provider.Types.Text text];
+      stop_reason = Llm_provider.Types.EndTurn;
+      usage = Some { input_tokens; output_tokens;
+                     cache_creation_input_tokens = 0;
+                     cache_read_input_tokens = 0 };
       id = "test-id";
     };
     checkpoint = None;

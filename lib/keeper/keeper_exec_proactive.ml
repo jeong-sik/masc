@@ -184,7 +184,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                     in
                     (* model_specs retained for cost estimation only *)
                     let model_specs =
-                      Llm_types.available_model_specs_of_strings meta.models
+                      Llm_cascade.available_model_specs_of_strings meta.models
                     in
                     let (result, delib_latency) = Llm_types.timed (fun () ->
                       Keeper_oas_adapter.run_simple
@@ -213,7 +213,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                           let primary =
                             match model_specs with
                             | p :: _ -> p
-                            | [] -> Llm_types.default_local_model_spec ()
+                            | [] -> Llm_cascade.default_local_model_spec ()
                           in
                           (inp *. primary.cost_per_1k_input)
                           +. (outp *. primary.cost_per_1k_output)
@@ -538,7 +538,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                let primary =
                  match specs with
                  | p :: _ -> p
-                 | [] -> Llm_types.default_local_model_spec ()
+                 | [] -> Llm_cascade.default_local_model_spec ()
                in
                let base_dir = session_base_dir ctx.config in
                let (session, ctx_opt) =

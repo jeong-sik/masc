@@ -652,9 +652,9 @@ Call masc_listen again to continue listening.
             let spec_name =
               if String.contains raw ':' then raw else "llama:" ^ raw
             in
-            Llm_types.model_spec_of_string spec_name
-        | _, Some _ -> Llm_types.default_execution_model_spec ()
-        | _, None -> Llm_types.default_execution_model_spec ()
+            Llm_cascade.model_spec_of_string spec_name
+        | _, Some _ -> Llm_cascade.default_execution_model_spec ()
+        | _, None -> Llm_cascade.default_execution_model_spec ()
       in
       let module U = Yojson.Safe.Util in
       let working_dir = match arguments |> U.member "working_dir" with

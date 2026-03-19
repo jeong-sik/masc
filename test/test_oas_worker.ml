@@ -44,7 +44,7 @@ let field key json = Yojson.Safe.Util.member key json
 
 let test_default_config_fields () =
   let model_spec =
-    match Llm_types.model_spec_of_string "llama:test-model" with
+    match Llm_cascade.model_spec_of_string "llama:test-model" with
     | Ok m -> m
     | Error e -> failwith e
   in
@@ -69,7 +69,7 @@ let test_default_config_fields () =
 
 let test_default_config_custom_values () =
   let model_spec =
-    match Llm_types.model_spec_of_string "llama:custom-model" with
+    match Llm_cascade.model_spec_of_string "llama:custom-model" with
     | Ok m -> m
     | Error e -> failwith e
   in
@@ -98,7 +98,7 @@ let test_build_with_mock_net () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let model_spec =
-    match Llm_types.model_spec_of_string "llama:test-model" with
+    match Llm_cascade.model_spec_of_string "llama:test-model" with
     | Ok m -> m
     | Error e -> failwith e
   in
@@ -120,7 +120,7 @@ let test_build_invalid_config () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let model_spec =
-    match Llm_types.model_spec_of_string "llama:test-model" with
+    match Llm_cascade.model_spec_of_string "llama:test-model" with
     | Ok m -> m
     | Error e -> failwith e
   in
@@ -142,7 +142,7 @@ let test_build_with_tools () =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let model_spec =
-    match Llm_types.model_spec_of_string "llama:test-model" with
+    match Llm_cascade.model_spec_of_string "llama:test-model" with
     | Ok m -> m
     | Error e -> failwith e
   in

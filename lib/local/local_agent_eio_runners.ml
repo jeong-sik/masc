@@ -411,7 +411,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                 }
               in
               let model =
-                let base_model = Llm_types.default_local_model_spec () in
+                let base_model = Llm_cascade.default_local_model_spec () in
                 let model_id =
                   if checkpoint.model <> "" then checkpoint.model
                   else meta.effective_model

@@ -82,7 +82,7 @@ let validate_model_spec (spec : Llm_types.model_spec) :
 let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
     (Llm_types.model_spec * string, string) result =
   let parse_worker_model raw =
-    match Llm_types.model_spec_of_string raw with
+    match Llm_cascade.model_spec_of_string raw with
     | Error _ as e -> e
     | Ok spec -> (
         match validate_model_spec spec with
@@ -157,7 +157,7 @@ let run ~(sw : Eio.Switch.t) ~(config : Room.config) (state : Mdal.loop_state)
         raise (Invalid_argument message)
   in
   let model_spec =
-    match Llm_types.model_spec_of_string model_label with
+    match Llm_cascade.model_spec_of_string model_label with
     | Ok spec -> spec
     | Error message -> raise (Invalid_argument message)
   in

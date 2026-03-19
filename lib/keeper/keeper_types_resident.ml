@@ -23,7 +23,7 @@ let model_specs_of_strings (model_strs : string list) :
   let rec go acc = function
     | [] -> Ok (List.rev acc)
     | s :: rest -> (
-        match Llm_types.model_spec_of_string s with
+        match Llm_cascade.model_spec_of_string s with
         | Ok spec -> go (spec :: acc) rest
         | Error e -> Error (Printf.sprintf "Bad model spec %s: %s" s e))
   in

@@ -350,22 +350,78 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     in
     loop ())
 
+(* Trim a full mission JSON to a lightweight snapshot:
+   summary, session_briefs (goal/elapsed/blocker only), attention_queue (top 5), counts.
+   Target: <20KB vs ~483KB full. *)
+let mission_snapshot_of_full (full : Yojson.Safe.t) : Yojson.Safe.t =
+  let field key = Yojson.Safe.Util.member key full in
+  let briefs =
+    match field "session_briefs" with
+    | `List items ->
+        `List
+          (List.map
+             (fun item ->
+               let f k = Yojson.Safe.Util.member k item in
+               `Assoc
+                 [
+                   ("session_id", f "session_id");
+                   ("goal", f "goal");
+                   ("status", f "status");
+                   ("health", f "health");
+                   ("elapsed_sec", f "elapsed_sec");
+                   ("blocker_summary", f "blocker_summary");
+                 ])
+             items)
+    | other -> other
+  in
+  let attention_top5 =
+    match field "attention_queue" with
+    | `List items -> `List (List.filteri (fun i _ -> i < 5) items)
+    | other -> other
+  in
+  `Assoc
+    [
+      ("generated_at", field "generated_at");
+      ("summary", field "summary");
+      ("session_briefs", briefs);
+      ("attention_queue", attention_top5);
+      ("session_count",
+       `Int
+         (match field "sessions" with `List l -> List.length l | _ -> 0));
+      ("agent_count",
+       `Int
+         (match field "agent_briefs" with
+         | `List l -> List.length l
+         | _ -> 0));
+      ("keeper_count",
+       `Int
+         (match field "keeper_briefs" with
+         | `List l -> List.length l
+         | _ -> 0));
+    ]
+
 let dashboard_mission_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in
-  match actor with
-  | None ->
-    (* Default: return proactively cached value immediately (0ms). *)
-    !_mission_json_ref
-  | Some _ ->
-    (* Actor-parameterized: on-demand with SWR cache. *)
-    let cache_key =
-      Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
-    in
-    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-      ~clock ~timeout_sec:30.0 (fun () ->
-      Dashboard_mission.json ?actor
-        ~config:state.Mcp_server.room_config ~sw ~clock
-        ~proc_mgr:state.Mcp_server.proc_mgr ())
+  let mode = query_param request "mode" in
+  let full_json =
+    match actor with
+    | None ->
+      (* Default: return proactively cached value immediately (0ms). *)
+      !_mission_json_ref
+    | Some _ ->
+      (* Actor-parameterized: on-demand with SWR cache. *)
+      let cache_key =
+        Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
+      in
+      Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
+        ~clock ~timeout_sec:30.0 (fun () ->
+        Dashboard_mission.json ?actor
+          ~config:state.Mcp_server.room_config ~sw ~clock
+          ~proc_mgr:state.Mcp_server.proc_mgr ())
+  in
+  match mode with
+  | Some "snapshot" -> mission_snapshot_of_full full_json
+  | _ -> full_json
 
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with

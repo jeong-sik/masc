@@ -4,7 +4,6 @@ import type {
   DashboardSemanticPanel,
 } from '../../types'
 import {
-  dashboardSemanticsLoading,
   findDashboardSemanticPanel,
 } from '../../store'
 
@@ -64,11 +63,7 @@ export function PanelSemanticDetails({
   label?: string
 }) {
   const panel = findDashboardSemanticPanel(panelId)
-  if (!panel) {
-    return dashboardSemanticsLoading.value
-      ? html`<span class="semantic-inline-state">의미 계층 불러오는 중…</span>`
-      : null
-  }
+  if (!panel) return null
   return html`
     <details class="semantic-inline ${compact ? 'compact' : ''}">
       <summary class="semantic-summary">${label}</summary>

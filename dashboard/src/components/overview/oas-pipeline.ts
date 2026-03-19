@@ -1,53 +1,49 @@
-// OAS Agent Pipeline — real-time agent lifecycle and keeper snapshot monitor.
-// Shows recent agent selection/decision/execution events from OAS Event_bus.
+// OAS Agent Pipeline — summary view with expandable raw events.
+// Shows 3-line summary + keeper context bars. Raw events behind <details> toggle.
 
 import { html } from 'htm/preact'
 import { oasAgentEvents, oasKeeperSnapshots, oasHealthSummary } from '../../store'
-
-function actionBadge(action: string | undefined): string {
-  switch (action) {
-    case 'post': return 'badge--post'
-    case 'comment': return 'badge--comment'
-    case 'upvote': return 'badge--upvote'
-    case 'skip': return 'badge--skip'
-    case 'passed': return 'badge--skip'
-    case 'skipped': return 'badge--skip'
-    default: return ''
-  }
-}
 
 function formatTs(ts: number): string {
   const d = new Date(ts * 1000)
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 }
 
-function OasAgentEventList() {
-  const events = oasAgentEvents.value
-  if (events.length === 0) {
-    return html`<div class="oas-empty">OAS agent event 대기 중...</div>`
+function actionBadge(action: string | undefined): string {
+  switch (action) {
+    case 'post': return 'badge--post'
+    case 'comment': return 'badge--comment'
+    case 'upvote': return 'badge--upvote'
+    case 'skip':
+    case 'passed':
+    case 'skipped': return 'badge--skip'
+    default: return ''
   }
+}
+
+function OasSummaryLines() {
+  const events = oasAgentEvents.value
+  const snapshots = oasKeeperSnapshots.value
+  const health = oasHealthSummary.value
+
+  // Count distinct active agents from recent events
+  const activeAgents = new Set(events.map(ev => ev.agent_name))
+  const firstEvent = events[0]
+  const lastEventTs = firstEvent != null ? firstEvent.timestamp : null
+  const agoMin = lastEventTs != null ? Math.round((Date.now() / 1000 - lastEventTs) / 60) : null
 
   return html`
-    <div class="oas-event-list">
-      ${events.slice(0, 15).map((ev, i) => html`
-        <div class="oas-event-row" key=${i}>
-          <span class="oas-event-ts">${formatTs(ev.timestamp)}</span>
-          <span class="oas-event-agent">${ev.agent_name}</span>
-          <span class="oas-event-type">${ev.type}</span>
-          ${ev.action ? html`<span class="oas-event-badge ${actionBadge(ev.action)}">${ev.action}</span>` : null}
-          ${ev.trigger ? html`<span class="oas-event-trigger">${ev.trigger}</span>` : null}
-          ${ev.success != null ? html`<span class="oas-event-ok ${ev.success ? 'ok' : 'fail'}">${ev.success ? 'ok' : 'fail'}</span>` : null}
-        </div>
-      `)}
+    <div class="oas-summary-lines">
+      <span>${activeAgents.size} agents active</span>
+      <span>${health.totalEvents} events${snapshots.size > 0 ? `, ${snapshots.size} keepers` : ''}</span>
+      <span>${agoMin != null ? `last ${agoMin}m ago` : 'no events yet'}</span>
     </div>
   `
 }
 
-function OasKeeperSnapshotList() {
+function OasKeeperBars() {
   const snapshots = oasKeeperSnapshots.value
-  if (snapshots.size === 0) {
-    return html`<div class="oas-empty">OAS keeper snapshot 대기 중...</div>`
-  }
+  if (snapshots.size === 0) return null
 
   const entries = [...snapshots.values()].sort((a, b) => b.timestamp - a.timestamp)
 
@@ -72,6 +68,28 @@ function OasKeeperSnapshotList() {
   `
 }
 
+function OasRawEventList() {
+  const events = oasAgentEvents.value
+  if (events.length === 0) {
+    return html`<div class="oas-empty">OAS agent event 대기 중...</div>`
+  }
+
+  return html`
+    <div class="oas-event-list">
+      ${events.slice(0, 15).map((ev, i) => html`
+        <div class="oas-event-row" key=${i}>
+          <span class="oas-event-ts">${formatTs(ev.timestamp)}</span>
+          <span class="oas-event-agent">${ev.agent_name}</span>
+          <span class="oas-event-type">${ev.type}</span>
+          ${ev.action ? html`<span class="oas-event-badge ${actionBadge(ev.action)}">${ev.action}</span>` : null}
+          ${ev.trigger ? html`<span class="oas-event-trigger">${ev.trigger}</span>` : null}
+          ${ev.success != null ? html`<span class="oas-event-ok ${ev.success ? 'ok' : 'fail'}">${ev.success ? 'ok' : 'fail'}</span>` : null}
+        </div>
+      `)}
+    </div>
+  `
+}
+
 export function OasPipeline() {
   const health = oasHealthSummary.value
 
@@ -82,15 +100,17 @@ export function OasPipeline() {
         <span class="oas-pipeline__count">${health.totalEvents} events</span>
       </div>
 
-      <div class="oas-pipeline__section">
-        <div class="oas-section-label">Agent Lifecycle</div>
-        <${OasAgentEventList} />
-      </div>
+      <${OasSummaryLines} />
 
       <div class="oas-pipeline__section">
         <div class="oas-section-label">Keeper Context</div>
-        <${OasKeeperSnapshotList} />
+        <${OasKeeperBars} />
       </div>
+
+      <details class="oas-pipeline__raw-toggle">
+        <summary>Agent Lifecycle (raw events)</summary>
+        <${OasRawEventList} />
+      </details>
     </div>
   `
 }

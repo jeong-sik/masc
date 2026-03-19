@@ -36,8 +36,8 @@ let pubsub_max_messages_from_env () =
 let generate_node_id () =
   let hostname = try Unix.gethostname () with Unix.Unix_error _ -> "unknown" in
   let pid = Unix.getpid () in
-  let rand = Random.int 10000 in
-  Printf.sprintf "%s-%d-%04d" hostname pid rand
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF in
+  Printf.sprintf "%s-%d-%04x" hostname pid hash
 
 let default_config = {
   backend_type = FileSystem;

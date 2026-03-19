@@ -83,8 +83,8 @@ let pending_episodes_dir base_path =
 
 let generate_episode_id () =
   let ts = Time_compat.now () in
-  let rand = Random.int 100000 in
-  Printf.sprintf "ep-%d-%05d" (int_of_float (ts *. 1000.0)) rand
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
+  Printf.sprintf "ep-%d-%05x" (int_of_float (ts *. 1000.0)) hash
 
 let now_iso () =
   let open Unix in
@@ -126,8 +126,8 @@ let mitosis_saga_dir base_path =
 
 let generate_saga_id () =
   let ts = Time_compat.now () in
-  let rand = Random.int 100000 in
-  Printf.sprintf "saga-%d-%05d" (int_of_float (ts *. 1000.0)) rand
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
+  Printf.sprintf "saga-%d-%05x" (int_of_float (ts *. 1000.0)) hash
 
 let ensure_dir dir =
   Fs_compat.mkdir_p dir

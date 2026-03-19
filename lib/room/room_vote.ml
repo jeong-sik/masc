@@ -32,8 +32,8 @@ let vote_create config ~proposer ~topic ~options ~required_votes =
 
   mkdir_p (votes_dir config);
 
-  let vote_id = Printf.sprintf "vote-%s-%d" (String.sub (now_iso ()) 0 10)
-    (Random.int 1_000_000) in
+  let vote_id = Printf.sprintf "vote-%s-%06x" (String.sub (now_iso ()) 0 10)
+    (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF) in
   let vote_path = Filename.concat (votes_dir config) (vote_id ^ ".json") in
 
   let vote_json = `Assoc [

@@ -104,8 +104,8 @@ let compact_if_needed
 
 let generate_trace_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rnd = Random.int 99999 in
-  Printf.sprintf "trace-%d-%05d" ts rnd
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFF in
+  Printf.sprintf "trace-%d-%05x" ts hash
 
 let keeper_board_write_tool_names =
   [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]

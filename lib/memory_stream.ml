@@ -210,10 +210,10 @@ let score_entry ?(weights = default_weights) ~now ~query (entry : memory_entry) 
 
 let add_memory ~agent_name ~content ~importance entry_type =
   let importance = max 1 (min 10 importance) in
-  let id = sprintf "%s-%d-%06d"
+  let id = sprintf "%s-%d-%06x"
     agent_name
     (int_of_float (Time_compat.now ()))
-    (Random.int 999999)
+    (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF)
   in
   let now = Time_compat.now () in
   let entry = {

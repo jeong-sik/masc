@@ -60,12 +60,10 @@ let list_dir_safe dir =
 
 (** {1 ID Generation} *)
 
-let () = Random.self_init ()
-
 let generate_debate_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rand = Random.int 1_000_000 in
-  Printf.sprintf "debate-%d-%06d" ts rand
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
+  Printf.sprintf "debate-%d-%06x" ts hash
 
 (** {1 JSON Serialization} *)
 

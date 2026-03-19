@@ -154,10 +154,10 @@ let run
   let session_id = match config.session_id with
     | Some id -> id
     | None ->
-      Printf.sprintf "%s-%d-%06d"
+      Printf.sprintf "%s-%d-%06x"
         config.name
         (int_of_float (Time_compat.now () *. 1000.0))
-        (Random.int 1_000_000)
+        (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF)
   in
   Option.iter (fun bus ->
     publish_lifecycle bus ~name:config.name ~event:"build" ~detail:goal

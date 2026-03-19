@@ -136,8 +136,8 @@ let record_outcome ~agent_name ~pattern ~evidence_id ~success =
     updated
   | None ->
     let now = Time_compat.now () in
-    let id = sprintf "proc-%s-%d-%06d"
-      agent_name (int_of_float now) (Random.int 999999) in
+    let id = sprintf "proc-%s-%d-%06x"
+      agent_name (int_of_float now) (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF) in
     let p = {
       id;
       agent_name;

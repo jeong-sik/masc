@@ -108,7 +108,7 @@ let now_ms () =
   int_of_float (Time_compat.now () *. 1000.0)
 
 let gen_goal_id () =
-  Printf.sprintf "goal-%d-%04x" (now_ms ()) (Random.int 0x10000)
+  Printf.sprintf "goal-%d-%04x" (now_ms ()) (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF)
 
 let find_goal goals id =
   List.find_opt (fun g -> g.id = id) goals

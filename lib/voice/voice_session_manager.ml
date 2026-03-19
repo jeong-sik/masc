@@ -33,7 +33,7 @@ type t = {
 (** {1 Utilities} *)
 
 let generate_session_id () =
-  (* Use smaller random values for cross-platform safety *)
+  (* intentional: voice session IDs need randomness for distributed uniqueness *)
   let high = Random.int 0xFFFF in
   let mid = Random.int 0xFFFF in
   let low = Random.int 0xFFFF in

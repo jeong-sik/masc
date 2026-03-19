@@ -167,8 +167,8 @@ let now_unix () = Time_compat.now ()
 
 let generate_id prefix =
   let ts = int_of_float (now_unix () *. 1000.0) in
-  let rand = Random.int 1_000_000 in
-  Printf.sprintf "%s-%d-%06d" prefix ts rand
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
+  Printf.sprintf "%s-%d-%06x" prefix ts hash
 
 let normalize_text raw =
   raw

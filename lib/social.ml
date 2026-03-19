@@ -35,17 +35,15 @@ type vote_record = {
 
 (** {1 ID Generation} *)
 
-let () = Random.self_init ()
-
 let generate_post_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rand = Random.int 1_000_000 in
-  Printf.sprintf "post-%d-%06d" ts rand
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
+  Printf.sprintf "post-%d-%06x" ts hash
 
 let generate_comment_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rand = Random.int 1_000_000 in
-  Printf.sprintf "cmt-%d-%06d" ts rand
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
+  Printf.sprintf "cmt-%d-%06x" ts hash
 
 (** {1 JSON Serialization} *)
 

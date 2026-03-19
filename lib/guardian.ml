@@ -143,24 +143,39 @@ let make_zombie_consumer config : (module Pulse.Consumer) =
         Error msg
   end)
 
-let make_gc_consumer config : (module Pulse.Consumer) =
+let make_gc_consumer ~sw ~clock config : (module Pulse.Consumer) =
   (module struct
     let name = "guardian-gc"
     let should_act _beat = true
     let on_beat _beat =
       try
         let result = Room.gc config ~days:gc_days () in
+        let keeper_ctx : _ Tool_keeper.context =
+          { config; agent_name = "guardian"; sw; clock; proc_mgr = None }
+        in
+        let keeper_bootstrap = Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
         (* Periodic cache eviction — piggyback on GC cycle *)
         let cache_evicted = Cache_eio.evict_expired config in
-        last_gc_result := Some result;
+        last_gc_result :=
+          Some
+            (Printf.sprintf
+               "%s\n✅ Keeper reconcile scanned=%d started=%d stale=%d recovering=%d"
+               result keeper_bootstrap.scanned keeper_bootstrap.started
+               keeper_bootstrap.stale keeper_bootstrap.recovering);
         set_last last_gc;
-        log_debug (sprintf "gc: %s (cache evicted: %d)" result cache_evicted);
+        log_debug
+          (sprintf
+             "gc: %s (cache evicted: %d, keeper started=%d recovering=%d)"
+             result cache_evicted keeper_bootstrap.started
+             keeper_bootstrap.recovering);
         publish_event "masc:guardian:gc"
           (`Assoc [
             ("agent_name", `String "guardian");
             ("result", `String result);
             ("gc_days", `Int gc_days);
             ("cache_evicted", `Int cache_evicted);
+            ("keeper_bootstrap_started", `Int keeper_bootstrap.started);
+            ("keeper_bootstrap_recovering", `Int keeper_bootstrap.recovering);
             ("timestamp", `Float (Time_compat.now ()));
           ]);
         Ok ()
@@ -229,7 +244,7 @@ let start_masc_loops_internal ~owner ~respect_guardian_toggle ?bus ~sw ~clock co
         ~clock
         ~rhythm:(fixed_rhythm gc_interval_s)
         ~lifecycle:Perpetual
-        ~consumers:[make_gc_consumer config]
+        ~consumers:[make_gc_consumer ~sw ~clock config]
       in
       gc_pulse := Some p;
       Pulse.run ~sw p;

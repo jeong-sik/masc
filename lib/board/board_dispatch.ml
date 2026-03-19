@@ -134,10 +134,12 @@ let list_posts ?(visibility_filter=None) ?hearth ?post_kind_filter ?(sort_by=Hot
   let apply_post_kind_filter posts =
     match (post_kind_filter, exclude_automation) with
     | Some kind, _ ->
-        List.filter (fun (p : Board.post) -> p.post_kind = kind) posts
+        List.filter
+          (fun (p : Board.post) -> Board.classify_post_kind p = kind)
+          posts
     | None, true ->
         List.filter (fun (p : Board.post) ->
-          p.post_kind <> Board.Automation_post) posts
+          Board.classify_post_kind p <> Board.Automation_post) posts
     | None, false -> posts
   in
   match backend () with
@@ -214,6 +216,23 @@ let set_thread_id ~post_id ~thread_id =
   match backend () with
   | Jsonl store -> Board.set_thread_id store ~post_id ~thread_id
   | Postgres t -> Board_pg.set_thread_id t ~post_id ~thread_id
+
+let delete_post ~post_id =
+  match backend () with
+  | Jsonl store -> Board.delete_post store ~post_id
+  | Postgres t -> Board_pg.delete_post t ~post_id
+
+let delete_posts_by_predicate ~predicate ?(limit=5200) () =
+  list_posts ~sort_by:Recent ~limit ()
+  |> List.fold_left
+       (fun acc (post : Board.post) ->
+         if predicate post then
+           match delete_post ~post_id:(Board.Post_id.to_string post.id) with
+           | Ok () -> acc + 1
+           | Error _ -> acc
+         else
+           acc)
+       0
 
 let search ~query ~limit =
   match backend () with

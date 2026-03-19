@@ -43,6 +43,43 @@ let cp_cleanup_fn
   : (config -> cp_cleanup_result) ref
   = ref (fun _config -> empty_cp_result)
 
+let stale_sentinel_daily_sec = 12.0 *. 3600.0
+
+let board_artifact_title title =
+  let title = String.lowercase_ascii (String.trim title) in
+  String.starts_with ~prefix:"[sentinel daily]" title
+
+let board_artifact_author author =
+  let author = String.lowercase_ascii (String.trim author) in
+  author = "auto-researcher"
+  || String.starts_with ~prefix:"qa-" author
+  || String.starts_with ~prefix:"qwen35-probe" author
+  || ((not (String.contains author ' '))
+      && String.ends_with ~suffix:"-probe" author)
+
+let should_delete_board_artifact now (post : Board.post) =
+  let author = Board.Agent_id.to_string post.author in
+  board_artifact_author author
+  || (String.equal (String.lowercase_ascii author) "sentinel"
+      && board_artifact_title post.title
+      && now -. post.updated_at >= stale_sentinel_daily_sec)
+
+let cleanup_board_artifacts () =
+  let now = Time_compat.now () in
+  Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5200 ()
+  |> List.fold_left
+       (fun removed (post : Board.post) ->
+         if should_delete_board_artifact now post then
+           match
+             Board_dispatch.delete_post
+               ~post_id:(Board.Post_id.to_string post.id)
+           with
+           | Ok () -> removed + 1
+           | Error _ -> removed
+         else
+           removed)
+       0
+
 
 (** Update agent heartbeat - must be called periodically.
     Uses scoped config for room-specific heartbeat. *)
@@ -384,7 +421,30 @@ let gc config ?(days=7) () =
   else
     results := "✅ No team sessions to archive" :: !results;
 
-  (* 7. CP data cleanup (dead units, stale operations, orphaned detachments) *)
+  (* 7. Hard-delete board/governance artifacts *)
+  let board_artifact_count = cleanup_board_artifacts () in
+  let governance_test_artifact_count =
+    Council.Governance_v2.purge_stale_test_cases config.base_path
+  in
+  let governance_artifact_count =
+    Council.Governance_v2.purge_stale_artifact_cases config.base_path
+  in
+  if board_artifact_count > 0 then
+    results :=
+      Printf.sprintf "🧽 Removed %d board artifact post(s)"
+        board_artifact_count
+      :: !results
+  else
+    results := "✅ No board artifacts" :: !results;
+  if governance_test_artifact_count > 0 || governance_artifact_count > 0 then
+    results :=
+      Printf.sprintf "⚖️ Removed %d governance artifact case(s) and %d stale test case(s)"
+        governance_artifact_count governance_test_artifact_count
+      :: !results
+  else
+    results := "✅ No governance artifacts" :: !results;
+
+  (* 8. CP data cleanup (dead units, stale operations, orphaned detachments) *)
   if not !cp_cleanup_connected then
     log_event config (Printf.sprintf
       "{\"type\":\"gc_warning\",\"msg\":\"cp_cleanup_fn not connected, CP cleanup skipped\",\"ts\":\"%s\"}"
@@ -411,8 +471,9 @@ let gc config ?(days=7) () =
       cp_result.intents_removed
   in
   log_event config (Printf.sprintf
-    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"cp_cleanup\":%s,\"days\":%d,\"ts\":\"%s\"}"
+    "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"board_artifacts\":%d,\"governance_test_artifacts\":%d,\"governance_artifacts\":%d,\"cp_cleanup\":%s,\"days\":%d,\"ts\":\"%s\"}"
     !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count !keeper_orphan_count !session_archive_count
+    board_artifact_count governance_test_artifact_count governance_artifact_count
     cp_json days (now_iso ()));
 
   String.concat "\n" (List.rev !results)

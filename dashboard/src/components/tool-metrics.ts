@@ -64,7 +64,7 @@ function TierDistribution({ dist }: { dist: Record<string, number> }) {
   const total = dist.total ?? dist.full ?? 0
   const essential = dist.essential ?? 0
   const standardOnly = dist.standard_only ?? dist.standard ?? 0
-  const fullOnly = dist.full_only ?? (total - standardOnly) ?? 0
+  const fullOnly = dist.full_only ?? (total - standardOnly)
   const essentialPct = total > 0 ? ((essential / total) * 100).toFixed(1) : '0'
   const standardPct = total > 0 ? ((standardOnly / total) * 100).toFixed(1) : '0'
   const fullOnlyPct = total > 0 ? ((fullOnly / total) * 100).toFixed(1) : '0'

@@ -207,8 +207,8 @@ export function setupSSEReaction(): () => void {
 // --- Periodic refresh ---
 
 const PERIODIC_REFRESH_MS =
-  typeof import.meta !== 'undefined' && (import.meta as Record<string, unknown>).env
-    && ((import.meta as Record<string, Record<string, unknown>>).env).DEV
+  typeof import.meta !== 'undefined'
+    && Boolean((import.meta as unknown as { env?: { DEV?: unknown } }).env?.DEV)
     ? 90_000
     : 30_000
 

@@ -24,6 +24,9 @@ export type SSEEventType =
   | 'mdal_stopped'
   | 'governance_param_changed'
   // OAS bridge events (relayed from Event_bus via oas_sse_bridge)
+  | 'oas:masc:lodge:agent_selected'
+  | 'oas:masc:lodge:agent_decision'
+  | 'oas:masc:lodge:agent_action_executed'
   | 'oas:masc:keeper:snapshot'
   | 'oas:masc:gardener:tick'
 

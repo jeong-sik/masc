@@ -287,6 +287,20 @@ let set_thread_id_q =
   (Caqti_type.(t2 string string) ->. Caqti_type.unit)
   "UPDATE masc_board_posts SET thread_id = $1 WHERE id = $2"
 
+let delete_post_votes_q =
+  (Caqti_type.string ->. Caqti_type.unit)
+  "DELETE FROM masc_board_votes WHERE target_type = 'post' AND target_id = $1"
+
+let delete_comment_votes_for_post_q =
+  (Caqti_type.string ->. Caqti_type.unit)
+  "DELETE FROM masc_board_votes \
+   WHERE target_type = 'comment' \
+     AND target_id IN (SELECT id FROM masc_board_comments WHERE post_id = $1)"
+
+let delete_post_q =
+  (Caqti_type.string ->. Caqti_type.unit)
+  "DELETE FROM masc_board_posts WHERE id = $1"
+
 let sweep_posts_q =
   (Caqti_type.int ->! Caqti_type.int)
   "WITH deleted AS ( \

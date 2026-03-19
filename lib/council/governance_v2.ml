@@ -11,6 +11,7 @@ open Yojson.Safe.Util
 include Governance_v2_types
 
 let stale_test_ttl_sec = 24.0 *. 3600.0
+let stale_artifact_ttl_sec = 12.0 *. 3600.0
 
 let risk_class_to_string = function
   | Low -> "low"
@@ -169,6 +170,15 @@ let generate_id prefix =
   let ts = int_of_float (now_unix () *. 1000.0) in
   let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
   Printf.sprintf "%s-%d-%06x" prefix ts hash
+
+let contains_substring haystack needle =
+  let hay_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    idx + needle_len <= hay_len
+    && ((String.sub haystack idx needle_len = needle) || loop (idx + 1))
+  in
+  needle_len = 0 || loop 0
 
 let normalize_text raw =
   raw
@@ -566,6 +576,32 @@ let is_test_origin origin =
   | "test" | "harness" -> true
   | _ -> false
 
+let title_has_artifact_signature title =
+  let title = String.lowercase_ascii (String.trim title) in
+  String.starts_with ~prefix:"lodge automation post volume high" title
+  || contains_substring title "qa-"
+  || contains_substring title "sm-test"
+  || contains_substring title "stress-"
+  || contains_substring title "team session fallback"
+  || contains_substring title "ghost-agent-not-joined"
+
+let source_ref_has_artifact_signature refs =
+  List.exists
+    (fun ref_ ->
+      let ref_ = String.lowercase_ascii (String.trim ref_) in
+      String.starts_with ~prefix:"anomaly-lodge-post-volume" ref_
+      || String.starts_with ~prefix:"anomaly:lodge-post-volume" ref_
+      || String.starts_with ~prefix:"task-qa-" ref_
+      || String.starts_with ~prefix:"task-sm-test" ref_
+      || String.starts_with ~prefix:"task-stress-" ref_)
+    refs
+
+let is_stale_artifact_case now (case_ : case_record) =
+  now -. case_.updated_at >= stale_artifact_ttl_sec
+  &&
+  (title_has_artifact_signature case_.title
+   || source_ref_has_artifact_signature case_.source_refs)
+
 let delete_case_bundle base_path (case_ : case_record) =
   List.iter
     (fun petition_id ->
@@ -587,11 +623,23 @@ let purge_stale_test_cases base_path =
            is_test_origin case_.origin
            && now -. case_.updated_at >= stale_test_ttl_sec)
   in
-  List.iter (delete_case_bundle base_path) stale_cases
+  List.iter (delete_case_bundle base_path) stale_cases;
+  List.length stale_cases
+
+let purge_stale_artifact_cases base_path =
+  let now = now_unix () in
+  let stale_cases =
+    load_cases_raw base_path
+    |> List.filter (fun case_ ->
+           not (is_test_origin case_.origin) && is_stale_artifact_case now case_)
+  in
+  List.iter (delete_case_bundle base_path) stale_cases;
+  List.length stale_cases
 
 let list_cases ?(include_test=false) ?(status_filter : case_status option) base_path :
     case_record list =
-  purge_stale_test_cases base_path;
+  ignore (purge_stale_test_cases base_path);
+  ignore (purge_stale_artifact_cases base_path);
   load_cases_raw base_path
   |> List.filter (fun (case_ : case_record) ->
          (include_test || not (is_test_origin case_.origin))
@@ -604,7 +652,8 @@ let list_cases ?(include_test=false) ?(status_filter : case_status option) base_
 
 let list_execution_orders ?(status_filter : order_status option) base_path :
     execution_order list =
-  purge_stale_test_cases base_path;
+  ignore (purge_stale_test_cases base_path);
+  ignore (purge_stale_artifact_cases base_path);
   load_entities (execution_orders_dir base_path) execution_order_of_yojson
   |> List.filter (fun (order : execution_order) ->
          match status_filter with
@@ -619,7 +668,8 @@ let get_case base_path case_id =
   | Some json -> case_of_yojson json
 
 let get_case_bundle ?(include_test=true) base_path case_id =
-  purge_stale_test_cases base_path;
+  ignore (purge_stale_test_cases base_path);
+  ignore (purge_stale_artifact_cases base_path);
   let* case_ = get_case base_path case_id in
   if (not include_test) && is_test_origin case_.origin then
     Error (Printf.sprintf "Case hidden by default filter: %s" case_id)

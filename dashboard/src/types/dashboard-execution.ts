@@ -251,6 +251,7 @@ export interface DashboardMemoryResponse {
     visible_posts?: number
     sort_by?: string
     exclude_system?: boolean
+    exclude_automation?: boolean
   }
   posts?: BoardPost[]
   count?: number

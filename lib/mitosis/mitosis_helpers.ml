@@ -42,31 +42,12 @@ let last_handoff_time : float ref = ref 0.0
 let reset_handoff_cooldown () =
   last_handoff_time := 0.0
 
-(** Convert Spawn_eio result to Spawn result for Mitosis compatibility *)
-let spawn_eio_to_spawn (r : Spawn_eio.spawn_result) : Spawn.spawn_result =
-  { Spawn.success = r.Spawn_eio.success;
-    output = r.Spawn_eio.output;
-    exit_code = r.Spawn_eio.exit_code;
-    elapsed_ms = r.Spawn_eio.elapsed_ms;
-    input_tokens = r.Spawn_eio.input_tokens;
-    output_tokens = r.Spawn_eio.output_tokens;
-    cache_creation_tokens = r.Spawn_eio.cache_creation_tokens;
-    cache_read_tokens = r.Spawn_eio.cache_read_tokens;
-    cost_usd = r.Spawn_eio.cost_usd }
-
-(** Create non-blocking spawn_fn when Eio context is available *)
+(** Create spawn_fn for mitosis.
+    Spawn_eio has been removed; always use the blocking Spawn.spawn path. *)
 let make_spawn_fn ~ctx ~agent_name ~timeout_seconds : (prompt:string -> Spawn.spawn_result) =
-  match ctx.sw, ctx.proc_mgr with
-  | Some sw, Some _pm ->
-      (fun ~prompt ->
-        let result = Spawn_eio.spawn ~sw ~agent_name ~prompt
-          ~timeout_seconds ~room_config:ctx.config ()
-        in
-        spawn_eio_to_spawn result)
-  | _ ->
-      (* Fallback to blocking spawn when Eio context unavailable *)
-      (fun ~prompt ->
-        Spawn.spawn ~agent_name ~prompt ~timeout_seconds ())
+  ignore ctx;
+  (fun ~prompt ->
+    Spawn.spawn ~agent_name ~prompt ~timeout_seconds ())
 
 (** Tool result type *)
 type result = bool * string

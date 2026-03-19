@@ -1,6 +1,6 @@
 (** Tests for the autonomy liberation refactoring (Phases 1-5). *)
 
-module Spawn_eio = Masc_mcp.Spawn_eio
+module Spawn = Masc_mcp.Spawn
 module Team_session_types = Masc_mcp.Team_session_types
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Agent_swarm_prompts = Masc_mcp.Agent_swarm_prompts
@@ -26,7 +26,7 @@ let contains_s haystack needle =
 (* ── Phase 1: Protocol Liberation ─────────────────────────────── *)
 
 let test_lifecycle_no_strict () =
-  let suffix = String.lowercase_ascii Spawn_eio.masc_lifecycle_suffix in
+  let suffix = String.lowercase_ascii Spawn.masc_lifecycle_suffix in
   Alcotest.(check bool) "no 'strictly'" false (contains_s suffix "strictly");
   Alcotest.(check bool) "no 'you must'" false (contains_s suffix "you must");
   Alcotest.(check bool) "contains 'capabilities'" true

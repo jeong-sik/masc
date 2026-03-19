@@ -80,44 +80,23 @@ let execute_spawn_pipeline
                    Some (`Assoc [ ("error", `String msg) ])
                | Ok () ->
                    let execute_spawn index prepared =
+                     (* Spawn_eio removed; use blocking Spawn.spawn.
+                        Extra Spawn_eio-only params are ignored; result fields
+                        (tool_names, tool_call_count, raw_trace_run) get defaults. *)
                      let spawn_result =
-                       Spawn_eio.spawn ~sw:ctx.sw
+                       Spawn.spawn
                          ~agent_name:prepared.spec.spawn_agent
                          ~prompt:prepared.spec.spawn_prompt
                          ~timeout_seconds:
                            prepared.spec.spawn_timeout_seconds
-                         ~room_config:ctx.config
-                         ?runtime_agent_name:
-                           prepared.runtime_actor_name
-                         ~runtime_model:prepared.runtime_model
-                         ?runtime_role:prepared.spec.spawn_role
-                         ?runtime_selection_note:
-                           prepared.spec.spawn_selection_note
-                         ~worker_run_id:prepared.worker_run_id
-                         ?worker_class:prepared.spec.worker_class
-                         ?worker_size:(deps.worker_size_of_spec prepared.spec)
-                         ?execution_scope:
-                           (deps.effective_execution_scope_of_spec prepared.spec)
-                         ?thinking_enabled:prepared.spec.thinking_enabled
-                         ?max_turns:prepared.spec.max_turns
-                         ~runtime_session_id:session_id ()
+                         ()
                      in
                    let output_preview =
                        deps.truncate_for_event spawn_result.output
                      in
-                     let trace_summary_json, trace_validation_json =
-                       match spawn_result.raw_trace_run with
-                       | Some run_ref -> (
-                           match
-                             deps.raw_trace_session_payloads
-                               ~config:ctx.config
-                               ~fallback_session_id:session_id
-                               run_ref
-                           with
-                           | Some pair -> (Some (fst pair), Some (snd pair))
-                           | None -> (None, None))
-                       | None -> (None, None)
-                     in
+                     (* raw_trace_run is no longer available after Spawn_eio removal *)
+                     let trace_summary_json = (None : Yojson.Safe.t option) in
+                     let trace_validation_json = (None : Yojson.Safe.t option) in
                      (match spawn_result.success with
                      | true ->
                          release_prepared_runtime prepared
@@ -144,8 +123,8 @@ let execute_spawn_pipeline
                        ?resolved_runtime:prepared.assigned_runtime
                        ~resolved_model:prepared.runtime_model.model_id
                        ?routing_reason:prepared.spec.routing_reason
-                       ~tool_names:spawn_result.tool_names
-                       ~tool_call_count:spawn_result.tool_call_count
+                       ~tool_names:([] : string list)
+                       ~tool_call_count:0
                        ~success:spawn_result.success
                        ~output_preview
                        ~evidence_session_id:
@@ -153,11 +132,11 @@ let execute_spawn_pipeline
                           .oas_worker_evidence_session_id
                             ~worker_run_id:
                               prepared.worker_run_id)
-                       ?trace_ref:spawn_result.raw_trace_run
+                       ?trace_ref:None
                        ?trace_summary:trace_summary_json
                        ?trace_validation:trace_validation_json
                          ~trace_capability:
-                         (if Option.is_some spawn_result.raw_trace_run then
+                         (if false (* raw_trace_run unavailable *) then
                             "raw"
                           else if deps.is_local_spawn_agent prepared.spec.spawn_agent
                           then "summary_only"
@@ -196,8 +175,8 @@ let execute_spawn_pipeline
                        ?assigned_runtime:prepared.assigned_runtime
                        ?spawn_selection_note:
                          prepared.spec.spawn_selection_note
-                       ~tool_names:spawn_result.tool_names
-                       ~tool_call_count:spawn_result.tool_call_count
+                       ~tool_names:([] : string list)
+                       ~tool_call_count:0
                        ~success:spawn_result.success
                        ~exit_code:spawn_result.exit_code
                        ~elapsed_ms:spawn_result.elapsed_ms
@@ -266,12 +245,12 @@ let execute_spawn_pipeline
                          ("worker_backend", if deps.is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
                          ("wait_mode", `String (Team_session_types.wait_mode_to_string wait_mode));
                          ("status", `String "completed");
-                         ("trace_capability", `String (if Option.is_some spawn_result.raw_trace_run then "raw" else "summary_only"));
+                         ("trace_capability", `String (if false (* raw_trace_run unavailable *) then "raw" else "summary_only"));
                          ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
                          ("resolved_model", `String prepared.runtime_model.model_id);
                          ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
-                         ("tool_call_count", `Int spawn_result.tool_call_count);
-                         ("tool_names", `List (List.map (fun name -> `String name) spawn_result.tool_names));
+                         ("tool_call_count", `Int 0);
+                         ("tool_names", `List (List.map (fun name -> `String name) ([] : string list)));
                          ("success", `Bool spawn_result.success);
                          ("elapsed_ms", `Int spawn_result.elapsed_ms);
                          ("output_preview", `String output_preview);

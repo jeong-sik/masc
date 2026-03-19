@@ -314,10 +314,7 @@
    session
    shutdown_hooks
    spawn
-   spawn_eio
    spawn_registry
-   async_spawn
-   tool_async_spawn
    sse
    streamable_http
    subscriptions

@@ -181,12 +181,6 @@ let spawned_agent_public_tool_names : string list =
 let spawned_agent_prefixed_tools : string list =
   Agent_tool_surfaces.spawned_agent_prefixed_tools
 
-let llama_worker_tool_names : string list =
-  Agent_tool_surfaces.llama_worker_tool_names
-
-let llama_worker_prefixed_tools : string list =
-  Agent_tool_surfaces.llama_worker_prefixed_tools
-
 let mdal_auditable_tool_names : string list =
   Agent_tool_surfaces.mdal_auditable_tool_names
 

@@ -28,12 +28,12 @@ type event =
 
 type loop_config = {
   initial_goal : string;
-  model_cascade : Llm_types.model_spec list;
-  tools : Llm_types.tool_def list;
+  model_cascade : Masc_model.model_spec list;
+  tools : Masc_model.tool_def list;
   heartbeat_interval_s : float;
   max_idle_turns : int;
   feedback_enabled : bool;
-  verifier_model : Llm_types.model_spec;
+  verifier_model : Masc_model.model_spec;
   compact_threshold : float;
   prepare_threshold : float;
   handoff_threshold : float;
@@ -65,7 +65,7 @@ type loop_state = {
   mutable started_at : float;
   mutable last_turn_ts : float;
   mutable last_model_used : string;
-  mutable last_usage : Llm_types.token_usage;
+  mutable last_usage : Masc_model.token_usage;
   mutable last_latency_ms : int;
   mutable compaction_count : int;
   mutable compaction_tokens_saved : int;
@@ -86,12 +86,12 @@ let default_config ~goal ~models ?verifier ?session_dir () =
   let verifier_model = match verifier with
     | Some v -> v
     | None -> (
-        match Llm_cascade.default_verifier_model_spec () with
+        match Cascade.default_verifier_model_spec () with
         | Ok model -> model
         | Error _ -> (
             match models with
             | model :: _ -> model
-            | [] -> Llm_types.glm_cloud))
+            | [] -> Masc_model.glm_cloud))
   in
   let session_base = match session_dir with
     | Some d -> d
@@ -158,7 +158,7 @@ let create_state config =
   in
   let primary_model = match config.model_cascade with
     | m :: _ -> m
-    | [] -> Llm_cascade.default_local_model_spec ()
+    | [] -> Cascade.default_local_model_spec ()
   in
   let context = Context_manager.create
     ~system_prompt
@@ -171,7 +171,7 @@ let create_state config =
   let session = Context_manager.create_session
     ~session_id:trace_id
     ~base_dir:config.session_base_dir in
-  let zero_usage : Llm_types.token_usage = {
+  let zero_usage : Masc_model.token_usage = {
     Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
     cache_creation_input_tokens = 0; cache_read_input_tokens = 0;
   } in
@@ -395,7 +395,7 @@ let status ~config state : Yojson.Safe.t =
     ("last_usage", `Assoc [
       ("input_tokens", `Int state.last_usage.input_tokens);
       ("output_tokens", `Int state.last_usage.output_tokens);
-      ("total_tokens", `Int (Llm_types.total_tokens state.last_usage));
+      ("total_tokens", `Int (Masc_model.total_tokens state.last_usage));
     ]);
     ("last_latency_ms", `Int state.last_latency_ms);
     ("last_heartbeat_ts", `Float state.last_heartbeat);

@@ -123,9 +123,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             match Keeper_types.model_specs_of_strings m.models with
             | Error _ -> `List []
             | Ok specs ->
-                `List (List.map (fun (s : Llm_types.model_spec) ->
+                `List (List.map (fun (s : Masc_model.model_spec) ->
                   `Assoc [
-                    ("provider", `String (Llm_types.string_of_provider s.provider));
+                    ("provider", `String (Masc_model.string_of_provider s.provider));
                     ("model_id", `String s.model_id);
                     ("max_context", `Int s.max_context);
                   ]
@@ -218,7 +218,7 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                  | Error _ -> `Assoc [("has_checkpoint", `Bool false)]
                  | Ok specs ->
                      let primary =
-                       match specs with m0 :: _ -> m0 | [] -> Llm_types.llama_default
+                       match specs with m0 :: _ -> m0 | [] -> Masc_model.llama_default
                      in
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =
@@ -355,6 +355,21 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("total_output_tokens", `Int m.total_output_tokens);
               ("total_tokens", `Int m.total_tokens);
               ("total_cost_usd", `Float m.total_cost_usd);
+              ("cost_report",
+                let cr = Eval_gate.cost_report
+                  ~accumulated_cost:m.total_cost_usd
+                  ~api_calls:m.total_turns
+                  ~input_tokens:m.total_input_tokens
+                  ~output_tokens:m.total_output_tokens
+                in
+                `Assoc [
+                  ("total_usd", `Float cr.Agent_sdk.Cost_tracker.total_usd);
+                  ("api_calls", `Int cr.api_calls);
+                  ("avg_cost_per_call", `Float cr.avg_cost_per_call);
+                  ("input_tokens", `Int cr.input_tokens);
+                  ("output_tokens", `Int cr.output_tokens);
+                  ("summary", `String (Eval_gate.cost_report_to_string cr));
+                ]);
               ("last_model_used", `String m.last_model_used);
               ("last_usage", `Assoc [
                 ("input_tokens", `Int m.last_input_tokens);

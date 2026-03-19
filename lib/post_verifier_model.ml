@@ -108,8 +108,8 @@ let score_to_verdict ~(dim_name : string) (score : int) : verdict =
   else Pass
 
 (** Validate that an LLM response contains parseable G-Eval scores. *)
-let geval_response_is_valid (resp : Llm_types.api_response) : bool =
-  match parse_geval_response (Llm_types.text_of_response resp) with
+let geval_response_is_valid (resp : Masc_model.api_response) : bool =
+  match parse_geval_response (Masc_model.text_of_response resp) with
   | Ok _ -> true
   | Error _ -> false
 
@@ -118,7 +118,7 @@ let geval_response_is_valid (resp : Llm_types.api_response) : bool =
 let verify_llm ~content : (verification_result, string) result =
   let prompt = build_geval_prompt ~content in
   match
-    Llm_cascade.call ~cascade_name:"verifier" ~prompt
+    Cascade.call ~cascade_name:"verifier" ~prompt
       ~temperature:0.2 ~timeout_sec:15 ~max_tokens:150
       ~accept:geval_response_is_valid ()
   with

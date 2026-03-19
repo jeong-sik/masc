@@ -17,7 +17,7 @@ import {
   signalTruthLabel,
   evidenceSourceLabel,
   continuityStateLabel,
-  findKeeper,
+  findKeeperOrFallback,
 } from './shared'
 
 export function WorkerSupportRow({
@@ -61,8 +61,7 @@ export function WorkerSupportRow({
 
 export function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
   const onClick = () => {
-    const keeper = findKeeper(row.name)
-    if (keeper) openKeeperDetail(keeper)
+    openKeeperDetail(findKeeperOrFallback(row))
   }
   const runtimeLabel = keeperRuntimeLabel(row.name, row.agent_name)
   const model: CanonicalKeeperCardModel = {

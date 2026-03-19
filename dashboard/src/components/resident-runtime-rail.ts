@@ -3,7 +3,6 @@ import type { ComponentChildren } from 'preact'
 import { connected, eventCount } from '../sse'
 import {
   refreshDashboard,
-  refreshDashboardSemantics,
   agents,
   tasks,
   keepers,
@@ -201,7 +200,6 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
           class="rail-refresh-btn"
           onClick=${() => {
             refreshDashboard()
-            refreshDashboardSemantics()
             refreshForTab(currentTab)
           }}
         >

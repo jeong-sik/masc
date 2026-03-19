@@ -44,11 +44,11 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
 
   let response =
     match
-      Llm_cascade.call ~cascade_name:"gardener_spawn" ~prompt
+      Cascade.call ~cascade_name:"gardener_spawn" ~prompt
         ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~max_tokens:200 () with
-    | Ok r -> r.Llm_cascade.response
+    | Ok r -> r.Cascade.response
     | Error _ -> ""
   in
 
@@ -229,27 +229,31 @@ let decide_retire ~config ~health ~(agent_stats : agent_stats) : retirement_deci
 let execute_spawn ?sw ?room_config ~(decision : spawn_decision) () : (string, string) result =
   match decision with
   | SpawnApproved { topic; proposed_traits; proposed_hours = _; reason; _ } ->
-      ignore (sw, room_config);
+      ignore sw;
       Eio.traceln "[Gardener] Executing OAS worker spawn: %s (reason: %s)" topic reason;
       let config = load_config () in
       let traits_str = String.concat ", " proposed_traits in
-      (match Gardener_worker.run_for_gap ~topic ~traits_str ~reason with
-       | Ok result ->
-           record_spawn ();
-           reset_circuit ();
-           let msg = Printf.sprintf
-             "OAS worker completed for '%s' (turns=%d, session=%s)"
-             topic result.Oas_worker.turns result.Oas_worker.session_id in
-           let store = Board.global () in
-           (try ignore (Board.create_post store ~author:"gardener"
-             ~content:(Printf.sprintf "Worker completed: %s\nTopic: %s\nReason: %s\nTurns: %d"
-               result.Oas_worker.session_id topic reason result.Oas_worker.turns)
-             ~ttl_hours:24 ())
-            with exn -> Log.Spawn.error "Board.create_post failed: %s" (Printexc.to_string exn));
-           Ok msg
-       | Error e ->
-           trip_circuit ~config;
-           Error (Printf.sprintf "OAS worker failed: %s" e))
+      (match room_config with
+       | None ->
+           Error "room_config required for OAS worker spawn (call from tick loop)"
+       | Some room_cfg ->
+           (match Gardener_worker.run_for_gap ~config:room_cfg ~topic ~traits_str ~reason with
+            | Ok result ->
+                record_spawn ();
+                reset_circuit ();
+                let msg = Printf.sprintf
+                  "OAS worker completed for '%s' (turns=%d, session=%s)"
+                  topic result.Oas_worker.turns result.Oas_worker.session_id in
+                let store = Board.global () in
+                (try ignore (Board.create_post store ~author:"gardener"
+                  ~content:(Printf.sprintf "Worker completed: %s\nTopic: %s\nReason: %s\nTurns: %d"
+                    result.Oas_worker.session_id topic reason result.Oas_worker.turns)
+                  ~ttl_hours:24 ())
+                 with exn -> Log.Spawn.error "Board.create_post failed: %s" (Printexc.to_string exn));
+                Ok msg
+            | Error e ->
+                trip_circuit ~config;
+                Error (Printf.sprintf "OAS worker failed: %s" e)))
   | SpawnDeferred { topic = _; reason; _ } ->
       Error (Printf.sprintf "Spawn deferred: %s" reason)
   | SpawnRejected { topic; reason } ->
@@ -432,11 +436,11 @@ Room 내 활성 에이전트: %d
 
   let response =
     match
-      Llm_cascade.call ~cascade_name:"gardener_spawn" ~prompt
+      Cascade.call ~cascade_name:"gardener_spawn" ~prompt
         ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~max_tokens:300 () with
-    | Ok r -> Ok r.Llm_cascade.response
+    | Ok r -> Ok r.Cascade.response
     | Error err -> Error ("llm intervention failed: " ^ err)
   in
 

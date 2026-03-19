@@ -58,16 +58,16 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     match canonical_policy_action_budget meta.policy_action_budget with
     | "board" -> dedupe_tool_names (keeper_board_tool_names @ with_shell)
     | _ -> dedupe_tool_names with_shell
-  else keeper_llm_tools |> List.map (fun tool -> tool.Llm_types.tool_name)
+  else keeper_llm_tools |> List.map (fun tool -> tool.Masc_model.tool_name)
 
 let keeper_allowed_llm_tools ?(write_done = false) (meta : keeper_meta) :
-    Llm_types.tool_def list =
+    Masc_model.tool_def list =
   let allowed = keeper_allowed_tool_names ~write_done meta in
   if allowed = [] then
     []
   else
     keeper_llm_tools
-    |> List.filter (fun tool -> List.mem tool.Llm_types.tool_name allowed)
+    |> List.filter (fun tool -> List.mem tool.Masc_model.tool_name allowed)
 
 let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
   let voice = Voice_bridge.get_voice_for_agent agent_id in
@@ -97,7 +97,7 @@ let execute_keeper_tool_call
     ~(config : Room.config)
     ~(meta : keeper_meta)
     ~(ctx_work : Context_manager.working_context)
-    (tc : Llm_types.tool_call) : string =
+    (tc : Masc_model.tool_call) : string =
   let args =
     try Yojson.Safe.from_string tc.call_arguments
     with Yojson.Json_error _ -> `Assoc []
@@ -646,11 +646,11 @@ let keeper_tool_loop_system_prompt ~(character_context : string) : string =
 let keeper_tool_followup_prompt
     ~(user_message : string)
     ~(draft_reply : string)
-    ~(tool_outputs : (Llm_types.tool_call * string) list)
+    ~(tool_outputs : (Masc_model.tool_call * string) list)
     ~(already_executed : string list) : string =
   let rendered =
     tool_outputs
-    |> List.map (fun ((tc : Llm_types.tool_call), output) ->
+    |> List.map (fun ((tc : Masc_model.tool_call), output) ->
            Printf.sprintf "- %s(%s)\n  => %s" tc.call_name tc.call_arguments
              output)
     |> String.concat "\n"

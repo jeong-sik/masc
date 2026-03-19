@@ -293,8 +293,8 @@ let parse_llm_intent (text : string) : (dm_intent, string) result =
                     (String.sub s 0 (min 100 (String.length s)))))
 
 (** Validate that an LLM response contains a parseable non-Unknown intent. *)
-let llm_response_is_valid (resp : Llm_types.api_response) : bool =
-  match parse_llm_intent (Llm_types.text_of_response resp) with
+let llm_response_is_valid (resp : Masc_model.api_response) : bool =
+  match parse_llm_intent (Masc_model.text_of_response resp) with
   | Ok intent -> not (equal_intent_category intent.primary Unknown)
   | Error _ -> false
 
@@ -305,7 +305,7 @@ let extract_with_llm (text : string) : (dm_intent, string) result =
   let prompt = build_classification_prompt text in
   try
     match
-      Llm_cascade.call ~cascade_name:"trpg_intent" ~prompt
+      Cascade.call ~cascade_name:"trpg_intent" ~prompt
         ~temperature:0.1 ~timeout_sec:15 ~max_tokens:200
         ~accept:llm_response_is_valid ()
     with

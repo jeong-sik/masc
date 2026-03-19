@@ -1,4 +1,6 @@
-(** Llm_types — Shared type definitions, model registry, and parsing for the LLM client subsystem. *)
+(** Masc_model — Shared type definitions, model registry, and parsing for the model subsystem.
+
+    @since 2.130.0 — renamed from Masc_model *)
 
 (** {1 Utility} *)
 

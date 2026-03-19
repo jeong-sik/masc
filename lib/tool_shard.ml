@@ -8,14 +8,14 @@
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
-  tools : Llm_types.tool_def list;
+  tools : Masc_model.tool_def list;
   removable : bool;  (** true = can be revoked at runtime *)
   description : string;
 }
 
 (** Predefined shards *)
 
-let base_tools : Llm_types.tool_def list = [
+let base_tools : Masc_model.tool_def list = [
   (* Time *)
   {
     tool_name = "keeper_time_now";
@@ -49,7 +49,7 @@ let base_tools : Llm_types.tool_def list = [
   };
 ]
 
-let board_tools : Llm_types.tool_def list = [
+let board_tools : Masc_model.tool_def list = [
   {
     tool_name = "keeper_board_post";
     tool_description = "Create a post on the MASC Board. Use hearth to target a topic channel.";
@@ -101,7 +101,7 @@ let board_tools : Llm_types.tool_def list = [
   };
 ]
 
-let filesystem_tools : Llm_types.tool_def list = [
+let filesystem_tools : Masc_model.tool_def list = [
   {
     tool_name = "keeper_fs_read";
     tool_description = "Read a file under current project root. Use for source inspection before edits.";
@@ -129,7 +129,7 @@ let filesystem_tools : Llm_types.tool_def list = [
   };
 ]
 
-let shell_tools : Llm_types.tool_def list = [
+let shell_tools : Masc_model.tool_def list = [
   {
     tool_name = "keeper_shell_readonly";
     tool_description = "Run a structured read-only project command. Supported ops: pwd, ls, cat, rg, git_status.";
@@ -171,7 +171,7 @@ let shell_tools : Llm_types.tool_def list = [
   };
 ]
 
-let voice_tools : Llm_types.tool_def list = [
+let voice_tools : Masc_model.tool_def list = [
   {
     tool_name = "keeper_voice_speak";
     tool_description = "Speak a short utterance as this keeper via the voice bridge, falling back to text when voice is unavailable.";
@@ -221,7 +221,7 @@ let voice_tools : Llm_types.tool_def list = [
   };
 ]
 
-let weather_tools : Llm_types.tool_def list = [
+let weather_tools : Masc_model.tool_def list = [
   {
     tool_name = "keeper_weather_note";
     tool_description = "Get weather capability note and recent weather-related questions.";
@@ -234,7 +234,7 @@ let weather_tools : Llm_types.tool_def list = [
   };
 ]
 
-let taskboard_tools : Llm_types.tool_def list = [
+let taskboard_tools : Masc_model.tool_def list = [
   {
     tool_name = "keeper_tasks_list";
     tool_description = "List tasks on the MASC backlog. Filter by status: todo, claimed, in_progress, done, cancelled.";
@@ -384,7 +384,7 @@ let get_shard (name : string) : shard option =
   Hashtbl.find_opt all_shards name
 
 (** Combine tools from multiple shard names *)
-let tools_of_shards (shard_names : string list) : Llm_types.tool_def list =
+let tools_of_shards (shard_names : string list) : Masc_model.tool_def list =
   shard_names
   |> List.filter_map (fun name -> Hashtbl.find_opt all_shards name)
   |> List.concat_map (fun (s : shard) -> s.tools)
@@ -424,7 +424,7 @@ let list_all_shards () : (string * bool * int) list =
   ) all_shards []
 
 (** Full tool set (all 11 tools) — backward compatible *)
-let keeper_llm_tools : Llm_types.tool_def list =
+let keeper_llm_tools : Masc_model.tool_def list =
   tools_of_shards default_shard_names
 
 (** {1 MCP Schemas} *)

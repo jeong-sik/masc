@@ -18,6 +18,7 @@ import type {
   DashboardMissionSessionBrief,
   DashboardMissionSessionCard,
   DashboardMissionSessionDetailResponse,
+  Keeper,
 } from '../types'
 import {
   type EnrichedAgentRow,
@@ -620,7 +621,15 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
 
   return html`
     <article class="mission-activity-card ${toneClass(row.brief.status ?? row.keeper?.status)} ${liveStateClass(row.brief.status, row.keeper?.status)}">
-      <button class="mission-card-select" onClick=${() => { if (row.keeper) openKeeperDetail(row.keeper) }}>
+      <button class="mission-card-select" onClick=${() => {
+        const keeper: Keeper = row.keeper ?? {
+          name: row.brief.name,
+          agent_name: row.brief.agent_name ?? row.brief.name,
+          status: row.brief.status ?? 'unknown',
+          context_ratio: row.brief.context_ratio ?? null,
+        } as Keeper
+        openKeeperDetail(keeper)
+      }}>
         <div class="mission-activity-head">
           <div class="mission-activity-title">
             <div class="mission-status-dot ${liveStateClass(row.brief.status, row.keeper?.status)}"></div>

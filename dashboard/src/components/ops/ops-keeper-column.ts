@@ -3,10 +3,13 @@
 import { html } from 'htm/preact'
 import { PanelSemanticDetails } from '../common/semantic-layer'
 import { KeeperConversationPanel } from '../keeper-shared'
+import { openKeeperDetail } from '../keeper-detail'
+import { findKeeper } from '../execution/shared'
 import {
   operatorActionLog,
   operatorSnapshot,
 } from '../../operator-store'
+import type { Keeper, OperatorKeeperSnapshot } from '../../types'
 import {
   actionTypeLabel,
   deliveryModeLabel,
@@ -18,6 +21,19 @@ import {
 
 function truncateGoal(goal: string, maxLen = 60): string {
   return goal.length > maxLen ? goal.slice(0, maxLen) + '...' : goal
+}
+
+function openOpsKeeperDetail(opsKeeper: OperatorKeeperSnapshot): void {
+  const full = findKeeper(opsKeeper.name)
+  const keeper: Keeper = full ?? {
+    name: opsKeeper.name,
+    agent_name: opsKeeper.agent_name ?? opsKeeper.name,
+    status: opsKeeper.status ?? 'unknown',
+    context_ratio: opsKeeper.context_ratio ?? null,
+    model: opsKeeper.model ?? null,
+    goal: opsKeeper.goal ?? null,
+  } as Keeper
+  openKeeperDetail(keeper)
 }
 
 export function OpsKeeperColumn() {
@@ -46,6 +62,12 @@ export function OpsKeeperColumn() {
               <div class="ops-entity-title-row">
                 <strong>${keeper.name}</strong>
                 <span class="status-badge ${keeper.status ?? 'idle'}">${displayStatus(keeper.status)}</span>
+                <span
+                  class="ops-detail-link"
+                  title="키퍼 상세 보기"
+                  style="cursor:pointer; font-size:12px; opacity:0.6; margin-left:auto;"
+                  onClick=${(e: Event) => { e.stopPropagation(); openOpsKeeperDetail(keeper) }}
+                >상세</span>
               </div>
               <div class="ops-entity-meta">
                 <span>${keeper.last_model_used ?? keeper.model ?? 'model 확인 필요'}</span>

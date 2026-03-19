@@ -940,9 +940,14 @@ let test_tick_reuses_existing_backlog_triage_session () =
     in_progress_count = 1; done_count = 2; orphan_count = 1;
     oldest_todo_age_hours = 4.0; high_priority_todo = 2;
   } in
-  match Gardener_worker.run_for_backlog ~backlog with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "expected Error for OAS worker without Eio context"
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room.default_config dir in
+      match Gardener_worker.run_for_backlog ~config ~backlog with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "expected Error for OAS worker without Eio context")
 
 (* Tick with inactive joined agent should still attempt OAS worker *)
 let test_tick_opens_backlog_triage_session_with_inactive_joined_agent () =
@@ -1275,9 +1280,14 @@ let test_worker_tool_count_bounds () =
   check bool "at most 30 tools" true (n <= 30)
 
 let test_run_for_gap_without_eio_returns_error () =
-  match Gardener_worker.run_for_gap ~topic:"test" ~traits_str:"a" ~reason:"r" with
-  | Error _ -> ()
-  | Ok _ -> fail "expected Error when Eio context is not set"
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let config = Room.default_config dir in
+      match Gardener_worker.run_for_gap ~config ~topic:"test" ~traits_str:"a" ~reason:"r" with
+      | Error _ -> ()
+      | Ok _ -> fail "expected Error when Eio context is not set")
 
 let worker_suite = [
   "worker_tools_include_claim_and_transition", `Quick,

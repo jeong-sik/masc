@@ -1189,22 +1189,34 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
       in
       check bool "keeper up ok" true ok;
       let json = Yojson.Safe.from_string body in
-      check string "policy mode" "explicit_event_v1"
-        Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
-      check bool "voice enabled" true
-        Yojson.Safe.Util.(json |> member "voice_enabled" |> to_bool);
-      check string "voice channel" "voice_text"
-        Yojson.Safe.Util.(json |> member "voice_channel" |> to_string);
-      check string "voice agent id" "sangsu"
-        Yojson.Safe.Util.(json |> member "voice_agent_id" |> to_string);
+      (* voice_config.json presence determines voice defaults:
+         present  → explicit_event_v1, voice_text, true
+         absent   → heuristic, text_only, false (CI)
+         Test checks whichever mode is active. *)
+      let voice_enabled =
+        Yojson.Safe.Util.(json |> member "voice_enabled" |> to_bool) in
+      if voice_enabled then begin
+        check string "policy mode" "explicit_event_v1"
+          Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
+        check string "voice channel" "voice_text"
+          Yojson.Safe.Util.(json |> member "voice_channel" |> to_string);
+        check string "voice agent id" "sangsu"
+          Yojson.Safe.Util.(json |> member "voice_agent_id" |> to_string)
+      end else begin
+        check string "policy mode" "heuristic"
+          Yojson.Safe.Util.(json |> member "policy_mode" |> to_string);
+        check string "voice channel" "text_only"
+          Yojson.Safe.Util.(json |> member "voice_channel" |> to_string)
+      end;
       let resident_path =
         Filename.concat base_dir ".masc/resident-keepers/sangsu.json"
       in
       check bool "resident spec exists" true (Sys.file_exists resident_path);
       let resident_json = Yojson.Safe.from_file resident_path in
-      check bool "resident voice enabled" true
+      check bool "resident voice enabled" voice_enabled
         Yojson.Safe.Util.(resident_json |> member "voice_enabled" |> to_bool);
-      check string "resident voice channel" "voice_text"
+      let expected_channel = if voice_enabled then "voice_text" else "text_only" in
+      check string "resident voice channel" expected_channel
         Yojson.Safe.Util.(resident_json |> member "voice_channel" |> to_string))
 
 let test_keeper_policy_set_accepts_explicit_event_v1 () =

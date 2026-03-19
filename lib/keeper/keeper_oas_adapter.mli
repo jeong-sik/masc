@@ -34,7 +34,9 @@ val run_with_tools :
 (** Tool loop with caller-provided dispatch closure.
     Unlike [run_with_tools], the caller controls tool execution
     (Eval_gate, Trajectory, custom logging). Returns raw OAS result;
-    caller manages tool tracking externally. *)
+    caller manages tool tracking externally.
+    [model_spec_override] is accepted for backward compat but ignored;
+    model resolution uses cascade name derived from [meta.name]. *)
 val run_with_custom_dispatch :
   meta:keeper_meta ->
   ?model_spec_override:Llm_types.model_spec ->

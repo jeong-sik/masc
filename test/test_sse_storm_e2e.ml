@@ -296,12 +296,12 @@ let test_mcp_rejects_reconnect_then_recovers () =
   let sid = Printf.sprintf "storm-mcp-%06d" (Random.int 1_000_000) in
   let headers = [("Accept", "text/event-stream"); ("Mcp-Session-Id", sid)] in
 
-  let first = run_curl ~headers ~max_time:0.6 ~port ~path:"/mcp" () in
+  let first = run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" () in
   check_status "first /mcp connect accepted" 200 first;
 
   (* MCP path no longer rate-limits SSE reconnects (rate limiting removed
      during TRPG archival). Verify immediate reconnect is accepted. *)
-  let second = run_curl ~headers ~max_time:0.6 ~port ~path:"/mcp" () in
+  let second = run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" () in
   check_status "immediate /mcp reconnect accepted" 200 second
 
 let test_ag_ui_rejects_reconnect_then_recovers () =

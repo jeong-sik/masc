@@ -251,7 +251,7 @@ let generate_action_plan ~model ~goal ~keeper_context =
   match Eio_context.get_net_opt (), Eio_context.get_switch_opt () with
   | None, _ | _, None ->
       (* Eio context unavailable — fall back to direct LLM call *)
-      (match Llm_orchestration.complete req with
+      (match Oas_worker.complete req with
        | Ok resp -> Ok (Llm_types.text_of_response resp)
        | Error e -> Error (sprintf "plan generation failed: %s" e))
   | Some net, Some sw ->

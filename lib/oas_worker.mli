@@ -54,3 +54,24 @@ val run_with_masc_tools :
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   string ->
   (run_result, string) result
+
+(** Drop-in replacement for [Llm_orchestration.complete].
+    Extracts model/messages/temperature/max_tokens from the request,
+    resolves Eio context from globals, runs a single-turn OAS agent.
+    Returns [api_response] directly for compatibility. *)
+val complete :
+  ?timeout_sec:int ->
+  Llm_types.completion_request ->
+  (Llm_types.api_response, string) result
+
+(** Drop-in replacement for [Llm_orchestration.run_prompt_cascade].
+    Tries each model spec in order via [complete]. *)
+val prompt_cascade :
+  ?temperature:float ->
+  ?timeout_sec:int ->
+  ?system:string ->
+  model_specs:Llm_types.model_spec list ->
+  max_tokens:int ->
+  prompt:string ->
+  unit ->
+  (Llm_types.api_response, string) result

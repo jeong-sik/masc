@@ -45,7 +45,7 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
   let model_specs = Llm_cascade.get_cascade ~cascade_name:"gardener_spawn" () in
   let response =
     match
-      Llm_orchestration.run_prompt_cascade ~temperature:0.3
+      Oas_worker.prompt_cascade ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~model_specs ~max_tokens:200 ~prompt () with
     | Ok resp -> Llm_types.text_of_response resp
@@ -461,7 +461,7 @@ Room 내 활성 에이전트: %d
   let model_specs = Llm_cascade.get_cascade ~cascade_name:"gardener_spawn" () in
   let response =
     match
-      Llm_orchestration.run_prompt_cascade ~temperature:0.3
+      Oas_worker.prompt_cascade ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~model_specs ~max_tokens:300 ~prompt () with
     | Ok resp -> Ok (Llm_types.text_of_response resp)

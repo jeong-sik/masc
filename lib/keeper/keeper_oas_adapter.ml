@@ -252,6 +252,7 @@ let run_cascade_stream ?timeout_sec ~on_event request ~fallback =
   (* OAS Agent SDK does not support streaming — use Llm_orchestration
      for the streaming path, fall back to OAS batch on failure. *)
   match
+    (* TODO: last remaining Llm_orchestration ref — streaming not yet supported by OAS Agent *)
     Llm_orchestration.call_provider_stream ?timeout_sec request ~on_event
   with
   | Ok _ as ok -> ok

@@ -213,3 +213,71 @@ let run_with_masc_tools
   ) masc_tools in
   let config = { config with tools = oas_tools @ config.tools } in
   run ~sw ~net ~config goal
+
+(* ================================================================ *)
+(* Convenience: complete (drop-in for Llm_orchestration.complete)    *)
+(* ================================================================ *)
+
+let extract_system_and_goal (msgs : Oas.Types.message list) : string * string =
+  let sys_parts = ref [] in
+  let user_parts = ref [] in
+  List.iter (fun (m : Oas.Types.message) ->
+    match m.role with
+    | Oas.Types.System ->
+        sys_parts := Llm_types.text_of_message m :: !sys_parts
+    | _ ->
+        let t = Llm_types.text_of_message m in
+        if String.length t > 0 then user_parts := t :: !user_parts
+  ) msgs;
+  let sys = String.concat "\n" (List.rev !sys_parts) in
+  let goal = String.concat "\n" (List.rev !user_parts) in
+  (sys, goal)
+
+let complete ?timeout_sec (req : Llm_types.completion_request)
+  : (Llm_types.api_response, string) result =
+  ignore timeout_sec;
+  let net = Eio_context.get_net () in
+  let sw = Eio_context.get_switch () in
+  let sys_prompt, goal = extract_system_and_goal req.messages in
+  if String.length goal = 0 then
+    Error "no user messages in completion request"
+  else
+  let config = {
+    (default_config
+      ~name:"oas-complete"
+      ~model_spec:req.model
+      ~system_prompt:sys_prompt
+      ~tools:[]) with
+    max_turns = 1;
+    max_tokens = req.max_tokens;
+    temperature = req.temperature;
+  } in
+  match run ~sw ~net ~config goal with
+  | Ok r -> Ok r.response
+  | Error e -> Error e
+
+let prompt_cascade ?(temperature = 0.7) ?timeout_sec ?(system = "")
+    ~model_specs ~max_tokens ~prompt () : (Llm_types.api_response, string) result =
+  let rec try_models errors = function
+    | [] ->
+        let all = String.concat "; " (List.rev errors) in
+        Error (Printf.sprintf "All cascade models failed: %s" all)
+    | (spec : Llm_types.model_spec) :: rest ->
+        let req : Llm_types.completion_request = {
+          model = spec;
+          messages = [
+            Oas.Types.system_msg system;
+            Oas.Types.user_msg prompt;
+          ];
+          temperature;
+          max_tokens;
+          tools = [];
+          response_format = `Text;
+        } in
+        (match complete ?timeout_sec req with
+         | Ok resp -> Ok resp
+         | Error e ->
+             Log.Keeper.warn "oas prompt_cascade: %s failed: %s" spec.model_id e;
+             try_models (e :: errors) rest)
+  in
+  try_models [] model_specs

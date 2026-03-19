@@ -2,7 +2,7 @@
 
 module Tool_result = Masc_mcp.Tool_result
 module Tool_dispatch = Masc_mcp.Tool_dispatch
-module Time_compat = Masc_mcp.Time_compat
+module Time_compat = Time_compat
 
 let test_wrap_json_response () =
   let start = 1000.0 in

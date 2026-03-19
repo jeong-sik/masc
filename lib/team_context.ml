@@ -185,7 +185,7 @@ let collaboration_of_session
     participants =
       List.map planned_worker_to_participant session.planned_workers;
     artifacts = [];
-    votes = [];
+    contributions = [];
     shared_context = ctx;
     created_at = session.started_at;
     updated_at =

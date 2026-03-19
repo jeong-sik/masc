@@ -49,7 +49,9 @@ let test_router_prefix_specificity () =
   let request = Httpun.Request.create `GET "/dashboard/assets/index.css" in
   (* Httpun.Reqd.t is opaque and cannot be constructed outside the HTTP
      stack. The test handlers ignore the reqd parameter entirely.
-     TODO: extract Router.resolve to remove this unsafe cast. *)
+     This unsafe cast is a known limitation; Router.dispatch should be
+     refactored to separate route resolution from request handling.
+     See: https://github.com/jeong-sik/masc-mcp/issues/1498 *)
   Router.dispatch routes request (Obj.magic () : Httpun.Reqd.t);
   Alcotest.(check string) "longest prefix route should win" "asset" !matched
 

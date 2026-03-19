@@ -23,8 +23,11 @@ WORKDIR /app
 COPY masc-mcp-linux-x64 /app/masc-mcp
 RUN chmod +x /app/masc-mcp
 
+# Create non-root user for runtime
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
+
 # Create data directory for JSONL fallback
-RUN mkdir -p /app/.masc
+RUN mkdir -p /app/.masc && chown -R appuser:appgroup /app/.masc
 
 # LLM cascade config (GLM-only for Railway, no local llama-server)
 COPY config/llm_cascade.json /app/config/llm_cascade.json
@@ -34,5 +37,7 @@ ENV MASC_BASE_PATH=/app
 ENV MASC_WORKSPACE_ROOT=/app
 
 EXPOSE 8080
+
+USER appuser
 
 CMD ["/app/masc-mcp", "--port", "8080", "--base-path", "/app"]

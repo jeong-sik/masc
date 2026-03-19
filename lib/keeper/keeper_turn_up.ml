@@ -365,17 +365,15 @@ let handle_keeper_up ctx args : tool_result =
             ~fallback_message:env_message_gate
             ~fallback_token:env_token_gate
         in
-        (match model_specs_of_strings requested_models with
+        (match ensure_api_keys_for_labels requested_models with
          | Error e -> (false, "❌ " ^ e)
-         | Ok specs ->
-           (match ensure_api_keys specs with
-           | Error e -> (false, "❌ " ^ e)
-           | Ok () ->
-             let trace_id = generate_trace_id () in
-             let primary = match specs with
-               | m :: _ -> m
-               | [] -> Cascade.default_local_model_spec ()
-             in
+         | Ok () ->
+           let specs = Cascade.available_model_specs_of_strings requested_models in
+           let trace_id = generate_trace_id () in
+           let primary = match specs with
+             | m :: _ -> m
+             | [] -> Cascade.default_local_model_spec ()
+           in
              let base_dir = session_base_dir ctx.config in
              mkdir_p base_dir;
              let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
@@ -545,7 +543,7 @@ let handle_keeper_up ctx args : tool_result =
                  ("auto_handoff", `Bool meta.auto_handoff);
                  ("handoff_threshold", `Float meta.handoff_threshold);
                ] in
-               (true, Yojson.Safe.pretty_to_string json)))
+               (true, Yojson.Safe.pretty_to_string json))
     | Ok (Some old) ->
       (* Update existing keeper meta (goal/models optional) *)
       let goal_provided = Option.is_some goal_opt in

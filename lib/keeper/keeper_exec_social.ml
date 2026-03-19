@@ -23,17 +23,15 @@ let explicit_room_prompt ~(meta : keeper_meta) ~(room_id : string) (msg : Types.
 let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_id : string)
     (msg : Types.message) : (keeper_meta * string, string) result =
   let model_labels = effective_model_labels_for_turn meta ~inline_models:[] in
-  match model_specs_of_strings model_labels with
+  match ensure_api_keys_for_labels model_labels with
   | Error e -> Error e
-  | Ok specs -> (
-      match ensure_api_keys specs with
-      | Error e -> Error e
-      | Ok () ->
-          let primary =
-            match specs with
-            | model :: _ -> model
-            | [] -> Cascade.default_local_model_spec ()
-          in
+  | Ok () ->
+      let specs = Cascade.available_model_specs_of_strings model_labels in
+      let primary =
+        match specs with
+        | model :: _ -> model
+        | [] -> Cascade.default_local_model_spec ()
+      in
           let base_dir = session_base_dir ctx.config in
           mkdir_p base_dir;
           let (session, ctx_opt) =
@@ -132,7 +130,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
                   last_latency_ms = cascade_latency;
                 }
               in
-              Ok (updated, reply))
+              Ok (updated, reply)
 
 let social_board_event_prompt ~(meta : keeper_meta) (event : social_board_event) : string =
   let event_kind =
@@ -173,17 +171,15 @@ let run_social_board_event_turn
     ~(meta : keeper_meta)
     ~(event : social_board_event) : (keeper_meta * social_turn_outcome, string) result =
   let model_labels = effective_model_labels_for_turn meta ~inline_models:[] in
-  match model_specs_of_strings model_labels with
+  match ensure_api_keys_for_labels model_labels with
   | Error e -> Error e
-  | Ok specs -> (
-      match ensure_api_keys specs with
-      | Error e -> Error e
-      | Ok () ->
-          let primary =
-            match specs with
-            | model :: _ -> model
-            | [] -> Cascade.default_local_model_spec ()
-          in
+  | Ok () ->
+      let specs = Cascade.available_model_specs_of_strings model_labels in
+      let primary =
+        match specs with
+        | model :: _ -> model
+        | [] -> Cascade.default_local_model_spec ()
+      in
           let base_dir = session_base_dir ctx.config in
           let session, ctx_opt =
             load_context_from_checkpoint
@@ -319,7 +315,7 @@ let run_social_board_event_turn
                     tools_used = final_tools_used;
                     decision_reason = Some assistant_text;
                     failure_reason = None;
-                  } ))
+                  } )
 
 let run_learned_policy_room_event
     (ctx : _ context)

@@ -22,20 +22,22 @@ let handle_keeper_model_set ctx args : tool_result =
     match read_meta ctx.config name with
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
-    | Ok (Some meta) -> (
-        match Cascade.model_spec_of_string model with
-        | Error e -> (false, "❌ " ^ e)
-        | Ok spec ->
+    | Ok (Some meta) ->
+            let is_local = label_is_local_runtime model in
             let runtime_ok =
-              match spec.provider with
-              | Cascade.Llama -> (
-                  match Tool_local_runtime.fetch_models () with
-                  | Ok (_, models) -> List.mem spec.model_id models
-                  | Error _ -> false)
-              | _ -> true
+              if is_local then (
+                let model_id =
+                  match String.index_opt model ':' with
+                  | Some i -> String.sub model (i + 1) (String.length model - i - 1)
+                  | None -> model
+                in
+                match Tool_local_runtime.fetch_models () with
+                | Ok (_, models) -> List.mem model_id models
+                | Error _ -> false)
+              else true
             in
-            if spec.provider = Cascade.Llama && not runtime_ok then
-              (false, Printf.sprintf "❌ model not present in llama inventory: %s" spec.model_id)
+            if is_local && not runtime_ok then
+              (false, Printf.sprintf "❌ model not present in llama inventory: %s" model)
             else
               let allowed_models =
                 dedupe_keep_order
@@ -66,7 +68,7 @@ let handle_keeper_model_set ctx args : tool_result =
                               (List.map (fun item -> `String item) updated.allowed_models));
                   ("room_scope", `String updated.room_scope);
                   ("trigger_mode", `String updated.trigger_mode);
-                    ]) ))
+                    ]) )
 
 
 let handle_keeper_down ctx args : tool_result =

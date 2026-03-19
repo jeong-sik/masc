@@ -120,7 +120,7 @@ let run_with_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ()
   with
   | Ok oas_result ->
-      let usage = Llm_types.usage_of_response oas_result.response in
+      let usage = Masc_model.usage_of_response oas_result.response in
       let cost_report = Some (Eval_gate.cost_report
         ~accumulated_cost:!accumulated_cost_ref
         ~api_calls:(max 1 oas_result.turns)

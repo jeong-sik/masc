@@ -41,79 +41,56 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
     (gap.topic_similarity *. 100.0)
     gap.maturity_hours
   in
-
-  let response =
-    match
-      Llm_cascade.call ~cascade_name:"gardener_spawn" ~prompt
-        ~temperature:0.3
-        ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
-        ~max_tokens:200 () with
-    | Ok r -> r.Llm_cascade.response
-    | Error _ -> ""
-  in
-
-  (* Parse LLM response *)
-  try
-    let start_opt = String.index_opt response '{' in
-    let end_opt = String.rindex_opt response '}' in
-    match start_opt, end_opt with
-    | Some start, Some end_pos when start <= end_pos ->
-        let json_str = String.sub response start (end_pos - start + 1) in
-        let json = Yojson.Safe.from_string json_str in
-        let module U = Yojson.Safe.Util in
-        let decision = json |> U.member "decision" |> U.to_string in
-        let reason = json |> U.member "reason" |> U.to_string in
-
-        (match decision with
-        | "approve" ->
-            let traits = json |> U.member "traits" |> U.to_list |> List.map U.to_string in
-            let hours = json |> U.member "hours" |> U.to_list |> List.map U.to_int in
-            SpawnApproved {
-              topic = gap.topic;
-              urgency = if gap.urgency_score > 0.7 then High else Medium;
-              proposed_traits = traits;
-              proposed_hours = hours;
-              reason;
-            }
-        | "defer" ->
-            SpawnDeferred {
-              topic = gap.topic;
-              retry_after_sec = config.spawn_cooldown_sec;
-              reason;
-            }
-        | _ ->
-            SpawnRejected {
-              topic = gap.topic;
-              reason;
-            })
-    | _ ->
-        SpawnDeferred {
-          topic = gap.topic;
-          retry_after_sec = config.spawn_cooldown_sec;
-          reason = "No JSON found in LLM response";
-        }
+  match
+    Oas_cascade.call_json ~cascade_name:"gardener_spawn" ~prompt
+      ~temperature:0.3
+      ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
+      ~max_tokens:200 ()
   with
-  | Yojson.Json_error msg ->
-      Eio.traceln "[Gardener] LLM JSON parse error: %s" msg;
+  | Error err ->
+      Eio.traceln "[Gardener] LLM decision error: %s" err;
       SpawnDeferred {
         topic = gap.topic;
         retry_after_sec = 1800.0;
-        reason = Printf.sprintf "LLM JSON parse error: %s" msg;
+        reason = Printf.sprintf "LLM decision failed: %s" err;
       }
-  | Not_found ->
-      Eio.traceln "[Gardener] LLM response missing JSON braces";
-      SpawnDeferred {
-        topic = gap.topic;
-        retry_after_sec = 1800.0;
-        reason = "LLM response missing JSON structure";
-      }
-  | exn ->
-      Eio.traceln "[Gardener] LLM decision error: %s" (Printexc.to_string exn);
-      SpawnDeferred {
-        topic = gap.topic;
-        retry_after_sec = 1800.0;
-        reason = Printf.sprintf "LLM decision failed: %s" (Printexc.to_string exn);
-      }
+  | Ok { json; _ } ->
+      let module U = Yojson.Safe.Util in
+      (try
+         let decision = json |> U.member "decision" |> U.to_string in
+         let reason = json |> U.member "reason" |> U.to_string in
+         match decision with
+         | "approve" ->
+             let traits =
+               json |> U.member "traits" |> U.to_list |> List.map U.to_string
+             in
+             let hours =
+               json |> U.member "hours" |> U.to_list |> List.map U.to_int
+             in
+             SpawnApproved
+               {
+                 topic = gap.topic;
+                 urgency = if gap.urgency_score > 0.7 then High else Medium;
+                 proposed_traits = traits;
+                 proposed_hours = hours;
+                 reason;
+               }
+         | "defer" ->
+             SpawnDeferred
+               {
+                 topic = gap.topic;
+                 retry_after_sec = config.spawn_cooldown_sec;
+                 reason;
+               }
+         | _ -> SpawnRejected { topic = gap.topic; reason }
+       with exn ->
+         let err = Printexc.to_string exn in
+         Eio.traceln "[Gardener] LLM JSON parse error: %s" err;
+         SpawnDeferred {
+           topic = gap.topic;
+           retry_after_sec = 1800.0;
+           reason = Printf.sprintf "LLM JSON parse error: %s" err;
+         })
 
 (** Rule-based spawn decision (no LLM) *)
 let decide_spawn_rule_based ~config ~health ~gap : spawn_decision =
@@ -435,44 +412,31 @@ Room 내 활성 에이전트: %d
     (health.system_error_rate *. 100.0) health.spawns_today config.max_daily_spawns
   in
 
-  let response =
+  let parsed_response =
     match
-      Llm_cascade.call ~cascade_name:"gardener_spawn" ~prompt
+      Oas_cascade.call_json ~cascade_name:"gardener_spawn" ~prompt
         ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
-        ~max_tokens:300 () with
-    | Ok r -> Ok r.Llm_cascade.response
+        ~max_tokens:300 ()
+    with
     | Error err -> Error ("llm intervention failed: " ^ err)
-  in
-
-  (* Parse LLM response *)
-  let parsed_response =
-    match response with
-    | Error err -> Error err
-    | Ok body ->
-        try
-          let start_opt = String.index_opt body '{' in
-          let end_opt = String.rindex_opt body '}' in
-          match start_opt, end_opt with
-          | Some start, Some end_pos when start <= end_pos ->
-              let json_str = String.sub body start (end_pos - start + 1) in
-              let json = Yojson.Safe.from_string json_str in
-              let module U = Yojson.Safe.Util in
-              let action = json |> U.member "action" |> U.to_string in
-              let reason =
-                match json |> U.member "reason" with
-                | `String value -> String.trim value
-                | _ -> ""
-              in
-              Ok (action, reason)
-          | _ -> Error "No JSON brackets found in LLM response"
-        with exn ->
-          let message =
-            Printf.sprintf "llm intervention JSON parse failed: %s"
-              (Printexc.to_string exn)
-          in
-          Eio.traceln "[Gardener] %s" message;
-          Error message
+    | Ok { json; _ } ->
+        let module U = Yojson.Safe.Util in
+        (try
+           let action = json |> U.member "action" |> U.to_string in
+           let reason =
+             match json |> U.member "reason" with
+             | `String value -> String.trim value
+             | _ -> ""
+           in
+           Ok (action, reason)
+         with exn ->
+           let message =
+             Printf.sprintf "llm intervention JSON parse failed: %s"
+               (Printexc.to_string exn)
+           in
+           Eio.traceln "[Gardener] %s" message;
+           Error message)
   in
   match parsed_response with
   | Error err ->
@@ -644,4 +608,3 @@ let status_json () : Yojson.Safe.t =
                    else "no_data"));
               ] );
         ])
-

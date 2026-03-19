@@ -21,6 +21,7 @@ module Oas = Agent_sdk
 type config = {
   name : string;
   model_spec : Llm_types.model_spec;
+  named_cascade : Oas.Api.named_cascade option;
   system_prompt : string;
   tools : Oas.Tool.t list;
   max_turns : int;
@@ -35,7 +36,7 @@ type config = {
 }
 
 let default_config ~name ~model_spec ~system_prompt ~tools : config =
-  { name; model_spec; system_prompt; tools;
+  { name; model_spec; named_cascade = None; system_prompt; tools;
     max_turns = 20;
     max_tokens = 4096;
     temperature = 0.7;
@@ -108,6 +109,13 @@ let build
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
   : (Oas.Agent.t, string) result =
+  (match config.named_cascade with
+  | Some named ->
+      Log.Llm.debug "oas_worker build name=%s cascade=%s tools=%d max_turns=%d"
+        config.name named.name (List.length config.tools) config.max_turns
+  | None ->
+      Log.Llm.debug "oas_worker build name=%s provider-seeded tools=%d max_turns=%d"
+        config.name (List.length config.tools) config.max_turns);
   let provider = resolve_provider config.model_spec in
   let tool_names =
     List.map (fun (t : Oas.Tool.t) -> t.schema.name) config.tools in
@@ -129,6 +137,10 @@ let build
     |> Oas.Builder.with_provider provider
     |> Oas.Builder.with_tools config.tools
     |> Oas.Builder.with_guardrails guardrails
+  in
+  let builder = match config.named_cascade with
+    | Some named -> Oas.Builder.with_named_cascade named builder
+    | None -> builder
   in
   let builder = match config.hooks with
     | Some h -> Oas.Builder.with_hooks h builder
@@ -230,7 +242,7 @@ let require_eio () =
   | _, None -> Error "Eio net not available (running outside server context)"
 
 let resolve_cascade ~cascade_name =
-  match Llm_cascade.get_cascade ~cascade_name () with
+  match Oas_cascade.get_cascade ~cascade_name () with
   | [] ->
     Error (Printf.sprintf "No models available for cascade '%s'" cascade_name)
   | spec :: _ -> Ok spec
@@ -253,8 +265,17 @@ let run_named
   match resolve_cascade ~cascade_name with
   | Error e -> Error e
   | Ok model_spec ->
+  (* Builder metadata still needs one concrete provider/model seed.
+     Pipeline execution is delegated to the named cascade below. *)
+  let named_cascade =
+    Oas.Api.named_cascade
+      ~name:cascade_name
+      ~defaults:(Oas_cascade.default_model_strings ~cascade_name)
+      ()
+  in
   let name = Printf.sprintf "oas-%s" cascade_name in
   let config = { (default_config ~name ~model_spec ~system_prompt ~tools) with
+    named_cascade = Some named_cascade;
     max_turns;
     max_tokens;
     temperature;
@@ -282,8 +303,17 @@ let run_named_with_masc_tools
   match resolve_cascade ~cascade_name with
   | Error e -> Error e
   | Ok model_spec ->
+  (* Builder metadata still needs one concrete provider/model seed.
+     Pipeline execution is delegated to the named cascade below. *)
+  let named_cascade =
+    Oas.Api.named_cascade
+      ~name:cascade_name
+      ~defaults:(Oas_cascade.default_model_strings ~cascade_name)
+      ()
+  in
   let name = Printf.sprintf "oas-%s" cascade_name in
   let config = { (default_config ~name ~model_spec ~system_prompt ~tools:[]) with
+    named_cascade = Some named_cascade;
     max_turns;
     max_tokens;
     temperature;

@@ -2,7 +2,7 @@
 
     Delegates to [Oas_worker.run_named] / [run_named_with_masc_tools]
     (cascade-name-based, no model_spec construction) or to
-    [Llm_cascade.call_with_tools] for single-shot cascade calls.
+    [Oas_cascade.call_with_tools] for single-shot cascade calls.
 
     @since OAS migration Phase 1
     @since LLM-free cascade Phase 2 *)
@@ -214,7 +214,7 @@ let extract_prompt_params
         }
 
 (* ================================================================ *)
-(* Public: cascade through Llm_cascade (single-shot, no Agent loop) *)
+(* Public: cascade through Oas_cascade (single-shot, no Agent loop) *)
 (* ================================================================ *)
 
 let run_cascade ?(cascade_name = "keeper_turn") ?timeout_sec requests =
@@ -227,7 +227,7 @@ let run_cascade ?(cascade_name = "keeper_turn") ?timeout_sec requests =
      else [])
     @ [ Llm_provider.Types.user_msg params.goal ]
   in
-  Llm_cascade.call_with_tools ~cascade_name ~messages
+  Oas_cascade.call_with_tools ~cascade_name ~messages
     ~temperature:params.temperature ~max_tokens:params.max_tokens
     ?timeout_sec ()
 

@@ -30,6 +30,14 @@ let gardener_lock : Eio.Mutex.t option ref = ref None
 let room_config_ref : Room_utils.config option ref = ref None
 let sw_ref : Eio.Switch.t option ref = ref None
 
+(** Reset singleton state for test isolation.
+    This must run before a test creates fresh Eio resources. *)
+let reset_for_test () =
+  gardener_state_ref := None;
+  gardener_lock := None;
+  room_config_ref := None;
+  sw_ref := None
+
 (** Execute [f] with lock if available, otherwise directly.
     Safe for single-threaded test scenarios (no Eio runtime). *)
 let with_lock f =
@@ -200,4 +208,3 @@ let record_retirement () =
   let state = get_state () in
   state.retirements_today <- state.retirements_today + 1;
   state.last_retirement_attempt <- Time_compat.now ()
-

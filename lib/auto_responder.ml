@@ -152,7 +152,7 @@ let call_llm_direct_sync ~agent_type ~prompt =
   let cascade_name = cascade_name_for_agent_type agent_type in
   try
     match
-      Llm_cascade.call ~cascade_name ~prompt
+      Oas_cascade.call ~cascade_name ~prompt
         ~accept:llm_response_is_valid ~timeout_sec:30 ~max_tokens:500 ()
     with
     | Ok result ->

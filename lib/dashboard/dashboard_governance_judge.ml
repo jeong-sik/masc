@@ -284,13 +284,12 @@ let compute_judgments ~base_path:_ ~factual_json =
   let timeout_sec = Env_config.Llm.dashboard_governance_judge_timeout_seconds in
   let prompt = prompt_for_facts factual_json in
   match
-    Llm_cascade.call_raw ~cascade_name:"governance_judge" ~prompt
+    Oas_cascade.call_json ~cascade_name:"governance_judge" ~prompt
       ~temperature:0.2 ~timeout_sec ~max_tokens:4096 ()
   with
   | Error message -> Error message
-  | Ok response -> (
+  | Ok { json = parsed; response } -> (
       try
-        let parsed = Yojson.Safe.from_string (Llm_types.text_of_response response) in
         let generated_at = now_iso () in
         let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
         let items =
@@ -302,13 +301,10 @@ let compute_judgments ~base_path:_ ~factual_json =
           items
           |> List.filter_map
                (parse_item_judgment ~generated_at ~expires_at
-                  ~model_used:response.Llm_provider.Types.model)
+                ~model_used:response.Llm_provider.Types.model)
         in
         Ok (response.Llm_provider.Types.model, generated_at, expires_at, judgments)
-      with
-      | Yojson.Json_error msg ->
-          Error (Printf.sprintf "Governance judge returned invalid JSON: %s" msg)
-      | exn ->
+      with exn ->
           Error (Printf.sprintf "Governance judge parse error: %s" (Printexc.to_string exn)))
 
 let append_judgments base_path judgments =

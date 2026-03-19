@@ -684,11 +684,11 @@ let generate_code_change ~goal ~baseline ~history ~insights
   let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
     ~file_content ~target_file in
   match
-    Llm_cascade.call ~cascade_name:"autoresearch" ~prompt
+    Oas_cascade.call ~cascade_name:"autoresearch" ~prompt
       ~temperature:0.7 ~max_tokens:4096 ~timeout_sec:120 ()
   with
   | Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
-  | Ok r -> parse_llm_code_response r.Llm_cascade.response
+  | Ok r -> parse_llm_code_response r.Oas_cascade.response
 
 (* ================================================================ *)
 (* Loop State Management                                            *)

@@ -88,6 +88,13 @@ let stable_worker_session_id ?team_session_id worker_name =
   let digest = Digest.string basis |> Digest.to_hex in
   sprintf "worker-%s" (String.sub digest 0 12)
 
+let safe_turn_log_text ?(max_len = 4000) text =
+  let sanitized =
+    String.map (fun ch -> if ch = '\000' then ' ' else ch) text
+  in
+  if String.length sanitized <= max_len then sanitized
+  else String.sub sanitized 0 max_len ^ "..."
+
 let oas_worker_evidence_session_id ~worker_run_id =
   String.trim worker_run_id
 
@@ -522,9 +529,9 @@ let append_worker_completion_log ~base_path ~team_session_id ~worker_name
       [
         ("ts", `Float (Time_compat.now ()));
         ("status", `String status);
-        ("prompt", `String (safe_text_for_followup prompt));
+        ("prompt", `String (safe_turn_log_text prompt));
         ("tool_names", `List (List.map (fun name -> `String name) tool_names));
-        ("output_preview", `String (safe_text_for_followup output));
+        ("output_preview", `String (safe_turn_log_text output));
         ( "error",
           Option.fold ~none:`Null ~some:(fun value -> `String value) error );
       ])
@@ -616,4 +623,3 @@ let materialize_direct_evidence ~base_path ~worker_name
           Log.LocalWorker.error
             "direct evidence persist failed for %s/%s: %s"
             worker_name session_id (Oas.Error.to_string err)
-

@@ -21,6 +21,11 @@ let cleanup_dir dir =
   in
   rm dir
 
+let reset_shared_state () =
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Gardener_state.reset_for_test ()
+
 (** {1 Configuration Tests} *)
 
 let test_load_config () =
@@ -258,13 +263,30 @@ let test_homeostatic_score_at_maximum () =
 
 (** {1 Spawn Decision Logic Tests} *)
 
-(** Test spawn decision returns valid result — requires Eio runtime *)
+(** Test spawn decision returns valid result without depending on live LLM IO.
+    This keeps the unit test deterministic while still exercising real health
+    calculation under an Eio runtime. *)
 let test_spawn_decision_returns_valid () =
+  reset_shared_state ();
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ();
-  (* Use propose_spawn which internally calculates health from real data *)
-  let decision = Gardener.propose_spawn ~topic:"test-topic" ~reason:"test" ~urgency:High in
+  let config = { (Gardener.load_config ()) with use_llm_decision = false } in
+  let health = Gardener.get_health () in
+  let now = Time_compat.now () in
+  let gap =
+    {
+      topic = "test-topic";
+      signal_count = 1;
+      proposers = [ "manual" ];
+      context_snippets = [ "test" ];
+      first_detected = now;
+      maturity_hours = config.gap_maturity_hours;
+      topic_similarity = 0.0;
+      urgency_score = 0.8;
+    }
+  in
+  let decision = Gardener_decisions.decide_spawn ~config ~health ~gap in
   (* Verify decision is one of the valid ADT variants *)
   let is_valid_decision = match decision with
     | SpawnApproved { topic; reason; _ } ->
@@ -280,6 +302,7 @@ let test_spawn_decision_returns_valid () =
 
 (** Test that retirement is rejected at min population — requires Eio runtime *)
 let test_retire_rejected_at_min_population () =
+  reset_shared_state ();
   Eio_main.run @@ fun _env ->
   (* When total_agents = min_agents, retirement should be rejected *)
   let decision = Gardener.propose_retire ~agent_name:"any-agent" in
@@ -909,6 +932,7 @@ let test_tick_opens_backlog_triage_session_for_orphans () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      reset_shared_state ();
       let config = Room.default_config dir in
       Eio_main.run @@ fun env ->
       ignore (Room.init config ~agent_name:(Some "fixture-root"));
@@ -950,6 +974,7 @@ let test_tick_opens_backlog_triage_session_with_inactive_joined_agent () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      reset_shared_state ();
       let config = Room.default_config dir in
       Eio_main.run @@ fun env ->
       ignore (Room.init config ~agent_name:(Some "fixture-root"));
@@ -1028,6 +1053,7 @@ let test_inactive_fallback_removed () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      reset_shared_state ();
       let config = Room.default_config dir in
       Eio_main.run @@ fun env ->
       ignore (Room.init config ~agent_name:(Some "fixture-root"));

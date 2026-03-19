@@ -194,7 +194,7 @@ let intent_response_is_valid (resp : Llm_types.api_response) : bool =
 let classify_intent_llm (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
-    Llm_cascade.call ~cascade_name:"context_router" ~prompt
+    Oas_cascade.call ~cascade_name:"context_router" ~prompt
       ~temperature:0.1 ~timeout_sec:10 ~max_tokens:20
       ~accept:intent_response_is_valid ()
   with
@@ -208,7 +208,7 @@ let classify_intent_llm (query : string) : query_intent * float =
 let classify_intent_hybrid (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
-    Llm_cascade.call ~cascade_name:"context_router" ~prompt
+    Oas_cascade.call ~cascade_name:"context_router" ~prompt
       ~temperature:0.1 ~timeout_sec:10 ~max_tokens:20
       ~accept:intent_response_is_valid ()
   with

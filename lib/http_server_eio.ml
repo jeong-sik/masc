@@ -574,7 +574,7 @@ let error_handler _client_addr ?request:_ error start_response =
 
 (** Run the HTTP server with Eio *)
 let run ~sw ~net ~clock config routes =
-  Llm_discovery_cache.set_env ~sw ~net;
+  Discovery_cache.set_env ~sw ~net;
   let request_handler = make_request_handler routes in
   (* Parse IP address using Ipaddr library then convert to Eio format *)
   let ip = match Ipaddr.of_string config.host with

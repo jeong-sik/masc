@@ -29,12 +29,12 @@ type event =
 (** Loop configuration — immutable after creation. *)
 type loop_config = {
   initial_goal : string;
-  model_cascade : Masc_model.model_spec list;   (** Ordered preference *)
-  tools : Masc_model.tool_def list;
+  model_cascade : Cascade.model_spec list;   (** Ordered preference *)
+  tools : Cascade.tool_def list;
   heartbeat_interval_s : float;                  (** Default: 30.0 *)
   max_idle_turns : int;                          (** Stop after N turns with no progress *)
   feedback_enabled : bool;                       (** Run verifier after each action *)
-  verifier_model : Masc_model.model_spec;        (** Cheap model for verification *)
+  verifier_model : Cascade.model_spec;        (** Cheap model for verification *)
   compact_threshold : float;                     (** Default: 0.5 *)
   prepare_threshold : float;                     (** Default: 0.7 *)
   handoff_threshold : float;                     (** Default: 0.85 *)
@@ -67,7 +67,7 @@ type loop_state = {
   mutable started_at : float;
   mutable last_turn_ts : float;
   mutable last_model_used : string;
-  mutable last_usage : Masc_model.token_usage;
+  mutable last_usage : Cascade.token_usage;
   mutable last_latency_ms : int;
   mutable compaction_count : int;
   mutable compaction_tokens_saved : int;
@@ -104,7 +104,7 @@ val publish_to_event_bus : Agent_sdk.Event_bus.t -> event -> unit
 (** Default configuration builder. *)
 val default_config :
   goal:string ->
-  models:Masc_model.model_spec list ->
-  ?verifier:Masc_model.model_spec ->
+  models:Cascade.model_spec list ->
+  ?verifier:Cascade.model_spec ->
   ?session_dir:string ->
   unit -> loop_config

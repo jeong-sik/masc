@@ -42,13 +42,13 @@ val run_with_tools :
     model resolution uses cascade name derived from [meta.name]. *)
 val run_with_custom_dispatch :
   meta:keeper_meta ->
-  ?model_spec_override:Masc_model.model_spec ->
+  ?model_spec_override:Cascade.model_spec ->
   system_prompt:string ->
   goal:string ->
   max_turns:int ->
   temperature:float ->
   max_tokens:int ->
-  masc_tools:Masc_model.tool_def list ->
+  masc_tools:Cascade.tool_def list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   unit ->
@@ -73,7 +73,7 @@ val text_of_run_result : Oas_worker.run_result -> string
 
 (** Extract usage from an OAS run result.
     Returns zero usage if response has no usage data. *)
-val usage_of_run_result : Oas_worker.run_result -> Masc_model.token_usage
+val usage_of_run_result : Oas_worker.run_result -> Cascade.token_usage
 
 (** Extract model ID string from an OAS run result. *)
 val model_of_run_result : Oas_worker.run_result -> string
@@ -85,7 +85,7 @@ val model_of_run_result : Oas_worker.run_result -> string
 val run_cascade :
   ?cascade_name:string ->
   ?timeout_sec:int ->
-  Masc_model.completion_request list ->
+  Cascade.completion_request list ->
   (Llm_provider.Types.api_response, string) result
 
 (** Streaming cascade with synthetic SSE events.
@@ -94,6 +94,6 @@ val run_cascade_stream :
   ?cascade_name:string ->
   ?timeout_sec:float ->
   on_event:(Llm_provider.Types.sse_event -> unit) ->
-  Masc_model.completion_request ->
-  fallback:Masc_model.completion_request list ->
+  Cascade.completion_request ->
+  fallback:Cascade.completion_request list ->
   (Llm_provider.Types.api_response, string) result

@@ -195,16 +195,16 @@ let llm_tool_defs_of_json = function
                  in
                  Some
                    {
-                     Masc_model.tool_name = tool_name;
+                     Cascade.tool_name = tool_name;
                      tool_description = tool_description;
                      parameters = parameters;
                    })
   | Some _ -> []
 
-let llm_tool_calls_json (calls : Masc_model.tool_call list) =
+let llm_tool_calls_json (calls : Cascade.tool_call list) =
   `List
     (List.map
-       (fun (call : Masc_model.tool_call) ->
+       (fun (call : Cascade.tool_call) ->
          `Assoc
            [
              ("id", `String call.call_id);
@@ -215,7 +215,7 @@ let llm_tool_calls_json (calls : Masc_model.tool_call list) =
 
 type llm_runner =
   | Stub
-  | Direct of Masc_model.model_spec
+  | Direct of Cascade.model_spec
   | Spawn of string (* agent name *)
   | SpawnWithModel of { agent: string; model: string }
 
@@ -303,9 +303,9 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
           ?tools:tools_json ~temperature:0.2 ~max_tokens:4096
           ~timeout_sec ()
       with
-      | Ok resp when trim (Masc_model.text_of_response resp) <> "" -> Ok (Masc_model.text_of_response resp)
-      | Ok resp when Masc_model.has_tool_calls resp ->
-          Ok (Yojson.Safe.to_string (llm_tool_calls_json (Masc_model.tool_calls_of_response resp)))
+      | Ok resp when trim (Cascade.text_of_response resp) <> "" -> Ok (Cascade.text_of_response resp)
+      | Ok resp when Cascade.has_tool_calls resp ->
+          Ok (Yojson.Safe.to_string (llm_tool_calls_json (Cascade.tool_calls_of_response resp)))
       | Ok _ -> Error "empty completion"
       | Error msg -> Error msg)
 

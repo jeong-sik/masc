@@ -202,7 +202,7 @@ let handle_start ctx args =
       ("trace_id", `String state.trace_id);
       ("status", `String (match ctx.start_loop with Some _ -> "started" | None -> "created"));
       ("generation", `Int 0);
-      ("models", `List (List.map (fun (m : Masc_model.model_spec) ->
+      ("models", `List (List.map (fun (m : Cascade.model_spec) ->
         `String m.model_id) models));
     ]
   end
@@ -222,9 +222,9 @@ let handle_status args =
       (match base with
        | `Assoc fields ->
          let models =
-           `List (List.map (fun (m : Masc_model.model_spec) ->
+           `List (List.map (fun (m : Cascade.model_spec) ->
              `Assoc [
-               ("provider", `String (Masc_model.string_of_provider m.provider));
+               ("provider", `String (Cascade.string_of_provider m.provider));
                ("model_id", `String m.model_id);
                ("max_context", `Int m.max_context);
                ("api_key_env", match m.api_key_env with None -> `Null | Some k -> `String k);

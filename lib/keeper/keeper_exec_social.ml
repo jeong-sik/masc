@@ -80,18 +80,18 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
           Context_manager.persist_message session user_message;
           let requests =
             List.map
-              (fun (model : Masc_model.model_spec) ->
+              (fun (model : Cascade.model_spec) ->
                 ({
-                  Masc_model.model;
+                  Cascade.model;
                   messages = (Agent_sdk.Types.system_msg ctx_work.system_prompt) :: ctx_work.messages;
                   temperature = Keeper_config.keeper_reflection_temp ();
                   max_tokens = Keeper_config.keeper_explicit_reply_max_tokens ();
                   tools = [];
                   response_format = `Text;
-                } : Masc_model.completion_request))
+                } : Cascade.completion_request))
               specs
           in
-          let (cascade_result, cascade_latency) = Masc_model.timed (fun () ->
+          let (cascade_result, cascade_latency) = Cascade.timed (fun () ->
               Keeper_oas_adapter.run_cascade requests) in
           match cascade_result with
           | Error e -> Error e
@@ -99,7 +99,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               let used_model =
                 model_spec_for_used specs resp.Llm_provider.Types.model |> Option.value ~default:primary
               in
-              let reply_raw = String.trim (Masc_model.text_of_response resp) in
+              let reply_raw = String.trim (Cascade.text_of_response resp) in
               let reply =
                 if reply_raw = "" then
                   Printf.sprintf "@%s 야, 다시 한 번만 말해봐." msg.from_agent
@@ -112,7 +112,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
                with exn ->
                  log_keeper_exn ~label:"save_checkpoint (explicit room reply) failed" exn);
-              let usage = Masc_model.usage_of_response resp in
+              let usage = Cascade.usage_of_response resp in
               let now_ts = Time_compat.now () in
               let updated =
                 {
@@ -121,14 +121,14 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
                   total_turns = meta.total_turns + 1;
                   total_input_tokens = meta.total_input_tokens + usage.input_tokens;
                   total_output_tokens = meta.total_output_tokens + usage.output_tokens;
-                  total_tokens = meta.total_tokens + Masc_model.total_tokens usage;
+                  total_tokens = meta.total_tokens + Cascade.total_tokens usage;
                   total_cost_usd =
                     meta.total_cost_usd +. cost_usd_of_usage usage used_model;
                   last_turn_ts = now_ts;
                   last_model_used = resp.Llm_provider.Types.model;
                   last_input_tokens = usage.input_tokens;
                   last_output_tokens = usage.output_tokens;
-                  last_total_tokens = Masc_model.total_tokens usage;
+                  last_total_tokens = Cascade.total_tokens usage;
                   last_latency_ms = cascade_latency;
                 }
               in
@@ -238,7 +238,7 @@ let run_social_board_event_turn
           let max_tool_rounds = Keeper_config.keeper_max_tool_rounds () in
           let system_prompt = ctx_work.system_prompt in
           let goal = prompt in
-          let (oas_result, total_latency_ms) = Masc_model.timed (fun () ->
+          let (oas_result, total_latency_ms) = Cascade.timed (fun () ->
               Keeper_oas_adapter.run_with_tools
                 ~config:ctx.config ~meta
                 ~cascade_name:"keeper_social"
@@ -254,13 +254,13 @@ let run_social_board_event_turn
                  Keeper_oas_adapter.tools_executed = final_tools_used } ->
               let final_resp = run_result.Oas_worker.response in
               let final_content =
-                let trimmed = String.trim (Masc_model.text_of_response final_resp) in
+                let trimmed = String.trim (Cascade.text_of_response final_resp) in
                 if trimmed = "" && final_tools_used <> [] then
                   Printf.sprintf "(tools executed: %s)" (String.concat ", " final_tools_used)
                 else if trimmed = "" then trimmed
                 else trimmed
               in
-              let final_usage = Masc_model.usage_of_response final_resp in
+              let final_usage = Cascade.usage_of_response final_resp in
               let final_model_used = final_resp.Llm_provider.Types.model in
               let final_latency_ms = total_latency_ms in
               let final_cost_usd =
@@ -295,13 +295,13 @@ let run_social_board_event_turn
                   total_turns = meta.total_turns + 1;
                   total_input_tokens = meta.total_input_tokens + final_usage.input_tokens;
                   total_output_tokens = meta.total_output_tokens + final_usage.output_tokens;
-                  total_tokens = meta.total_tokens + Masc_model.total_tokens final_usage;
+                  total_tokens = meta.total_tokens + Cascade.total_tokens final_usage;
                   total_cost_usd = meta.total_cost_usd +. final_cost_usd;
                   last_turn_ts = now_ts;
                   last_model_used = final_model_used;
                   last_input_tokens = final_usage.input_tokens;
                   last_output_tokens = final_usage.output_tokens;
-                  last_total_tokens = Masc_model.total_tokens final_usage;
+                  last_total_tokens = Cascade.total_tokens final_usage;
                   last_latency_ms = final_latency_ms;
                   last_autonomous_action_at =
                     (if action_kind = "none" then meta.last_autonomous_action_at else now_iso ());

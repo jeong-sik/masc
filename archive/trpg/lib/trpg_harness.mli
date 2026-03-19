@@ -32,20 +32,20 @@ type evaluation_result = {
 (** Tier 1 structural gate. Checks: valid JSON action, non-empty narrative,
     not out-of-character gibberish. Returns Pass or Fail with reason.
     Budget: max 50 tokens, temperature 0.0 *)
-val tier1_check : model:Masc_model.model_spec -> actor_name:string ->
+val tier1_check : model:Cascade.model_spec -> actor_name:string ->
   actor_persona:string -> response_text:string -> tier1_result
 
 (** Tier 2 quality evaluation. Scores across 3 dimensions.
     Budget: max 200 tokens, temperature 0.0.
     Only called if tier1 passes. *)
-val tier2_evaluate : model:Masc_model.model_spec -> actor_name:string ->
+val tier2_evaluate : model:Cascade.model_spec -> actor_name:string ->
   actor_persona:string -> actor_traits:string list -> scene_context:string ->
   response_text:string -> dimension_score list
 
 (** Full evaluation pipeline: tier1 -> tier2 (if pass) -> weighted score.
     tier1_model: cheap model (e.g., ollama:LFM2.5-1.2B-Instruct)
     tier2_model: capable model (e.g., glm:glm-4.7-flash) *)
-val evaluate : tier1_model:Masc_model.model_spec -> tier2_model:Masc_model.model_spec ->
+val evaluate : tier1_model:Cascade.model_spec -> tier2_model:Cascade.model_spec ->
   actor_name:string -> actor_persona:string -> actor_traits:string list ->
   scene_context:string -> response_text:string -> evaluation_result
 

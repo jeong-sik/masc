@@ -41,9 +41,14 @@ let require_switch () =
 (* ================================================================ *)
 
 (** Build a dispatch closure compatible with [Oas_worker.run_with_masc_tools].
-    Creates a minimal [Context_manager.working_context] for tool execution. *)
+    Creates a minimal [Context_manager.working_context] for tool execution.
+    When [gate_config] is provided, wraps execution with [Eval_gate.guarded_execute]
+    for cost/entropy/destructive pattern safety checks. *)
 let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
     ~(model_spec : Llm_types.model_spec)
+    ~(gate_config : Eval_gate.gate_config option)
+    ~(accumulated_cost_ref : float ref)
+    ~(trajectory_ref : Trajectory.accumulator option ref)
     ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
   let ctx_work = Context_manager.create
     ~system_prompt:(Printf.sprintf "Keeper %s OAS tool dispatch" meta.name)
@@ -54,16 +59,44 @@ let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
     call_name = name;
     call_arguments = Yojson.Safe.to_string args;
   } in
-  try
-    let output = execute_keeper_tool_call ~config ~meta ~ctx_work tc in
-    (true, output)
-  with exn ->
-    Log.Keeper.error "oas adapter tool %s failed: %s" name (Printexc.to_string exn);
-    (false, Yojson.Safe.to_string
-       (`Assoc [
-         ("error", `String "Tool execution failed");
-         ("tool", `String name);
-       ]))
+  let args_json = Yojson.Safe.to_string args in
+  match gate_config with
+  | None ->
+    (* No gate — direct execution (L2 and below) *)
+    (try
+       let output = execute_keeper_tool_call ~config ~meta ~ctx_work tc in
+       (true, output)
+     with exn ->
+       Log.Keeper.error "oas adapter tool %s failed: %s" name (Printexc.to_string exn);
+       (false, Yojson.Safe.to_string
+          (`Assoc [("error", `String "Tool execution failed"); ("tool", `String name)])))
+  | Some gate ->
+    (* Eval_gate guarded execution (L3+) *)
+    let (decision, result_opt, eval_opt, _duration) =
+      Eval_gate.guarded_execute
+        ~config:gate
+        ~accumulated_cost:!accumulated_cost_ref
+        ~trajectory_acc:!trajectory_ref
+        ~tool_name:name
+        ~args_json
+        ~execute:(fun () -> execute_keeper_tool_call ~config ~meta ~ctx_work tc)
+    in
+    (match decision with
+     | Trajectory.Reject reason ->
+       Log.Keeper.warn "eval_gate rejected %s: %s" name reason;
+       (false, Yojson.Safe.to_string
+          (`Assoc [("error", `String ("Gate rejected: " ^ reason));
+                   ("tool", `String name); ("gate", `String "reject")]))
+     | Trajectory.Pass ->
+       let result = Option.value ~default:"{\"error\":\"no result\"}" result_opt in
+       (match eval_opt with
+        | Some eval ->
+          accumulated_cost_ref := !accumulated_cost_ref +. eval.Eval_gate.cost_usd;
+          if eval.Eval_gate.should_warn then
+            Log.Keeper.warn "eval_gate warning for %s: %s"
+              name (Option.value ~default:"" eval.Eval_gate.warning)
+        | None -> ());
+       (true, result))
 
 (* ================================================================ *)
 (* Public: run_with_tools                                            *)
@@ -78,6 +111,7 @@ let run_with_tools
     ~(config : Room.config)
     ~(meta : keeper_meta)
     ?model_spec:model_spec_override
+    ?(gate_config : Eval_gate.gate_config option)
     ~(system_prompt : string)
     ~(goal : string)
     ~(max_turns : int)
@@ -101,9 +135,12 @@ let run_with_tools
   | Ok sw ->
   let masc_tools = keeper_allowed_llm_tools meta in
   let tools_executed_ref = ref [] in
+  let accumulated_cost_ref = ref 0.0 in
+  let trajectory_ref = ref None in
   let dispatch ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
     tools_executed_ref := name :: !tools_executed_ref;
-    make_dispatch ~config ~meta ~model_spec ~name ~args
+    make_dispatch ~config ~meta ~model_spec
+      ~gate_config ~accumulated_cost_ref ~trajectory_ref ~name ~args
   in
   let oas_config = { (Oas_worker.default_config
     ~name:(Printf.sprintf "keeper-%s" meta.name)

@@ -13,13 +13,15 @@ type tools_run_result = {
   tools_executed : string list;
 }
 
-(** Tool loop LLM call (proactive, autonomy, social board events).
-    Wraps [Oas_worker.run_with_masc_tools] with keeper tool dispatch.
-    Returns tool execution history alongside OAS result. *)
+(** Tool loop LLM call with optional Eval_gate safety checks.
+    When [~gate_config] is provided, each tool call goes through
+    [Eval_gate.guarded_execute] for cost/entropy/destructive pattern
+    validation. Required for L3+ autonomy levels. *)
 val run_with_tools :
   config:Room.config ->
   meta:keeper_meta ->
   ?model_spec:Llm_types.model_spec ->
+  ?gate_config:Eval_gate.gate_config ->
   system_prompt:string ->
   goal:string ->
   max_turns:int ->

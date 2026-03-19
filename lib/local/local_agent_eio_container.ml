@@ -97,7 +97,7 @@ let evidence_session_id_of_worker_run = function
   | _ -> None
 
 let session_min_tool_names =
-  Agent_tool_surfaces.llama_worker_tool_names
+  Agent_tool_surfaces.gardener_worker_tool_names
 
 let execution_scope_or_default = function
   | Some scope -> scope
@@ -463,7 +463,7 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
                ~on_exec ()))
   | Error e, _ | _, Error e -> Error e
 
-let oas_provider_of_model (model : Llm_types.model_spec) : Oas.Provider.config =
+let oas_provider_of_model (model : Masc_model.model_spec) : Oas.Provider.config =
   match Oas_type_adapters.to_oas_provider model with
   | Some config -> config
   | None ->
@@ -538,7 +538,7 @@ let build_resume_config ~worker_name ~model ~system_prompt ~tools ~max_turns
     {
       Oas.Types.default_config with
       name = worker_name;
-      model = model.Llm_types.model_id;
+      model = model.Masc_model.model_id;
       system_prompt = Some system_prompt;
       max_tokens = local_worker_max_tokens ();
       max_turns;

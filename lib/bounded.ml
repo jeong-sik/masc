@@ -11,7 +11,7 @@
 (* Fiber-safe random state for jitter calculation *)
 let bounded_rng = Random.State.make_self_init ()
 
-open Spawn_eio
+open Spawn
 
 (** Comparison operators for goal conditions *)
 type comparison =

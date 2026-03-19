@@ -9,7 +9,7 @@
 
 module Tool_perpetual = Masc_mcp.Tool_perpetual
 module Perpetual_loop = Masc_mcp.Perpetual_loop
-module Llm_types = Masc_mcp.Llm_types
+module Masc_model = Masc_mcp.Masc_model
 
 (* ============================================================
    Test Helpers
@@ -25,8 +25,8 @@ let make_ctx () : Tool_perpetual.context = {
 }
 
 (** Create a default model spec for testing. *)
-let test_model : Llm_types.model_spec = {
-  provider = Llm_types.Llama;
+let test_model : Masc_model.model_spec = {
+  provider = Masc_model.Llama;
   model_id = "test-model";
   max_context = 4000;
   api_url = "http://127.0.0.1:8085";

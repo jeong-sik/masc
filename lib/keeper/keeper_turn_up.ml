@@ -374,7 +374,7 @@ let handle_keeper_up ctx args : tool_result =
              let trace_id = generate_trace_id () in
              let primary = match specs with
                | m :: _ -> m
-               | [] -> Llm_types.default_local_model_spec ()
+               | [] -> Cascade.default_local_model_spec ()
              in
              let base_dir = session_base_dir ctx.config in
              mkdir_p base_dir;

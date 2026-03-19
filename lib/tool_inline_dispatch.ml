@@ -401,18 +401,14 @@ let dispatch (ctx : context) ~(name : string) : result option =
       let goal_json = arguments |> U.member "goal" in
       let constraints = Bounded.constraints_of_json constraints_json in
       let goal = Bounded.goal_of_json goal_json in
-      (match state.Mcp_server.proc_mgr with
-       | Some _pm ->
-           let spawn_fn agent_name prompt =
-             Spawn_eio.spawn ~sw ~agent_name ~prompt
-               ~timeout_seconds:Env_config.Spawn.timeout_seconds
-               ~room_config:state.Mcp_server.room_config ()
-           in
-           let result = Bounded.bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn in
-           let json = Bounded.result_to_json result in
-           Some (result.Bounded.status = `Goal_reached, Yojson.Safe.pretty_to_string json)
-       | None ->
-           Some (false, "Process manager not available"))
+      ignore (state, sw);
+      let spawn_fn agent_name prompt =
+        Spawn.spawn ~agent_name ~prompt
+          ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
+      in
+      let result = Bounded.bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn in
+      let json = Bounded.result_to_json result in
+      Some (result.Bounded.status = `Goal_reached, Yojson.Safe.pretty_to_string json)
 
   | "masc_broadcast" ->
       let message = arg_get_string "message" "" in
@@ -656,9 +652,9 @@ Call masc_listen again to continue listening.
             let spec_name =
               if String.contains raw ':' then raw else "llama:" ^ raw
             in
-            Llm_types.model_spec_of_string spec_name
-        | _, Some _ -> Llm_types.default_execution_model_spec ()
-        | _, None -> Llm_types.default_execution_model_spec ()
+            Cascade.model_spec_of_string spec_name
+        | _, Some _ -> Cascade.default_execution_model_spec ()
+        | _, None -> Cascade.default_execution_model_spec ()
       in
       let module U = Yojson.Safe.Util in
       let working_dir = match arguments |> U.member "working_dir" with
@@ -673,18 +669,13 @@ Call masc_listen again to continue listening.
       in
        (match runtime_model with
        | Error e -> Some (false, e)
-       | Ok runtime_model ->
-           (match state.Mcp_server.proc_mgr with
-            | Some _pm ->
-                let result =
-                  Spawn_eio.spawn ~sw ~agent_name:spawn_agent_name
-                    ~prompt ~timeout_seconds ?working_dir ?execution_scope
-                    ~room_config:state.Mcp_server.room_config
-                    ~runtime_model ()
-                in
-                Some (result.Spawn_eio.success, Spawn_eio.result_to_human_string result)
-            | None ->
-                Some (false, "Process manager not available in this environment")))
+       | Ok _runtime_model ->
+           ignore (sw, state, execution_scope);
+           let result =
+             Spawn.spawn ~agent_name:spawn_agent_name
+               ~prompt ~timeout_seconds ?working_dir ()
+           in
+           Some (result.Spawn.success, Spawn.result_to_string result))
 
   | "masc_memento_mori" ->
       let context_ratio = arg_get_float "context_ratio" 0.0 in
@@ -756,36 +747,22 @@ Call masc_listen again to continue listening.
           in
           let _ = Room.broadcast config ~from_agent:agent_name ~content:last_words in
 
-          match state.Mcp_server.proc_mgr with
-          | None ->
-              Some (false, "Process manager not available for mitosis spawn")
-          | Some _pm ->
-              let spawn_fn ~prompt =
-                let result = Spawn_eio.spawn ~sw ~agent_name:target_agent
-                  ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds
-                  ~room_config:state.Mcp_server.room_config ()
-                in
-                { Spawn.success = result.Spawn_eio.success;
-                  output = result.Spawn_eio.output;
-                  exit_code = result.Spawn_eio.exit_code;
-                  elapsed_ms = result.Spawn_eio.elapsed_ms;
-                  input_tokens = result.Spawn_eio.input_tokens;
-                  output_tokens = result.Spawn_eio.output_tokens;
-                  cache_creation_tokens = result.Spawn_eio.cache_creation_tokens;
-                  cache_read_tokens = result.Spawn_eio.cache_read_tokens;
-                  cost_usd = result.Spawn_eio.cost_usd }
-              in
+          ignore (state, sw);
+          let spawn_fn ~prompt =
+            Spawn.spawn ~agent_name:target_agent
+              ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
+          in
 
-              let (spawn_result, new_cell, new_pool, _handoff_dna) =
-                Mitosis.execute_mitosis
-                  ~config:mitosis_config
-                  ~pool:!(Mcp_server.stem_pool)
-                  ~parent:cell
-                  ~full_context:(Printf.sprintf "Summary: %s\n\nCurrent Task: %s\n\nContext:\n%s"
-                      (if summary = "" then "Memento mori - context limit reached" else summary)
-                      current_task full_context)
-                  ~spawn_fn
-              in
+          let (spawn_result, new_cell, new_pool, _handoff_dna) =
+            Mitosis.execute_mitosis
+              ~config:mitosis_config
+              ~pool:!(Mcp_server.stem_pool)
+              ~parent:cell
+              ~full_context:(Printf.sprintf "Summary: %s\n\nCurrent Task: %s\n\nContext:\n%s"
+                  (if summary = "" then "Memento mori - context limit reached" else summary)
+                  current_task full_context)
+              ~spawn_fn
+          in
               Mcp_server.current_cell := new_cell;
               Mcp_server.stem_pool := new_pool;
 

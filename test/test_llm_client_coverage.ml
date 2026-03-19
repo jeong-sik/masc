@@ -1,6 +1,7 @@
 open Alcotest
 
-module Llm = Masc_mcp.Llm_types
+module Llm = Masc_mcp.Masc_model
+module Cascade = Masc_mcp.Cascade
 
 let test_string_of_provider () =
   check string "llama" "llama" (Llm.string_of_provider Llm.Llama);
@@ -19,14 +20,14 @@ let test_estimate_tokens_positive () =
   check bool "positive" true (tokens > 0)
 
 let test_model_spec_of_string_llama () =
-  match Llm.model_spec_of_string "llama:qwen3.5-32b" with
+  match Cascade.model_spec_of_string "llama:qwen3.5-32b" with
   | Ok spec ->
       check string "provider" "llama" (Llm.string_of_provider spec.provider);
       check string "model id" "qwen3.5-32b" spec.model_id
   | Error err -> fail ("expected llama model spec, got error: " ^ err)
 
 let test_model_spec_of_string_invalid () =
-  match Llm.model_spec_of_string "broken" with
+  match Cascade.model_spec_of_string "broken" with
   | Ok _ -> fail "expected parse error"
   | Error err ->
       check bool "mentions provider:model" true
@@ -39,7 +40,7 @@ let test_sanitize_text_utf8 () =
   check bool "not empty" true (String.length sanitized > 0)
 
 let test_available_model_specs_of_strings_llama () =
-  match Llm.available_model_specs_of_strings [ "llama:qwen3.5-32b" ] with
+  match Cascade.available_model_specs_of_strings [ "llama:qwen3.5-32b" ] with
   | [ spec ] ->
       check string "provider" "llama" (Llm.string_of_provider spec.provider);
       check string "model id" "qwen3.5-32b" spec.model_id

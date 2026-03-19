@@ -527,10 +527,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           sw = Some sw; proc_mgr = state.Mcp_server.proc_mgr;
           worker_runner = None; clock = Some clock } in
         Tool_mdal.dispatch ctx ~name ~args:arguments
-    | Mod_async_spawn ->
-        let ctx : Tool_async_spawn.context = { config; agent_name;
-          sw; proc_mgr = state.Mcp_server.proc_mgr } in
-        Tool_async_spawn.dispatch ctx ~name ~args:arguments
     | Mod_autoresearch ->
         let ctx : Tool_autoresearch.context = { base_path = config.base_path;
           agent_name = Some agent_name; start_operation = None;

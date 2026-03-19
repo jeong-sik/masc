@@ -23,18 +23,18 @@ let handle_keeper_model_set ctx args : tool_result =
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
     | Ok (Some meta) -> (
-        match Llm_types.model_spec_of_string model with
+        match Cascade.model_spec_of_string model with
         | Error e -> (false, "❌ " ^ e)
         | Ok spec ->
             let runtime_ok =
               match spec.provider with
-              | Llm_types.Llama -> (
+              | Masc_model.Llama -> (
                   match Tool_local_runtime.fetch_models () with
                   | Ok (_, models) -> List.mem spec.model_id models
                   | Error _ -> false)
               | _ -> true
             in
-            if spec.provider = Llm_types.Llama && not runtime_ok then
+            if spec.provider = Masc_model.Llama && not runtime_ok then
               (false, Printf.sprintf "❌ model not present in llama inventory: %s" spec.model_id)
             else
               let allowed_models =

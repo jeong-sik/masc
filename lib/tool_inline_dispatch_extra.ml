@@ -152,23 +152,10 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
             (context_ratio *. 100.0) (cell.Mitosis.generation + 1)
           in
           let _ = Room.broadcast config ~from_agent:agent_name ~content:last_words in
-          match state.Mcp_server.proc_mgr with
-          | None ->
-              Some (false, "Process manager not available for mitosis spawn")
-          | Some _pm ->
+          ignore (state, sw);
               let spawn_fn ~prompt =
-                let result = Spawn_eio.spawn ~sw ~agent_name:target_agent
-                  ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds
-                  ~room_config:state.Mcp_server.room_config () in
-                { Spawn.success = result.Spawn_eio.success;
-                  output = result.Spawn_eio.output;
-                  exit_code = result.Spawn_eio.exit_code;
-                  elapsed_ms = result.Spawn_eio.elapsed_ms;
-                  input_tokens = result.Spawn_eio.input_tokens;
-                  output_tokens = result.Spawn_eio.output_tokens;
-                  cache_creation_tokens = result.Spawn_eio.cache_creation_tokens;
-                  cache_read_tokens = result.Spawn_eio.cache_read_tokens;
-                  cost_usd = result.Spawn_eio.cost_usd } in
+                Spawn.spawn ~agent_name:target_agent
+                  ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds () in
               let (spawn_result, new_cell, new_pool, _handoff_dna) =
                 Mitosis.execute_mitosis ~config:mitosis_config
                   ~pool:!(Mcp_server.stem_pool) ~parent:cell

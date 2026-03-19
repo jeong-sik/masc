@@ -5,7 +5,7 @@ open Printf
 include Local_agent_eio_container
 
 let run_worker_oas ~sw ~base_path ~worker_name
-    ~(model : Llm_types.model_spec) ~team_session_id
+    ~(model : Masc_model.model_spec) ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
     ?thinking_enabled ?max_turns ?worker_run_id
     ~role
@@ -411,7 +411,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                 }
               in
               let model =
-                let base_model = Llm_types.default_local_model_spec () in
+                let base_model = Cascade.default_local_model_spec () in
                 let model_id =
                   if checkpoint.model <> "" then checkpoint.model
                   else meta.effective_model

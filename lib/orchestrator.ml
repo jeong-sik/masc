@@ -115,36 +115,24 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 
 Start by calling mcp__masc__masc_status to see the current room state.|}
 
-(** Spawn the orchestrator agent (Eio-friendly, runs in a domain if provided) *)
-let spawn_orchestrator ~sw ~proc_mgr:_ ?domain_mgr config room_config =
-  (* TOCTOU defense: re-check pause before spawn *)
+(** Spawn the orchestrator agent.
+    Spawn_eio has been removed; uses blocking Spawn.spawn as fallback. *)
+let spawn_orchestrator ~sw:_ ~proc_mgr:_ ?domain_mgr:_ config room_config =
   if Room.is_paused room_config then begin
     Log.Orchestrator.debug "room paused before spawn, aborting";
-    { Spawn_eio.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
-      tool_call_count = 0; tool_names = [];
+    { Spawn.success = false; output = "Room paused"; exit_code = 0; elapsed_ms = 0;
       input_tokens = None; output_tokens = None; cache_creation_tokens = None;
-      cache_read_tokens = None; cost_usd = None; raw_trace_run = None;
-      termination = None }
+      cache_read_tokens = None; cost_usd = None }
   end else begin
   Log.Orchestrator.info "spawning agent: %s (with MCP tools)" config.orchestrator_agent;
 
-  (* Broadcast that orchestrator is starting *)
   let _ = Room.broadcast room_config ~from_agent:"system"
-    ~content:"🎯 Auto-orchestrator activated - spawning coordinator with MCP tools" in
+    ~content:"Auto-orchestrator activated - spawning coordinator with MCP tools" in
 
   let prompt = make_orchestrator_prompt ~port:config.port in
-  let run () =
-    Spawn_eio.spawn
-      ~sw
-      ~agent_name:config.orchestrator_agent
-      ~prompt
-      ~timeout_seconds:config.agent_timeout_s
-      ()
-  in
   let result =
-    match domain_mgr with
-    | Some dm -> Eio.Domain_manager.run dm run
-    | None -> run ()
+    Spawn.spawn ~agent_name:config.orchestrator_agent ~prompt
+      ~timeout_seconds:config.agent_timeout_s ()
   in
 
   if result.success then
@@ -152,14 +140,6 @@ let spawn_orchestrator ~sw ~proc_mgr:_ ?domain_mgr config room_config =
   else
     Log.Orchestrator.warn "failed (exit %d) in %dms"
       result.exit_code result.elapsed_ms;
-
-  (* Log structured termination reason when available *)
-  (match result.termination with
-   | Some t ->
-     Log.Orchestrator.info "termination: %s (agent=%s, elapsed=%dms, tools=%d)"
-       (Spawn_eio.termination_reason_to_string t.reason)
-       t.agent_name t.elapsed_ms t.tool_call_count
-   | None -> ());
 
   result
   end

@@ -127,7 +127,7 @@ export function fetchDashboardMemory(
   params.set('sort_by', sortMode)
   if (opts?.excludeSystem) params.set('exclude_system', 'true')
   if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
-  return get(`/api/v1/dashboard/memory${params.toString() ? `?${params}` : ''}`)
+  return get(`/api/v1/dashboard/board${params.toString() ? `?${params}` : ''}`)
 }
 
 export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
@@ -212,8 +212,9 @@ export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
   return get('/api/v1/dashboard/semantics')
 }
 
-export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
-  return get('/api/v1/dashboard/mission')
+export function fetchDashboardMission(mode?: 'snapshot' | 'full'): Promise<DashboardMissionResponse> {
+  const query = mode ? `?mode=${mode}` : ''
+  return get(`/api/v1/dashboard/mission${query}`)
 }
 
 export function fetchDashboardMissionSession(sessionId: string): Promise<DashboardMissionSessionDetailResponse> {

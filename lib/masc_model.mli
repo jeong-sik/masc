@@ -1,4 +1,6 @@
-(** Llm_types — Shared type definitions, model registry, and parsing for the LLM client subsystem. *)
+(** Masc_model — Shared type definitions, model registry, and parsing for the model subsystem.
+
+    @since 2.130.0 — renamed from Masc_model *)
 
 (** {1 Utility} *)
 
@@ -157,33 +159,3 @@ val sanitize_messages_utf8 : message list -> message list
 (** Estimate token count for a message list (heuristic: ~4 chars per token). *)
 val estimate_tokens : message list -> int
 
-(** {1 Model Spec Parsing} *)
-
-(** Parse model spec from string like "glm:glm-4.7",
-    "claude:opus", "default", or "default:gemini-2.5-flash".
-    Splits at the first ':' only, so model IDs may contain additional ':'. *)
-val model_spec_of_string : string -> (model_spec, string) result
-
-(** Parse model strings and keep only models that are callable in the current
-    environment. Invalid specs and specs with missing API keys are skipped. *)
-val available_model_specs_of_strings : string list -> model_spec list
-
-(** Resolve the canonical default local model through the provider registry.
-    Falls back to the first available execution model or GLM if parsing fails. *)
-val default_local_model_spec : unit -> model_spec
-
-(** Preferred model labels for execution defaults, resolved from explicit env
-    overrides first, then available remote provider credentials, then any
-    explicitly configured local model. *)
-val default_execution_model_labels : unit -> string list
-
-(** Preferred model labels for verifier defaults. *)
-val default_verifier_model_labels : unit -> string list
-
-(** Resolve the first callable execution default.
-    Returns [Error _] instead of silently forcing a local model. *)
-val default_execution_model_spec : unit -> (model_spec, string) result
-
-(** Resolve the first callable verifier default.
-    Returns [Error _] instead of silently forcing a local model. *)
-val default_verifier_model_spec : unit -> (model_spec, string) result

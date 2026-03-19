@@ -24,7 +24,7 @@ export function refreshForTab(tab: string) {
 
   if (tab === 'situation') {
     refreshRoomTruth()
-    refreshMissionSnapshot()
+    refreshMissionSnapshot('full')
     refreshMissionBriefing()
   }
 

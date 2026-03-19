@@ -496,7 +496,7 @@ let release (lease : lease) ~success ?error ?latency_ms () =
 
 let model_spec_of_assignment (assignment : assignment) =
   {
-    Llm_types.llama_default with
+    Masc_model.llama_default with
     model_id = assignment.model_name;
     api_url = assignment.base_url;
   }

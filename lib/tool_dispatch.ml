@@ -157,7 +157,6 @@ type module_tag =
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper | Mod_perpetual | Mod_compact | Mod_mdal
   | Mod_notifications | Mod_gardener | Mod_inline
-  | Mod_async_spawn
   | Mod_autoresearch
   | Mod_model_catalog
 

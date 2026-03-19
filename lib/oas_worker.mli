@@ -1,7 +1,7 @@
 (** Oas_worker — Unified entry point for OAS-based MASC tool modules.
 
     Callers pass a [cascade_name] string; model resolution is delegated
-    to [Llm_cascade.get_cascade].  Internal [config] / [build] / [run]
+    to [Cascade.get_cascade].  Internal [config] / [build] / [run]
     are implementation details and not exported.
 
     @since Phase 1 — MASC→OAS migration
@@ -33,7 +33,7 @@ val run_named_with_masc_tools :
   cascade_name:string ->
   goal:string ->
   ?system_prompt:string ->
-  masc_tools:Llm_types.tool_def list ->
+  masc_tools:Masc_model.tool_def list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   ?max_turns:int ->
   ?temperature:float ->

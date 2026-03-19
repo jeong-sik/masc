@@ -5,13 +5,13 @@ val ensure_keeper_board_post_args :
 
 val keeper_allowed_tool_names : ?write_done:bool -> keeper_meta -> string list
 val keeper_allowed_llm_tools :
-  ?write_done:bool -> keeper_meta -> Llm_types.tool_def list
+  ?write_done:bool -> keeper_meta -> Masc_model.tool_def list
 
 val execute_keeper_tool_call :
   config:Room.config ->
   meta:keeper_meta ->
   ctx_work:Context_manager.working_context ->
-  Llm_types.tool_call ->
+  Masc_model.tool_call ->
   string
 
 val keeper_tool_loop_system_prompt : character_context:string -> string
@@ -19,7 +19,7 @@ val keeper_tool_loop_system_prompt : character_context:string -> string
 val keeper_tool_followup_prompt :
   user_message:string ->
   draft_reply:string ->
-  tool_outputs:(Llm_types.tool_call * string) list ->
+  tool_outputs:(Masc_model.tool_call * string) list ->
   already_executed:string list ->
   string
 

@@ -20,7 +20,8 @@ module Oas = Agent_sdk
 
 type config = {
   name : string;
-  model_spec : Llm_types.model_spec;
+  provider : Oas.Provider.config;
+  model_id : string;
   system_prompt : string;
   tools : Oas.Tool.t list;
   max_turns : int;
@@ -34,8 +35,8 @@ type config = {
   description : string option;
 }
 
-let default_config ~name ~model_spec ~system_prompt ~tools : config =
-  { name; model_spec; system_prompt; tools;
+let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
+  { name; provider; model_id; system_prompt; tools;
     max_turns = 20;
     max_tokens = 4096;
     temperature = 0.7;
@@ -62,7 +63,7 @@ type run_result = {
 (* Internal: resolve provider                                        *)
 (* ================================================================ *)
 
-let resolve_provider (spec : Llm_types.model_spec) : Oas.Provider.config =
+let resolve_provider (spec : Masc_model.model_spec) : Oas.Provider.config =
   match Oas_type_adapters.to_oas_provider spec with
   | Some cfg -> cfg
   | None ->
@@ -108,7 +109,6 @@ let build
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
   : (Oas.Agent.t, string) result =
-  let provider = resolve_provider config.model_spec in
   let tool_names =
     List.map (fun (t : Oas.Tool.t) -> t.schema.name) config.tools in
   let guardrails = match config.guardrails with
@@ -120,13 +120,13 @@ let build
           else Oas.Guardrails.AllowAll }
   in
   let builder =
-    Oas.Builder.create ~net ~model:config.model_spec.model_id
+    Oas.Builder.create ~net ~model:config.model_id
     |> Oas.Builder.with_name config.name
     |> Oas.Builder.with_system_prompt config.system_prompt
     |> Oas.Builder.with_max_tokens config.max_tokens
     |> Oas.Builder.with_max_turns config.max_turns
     |> Oas.Builder.with_temperature config.temperature
-    |> Oas.Builder.with_provider provider
+    |> Oas.Builder.with_provider config.provider
     |> Oas.Builder.with_tools config.tools
     |> Oas.Builder.with_guardrails guardrails
   in
@@ -204,12 +204,12 @@ let run_with_masc_tools
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
-    ~(masc_tools : Llm_types.tool_def list)
+    ~(masc_tools : Masc_model.tool_def list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?on_event
     (goal : string)
   : (run_result, string) result =
-  let oas_tools = List.map (fun (td : Llm_types.tool_def) ->
+  let oas_tools = List.map (fun (td : Masc_model.tool_def) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.tool_name
       ~description:td.tool_description
@@ -230,10 +230,12 @@ let require_eio () =
   | _, None -> Error "Eio net not available (running outside server context)"
 
 let resolve_cascade ~cascade_name =
-  match Llm_cascade.get_cascade ~cascade_name () with
+  match Cascade.get_cascade ~cascade_name () with
   | [] ->
     Error (Printf.sprintf "No models available for cascade '%s'" cascade_name)
-  | spec :: _ -> Ok spec
+  | spec :: _ ->
+    let provider = resolve_provider spec in
+    Ok (provider, spec.model_id)
 
 let run_named
     ~cascade_name
@@ -252,9 +254,9 @@ let run_named
   | Ok (sw, net) ->
   match resolve_cascade ~cascade_name with
   | Error e -> Error e
-  | Ok model_spec ->
+  | Ok (provider, model_id) ->
   let name = Printf.sprintf "oas-%s" cascade_name in
-  let config = { (default_config ~name ~model_spec ~system_prompt ~tools) with
+  let config = { (default_config ~name ~provider ~model_id ~system_prompt ~tools) with
     max_turns;
     max_tokens;
     temperature;
@@ -267,7 +269,7 @@ let run_named_with_masc_tools
     ~cascade_name
     ~goal
     ?(system_prompt = "")
-    ~(masc_tools : Llm_types.tool_def list)
+    ~(masc_tools : Masc_model.tool_def list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
     ?(temperature = 0.7)
@@ -281,9 +283,9 @@ let run_named_with_masc_tools
   | Ok (sw, net) ->
   match resolve_cascade ~cascade_name with
   | Error e -> Error e
-  | Ok model_spec ->
+  | Ok (provider, model_id) ->
   let name = Printf.sprintf "oas-%s" cascade_name in
-  let config = { (default_config ~name ~model_spec ~system_prompt ~tools:[]) with
+  let config = { (default_config ~name ~provider ~model_id ~system_prompt ~tools:[]) with
     max_turns;
     max_tokens;
     temperature;

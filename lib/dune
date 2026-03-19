@@ -124,7 +124,7 @@
    credits_dashboard
    cp_microarch_summary
    cp_search_fabric
-   llm_cascade
+   cascade
    ;; WebRTC modules removed — use ocaml-webrtc library directly
    eio_context
    encryption
@@ -314,10 +314,7 @@
    session
    shutdown_hooks
    spawn
-   spawn_eio
    spawn_registry
-   async_spawn
-   tool_async_spawn
    sse
    streamable_http
    subscriptions
@@ -515,7 +512,7 @@
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
-   llm_types
+   masc_model
    masc_eio_env
    discovery_cache
    oas_type_adapters

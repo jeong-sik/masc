@@ -113,20 +113,16 @@ let test_check_goal_missing_path () =
 (* ============================================ *)
 
 let mock_spawn_result ?(success=true) ?(output="{}") () =
-  Masc_mcp.Spawn_eio.{
+  Masc_mcp.Spawn.{
     success;
     output;
     exit_code = if success then 0 else 1;
     elapsed_ms = 100;
-    tool_call_count = 0;
-    tool_names = [];
     input_tokens = Some 50;
     output_tokens = Some 30;
     cache_creation_tokens = None;
     cache_read_tokens = None;
     cost_usd = Some 0.001;
-    raw_trace_run = None;
-    termination = None;
   }
 
 let test_bounded_run_empty_agents () =

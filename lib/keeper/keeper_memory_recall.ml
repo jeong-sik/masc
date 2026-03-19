@@ -4,20 +4,20 @@ open Keeper_types
 
 include Keeper_memory_bank
 
-let cost_usd_of_usage (usage : Agent_sdk.Types.api_usage) (model : Llm_types.model_spec) : float =
+let cost_usd_of_usage (usage : Agent_sdk.Types.api_usage) (model : Masc_model.model_spec) : float =
   let input_cost = float_of_int usage.input_tokens *. model.cost_per_1k_input /. 1000.0 in
   let output_cost = float_of_int usage.output_tokens *. model.cost_per_1k_output /. 1000.0 in
   input_cost +. output_cost
 
-let model_spec_for_used (specs : Llm_types.model_spec list) (model_used : string) :
-  Llm_types.model_spec option =
+let model_spec_for_used (specs : Masc_model.model_spec list) (model_used : string) :
+  Masc_model.model_spec option =
   let used =
     if String.ends_with ~suffix:":latest" model_used then
       String.sub model_used 0 (String.length model_used - String.length ":latest")
     else
       model_used
   in
-  List.find_opt (fun (m : Llm_types.model_spec) ->
+  List.find_opt (fun (m : Masc_model.model_spec) ->
     m.model_id = model_used || m.model_id = used
   ) specs
 
@@ -509,6 +509,49 @@ let recent_user_messages (msgs : Agent_sdk.Types.message list) ~(max_n : int) : 
          if c = "" then None else Some c
        else None)
   |> take max_n
+
+(** Load user messages from a history.jsonl file (persisted across generations).
+    Each line is a JSON object with "role" and "content" fields.
+    Returns up to [max_n] user messages from the tail of the file. *)
+let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
+  let lines = read_file_tail_lines path ~max_bytes:0 ~max_lines:(max_n * 3) in
+  lines
+  |> List.filter_map (fun line ->
+       try
+         let json = Yojson.Safe.from_string line in
+         let role = Yojson.Safe.Util.(json |> member "role" |> to_string) in
+         if role = "user" then
+           let content =
+             Yojson.Safe.Util.(json |> member "content" |> to_string)
+             |> String.trim
+           in
+           if content = "" then None else Some content
+         else None
+       with _ -> None)
+  |> take max_n
+
+(** Build recall candidates by merging checkpoint messages with history.jsonl.
+    Checkpoint messages are prioritized (recent context), history.jsonl
+    provides cross-generation recall for older conversations. Deduplication
+    uses exact string match on the first 100 characters. *)
+let recall_candidates_with_history
+    ~(checkpoint_messages : Agent_sdk.Types.message list)
+    ~(history_path : string)
+    ~(max_checkpoint : int)
+    ~(max_history : int) : string list =
+  let from_checkpoint = recent_user_messages checkpoint_messages ~max_n:max_checkpoint in
+  let from_history = load_history_user_messages ~path:history_path ~max_n:max_history in
+  (* Deduplicate: checkpoint messages take priority *)
+  let seen : (string, unit) Hashtbl.t = Hashtbl.create 64 in
+  let key_of s =
+    let len = min 100 (String.length s) in
+    String.sub s 0 len
+  in
+  List.iter (fun s -> Hashtbl.replace seen (key_of s) ()) from_checkpoint;
+  let unique_history =
+    List.filter (fun s -> not (Hashtbl.mem seen (key_of s))) from_history
+  in
+  from_checkpoint @ unique_history
 
 type memory_recall_eval = {
   performed: bool;

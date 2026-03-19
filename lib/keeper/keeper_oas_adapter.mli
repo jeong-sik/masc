@@ -2,7 +2,7 @@
 
     Uses cascade-name-based model resolution (no [model_spec] construction).
     Delegates to [Oas_worker.run_named] for agent loops and
-    [Llm_cascade.call_with_tools] for single-shot cascade calls.
+    [Cascade.call_with_tools] for single-shot cascade calls.
 
     @since OAS migration Phase 1
     @since LLM-free cascade Phase 2 *)
@@ -42,13 +42,13 @@ val run_with_tools :
     model resolution uses cascade name derived from [meta.name]. *)
 val run_with_custom_dispatch :
   meta:keeper_meta ->
-  ?model_spec_override:Llm_types.model_spec ->
+  ?model_spec_override:Masc_model.model_spec ->
   system_prompt:string ->
   goal:string ->
   max_turns:int ->
   temperature:float ->
   max_tokens:int ->
-  masc_tools:Llm_types.tool_def list ->
+  masc_tools:Masc_model.tool_def list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   unit ->
@@ -73,19 +73,19 @@ val text_of_run_result : Oas_worker.run_result -> string
 
 (** Extract usage from an OAS run result.
     Returns zero usage if response has no usage data. *)
-val usage_of_run_result : Oas_worker.run_result -> Llm_types.token_usage
+val usage_of_run_result : Oas_worker.run_result -> Masc_model.token_usage
 
 (** Extract model ID string from an OAS run result. *)
 val model_of_run_result : Oas_worker.run_result -> string
 
-(** Cascade through [Llm_cascade.call_with_tools] — single-shot, no agent loop.
+(** Cascade through [Cascade.call_with_tools] — single-shot, no agent loop.
     [cascade_name] defaults to ["keeper_turn"]. Model specs in the
     [completion_request] list are ignored; only prompt/system/temperature
     are extracted. *)
 val run_cascade :
   ?cascade_name:string ->
   ?timeout_sec:int ->
-  Llm_types.completion_request list ->
+  Masc_model.completion_request list ->
   (Llm_provider.Types.api_response, string) result
 
 (** Streaming cascade with synthetic SSE events.
@@ -94,6 +94,6 @@ val run_cascade_stream :
   ?cascade_name:string ->
   ?timeout_sec:float ->
   on_event:(Llm_provider.Types.sse_event -> unit) ->
-  Llm_types.completion_request ->
-  fallback:Llm_types.completion_request list ->
+  Masc_model.completion_request ->
+  fallback:Masc_model.completion_request list ->
   (Llm_provider.Types.api_response, string) result

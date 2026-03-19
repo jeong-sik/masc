@@ -116,7 +116,7 @@ let canonical_capability_id tool_name =
   | Some canonical_name -> canonical_name
   | None -> tool_name
 
-let schema_of_tool_def (tool : Llm_types.tool_def) : Types.tool_schema =
+let schema_of_tool_def (tool : Masc_model.tool_def) : Types.tool_schema =
   {
     Types.name = tool.tool_name;
     description = tool.tool_description;
@@ -180,12 +180,6 @@ let spawned_agent_public_tool_names : string list =
 
 let spawned_agent_prefixed_tools : string list =
   Agent_tool_surfaces.spawned_agent_prefixed_tools
-
-let llama_worker_tool_names : string list =
-  Agent_tool_surfaces.llama_worker_tool_names
-
-let llama_worker_prefixed_tools : string list =
-  Agent_tool_surfaces.llama_worker_prefixed_tools
 
 let mdal_auditable_tool_names : string list =
   Agent_tool_surfaces.mdal_auditable_tool_names
@@ -428,12 +422,12 @@ let local_worker_tool_schemas ?names () :
 
 let keeper_all_tool_names : string list =
   Tool_shard.keeper_llm_tools
-  |> List.map (fun tool -> tool.Llm_types.tool_name)
+  |> List.map (fun tool -> tool.Masc_model.tool_name)
   |> unique_preserve_order
 
 let keeper_safe_tool_names : string list =
   Tool_shard.keeper_llm_tools
-  |> List.map (fun tool -> tool.Llm_types.tool_name)
+  |> List.map (fun tool -> tool.Masc_model.tool_name)
   |> List.filter (fun name -> not (List.mem name privileged_keeper_tool_names))
   |> unique_preserve_order
 

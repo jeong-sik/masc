@@ -305,49 +305,74 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 |> Option.value ~default:primary
               in
               let cost0 = cost_usd_of_usage (Llm_types.usage_of_response resp0) used_model0 in
-              (* Multi-round tool calling loop: up to 3 rounds *)
+              (* Multi-round tool calling: gated dispatch + OAS lifecycle *)
               let max_tool_rounds = 3 in
               let _trunc s n = if String.length s > n then String.sub s 0 n ^ "..." else s in
-              let execute_tool_calls tcs =
-                List.map (fun (tc : Llm_types.tool_call) ->
-                  Log.Trpg.info "Executing tool: %s args: %s"
-                    tc.call_name (_trunc tc.call_arguments 200);
+
+              (* Gated dispatch closure — Eval_gate + Trajectory + write_done.
+                 Compatible with run_with_custom_dispatch's ~dispatch parameter. *)
+              let tools_executed_ref = ref [] in
+              let write_done_ref = ref false in
+              let is_write_tool name =
+                List.mem name [
+                  "keeper_board_post"; "keeper_board_comment";
+                  "keeper_fs_edit"; "keeper_edit";
+                  "keeper_voice_speak";
+                  "keeper_voice_session_start"; "keeper_voice_session_end";
+                ]
+              in
+              let gated_dispatch ~(name : string) ~(args : Yojson.Safe.t)
+                : bool * string =
+                let args_str = Yojson.Safe.to_string args in
+                Log.Trpg.info "Executing tool: %s args: %s"
+                  name (_trunc args_str 200);
+                if is_write_tool name && !write_done_ref then
+                  (false, Yojson.Safe.to_string (`Assoc [
+                    ("error",
+                     `String "Write already performed — produce final text answer");
+                    ("tool", `String name);
+                  ]))
+                else begin
                   let (decision, result_opt, eval_opt, duration_ms) =
                     Eval_gate.guarded_execute
                       ~config:gate_config
                       ~accumulated_cost:trajectory_acc.Trajectory.total_cost
                       ~trajectory_acc:(Some trajectory_acc)
-                      ~tool_name:tc.call_name
-                      ~args_json:tc.call_arguments
+                      ~tool_name:name
+                      ~args_json:args_str
                       ~execute:(fun () ->
-                        execute_keeper_tool_call ~config:ctx.config ~meta ~ctx_work tc)
+                        let tc : Llm_types.tool_call = {
+                          call_id = ""; call_name = name;
+                          call_arguments = args_str;
+                        } in
+                        execute_keeper_tool_call
+                          ~config:ctx.config ~meta ~ctx_work tc)
                   in
                   let output = match decision with
                     | Trajectory.Reject reason ->
-                        Log.Misc.info "Tool %s GATED: %s" tc.call_name reason;
+                        Log.Misc.info "Tool %s GATED: %s" name reason;
                         Yojson.Safe.to_string (`Assoc [
-                          ("error", `String (Printf.sprintf "gated: %s" reason));
-                          ("tool", `String tc.call_name);
+                          ("error",
+                           `String (Printf.sprintf "gated: %s" reason));
+                          ("tool", `String name);
                         ])
                     | Trajectory.Pass ->
                         let r = Option.value ~default:"" result_opt in
-                        Log.Trpg.info "Tool %s OK: %s" tc.call_name (_trunc r 200);
-                        (* Log post-eval warnings *)
+                        Log.Trpg.info "Tool %s OK: %s" name (_trunc r 200);
                         (match eval_opt with
                          | Some eval when eval.Eval_gate.should_warn ->
-                             Log.Misc.warn "Warning for %s: %s" tc.call_name
+                             Log.Misc.warn "Warning for %s: %s" name
                                (Option.value ~default:"" eval.Eval_gate.warning)
                          | _ -> ());
                         r
                   in
-                  (* Record trajectory entry *)
                   let entry : Trajectory.tool_call_entry = {
                     ts = Time_compat.now ();
                     ts_iso = Types.now_iso ();
                     turn = trajectory_acc.Trajectory.turn;
-                    round = 0;  (* updated by tool_loop caller *)
-                    tool_name = tc.call_name;
-                    args_json = tc.call_arguments;
+                    round = 0;
+                    tool_name = name;
+                    args_json = args_str;
                     gate_decision = decision;
                     result = (match decision with
                       | Trajectory.Pass -> result_opt
@@ -361,113 +386,144 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       | None -> 0.0);
                   } in
                   Trajectory.record_entry trajectory_acc entry;
-                  (tc, output)
-                ) tcs
-              in
-              let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
-                  ~acc_tools_used ~last_resp =
-                if not (Llm_types.has_tool_calls last_resp) || round > max_tool_rounds then
-                  (* Terminal: no more tool calls or hit round limit *)
-                  let content =
-                    let c = String.trim (Llm_types.text_of_response last_resp) in
-                    if c = "" && acc_tools_used <> [] then
-                      Printf.sprintf "(tools executed: %s)"
-                        (String.concat ", " acc_tools_used)
-                    else Llm_types.text_of_response last_resp
+                  tools_executed_ref := name :: !tools_executed_ref;
+                  let success = match decision with
+                    | Trajectory.Pass -> true
+                    | Trajectory.Reject _ -> false
                   in
-                  ( content, acc_usage, last_resp.Llm_provider.Types.model,
-                    acc_latency, acc_cost, acc_tools_used )
-                else begin
-                  let last_resp_tool_calls = Llm_types.tool_calls_of_response last_resp in
-                  Log.Trpg.info "Tool round %d/%d: %d tool calls"
-                    round max_tool_rounds
-                    (List.length last_resp_tool_calls);
-                  let round_tools =
-                    List.map (fun (tc : Llm_types.tool_call) -> tc.call_name)
-                      last_resp_tool_calls
-                  in
-                  let all_tools_so_far = acc_tools_used @ round_tools in
-                  let tool_outputs = execute_tool_calls last_resp_tool_calls in
-                  let followup_prompt =
-                    keeper_tool_followup_prompt
-                      ~user_message:message
-                      ~draft_reply:(Llm_types.text_of_response last_resp)
-                      ~tool_outputs
-                      ~already_executed:all_tools_so_far
-                  in
-                  (* Once a write tool has been executed, strip tools from the
-                     next request to force the model to produce a text answer. *)
-                  let write_done =
-                    List.exists
-                      (fun n ->
-                         List.mem n
-                           [
-                             "keeper_board_post";
-                             "keeper_board_comment";
-                             "keeper_fs_edit";
-                             "keeper_edit";
-                             "keeper_voice_speak";
-                             "keeper_voice_session_start";
-                             "keeper_voice_session_end";
-                           ])
-                      all_tools_so_far
-                  in
-                  let next_tools =
-                    keeper_allowed_llm_tools ~write_done meta
-                  in
-                  let followup_requests =
-                    List.map (fun (model : Llm_types.model_spec) ->
-                      ({
-                        Llm_types.model;
-                        messages = [
-                          Agent_sdk.Types.system_msg (keeper_tool_loop_system_prompt
-                            ~character_context:ctx_work.system_prompt);
-                          Agent_sdk.Types.user_msg followup_prompt;
-                        ];
-                        temperature = 0.3;
-                        max_tokens = followup_max_tokens;
-                        tools = next_tools;
-                        response_format = `Text;
-                      } : Llm_types.completion_request)
-                    ) specs
-                  in
-                  let (followup_result, round_latency) = Llm_types.timed (fun () ->
-                      run_cascade_batch followup_requests) in
-                  match followup_result with
-                  | Error _ ->
-                    (* Cascade failed — return what we have *)
-                    ( Llm_types.text_of_response last_resp, acc_usage,
-                      last_resp.Llm_provider.Types.model, acc_latency,
-                      acc_cost, acc_tools_used @ round_tools )
-                  | Ok resp_next ->
-                    let resp_next_tool_calls = Llm_types.tool_calls_of_response resp_next in
-                    Log.Trpg.info "Follow-up round %d resp: tool_calls=%d content_len=%d model=%s"
-                      round
-                      (List.length resp_next_tool_calls)
-                      (String.length (Llm_types.text_of_response resp_next))
-                      resp_next.Llm_provider.Types.model;
-                    let used_model_next =
-                      model_spec_for_used specs resp_next.Llm_provider.Types.model
-                      |> Option.value ~default:primary
-                    in
-                    let resp_next_usage = Llm_types.usage_of_response resp_next in
-                    let cost_next = cost_usd_of_usage resp_next_usage used_model_next in
-                    tool_loop
-                      ~round:(round + 1)
-                      ~acc_usage:(merge_usage acc_usage resp_next_usage)
-                      ~acc_latency:(acc_latency + round_latency)
-                      ~acc_cost:(acc_cost +. cost_next)
-                      ~acc_tools_used:(acc_tools_used @ round_tools)
-                      ~last_resp:resp_next
+                  if is_write_tool name && success then
+                    write_done_ref := true;
+                  (success, output)
                 end
               in
               (* Harness: increment turn counter before tool execution *)
               Trajectory.increment_turn trajectory_acc;
               let (base_content, base_usage, base_model_used, base_latency_ms,
                    base_cost_usd, tools_used) =
-                tool_loop ~round:1 ~acc_usage:(Llm_types.usage_of_response resp0)
-                  ~acc_latency:latency0 ~acc_cost:cost0
-                  ~acc_tools_used:[] ~last_resp:resp0
+                if not (Llm_types.has_tool_calls resp0) then
+                  (* No tool calls — return initial response directly *)
+                  (Llm_types.text_of_response resp0,
+                   Llm_types.usage_of_response resp0,
+                   resp0.Llm_provider.Types.model,
+                   latency0, cost0, [])
+                else begin
+                  (* First round: execute tool calls from initial response *)
+                  let first_tcs =
+                    Llm_types.tool_calls_of_response resp0
+                  in
+                  Log.Trpg.info "Tool round 1/%d: %d tool calls"
+                    max_tool_rounds (List.length first_tcs);
+                  let first_outputs = List.map
+                    (fun (tc : Llm_types.tool_call) ->
+                      let args =
+                        try Yojson.Safe.from_string tc.call_arguments
+                        with _ -> `Assoc []
+                      in
+                      let (_ok, output) =
+                        gated_dispatch ~name:tc.call_name ~args
+                      in
+                      (tc, output))
+                    first_tcs
+                  in
+                  let first_tools = List.map
+                    (fun (tc : Llm_types.tool_call) -> tc.call_name)
+                    first_tcs
+                  in
+                  if max_tool_rounds <= 1 || !write_done_ref then begin
+                    (* Write done or single round — return first-round result *)
+                    let content =
+                      let c =
+                        String.trim (Llm_types.text_of_response resp0)
+                      in
+                      if c = "" then
+                        Printf.sprintf "(tools executed: %s)"
+                          (String.concat ", " first_tools)
+                      else c
+                    in
+                    (content, Llm_types.usage_of_response resp0,
+                     resp0.Llm_provider.Types.model,
+                     latency0, cost0, first_tools)
+                  end else begin
+                    (* Remaining rounds: delegate to OAS lifecycle *)
+                    let followup = keeper_tool_followup_prompt
+                      ~user_message:message
+                      ~draft_reply:(Llm_types.text_of_response resp0)
+                      ~tool_outputs:first_outputs
+                      ~already_executed:first_tools
+                    in
+                    let remaining_tools =
+                      keeper_allowed_llm_tools
+                        ~write_done:!write_done_ref meta
+                    in
+                    let (oas_result, oas_latency) = Llm_types.timed
+                      (fun () ->
+                        Keeper_oas_adapter.run_with_custom_dispatch
+                          ~meta
+                          ~model_spec_override:primary
+                          ~system_prompt:(keeper_tool_loop_system_prompt
+                            ~character_context:ctx_work.system_prompt)
+                          ~goal:followup
+                          ~max_turns:(max_tool_rounds - 1)
+                          ~temperature:0.3
+                          ~max_tokens:followup_max_tokens
+                          ~masc_tools:remaining_tools
+                          ~dispatch:gated_dispatch
+                          ())
+                    in
+                    let all_tools = List.rev !tools_executed_ref in
+                    match oas_result with
+                    | Error _e ->
+                      (* OAS failed — return first-round result *)
+                      Log.Keeper.warn
+                        "OAS tool loop failed: %s — using first-round result"
+                        _e;
+                      let content =
+                        let c =
+                          String.trim (Llm_types.text_of_response resp0)
+                        in
+                        if c = "" then
+                          Printf.sprintf "(tools executed: %s)"
+                            (String.concat ", " first_tools)
+                        else c
+                      in
+                      (content, Llm_types.usage_of_response resp0,
+                       resp0.Llm_provider.Types.model,
+                       latency0, cost0, all_tools)
+                    | Ok run_result ->
+                      let oas_resp =
+                        run_result.Oas_worker.response
+                      in
+                      let oas_content =
+                        let c =
+                          String.trim (Llm_types.text_of_response oas_resp)
+                        in
+                        if c = "" then
+                          Printf.sprintf "(tools executed: %s)"
+                            (String.concat ", " all_tools)
+                        else Llm_types.text_of_response oas_resp
+                      in
+                      let oas_usage =
+                        Llm_types.usage_of_response oas_resp
+                      in
+                      let oas_model =
+                        oas_resp.Llm_provider.Types.model
+                      in
+                      let used_model_oas =
+                        model_spec_for_used specs oas_model
+                        |> Option.value ~default:primary
+                      in
+                      let oas_cost =
+                        cost_usd_of_usage oas_usage used_model_oas
+                      in
+                      (oas_content,
+                       merge_usage
+                         (Llm_types.usage_of_response resp0) oas_usage,
+                       oas_model,
+                       latency0 + oas_latency,
+                       cost0 +. oas_cost,
+                       all_tools)
+                  end
+                end
               in
               let eval0 =
                 evaluate_memory_recall

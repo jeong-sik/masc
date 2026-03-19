@@ -34,6 +34,7 @@ val run_with_tools :
     caller manages tool tracking externally. *)
 val run_with_custom_dispatch :
   meta:keeper_meta ->
+  ?model_spec_override:Llm_types.model_spec ->
   system_prompt:string ->
   goal:string ->
   max_turns:int ->

@@ -3,6 +3,7 @@ open Alcotest
 module Mention = Masc_mcp.Mention
 module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_memory = Masc_mcp.Keeper_memory
+module Keeper_memory_recall = Masc_mcp.Keeper_memory_recall
 module Keeper_types = Masc_mcp.Keeper_types
 module Types = Masc_mcp.Types
 
@@ -174,6 +175,84 @@ let test_prioritized_action_to_string_all_variants () =
   check string "handoff" "handoff" (prioritized_action_to_string Act_handoff);
   check string "none" "none" (prioritized_action_to_string Act_none)
 
+(* --- history recall tests --- *)
+
+let test_tmpdir () =
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "masc-test-%d" (Unix.getpid ())) in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  dir
+
+let cleanup_tmpdir dir =
+  (try
+     Array.iter (fun f -> Sys.remove (Filename.concat dir f)) (Sys.readdir dir);
+     Unix.rmdir dir
+   with _ -> ())
+
+let test_load_history_user_messages () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let path = Filename.concat dir "history.jsonl" in
+    let lines = [
+      {|{"role":"user","content":"hello world"}|};
+      {|{"role":"assistant","content":"hi there"}|};
+      {|{"role":"user","content":"second question"}|};
+      {|{"role":"user","content":""}|};
+      {|{"role":"user","content":"third question"}|};
+    ] in
+    let oc = open_out path in
+    List.iter (fun l -> output_string oc (l ^ "\n")) lines;
+    close_out oc;
+    let result = Keeper_memory_recall.load_history_user_messages ~path ~max_n:10 in
+    check int "3 user messages" 3 (List.length result);
+    check string "first" "hello world" (List.hd result);
+    check string "last" "third question" (List.nth result 2))
+
+let test_recall_candidates_with_history_dedup () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let path = Filename.concat dir "history.jsonl" in
+    (* history contains same message as checkpoint *)
+    let lines = [
+      {|{"role":"user","content":"hello world"}|};
+      {|{"role":"user","content":"unique from history"}|};
+    ] in
+    let oc = open_out path in
+    List.iter (fun l -> output_string oc (l ^ "\n")) lines;
+    close_out oc;
+    let checkpoint_msgs : Agent_sdk.Types.message list = [
+      Agent_sdk.Types.text_message Agent_sdk.Types.User "hello world";
+    ] in
+    let result = Keeper_memory_recall.recall_candidates_with_history
+      ~checkpoint_messages:checkpoint_msgs
+      ~history_path:path
+      ~max_checkpoint:32 ~max_history:64 in
+    (* "hello world" from checkpoint, "unique from history" from history *)
+    check int "2 total (deduped)" 2 (List.length result);
+    check string "first from checkpoint" "hello world" (List.hd result);
+    check string "second from history" "unique from history" (List.nth result 1))
+
+let test_recall_candidates_with_history_appends () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
+    let path = Filename.concat dir "history.jsonl" in
+    let lines = [
+      {|{"role":"user","content":"old question from 3 days ago"}|};
+      {|{"role":"user","content":"another old question"}|};
+    ] in
+    let oc = open_out path in
+    List.iter (fun l -> output_string oc (l ^ "\n")) lines;
+    close_out oc;
+    let checkpoint_msgs : Agent_sdk.Types.message list = [
+      Agent_sdk.Types.text_message Agent_sdk.Types.User "recent question";
+    ] in
+    let result = Keeper_memory_recall.recall_candidates_with_history
+      ~checkpoint_messages:checkpoint_msgs
+      ~history_path:path
+      ~max_checkpoint:32 ~max_history:64 in
+    check int "3 total" 3 (List.length result);
+    check string "checkpoint first" "recent question" (List.hd result))
+
 let () =
   run "Keeper_memory"
     [
@@ -191,6 +270,15 @@ let () =
             test_user_visible_reply_strips_skill_and_state_markers;
           test_case "user visible reply falls back to snapshot progress" `Quick
             test_user_visible_reply_falls_back_to_snapshot_progress;
+        ] );
+      ( "history_recall",
+        [
+          test_case "load_history_user_messages from jsonl" `Quick
+            test_load_history_user_messages;
+          test_case "recall_candidates_with_history deduplicates" `Quick
+            test_recall_candidates_with_history_dedup;
+          test_case "recall_candidates_with_history appends history" `Quick
+            test_recall_candidates_with_history_appends;
         ] );
       ( "prioritized_action",
         [

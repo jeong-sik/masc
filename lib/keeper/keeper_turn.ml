@@ -291,7 +291,16 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     ~fallback:requests
               | _ -> run_cascade_batch requests
             in
-            let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
+            let history_path =
+              Filename.concat (Filename.concat base_dir meta.trace_id) "history.jsonl"
+            in
+            let recall_candidates =
+              recall_candidates_with_history
+                ~checkpoint_messages:base_ctx.messages
+                ~history_path
+                ~max_checkpoint:32
+                ~max_history:64
+            in
             let (cascade_result0, latency0) = Masc_model.timed (fun () ->
                 run_cascade requests) in
             match cascade_result0 with

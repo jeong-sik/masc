@@ -269,17 +269,17 @@ let process_one rctx ~state_json ~role ~actor_id ~keeper_name =
     | Some tier1_str ->
     try
       let tier1_model =
-        match Llm_cascade.model_spec_of_string tier1_str with
+        match Cascade.model_spec_of_string tier1_str with
         | Ok m -> m
         | Error _ -> (
-            match Llm_cascade.default_verifier_model_spec () with
+            match Cascade.default_verifier_model_spec () with
             | Ok model -> model
             | Error _ -> Masc_model.glm_cloud)
       in
       let tier2_model =
         match Sys.getenv_opt "TRPG_HARNESS_TIER2_MODEL" with
         | Some s -> (
-            match Llm_cascade.model_spec_of_string s with
+            match Cascade.model_spec_of_string s with
             | Ok m -> m
             | Error _ -> Masc_model.glm_cloud)
         | None -> Masc_model.glm_cloud

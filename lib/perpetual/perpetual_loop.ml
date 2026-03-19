@@ -86,7 +86,7 @@ let default_config ~goal ~models ?verifier ?session_dir () =
   let verifier_model = match verifier with
     | Some v -> v
     | None -> (
-        match Llm_cascade.default_verifier_model_spec () with
+        match Cascade.default_verifier_model_spec () with
         | Ok model -> model
         | Error _ -> (
             match models with
@@ -158,7 +158,7 @@ let create_state config =
   in
   let primary_model = match config.model_cascade with
     | m :: _ -> m
-    | [] -> Llm_cascade.default_local_model_spec ()
+    | [] -> Cascade.default_local_model_spec ()
   in
   let context = Context_manager.create
     ~system_prompt

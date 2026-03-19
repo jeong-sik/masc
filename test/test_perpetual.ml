@@ -58,14 +58,14 @@ let test_llm_client () = group "LLM Client" (fun () ->
     "gemini" (Masc_model.string_of_provider Gemini);
 
   (* 2. Model spec parsing *)
-  (match Llm_cascade.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl" with
+  (match Cascade.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl" with
    | Ok m ->
      assert_equal "parse_model:llama_local_id" "qwen3.5-35b-a3b-ud-q8-xl" m.model_id;
      assert_true "parse_model:llama_local_provider"
        (m.provider = Masc_model.Llama)
    | Error _ -> assert_true "parse_model:llama_local" false);
 
-  (match Llm_cascade.model_spec_of_string "claude:opus" with
+  (match Cascade.model_spec_of_string "claude:opus" with
    | Ok m ->
      assert_equal "parse_model:claude_id" Masc_mcp.Env_config.Claude.default_model m.model_id;
      assert_true "parse_model:claude_provider"
@@ -75,21 +75,21 @@ let test_llm_client () = group "LLM Client" (fun () ->
        (m.cost_per_1k_input > 0.01)
    | Error _ -> assert_true "parse_model:claude" false);
 
-  (match Llm_cascade.model_spec_of_string "gemini:gemini-2.5-flash" with
+  (match Cascade.model_spec_of_string "gemini:gemini-2.5-flash" with
    | Ok m ->
      assert_equal "parse_model:gemini_id" "gemini-2.5-flash" m.model_id;
      assert_true "parse_model:gemini_provider"
        (m.provider = Masc_model.Gemini)
    | Error _ -> assert_true "parse_model:gemini" false);
 
-  (match Llm_cascade.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl:latest" with
+  (match Cascade.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl:latest" with
    | Ok m ->
      assert_equal "parse_model:llama_tagged_id" "qwen3.5-35b-a3b-ud-q8-xl:latest" m.model_id;
      assert_true "parse_model:llama_tagged_provider"
        (m.provider = Masc_model.Llama)
    | Error _ -> assert_true "parse_model:llama_tagged" false);
 
-  (match Llm_cascade.model_spec_of_string "llama:qwen3.5-coder" with
+  (match Cascade.model_spec_of_string "llama:qwen3.5-coder" with
    | Ok m ->
      assert_equal "parse_model:llama_id" "qwen3.5-coder" m.model_id;
      assert_true "parse_model:llama_provider"
@@ -98,35 +98,35 @@ let test_llm_client () = group "LLM Client" (fun () ->
        Masc_mcp.Env_config.Llama.server_url m.api_url
    | Error e -> assert_true ("parse_model:llama_failed: " ^ e) false);
 
-  (match Llm_cascade.model_spec_of_string "anthropic:sonnet" with
+  (match Cascade.model_spec_of_string "anthropic:sonnet" with
    | Ok m ->
      assert_equal "parse_model:anthropic_alias_id" Masc_mcp.Env_config.Claude.default_model m.model_id;
      assert_true "parse_model:anthropic_alias_provider"
        (m.provider = Masc_model.Claude)
    | Error _ -> assert_true "parse_model:anthropic_alias" false);
 
-  (match Llm_cascade.model_spec_of_string "google:flash" with
+  (match Cascade.model_spec_of_string "google:flash" with
    | Ok m ->
      assert_equal "parse_model:google_alias_id" Masc_mcp.Env_config.Gemini.flash_model m.model_id;
      assert_true "parse_model:google_alias_provider"
        (m.provider = Masc_model.Gemini)
    | Error _ -> assert_true "parse_model:google_alias" false);
 
-  (match Llm_cascade.model_spec_of_string "claude-api:sonnet" with
+  (match Cascade.model_spec_of_string "claude-api:sonnet" with
    | Ok m ->
      assert_equal "parse_model:claude_api_id" Masc_mcp.Env_config.Claude.default_model m.model_id;
      assert_true "parse_model:claude_api_provider"
        (m.provider = Masc_model.Claude)
    | Error _ -> assert_true "parse_model:claude_api" false);
 
-  (match Llm_cascade.model_spec_of_string "gemini-api:gemini-2.5-flash" with
+  (match Cascade.model_spec_of_string "gemini-api:gemini-2.5-flash" with
    | Ok m ->
      assert_equal "parse_model:gemini_api_id" "gemini-2.5-flash" m.model_id;
      assert_true "parse_model:gemini_api_provider"
        (m.provider = Masc_model.Gemini)
    | Error _ -> assert_true "parse_model:gemini_api" false);
 
-  (match Llm_cascade.model_spec_of_string "codex-api:gpt-5-mini" with
+  (match Cascade.model_spec_of_string "codex-api:gpt-5-mini" with
    | Ok m ->
      assert_equal "parse_model:codex_api_id" "gpt-5-mini" m.model_id;
      assert_true "parse_model:codex_api_provider"
@@ -134,20 +134,20 @@ let test_llm_client () = group "LLM Client" (fun () ->
    | Error _ -> assert_true "parse_model:codex_api" false);
 
   (* 3. Invalid model spec *)
-  (match Llm_cascade.model_spec_of_string "invalid" with
+  (match Cascade.model_spec_of_string "invalid" with
    | Error _ -> assert_true "parse_model:invalid" true
    | Ok _ -> assert_true "parse_model:invalid_should_fail" false);
 
-  (match Llm_cascade.model_spec_of_string "llama:" with
+  (match Cascade.model_spec_of_string "llama:" with
    | Error _ -> assert_true "parse_model:empty_model_rejected" true
    | Ok _ -> assert_true "parse_model:empty_model_should_fail" false);
 
   (* 3b. MLX provider was removed (PR #799); parsing should fail *)
-  (match Llm_cascade.model_spec_of_string "mlx:qwen3.5-35b" with
+  (match Cascade.model_spec_of_string "mlx:qwen3.5-35b" with
    | Error _ -> assert_true "parse_model:mlx_rejected" true
    | Ok _ -> assert_true "parse_model:mlx_should_fail" false);
 
-  (match Llm_cascade.model_spec_of_string "custom:mymodel@http://localhost:9999" with
+  (match Cascade.model_spec_of_string "custom:mymodel@http://localhost:9999" with
    | Ok m ->
      assert_equal "parse_model:custom_with_url_id" "mymodel" m.model_id;
      assert_true "parse_model:custom_with_url_provider"
@@ -155,7 +155,7 @@ let test_llm_client () = group "LLM Client" (fun () ->
      assert_equal "parse_model:custom_with_url_url" "http://localhost:9999" m.api_url
    | Error e -> assert_true ("parse_model:custom_url_failed: " ^ e) false);
 
-  (match Llm_cascade.model_spec_of_string "custom:bare-model" with
+  (match Cascade.model_spec_of_string "custom:bare-model" with
    | Ok m ->
      assert_equal "parse_model:custom_bare_id" "bare-model" m.model_id;
      assert_true "parse_model:custom_bare_provider"
@@ -197,7 +197,7 @@ let test_llm_client () = group "LLM Client" (fun () ->
   Unix.putenv "MASC_DEFAULT_PROVIDER" "llama";
   Unix.putenv "MASC_DEFAULT_MODEL" "default-model";
   Unix.putenv "LLAMA_DEFAULT_MODEL" "default-model";
-  let default_local = Llm_cascade.default_local_model_spec () in
+  let default_local = Cascade.default_local_model_spec () in
   assert_true "builtin:default_local_provider"
     (default_local.provider = Masc_model.Llama);
   assert_equal "builtin:default_local_model_id"

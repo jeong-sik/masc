@@ -41,7 +41,7 @@ let handle_keeper_status ctx args : tool_result =
       (match model_specs_of_strings models with
        | Error e -> (false, "❌ " ^ e)
        | Ok specs ->
-         let primary = match specs with m0 :: _ -> m0 | [] -> Llm_cascade.default_local_model_spec () in
+         let primary = match specs with m0 :: _ -> m0 | [] -> Cascade.default_local_model_spec () in
          let base_dir = session_base_dir ctx.config in
          let ctx_opt =
            if include_context then

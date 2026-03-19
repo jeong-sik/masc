@@ -32,7 +32,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
           let primary =
             match specs with
             | model :: _ -> model
-            | [] -> Llm_cascade.default_local_model_spec ()
+            | [] -> Cascade.default_local_model_spec ()
           in
           let base_dir = session_base_dir ctx.config in
           mkdir_p base_dir;
@@ -181,7 +181,7 @@ let run_social_board_event_turn
           let primary =
             match specs with
             | model :: _ -> model
-            | [] -> Llm_cascade.default_local_model_spec ()
+            | [] -> Cascade.default_local_model_spec ()
           in
           let base_dir = session_base_dir ctx.config in
           let session, ctx_opt =

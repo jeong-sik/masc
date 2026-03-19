@@ -39,23 +39,22 @@ type cascade_result = {
 }
 
 (** Locate config/cascade.json via CWD or ME_ROOT.
+    Falls back to legacy config/llm_cascade.json if new name not found.
     Returns [Some path] when the file exists on disk. *)
 let default_config_path () : string option =
+  let base dir name = Filename.concat (Filename.concat dir "config") name in
+  let cwd = Sys.getcwd () in
+  let me_root =
+    Sys.getenv_opt "ME_ROOT"
+    |> Option.value
+         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
+  in
+  let masc_root = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
   let candidates =
-    let cwd_candidate =
-      Filename.concat (Sys.getcwd ()) "config/cascade.json"
-    in
-    let me_root_candidate =
-      let me =
-        Sys.getenv_opt "ME_ROOT"
-        |> Option.value
-             ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
-      in
-      Filename.concat
-        (Filename.concat me "workspace/yousleepwhen/masc-mcp")
-        "config/cascade.json"
-    in
-    [ cwd_candidate; me_root_candidate ]
+    [ base cwd "cascade.json";
+      base masc_root "cascade.json";
+      base cwd "llm_cascade.json";
+      base masc_root "llm_cascade.json" ]
   in
   List.find_opt Sys.file_exists candidates
 

@@ -152,16 +152,23 @@ let handle_swarm_live_run (ctx : (_, _) context) args : result =
                     Unix.openfile log_path
                       [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] 0o644
                   in
-                  let dev_null =
-                    Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o000
+                  let close_log () =
+                    (try Unix.close log_fd with Unix.Unix_error _ -> ())
                   in
                   let pid =
-                    Unix.create_process_env "/bin/bash"
-                      [| "bash"; script_path |]
-                      common_env dev_null log_fd log_fd
+                    Fun.protect ~finally:close_log (fun () ->
+                      let dev_null =
+                        Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o644
+                      in
+                      Fun.protect
+                        ~finally:(fun () ->
+                          (try Unix.close dev_null
+                           with Unix.Unix_error _ -> ()))
+                        (fun () ->
+                          Unix.create_process_env "/bin/bash"
+                            [| "bash"; script_path |]
+                            common_env dev_null log_fd log_fd))
                   in
-                  Unix.close log_fd;
-                  Unix.close dev_null;
                   Out_channel.with_open_text pid_path
                     (fun oc -> Out_channel.output_string oc (string_of_int pid));
                   Out_channel.with_open_text started_path
@@ -230,8 +237,11 @@ let handle_swarm_live_run (ctx : (_, _) context) args : result =
                   (true, Yojson.Safe.to_string payload)))
 
 (** Check whether a PID is still running (Unix-only).
-    Returns true if process exists (even if not signalable due to EPERM). *)
+    Also attempts to reap zombie via non-blocking waitpid. *)
 let pid_is_alive pid =
+  (* Reap zombie if this is our child process (WNOHANG = non-blocking). *)
+  (try ignore (Unix.waitpid [ Unix.WNOHANG ] pid)
+   with Unix.Unix_error _ -> ());
   try
     Unix.kill pid 0;
     true

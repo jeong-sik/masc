@@ -21,6 +21,8 @@ export const roomTruthLoading = signal(false)
 export const roomTruthError = signal<string | null>(null)
 
 let inflightRoomTruthRefresh: Promise<void> | null = null
+let lastRoomTruthRefreshAt = 0
+const ROOM_TRUTH_TTL_MS = 15_000
 
 function normalizeServerStatus(raw: unknown): ServerStatus | null {
   if (!isRecord(raw)) return null
@@ -160,8 +162,9 @@ export const roomTruthInitializing = signal(false)
 const WARM_RETRY_DELAY_MS = 3_000
 const WARM_MAX_RETRIES = 10
 
-export async function refreshRoomTruth(): Promise<void> {
+export async function refreshRoomTruth(opts?: { force?: boolean }): Promise<void> {
   if (inflightRoomTruthRefresh) return inflightRoomTruthRefresh
+  if (!opts?.force && Date.now() - lastRoomTruthRefreshAt < ROOM_TRUTH_TTL_MS) return
 
   roomTruthLoading.value = true
   roomTruthError.value = null
@@ -178,6 +181,7 @@ export async function refreshRoomTruth(): Promise<void> {
       }
       roomTruthInitializing.value = false
       roomTruth.value = normalizeRoomTruth(raw)
+      lastRoomTruthRefreshAt = Date.now()
     } catch (err) {
       roomTruthError.value = err instanceof Error ? err.message : 'Failed to load room truth'
     } finally {

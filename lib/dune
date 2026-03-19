@@ -515,7 +515,7 @@
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
    llm_types
-   llm_eio_env
+   masc_eio_env
    llm_discovery_cache
    oas_type_adapters
    context_scoring

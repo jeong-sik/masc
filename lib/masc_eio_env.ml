@@ -1,10 +1,10 @@
-(** Module-level Eio environment for LLM HTTP calls via Llm_provider.
+(** Module-level Eio environment for OAS HTTP calls.
     Set once at server startup via {!init}.
 
-    The switch and net handle are needed by [Llm_provider.Complete.complete]
-    which uses cohttp-eio for HTTP transport.
+    The switch and net handle are needed by OAS provider completions
+    which use cohttp-eio for HTTP transport.
 
-    @since 2.103.0 — v0.49 curl-subprocess replacement *)
+    @since 2.130.0 — renamed from Llm_eio_env *)
 
 type t = {
   sw : Eio.Switch.t;
@@ -19,6 +19,6 @@ let init ~sw ~net ?clock () = Atomic.set env (Some { sw; net; clock })
 let get () =
   match Atomic.get env with
   | Some e -> e
-  | None -> failwith "Llm_eio_env not initialized: call init at server startup"
+  | None -> failwith "Masc_eio_env not initialized: call init at server startup"
 
 let get_opt () = Atomic.get env

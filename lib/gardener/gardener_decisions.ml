@@ -225,12 +225,7 @@ let decide_retire ~config ~health ~(agent_stats : agent_stats) : retirement_deci
 
 (** {1 Spawn Execution} *)
 
-(** Execute an approved spawn via OAS worker agent (Spawn_eio).
-
-    When called from the background tick loop, [~sw] and [~room_config] are
-    passed explicitly. When called from the MCP tool layer (which has no
-    Eio.Switch in scope), the function falls back to the module-level refs
-    set during [Gardener.start]. *)
+(** Execute an approved spawn via OAS worker agent. *)
 let execute_spawn ?sw ?room_config ~(decision : spawn_decision) () : (string, string) result =
   match decision with
   | SpawnApproved { topic; proposed_traits; proposed_hours = _; reason; _ } ->

@@ -297,20 +297,12 @@ let build_successor_prompt (h : handover_record) ~additional_instructions : stri
 
 Begin work now.|} dna instructions
 
-(** Claim a handover and spawn the successor agent *)
-let claim_and_spawn ~sw ~fs ~proc_mgr:_ config ~handover_id ~agent_name ?additional_instructions ?timeout_seconds () 
-    : (Spawn_eio.spawn_result, string) result =
+(** Claim a handover and spawn the successor agent.
+    Spawn_eio has been removed; returns an error stub. *)
+let claim_and_spawn ~sw:_ ~fs ~proc_mgr:_ config ~handover_id ~agent_name ?additional_instructions ?timeout_seconds:_ ()
+    : (Spawn.spawn_result, string) result =
   match claim_handover ~fs config ~handover_id ~agent_name with
   | Error e -> Error e
   | Ok h ->
-      let prompt = build_successor_prompt h ~additional_instructions in
-      let result = Spawn_eio.spawn
-        ~sw
-        ~agent_name
-        ~prompt
-        ?timeout_seconds
-        ~working_dir:config.base_path
-        ~room_config:config
-        ()
-      in
-      Ok result
+      ignore (build_successor_prompt h ~additional_instructions);
+      Error "spawn_eio removed: use OAS workers for handover spawns"

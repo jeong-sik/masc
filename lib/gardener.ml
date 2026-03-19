@@ -212,7 +212,7 @@ let tick ~sw ~clock:_ ~config ~room_config : unit =
         Eio.traceln "[Gardener] Task pressure: %d TODO, %d high-pri, %d orphans"
           backlog.todo_count backlog.high_priority_todo backlog.orphan_count;
         let triage_state = get_state () in
-        (match Gardener_worker.run_for_backlog ~backlog with
+        (match Gardener_worker.run_for_backlog ~config:room_config ~backlog with
          | Ok result ->
              triage_state.last_triage_started_at <- Time_compat.now ();
              triage_state.last_triage_outcome <- Triage_productive;

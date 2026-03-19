@@ -66,7 +66,7 @@ let masc_msg_to_oas (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
       [Agent_sdk.Types.ToolResult { tool_use_id; content = tagged_text; is_error = false }]
     | _ -> [Agent_sdk.Types.Text tagged_text]
   in
-  { Agent_sdk.Types.role; content }
+  { Agent_sdk.Types.role; content; name = None; tool_call_id = None }
 
 (** Recover a MASC message from a tagged OAS message.
     Strips sentinel prefixes and restores the original MASC role. *)
@@ -106,7 +106,7 @@ let oas_msg_to_masc (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
       [Agent_sdk.Types.ToolResult { tool_use_id; content; is_error = false }]
     | _ -> [Agent_sdk.Types.Text content]
   in
-  { Agent_sdk.Types.role; content = content_blocks }
+  { Agent_sdk.Types.role; content = content_blocks; name = None; tool_call_id = None }
 
 (* ================================================================ *)
 (* Importance Scoring — delegated to Context_scoring (shared SSOT)  *)

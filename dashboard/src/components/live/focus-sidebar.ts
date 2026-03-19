@@ -1,7 +1,8 @@
 // Focus Sidebar — active agents with task info and pressure gauge
 
 import { html } from 'htm/preact'
-import { focusAgents, selectedAgent, selectAgent } from '../../live-store'
+import { focusAgents } from '../../live-store'
+import { openAgentDetail, selectedAgentName } from '../agent-detail'
 import { TimeAgo } from '../common/time-ago'
 
 function pressureClass(pressure: 'calm' | 'normal' | 'hot'): string {
@@ -22,7 +23,7 @@ function pressureLabel(pressure: 'calm' | 'normal' | 'hot'): string {
 
 export function FocusSidebar() {
   const list = focusAgents.value
-  const selected = selectedAgent.value
+  const selected = selectedAgentName.value
 
   return html`
     <div class="focus-sidebar">
@@ -37,7 +38,7 @@ export function FocusSidebar() {
             <div
               key=${agent.name}
               class="focus-agent-card ${selected === agent.name ? 'focus-agent-selected' : ''}"
-              onClick=${() => selectAgent(selected === agent.name ? null : agent.name)}
+              onClick=${() => openAgentDetail(agent.name)}
             >
               <div class="focus-agent-header">
                 <span class="focus-agent-name">

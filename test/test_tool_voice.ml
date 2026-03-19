@@ -394,12 +394,16 @@ let test_voice_sessions_without_net_errors () =
       in
       check bool "succeeds (local list)" true ok)
 
+(* Transcript is a stub — STT not yet integrated, so it returns false
+   with status "not_available". The important thing is it does NOT fail
+   due to missing network (it's a local-only handler). *)
 let test_voice_transcript_without_net_errors () =
   with_ctx_no_net (fun ctx ->
-      let ok, _body =
+      let ok, body =
         dispatch_exn ctx ~name:"masc_voice_transcript" ~args:(`Assoc [])
       in
-      check bool "succeeds (local transcript)" true ok)
+      check bool "returns false (stub)" false ok;
+      check bool "mentions STT" true (contains body "stt"))
 
 let test_voice_conference_end_without_net_errors () =
   with_ctx_no_net (fun ctx ->
@@ -457,15 +461,16 @@ let test_voice_conference_end_with_unavailable_server_errors () =
 }
 |}
   in
+  (* Post-migration: conference_end uses local Voice_session_manager,
+     so it succeeds regardless of TTS endpoint availability.
+     The "unavailable server" config only affects TTS speak, not session ops. *)
   with_temp_voice_config config_json @@ fun () ->
       with_ctx_net @@ fun ctx ->
-      let ok, body =
+      let ok, _body =
         dispatch_exn ctx ~name:"masc_voice_conference_end"
           ~args:(`Assoc [ ("agent_ids", `List [ `String "claude"; `String "gemini" ]) ])
       in
-      check bool "fails" false ok;
-      check bool "mentions unavailable" true
-        (contains body "unavailable" || contains body "cannot end conference")
+      check bool "succeeds (local session manager)" true ok
 
 let test_voice_public_config_json () =
   let config_json =

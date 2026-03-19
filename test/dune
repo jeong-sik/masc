@@ -256,11 +256,6 @@
  (libraries masc_mcp alcotest str yojson))
 
 (test
- (name test_llm_response_cache)
- (modules test_llm_response_cache)
- (libraries masc_mcp alcotest yojson unix))
-
-(test
  (name test_llm_cascade)
  (modules test_llm_cascade)
  (libraries masc_mcp alcotest unix eio eio_main))

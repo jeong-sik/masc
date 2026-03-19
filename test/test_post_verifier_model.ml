@@ -1,9 +1,9 @@
-(** Tests for Post_verifier_llm module — G-Eval response parsing and scoring.
+(** Tests for Post_verifier_model module — G-Eval response parsing and scoring.
 
     All tests target pure functions (parse_geval_response, score_to_verdict).
     No actual LLM calls — those require MASC_VERIFIER_MODE=llm at runtime. *)
 
-module Pvl = Masc_mcp.Post_verifier_llm
+module Pvl = Masc_mcp.Post_verifier_model
 module Pv = Masc_mcp.Post_verifier
 
 open Alcotest
@@ -119,7 +119,7 @@ let test_verify_auto_rejects_short () =
 (* ================================================================ *)
 
 let () =
-  run "Post_verifier_llm" [
+  run "Post_verifier_model" [
     "parse_geval_response", [
       test_case "valid JSON" `Quick test_parse_valid_json;
       test_case "markdown-wrapped JSON" `Quick test_parse_markdown_wrapped;

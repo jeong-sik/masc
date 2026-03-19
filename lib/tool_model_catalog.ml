@@ -1,5 +1,5 @@
 [@@@warning "-32-33-69"]
-(** Tool_llm_catalog — MCP tool layer over OAS Discovery (via {!Discovery_cache}).
+(** Tool_model_catalog — MCP tool layer over OAS Discovery (via {!Discovery_cache}).
 
     All probing logic is in OAS [Llm_provider.Discovery].
     This module provides the MCP tool interface for agents.
@@ -109,7 +109,7 @@ let handle_recommend _ctx args : result =
 
 let dispatch ctx ~name ~args : result option =
   match name with
-  | "masc_llm_catalog" ->
+  | "masc_model_catalog" ->
     let action =
       args |> Yojson.Safe.Util.member "action"
       |> Yojson.Safe.Util.to_string_option
@@ -125,7 +125,7 @@ let dispatch ctx ~name ~args : result option =
 (* ── Schemas ─────────────────────────────────────────────── *)
 
 let schemas : tool_schema list = [
-  { name = "masc_llm_catalog";
+  { name = "masc_model_catalog";
     description =
       "Query LLM provider infrastructure status and get endpoint recommendations. \
        Actions: 'list' (enumerate endpoints), 'status' (slot utilization + \

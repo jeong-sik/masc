@@ -70,6 +70,11 @@ let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
 (* Public: run_with_tools                                            *)
 (* ================================================================ *)
 
+type tools_run_result = {
+  oas_result : Oas_worker.run_result;
+  tools_executed : string list;
+}
+
 let run_with_tools
     ~(config : Room.config)
     ~(meta : keeper_meta)
@@ -80,7 +85,7 @@ let run_with_tools
     ~(max_tokens : int)
     ?(guardrails : Agent_sdk.Guardrails.t option)
     ()
-  : (Oas_worker.run_result, string) result =
+  : (tools_run_result, string) result =
   match resolve_primary_model_spec meta with
   | Error e -> Error e
   | Ok model_spec ->
@@ -91,7 +96,11 @@ let run_with_tools
   | Error e -> Error e
   | Ok sw ->
   let masc_tools = keeper_allowed_llm_tools meta in
-  let dispatch = make_dispatch ~config ~meta ~model_spec in
+  let tools_executed_ref = ref [] in
+  let dispatch ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
+    tools_executed_ref := name :: !tools_executed_ref;
+    make_dispatch ~config ~meta ~model_spec ~name ~args
+  in
   let oas_config = { (Oas_worker.default_config
     ~name:(Printf.sprintf "keeper-%s" meta.name)
     ~model_spec
@@ -102,8 +111,12 @@ let run_with_tools
     temperature;
     guardrails;
   } in
-  Oas_worker.run_with_masc_tools
+  match Oas_worker.run_with_masc_tools
     ~sw ~net ~config:oas_config ~masc_tools ~dispatch goal
+  with
+  | Ok oas_result ->
+      Ok { oas_result; tools_executed = List.rev !tools_executed_ref }
+  | Error e -> Error e
 
 (* ================================================================ *)
 (* Public: run_simple                                                *)

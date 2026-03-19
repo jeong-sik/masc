@@ -8,9 +8,15 @@
 
 open Keeper_types
 
+(** Result of [run_with_tools], including tool execution history. *)
+type tools_run_result = {
+  oas_result : Oas_worker.run_result;
+  tools_executed : string list;
+}
+
 (** Tool loop LLM call (proactive, autonomy, social board events).
     Wraps [Oas_worker.run_with_masc_tools] with keeper tool dispatch.
-    The [goal] string is the prompt/instruction for the agent. *)
+    Returns tool execution history alongside OAS result. *)
 val run_with_tools :
   config:Room.config ->
   meta:keeper_meta ->
@@ -21,7 +27,7 @@ val run_with_tools :
   max_tokens:int ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   unit ->
-  (Oas_worker.run_result, string) result
+  (tools_run_result, string) result
 
 (** Tool-free LLM call (deliberation, correction, forced grounding).
     Wraps [Oas_worker.run] without tools. *)

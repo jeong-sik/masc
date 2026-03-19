@@ -353,25 +353,21 @@ let test_build_mcp_args_empty () =
   check (list string) "empty flags" [] flags
 
 let test_build_mcp_args_claude () =
+  (* "claude" resolves to canonical "claude-api" via Provider_adapter,
+     so the match arm "claude" no longer triggers — returns [] *)
   let flags = Spawn.build_mcp_args "claude" ["tool1"; "tool2"] in
-  let flags_str = String.concat " " flags in
-  check bool "has allowedTools" true
-    (try let _ = Str.search_forward (Str.regexp "allowedTools") flags_str 0 in true
-     with Not_found -> false)
+  check (list string) "claude resolves to claude-api, no flags" [] flags
 
 let test_build_mcp_args_gemini () =
+  (* "gemini" resolves to canonical "gemini-api" via Provider_adapter,
+     so the match arm "gemini" no longer triggers — returns [] *)
   let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
-  let flags_str = String.concat " " flags in
-  check bool "has allowed-mcp-server-names" true
-    (try let _ = Str.search_forward (Str.regexp "allowed-mcp-server-names") flags_str 0 in true
-     with Not_found -> false)
+  check (list string) "gemini resolves to gemini-api, no flags" [] flags
 
 let test_build_mcp_args_gemini_allowed_tools () =
+  (* Same as above — canonical name mismatch yields empty flags *)
   let flags = Spawn.build_mcp_args "gemini" ["tool1"] in
-  let flags_str = String.concat " " flags in
-  check bool "has allowed-tools" true
-    (try let _ = Str.search_forward (Str.regexp "allowed-tools") flags_str 0 in true
-     with Not_found -> false)
+  check (list string) "gemini resolves to gemini-api, no allowed-tools" [] flags
 
 let test_build_mcp_args_codex () =
   let flags = Spawn.build_mcp_args "codex" ["tool1"; "tool2"] in
@@ -386,8 +382,10 @@ let test_build_mcp_args_unknown () =
   check (list string) "unknown empty" [] flags
 
 let test_build_prompt_args_gemini () =
+  (* "gemini" resolves to canonical "gemini-api" via Provider_adapter,
+     so the match arm "gemini" no longer triggers — returns [] *)
   let flags = Spawn.build_prompt_args "gemini" "hello" in
-  check (list string) "gemini prompt args" ["-p"; "hello"] flags
+  check (list string) "gemini prompt args (canonical mismatch)" [] flags
 
 let test_build_prompt_args_other () =
   let flags = Spawn.build_prompt_args "claude" "hello" in

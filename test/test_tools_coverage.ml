@@ -82,7 +82,7 @@ let test_find_tool_existing () =
                "masc_team_session_step"; "masc_team_session_finalize";
                "masc_team_session_list"; "masc_team_session_compare";
                "masc_team_session_events";
-               "masc_team_session_prove"; "masc_llama_models";
+               "masc_team_session_prove"; "masc_local_runtime_models";
                "masc_runtime_verify"; "masc_observe_swarm";
                "masc_operator_snapshot"; "masc_operator_digest";
                "masc_operator_action"; "masc_operator_confirm";
@@ -626,15 +626,17 @@ let test_masc_spawn_schema () =
       | None -> Alcotest.fail "masc_spawn missing properties"
 
 let test_masc_llama_models_schema () =
-  match find_tool "masc_llama_models" with
-  | None -> Alcotest.fail "masc_llama_models not found"
+  (* Tool renamed from masc_llama_models to masc_local_runtime_models;
+     old name kept as dispatch alias only *)
+  match find_tool "masc_local_runtime_models" with
+  | None -> Alcotest.fail "masc_local_runtime_models not found"
   | Some schema ->
       Alcotest.(check bool) "has description" true
         (String.length schema.description > 20);
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check int) "no required params" 0 (List.length props)
-      | None -> Alcotest.fail "masc_llama_models missing properties"
+      | None -> Alcotest.fail "masc_local_runtime_models missing properties"
 
 let test_masc_runtime_verify_schema () =
   match find_tool "masc_runtime_verify" with

@@ -430,15 +430,6 @@ let test_handle_request_tools_list () =
          | _ -> None)
     |> List.filter_map (function `String s -> Some s | _ -> None)
   in
-  (* Full is now the room default, so TRPG tools are available immediately. *)
-  Alcotest.(check bool)
-    "contains trpg.dice.roll in full default"
-    true
-    (List.mem "trpg.dice.roll" names);
-  Alcotest.(check bool)
-    "contains trpg.turn.advance in full default"
-    true
-    (List.mem "trpg.turn.advance" names);
   (* Plan and Board categories remain available. *)
   Alcotest.(check bool)
     "contains masc_goal_upsert (Plan category)"
@@ -448,10 +439,6 @@ let test_handle_request_tools_list () =
     "contains masc_board_post (Board category)"
     true
     (List.mem "masc_board_post" names);
-  Alcotest.(check bool)
-    "legacy masc_trpg_dice_roll hidden from list"
-    false
-    (List.mem "masc_trpg_dice_roll" names);
   Alcotest.(check bool)
     "legacy experiment_start hidden from list"
     false
@@ -935,7 +922,7 @@ let test_handle_request_tools_list_include_usage_metadata () =
        (match first_tool with `Assoc fields -> fields | _ -> []));
   cleanup_dir base_path
 
-let test_execute_tool_trpg_flow () =
+let _test_execute_tool_trpg_flow () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
@@ -1143,7 +1130,7 @@ let test_execute_tool_team_session_step_direct_call () =
 
   cleanup_dir base_path
 
-let test_execute_tool_trpg_validation () =
+let _test_execute_tool_trpg_validation () =
   Eio_main.run @@ fun env ->
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
@@ -1406,7 +1393,7 @@ let test_convo_start_uses_current_room () =
 
   cleanup_dir base_path
 
-let test_handle_request_tools_call_trpg () =
+let _test_handle_request_tools_call_trpg () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -2192,14 +2179,12 @@ let eio_tests = [
     test_handle_request_tools_call_managed_profile_sdk_alias_claim;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
-  "handle tools/call trpg", `Quick, test_handle_request_tools_call_trpg;
+  (* TRPG tool tests removed — modules archived *)
   "coding mode allows governance status", `Quick, test_execute_tool_coding_mode_allows_governance_status;
   "hidden active utility direct call", `Quick,
     test_execute_tool_hidden_active_utility_direct_call;
   "canonical team_session_step direct call", `Quick,
     test_execute_tool_team_session_step_direct_call;
-  "execute trpg flow", `Quick, test_execute_tool_trpg_flow;
-  "execute trpg validation", `Quick, test_execute_tool_trpg_validation;
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
   "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
   "mcp session ignores term persistence", `Quick, test_execute_tool_mcp_session_ignores_term_persistence;

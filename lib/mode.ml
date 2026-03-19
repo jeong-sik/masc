@@ -285,7 +285,7 @@ let tool_category tool_name =
   | "masc_agent_update" | "masc_agent_card"
   | "masc_get_metrics" | "masc_agent_fitness" | "masc_select_agent"
   | "masc_collaboration_graph" | "masc_consolidate_learning"
-  | "masc_self_introspect" -> Discovery
+  | "masc_self_introspect" | "masc_agent_relations" -> Discovery
 
   (* ── Voting ── *)
   | "masc_vote_create" | "masc_vote_cast" | "masc_vote_status"

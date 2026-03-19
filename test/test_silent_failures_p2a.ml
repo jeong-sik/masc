@@ -133,19 +133,34 @@ let keeper_source_files () =
     | Some d -> d
     | None -> Sys.getcwd ()
   in
+  (* Keeper files moved to lib/keeper/ subdirectory *)
+  let keeper_dir = Filename.concat (Filename.concat source_root "lib") "keeper" in
+  let from_keeper =
+    if Sys.file_exists keeper_dir && Sys.is_directory keeper_dir then
+      Sys.readdir keeper_dir
+      |> Array.to_list
+      |> List.filter (fun name ->
+             Filename.check_suffix name ".ml"
+             && String.starts_with ~prefix:"keeper_" name)
+      |> List.map (Filename.concat "lib/keeper")
+    else []
+  in
   let lib_dir = Filename.concat source_root "lib" in
-  Sys.readdir lib_dir
-  |> Array.to_list
-  |> List.filter (fun name ->
-         Filename.check_suffix name ".ml"
-         && String.starts_with ~prefix:"keeper_" name)
-  |> List.map (Filename.concat "lib")
+  let from_root =
+    Sys.readdir lib_dir
+    |> Array.to_list
+    |> List.filter (fun name ->
+           Filename.check_suffix name ".ml"
+           && String.starts_with ~prefix:"keeper_" name)
+    |> List.map (Filename.concat "lib")
+  in
+  from_keeper @ from_root
 (* HIGH priority patterns *)
 
 let test_source_main_keeper_bootstrap () =
   check bool "bootstrap sources have keeper bootstrap logging"
     true (any_file_contains_pattern
-      [ "bin/main_eio.ml"; "lib/server_runtime_bootstrap.ml" ]
+      [ "bin/main_eio.ml"; "lib/server/server_runtime_bootstrap.ml" ]
       {|[main] keeper bootstrap failed:|})
 
 let test_source_metrics_fd_close () =
@@ -161,7 +176,7 @@ let test_source_metrics_fd_unlock () =
 let test_source_llm_token_parse () =
   check bool "llm_types.ml has token count parse logging"
     true (any_file_contains_pattern
-      ["lib/llm_types.ml"; "lib/llm_client.ml"]
+      ["lib/llm/llm_types.ml"]
       {|token|})
 
 let test_source_keeper_proactive () =
@@ -174,7 +189,7 @@ let test_source_keeper_proactive () =
 let test_source_worktree_agent_state () =
   check bool "room_worktree.ml has agent state read logging"
     true (any_file_contains_pattern
-      ["lib/room_worktree.ml"; "lib/room_agent.ml"]
+      ["lib/room/room_worktree.ml"; "lib/room/room_agent.ml"]
       {|agent state read|})
 
 let test_source_social_vote_post () =
@@ -189,7 +204,7 @@ let test_source_social_vote_comment () =
 
 let test_source_board_pg_vote_migration () =
   check bool "board_pg.ml has vote migration logging"
-    true (file_contains_pattern "lib/board_pg.ml"
+    true (file_contains_pattern "lib/board/board_pg.ml"
       {|vote migration:|})
 
 (* test_source_heartbeat_traits removed — lodge_heartbeat_state.ml deleted (#1596) *)
@@ -198,12 +213,13 @@ let test_source_board_pg_vote_migration () =
 
 let test_source_keeper_log_parse () =
   check bool "dashboard http has keeper log parse logging"
-    true (file_contains_pattern "lib/dashboard_http_keeper_metrics.ml"
+    true (file_contains_pattern "lib/dashboard/dashboard_http_keeper_metrics.ml"
       {|keeper log parse:|})
 
 let test_source_trpg_npc_heal () =
-  check bool "trpg_round_fallback.ml has npc heal logging"
-    true (file_contains_pattern "lib/trpg_round_fallback.ml"
+  (* trpg_round_fallback.ml archived to archive/trpg/ *)
+  check bool "trpg_round_fallback.ml has npc heal logging (archived)"
+    true (file_contains_pattern "archive/trpg/lib/trpg_round_fallback.ml"
       {|[trpg] npc heal:|})
 
 (* ============================================================

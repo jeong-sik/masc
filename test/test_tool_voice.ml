@@ -377,39 +377,37 @@ let test_voice_speak_without_net_errors () =
       check bool "fails" false ok;
       check bool "mentions net" true (contains body "net"))
 
+(* Voice tools now use local session manager — no network required.
+   session_start, sessions, conference_end succeed without net. *)
 let test_voice_session_start_without_net_errors () =
   with_ctx_no_net (fun ctx ->
-      let ok, body =
+      let ok, _body =
         dispatch_exn ctx ~name:"masc_voice_session_start"
           ~args:(`Assoc [ ("agent_id", `String "claude") ])
       in
-      check bool "fails" false ok;
-      check bool "mentions net" true (contains body "net"))
+      check bool "succeeds (local session)" true ok)
 
 let test_voice_sessions_without_net_errors () =
   with_ctx_no_net (fun ctx ->
-      let ok, body =
+      let ok, _body =
         dispatch_exn ctx ~name:"masc_voice_sessions" ~args:(`Assoc [])
       in
-      check bool "fails" false ok;
-      check bool "mentions net" true (contains body "net"))
+      check bool "succeeds (local list)" true ok)
 
 let test_voice_transcript_without_net_errors () =
   with_ctx_no_net (fun ctx ->
-      let ok, body =
+      let ok, _body =
         dispatch_exn ctx ~name:"masc_voice_transcript" ~args:(`Assoc [])
       in
-      check bool "fails" false ok;
-      check bool "mentions net" true (contains body "net"))
+      check bool "succeeds (local transcript)" true ok)
 
 let test_voice_conference_end_without_net_errors () =
   with_ctx_no_net (fun ctx ->
-      let ok, body =
+      let ok, _body =
         dispatch_exn ctx ~name:"masc_voice_conference_end"
           ~args:(`Assoc [ ("agent_ids", `List [ `String "claude"; `String "gemini" ]) ])
       in
-      check bool "fails" false ok;
-      check bool "mentions net" true (contains body "net"))
+      check bool "succeeds (local conference)" true ok)
 
 let test_voice_conference_end_with_unavailable_server_errors () =
   let config_json =

@@ -302,7 +302,7 @@ let test_guarded_execute_exception () =
   | Some result ->
       Alcotest.(check bool) "error in result" true
         (let r = String.lowercase_ascii result in
-         try ignore (Str.search_forward (Str.regexp_string "simulated failure") r 0); true
+         try ignore (Str.search_forward (Str.regexp_string "tool execution failed") r 0); true
          with Not_found -> false);
       Alcotest.(check bool) "has eval" true (eval_opt <> None)
   | None -> Alcotest.fail "Should have result (from exception handler)"

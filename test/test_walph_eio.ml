@@ -314,12 +314,12 @@ let test_eio_error_cutoff () =
 
 let test_eio_default_dispatch_uses_shared_cascade () =
   check bool "uses Llm_cascade.call" true
-    (file_contains_pattern "lib/room_walph_eio.ml"
+    (file_contains_pattern "lib/room/room_walph_eio.ml"
        {|Llm_cascade.call ~cascade_name:"walph"|});
   check bool "legacy direct dispatch removed" false
-    (file_contains_pattern "lib/room_walph_eio.ml" "Llm_direct.dispatch");
+    (file_contains_pattern "lib/room/room_walph_eio.ml" "Llm_direct.dispatch");
   check bool "no direct run_prompt_cascade" false
-    (file_contains_pattern "lib/room_walph_eio.ml" "Llm_orchestration.run_prompt_cascade")
+    (file_contains_pattern "lib/room/room_walph_eio.ml" "Llm_orchestration.run_prompt_cascade")
 
 (* ============================================
    Test Registration

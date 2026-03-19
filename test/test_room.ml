@@ -767,9 +767,9 @@ let test_vote_double_vote () =
 
     let _ = Room.vote_cast config ~agent_name:"gemini" ~vote_id ~choice:"yes" in
 
-    (* Vote again - should succeed (vote change allowed) *)
+    (* Vote again - should be rejected (duplicate vote blocked) *)
     let result = Room.vote_cast config ~agent_name:"gemini" ~vote_id ~choice:"no" in
-    Alcotest.(check bool) "vote change allowed" true (contains_check result)
+    Alcotest.(check bool) "double vote rejected" true (contains_warning result)
   )
 
 let test_vote_invalid_choice () =

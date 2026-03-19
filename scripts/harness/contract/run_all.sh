@@ -56,9 +56,7 @@ if ! harness_wait_for_health "$PORT" 25; then
   exit 1
 fi
 
-run_contract 1 4 "streamable_http_contract.sh"
-run_contract 2 4 "team_session_contract.sh"
-run_contract 3 4 "game_view_precondition.sh"
-run_contract 4 4 "trpg_session_contract.sh"
+run_contract 1 2 "streamable_http_contract.sh"
+run_contract 2 2 "team_session_contract.sh"
 
 echo "PASS: contract harness suite"

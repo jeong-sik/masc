@@ -5,9 +5,8 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { route, initRouter } from './router'
 import { connectSSE, disconnectSSE } from './sse'
-import {
-  refreshDashboardSemantics,
-} from './store'
+import { dashboardSemantics } from './store'
+import { fetchDashboardSemantics } from './api'
 import { refreshRoomTruth } from './room-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshForTab } from './tab-refresh'
@@ -35,7 +34,11 @@ export function App() {
     // Removed redundant refreshShell(), refreshExecution(), refreshMissionSnapshot()
     // that caused 5 concurrent API calls (server computes same data 3-6x).
     refreshRoomTruth()
-    refreshDashboardSemantics()
+
+    // Semantics: static data, fetch once and cache forever.
+    void fetchDashboardSemantics()
+      .then(data => { dashboardSemantics.value = data })
+      .catch(() => {})
 
     // Register mission refresh for periodic recovery from transient failures.
     // Uses registration pattern to avoid circular imports.

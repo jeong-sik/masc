@@ -635,11 +635,11 @@ function normalizeMissionBriefing(raw: unknown): DashboardMissionBriefingRespons
   }
 }
 
-export async function refreshMissionSnapshot(): Promise<void> {
+export async function refreshMissionSnapshot(mode?: 'snapshot' | 'full'): Promise<void> {
   missionLoading.value = true
   missionError.value = null
   try {
-    const raw = await fetchDashboardMission()
+    const raw = await fetchDashboardMission(mode ?? 'snapshot')
     missionSnapshot.value = normalizeMission(raw)
   } catch (err) {
     missionError.value = err instanceof Error ? err.message : 'Failed to load mission snapshot'

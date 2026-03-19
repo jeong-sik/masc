@@ -29,7 +29,6 @@ import {
   fetchDashboardExecution,
   fetchDashboardMemory,
   fetchDashboardPlanning,
-  fetchDashboardSemantics,
   fetchDashboardShell,
   fetchMessagesList,
   fetchTrpgState,
@@ -188,9 +187,9 @@ export const dashboardLoading = signal(false)
 export const boardLoading = signal(false)
 export const trpgLoading = signal(false)
 export const mdalLoading = signal(false)
+
+// Semantics: loaded once on startup, never refreshed (static data).
 export const dashboardSemantics = signal<DashboardSemanticsResponse | null>(null)
-export const dashboardSemanticsLoading = signal(false)
-export const dashboardSemanticsError = signal<string | null>(null)
 
 // --- Refresh timestamps ---
 
@@ -198,7 +197,10 @@ export const lastDashboardRefreshAt = signal<string | null>(null)
 export const lastBoardRefreshAt = signal<string | null>(null)
 export const lastGoalsRefreshAt = signal<string | null>(null)
 export const lastMdalRefreshAt = signal<string | null>(null)
-export const lastDashboardSemanticsRefreshAt = signal<string | null>(null)
+
+// --- Execution TTL guard (Phase 1C) ---
+
+export const lastExecutionRefreshAt = signal<number>(0)
 
 // --- Derived state ---
 
@@ -305,22 +307,6 @@ export async function refreshDashboard(): Promise<void> {
   }
 }
 
-export async function refreshDashboardSemantics(): Promise<void> {
-  dashboardSemanticsLoading.value = true
-  dashboardSemanticsError.value = null
-  try {
-    const data = await fetchDashboardSemantics()
-    dashboardSemantics.value = data
-    lastDashboardSemanticsRefreshAt.value = new Date().toISOString()
-  } catch (err) {
-    dashboardSemanticsError.value =
-      err instanceof Error ? err.message : 'Failed to load dashboard semantics'
-  } finally {
-    dashboardSemanticsLoading.value = false
-  }
-}
-
-
 export function findDashboardSemanticPanel(panelId: string): DashboardSemanticPanel | null {
   const surfaces = dashboardSemantics.value?.surfaces ?? []
   for (const surface of surfaces) {
@@ -414,7 +400,10 @@ export async function refreshAgentActivity(): Promise<void> {
   }
 }
 
-export async function refreshExecution(): Promise<void> {
+const EXECUTION_TTL_MS = 30_000
+
+export async function refreshExecution(opts?: { force?: boolean }): Promise<void> {
+  if (!opts?.force && Date.now() - lastExecutionRefreshAt.value < EXECUTION_TTL_MS) return
   try {
     const data = await fetchDashboardExecution()
     const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
@@ -455,6 +444,7 @@ export async function refreshExecution(): Promise<void> {
       .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
     perpetualStatus.value = null
     executionLoaded.value = true
+    lastExecutionRefreshAt.value = Date.now()
     lastDashboardRefreshAt.value = new Date().toISOString()
   } catch (err) {
     console.error('Dashboard execution fetch error:', err)

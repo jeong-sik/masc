@@ -82,6 +82,12 @@ let add_routes ~sw ~clock router =
          let json = dashboard_execution_http_json ~state ~sw ~clock request in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/board" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = dashboard_memory_http_json req in
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  (* Legacy alias — kept for backward compatibility *)
   |> Http.Router.get "/api/v1/dashboard/memory" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = dashboard_memory_http_json req in

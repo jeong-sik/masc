@@ -425,9 +425,19 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_tempo ->
         Tool_tempo.dispatch { Tool_tempo.config; agent_name } ~name ~args:arguments
     | Mod_mitosis ->
-        let ctx = Tool_mitosis.make_context_with_eio ~config ~sw
-          ~proc_mgr:state.Mcp_server.proc_mgr ~clock in
-        Tool_mitosis.dispatch ctx ~name ~args:arguments
+        let ctx : Tool_mitosis_oas.context = {
+          config;
+          agent_name;
+          masc_tools = [];
+          dispatch = (fun ~name:n ~args:a ->
+            match Tool_mitosis.dispatch
+              (Tool_mitosis.make_context_with_eio ~config ~sw
+                ~proc_mgr:state.Mcp_server.proc_mgr ~clock)
+              ~name:n ~args:a with
+            | Some r -> r
+            | None -> (false, Printf.sprintf "unknown tool: %s" n));
+        } in
+        Tool_mitosis_oas.dispatch ctx ~name ~args:arguments
     | Mod_portal ->
         Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:arguments
     | Mod_worktree ->
@@ -441,8 +451,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_social ->
         Tool_social.dispatch { Tool_social.config; agent_name } ~name ~args:arguments
     | Mod_council ->
-        Tool_council.dispatch { base_path = config.base_path; agent_name;
-                                room_config = Some config } ~name ~args:arguments
+        Tool_council_oas.dispatch { base_path = config.base_path; agent_name;
+                                    room_config = Some config } ~name ~args:arguments
     | Mod_a2a ->
         Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args:arguments
     | Mod_handover ->

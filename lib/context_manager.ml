@@ -334,9 +334,9 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   match role with
   | Agent_sdk.Types.Tool ->
     let tool_use_id = json |> member "tool_call_id" |> to_string_option |> Option.value ~default:"masc-tool" in
-    { Agent_sdk.Types.role; content = [Agent_sdk.Types.ToolResult { tool_use_id; content = text; is_error = false }] }
+    { Agent_sdk.Types.role; content = [Agent_sdk.Types.ToolResult { tool_use_id; content = text; is_error = false }]; name = None; tool_call_id = None }
   | _ ->
-    { Agent_sdk.Types.role; content = [Agent_sdk.Types.Text text] }
+    { Agent_sdk.Types.role; content = [Agent_sdk.Types.Text text]; name = None; tool_call_id = None }
 
 let serialize_context (ctx : working_context) : string =
   let json = `Assoc [

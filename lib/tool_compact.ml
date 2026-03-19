@@ -115,9 +115,9 @@ let parse_message (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let content = json |> member "content" |> to_string in
   match role with
   | Agent_sdk.Types.Tool ->
-    { Agent_sdk.Types.role; content = [Agent_sdk.Types.ToolResult { tool_use_id = "compact"; content; is_error = false }] }
+    { Agent_sdk.Types.role; content = [Agent_sdk.Types.ToolResult { tool_use_id = "compact"; content; is_error = false }]; name = None; tool_call_id = None }
   | _ ->
-    { Agent_sdk.Types.role; content = [Agent_sdk.Types.Text content] }
+    { Agent_sdk.Types.role; content = [Agent_sdk.Types.Text content]; name = None; tool_call_id = None }
 
 (** Serialize an Agent_sdk.Types.message back to JSON. *)
 let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =

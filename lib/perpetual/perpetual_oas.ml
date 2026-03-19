@@ -160,6 +160,7 @@ let run_perpetual_via_oas
       disable_parallel_tool_use = false;
       context = oas_ctx;
       mcp_sessions = [];
+      working_context = None;
     } in
     let ckpt_path2 =
       Filename.concat config.session_base_dir

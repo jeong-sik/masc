@@ -292,7 +292,8 @@ let normalize_for_model (msgs : Agent_sdk.Types.message list)
             | _ -> None) m.content |> Option.value ~default:"unknown" in
           { Agent_sdk.Types.role = Agent_sdk.Types.User;
                    content = [Agent_sdk.Types.Text (sprintf "[Tool result: %s]\n%s"
-                     tool_id (Agent_sdk.Types.text_of_message m))] }
+                     tool_id (Agent_sdk.Types.text_of_message m))];
+                   name = None; tool_call_id = None }
         | _ -> m
       ) msgs
     | Llm_types.Claude ->
@@ -573,6 +574,7 @@ let checkpoint_of_dna
     disable_parallel_tool_use = false;
     context = oas_ctx;
     mcp_sessions = [];
+    working_context = None;
   }
 
 (* ================================================================ *)

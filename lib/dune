@@ -265,7 +265,7 @@
    orchestrator
    planning_eio
    post_verifier
-   post_verifier_llm
+   post_verifier_model
    provider_adapter
    process_eio
    progress
@@ -390,7 +390,7 @@
    tool_agent_timeline
    tool_local_runtime
    tool_local_runtime_core
-   tool_llm_catalog
+   tool_model_catalog
    tool_board
    tool_command_plane
    tool_command_plane_support

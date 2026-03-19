@@ -185,7 +185,7 @@ let tool_category tool_name =
   | "masc_local_runtime_status" | "masc_llama_runtime_status"
   | "masc_runtime_verify"
   | "masc_local_runtime_bench" | "masc_llama_runtime_bench"
-  | "masc_llm_catalog"
+  | "masc_model_catalog"
   (* Units *)
   | "masc_unit_define" | "masc_unit_list"
   | "masc_unit_reparent" | "masc_unit_reassign"

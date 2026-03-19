@@ -114,6 +114,24 @@ let llama_worker_tool_names : string list =
 let llama_worker_prefixed_tools : string list =
   prefixed_tool_names llama_worker_tool_names
 
+(** Tool surface for Gardener-spawned OAS workers.
+    These 10 tools cover: room awareness, task lifecycle, and reporting.
+    Notably includes [masc_claim_next] and [masc_transition] which the old
+    [llama_worker_tool_names] lacked — the root cause of zombie workers. *)
+let gardener_worker_tool_names : string list =
+  [
+    "masc_status";
+    "masc_tasks";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_add_task";
+    "masc_broadcast";
+    "masc_heartbeat";
+    "masc_memento_mori";
+    "masc_board_post";
+    "masc_board_get";
+  ]
+
 let mdal_auditable_tool_names : string list =
   [
     "masc_code_search";

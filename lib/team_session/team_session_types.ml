@@ -279,6 +279,7 @@ let planned_worker_to_yojson (w : planned_worker) =
           ~some:(fun scope -> `String (execution_scope_to_string scope))
           w.execution_scope );
       ("thinking_enabled", Option.fold ~none:`Null ~some:(fun v -> `Bool v) w.thinking_enabled);
+      ("thinking_budget", Option.fold ~none:`Null ~some:(fun n -> `Int n) w.thinking_budget);
       ("max_turns", Option.fold ~none:`Null ~some:(fun n -> `Int n) w.max_turns);
       ("timeout_seconds", Option.fold ~none:`Null ~some:(fun n -> `Int n) w.timeout_seconds);
       ( "worker_class",
@@ -347,6 +348,8 @@ let planned_worker_of_yojson (json : Yojson.Safe.t) =
                 (member "execution_scope" json |> to_string_option);
             thinking_enabled =
               member "thinking_enabled" json |> to_bool_option;
+            thinking_budget =
+              member "thinking_budget" json |> to_int_option;
             max_turns =
               member "max_turns" json |> to_int_option;
             timeout_seconds =

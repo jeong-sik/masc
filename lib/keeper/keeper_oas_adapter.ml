@@ -1,6 +1,5 @@
 (** Keeper_oas_adapter — OAS Agent.run wrappers for keeper LLM calls.
 
-    Replaces direct [Llm_orchestration.cascade] usage in keeper modules.
     Delegates to [Oas_worker.run] (no tools) or [Oas_worker.run_with_masc_tools]
     (with keeper tool dispatch).
 
@@ -236,7 +235,7 @@ let run_cascade ?timeout_sec requests =
 
 let run_cascade_stream ?timeout_sec ~on_event request ~fallback =
   (* Batch fallback with synthetic SSE events.
-     Streaming via Llm_orchestration removed; all calls route through Llm_cascade. *)
+     All calls route through Llm_cascade. *)
   let timeout_int = Option.map int_of_float timeout_sec in
   match run_cascade ?timeout_sec:timeout_int (request :: fallback) with
   | Ok resp ->

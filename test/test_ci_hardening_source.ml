@@ -44,25 +44,25 @@ let test_health_and_ci_runner_diagnostics () =
 
 let test_route_auth_contracts () =
   check bool "http command-plane units use tool auth" true
-    (file_contains_pattern "lib/server_routes_http_routes_command_plane_write.ml"
+    (file_contains_pattern "lib/server/server_routes_http_routes_command_plane_write.ml"
        {|with_tool_auth ~tool_name:"masc_unit_define"|});
   check bool "http command-plane dispatch tick use tool auth" true
-    (file_contains_pattern "lib/server_routes_http_routes_command_plane_write.ml"
+    (file_contains_pattern "lib/server/server_routes_http_routes_command_plane_write.ml"
        {|with_tool_auth ~tool_name:"masc_dispatch_tick"|});
   check bool "http command-plane policy approve use tool auth" true
-    (file_contains_pattern "lib/server_routes_http_routes_command_plane_write.ml"
+    (file_contains_pattern "lib/server/server_routes_http_routes_command_plane_write.ml"
        {|with_tool_auth ~tool_name:"masc_policy_approve"|});
   check bool "http keeper chat stream uses keeper tool auth" true
-    (file_contains_pattern "lib/server_routes_http_routes_dashboard.ml"
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|with_tool_auth ~tool_name:"masc_keeper_msg"|});
   check bool "h2 gateway units use tool auth" true
-    (file_contains_pattern "lib/server_h2_gateway_routes_cp.ml"
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_unit_define"|});
   check bool "h2 gateway dispatch tick uses tool auth" true
-    (file_contains_pattern "lib/server_h2_gateway_routes_cp.ml"
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_dispatch_tick"|});
   check bool "h2 gateway operator confirm uses tool auth" true
-    (file_contains_pattern "lib/server_h2_gateway_routes_cp.ml"
+    (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_operator_confirm"|})
 
 let test_input_validation_contracts () =

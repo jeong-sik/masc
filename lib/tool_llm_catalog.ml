@@ -1,5 +1,5 @@
 [@@@warning "-32-33-69"]
-(** Tool_llm_catalog — MCP tool layer over OAS Discovery (via {!Llm_discovery_cache}).
+(** Tool_llm_catalog — MCP tool layer over OAS Discovery (via {!Discovery_cache}).
 
     All probing logic is in OAS [Llm_provider.Discovery].
     This module provides the MCP tool interface for agents.
@@ -7,7 +7,7 @@
     @since 2.113.0 *)
 
 open Types
-module D = Llm_discovery_cache
+module D = Discovery_cache
 
 (* ── Types ───────────────────────────────────────────────── *)
 

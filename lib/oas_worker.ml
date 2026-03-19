@@ -170,31 +170,40 @@ let run
     ) config.event_bus;
     Error (Printf.sprintf "Agent build failed: %s" e)
   | Ok agent ->
-  let result = match on_event with
-    | Some cb -> Oas.Agent.run_stream ~sw ~on_event:cb agent goal
-    | None -> Oas.Agent.run ~sw agent goal
-  in
-  let checkpoint = match config.checkpoint_dir with
-    | Some dir ->
-      let ckpt = Oas.Agent.checkpoint ~session_id agent in
-      (try persist_checkpoint ~dir ~session_id ckpt
-       with exn ->
-         Printf.eprintf "[oas_worker] Checkpoint save failed: %s\n%!"
-           (Printexc.to_string exn));
-      Some ckpt
-    | None -> None
-  in
-  Option.iter (fun bus ->
-    let status = match result with Ok _ -> "completed" | Error _ -> "failed" in
-    publish_lifecycle bus ~name:config.name ~event:status
-      ~detail:(Printf.sprintf "session=%s" session_id)
-  ) config.event_bus;
-  let turns = (Oas.Agent.state agent).turn_count in
-  Oas.Agent.close agent;
-  match result with
-  | Ok response -> Ok { response; checkpoint; session_id; turns }
-  | Error err ->
-    Error (Printf.sprintf "Agent run failed: %s" (Oas.Error.to_string err))
+  (* Wrap agent execution so Eio/network exceptions become Error results,
+     honouring the (run_result, string) result return type promised by .mli.
+     Eio.Cancel.Cancelled is re-raised for structured-concurrency safety. *)
+  (try
+    let result = match on_event with
+      | Some cb -> Oas.Agent.run_stream ~sw ~on_event:cb agent goal
+      | None -> Oas.Agent.run ~sw agent goal
+    in
+    let checkpoint = match config.checkpoint_dir with
+      | Some dir ->
+        let ckpt = Oas.Agent.checkpoint ~session_id agent in
+        (try persist_checkpoint ~dir ~session_id ckpt
+         with exn ->
+           Printf.eprintf "[oas_worker] Checkpoint save failed: %s\n%!"
+             (Printexc.to_string exn));
+        Some ckpt
+      | None -> None
+    in
+    Option.iter (fun bus ->
+      let status = match result with Ok _ -> "completed" | Error _ -> "failed" in
+      publish_lifecycle bus ~name:config.name ~event:status
+        ~detail:(Printf.sprintf "session=%s" session_id)
+    ) config.event_bus;
+    let turns = (Oas.Agent.state agent).turn_count in
+    Oas.Agent.close agent;
+    (match result with
+    | Ok response -> Ok { response; checkpoint; session_id; turns }
+    | Error err ->
+      Error (Printf.sprintf "Agent run failed: %s" (Oas.Error.to_string err)))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    (try Oas.Agent.close agent with _ -> ());
+    Error (Printf.sprintf "Agent execution exception: %s" (Printexc.to_string exn)))
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)

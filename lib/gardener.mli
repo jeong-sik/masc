@@ -106,10 +106,9 @@ val decide_retire :
 
 (** Execute an approved spawn decision via OAS worker agent.
 
-    Spawns a real OAS agent using [Spawn_eio.spawn]. When called from the
-    background tick loop, pass [~sw] and [~room_config] explicitly. When
-    called from the MCP tool layer, omit them to use the module-level refs
-    set during {!start}.
+    Spawns a real OAS agent. When called from the background tick loop,
+    pass [~sw] and [~room_config] explicitly. When called from the MCP
+    tool layer, omit them to use the module-level refs set during {!start}.
 
     @return [Ok message] on success, [Error reason] otherwise *)
 val execute_spawn :

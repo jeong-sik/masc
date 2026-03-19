@@ -97,7 +97,7 @@ let evidence_session_id_of_worker_run = function
   | _ -> None
 
 let session_min_tool_names =
-  Agent_tool_surfaces.llama_worker_tool_names
+  Agent_tool_surfaces.gardener_worker_tool_names
 
 let execution_scope_or_default = function
   | Some scope -> scope

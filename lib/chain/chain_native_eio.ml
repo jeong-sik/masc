@@ -262,18 +262,11 @@ let model_runner_of_string raw =
           Ok (SpawnWithModel { agent = "codex"; model = value })
       | Error msg -> Error msg)
 
-let call_spawn_model (runtime : runtime) ~agent_name ?model_override ~prompt ~timeout_sec () =
-  match runtime.mcp_state.Mcp_server.proc_mgr with
-  | None -> Error "spawn runtime unavailable"
-  | Some _proc_mgr ->
-      let result =
-        Spawn_eio.spawn ~sw:runtime.sw ~agent_name ~prompt
-          ~timeout_seconds:timeout_sec
-          ?working_dir:(Some runtime.config.base_path)
-          ?model_override
-          ~room_config:runtime.config ()
-      in
-      if result.success then Ok result.output else Error result.output
+let call_spawn_model (_runtime : runtime) ~agent_name ?model_override:_ ~prompt ~timeout_sec () =
+  let result =
+    Spawn.spawn ~agent_name ~prompt ~timeout_seconds:timeout_sec ()
+  in
+  if result.Spawn.success then Ok result.Spawn.output else Error result.Spawn.output
 
 let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
     ~timeout_sec () =

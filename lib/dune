@@ -498,6 +498,7 @@
    keeper_learning
    keeper_feedback_tool
    keeper_keepalive
+   keeper_supervisor
    keeper_runtime
    keeper_turn_session
    keeper_turn_response

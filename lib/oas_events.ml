@@ -113,6 +113,21 @@ let publish_keeper_snapshot (bus : Agent_sdk.Event_bus.t) ~keeper_name
   Agent_sdk.Event_bus.publish bus
     (Agent_sdk.Event_bus.Custom ("masc:keeper:snapshot", payload))
 
+(** {1 Keeper Lifecycle Events (Supervisor)} *)
+
+(** Publish a keeper lifecycle event from the supervisor.
+    Event names: "started", "stopped", "crashed", "restarted", "dead". *)
+let publish_keeper_lifecycle (bus : Agent_sdk.Event_bus.t) ~event ~keeper_name
+    ~detail =
+  let payload = `Assoc [
+    ("event", `String event);
+    ("keeper_name", `String keeper_name);
+    ("detail", `String detail);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.Custom ("masc:keeper:lifecycle", payload))
+
 (** {1 Phase 4: Social Events} *)
 
 (** Publish a trust score update between two agents. *)

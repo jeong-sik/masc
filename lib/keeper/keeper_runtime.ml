@@ -103,7 +103,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 if already_running then false
                 else if max_keepers > 0 && !remaining_slots <= 0 then false
                 else (
-                  start_keepalive ~proactive_warmup_sec ctx m;
+                  Keeper_supervisor.supervise_keepalive ~proactive_warmup_sec ctx m;
                   if max_keepers > 0 then remaining_slots := !remaining_slots - 1;
                   true
                 )
@@ -117,6 +117,40 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     in
     { enabled = true; scanned; started; stale; recovering }
 
+(** Start the supervisor sweep Pulse loop.
+    Runs alongside existing keepalive bootstrap, scanning for
+    zombie fibers and restarting them with exponential backoff.
+    Called once from start_existing_keepalives after bootstrap. *)
+let supervisor_sweep_started = ref false
+
+let start_supervisor_sweep ctx =
+  if !supervisor_sweep_started then ()
+  else begin
+    let consumer : (module Pulse.Consumer) =
+      (module struct
+        let name = "keeper-supervisor-sweep"
+        let should_act _beat = true
+        let on_beat _beat =
+          (try Keeper_supervisor.sweep_and_recover ctx
+           with exn ->
+             Log.Keeper.error "supervisor sweep failed: %s"
+               (Printexc.to_string exn));
+          Ok ()
+      end)
+    in
+    let p = Pulse.create
+      ~clock:ctx.clock
+      ~rhythm:(Guardian.fixed_rhythm
+                 Env_config.KeeperSupervisor.sweep_interval_sec)
+      ~lifecycle:Perpetual
+      ~consumers:[consumer]
+    in
+    Pulse.run ~sw:ctx.sw p;
+    supervisor_sweep_started := true;
+    Log.Keeper.info "supervisor sweep started (interval %.0fs)"
+      Env_config.KeeperSupervisor.sweep_interval_sec
+  end
+
 let existing_keepalive_bootstrap_done = ref false
 
 let start_existing_keepalives ctx =
@@ -128,7 +162,9 @@ let start_existing_keepalives ctx =
       if keeper_debug then
         Log.Keeper.debug "bootstrap_existing_keepers enabled=%b scanned=%d started=%d stale=%d recovering=%d"
           stats.enabled stats.scanned stats.started stats.stale
-          stats.recovering
+          stats.recovering;
+      (* Start supervisor sweep loop after bootstrap *)
+      start_supervisor_sweep ctx
     with exn ->
       (* Retry bootstrap on next keeper tool call if this attempt failed. *)
       existing_keepalive_bootstrap_done := false;

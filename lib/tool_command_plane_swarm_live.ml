@@ -229,12 +229,15 @@ let handle_swarm_live_run (ctx : (_, _) context) args : result =
                   in
                   (true, Yojson.Safe.to_string payload)))
 
-(** Check whether a PID is still running (Unix-only). *)
+(** Check whether a PID is still running (Unix-only).
+    Returns true if process exists (even if not signalable due to EPERM). *)
 let pid_is_alive pid =
   try
     Unix.kill pid 0;
     true
-  with Unix.Unix_error (Unix.ESRCH, _, _) -> false
+  with
+  | Unix.Unix_error (Unix.ESRCH, _, _) -> false
+  | Unix.Unix_error (Unix.EPERM, _, _) -> true
 
 (** Read a file's contents, returning None on any error. *)
 let read_file_opt path =

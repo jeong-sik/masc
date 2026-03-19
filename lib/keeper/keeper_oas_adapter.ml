@@ -17,6 +17,14 @@ open Keeper_exec_tools
 (** Default context window for tool dispatch scratch context. *)
 let tool_dispatch_max_context = 8192
 
+(** Context offload config: threshold from env or default 4096. *)
+let context_offload_config () : Agent_sdk.Context_offload.config =
+  let threshold = match Sys.getenv_opt "MASC_CONTEXT_OFFLOAD_THRESHOLD" with
+    | Some s -> (try int_of_string s with Failure _ -> 4096)
+    | None -> 4096
+  in
+  { Agent_sdk.Context_offload.default_config with threshold_bytes = threshold }
+
 let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
     ~(gate_config : Eval_gate.gate_config option)
     ~(accumulated_cost_ref : float ref)
@@ -36,7 +44,11 @@ let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
   in
   match gate_config with
   | None ->
-    (try (true, execute ())
+    (try
+       let raw = execute () in
+       let offloaded = Agent_sdk.Context_offload.offload_tool_result
+         ~config:(context_offload_config ()) ~tool_name:name raw in
+       (true, offloaded)
      with exn ->
        Log.Keeper.error "oas adapter tool %s failed: %s"
          name (Printexc.to_string exn);
@@ -60,7 +72,9 @@ let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
           (`Assoc [("error", `String ("Gate rejected: " ^ reason));
                    ("tool", `String name)]))
      | Trajectory.Pass ->
-       let output = Option.value ~default:"{}" result_opt in
+       let raw_output = Option.value ~default:"{}" result_opt in
+       let output = Agent_sdk.Context_offload.offload_tool_result
+         ~config:(context_offload_config ()) ~tool_name:name raw_output in
        (match eval_opt with
         | Some eval ->
           accumulated_cost_ref :=
@@ -78,6 +92,7 @@ let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
 type tools_run_result = {
   oas_result : Oas_worker.run_result;
   tools_executed : string list;
+  cost_report : Agent_sdk.Cost_tracker.cost_report option;
 }
 
 let run_with_tools
@@ -105,7 +120,14 @@ let run_with_tools
     ~max_turns ~temperature ~max_tokens ?guardrails ()
   with
   | Ok oas_result ->
-      Ok { oas_result; tools_executed = List.rev !tools_executed_ref }
+      let usage = Llm_types.usage_of_response oas_result.response in
+      let cost_report = Some (Eval_gate.cost_report
+        ~accumulated_cost:!accumulated_cost_ref
+        ~api_calls:1
+        ~input_tokens:usage.input_tokens
+        ~output_tokens:usage.output_tokens)
+      in
+      Ok { oas_result; tools_executed = List.rev !tools_executed_ref; cost_report }
   | Error e -> Error e
 
 (* ================================================================ *)

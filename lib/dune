@@ -408,6 +408,7 @@
    gardener_state
    gardener_health
    gardener_decisions
+   gardener_worker
    gardener
    tool_gardener
    tool_library
@@ -583,6 +584,7 @@
  gardener_state
  gardener_health
  gardener_decisions
+ gardener_worker
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
  mitosis_helpers

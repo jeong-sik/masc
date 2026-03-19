@@ -12,11 +12,14 @@
 (** Global Lamport clock shared by all spans *)
 let global_clock = Lamport.create ()
 
+(** Monotonic counter for ID uniqueness within the same millisecond *)
+let id_counter = Atomic.make 0
+
 (** Generate trace/span IDs *)
 let generate_id prefix =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
-  Printf.sprintf "%s-%d-%06x" prefix ts hash
+  let seq = Atomic.fetch_and_add id_counter 1 in
+  Printf.sprintf "%s-%d-%06x" prefix ts (seq land 0xFFFFFF)
 
 (** Span status *)
 type span_status = Ok | Error of string
@@ -151,4 +154,5 @@ let spans_by_agent agent =
 let clear () =
   Hashtbl.clear spans;
   Queue.clear span_order;
-  Lamport.reset global_clock
+  Lamport.reset global_clock;
+  Atomic.set id_counter 0

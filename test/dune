@@ -37,7 +37,7 @@
         test_tool_exposure
         test_code_swarm
         test_autonomy_liberation
-        test_oas_v068)
+)
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
           test_graphql_endpoint
@@ -55,7 +55,7 @@
           test_tool_exposure
           test_code_swarm
           test_autonomy_liberation
-          test_oas_v068)
+  )
  (libraries masc_mcp alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))
 

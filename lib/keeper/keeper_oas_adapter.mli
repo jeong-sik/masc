@@ -9,13 +9,10 @@
 
 open Keeper_types
 
-(** Result of [run_with_tools], including tool execution history
-    and optional structured cost report (via OAS Cost_tracker).
-    @since OAS v0.68.0 integration *)
+(** Result of [run_with_tools], including tool execution history. *)
 type tools_run_result = {
   oas_result : Oas_worker.run_result;
   tools_executed : string list;
-  cost_report : Agent_sdk.Cost_tracker.cost_report option;
 }
 
 (** Tool loop LLM call (proactive, autonomy, social board events).

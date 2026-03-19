@@ -128,6 +128,8 @@ let default_model_strings ~cascade_name =
   | "spawn_glm" ->
       labels_of [ ("glm", glm_model); ("glm", glm_flash) ]
       @ [ "glm:auto" ]
+  (* mitosis — cell division / handoff *)
+  | "mitosis" -> llama_glm
   (* topic extraction — fast local model, glm fallback *)
   | "topic_extraction" -> llama_glm
   (* unregistered cascade: llama + glm as safety net *)

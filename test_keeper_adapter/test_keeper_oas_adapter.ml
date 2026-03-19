@@ -2,8 +2,64 @@ open Alcotest
 
 module Adapter = Masc_mcp.Keeper_oas_adapter
 module Llm_types = Masc_mcp.Llm_types
+module Keeper_types = Masc_mcp.Keeper_types
 module Oas_worker = Masc_mcp.Oas_worker
 module Types = Agent_sdk.Types
+
+(* ================================================================ *)
+(* Helper: build a minimal keeper_meta with overridable fields      *)
+(* ================================================================ *)
+
+let make_test_meta
+    ?(name = "test-keeper")
+    ?(active_model = "")
+    ?(allowed_models = [])
+    ?(models = ["llama:test-model"])
+    ?(autonomy_level = "l1_reactive")
+    ?(proactive_enabled = false)
+    () : Keeper_types.keeper_meta =
+  { name; agent_name = "keeper-" ^ name ^ "-agent";
+    persona_profile_path = ""; trace_id = "trace-test"; trace_history = [];
+    goal = "test goal"; short_goal = ""; mid_goal = ""; long_goal = "";
+    soul_profile = ""; will = ""; needs = ""; desires = ""; instructions = "";
+    models; allowed_models; active_model;
+    policy_mode = "learned_offline_v1"; policy_action_budget = "board";
+    policy_reward_model_path = ""; policy_voice_enabled = false;
+    policy_shell_mode = "disabled";
+    initiative_enabled = false; initiative_scope = "board_only";
+    initiative_idle_sec = 3600; initiative_cooldown_sec = 3600;
+    initiative_context_mode = "board_snapshot"; initiative_post_ttl_hours = 24;
+    scope_kind = "global"; room_scope = "all"; trigger_mode = "legacy";
+    mention_targets = []; joined_room_ids = ["default"];
+    last_seen_seq_by_room = []; generation = 0; verify = false;
+    presence_keepalive = false; presence_keepalive_sec = 30;
+    proactive_enabled; proactive_idle_sec = 900; proactive_cooldown_sec = 1800;
+    drift_enabled = false; drift_min_turn_gap = 6; drift_count_total = 0;
+    last_drift_turn = 0; last_drift_reason = "";
+    compaction_profile = "custom"; compaction_ratio_gate = 0.5;
+    compaction_message_gate = 240; compaction_token_gate = 0;
+    continuity_compaction_cooldown_sec = 90;
+    auto_handoff = false; handoff_threshold = 0.85; handoff_cooldown_sec = 300;
+    context_budget = 0.6; voice_enabled = false; voice_channel = "";
+    voice_agent_id = ""; last_handoff_ts = 0.0;
+    created_at = "2026-01-01T00:00:00Z"; updated_at = "2026-01-01T00:00:00Z";
+    total_turns = 0; total_input_tokens = 0; total_output_tokens = 0;
+    total_tokens = 0; total_cost_usd = 0.0; last_turn_ts = 0.0;
+    last_model_used = ""; last_input_tokens = 0; last_output_tokens = 0;
+    last_total_tokens = 0; last_latency_ms = 0;
+    compaction_count = 0; last_compaction_ts = 0.0;
+    last_compaction_before_tokens = 0; last_compaction_after_tokens = 0;
+    proactive_count_total = 0; last_proactive_ts = 0.0;
+    last_proactive_reason = ""; last_proactive_preview = "";
+    last_compaction_check_ts = 0.0; last_compaction_decision = "";
+    last_continuity_update_ts = 0.0; continuity_summary = "";
+    autonomy_level; active_goal_ids = [];
+    auto_team_session_enabled = false; active_team_session_id = None;
+    last_team_session_started_at = ""; team_session_start_count_total = 0;
+    last_autonomous_action_at = ""; autonomous_action_count = 0;
+    deliberation_count = 0; deliberation_cost_total_usd = 0.0;
+    last_deliberation_ts = 0.0; last_triage_triggers = "";
+  }
 
 (* ================================================================ *)
 (* Helper: build a minimal completion_request                       *)
@@ -101,6 +157,56 @@ let test_cascade_config_preserves_temperature () =
         (Float.abs (params.temperature -. 0.3) < epsilon);
       check int "max_tokens" 512 params.max_tokens
 
+let test_cascade_config_multiple_system_messages () =
+  let req = make_request [
+    Types.system_msg "You are a keeper.";
+    Types.system_msg "Be concise.";
+    Types.user_msg "Status?";
+  ] in
+  match Adapter.cascade_config_of_requests [req] with
+  | Error e -> fail e
+  | Ok params ->
+      check bool "system contains both" true
+        (String.length params.system_prompt > String.length "You are a keeper.")
+
+let test_cascade_config_mixed_message_types () =
+  let req = make_request [
+    Types.system_msg "sys";
+    Types.user_msg "hello";
+    Types.assistant_msg "hi";
+    Types.user_msg "question";
+  ] in
+  match Adapter.cascade_config_of_requests [req] with
+  | Error e -> fail e
+  | Ok params ->
+      check string "system separated" "sys" params.system_prompt;
+      check bool "goal non-empty" true (String.length params.goal > 0)
+
+let test_cascade_config_assistant_only () =
+  let req = make_request [Types.assistant_msg "I said something"] in
+  match Adapter.cascade_config_of_requests [req] with
+  | Error _ -> fail "assistant-only should still produce a goal"
+  | Ok params ->
+      check string "no system" "" params.system_prompt;
+      check bool "goal non-empty" true (String.length params.goal > 0)
+
+let test_cascade_config_temperature_zero () =
+  let req = make_request ~temperature:0.0
+    [Types.system_msg "s"; Types.user_msg "g"] in
+  match Adapter.cascade_config_of_requests [req] with
+  | Error e -> fail e
+  | Ok params ->
+      check bool "temperature is zero" true
+        (Float.abs params.temperature < 0.001)
+
+let test_cascade_config_max_tokens_boundary () =
+  let req = make_request ~max_tokens:1
+    [Types.system_msg "s"; Types.user_msg "g"] in
+  match Adapter.cascade_config_of_requests [req] with
+  | Error e -> fail e
+  | Ok params ->
+      check int "max_tokens=1" 1 params.max_tokens
+
 (* ================================================================ *)
 (* Group 2: result extractors                                       *)
 (* ================================================================ *)
@@ -152,6 +258,49 @@ let test_run_cascade_no_user_messages () =
   | Ok _ -> fail "expected Error for request with no user messages"
 
 (* ================================================================ *)
+(* Group 4: resolve_primary_model_spec                              *)
+(* ================================================================ *)
+
+let test_resolve_active_model_set () =
+  let meta = make_test_meta ~active_model:"llama:qwen3.5" () in
+  match Adapter.resolve_primary_model_spec meta with
+  | Error e -> fail (Printf.sprintf "unexpected error: %s" e)
+  | Ok spec -> check string "model_id" "qwen3.5" spec.model_id
+
+let test_resolve_active_model_empty_uses_models () =
+  let meta = make_test_meta ~active_model:"" ~models:["llama:test"] () in
+  match Adapter.resolve_primary_model_spec meta with
+  | Error e -> fail (Printf.sprintf "unexpected error: %s" e)
+  | Ok spec -> check string "model_id" "test" spec.model_id
+
+let test_resolve_allowed_and_models_dedup () =
+  let meta = make_test_meta ~active_model:""
+    ~allowed_models:["llama:a"] ~models:["llama:a"; "llama:b"] () in
+  match Adapter.resolve_primary_model_spec meta with
+  | Error e -> fail (Printf.sprintf "unexpected error: %s" e)
+  | Ok spec -> check string "first from deduped" "a" spec.model_id
+
+let test_resolve_all_models_empty () =
+  let meta = make_test_meta ~active_model:""
+    ~allowed_models:[] ~models:[] () in
+  match Adapter.resolve_primary_model_spec meta with
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for empty models"
+
+let test_resolve_invalid_model_string () =
+  let meta = make_test_meta ~active_model:"" ~models:["invalid"] () in
+  match Adapter.resolve_primary_model_spec meta with
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for invalid model string"
+
+let test_resolve_multiple_models_picks_first () =
+  let meta = make_test_meta ~active_model:""
+    ~models:["llama:first"; "glm:second"] () in
+  match Adapter.resolve_primary_model_spec meta with
+  | Error e -> fail (Printf.sprintf "unexpected error: %s" e)
+  | Ok spec -> check string "picks first" "first" spec.model_id
+
+(* ================================================================ *)
 (* Registration                                                     *)
 (* ================================================================ *)
 
@@ -170,6 +319,16 @@ let () =
         test_cascade_config_no_user_messages;
       test_case "preserves temperature and max_tokens" `Quick
         test_cascade_config_preserves_temperature;
+      test_case "multiple system messages concat" `Quick
+        test_cascade_config_multiple_system_messages;
+      test_case "mixed message types" `Quick
+        test_cascade_config_mixed_message_types;
+      test_case "assistant-only produces goal" `Quick
+        test_cascade_config_assistant_only;
+      test_case "temperature zero" `Quick
+        test_cascade_config_temperature_zero;
+      test_case "max_tokens boundary" `Quick
+        test_cascade_config_max_tokens_boundary;
     ]);
     ("extractors", [
       test_case "text_of_run_result" `Quick test_text_of_run_result;
@@ -179,5 +338,13 @@ let () =
     ("run_cascade_errors", [
       test_case "empty requests" `Quick test_run_cascade_empty_requests;
       test_case "no user messages" `Quick test_run_cascade_no_user_messages;
+    ]);
+    ("resolve_model_spec", [
+      test_case "active_model set" `Quick test_resolve_active_model_set;
+      test_case "active_model empty uses models" `Quick test_resolve_active_model_empty_uses_models;
+      test_case "allowed + models dedup" `Quick test_resolve_allowed_and_models_dedup;
+      test_case "all models empty" `Quick test_resolve_all_models_empty;
+      test_case "invalid model string" `Quick test_resolve_invalid_model_string;
+      test_case "multiple models picks first" `Quick test_resolve_multiple_models_picks_first;
     ]);
   ]

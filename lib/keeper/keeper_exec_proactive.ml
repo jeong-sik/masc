@@ -192,7 +192,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                         ~system_prompt:system
                         ~prompt
                         ~temperature:0.3
-                        ~max_tokens:1024) in
+                        ~max_tokens:1024 ()) in
                     match result with
                     | Error msg ->
                         Log.KeeperExec.error "%s LLM call failed: %s"

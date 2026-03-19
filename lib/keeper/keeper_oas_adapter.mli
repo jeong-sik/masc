@@ -19,6 +19,7 @@ type tools_run_result = {
 val run_with_tools :
   config:Room.config ->
   meta:keeper_meta ->
+  ?model_spec:Llm_types.model_spec ->
   system_prompt:string ->
   goal:string ->
   max_turns:int ->
@@ -33,10 +34,12 @@ val run_with_tools :
 val run_simple :
   config:Room.config ->
   meta:keeper_meta ->
+  ?model_spec:Llm_types.model_spec ->
   system_prompt:string ->
   prompt:string ->
   temperature:float ->
   max_tokens:int ->
+  unit ->
   (Oas_worker.run_result, string) result
 
 (** Extract text content from an OAS run result. *)

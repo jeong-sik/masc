@@ -154,10 +154,10 @@ let verify (req : verification_request) : verdict =
   else
     let prompt = build_prompt req in
     match
-      Llm_cascade.call ~cascade_name:"verifier" ~prompt
+      Cascade.call ~cascade_name:"verifier" ~prompt
         ~temperature:0.0 ~max_tokens:200 ()
     with
-    | Ok r -> parse_verdict r.Llm_cascade.response
+    | Ok r -> parse_verdict r.Cascade.response
     | Error e ->
       eprintf "[verifier] LLM call failed: %s (defaulting to WARN)\n%!" e;
       Warn ("verifier_unavailable: " ^ e)

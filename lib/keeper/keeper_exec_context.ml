@@ -545,8 +545,8 @@ let looks_fragmentary_history_text (raw : string) : bool =
     hard_fragment || short_unterminated || trailing_connector
 
 let run_proactive_generation
-    ~(specs : Llm_types.model_spec list)
-    ~(primary : Llm_types.model_spec)
+    ~(specs : Masc_model.model_spec list)
+    ~(primary : Masc_model.model_spec)
     ~(config : Room.config)
     ~(ctx_work : Context_manager.working_context)
     ~(meta : keeper_meta)
@@ -588,9 +588,9 @@ let run_proactive_generation
   let max_tool_rounds = 3 in
   let execute_tool_calls
       ~(ctx_work : Context_manager.working_context)
-      (tcs : Llm_types.tool_call list) : (Llm_types.tool_call * string) list =
+      (tcs : Masc_model.tool_call list) : (Masc_model.tool_call * string) list =
     List.map
-      (fun (tc : Llm_types.tool_call) ->
+      (fun (tc : Masc_model.tool_call) ->
          let output =
            try execute_keeper_tool_call ~config ~meta ~ctx_work tc
            with exn ->
@@ -624,9 +624,9 @@ let run_proactive_generation
       in
       let requests =
         List.map
-          (fun (model : Llm_types.model_spec) ->
+          (fun (model : Masc_model.model_spec) ->
             ({
-               Llm_types.model;
+               Masc_model.model;
                messages =
                  (Agent_sdk.Types.system_msg turn_system_prompt)
                  :: (ctx_work.messages @ [ Agent_sdk.Types.user_msg prompt ]);
@@ -635,10 +635,10 @@ let run_proactive_generation
                tools = keeper_allowed_llm_tools meta;
                response_format = `Text;
              }
-              : Llm_types.completion_request))
+              : Masc_model.completion_request))
           specs
       in
-      let (cascade_result0, latency0) = Llm_types.timed (fun () ->
+      let (cascade_result0, latency0) = Masc_model.timed (fun () ->
           run_cascade requests) in
       match cascade_result0 with
       | Error _ -> None
@@ -647,16 +647,16 @@ let run_proactive_generation
             model_spec_for_used specs resp0.Llm_provider.Types.model
             |> Option.value ~default:primary
           in
-          let cost0 = cost_usd_of_usage (Llm_types.usage_of_response resp0) used_model0 in
+          let cost0 = cost_usd_of_usage (Masc_model.usage_of_response resp0) used_model0 in
           let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
               ~acc_tools_used ~last_resp =
-            if not (Llm_types.has_tool_calls last_resp) || round > max_tool_rounds then
+            if not (Masc_model.has_tool_calls last_resp) || round > max_tool_rounds then
               let content =
-                let c = String.trim (Llm_types.text_of_response last_resp) in
+                let c = String.trim (Masc_model.text_of_response last_resp) in
                 if c = "" && acc_tools_used <> [] then
                   Printf.sprintf "(tools executed: %s)"
                     (String.concat ", " acc_tools_used)
-                else Llm_types.text_of_response last_resp
+                else Masc_model.text_of_response last_resp
               in
               ( content,
                 acc_usage,
@@ -665,10 +665,10 @@ let run_proactive_generation
                 acc_cost,
                 acc_tools_used )
             else
-              let last_resp_tool_calls = Llm_types.tool_calls_of_response last_resp in
+              let last_resp_tool_calls = Masc_model.tool_calls_of_response last_resp in
               let round_tools =
                 List.map
-                  (fun (tc : Llm_types.tool_call) -> tc.call_name)
+                  (fun (tc : Masc_model.tool_call) -> tc.call_name)
                   last_resp_tool_calls
               in
               let all_tools_so_far = acc_tools_used @ round_tools in
@@ -678,7 +678,7 @@ let run_proactive_generation
               let followup_prompt =
                 keeper_tool_followup_prompt
                   ~user_message:prompt
-                  ~draft_reply:(Llm_types.text_of_response last_resp)
+                  ~draft_reply:(Masc_model.text_of_response last_resp)
                   ~tool_outputs
                   ~already_executed:all_tools_so_far
               in
@@ -693,9 +693,9 @@ let run_proactive_generation
               in
               let followup_requests =
                 List.map
-                  (fun (model : Llm_types.model_spec) ->
+                  (fun (model : Masc_model.model_spec) ->
                      ({
-                        Llm_types.model;
+                        Masc_model.model;
                         messages = [
                           Agent_sdk.Types.system_msg
                             (keeper_tool_loop_system_prompt
@@ -707,14 +707,14 @@ let run_proactive_generation
                         tools = next_tools;
                         response_format = `Text;
                       }
-                       : Llm_types.completion_request))
+                       : Masc_model.completion_request))
                   specs
               in
-              let (followup_result, round_latency) = Llm_types.timed (fun () ->
+              let (followup_result, round_latency) = Masc_model.timed (fun () ->
                   run_cascade followup_requests) in
               match followup_result with
               | Error _ ->
-                  ( Llm_types.text_of_response last_resp,
+                  ( Masc_model.text_of_response last_resp,
                     acc_usage,
                     last_resp.Llm_provider.Types.model,
                     acc_latency,
@@ -725,7 +725,7 @@ let run_proactive_generation
                     model_spec_for_used specs resp_next.Llm_provider.Types.model
                     |> Option.value ~default:primary
                   in
-                  let resp_next_usage = Llm_types.usage_of_response resp_next in
+                  let resp_next_usage = Masc_model.usage_of_response resp_next in
                   let cost_next = cost_usd_of_usage resp_next_usage used_model_next in
                   tool_loop
                     ~round:(round + 1)
@@ -739,7 +739,7 @@ let run_proactive_generation
                attempt_cost_usd, attempt_tools_used) =
             tool_loop
               ~round:1
-              ~acc_usage:(Llm_types.usage_of_response resp0)
+              ~acc_usage:(Masc_model.usage_of_response resp0)
               ~acc_latency:latency0
               ~acc_cost:cost0
               ~acc_tools_used:[]

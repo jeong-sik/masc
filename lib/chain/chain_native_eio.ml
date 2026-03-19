@@ -195,16 +195,16 @@ let llm_tool_defs_of_json = function
                  in
                  Some
                    {
-                     Llm_types.tool_name = tool_name;
+                     Masc_model.tool_name = tool_name;
                      tool_description = tool_description;
                      parameters = parameters;
                    })
   | Some _ -> []
 
-let llm_tool_calls_json (calls : Llm_types.tool_call list) =
+let llm_tool_calls_json (calls : Masc_model.tool_call list) =
   `List
     (List.map
-       (fun (call : Llm_types.tool_call) ->
+       (fun (call : Masc_model.tool_call) ->
          `Assoc
            [
              ("id", `String call.call_id);
@@ -215,7 +215,7 @@ let llm_tool_calls_json (calls : Llm_types.tool_call list) =
 
 type llm_runner =
   | Stub
-  | Direct of Llm_types.model_spec
+  | Direct of Masc_model.model_spec
   | Spawn of string (* agent name *)
   | SpawnWithModel of { agent: string; model: string }
 
@@ -223,7 +223,7 @@ let model_runner_of_string raw =
   let model = trim raw in
   let lower = String.lowercase_ascii model in
   let direct spec =
-    match Llm_cascade.model_spec_of_string spec with
+    match Cascade.model_spec_of_string spec with
     | Ok parsed -> Ok (Direct parsed)
     | Error msg -> Error msg
   in
@@ -245,7 +245,7 @@ let model_runner_of_string raw =
   | "codex" -> Ok (Spawn "codex")
   | value when starts_with ~prefix:"codex:" value -> Ok (Spawn "codex")
   | value -> (
-      match Llm_cascade.model_spec_of_string model with
+      match Cascade.model_spec_of_string model with
       | Ok parsed -> Ok (Direct parsed)
       | Error _ when starts_with ~prefix:"llama:" value -> direct model
       | Error _ when starts_with ~prefix:"gemini:" value -> direct model
@@ -299,13 +299,13 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
         | _ -> None
       in
       (match
-        Llm_cascade.call_with_tools ~cascade_name:"chain_llm" ~messages
+        Cascade.call_with_tools ~cascade_name:"chain_llm" ~messages
           ?tools:tools_json ~temperature:0.2 ~max_tokens:4096
           ~timeout_sec ()
       with
-      | Ok resp when trim (Llm_types.text_of_response resp) <> "" -> Ok (Llm_types.text_of_response resp)
-      | Ok resp when Llm_types.has_tool_calls resp ->
-          Ok (Yojson.Safe.to_string (llm_tool_calls_json (Llm_types.tool_calls_of_response resp)))
+      | Ok resp when trim (Masc_model.text_of_response resp) <> "" -> Ok (Masc_model.text_of_response resp)
+      | Ok resp when Masc_model.has_tool_calls resp ->
+          Ok (Yojson.Safe.to_string (llm_tool_calls_json (Masc_model.tool_calls_of_response resp)))
       | Ok _ -> Error "empty completion"
       | Error msg -> Error msg)
 

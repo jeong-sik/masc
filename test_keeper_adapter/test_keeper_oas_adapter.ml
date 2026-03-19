@@ -1,15 +1,15 @@
 open Alcotest
 
 module Adapter = Masc_mcp.Keeper_oas_adapter
-module Llm_types = Masc_mcp.Llm_types
+module Masc_model = Masc_mcp.Masc_model
 module Types = Agent_sdk.Types
 
 (* ================================================================ *)
 (* Helper: build a minimal completion_request                       *)
 (* ================================================================ *)
 
-let make_model_spec ?(model_id = "test-model") ?(provider = Llm_types.Llama) () :
-    Llm_types.model_spec =
+let make_model_spec ?(model_id = "test-model") ?(provider = Masc_model.Llama) () :
+    Masc_model.model_spec =
   { provider;
     model_id;
     max_context = 4096;
@@ -19,9 +19,9 @@ let make_model_spec ?(model_id = "test-model") ?(provider = Llm_types.Llama) () 
     cost_per_1k_output = 0.0;
   }
 
-let make_request ?(model_id = "test-model") ?(provider = Llm_types.Llama)
+let make_request ?(model_id = "test-model") ?(provider = Masc_model.Llama)
     ?(temperature = 0.7) ?(max_tokens = 1024) ?(tools = [])
-    (messages : Types.message list) : Llm_types.completion_request =
+    (messages : Types.message list) : Masc_model.completion_request =
   { model = make_model_spec ~model_id ~provider ();
     messages;
     temperature;

@@ -264,8 +264,8 @@ let get_chain_id_for_preset = function
   | "figma" -> Some "walph-figma"
   | _ -> None
 
-let walph_response_is_valid (resp : Llm_types.api_response) =
-  let content = String.trim (Llm_types.text_of_response resp) in
+let walph_response_is_valid (resp : Masc_model.api_response) =
+  let content = String.trim (Masc_model.text_of_response resp) in
   let lower = String.lowercase_ascii content in
   let len = String.length content in
   len > 0
@@ -275,7 +275,7 @@ let walph_response_is_valid (resp : Llm_types.api_response) =
 
 let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec ~max_chars () =
   match
-    Llm_cascade.call ~cascade_name:"walph" ~prompt ~timeout_sec
+    Cascade.call ~cascade_name:"walph" ~prompt ~timeout_sec
       ~max_tokens:max_chars ~accept:walph_response_is_valid ()
   with
   | Ok r -> r.response

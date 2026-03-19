@@ -144,7 +144,7 @@ let () =
 
   (* Parse model specs *)
   let models = List.filter_map (fun s ->
-    match Llm_cascade.model_spec_of_string s with
+    match Cascade.model_spec_of_string s with
     | Ok m ->
       (* Apply max_context override if specified *)
       let m = match args.max_context with
@@ -165,7 +165,7 @@ let () =
   let verifier =
     match args.verifier_str with
     | Some s -> (
-        match Llm_cascade.model_spec_of_string s with
+        match Cascade.model_spec_of_string s with
         | Ok m -> Some m
         | Error e ->
             eprintf "Bad verifier spec '%s': %s\n%!" s e;
@@ -194,8 +194,8 @@ let () =
   eprintf "Perpetual Agent CLI\n%!";
   eprintf "Goal: %s\n%!" args.goal;
   eprintf "Models: %s\n%!" (String.concat ", "
-    (List.map (fun (m : Llm_types.model_spec) ->
-      sprintf "%s:%s" (Llm_types.string_of_provider m.provider) m.model_id
+    (List.map (fun (m : Masc_model.model_spec) ->
+      sprintf "%s:%s" (Masc_model.string_of_provider m.provider) m.model_id
     ) models));
   eprintf "Verify: %b (model: %s)\n%!" args.verify config.verifier_model.model_id;
   eprintf "Thresholds: compact=%.0f%%, handoff=%.0f%%\n%!"

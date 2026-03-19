@@ -245,8 +245,8 @@ let parse_llm_score (text : string) : float option =
       scan 0
 
 (** Validate that an LLM response contains a parseable score. *)
-let llm_score_is_valid (resp : Llm_types.api_response) : bool =
-  parse_llm_score (Llm_types.text_of_response resp) <> None
+let llm_score_is_valid (resp : Masc_model.api_response) : bool =
+  parse_llm_score (Masc_model.text_of_response resp) <> None
 
 (** Call LLM to score agent-task compatibility.
     Returns Ok float or Error string. *)
@@ -254,7 +254,7 @@ let score_with_llm (agent : agent_profile) (task : task_profile)
     : (float, string) result =
   let prompt = build_scoring_prompt agent task in
   match
-    Llm_cascade.call ~cascade_name:"capability_match" ~prompt
+    Cascade.call ~cascade_name:"capability_match" ~prompt
       ~temperature:0.1 ~timeout_sec:15 ~max_tokens:20
       ~accept:llm_score_is_valid ()
   with

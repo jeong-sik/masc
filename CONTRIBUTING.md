@@ -75,7 +75,7 @@ test/                         # ~205 test files
 └── bench_*.ml                # Benchmarks
 
 config/
-└── llm_cascade.json          # LLM cascade slot configuration
+└── cascade.json              # Cascade slot configuration
 ```
 
 ### Key Subsystems
@@ -160,7 +160,7 @@ chore: bump version to 0.9.0
 - Slots tried in order: GLM → Gemini → Claude
 - If a slot returns empty or errors, the next slot is tried
 - Claude API keys are rotated round-robin per heartbeat tick
-- Configuration in `config/llm_cascade.json`, hot-reloaded by mtime check
+- Configuration in `config/cascade.json`, hot-reloaded by mtime check
 
 ## Reporting Issues
 

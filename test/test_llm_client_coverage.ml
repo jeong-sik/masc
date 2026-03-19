@@ -1,7 +1,7 @@
 open Alcotest
 
-module Llm = Masc_mcp.Llm_types
-module Cascade = Masc_mcp.Llm_cascade
+module Llm = Masc_mcp.Masc_model
+module Cascade = Masc_mcp.Cascade
 
 let test_string_of_provider () =
   check string "llama" "llama" (Llm.string_of_provider Llm.Llama);

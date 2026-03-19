@@ -182,6 +182,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                       "You are " ^ meta.name
                       ^ ", a keeper agent. Respond with JSON only."
                     in
+                    (* model_specs retained for cost estimation only *)
                     let model_specs =
                       Llm_types.available_model_specs_of_strings meta.models
                     in
@@ -189,6 +190,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                       Keeper_oas_adapter.run_simple
                         ~config:ctx.config
                         ~meta
+                        ~cascade_name:"keeper_proactive"
                         ~system_prompt:system
                         ~prompt
                         ~temperature:0.3

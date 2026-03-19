@@ -87,17 +87,18 @@ let default_model_strings ~cascade_name =
   | "lodge_comment" | "lodge_agent_match" ->
       llama_glm
   (* gardener — llama first, glm fallback *)
-  | "gardener_spawn" -> llama_glm
+  | "gardener_spawn" | "gardener_retire" -> llama_glm
   (* classification — local llama, glm fallback *)
   | "classification" | "context_router" | "capability_match" -> llama_glm
   (* theory of mind — local llama, glm fallback *)
   | "tom" -> llama_glm
   (* verifier — local llama, glm fallback *)
-  | "verifier" | "code_swarm_verify" -> llama_glm
+  | "verifier" | "code_swarm_verify" | "code_swarm" -> llama_glm
   (* keeper — local llama, glm fallback *)
-  | "keeper_autonomy" -> llama_glm
+  | "keeper_autonomy" | "keeper_proactive" | "keeper_deliberation"
+  | "keeper_reply" | "keeper_social" | "keeper_turn" -> llama_glm
   (* routing — local llama, glm fallback *)
-  | "routing_judge" -> llama_glm
+  | "routing_judge" | "team_router" -> llama_glm
   (* chain — local llama, glm fallback *)
   | "chain_llm" -> llama_glm
   (* autoresearch — local llama, glm fallback *)
@@ -127,6 +128,8 @@ let default_model_strings ~cascade_name =
   | "spawn_glm" ->
       labels_of [ ("glm", glm_model); ("glm", glm_flash) ]
       @ [ "glm:auto" ]
+  (* mitosis — cell division / handoff *)
+  | "mitosis" -> llama_glm
   (* topic extraction — fast local model, glm fallback *)
   | "topic_extraction" -> llama_glm
   (* unregistered cascade: llama + glm as safety net *)

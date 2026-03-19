@@ -17,7 +17,9 @@ type tools_run_result = {
 
 (** Tool loop LLM call (proactive, autonomy, social board events).
     Wraps [Oas_worker.run_named_with_masc_tools] with keeper tool dispatch.
-    [cascade_name] selects the model cascade (e.g. "keeper_autonomy"). *)
+    [cascade_name] selects the model cascade (e.g. "keeper_autonomy").
+    When [gate_config] is provided, each tool call is wrapped with
+    [Eval_gate.guarded_execute] for cost/entropy/destructive checks. *)
 val run_with_tools :
   config:Room.config ->
   meta:keeper_meta ->
@@ -27,6 +29,7 @@ val run_with_tools :
   max_turns:int ->
   temperature:float ->
   max_tokens:int ->
+  ?gate_config:Eval_gate.gate_config ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   unit ->
   (tools_run_result, string) result

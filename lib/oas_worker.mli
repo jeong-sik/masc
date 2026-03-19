@@ -25,6 +25,7 @@ val run_named :
   ?temperature:float ->
   ?max_tokens:int ->
   ?guardrails:Oas.Guardrails.t ->
+  ?on_event:(Oas.Types.sse_event -> unit) ->
   unit ->
   (run_result, string) result
 
@@ -38,5 +39,6 @@ val run_named_with_masc_tools :
   ?temperature:float ->
   ?max_tokens:int ->
   ?guardrails:Oas.Guardrails.t ->
+  ?on_event:(Oas.Types.sse_event -> unit) ->
   unit ->
   (run_result, string) result

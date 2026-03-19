@@ -26,7 +26,7 @@ let schemas : tool_schema list =
     {
       name = "masc_voice_speak";
       description =
-        "Send text to the voice bridge for TTS playback. Requires an active voice session (call masc_voice_session_start first). provider: optional, one of 'elevenlabs', 'openai_compat'. priority: 1=normal, higher=urgent.";
+        "Send text to the TTS layer for audio playback. Requires an active voice session (call masc_voice_session_start first). provider: optional, one of 'elevenlabs', 'openai_compat'. priority: 1=normal, higher=urgent.";
       input_schema =
         `Assoc
           [
@@ -61,7 +61,7 @@ let schemas : tool_schema list =
     };
     {
       name = "masc_voice_session_end";
-      description = "End the active voice session for an agent and release bridge resources. Use when the agent's voice interaction is complete or the session needs cleanup.";
+      description = "End the active voice session for an agent and release session resources. Use when the agent's voice interaction is complete or the session needs cleanup.";
       input_schema =
         `Assoc
           [
@@ -93,7 +93,7 @@ let schemas : tool_schema list =
     };
     {
       name = "masc_voice_transcript";
-      description = "Get the current transcript (STT output) from the voice bridge. Requires an active voice session.";
+      description = "Get the current transcript (STT output). Requires STT service integration and an active voice session.";
       input_schema =
         `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ];
     };
@@ -145,8 +145,16 @@ let schemas : tool_schema list =
 let require_net_or_error (ctx : 'a context) =
   match ctx.net with
   | Some net -> Ok net
-  | None -> Error "Voice bridge unavailable: server started without network. Restart masc-mcp with --http flag to enable voice tools."
+  | None -> Error "TTS service unavailable: server started without network. Restart masc-mcp with --http flag to enable voice tools."
 
+(* --- Handler categories ---
+   All handlers receive [ctx] for dispatch signature consistency.
+   Category A (net required): speak, agent — call Voice_bridge over HTTP.
+   Category B (local only):   session_start/end, sessions, conference_start/end
+                               — use Keeper_voice_local / Voice_session_manager.
+   Category C (stub):         transcript — STT service not yet integrated. *)
+
+(* Category A: requires network for TTS endpoint *)
 let handle_voice_speak (ctx : 'a context) args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in
   let message = get_string args "message" "" in
@@ -167,6 +175,7 @@ let handle_voice_speak (ctx : 'a context) args : result =
           (Voice_bridge.agent_speak ~sw:ctx.sw ~clock:ctx.clock ~net ~agent_id
              ~message ?provider ~priority ())
 
+(* Category B: local session via Voice_session_manager *)
 let handle_voice_session_start (_ctx : 'a context) args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in
   let voice = get_string_opt args "session_name" |> Option.map String.trim in
@@ -206,6 +215,7 @@ let handle_voice_sessions (_ctx : 'a context) _args : result =
         ("sessions",
           `List (List.map Voice_session_manager.session_to_json sessions)) ]))
 
+(* Category A: reads agent voice config via Voice_bridge *)
 let handle_voice_agent _ctx args : result =
   let agent_id = get_string args "agent_id" "" |> String.trim in
   if agent_id = "" then
@@ -213,6 +223,7 @@ let handle_voice_agent _ctx args : result =
   else
     json_string_of_result (Voice_bridge.get_agent_voice ~agent_id)
 
+(* Category C: STT stub — returns not_available until service is integrated *)
 let handle_voice_transcript (_ctx : 'a context) _args : result =
   (* Transcript requires an external STT service — not yet integrated locally *)
   (false, Yojson.Safe.to_string
@@ -220,6 +231,9 @@ let handle_voice_transcript (_ctx : 'a context) _args : result =
       [ ("status", `String "not_available");
         ("message", `String "transcript requires STT service integration") ]))
 
+(* Category B: conference = batch start of local sessions for multiple agents.
+   Each agent_id gets its own Voice_session_manager session; the "conference"
+   is a convenience grouping, not a shared audio channel. *)
 let handle_voice_conference_start (_ctx : 'a context) args : result =
   let agent_ids =
     get_string_list args "agent_ids"
@@ -242,6 +256,7 @@ let handle_voice_conference_start (_ctx : 'a context) args : result =
           ("participant_count", `Int (List.length agent_ids));
           ("sessions", `List sessions) ]))
 
+(* Category B: batch end — tears down each agent's session individually *)
 let handle_voice_conference_end (_ctx : 'a context) args : result =
   let agent_ids =
     get_string_list args "agent_ids"

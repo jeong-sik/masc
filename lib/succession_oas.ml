@@ -513,7 +513,7 @@ let set_metrics ctx (m : succession_metrics) =
 (** Convert a [succession_dna] into an OAS [Checkpoint.t].
 
     The DNA's compressed_context messages are stored in the checkpoint's
-    message list (converted via [Llm_provider_dispatch.to_oas_message]). All other
+    message list (converted via [Oas_type_adapters.to_oas_message]). All other
     DNA fields are stored in the checkpoint's context under the
     [Custom "masc_dna"] scope.
 
@@ -541,7 +541,7 @@ let checkpoint_of_dna
   set_str_list oas_ctx "memory_refs" dna.memory_refs;
   set_str_list oas_ctx "warnings" dna.warnings;
   set_metrics oas_ctx dna.metrics;
-  let messages = List.filter_map Llm_provider_dispatch.to_oas_message working_ctx.messages in
+  let messages = List.filter_map Oas_type_adapters.to_oas_message working_ctx.messages in
   {
     Agent_sdk.Checkpoint.version = 3;
     session_id = sprintf "succession-%s-gen%d" dna.trace_id dna.generation;

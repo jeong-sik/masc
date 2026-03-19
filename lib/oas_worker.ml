@@ -63,7 +63,7 @@ type run_result = {
 (* ================================================================ *)
 
 let resolve_provider (spec : Llm_types.model_spec) : Oas.Provider.config =
-  match Llm_provider_dispatch.to_oas_provider spec with
+  match Oas_type_adapters.to_oas_provider spec with
   | Some cfg -> cfg
   | None ->
     { Oas.Provider.provider =

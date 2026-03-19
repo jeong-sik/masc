@@ -133,8 +133,8 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
     - DropLowImportance uses OAS Custom strategy with inline scoring.
     - SummarizeOld uses OAS Custom strategy with heuristic summarization.
 
-    TODO: SummarizeOld currently uses heuristic truncation, not LLM summarization.
-    A proper implementation would accept a summarizer function parameter. *)
+    SummarizeOld uses extractive summarization (first-sentence extraction).
+    A future enhancement could accept an LLM summarizer function parameter. *)
 let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
   | PruneToolOutputs ->
@@ -182,18 +182,69 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
       ) masc_msgs in
       List.map masc_msg_to_oas filtered)
   | SummarizeOld ->
-    (* STUB: requires LLM call for real summarization.
-       Falls back to Keep_first_and_last { first_n = 2; last_n = 5 }
-       to preserve conversation boundaries without pretending to summarize. *)
+    (* Extractive summarization: replace the middle section of messages with
+       a single System message containing first-sentence extracts of each
+       removed user/assistant turn. Preserves the first 2 and last 5 messages
+       intact (conversation start + recent context). The summary message
+       bridges the gap so the model knows what was discussed without reading
+       every old message.
+
+       This is deterministic (no LLM call). A future enhancement could use
+       an LLM for abstractive summarization via a callback parameter. *)
     Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
       let n = List.length oas_msgs in
       let first_n = 2 in
       let last_n = 5 in
-      if n <= first_n + last_n then oas_msgs
+      if n <= first_n + last_n + 1 then oas_msgs
       else
         let first = List.filteri (fun i _ -> i < first_n) oas_msgs in
         let last = List.filteri (fun i _ -> i >= n - last_n) oas_msgs in
-        first @ last)
+        let middle = List.filteri (fun i _ -> i >= first_n && i < n - last_n) oas_msgs in
+        let first_sentence (s : string) =
+          let s = String.trim s in
+          let max_len = 120 in
+          let cut_at =
+            let period = try Some (String.index s '.') with Not_found -> None in
+            let newline = try Some (String.index s '\n') with Not_found -> None in
+            match period, newline with
+            | Some p, Some n -> Some (min p n + 1)
+            | Some p, None -> Some (p + 1)
+            | None, Some n -> Some n
+            | None, None -> None
+          in
+          match cut_at with
+          | Some pos when pos <= max_len -> String.sub s 0 pos
+          | _ -> if String.length s > max_len then String.sub s 0 max_len ^ "..." else s
+        in
+        let extract_text (m : Agent_sdk.Types.message) : string =
+          m.content
+          |> List.filter_map (function
+               | Agent_sdk.Types.Text s ->
+                 let t = String.trim s in
+                 if t = "" || (String.length t > 0 && t.[0] = '\x00') then None
+                 else Some t
+               | _ -> None)
+          |> String.concat " "
+        in
+        let summary_lines = middle |> List.mapi (fun i m ->
+          let role_str = match m.Agent_sdk.Types.role with
+            | Agent_sdk.Types.User -> "user"
+            | Agent_sdk.Types.Assistant -> "assistant"
+            | Agent_sdk.Types.System -> "system"
+            | Agent_sdk.Types.Tool -> "tool"
+          in
+          let text = extract_text m in
+          if text = "" then None
+          else Some (Printf.sprintf "[%d] %s: %s" (first_n + i + 1) role_str (first_sentence text))
+        ) |> List.filter_map Fun.id in
+        let omitted_count = List.length middle in
+        let summary_text = Printf.sprintf
+          "[Compacted %d messages into summary]\n%s"
+          omitted_count (String.concat "\n" summary_lines)
+        in
+        let summary_msg = Agent_sdk.Types.text_message
+          Agent_sdk.Types.System summary_text in
+        first @ [summary_msg] @ last)
 
 (* ================================================================ *)
 (* Sentinel Roundtrip Validation                                    *)

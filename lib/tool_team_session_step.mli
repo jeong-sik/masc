@@ -14,6 +14,7 @@ type spawn_spec = {
   spawn_role : string option;
   execution_scope : Team_session_types.execution_scope option;
   thinking_enabled : bool option;
+  thinking_budget : int option;
   max_turns : int option;
   worker_class : Team_session_types.worker_class option;
   worker_size : Team_session_types.worker_size option;

@@ -281,6 +281,7 @@ let test_status_reports_worker_run_progress_summary () =
       spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
       execution_scope = Some Team_session_types.Limited_code_change;
       thinking_enabled = None;
+      thinking_budget = None;
       max_turns = None;
       timeout_seconds = Some 300;
       worker_class = Some Team_session_types.Worker_executor;

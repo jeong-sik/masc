@@ -121,6 +121,7 @@ type planned_worker = {
   spawn_model : string option;
   execution_scope : execution_scope option;
   thinking_enabled : bool option;
+  thinking_budget : int option;
   max_turns : int option;
   timeout_seconds : int option;
   worker_class : worker_class option;

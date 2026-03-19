@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# Pin private/external opam dependencies that are not published on opam-repository.
+#
+# NOTE: These pins use branch refs (#main) intentionally. These are private
+# first-party packages where we control both sides. Version constraints for
+# compatibility are declared in masc_mcp.opam (e.g., mcp_protocol >= 0.13.0).
+# If you need reproducible builds, pin to a specific commit SHA instead:
+#   opam pin add <pkg> <url>#<commit-sha> -n -y
 set -euo pipefail
 
 include_bisect=false

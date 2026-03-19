@@ -19,23 +19,32 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 TODAY="$(date +%Y-%m-%d)"
 
-echo "🔄 Bumping release version to $NEW_VERSION"
+# Cross-platform sed -i: macOS uses sed -i '', GNU uses sed -i
+sedi() {
+  if sed --version 2>/dev/null | grep -q GNU; then
+    sed -i "$@"
+  else
+    sed -i '' "$@"
+  fi
+}
+
+echo "Bumping release version to $NEW_VERSION"
 
 # 1) SSOT: dune-project
-sed -i '' -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
+sedi -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
   "$ROOT_DIR/dune-project"
-echo "✅ dune-project"
+echo "  dune-project updated"
 
 # 2) README badge
-sed -i '' -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
+sedi -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
   "$ROOT_DIR/README.md"
-echo "✅ README.md badge"
+echo "  README.md badge updated"
 
 # 3) opam metadata (if tracked)
 if [ -f "$ROOT_DIR/masc_mcp.opam" ]; then
-  sed -i '' -E "s/^version: \".*\"/version: \"$NEW_VERSION\"/" \
+  sedi -E "s/^version: \".*\"/version: \"$NEW_VERSION\"/" \
     "$ROOT_DIR/masc_mcp.opam"
-  echo "✅ masc_mcp.opam"
+  echo "  masc_mcp.opam updated"
 fi
 
 # 4) CHANGELOG stub (prepend if missing)
@@ -58,9 +67,9 @@ if ! grep -q "^## \[$NEW_VERSION\]" "$ROOT_DIR/CHANGELOG.md"; then
     { print }
   ' "$ROOT_DIR/CHANGELOG.md" > "$tmp_file"
   mv "$tmp_file" "$ROOT_DIR/CHANGELOG.md"
-  echo "✅ CHANGELOG.md stub added"
+  echo "  CHANGELOG.md stub added"
 else
-  echo "ℹ️ CHANGELOG already has $NEW_VERSION entry"
+  echo "  CHANGELOG already has $NEW_VERSION entry"
 fi
 
 echo ""

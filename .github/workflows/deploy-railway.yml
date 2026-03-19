@@ -89,7 +89,6 @@ jobs:
           '
 
       - name: Smoke deployment image
-        continue-on-error: true
         run: |
           set -euo pipefail
           cid="$(docker run -d --network host -e PORT=18080 masc-mcp-railway-smoke /app/masc-mcp --port 18080 --base-path /app)"
@@ -107,12 +106,12 @@ jobs:
           docker logs "$cid" || true
           exit 1
 
-      - name: Remove binary from gitignore for Railway upload
+      - name: Allow binary in Railway upload
         run: |
-          # Railway respects .gitignore, so we need to remove the binary exclusion
-          sed -i '/masc-mcp-linux-x64/d' .gitignore
-          echo "Modified .gitignore:"
-          tail -5 .gitignore
+          # Railway CLI respects .gitignore. Instead of mutating .gitignore
+          # (which could affect later steps), force-add the binary to git's
+          # index so Railway includes it in the upload.
+          git add -f masc-mcp-linux-x64
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli

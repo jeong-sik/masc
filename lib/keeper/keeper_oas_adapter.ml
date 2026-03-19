@@ -1,53 +1,27 @@
-(** Keeper_oas_adapter — OAS Agent.run wrappers for keeper LLM calls.
+(** Keeper_oas_adapter — OAS wrappers for keeper LLM calls.
 
-    Delegates to [Oas_worker.run] (no tools) or [Oas_worker.run_with_masc_tools]
-    (with keeper tool dispatch).
+    Delegates to [Oas_worker.run_named] / [run_named_with_masc_tools]
+    (cascade-name-based, no model_spec construction) or to
+    [Llm_cascade.call_with_tools] for single-shot cascade calls.
 
-    @since OAS migration Phase 1 *)
+    @since OAS migration Phase 1
+    @since LLM-free cascade Phase 2 *)
 
 open Keeper_types
 open Keeper_exec_tools
 
 (* ================================================================ *)
-(* Internal: resolve model spec from keeper meta                     *)
+(* Internal: tool dispatch                                           *)
 (* ================================================================ *)
 
-let resolve_primary_model_spec (meta : keeper_meta) :
-    (Llm_types.model_spec, string) result =
-  let labels =
-    match Keeper_exec_status.active_model_of_meta meta with
-    | "" ->
-      let pool = dedupe_keep_order (meta.allowed_models @ meta.models) in
-      if pool = [] then meta.models else pool
-    | model -> [model]
-  in
-  match model_specs_of_strings labels with
-  | Error e -> Error e
-  | Ok [] -> Error "no model specs resolved"
-  | Ok (primary :: _) -> Ok primary
+(** Default context window for tool dispatch scratch context. *)
+let tool_dispatch_max_context = 8192
 
-let require_net () =
-  match Eio_context.get_net_opt () with
-  | Some net -> Ok net
-  | None -> Error "Eio net not available (keeper running outside server context)"
-
-let require_switch () =
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Ok sw
-  | None -> Error "Eio switch not available (keeper running outside server context)"
-
-(* ================================================================ *)
-(* Internal: keeper tool dispatch closure for OAS                    *)
-(* ================================================================ *)
-
-(** Build a dispatch closure compatible with [Oas_worker.run_with_masc_tools].
-    Creates a minimal [Context_manager.working_context] for tool execution. *)
 let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
-    ~(model_spec : Llm_types.model_spec)
     ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
   let ctx_work = Context_manager.create
     ~system_prompt:(Printf.sprintf "Keeper %s OAS tool dispatch" meta.name)
-    ~max_tokens:model_spec.max_context
+    ~max_tokens:tool_dispatch_max_context
   in
   let tc : Llm_types.tool_call = {
     call_id = "";
@@ -77,6 +51,7 @@ type tools_run_result = {
 let run_with_tools
     ~(config : Room.config)
     ~(meta : keeper_meta)
+    ~(cascade_name : string)
     ~(system_prompt : string)
     ~(goal : string)
     ~(max_turns : int)
@@ -85,33 +60,15 @@ let run_with_tools
     ?(guardrails : Agent_sdk.Guardrails.t option)
     ()
   : (tools_run_result, string) result =
-  match resolve_primary_model_spec meta with
-  | Error e -> Error e
-  | Ok model_spec ->
-  match require_net () with
-  | Error e -> Error e
-  | Ok net ->
-  match require_switch () with
-  | Error e -> Error e
-  | Ok sw ->
   let masc_tools = keeper_allowed_llm_tools meta in
   let tools_executed_ref = ref [] in
   let dispatch ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
     tools_executed_ref := name :: !tools_executed_ref;
-    make_dispatch ~config ~meta ~model_spec ~name ~args
+    make_dispatch ~config ~meta ~name ~args
   in
-  let oas_config = { (Oas_worker.default_config
-    ~name:(Printf.sprintf "keeper-%s" meta.name)
-    ~model_spec
-    ~system_prompt
-    ~tools:[]) with
-    max_turns;
-    max_tokens;
-    temperature;
-    guardrails;
-  } in
-  match Oas_worker.run_with_masc_tools
-    ~sw ~net ~config:oas_config ~masc_tools ~dispatch goal
+  match Oas_worker.run_named_with_masc_tools
+    ~cascade_name ~goal ~system_prompt ~masc_tools ~dispatch
+    ~max_turns ~temperature ~max_tokens ?guardrails ()
   with
   | Ok oas_result ->
       Ok { oas_result; tools_executed = List.rev !tools_executed_ref }
@@ -124,31 +81,15 @@ let run_with_tools
 let run_simple
     ~(config : Room.config)
     ~(meta : keeper_meta)
+    ~(cascade_name : string)
     ~(system_prompt : string)
     ~(prompt : string)
     ~(temperature : float)
     ~(max_tokens : int)
   : (Oas_worker.run_result, string) result =
-  ignore config;
-  match resolve_primary_model_spec meta with
-  | Error e -> Error e
-  | Ok model_spec ->
-  match require_net () with
-  | Error e -> Error e
-  | Ok net ->
-  match require_switch () with
-  | Error e -> Error e
-  | Ok sw ->
-  let oas_config = { (Oas_worker.default_config
-    ~name:(Printf.sprintf "keeper-%s-simple" meta.name)
-    ~model_spec
-    ~system_prompt
-    ~tools:[]) with
-    max_turns = 1;
-    max_tokens;
-    temperature;
-  } in
-  Oas_worker.run ~sw ~net ~config:oas_config prompt
+  ignore (config, meta);
+  Oas_worker.run_named ~cascade_name ~goal:prompt ~system_prompt
+    ~max_turns:1 ~temperature ~max_tokens ()
 
 (* ================================================================ *)
 (* Public: result extractors                                         *)
@@ -164,12 +105,10 @@ let model_of_run_result (r : Oas_worker.run_result) : string =
   r.response.model
 
 (* ================================================================ *)
-(* Internal: extract OAS parameters from completion_request list    *)
+(* Internal: extract prompt from completion_request list             *)
 (* ================================================================ *)
 
-type cascade_params = {
-  primary_spec : Llm_types.model_spec;
-  fallback_specs : Llm_types.model_spec list;
+type prompt_params = {
   system_prompt : string;
   goal : string;
   temperature : float;
@@ -194,21 +133,18 @@ let messages_to_goal_text (msgs : Agent_sdk.Types.message list) : string =
   |> List.filter (fun s -> String.length s > 0)
   |> String.concat "\n"
 
-let cascade_config_of_requests
+let extract_prompt_params
     (requests : Llm_types.completion_request list)
-  : (cascade_params, string) result =
+  : (prompt_params, string) result =
   match requests with
   | [] -> Error "empty cascade request list"
-  | first :: rest ->
+  | first :: _ ->
       let sys_prompt, user_msgs = separate_system_and_user first.messages in
       let goal = messages_to_goal_text user_msgs in
       if String.length goal = 0 then
         Error "no user messages in cascade request"
       else
         Ok {
-          primary_spec = first.model;
-          fallback_specs =
-            List.map (fun (r : Llm_types.completion_request) -> r.model) rest;
           system_prompt = sys_prompt;
           goal;
           temperature = first.temperature;
@@ -216,11 +152,11 @@ let cascade_config_of_requests
         }
 
 (* ================================================================ *)
-(* Public: cascade through OAS Agent.t                              *)
+(* Public: cascade through Llm_cascade (single-shot, no Agent loop) *)
 (* ================================================================ *)
 
-let run_cascade ?timeout_sec requests =
-  match cascade_config_of_requests requests with
+let run_cascade ?(cascade_name = "keeper_turn") ?timeout_sec requests =
+  match extract_prompt_params requests with
   | Error e -> Error e
   | Ok params ->
   let messages : Llm_provider.Types.message list =
@@ -229,15 +165,13 @@ let run_cascade ?timeout_sec requests =
      else [])
     @ [ Llm_provider.Types.user_msg params.goal ]
   in
-  Llm_cascade.call_with_tools ~cascade_name:"keeper_autonomy" ~messages
+  Llm_cascade.call_with_tools ~cascade_name ~messages
     ~temperature:params.temperature ~max_tokens:params.max_tokens
     ?timeout_sec ()
 
-let run_cascade_stream ?timeout_sec ~on_event request ~fallback =
-  (* Batch fallback with synthetic SSE events.
-     All calls route through Llm_cascade. *)
+let run_cascade_stream ?(cascade_name = "keeper_turn") ?timeout_sec ~on_event request ~fallback =
   let timeout_int = Option.map int_of_float timeout_sec in
-  match run_cascade ?timeout_sec:timeout_int (request :: fallback) with
+  match run_cascade ~cascade_name ?timeout_sec:timeout_int (request :: fallback) with
   | Ok resp ->
       let text = Llm_types.text_of_response resp in
       on_event (Llm_provider.Types.MessageStart {

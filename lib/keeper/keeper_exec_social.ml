@@ -250,7 +250,8 @@ let run_social_board_event_turn
           match oas_result with
           | Error e -> Error e
           | Ok { Keeper_oas_adapter.oas_result = run_result;
-                 Keeper_oas_adapter.tools_executed = final_tools_used } ->
+                 Keeper_oas_adapter.tools_executed = final_tools_used;
+                 cost_report = _; } ->
               let final_resp = run_result.Oas_worker.response in
               let final_content =
                 let trimmed = String.trim (Masc_model.text_of_response final_resp) in

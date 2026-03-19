@@ -84,6 +84,9 @@ load_env_file() {
 REPO_ENV_ROOT="$(resolve_repo_env_root)"
 
 # Load secrets from the user profile; tracked plist files must not embed them.
+# NOTE: This intentionally sources ~/.zshenv which may set PATH and other vars.
+# For isolated production deploys, use scripts/deploy.sh which loads only
+# repo-local env files (config/lodge.env, .env) to avoid contamination.
 load_env_file "$HOME/.zshenv"
 
 # Load repo-local env for development overrides and secrets kept out of user shell.

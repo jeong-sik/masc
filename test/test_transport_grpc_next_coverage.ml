@@ -98,8 +98,9 @@ let test_check_dependencies () =
   | _ -> fail "expected Available"
 
 let test_service_status_not_installed () =
-  let _ : Transport_grpc_next.service_status = Transport_grpc_next.NotInstalled in
-  ()
+  let status : Transport_grpc_next.service_status = Transport_grpc_next.NotInstalled in
+  check bool "is not installed" true
+    (match status with Transport_grpc_next.NotInstalled -> true | _ -> false)
 
 let test_service_status_running () =
   let status : Transport_grpc_next.service_status =

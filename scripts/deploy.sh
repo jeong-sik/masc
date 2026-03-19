@@ -110,12 +110,16 @@ if [ "$USE_LAUNCHD" = true ]; then
 else
     echo "==> Starting prod on :$PROD_PORT..." >&2
 
-    if [ -f "$HOME/.zshenv" ]; then
-        set -a; source "$HOME/.zshenv" 2>/dev/null || true; set +a
-    fi
+    # Load secrets needed at runtime (GRAPHQL_API_KEY, SSL_CERT_FILE, etc.)
+    # Only repo-local env files are loaded; ~/.zshenv is intentionally skipped
+    # to avoid environment contamination from user shell configuration.
+    # Required env vars should be set in config/lodge.env or the repo .env files.
     LODGE_ENV="$REPO_DIR/config/lodge.env"
     if [ -f "$LODGE_ENV" ]; then
         set -a; source "$LODGE_ENV" 2>/dev/null || true; set +a
+    fi
+    if [ -f "$REPO_DIR/.env" ]; then
+        set -a; source "$REPO_DIR/.env" 2>/dev/null || true; set +a
     fi
 
     mkdir -p "$LOG_DIR"
@@ -164,6 +168,21 @@ else
         # Restart with previous binary
         if [ "$USE_LAUNCHD" = true ]; then
             launchctl load "$LAUNCHD_PLIST"
+        else
+            echo "    Restarting previous binary on :$PROD_PORT..." >&2
+            if [ -f "$HOME/.zshenv" ]; then
+                set -a; source "$HOME/.zshenv" 2>/dev/null || true; set +a
+            fi
+            MASC_ORCHESTRATOR_ENABLED=0 \
+            MASC_AUTO_RESPOND=true \
+                nohup "$RELEASE_EXE" \
+                    --port="$PROD_PORT" \
+                    --base-path="$BASE_PATH" \
+                >> "$LOG_DIR/masc-prod.out.log" \
+                2>> "$LOG_DIR/masc-prod.err.log" &
+            ROLLBACK_PID=$!
+            echo "$ROLLBACK_PID" > "$PID_FILE"
+            echo "    Rollback started with PID $ROLLBACK_PID" >&2
         fi
     fi
     exit 1

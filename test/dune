@@ -479,10 +479,10 @@
  (name test_code_navigation_eio)
  (modules test_code_navigation_eio)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
-; TODO: These tests need to be created
-; - test_dtls_eio
-; - test_sctp_eio
-; - test_webrtc_stack_eio
+; Missing transport tests (tracked in GitHub Issues):
+; - test_dtls_eio: https://github.com/jeong-sik/masc-mcp/issues/1499
+; - test_sctp_eio: https://github.com/jeong-sik/masc-mcp/issues/1499
+; - test_webrtc_stack_eio: https://github.com/jeong-sik/masc-mcp/issues/1499
 
 ; ============================================================
 ; Eio-native tests (OCaml 5.x concurrency)

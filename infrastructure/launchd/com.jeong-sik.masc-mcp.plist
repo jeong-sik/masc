@@ -2,13 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Dev instance (port 8935). Prod uses com.jeong-sik.masc-mcp-prod (port 8945, see scripts/deploy.sh). -->
     <key>Label</key>
     <string>com.jeong-sik.masc-mcp</string>
 
+    <!-- NOTE: Paths below are machine-specific. Adjust for your setup:
+         - ProgramArguments: path to start-masc-mcp.sh in the repo
+         - StandardOutPath/StandardErrorPath: log directory
+         - ME_ROOT / MASC_BASE_PATH / WorkingDirectory: your ME_ROOT -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/dancer/me/scripts/launchd/masc-mcp-start.sh</string>
+        <string>/Users/dancer/me/workspace/yousleepwhen/masc-mcp/start-masc-mcp.sh</string>
         <string>--http</string>
         <string>--port</string>
         <string>8935</string>

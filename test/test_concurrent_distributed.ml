@@ -98,10 +98,13 @@ let verify () =
   let max_seq = List.hd (List.rev seqs_sorted) in
   let expected = max_seq - min_seq + 1 in
 
+  let has_gaps = ref false in
   if total = expected then
-    Printf.printf "✅ No gaps detected (seq %d to %d)\n%!" min_seq max_seq
-  else
-    Printf.printf "⚠️ Possible gaps: expected %d messages, found %d\n%!" expected total;
+    Printf.printf "No gaps detected (seq %d to %d)\n%!" min_seq max_seq
+  else begin
+    Printf.printf "SEQUENCE GAPS DETECTED: expected %d messages, found %d (seq %d to %d)\n%!" expected total min_seq max_seq;
+    has_gaps := true
+  end;
 
   (* Verify each worker's messages are in order *)
   Printf.printf "\n--- Per-worker message ordering ---\n%!";
@@ -124,19 +127,22 @@ let verify () =
       | a :: b :: rest -> a < b && is_ascending (b :: rest)
     in
     if is_ascending sorted then
-      Printf.printf "  Worker %s: %d messages, ordered ✓\n%!" wid (List.length sorted)
+      Printf.printf "  Worker %s: %d messages, ordered\n%!" wid (List.length sorted)
     else begin
-      Printf.printf "  Worker %s: %d messages, NOT ordered ✗\n%!" wid (List.length sorted);
+      Printf.printf "  Worker %s: %d messages, NOT ordered\n%!" wid (List.length sorted);
       all_ordered := false
     end
   ) worker_msgs;
 
-  if total > 0 && !all_ordered then begin
-    Printf.printf "\n✅ CONCURRENT DISTRIBUTED TEST PASSED\n%!";
-    Printf.printf "   No collisions, all messages accounted for\n%!";
+  if total > 0 && !all_ordered && not !has_gaps then begin
+    Printf.printf "\nCONCURRENT DISTRIBUTED TEST PASSED\n%!";
+    Printf.printf "   No collisions, no gaps, all messages accounted for\n%!";
     exit 0
   end else begin
-    Printf.printf "\n❌ TEST FAILED\n%!";
+    Printf.printf "\nTEST FAILED";
+    if !has_gaps then Printf.printf " (sequence gaps detected)";
+    if not !all_ordered then Printf.printf " (ordering violations)";
+    Printf.printf "\n%!";
     exit 1
   end
 

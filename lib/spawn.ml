@@ -32,7 +32,7 @@ let masc_lifecycle_suffix = {|
 ---
 [MASC LIFECYCLE PROTOCOL - Auto-injected]
 
-You are running as a MASC-managed agent. Follow these rules strictly:
+You are running as a MASC-managed agent. Follow these lifecycle rules:
 
 1. **Session Start**: Call `mcp__masc__masc_join` with your agent name
 2. **Heartbeat**: Call `mcp__masc__masc_heartbeat` every 2 minutes during long tasks
@@ -54,7 +54,7 @@ mcp__masc__masc_transition(agent_name="gemini", task_id="task-XXX", action="done
 mcp__masc__masc_leave(agent_name="gemini")
 ```
 
-IMPORTANT: If context_ratio exceeds 0.8, you MUST handoff. Do not ignore this.
+IMPORTANT: If context_ratio exceeds 0.8, handoff to a successor agent. Do not ignore this.
 ---
 |}
 

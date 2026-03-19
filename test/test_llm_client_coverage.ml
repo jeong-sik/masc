@@ -1,30 +1,6 @@
 open Alcotest
 
 module Llm = Masc_mcp.Llm_types
-module Llm_orch = Masc_mcp.Llm_orchestration
-
-let sample_request provider =
-  {
-    Llm.model =
-      {
-        provider;
-        model_id = "demo-model";
-        max_context = 8192;
-        api_url = "http://localhost";
-        api_key_env = None;
-        cost_per_1k_input = 0.0;
-        cost_per_1k_output = 0.0;
-      };
-    messages =
-      [
-        Llm.system_msg "system";
-        Llm.user_msg "hello";
-      ];
-    temperature = 0.2;
-    max_tokens = 256;
-    tools = [];
-    response_format = `Text;
-  }
 
 let test_string_of_provider () =
   check string "llama" "llama" (Llm.string_of_provider Llm.Llama);
@@ -69,12 +45,6 @@ let test_available_model_specs_of_strings_llama () =
       check string "model id" "qwen3.5-32b" spec.model_id
   | _ -> fail "expected one available llama model"
 
-let test_cache_key_of_request_deterministic () =
-  let request = sample_request Llm.Llama in
-  let key_a = Llm_orch.cache_key_of_request request in
-  let key_b = Llm_orch.cache_key_of_request request in
-  check string "same request -> same key" key_a key_b
-
 let () =
   Alcotest.run "llm_client coverage"
     [
@@ -91,10 +61,5 @@ let () =
           test_case "sanitize utf8" `Quick test_sanitize_text_utf8;
           test_case "available llama model spec" `Quick
             test_available_model_specs_of_strings_llama;
-        ] );
-      ( "cache",
-        [
-          test_case "cache key deterministic" `Quick
-            test_cache_key_of_request_deterministic;
         ] );
     ]

@@ -1,6 +1,5 @@
 (** Keeper_oas_adapter — OAS Agent.run wrappers for keeper LLM calls.
 
-    Replaces direct [Llm_orchestration.cascade] usage in keeper modules.
     Uses [Oas_worker] for agent build/run and [keeper_exec_tools] for
     tool dispatch.
 
@@ -75,9 +74,8 @@ val run_cascade :
   Llm_types.completion_request list ->
   (Llm_provider.Types.api_response, string) result
 
-(** Streaming cascade — uses [Llm_orchestration.call_provider_stream]
-    for streaming (OAS Agent SDK lacks streaming API). Falls back to
-    OAS batch [run_cascade] on streaming failure. *)
+(** Streaming cascade — batch call with synthetic SSE events.
+    Falls back to OAS batch [run_cascade] on streaming failure. *)
 val run_cascade_stream :
   ?timeout_sec:float ->
   on_event:(Llm_provider.Types.sse_event -> unit) ->

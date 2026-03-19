@@ -24,8 +24,7 @@ val call_glm_cloud_with_pool :
   Llm_types.completion_request ->
   (Llm_provider.Types.api_response, string) result
 
-(** Build a provider config, messages, and tools from a completion request.
-    Used by {!Llm_orchestration.call_provider_stream}. *)
+(** Build a provider config, messages, and tools from a completion request. *)
 val provider_config_of_request :
   Llm_types.completion_request ->
   (Llm_provider.Provider_config.t

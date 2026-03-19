@@ -138,6 +138,7 @@ let parse_spawn_spec_from_object ?(default_timeout = 300)
                 default_execution_scope_for_worker_class
                   (get_optional_worker_class "worker_class"));
           thinking_enabled = policy_bool "thinking";
+          thinking_budget = policy_int "thinking_budget";
           max_turns = policy_int "max_turns";
           worker_class = get_optional_worker_class "worker_class";
           worker_size = get_optional_worker_size "worker_size";
@@ -246,6 +247,7 @@ let parse_step_spawn_specs args =
                     | Some _ as explicit -> explicit
                     | None -> Some Team_session_types.Limited_code_change);
                   thinking_enabled = policy_bool "thinking";
+                  thinking_budget = policy_int "thinking_budget";
                   max_turns = policy_int "max_turns";
                   worker_class =
                     Option.bind
@@ -307,6 +309,7 @@ let planned_worker_of_spec ?runtime_actor (spec : spawn_spec) :
     spawn_model = spec.spawn_model;
     execution_scope = effective_execution_scope_of_spec spec;
     thinking_enabled = spec.thinking_enabled;
+    thinking_budget = spec.thinking_budget;
     max_turns = spec.max_turns;
     timeout_seconds = Some spec.spawn_timeout_seconds;
     worker_class = spec.worker_class;

@@ -69,6 +69,7 @@ let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ])
           routing_confidence = Some 0.9;
           routing_reason = Some "worker-a implements proof surface";
           thinking_enabled = None;
+          thinking_budget = None;
           max_turns = None;
           timeout_seconds = None;
           routing_escalated = false;

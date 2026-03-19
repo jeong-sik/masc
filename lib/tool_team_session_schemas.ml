@@ -355,7 +355,8 @@ After masc_team_session_start; the primary write path for all session activity."
                         ( "properties",
                           `Assoc
                             [
-                              ("thinking", `Assoc [ ("type", `String "boolean") ]);
+                              ("thinking", `Assoc [ ("type", `String "boolean"); ("description", `String "Enable extended thinking mode") ]);
+                              ("thinking_budget", `Assoc [ ("type", `String "integer"); ("description", `String "Max thinking tokens (Anthropic only)") ]);
                               ("timeout_seconds", `Assoc [ ("type", `String "integer") ]);
                               ("max_turns", `Assoc [ ("type", `String "integer") ]);
                             ] );

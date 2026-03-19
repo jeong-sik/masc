@@ -1,13 +1,11 @@
 (** Oas_worker — Unified entry point for OAS-based MASC tool modules.
 
-    Callers pass a [cascade_name] string; model resolution is delegated
-    to [Llm_cascade.get_cascade].  Internal [config] / [build] / [run]
-    are implementation details and not exported.
-
     @since Phase 1 — MASC→OAS migration
-    @since Phase 4 — public API restricted to named cascade functions *)
+    @since Phase 4 — named cascade functions preferred *)
 
 module Oas = Agent_sdk
+
+(** {1 Result type} *)
 
 type run_result = {
   response : Oas.Types.api_response;
@@ -15,6 +13,8 @@ type run_result = {
   session_id : string;
   turns : int;
 }
+
+(** {1 Named cascade API (preferred)} *)
 
 val run_named :
   cascade_name:string ->
@@ -39,4 +39,47 @@ val run_named_with_masc_tools :
   ?max_tokens:int ->
   ?guardrails:Oas.Guardrails.t ->
   unit ->
+  (run_result, string) result
+
+(** {1 Legacy model-spec API (used by keeper_oas_adapter)} *)
+
+type config = {
+  name : string;
+  model_spec : Llm_types.model_spec;
+  system_prompt : string;
+  tools : Oas.Tool.t list;
+  max_turns : int;
+  max_tokens : int;
+  temperature : float;
+  hooks : Oas.Hooks.hooks option;
+  guardrails : Oas.Guardrails.t option;
+  event_bus : Oas.Event_bus.t option;
+  checkpoint_dir : string option;
+  session_id : string option;
+  description : string option;
+}
+
+val default_config :
+  name:string ->
+  model_spec:Llm_types.model_spec ->
+  system_prompt:string ->
+  tools:Oas.Tool.t list ->
+  config
+
+val run :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  config:config ->
+
+  string ->
+  (run_result, string) result
+
+val run_with_masc_tools :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  config:config ->
+  masc_tools:Llm_types.tool_def list ->
+  dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
+
+  string ->
   (run_result, string) result

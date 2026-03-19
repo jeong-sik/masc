@@ -75,6 +75,34 @@ let run_with_tools
   | Error e -> Error e
 
 (* ================================================================ *)
+(* Internal: model spec resolution (restored from #1730 deletion)    *)
+(* ================================================================ *)
+
+let resolve_primary_model_spec (meta : keeper_meta) :
+    (Llm_types.model_spec, string) result =
+  let labels =
+    match Keeper_exec_status.active_model_of_meta meta with
+    | "" ->
+      let pool = Json_util.dedupe_keep_order (meta.allowed_models @ meta.models) in
+      if pool = [] then meta.models else pool
+    | model -> [model]
+  in
+  match Keeper_types.model_specs_of_strings labels with
+  | Error e -> Error e
+  | Ok [] -> Error "no model specs resolved"
+  | Ok (primary :: _) -> Ok primary
+
+let require_net () =
+  match Eio_context.get_net_opt () with
+  | Some net -> Ok net
+  | None -> Error "Eio net not available (keeper running outside server context)"
+
+let require_switch () =
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Ok sw
+  | None -> Error "Eio switch not available (keeper running outside server context)"
+
+(* ================================================================ *)
 (* Public: run_with_custom_dispatch                                  *)
 (* ================================================================ *)
 

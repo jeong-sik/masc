@@ -380,6 +380,7 @@ let test_delegate_rejects_not_ready_worker_with_guidance () =
                  spawn_model = Some "qwen3.5-35b-a3b-ud-q8-xl";
                  execution_scope = Some Team_session_types.Limited_code_change;
                  thinking_enabled = None;
+                 thinking_budget = None;
                  max_turns = None;
                  timeout_seconds = Some 300;
                  worker_class = Some Team_session_types.Worker_executor;

@@ -276,45 +276,6 @@ let post_eval
 (* JSON serialization                                                *)
 (* ================================================================ *)
 
-(* ================================================================ *)
-(* OAS Cost_tracker bridge                                          *)
-(* ================================================================ *)
-
-(** Build an OAS usage_stats from MASC accumulated cost and gate post-eval.
-    Bridges the MASC float-based tracking to structured OAS types. *)
-let usage_stats_of_accumulated
-    ~(accumulated_cost : float)
-    ~(api_calls : int)
-    ~(input_tokens : int)
-    ~(output_tokens : int)
-    : Agent_sdk.Types.usage_stats =
-  { total_input_tokens = input_tokens;
-    total_output_tokens = output_tokens;
-    total_cache_creation_input_tokens = 0;
-    total_cache_read_input_tokens = 0;
-    api_calls;
-    estimated_cost_usd = accumulated_cost;
-  }
-
-(** Generate a structured cost report from accumulated session data.
-    Delegates to [Agent_sdk.Cost_tracker.report]. *)
-let cost_report
-    ~(accumulated_cost : float)
-    ~(api_calls : int)
-    ~(input_tokens : int)
-    ~(output_tokens : int)
-    : Agent_sdk.Cost_tracker.cost_report =
-  let usage = usage_stats_of_accumulated
-    ~accumulated_cost ~api_calls ~input_tokens ~output_tokens in
-  Agent_sdk.Cost_tracker.report usage
-
-(** Format cost report as a human-readable string. *)
-let cost_report_to_string = Agent_sdk.Cost_tracker.report_to_string
-
-(* ================================================================ *)
-(* JSON serialization                                                *)
-(* ================================================================ *)
-
 let gate_config_to_json (c : gate_config) : Yojson.Safe.t =
   `Assoc [
     ("max_cost_usd", `Float c.max_cost_usd);

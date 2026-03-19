@@ -1,6 +1,10 @@
-(** Llm_orchestration — Concurrency control, response caching, and cascade logic for LLM calls. *)
+(** Llm_orchestration — Concurrency diagnostics, response caching, and health filtering.
 
-open Printf
+    Inference functions (complete, cascade, run_prompt_cascade, call_provider_stream)
+    have been removed. All LLM calls now route through {!Oas_worker} or {!Llm_cascade}.
+
+    Retained: concurrency counters, cache helpers, health filtering. *)
+
 open Llm_types
 
 (* ================================================================ *)
@@ -9,9 +13,7 @@ open Llm_types
 
 (** Maximum concurrent LLM calls — retained for diagnostics/dashboard.
     No longer enforced via semaphore: llama-server handles slot-based
-    parallelism internally, and cloud APIs return rate-limit errors.
-    The old Eio.Semaphore (max=2) caused permit-contention stalls
-    between sentinel, heartbeat, and lodge subsystems. *)
+    parallelism internally, and cloud APIs return rate-limit errors. *)
 let max_concurrent_llm =
   int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:8 ~min_v:1 ~max_v:128
 
@@ -20,17 +22,6 @@ let inflight = Atomic.make 0
 
 let llm_semaphore_available () = max_concurrent_llm - Atomic.get inflight
 let llm_permits_in_use () = Atomic.get inflight
-
-(** Track in-flight calls for diagnostics. No blocking. *)
-let with_inflight_tracking f =
-  Atomic.incr inflight;
-  match f () with
-  | result ->
-      Atomic.decr inflight;
-      result
-  | exception exn ->
-      Atomic.decr inflight;
-      raise exn
 
 (* ================================================================ *)
 (* Response cache helpers                                            *)
@@ -96,73 +87,6 @@ let record_cache_bypass reason =
     ~labels:[ ("reason", reason) ] ()
 
 (* ================================================================ *)
-(* Core: complete                                                   *)
-(* ================================================================ *)
-
-(** @deprecated Use {!Llm_cascade.call} or {!Llm_cascade.call_raw} instead.
-    Single completion with MASC-level cache check/write.
-    Bypasses OAS Cascade_config health filtering and metrics. *)
-let complete ?timeout_sec (req : completion_request)
-    : (Llm_provider.Types.api_response, string) result =
-  let req = normalize_request req in
-  let cache_key =
-    match cache_bypass_reason req with
-    | Some reason ->
-        record_cache_bypass reason;
-        None
-    | None -> Some (completion_cache_key req)
-  in
-  let cached_result =
-    match cache_key with
-    | None -> None
-    | Some key -> (
-        match Llm_response_cache.get_json ~key with
-        | Ok (Some cached_json) -> (
-            match Llm_provider.Cache.response_of_json cached_json with
-            | Some api_resp ->
-                Prometheus.inc_counter "masc_llm_cache_hits_total" ();
-                Some (Ok api_resp)
-            | None ->
-                Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-                let _ = Llm_response_cache.delete ~key in
-                Log.LlmClient.warn "cache decode error: incompatible format";
-                None)
-        | Ok None ->
-            Prometheus.inc_counter "masc_llm_cache_misses_total" ();
-            None
-        | Error e ->
-            Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-            Log.LlmClient.warn "cache read error: %s" e;
-            None)
-  in
-  let metrics_opt = Some (Llm_oas_adapters.metrics_adapter ()) in
-  match cached_result with
-  | Some cached -> cached
-  | None ->
-      let upstream_result =
-        match req.model.provider with
-        | Glm_cloud ->
-            Llm_provider_dispatch.call_glm_cloud_with_pool
-              ?timeout_sec ?metrics:metrics_opt req
-        | _ ->
-            Llm_provider_dispatch.call_provider
-              ?timeout_sec ?metrics:metrics_opt req
-      in
-      (match (cache_key, upstream_result) with
-      | Some key, Ok resp -> (
-          match
-            Llm_response_cache.set_json ~key
-              ~ttl_seconds:Env_config.Llm.cache_ttl_seconds
-              (Llm_provider.Cache.response_to_json resp)
-          with
-          | Ok () -> Prometheus.inc_counter "masc_llm_cache_writes_total" ()
-          | Error e ->
-              Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-              Log.LlmClient.warn "cache write error: %s" e);
-          Ok resp
-      | _ -> upstream_result)
-
-(* ================================================================ *)
 (* Provider-aware capacity check                                    *)
 (* ================================================================ *)
 
@@ -193,160 +117,3 @@ let filter_by_provider_health (requests : completion_request list)
         r.model.provider <> Llama) requests
     end else
       requests
-
-(* ================================================================ *)
-(* Cascade: try models in order                                     *)
-(* ================================================================ *)
-
-(** @deprecated Use {!Llm_cascade.call_with_tools} instead. *)
-let cascade ?(accept = fun _ -> true) ?timeout_sec
-    (requests : completion_request list)
-    : (Llm_provider.Types.api_response, string) result =
-  let requests = filter_by_provider_health requests in
-  with_inflight_tracking (fun () ->
-    Log.LlmClient.debug "cascade: inflight=%d" (Atomic.get inflight);
-    let deadline_opt =
-      Option.map (fun sec -> Time_compat.now () +. float_of_int sec) timeout_sec
-    in
-    let remaining_timeout_sec () =
-      match deadline_opt with
-      | None -> None
-      | Some deadline ->
-          let remaining = int_of_float (Float.ceil (deadline -. Time_compat.now ())) in
-          Some (max 0 remaining)
-    in
-    let rec try_next errors = function
-      | [] ->
-        let all_errors = String.concat "; " (List.rev errors) in
-        Error (sprintf "All models failed: %s" all_errors)
-      | _ when Option.value ~default:1 (remaining_timeout_sec ()) <= 0 ->
-        let all_errors =
-          String.concat "; " (List.rev ("cascade deadline exceeded" :: errors))
-        in
-        Error (sprintf "All models failed: %s" all_errors)
-      | req :: rest ->
-        Log.LlmClient.debug "cascade: trying %s (%s)"
-          req.model.model_id (string_of_provider req.model.provider);
-        let attempt_result =
-          match remaining_timeout_sec () with
-          | None -> complete req
-          | Some sec when sec > 0 ->
-              complete ~timeout_sec:sec req
-          | Some _ -> Error "cascade deadline exceeded"
-        in
-        match attempt_result with
-        | Ok resp ->
-          if accept resp then (
-            Log.LlmClient.info "cascade: success with %s"
-              resp.Llm_provider.Types.model;
-            Ok resp)
-          else (
-            Log.LlmClient.warn
-              "cascade: %s rejected by validator, continuing"
-              resp.Llm_provider.Types.model;
-            try_next ("response rejected by validator" :: errors) rest)
-        | Error e ->
-          Log.LlmClient.warn "cascade: %s failed: %s"
-            req.model.model_id e;
-          try_next (e :: errors) rest
-    in
-    try_next [] requests)
-
-(* ================================================================ *)
-(* run_prompt_cascade                                                *)
-(* ================================================================ *)
-
-(** @deprecated Use {!Llm_cascade.call} instead. *)
-let run_prompt_cascade ?(temperature = 0.7) ?timeout_sec
-    ?(accept = fun _ -> true) ?system ~model_specs ~max_tokens ~prompt () =
-  let msgs =
-    match system with
-    | Some s -> [ system_msg s; user_msg prompt ]
-    | None -> [ user_msg prompt ]
-  in
-  let requests =
-    List.map
-      (fun (model : model_spec) ->
-        ({
-           model;
-           messages = msgs;
-           temperature;
-           max_tokens;
-           tools = [];
-           response_format = `Text;
-         }
-          : completion_request))
-      model_specs
-  in
-  cascade ?timeout_sec ~accept requests
-
-(* ================================================================ *)
-(* Streaming completion                                             *)
-(* ================================================================ *)
-
-(** @deprecated Streaming now handled at the keeper_oas_adapter level
-    with batch fallback via {!Llm_cascade}. *)
-let call_provider_stream ?timeout_sec (req : completion_request)
-    ~(on_event : Llm_provider.Types.sse_event -> unit)
-    : (Llm_provider.Types.api_response, string) result =
-  let req = normalize_request req in
-  (* Try real streaming first *)
-  let stream_result =
-    match Llm_provider_dispatch.provider_config_of_request req with
-    | Error _ -> None  (* fall through to batch *)
-    | Ok (config, messages, tools) ->
-        let env = Llm_eio_env.get () in
-        Log.LlmClient.debug
-          "provider stream req: model=%s provider=%s max_tokens=%d tools=%d"
-          req.model.model_id
-          (string_of_provider req.model.provider)
-          req.max_tokens (List.length req.tools);
-        let result =
-          try
-            Llm_provider.Complete.complete_stream
-              ~sw:env.sw ~net:env.net ~config
-              ~messages
-              ?tools:(if tools = [] then None else Some tools)
-              ~on_event ()
-          with exn ->
-            Error (Llm_provider.Http_client.NetworkError
-                     { message = Printexc.to_string exn })
-        in
-        (match result with
-         | Ok resp ->
-             let text = Agent_sdk.Types.text_of_content resp.content in
-             if String.trim text = "" && not (has_tool_calls resp) then
-               None  (* empty response, try batch *)
-             else
-               Some (Ok resp)
-         | Error http_err ->
-             Log.LlmClient.warn "stream: provider error: %s"
-               (Llm_provider_dispatch.string_of_http_error http_err);
-             None  (* fall through to batch *))
-  in
-  match stream_result with
-  | Some result -> result
-  | None ->
-      (* Fallback: batch call, then synthesise SSE events *)
-      Log.LlmClient.info
-        "stream: falling back to batch for %s" req.model.model_id;
-      let timeout_sec_int =
-        Option.map (fun f -> max 1 (int_of_float (Float.ceil f))) timeout_sec
-      in
-      let batch_result = complete ?timeout_sec:timeout_sec_int req in
-      (match batch_result with
-       | Ok resp ->
-           let text = text_of_response resp in
-           on_event (MessageStart {
-             id = "batch-" ^ req.model.model_id;
-             model = resp.Llm_provider.Types.model;
-             usage = None;
-           });
-           if text <> "" then
-             on_event (ContentBlockDelta {
-               index = 0;
-               delta = TextDelta text;
-             });
-           on_event MessageStop;
-           Ok resp
-       | Error _ as e -> e)

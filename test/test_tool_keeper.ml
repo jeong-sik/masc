@@ -1213,9 +1213,10 @@ let test_keeper_up_defaults_sangsu_to_explicit_voice_policy () =
       in
       check bool "resident spec exists" true (Sys.file_exists resident_path);
       let resident_json = Yojson.Safe.from_file resident_path in
-      check bool "resident voice enabled" true
+      check bool "resident voice enabled" voice_enabled
         Yojson.Safe.Util.(resident_json |> member "voice_enabled" |> to_bool);
-      check string "resident voice channel" "voice_text"
+      let expected_channel = if voice_enabled then "voice_text" else "text_only" in
+      check string "resident voice channel" expected_channel
         Yojson.Safe.Util.(resident_json |> member "voice_channel" |> to_string))
 
 let test_keeper_policy_set_accepts_explicit_event_v1 () =

@@ -240,6 +240,7 @@ let run_social_board_event_turn
           let (oas_result, total_latency_ms) = Llm_types.timed (fun () ->
               Keeper_oas_adapter.run_with_tools
                 ~config:ctx.config ~meta
+                ~cascade_name:"keeper_social"
                 ~system_prompt ~goal
                 ~max_turns:max_tool_rounds
                 ~temperature:(Keeper_config.keeper_planning_temp ())

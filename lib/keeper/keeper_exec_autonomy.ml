@@ -102,7 +102,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
   let max_rounds = 3 in
   let guardrails = Verifier_oas.eval_gate_to_oas_guardrails gate_config in
   match Keeper_oas_adapter.run_with_tools
-    ~config ~meta ~system_prompt
+    ~config ~meta ~cascade_name:"keeper_autonomy" ~system_prompt
     ~goal:"Execute the first step of the plan now."
     ~max_turns:max_rounds
     ~temperature:0.3

@@ -179,14 +179,9 @@ let handle_mitosis_divide ctx args : result =
   in
   let dna = Mitosis.extract_dna ~config ~parent_cell:cell ~full_context in
   let next_gen = cell.Mitosis.generation + 1 in
-  let model_spec = Llm_types.default_local_model_spec () in
-  let oas_config = Oas_worker.default_config
-    ~name:(Printf.sprintf "mitosis-child-gen%d" next_gen)
-    ~model_spec
-    ~system_prompt:(Printf.sprintf
-      "You are a continuation agent (generation %d). Previous context DNA:\n\n%s"
-      next_gen dna)
-    ~tools:[]
+  let system_prompt = Printf.sprintf
+    "You are a continuation agent (generation %d). Previous context DNA:\n\n%s"
+    next_gen dna
   in
   let goal =
     if current_task <> "" then
@@ -195,16 +190,10 @@ let handle_mitosis_divide ctx args : result =
     else
       Printf.sprintf "Continue from generation %d. Context: %s" next_gen summary
   in
-  match Eio_context.get_net_opt (), Eio_context.get_switch_opt () with
-  | None, _ -> json_err "Eio net not available for OAS agent"
-  | _, None -> json_err "Eio switch not available for OAS agent"
-  | Some net, Some sw ->
   let run_result =
-    Oas_worker.run_with_masc_tools
-      ~sw ~net ~config:oas_config
-      ~masc_tools:ctx.masc_tools
-      ~dispatch:ctx.dispatch
-      goal
+    Oas_worker.run_named_with_masc_tools
+      ~cascade_name:"mitosis" ~goal ~system_prompt
+      ~masc_tools:ctx.masc_tools ~dispatch:ctx.dispatch ()
   in
   (* Update MASC L3 state regardless of run outcome *)
   let new_cell = Mitosis.create_stem_cell ~generation:next_gen in
@@ -260,28 +249,18 @@ let handle_mitosis_handoff ctx args : result =
     (* Phase 2: Run successor agent *)
     let target = get_string args "target_agent" "claude" in
     let next_gen = prepared_cell.Mitosis.generation + 1 in
-    let model_spec = Llm_types.default_local_model_spec () in
-    let successor_config = Oas_worker.default_config
-      ~name:(Printf.sprintf "mitosis-gen%d" next_gen)
-      ~model_spec
-      ~system_prompt:(Printf.sprintf
-        "You are generation %d. Continue from this DNA:\n\n%s"
-        next_gen dna)
-      ~tools:[]
+    let system_prompt = Printf.sprintf
+      "You are generation %d. Continue from this DNA:\n\n%s"
+      next_gen dna
     in
     let goal = Printf.sprintf
       "You are the successor agent (generation %d). Resume work from the handoff DNA above. Context ratio was %.1f%%."
       next_gen (context_ratio *. 100.0)
     in
-    let run_result = match Eio_context.get_net_opt (), Eio_context.get_switch_opt () with
-      | None, _ -> Error "Eio net not available"
-      | _, None -> Error "Eio switch not available"
-      | Some net, Some sw ->
-        Oas_worker.run_with_masc_tools
-          ~sw ~net ~config:successor_config
-          ~masc_tools:ctx.masc_tools
-          ~dispatch:ctx.dispatch
-          goal
+    let run_result =
+      Oas_worker.run_named_with_masc_tools
+        ~cascade_name:"mitosis" ~goal ~system_prompt
+        ~masc_tools:ctx.masc_tools ~dispatch:ctx.dispatch ()
     in
     (* Update state regardless of run outcome *)
     let new_cell = Mitosis.create_stem_cell ~generation:next_gen in

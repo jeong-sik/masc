@@ -265,7 +265,7 @@ let get_chain_id_for_preset = function
   | _ -> None
 
 let walph_response_is_valid (resp : Masc_model.api_response) =
-  let content = String.trim (Masc_model.text_of_response resp) in
+  let content = String.trim (Agent_sdk.Types.text_of_content resp.content) in
   let lower = String.lowercase_ascii content in
   let len = String.length content in
   len > 0

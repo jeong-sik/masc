@@ -303,7 +303,7 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
           ?tools:tools_json ~temperature:0.2 ~max_tokens:4096
           ~timeout_sec ()
       with
-      | Ok resp when trim (Masc_model.text_of_response resp) <> "" -> Ok (Masc_model.text_of_response resp)
+      | Ok resp when trim (Agent_sdk.Types.text_of_content resp.content) <> "" -> Ok (Agent_sdk.Types.text_of_content resp.content)
       | Ok resp when Masc_model.has_tool_calls resp ->
           Ok (Yojson.Safe.to_string (llm_tool_calls_json (Masc_model.tool_calls_of_response resp)))
       | Ok _ -> Error "empty completion"

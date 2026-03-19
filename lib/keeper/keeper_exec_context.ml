@@ -8,6 +8,13 @@ open Keeper_alerting
 open Keeper_exec_tools
 open Keeper_exec_status
 
+let zero_usage : Agent_sdk.Types.api_usage =
+  { Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
+    cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
+
+let usage_of_response (resp : Llm_provider.Types.api_response) : Agent_sdk.Types.api_usage =
+  match resp.usage with Some u -> u | None -> zero_usage
+
 let log_keeper_exn ~label exn =
   let tag = match exn with
     | Sys_error _ | Failure _ | Not_found
@@ -647,16 +654,16 @@ let run_proactive_generation
             model_spec_for_used specs resp0.Llm_provider.Types.model
             |> Option.value ~default:primary
           in
-          let cost0 = cost_usd_of_usage (Masc_model.usage_of_response resp0) used_model0 in
+          let cost0 = cost_usd_of_usage (usage_of_response resp0) used_model0 in
           let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
               ~acc_tools_used ~last_resp =
             if not (Masc_model.has_tool_calls last_resp) || round > max_tool_rounds then
               let content =
-                let c = String.trim (Masc_model.text_of_response last_resp) in
+                let c = String.trim (Agent_sdk.Types.text_of_content last_resp.content) in
                 if c = "" && acc_tools_used <> [] then
                   Printf.sprintf "(tools executed: %s)"
                     (String.concat ", " acc_tools_used)
-                else Masc_model.text_of_response last_resp
+                else Agent_sdk.Types.text_of_content last_resp.content
               in
               ( content,
                 acc_usage,
@@ -678,7 +685,7 @@ let run_proactive_generation
               let followup_prompt =
                 keeper_tool_followup_prompt
                   ~user_message:prompt
-                  ~draft_reply:(Masc_model.text_of_response last_resp)
+                  ~draft_reply:(Agent_sdk.Types.text_of_content last_resp.content)
                   ~tool_outputs
                   ~already_executed:all_tools_so_far
               in
@@ -714,7 +721,7 @@ let run_proactive_generation
                   run_cascade followup_requests) in
               match followup_result with
               | Error _ ->
-                  ( Masc_model.text_of_response last_resp,
+                  ( Agent_sdk.Types.text_of_content last_resp.content,
                     acc_usage,
                     last_resp.Llm_provider.Types.model,
                     acc_latency,
@@ -725,7 +732,7 @@ let run_proactive_generation
                     model_spec_for_used specs resp_next.Llm_provider.Types.model
                     |> Option.value ~default:primary
                   in
-                  let resp_next_usage = Masc_model.usage_of_response resp_next in
+                  let resp_next_usage = usage_of_response resp_next in
                   let cost_next = cost_usd_of_usage resp_next_usage used_model_next in
                   tool_loop
                     ~round:(round + 1)
@@ -739,7 +746,7 @@ let run_proactive_generation
                attempt_cost_usd, attempt_tools_used) =
             tool_loop
               ~round:1
-              ~acc_usage:(Masc_model.usage_of_response resp0)
+              ~acc_usage:(usage_of_response resp0)
               ~acc_latency:latency0
               ~acc_cost:cost0
               ~acc_tools_used:[]

@@ -18,6 +18,13 @@ open Keeper_turn_session
 open Keeper_turn_response
 open Keeper_turn_setup
 
+let zero_usage : Agent_sdk.Types.api_usage =
+  { Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
+    cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
+
+let usage_of_response (resp : Llm_provider.Types.api_response) : Agent_sdk.Types.api_usage =
+  match resp.usage with Some u -> u | None -> zero_usage
+
 type tool_result = Keeper_types.tool_result
 
 let handle_keeper_up = Keeper_turn_up.handle_keeper_up
@@ -313,7 +320,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 model_spec_for_used specs resp0.Llm_provider.Types.model
                 |> Option.value ~default:primary
               in
-              let cost0 = cost_usd_of_usage (Masc_model.usage_of_response resp0) used_model0 in
+              let cost0 = cost_usd_of_usage (usage_of_response resp0) used_model0 in
               (* Multi-round tool calling: gated dispatch + OAS lifecycle *)
               let max_tool_rounds = 3 in
               let _trunc s n = if String.length s > n then String.sub s 0 n ^ "..." else s in
@@ -411,8 +418,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                    base_cost_usd, tools_used) =
                 if not (Masc_model.has_tool_calls resp0) then
                   (* No tool calls — return initial response directly *)
-                  (Masc_model.text_of_response resp0,
-                   Masc_model.usage_of_response resp0,
+                  (Agent_sdk.Types.text_of_content resp0.content,
+                   usage_of_response resp0,
                    resp0.Llm_provider.Types.model,
                    latency0, cost0, [])
                 else begin
@@ -442,21 +449,21 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     (* Write done or single round — return first-round result *)
                     let content =
                       let c =
-                        String.trim (Masc_model.text_of_response resp0)
+                        String.trim (Agent_sdk.Types.text_of_content resp0.content)
                       in
                       if c = "" then
                         Printf.sprintf "(tools executed: %s)"
                           (String.concat ", " first_tools)
                       else c
                     in
-                    (content, Masc_model.usage_of_response resp0,
+                    (content, usage_of_response resp0,
                      resp0.Llm_provider.Types.model,
                      latency0, cost0, first_tools)
                   end else begin
                     (* Remaining rounds: delegate to OAS lifecycle *)
                     let followup = keeper_tool_followup_prompt
                       ~user_message:message
-                      ~draft_reply:(Masc_model.text_of_response resp0)
+                      ~draft_reply:(Agent_sdk.Types.text_of_content resp0.content)
                       ~tool_outputs:first_outputs
                       ~already_executed:first_tools
                     in
@@ -488,14 +495,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         _e;
                       let content =
                         let c =
-                          String.trim (Masc_model.text_of_response resp0)
+                          String.trim (Agent_sdk.Types.text_of_content resp0.content)
                         in
                         if c = "" then
                           Printf.sprintf "(tools executed: %s)"
                             (String.concat ", " first_tools)
                         else c
                       in
-                      (content, Masc_model.usage_of_response resp0,
+                      (content, usage_of_response resp0,
                        resp0.Llm_provider.Types.model,
                        latency0, cost0, all_tools)
                     | Ok run_result ->
@@ -504,15 +511,15 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       in
                       let oas_content =
                         let c =
-                          String.trim (Masc_model.text_of_response oas_resp)
+                          String.trim (Agent_sdk.Types.text_of_content oas_resp.content)
                         in
                         if c = "" then
                           Printf.sprintf "(tools executed: %s)"
                             (String.concat ", " all_tools)
-                        else Masc_model.text_of_response oas_resp
+                        else Agent_sdk.Types.text_of_content oas_resp.content
                       in
                       let oas_usage =
-                        Masc_model.usage_of_response oas_resp
+                        usage_of_response oas_resp
                       in
                       let oas_model =
                         oas_resp.Llm_provider.Types.model
@@ -526,7 +533,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       in
                       (oas_content,
                        merge_usage
-                         (Masc_model.usage_of_response resp0) oas_usage,
+                         (usage_of_response resp0) oas_usage,
                        oas_model,
                        latency0 + oas_latency,
                        cost0 +. oas_cost,
@@ -589,17 +596,17 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       model_spec_for_used specs corr.Llm_provider.Types.model
                       |> Option.value ~default:primary
                     in
-                    let corr_usage = Masc_model.usage_of_response corr in
+                    let corr_usage = usage_of_response corr in
                     let cost1 = cost_usd_of_usage corr_usage used_model1 in
                     let eval1 =
                       evaluate_memory_recall
                         ~user_message:message
-                        ~assistant_reply:(Masc_model.text_of_response corr)
+                        ~assistant_reply:(Agent_sdk.Types.text_of_content corr.content)
                         ~candidates:recall_candidates
                     in
                     let evalf = { eval1 with initial_score = eval0.final_score } in
                     let merged_usage = merge_usage base_usage corr_usage in
-                    ( Masc_model.text_of_response corr, merged_usage, corr.Llm_provider.Types.model,
+                    ( Agent_sdk.Types.text_of_content corr.content, merged_usage, corr.Llm_provider.Types.model,
                       base_latency_ms + corr_latency,
                       evalf, true, evalf.passed, false, base_cost_usd +. cost1,
                       tools_used )
@@ -657,13 +664,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         model_spec_for_used specs forced.Llm_provider.Types.model
                         |> Option.value ~default:primary
                       in
-                      let forced_usage = Masc_model.usage_of_response forced in
+                      let forced_usage = usage_of_response forced in
                       let cost2 = cost_usd_of_usage forced_usage used_model2 in
                       let merged_usage = merge_usage usage_after_correction forced_usage in
                       let merged_latency = latency_after_correction + forced_latency in
                       let grounded_content =
-                        let c = String.trim (Masc_model.text_of_response forced) in
-                        if c = "" then content_after_correction else Masc_model.text_of_response forced
+                        let c = String.trim (Agent_sdk.Types.text_of_content forced.content) in
+                        if c = "" then content_after_correction else Agent_sdk.Types.text_of_content forced.content
                       in
                       let eval2 =
                         evaluate_memory_recall

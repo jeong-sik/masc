@@ -203,7 +203,7 @@ let handle_mitosis_divide ctx args : result =
   | Error e ->
     json_err (Printf.sprintf "OAS child agent failed: %s" e)
   | Ok result ->
-    let response_text = Masc_model.text_of_response result.response in
+    let response_text = Agent_sdk.Types.text_of_content result.response.content in
     json_ok (`Assoc [
       ("divided", `Bool true);
       ("session_id", `String result.session_id);
@@ -278,7 +278,7 @@ let handle_mitosis_handoff ctx args : result =
         ("runtime", `String "oas");
       ])
     | Ok result ->
-      let response_text = Masc_model.text_of_response result.response in
+      let response_text = Agent_sdk.Types.text_of_content result.response.content in
       json_ok (`Assoc [
         ("action", `String "handoff");
         ("generation", `Int new_cell.Mitosis.generation);

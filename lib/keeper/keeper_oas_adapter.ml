@@ -10,6 +10,13 @@
 open Keeper_types
 open Keeper_exec_tools
 
+let zero_usage : Agent_sdk.Types.api_usage =
+  { Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
+    cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
+
+let usage_of_response (resp : Llm_provider.Types.api_response) : Agent_sdk.Types.api_usage =
+  match resp.usage with Some u -> u | None -> zero_usage
+
 (* ================================================================ *)
 (* Internal: tool dispatch                                           *)
 (* ================================================================ *)
@@ -158,10 +165,10 @@ let run_simple
 (* ================================================================ *)
 
 let text_of_run_result (r : Oas_worker.run_result) : string =
-  Masc_model.text_of_response r.response
+  Agent_sdk.Types.text_of_content r.response.content
 
-let usage_of_run_result (r : Oas_worker.run_result) : Masc_model.token_usage =
-  Masc_model.usage_of_response r.response
+let usage_of_run_result (r : Oas_worker.run_result) : Agent_sdk.Types.api_usage =
+  usage_of_response r.response
 
 let model_of_run_result (r : Oas_worker.run_result) : string =
   r.response.model
@@ -235,7 +242,7 @@ let run_cascade_stream ?(cascade_name = "keeper_turn") ?timeout_sec ~on_event re
   let timeout_int = Option.map int_of_float timeout_sec in
   match run_cascade ~cascade_name ?timeout_sec:timeout_int (request :: fallback) with
   | Ok resp ->
-      let text = Masc_model.text_of_response resp in
+      let text = Agent_sdk.Types.text_of_content resp.content in
       on_event (Llm_provider.Types.MessageStart {
         id = "batch-keeper"; model = resp.Llm_provider.Types.model; usage = None });
       if text <> "" then

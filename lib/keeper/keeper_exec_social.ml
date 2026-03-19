@@ -7,6 +7,13 @@ open Keeper_alerting [@@warning "-33"]
 open Keeper_exec_tools [@@warning "-33"]
 open Keeper_exec_context
 
+let zero_usage : Agent_sdk.Types.api_usage =
+  { Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
+    cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
+
+let usage_of_response (resp : Llm_provider.Types.api_response) : Agent_sdk.Types.api_usage =
+  match resp.usage with Some u -> u | None -> zero_usage
+
 let explicit_room_prompt ~(meta : keeper_meta) ~(room_id : string) (msg : Types.message) : string =
   Printf.sprintf
     "You were explicitly mentioned in room '%s' by %s.\n\
@@ -99,7 +106,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               let used_model =
                 model_spec_for_used specs resp.Llm_provider.Types.model |> Option.value ~default:primary
               in
-              let reply_raw = String.trim (Masc_model.text_of_response resp) in
+              let reply_raw = String.trim (Agent_sdk.Types.text_of_content resp.content) in
               let reply =
                 if reply_raw = "" then
                   Printf.sprintf "@%s 야, 다시 한 번만 말해봐." msg.from_agent
@@ -112,7 +119,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
                with exn ->
                  log_keeper_exn ~label:"save_checkpoint (explicit room reply) failed" exn);
-              let usage = Masc_model.usage_of_response resp in
+              let usage = usage_of_response resp in
               let now_ts = Time_compat.now () in
               let updated =
                 {
@@ -254,13 +261,13 @@ let run_social_board_event_turn
                  Keeper_oas_adapter.tools_executed = final_tools_used } ->
               let final_resp = run_result.Oas_worker.response in
               let final_content =
-                let trimmed = String.trim (Masc_model.text_of_response final_resp) in
+                let trimmed = String.trim (Agent_sdk.Types.text_of_content final_resp.content) in
                 if trimmed = "" && final_tools_used <> [] then
                   Printf.sprintf "(tools executed: %s)" (String.concat ", " final_tools_used)
                 else if trimmed = "" then trimmed
                 else trimmed
               in
-              let final_usage = Masc_model.usage_of_response final_resp in
+              let final_usage = usage_of_response final_resp in
               let final_model_used = final_resp.Llm_provider.Types.model in
               let final_latency_ms = total_latency_ms in
               let final_cost_usd =

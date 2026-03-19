@@ -7,6 +7,13 @@ open Keeper_alerting
 open Keeper_exec_context
 open Keeper_exec_autonomy
 
+let zero_usage : Agent_sdk.Types.api_usage =
+  { Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
+    cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
+
+let usage_of_response (resp : Llm_provider.Types.api_response) : Agent_sdk.Types.api_usage =
+  match resp.usage with Some u -> u | None -> zero_usage
+
 let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
   let log_proactive_failure reason =
     Log.Keeper.error "proactive emission failed: %s" reason
@@ -202,7 +209,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                         meta
                     | Ok run_result ->
                         let response = run_result.Oas_worker.response in
-                        let response_usage = Masc_model.usage_of_response response in
+                        let response_usage = usage_of_response response in
                         let turn_cost =
                           let inp =
                             float_of_int response_usage.input_tokens /. 1000.0
@@ -220,12 +227,12 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                         in
                         (match
                            Keeper_deliberation.parse_deliberation_response
-                             (Masc_model.text_of_response response)
+                             (Agent_sdk.Types.text_of_content response.content)
                          with
                          | Error msg ->
                              Log.KeeperExec.error "%s parse failed: %s (raw: %s)"
                                meta.name msg
-                               (Keeper_types.short_preview (Masc_model.text_of_response response));
+                               (Keeper_types.short_preview (Agent_sdk.Types.text_of_content response.content));
                              (* Update meta with cost even on parse failure *)
                              let updated =
                                { meta with

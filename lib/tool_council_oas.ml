@@ -206,6 +206,7 @@ let handle_governance_status ctx _args =
   json_ok (`Assoc [
     ("total_cases", `Int (List.length cases));
     ("open_cases", `Int (List.length open_cases));
+    ("cases_open", `Int (List.length open_cases));
     ("execution_orders", `Int (List.length orders));
     ("runtime", `String "oas");
   ])

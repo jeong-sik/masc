@@ -48,9 +48,16 @@ let make_dispatch ~(config : Room.config) ~(agent_name : string) () ~name ~args 
   | None ->
       (false, Printf.sprintf "Unknown tool: %s" name)
 
+(** Wrap OAS worker calls so Eio exceptions (Mutex.Poisoned from LLM
+    connection failure, etc.) become [Error] results instead of crashing. *)
+let run_safe f =
+  try f ()
+  with exn ->
+    Error (Printf.sprintf "OAS worker exception: %s" (Printexc.to_string exn))
+
 let run_for_gap ~(config : Room.config) ~topic ~traits_str ~reason =
   let agent_name = Printf.sprintf "gardener-worker-%s" topic in
-  Oas_worker.run_named_with_masc_tools
+  run_safe (fun () -> Oas_worker.run_named_with_masc_tools
     ~cascade_name:"gardener_spawn"
     ~system_prompt:
       (Printf.sprintf
@@ -69,11 +76,11 @@ let run_for_gap ~(config : Room.config) ~topic ~traits_str ~reason =
     ~goal:(Printf.sprintf "Address gap '%s': %s" topic reason)
     ~masc_tools:(worker_tools ())
     ~dispatch:(make_dispatch ~config ~agent_name ())
-    ~max_turns:10 ~temperature:0.3 ()
+    ~max_turns:10 ~temperature:0.3 ())
 
 let run_for_backlog ~(config : Room.config) ~(backlog : Gardener_types.task_backlog_summary) =
   let agent_name = "gardener-triage-worker" in
-  Oas_worker.run_named_with_masc_tools
+  run_safe (fun () -> Oas_worker.run_named_with_masc_tools
     ~cascade_name:"gardener_spawn"
     ~system_prompt:
       (Printf.sprintf
@@ -92,4 +99,4 @@ let run_for_backlog ~(config : Room.config) ~(backlog : Gardener_types.task_back
          backlog.todo_count backlog.high_priority_todo backlog.orphan_count)
     ~masc_tools:(worker_tools ())
     ~dispatch:(make_dispatch ~config ~agent_name ())
-    ~max_turns:15 ~temperature:0.3 ()
+    ~max_turns:15 ~temperature:0.3 ())

@@ -77,6 +77,7 @@ type tools_run_result = {
 let run_with_tools
     ~(config : Room.config)
     ~(meta : keeper_meta)
+    ?model_spec:model_spec_override
     ~(system_prompt : string)
     ~(goal : string)
     ~(max_turns : int)
@@ -85,7 +86,11 @@ let run_with_tools
     ?(guardrails : Agent_sdk.Guardrails.t option)
     ()
   : (tools_run_result, string) result =
-  match resolve_primary_model_spec meta with
+  let model_spec_result = match model_spec_override with
+    | Some spec -> Ok spec
+    | None -> resolve_primary_model_spec meta
+  in
+  match model_spec_result with
   | Error e -> Error e
   | Ok model_spec ->
   match require_net () with
@@ -124,13 +129,19 @@ let run_with_tools
 let run_simple
     ~(config : Room.config)
     ~(meta : keeper_meta)
+    ?model_spec:model_spec_override
     ~(system_prompt : string)
     ~(prompt : string)
     ~(temperature : float)
     ~(max_tokens : int)
+    ()
   : (Oas_worker.run_result, string) result =
   ignore config;
-  match resolve_primary_model_spec meta with
+  let model_spec_result = match model_spec_override with
+    | Some spec -> Ok spec
+    | None -> resolve_primary_model_spec meta
+  in
+  match model_spec_result with
   | Error e -> Error e
   | Ok model_spec ->
   match require_net () with

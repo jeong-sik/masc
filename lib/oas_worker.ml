@@ -213,3 +213,74 @@ let run_with_masc_tools
   ) masc_tools in
   let config = { config with tools = oas_tools @ config.tools } in
   run ~sw ~net ~config goal
+
+(* ================================================================ *)
+(* Named cascade API — callers pass cascade_name, not model_spec    *)
+(* ================================================================ *)
+
+let require_eio () =
+  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+  | Some sw, Some net -> Ok (sw, net)
+  | None, _ -> Error "Eio switch not available (running outside server context)"
+  | _, None -> Error "Eio net not available (running outside server context)"
+
+let resolve_cascade ~cascade_name =
+  match Llm_cascade.get_cascade ~cascade_name () with
+  | [] ->
+    Error (Printf.sprintf "No models available for cascade '%s'" cascade_name)
+  | spec :: _ -> Ok spec
+
+let run_named
+    ~cascade_name
+    ~goal
+    ?(system_prompt = "")
+    ?(tools = [])
+    ?(max_turns = 20)
+    ?(temperature = 0.7)
+    ?(max_tokens = 4096)
+    ?guardrails
+    ()
+  : (run_result, string) result =
+  match require_eio () with
+  | Error e -> Error e
+  | Ok (sw, net) ->
+  match resolve_cascade ~cascade_name with
+  | Error e -> Error e
+  | Ok model_spec ->
+  let name = Printf.sprintf "oas-%s" cascade_name in
+  let config = { (default_config ~name ~model_spec ~system_prompt ~tools) with
+    max_turns;
+    max_tokens;
+    temperature;
+    guardrails;
+    description = Some (Printf.sprintf "cascade:%s" cascade_name);
+  } in
+  run ~sw ~net ~config goal
+
+let run_named_with_masc_tools
+    ~cascade_name
+    ~goal
+    ?(system_prompt = "")
+    ~(masc_tools : Llm_types.tool_def list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ?(max_turns = 20)
+    ?(temperature = 0.7)
+    ?(max_tokens = 4096)
+    ?guardrails
+    ()
+  : (run_result, string) result =
+  match require_eio () with
+  | Error e -> Error e
+  | Ok (sw, net) ->
+  match resolve_cascade ~cascade_name with
+  | Error e -> Error e
+  | Ok model_spec ->
+  let name = Printf.sprintf "oas-%s" cascade_name in
+  let config = { (default_config ~name ~model_spec ~system_prompt ~tools:[]) with
+    max_turns;
+    max_tokens;
+    temperature;
+    guardrails;
+    description = Some (Printf.sprintf "cascade:%s" cascade_name);
+  } in
+  run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch goal

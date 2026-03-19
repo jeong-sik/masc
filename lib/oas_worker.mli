@@ -54,3 +54,34 @@ val run_with_masc_tools :
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   string ->
   (run_result, string) result
+
+(** {2 Named cascade API}
+
+    Callers pass a [cascade_name] string instead of constructing
+    [Llm_types.model_spec]. Model resolution is delegated to
+    [Llm_cascade.get_cascade]. *)
+
+val run_named :
+  cascade_name:string ->
+  goal:string ->
+  ?system_prompt:string ->
+  ?tools:Oas.Tool.t list ->
+  ?max_turns:int ->
+  ?temperature:float ->
+  ?max_tokens:int ->
+  ?guardrails:Oas.Guardrails.t ->
+  unit ->
+  (run_result, string) result
+
+val run_named_with_masc_tools :
+  cascade_name:string ->
+  goal:string ->
+  ?system_prompt:string ->
+  masc_tools:Llm_types.tool_def list ->
+  dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
+  ?max_turns:int ->
+  ?temperature:float ->
+  ?max_tokens:int ->
+  ?guardrails:Oas.Guardrails.t ->
+  unit ->
+  (run_result, string) result

@@ -1,9 +1,11 @@
-(** Keeper_oas_adapter — OAS Agent.run wrappers for keeper LLM calls.
+(** Keeper_oas_adapter — OAS wrappers for keeper LLM calls.
 
-    Uses [Oas_worker] for agent build/run and [keeper_exec_tools] for
-    tool dispatch.
+    Uses cascade-name-based model resolution (no [model_spec] construction).
+    Delegates to [Oas_worker.run_named] for agent loops and
+    [Llm_cascade.call_with_tools] for single-shot cascade calls.
 
-    @since OAS migration Phase 1 *)
+    @since OAS migration Phase 1
+    @since LLM-free cascade Phase 2 *)
 
 open Keeper_types
 
@@ -14,11 +16,12 @@ type tools_run_result = {
 }
 
 (** Tool loop LLM call (proactive, autonomy, social board events).
-    Wraps [Oas_worker.run_with_masc_tools] with keeper tool dispatch.
-    Returns tool execution history alongside OAS result. *)
+    Wraps [Oas_worker.run_named_with_masc_tools] with keeper tool dispatch.
+    [cascade_name] selects the model cascade (e.g. "keeper_autonomy"). *)
 val run_with_tools :
   config:Room.config ->
   meta:keeper_meta ->
+  cascade_name:string ->
   system_prompt:string ->
   goal:string ->
   max_turns:int ->
@@ -29,10 +32,12 @@ val run_with_tools :
   (tools_run_result, string) result
 
 (** Tool-free LLM call (deliberation, correction, forced grounding).
-    Wraps [Oas_worker.run] without tools. *)
+    Wraps [Oas_worker.run_named] without tools. Single turn.
+    [cascade_name] selects the model cascade (e.g. "keeper_deliberation"). *)
 val run_simple :
   config:Room.config ->
   meta:keeper_meta ->
+  cascade_name:string ->
   system_prompt:string ->
   prompt:string ->
   temperature:float ->
@@ -49,40 +54,22 @@ val usage_of_run_result : Oas_worker.run_result -> Llm_types.token_usage
 (** Extract model ID string from an OAS run result. *)
 val model_of_run_result : Oas_worker.run_result -> string
 
-(** Parameters extracted from a cascade request list for OAS execution. *)
-type cascade_params = {
-  primary_spec : Llm_types.model_spec;
-  fallback_specs : Llm_types.model_spec list;
-  system_prompt : string;
-  goal : string;
-  temperature : float;
-  max_tokens : int;
-}
-
-(** Extract OAS execution parameters from a cascade request list.
-    Separates system messages into [system_prompt], remaining messages
-    into [goal] text. Returns [Error] on empty list or no user messages. *)
-val cascade_config_of_requests :
-  Llm_types.completion_request list ->
-  (cascade_params, string) result
-
-(** Cascade through OAS Agent.t — tries each model spec in order via
-    [Oas_worker.run]. Falls back to next model on failure.
-    Prefer [run_with_tools] or [run_simple] for new code. *)
+(** Cascade through [Llm_cascade.call_with_tools] — single-shot, no agent loop.
+    [cascade_name] defaults to ["keeper_turn"]. Model specs in the
+    [completion_request] list are ignored; only prompt/system/temperature
+    are extracted. *)
 val run_cascade :
+  ?cascade_name:string ->
   ?timeout_sec:int ->
   Llm_types.completion_request list ->
   (Llm_provider.Types.api_response, string) result
 
-(** Streaming cascade — batch call with synthetic SSE events.
-    Falls back to OAS batch [run_cascade] on streaming failure. *)
+(** Streaming cascade with synthetic SSE events.
+    [cascade_name] defaults to ["keeper_turn"]. *)
 val run_cascade_stream :
+  ?cascade_name:string ->
   ?timeout_sec:float ->
   on_event:(Llm_provider.Types.sse_event -> unit) ->
   Llm_types.completion_request ->
   fallback:Llm_types.completion_request list ->
   (Llm_provider.Types.api_response, string) result
-
-(** Expose model spec resolution for testing. *)
-val resolve_primary_model_spec :
-  keeper_meta -> (Llm_types.model_spec, string) result

@@ -17,7 +17,6 @@ let run_cmd base_path =
   Eio_main.run @@ fun env ->
   Mirage_crypto_rng_unix.use_default ();
   Masc_mcp.Prometheus.enable_eio ();
-  Masc_mcp.Llm_response_cache.enable_eio ();
   Masc_mcp.Chain_telemetry.enable_eio ();
   Masc_mcp.Generational_metrics.enable_eio ();
   Masc_mcp.Dashboard_cache.enable_eio ();

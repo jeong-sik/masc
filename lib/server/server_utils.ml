@@ -117,3 +117,22 @@ let dashboard_compact_mode request =
   | Some s -> String.equal "compact" (String.lowercase_ascii (String.trim s))
   | None -> false
 
+(** Extract a path parameter after a known prefix.
+    Returns None if the path doesn't start with prefix or the parameter is empty.
+    Prevents String.sub crash from bounds violations. *)
+let extract_path_param ~prefix path =
+  let plen = String.length prefix in
+  let plen_total = String.length path in
+  if plen_total > plen && String.sub path 0 plen = prefix then
+    let param = String.trim (String.sub path plen (plen_total - plen)) in
+    if String.length param > 0 then Some param else None
+  else None
+
+(** Standard query param: limit with default 50, clamped 1..200. *)
+let standard_limit request =
+  int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200
+
+(** Standard query param: offset with default 0, min 0. *)
+let standard_offset request =
+  int_query_param request "offset" ~default:0 |> max 0
+

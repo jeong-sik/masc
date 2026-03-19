@@ -103,12 +103,10 @@ let ensure_dirs config =
 
 (** {1 ID Generation} *)
 
-let () = Random.self_init ()
-
 let generate_thread_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rand = Random.int 1_000_000 in
-  Printf.sprintf "thread-%d-%06d" ts rand
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
+  Printf.sprintf "thread-%d-%06x" ts hash
 
 let generate_turn_id ~thread_id ~seq =
   Printf.sprintf "%s-turn-%04d" thread_id seq

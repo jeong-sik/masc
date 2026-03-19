@@ -37,11 +37,12 @@ end = struct
   let of_string s = s
   let to_string t = t
   let equal = String.equal
-  let () = Random.self_init ()  (* Seed RNG on module load *)
+  let _id_counter = Atomic.make 0
   let generate () =
     let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
-    let random = Random.int 10000 in  (* 4 digits for less collision *)
-    Printf.sprintf "task-%d-%04d" timestamp random
+    Atomic.incr _id_counter;
+    let seq = Atomic.get _id_counter land 0xFFFF in
+    Printf.sprintf "task-%d-%04x" timestamp seq
   let to_yojson t = `String t
   let of_yojson = function
     | `String s -> Ok s
@@ -62,10 +63,12 @@ end = struct
   let of_string s = s
   let to_string t = t
   let equal = String.equal
+  let _id_counter = Atomic.make 0
   let generate () =
     let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
-    let random = Random.int 10000 in
-    Printf.sprintf "thread-%d-%04d" timestamp random
+    Atomic.incr _id_counter;
+    let seq = Atomic.get _id_counter land 0xFFFF in
+    Printf.sprintf "thread-%d-%04x" timestamp seq
   let to_yojson t = `String t
   let of_yojson = function
     | `String s -> Ok s

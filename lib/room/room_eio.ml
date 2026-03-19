@@ -75,7 +75,7 @@ let create_config ~fs base_path =
 let test_config ~fs base_path =
   let backend_config = Backend_eio.{
     base_path = Filename.concat base_path ".masc";
-    node_id = Printf.sprintf "test_node_%d" (Random.int 100000);
+    node_id = Printf.sprintf "test_node_%04x" (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF);
     cluster_name = "test";
   } in
   let backend = Backend_eio.FileSystem.create ~fs backend_config in
@@ -653,7 +653,7 @@ let task_of_json json =
 
 (** Create a new task *)
 let create_task config ~description ?(priority=1) () =
-  let id = Printf.sprintf "task_%d_%d" (int_of_float (Time_compat.now () *. 1000.)) (Random.int 10000) in
+  let id = Printf.sprintf "task_%d_%04x" (int_of_float (Time_compat.now () *. 1000.)) (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFF) in
   let now = Time_compat.now () in
   let task = {
     id;

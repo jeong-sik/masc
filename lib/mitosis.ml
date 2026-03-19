@@ -194,11 +194,12 @@ let log_state_transition ~old_state ~new_state ~agent_name ~reason =
 
 (** Create a new stem cell with collision-resistant ID *)
 let create_stem_cell ~generation =
-  (* Use random bytes instead of timestamp mod to avoid ID collision *)
+  (* Use hash-based suffix to avoid ID collision without Random.int *)
   let random_suffix =
-    let bytes = Bytes.create 4 in
-    for i = 0 to 3 do Bytes.set bytes i (Char.chr (Random.int 256)) done;
-    Bytes.fold_left (fun acc b -> acc ^ Printf.sprintf "%02x" (Char.code b)) "" bytes
+    let t = Unix.gettimeofday () in
+    Printf.sprintf "%04x%04x"
+      (Hashtbl.hash t land 0xFFFF)
+      (Hashtbl.hash (t *. 1000.0) land 0xFFFF)
   in
   let id = Printf.sprintf "cell-%d-%s" generation random_suffix in
   {

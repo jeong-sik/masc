@@ -345,7 +345,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
               float_of_int
                 (max 30 (min 300 meta_after_proactive.presence_keepalive_sec))
             in
-            let jitter = base *. 0.2 *. Random.float 1.0 in
+            let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
             Eio.Time.sleep ctx.clock (base +. jitter);
             loop ())
         in

@@ -221,7 +221,8 @@ let next_task_number config backlog =
 
 (** Generate short session ID *)
 let generate_session_id () =
-  Printf.sprintf "%04x%04x" (Random.int 0xFFFF) (Random.int 0xFFFF)
+  let t = Unix.gettimeofday () in
+  Printf.sprintf "%04x%04x" (Hashtbl.hash t land 0xFFFF) (Hashtbl.hash (t *. 1000.0) land 0xFFFF)
 
 (** Get hostname *)
 let get_hostname () =

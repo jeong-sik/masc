@@ -16,8 +16,8 @@ type result = bool * string
 
 let gen_id prefix =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rand = Random.int 1_000_000 in
-  Printf.sprintf "%s-%d-%06d" prefix ts rand
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
+  Printf.sprintf "%s-%d-%06x" prefix ts hash
 
 let room_config_of_ctx (ctx : context) =
   match ctx.room_config with

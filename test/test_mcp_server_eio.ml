@@ -1015,8 +1015,8 @@ let test_execute_tool_coding_mode_allows_governance_status () =
   in
   Alcotest.(check bool) "governance status tool allowed in coding mode" true ok;
   let json = Yojson.Safe.from_string msg in
-  Alcotest.(check bool) "has cases_open field" true
-    Yojson.Safe.Util.(member "cases_open" json <> `Null);
+  Alcotest.(check bool) "has open_cases field" true
+    Yojson.Safe.Util.(member "open_cases" json <> `Null);
 
   cleanup_dir base_path
 

@@ -121,7 +121,7 @@ let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
 let test_llm_client_sanitize_message_utf8_repairs_invalid_fields () =
   let raw : Agent_sdk.Types.message =
     { Agent_sdk.Types.role = User;
-      content = [Agent_sdk.Types.Text "hello\x80.world"] }
+      content = [Agent_sdk.Types.Text "hello\x80.world"]; name = None; tool_call_id = None }
   in
   let sanitized = Masc_mcp.Llm_types.sanitize_message_utf8 raw in
   check bool "role preserved" true (sanitized.role = raw.role);

@@ -103,7 +103,7 @@ let resolve_openai_compatible_endpoint (spec : model_spec) =
 (* ================================================================ *)
 
 let provider_message_of_masc (m : Llm_types.message) : Llm_provider.Types.message =
-  { role = m.role; content = m.content }
+  { role = m.role; content = m.content; name = m.name; tool_call_id = m.tool_call_id }
 
 let extract_system (msgs : Llm_types.message list) =
   let system_parts, rest =

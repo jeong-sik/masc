@@ -77,9 +77,9 @@ let test_system_role_dropped () =
 let test_restore_messages () =
   let oas_msgs : Agent_sdk.Types.message list = [
     { Agent_sdk.Types.role = Agent_sdk.Types.User;
-      content = [Agent_sdk.Types.Text "hello"] };
+      content = [Agent_sdk.Types.Text "hello"]; name = None; tool_call_id = None };
     { Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
-      content = [Agent_sdk.Types.Text "world"] };
+      content = [Agent_sdk.Types.Text "world"]; name = None; tool_call_id = None };
   ] in
   let masc_msgs = List.map Llm_provider_dispatch.of_oas_message oas_msgs in
   Alcotest.(check int) "2 messages" 2 (List.length masc_msgs);

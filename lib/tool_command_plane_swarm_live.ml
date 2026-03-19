@@ -140,24 +140,61 @@ let handle_swarm_live_run (ctx : (_, _) context) args : result =
                          ())
                     ~proc:preflight_proc ())
               else if not allow_sync_self then
-                ( false,
-                  json_error_fields
-                    "swarm-live synchronous self-execution is disabled to avoid MCP server reentrancy hangs; run scripts/harness_agent_swarm_live.sh externally or enable MASC_SWARM_LIVE_ALLOW_SYNC_SELF=1."
-                    [
-                      assoc_field "run_id" (`String run_id);
-                      assoc_field "runtime_blocker"
-                        (`String "sync_self_unsupported");
-                      assoc_field "detail"
-                        (`String
-                           "Preflight succeeded, but the live harness re-enters the same MCP server over HTTP and can deadlock when executed synchronously inside tools/call.");
-                      assoc_field "runtime_doctor_path"
-                        (`String
-                           (swarm_live_runtime_doctor_path ctx.config run_id));
-                      assoc_field "summary_path"
-                        (`String (swarm_live_summary_path ctx.config run_id));
-                      assoc_field "swarm"
-                        (Command_plane_v2.swarm_live_json ctx.config ~run_id ());
-                    ] )
+                (* Async fire-and-forget: fork harness in background,
+                   return immediately with run_id for status polling. *)
+                let run_dir = swarm_live_run_dir ctx.config run_id in
+                Room_utils.mkdir_p run_dir;
+                let pid_path = Filename.concat run_dir "harness.pid" in
+                let log_path = Filename.concat run_dir "harness.log" in
+                let started_path = Filename.concat run_dir "started_at.txt" in
+                (try
+                  let log_fd =
+                    Unix.openfile log_path
+                      [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] 0o644
+                  in
+                  let close_log () =
+                    (try Unix.close log_fd with Unix.Unix_error _ -> ())
+                  in
+                  let pid =
+                    Fun.protect ~finally:close_log (fun () ->
+                      let dev_null =
+                        Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o644
+                      in
+                      Fun.protect
+                        ~finally:(fun () ->
+                          (try Unix.close dev_null
+                           with Unix.Unix_error _ -> ()))
+                        (fun () ->
+                          Unix.create_process_env "/bin/bash"
+                            [| "bash"; script_path |]
+                            common_env dev_null log_fd log_fd))
+                  in
+                  Out_channel.with_open_text pid_path
+                    (fun oc -> Out_channel.output_string oc (string_of_int pid));
+                  Out_channel.with_open_text started_path
+                    (fun oc ->
+                      Out_channel.output_string oc
+                        (Printf.sprintf "%.0f" (Unix.gettimeofday ())));
+                  ( true,
+                    Yojson.Safe.to_string
+                      (`Assoc
+                        [
+                          ("status", `String "started");
+                          ("run_id", `String run_id);
+                          ("pid", `Int pid);
+                          ("worker_count", `Int worker_count);
+                          ( "monitor",
+                            `String
+                              "Use masc_swarm_live_status with this run_id to \
+                               check progress." );
+                          ("log_path", `String log_path);
+                        ]) )
+                with exn ->
+                  ( false,
+                    json_error
+                      (Printf.sprintf
+                         "Failed to launch async harness: %s"
+                         (Printexc.to_string exn)) ))
               else
                 let proc =
                   run_process_with_timeout ~clock_opt:ctx.clock
@@ -198,3 +235,116 @@ let handle_swarm_live_run (ctx : (_, _) context) args : result =
                     json_with_process_metadata detailed_json proc
                   in
                   (true, Yojson.Safe.to_string payload)))
+
+(** Check whether a PID is still running (Unix-only).
+    Also attempts to reap zombie via non-blocking waitpid. *)
+let pid_is_alive pid =
+  (* Reap zombie if this is our child process (WNOHANG = non-blocking). *)
+  (try ignore (Unix.waitpid [ Unix.WNOHANG ] pid)
+   with Unix.Unix_error _ -> ());
+  try
+    Unix.kill pid 0;
+    true
+  with
+  | Unix.Unix_error (Unix.ESRCH, _, _) -> false
+  | Unix.Unix_error (Unix.EPERM, _, _) -> true
+
+(** Read a file's contents, returning None on any error. *)
+let read_file_opt path =
+  try Some (In_channel.with_open_text path In_channel.input_all)
+  with _ -> None
+
+let handle_swarm_live_status (ctx : (_, _) context) args : result =
+  let run_id =
+    match get_string_opt args "run_id" with
+    | Some value -> value
+    | None -> "swarm-live"
+  in
+  match validate_run_id run_id with
+  | Error message -> (false, json_error message)
+  | Ok run_id ->
+      let run_dir = swarm_live_run_dir ctx.config run_id in
+      if not (Sys.file_exists run_dir) then
+        ( false,
+          json_error
+            (Printf.sprintf "No swarm-live run found for run_id: %s" run_id) )
+      else
+        let pid_path = Filename.concat run_dir "harness.pid" in
+        let summary_path =
+          Filename.concat run_dir "swarm-live-summary.json"
+        in
+        let doctor_path =
+          Filename.concat run_dir "runtime-doctor.json"
+        in
+        let log_path = Filename.concat run_dir "harness.log" in
+        let pid_opt =
+          match read_file_opt pid_path with
+          | Some s -> int_of_string_opt (String.trim s)
+          | None -> None
+        in
+        let is_running =
+          match pid_opt with
+          | Some pid -> pid_is_alive pid
+          | None -> false
+        in
+        let has_summary = Sys.file_exists summary_path in
+        let has_doctor = Sys.file_exists doctor_path in
+        let status =
+          if is_running then "running"
+          else if has_summary then "completed"
+          else if has_doctor then "failed"
+          else "unknown"
+        in
+        let base_fields =
+          [
+            ("status", `String status);
+            ("run_id", `String run_id);
+          ]
+        in
+        let pid_field =
+          match pid_opt with
+          | Some pid -> [ ("pid", `Int pid) ]
+          | None -> []
+        in
+        let summary_field =
+          if has_summary then
+            match read_json_file_opt summary_path with
+            | Some json -> [ ("summary", json) ]
+            | None -> []
+          else []
+        in
+        let doctor_field =
+          if has_doctor then
+            match read_json_file_opt doctor_path with
+            | Some json -> [ ("runtime_doctor", json) ]
+            | None -> []
+          else []
+        in
+        let log_tail =
+          if Sys.file_exists log_path then
+            match read_file_opt log_path with
+            | Some content ->
+                let lines =
+                  String.split_on_char '\n' content
+                  |> List.rev
+                  |> List.filteri (fun i _ -> i < 20)
+                  |> List.rev
+                  |> String.concat "\n"
+                in
+                [ ("log_tail", `String lines) ]
+            | None -> []
+          else []
+        in
+        let swarm_field =
+          if String.equal status "completed" || String.equal status "failed"
+          then
+            [ ("swarm",
+               Command_plane_v2.swarm_live_json ctx.config ~run_id ()) ]
+          else []
+        in
+        let payload =
+          `Assoc
+            (base_fields @ pid_field @ summary_field @ doctor_field
+            @ log_tail @ swarm_field)
+        in
+        (true, Yojson.Safe.to_string payload)

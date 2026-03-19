@@ -2,6 +2,7 @@ open Alcotest
 
 module Adapter = Masc_mcp.Keeper_oas_adapter
 module Llm_types = Masc_mcp.Llm_types
+module Oas_worker = Masc_mcp.Oas_worker
 module Types = Agent_sdk.Types
 
 (* ================================================================ *)
@@ -17,6 +18,8 @@ let make_model_spec ?(model_id = "test-model") ?(provider = Llm_types.Llama) () 
     api_key_env = None;
     cost_per_1k_input = 0.0;
     cost_per_1k_output = 0.0;
+    api_url = "http://127.0.0.1:8085";
+    api_key_env = None;
   }
 
 let make_request ?(model_id = "test-model") ?(provider = Llm_types.Llama)

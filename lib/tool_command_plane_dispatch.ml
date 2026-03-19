@@ -44,4 +44,5 @@ let dispatch (ctx : (_, _) context) ~name ~args : result option =
   | "masc_observe_capacity" -> Some (handle_observe_capacity ctx)
   | "masc_observe_traces" -> Some (handle_observe_traces ctx args)
   | "masc_swarm_live_run" -> Some (handle_swarm_live_run ctx args)
+  | "masc_swarm_live_status" -> Some (handle_swarm_live_status ctx args)
   | _ -> None

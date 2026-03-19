@@ -291,9 +291,8 @@ let proactive_temperature attempt =
   else Keeper_config.keeper_proactive_temperature_high ()
 
 (* strip_state_blocks_text moved to Keeper_alerting_path to break
-   Keeper_prompt → Keeper_alerting → Tool_board → Keeper_prompt cycle.
-   Re-exported here via open Keeper_alerting (which includes Keeper_alerting_path). *)
-let strip_state_blocks_text = strip_state_blocks_text
+   Keeper_prompt → Keeper_alerting → Tool_board → Keeper_prompt cycle. *)
+let strip_state_blocks_text = Keeper_alerting_path.strip_state_blocks_text
 
 let trim_to_option (s : string) : string option =
   let trimmed = String.trim s in

@@ -413,7 +413,7 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
         | Some model_name -> Some model_name
         | None ->
             let default_model =
-              Llm_types.default_local_model_spec ()
+              Llm_cascade.default_local_model_spec ()
             in
             Some default_model.model_id
       in
@@ -433,7 +433,7 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
                   Some assignment.runtime_id )
           | Error err -> Error err)
     else
-      Ok (Llm_types.default_local_model_spec (), None, None)
+      Ok (Llm_cascade.default_local_model_spec (), None, None)
   in
   match runtime_model with
   | Error e -> Error (spec, runtime_actor_name, e)

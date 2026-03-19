@@ -85,7 +85,7 @@ let execute_approved_plan
     : string * float * string list =
   ignore trajectory_acc;
   let gate_config = autonomous_gate_config ~autonomy_level in
-  let primary = match specs with p :: _ -> p | [] -> Llm_types.default_local_model_spec () in
+  let primary = match specs with p :: _ -> p | [] -> Llm_cascade.default_local_model_spec () in
   let system_prompt = Printf.sprintf
 {|You are a keeper agent executing an approved action plan.
 Your name: %s

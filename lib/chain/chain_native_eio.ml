@@ -223,7 +223,7 @@ let model_runner_of_string raw =
   let model = trim raw in
   let lower = String.lowercase_ascii model in
   let direct spec =
-    match Llm_types.model_spec_of_string spec with
+    match Llm_cascade.model_spec_of_string spec with
     | Ok parsed -> Ok (Direct parsed)
     | Error msg -> Error msg
   in
@@ -245,7 +245,7 @@ let model_runner_of_string raw =
   | "codex" -> Ok (Spawn "codex")
   | value when starts_with ~prefix:"codex:" value -> Ok (Spawn "codex")
   | value -> (
-      match Llm_types.model_spec_of_string model with
+      match Llm_cascade.model_spec_of_string model with
       | Ok parsed -> Ok (Direct parsed)
       | Error _ when starts_with ~prefix:"llama:" value -> direct model
       | Error _ when starts_with ~prefix:"gemini:" value -> direct model

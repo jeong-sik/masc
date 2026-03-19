@@ -154,7 +154,7 @@ let handle_start ctx args =
   let auto_claim_cooldown = Safe_ops.json_float ~default:60.0 "auto_claim_cooldown_sec" args in
   (* Parse model specs *)
   let models = List.filter_map (fun s ->
-    match Llm_types.model_spec_of_string s with
+    match Llm_cascade.model_spec_of_string s with
     | Ok m -> Some m
     | Error e -> Log.Perpetual.info "Bad model spec %s: %s" s e; None
   ) model_strs in

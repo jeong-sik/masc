@@ -100,8 +100,9 @@ let test_calculate_agent_metrics () =
     match Metrics_store_eio.calculate_agent_metrics config ~agent_id:"claude" ~days:1 with
     | Some metrics ->
       assert (metrics.total_tasks = 5);
-      assert (metrics.completed_tasks = 5);
-      (* 2 and 4 are successful (even numbers) *)
+      (* completed_tasks counts successful tasks: i=2 and i=4 (even numbers) *)
+      assert (metrics.completed_tasks = 2);
+      (* task_completion_rate = successful / total = 2/5 = 0.4 *)
       assert (metrics.task_completion_rate >= 0.3 && metrics.task_completion_rate <= 0.5);
       print_endline (Printf.sprintf "  Completion rate: %.1f%%" (metrics.task_completion_rate *. 100.0))
     | None -> failwith "Expected to get agent metrics"

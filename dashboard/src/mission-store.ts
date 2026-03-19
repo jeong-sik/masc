@@ -639,7 +639,7 @@ export async function refreshMissionSnapshot(mode?: 'snapshot' | 'full'): Promis
   missionLoading.value = true
   missionError.value = null
   try {
-    const raw = await fetchDashboardMission(mode ?? 'snapshot')
+    const raw = await fetchDashboardMission(mode)
     missionSnapshot.value = normalizeMission(raw)
   } catch (err) {
     missionError.value = err instanceof Error ? err.message : 'Failed to load mission snapshot'

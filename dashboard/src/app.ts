@@ -38,11 +38,11 @@ export function App() {
     // Semantics: static data, fetch once and cache forever.
     void fetchDashboardSemantics()
       .then(data => { dashboardSemantics.value = data })
-      .catch(() => {})
+      .catch(err => { console.warn('Semantics load failed (non-critical):', err) })
 
     // Register mission refresh for periodic recovery from transient failures.
     // Uses registration pattern to avoid circular imports.
-    registerMissionRefresh(() => void refreshMissionSnapshot())
+    registerMissionRefresh(() => void refreshMissionSnapshot('snapshot'))
 
     // Setup SSE -> store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()

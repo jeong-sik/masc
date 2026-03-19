@@ -396,10 +396,11 @@ let test_voice_sessions_without_net_errors () =
 
 let test_voice_transcript_without_net_errors () =
   with_ctx_no_net (fun ctx ->
-      let ok, _body =
+      let ok, body =
         dispatch_exn ctx ~name:"masc_voice_transcript" ~args:(`Assoc [])
       in
-      check bool "succeeds (local transcript)" true ok)
+      check bool "returns not_available (STT not integrated)" false ok;
+      check bool "mentions not_available" true (contains body "not_available"))
 
 let test_voice_conference_end_without_net_errors () =
   with_ctx_no_net (fun ctx ->
@@ -463,9 +464,8 @@ let test_voice_conference_end_with_unavailable_server_errors () =
         dispatch_exn ctx ~name:"masc_voice_conference_end"
           ~args:(`Assoc [ ("agent_ids", `List [ `String "claude"; `String "gemini" ]) ])
       in
-      check bool "fails" false ok;
-      check bool "mentions unavailable" true
-        (contains body "unavailable" || contains body "cannot end conference")
+      check bool "succeeds (local session teardown, no server needed)" true ok;
+      check bool "reports ended count" true (contains body "ended")
 
 let test_voice_public_config_json () =
   let config_json =

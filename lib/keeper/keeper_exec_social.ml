@@ -226,7 +226,7 @@ let run_social_board_event_turn
           let user_message = Agent_sdk.Types.user_msg prompt in
           let ctx_work = Context_manager.append ctx_work user_message in
           Context_manager.persist_message session user_message;
-          let execute_tool_calls
+          let _execute_tool_calls
               ~(ctx_work : Context_manager.working_context)
               (tcs : Llm_types.tool_call list) : (Llm_types.tool_call * string) list =
             List.map
@@ -245,126 +245,37 @@ let run_social_board_event_turn
                  (tc, output))
               tcs
           in
-          let requests =
-            List.map
-              (fun (model : Llm_types.model_spec) ->
-                 ({
-                    Llm_types.model;
-                    messages =
-                      (Agent_sdk.Types.system_msg ctx_work.system_prompt)
-                      :: (ctx_work.messages @ [ Agent_sdk.Types.user_msg prompt ]);
-                    temperature = Keeper_config.keeper_planning_temp ();
-                    max_tokens = Keeper_config.keeper_social_initial_max_tokens ();
-                    tools = keeper_allowed_llm_tools meta;
-                    response_format = `Text;
-                  }
-                   : Llm_types.completion_request))
-              specs
+          (* OAS Agent lifecycle: run_with_tools replaces manual tool loop *)
+          let max_tool_rounds = Keeper_config.keeper_max_tool_rounds () in
+          let system_prompt = ctx_work.system_prompt in
+          let goal = prompt in
+          let (oas_result, total_latency_ms) = Llm_types.timed (fun () ->
+              Keeper_oas_adapter.run_with_tools
+                ~config:ctx.config ~meta
+                ~system_prompt ~goal
+                ~max_turns:max_tool_rounds
+                ~temperature:(Keeper_config.keeper_planning_temp ())
+                ~max_tokens:(Keeper_config.keeper_social_initial_max_tokens ()) ())
           in
-          let (cascade_result0, latency0) = Llm_types.timed (fun () ->
-              Keeper_oas_adapter.run_cascade requests) in
-          match cascade_result0 with
+          match oas_result with
           | Error e -> Error e
-          | Ok resp0 ->
-              let max_tool_rounds = Keeper_config.keeper_max_tool_rounds () in
-              let used_model0 =
-                model_spec_for_used specs resp0.Llm_provider.Types.model
-                |> Option.value ~default:primary
+          | Ok { Keeper_oas_adapter.oas_result = run_result;
+                 Keeper_oas_adapter.tools_executed = final_tools_used } ->
+              let final_resp = run_result.Oas_worker.response in
+              let final_content =
+                let trimmed = String.trim (Llm_types.text_of_response final_resp) in
+                if trimmed = "" && final_tools_used <> [] then
+                  Printf.sprintf "(tools executed: %s)" (String.concat ", " final_tools_used)
+                else if trimmed = "" then trimmed
+                else trimmed
               in
-              let cost0 = cost_usd_of_usage (Llm_types.usage_of_response resp0) used_model0 in
-              let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
-                  ~acc_tools_used ~last_resp =
-                if not (Llm_types.has_tool_calls last_resp) || round > max_tool_rounds then
-                  let content =
-                    let trimmed = String.trim (Llm_types.text_of_response last_resp) in
-                    if trimmed = "" && acc_tools_used <> [] then
-                      Printf.sprintf "(tools executed: %s)"
-                        (String.concat ", " acc_tools_used)
-                    else
-                      Llm_types.text_of_response last_resp
-                  in
-                  ( content,
-                    acc_usage,
-                    last_resp.Llm_provider.Types.model,
-                    acc_latency,
-                    acc_cost,
-                    acc_tools_used )
-                else
-                  let last_resp_tool_calls = Llm_types.tool_calls_of_response last_resp in
-                  let round_tools =
-                    List.map
-                      (fun (tc : Llm_types.tool_call) -> tc.call_name)
-                      last_resp_tool_calls
-                  in
-                  let all_tools_so_far = acc_tools_used @ round_tools in
-                  let tool_outputs =
-                    execute_tool_calls ~ctx_work last_resp_tool_calls
-                  in
-                  let followup_prompt =
-                    keeper_tool_followup_prompt
-                      ~user_message:prompt
-                      ~draft_reply:(Llm_types.text_of_response last_resp)
-                      ~tool_outputs
-                      ~already_executed:all_tools_so_far
-                  in
-                  let next_tools =
-                    keeper_allowed_llm_tools
-                      ~write_done:(keeper_write_done all_tools_so_far)
-                      meta
-                  in
-                  let followup_requests =
-                    List.map
-                      (fun (model : Llm_types.model_spec) ->
-                         ({
-                            Llm_types.model;
-                            messages = [
-                              Agent_sdk.Types.system_msg
-                                (keeper_tool_loop_system_prompt
-                                   ~character_context:ctx_work.system_prompt);
-                              Agent_sdk.Types.user_msg followup_prompt;
-                            ];
-                            temperature = Keeper_config.keeper_deterministic_temp ();
-                            max_tokens = Keeper_config.keeper_social_followup_max_tokens ();
-                            tools = next_tools;
-                            response_format = `Text;
-                          }
-                           : Llm_types.completion_request))
-                      specs
-                  in
-                  let (followup_result, round_latency) = Llm_types.timed (fun () ->
-                      Keeper_oas_adapter.run_cascade followup_requests) in
-                  match followup_result with
-                  | Error _ ->
-                      ( Llm_types.text_of_response last_resp,
-                        acc_usage,
-                        last_resp.Llm_provider.Types.model,
-                        acc_latency,
-                        acc_cost,
-                        acc_tools_used @ round_tools )
-                  | Ok resp_next ->
-                      let used_model_next =
-                        model_spec_for_used specs resp_next.Llm_provider.Types.model
-                        |> Option.value ~default:primary
-                      in
-                      let resp_next_usage = Llm_types.usage_of_response resp_next in
-                      let cost_next = cost_usd_of_usage resp_next_usage used_model_next in
-                      tool_loop
-                        ~round:(round + 1)
-                        ~acc_usage:(merge_usage acc_usage resp_next_usage)
-                        ~acc_latency:(acc_latency + round_latency)
-                        ~acc_cost:(acc_cost +. cost_next)
-                        ~acc_tools_used:(acc_tools_used @ round_tools)
-                        ~last_resp:resp_next
-              in
-              let final_content, final_usage, final_model_used, final_latency_ms,
-                  final_cost_usd, final_tools_used =
-                tool_loop
-                  ~round:1
-                  ~acc_usage:(Llm_types.usage_of_response resp0)
-                  ~acc_latency:latency0
-                  ~acc_cost:cost0
-                  ~acc_tools_used:[]
-                  ~last_resp:resp0
+              let final_usage = Llm_types.usage_of_response final_resp in
+              let final_model_used = final_resp.Llm_provider.Types.model in
+              let final_latency_ms = total_latency_ms in
+              let final_cost_usd =
+                let used_model = model_spec_for_used specs final_model_used
+                  |> Option.value ~default:primary in
+                cost_usd_of_usage final_usage used_model
               in
               let assistant_text =
                 let trimmed = String.trim final_content in

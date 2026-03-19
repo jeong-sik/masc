@@ -78,8 +78,13 @@ let run_with_tools
 (* Public: run_with_custom_dispatch                                  *)
 (* ================================================================ *)
 
+(** Run with a custom dispatch function and explicit tool list.
+    Uses cascade-name-based API (post-#1730).
+    [model_spec_override] is accepted for backward compat but ignored —
+    model resolution happens inside [Oas_worker.run_named_with_masc_tools]. *)
 let run_with_custom_dispatch
-    ~(cascade_name : string)
+    ~(meta : keeper_meta)
+    ?(model_spec_override : Llm_types.model_spec option)
     ~(system_prompt : string)
     ~(goal : string)
     ~(max_turns : int)
@@ -90,6 +95,8 @@ let run_with_custom_dispatch
     ?(guardrails : Agent_sdk.Guardrails.t option)
     ()
   : (Oas_worker.run_result, string) result =
+  ignore model_spec_override;
+  let cascade_name = Printf.sprintf "keeper_%s" meta.name in
   Oas_worker.run_named_with_masc_tools
     ~cascade_name ~goal ~system_prompt ~masc_tools ~dispatch
     ~max_turns ~temperature ~max_tokens ?guardrails ()

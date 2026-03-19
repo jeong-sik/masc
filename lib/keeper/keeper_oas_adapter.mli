@@ -35,9 +35,11 @@ val run_with_tools :
     Unlike [run_with_tools], the caller controls tool execution
     (Eval_gate, Trajectory, custom logging). Returns raw OAS result;
     caller manages tool tracking externally.
-    [cascade_name] selects the model cascade (e.g. "keeper_turn"). *)
+    [model_spec_override] is accepted for backward compat but ignored;
+    model resolution uses cascade name derived from [meta.name]. *)
 val run_with_custom_dispatch :
-  cascade_name:string ->
+  meta:keeper_meta ->
+  ?model_spec_override:Llm_types.model_spec ->
   system_prompt:string ->
   goal:string ->
   max_turns:int ->

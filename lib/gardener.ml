@@ -387,7 +387,7 @@ let start_backlog_triage_session ~sw ~clock ~(room_config : Room_utils.config)
 (** {1 Background Loop} *)
 
 (** Main gardener loop iteration *)
-let tick ~sw ~clock ~config ~room_config : unit =
+let tick ~sw ~clock:_ ~config ~room_config : unit =
   let tick_started_at = mark_tick_start () in
   if is_circuit_open () then begin
     record_decision
@@ -430,37 +430,35 @@ let tick ~sw ~clock ~config ~room_config : unit =
         Eio.traceln "[Gardener] Task pressure: %d TODO, %d high-pri, %d orphans"
           backlog.todo_count backlog.high_priority_todo backlog.orphan_count;
         let triage_state = get_state () in
-        (match start_backlog_triage_session ~sw ~clock ~room_config ~backlog with
-         | Ok session_id ->
+        (match Gardener_worker.run_for_backlog ~backlog with
+         | Ok result ->
              triage_state.last_triage_started_at <- Time_compat.now ();
              triage_state.last_triage_outcome <- Triage_productive;
-             record_action "worker_session_started" ~target:session_id
-               ~reason:"started backlog triage session";
-             Eio.traceln "[Gardener] Started backlog triage session: %s" session_id;
+             record_action "worker_completed" ~target:result.Oas_worker.session_id
+               ~reason:(Printf.sprintf "triage done in %d turns" result.Oas_worker.turns);
+             Eio.traceln "[Gardener] Triage worker completed: %s (turns=%d)"
+               result.Oas_worker.session_id result.Oas_worker.turns;
              Sse.broadcast
                (`Assoc
                  [
                    ("type", `String "gardener_need_worker");
-                   ("session_id", `String session_id);
+                   ("session_id", `String result.Oas_worker.session_id);
+                   ("turns", `Int result.Oas_worker.turns);
                    ("todo_count", `Int backlog.todo_count);
                    ("high_priority_todo", `Int backlog.high_priority_todo);
                    ("orphan_count", `Int backlog.orphan_count);
                  ])
          | Error err ->
-             (* Only record noop + timestamp if this was an actual attempt,
-                not a cooldown rejection (which preserves original timestamp) *)
-             if not (String.equal err "triage cooldown active") then begin
-               triage_state.last_triage_started_at <- Time_compat.now ();
-               triage_state.last_triage_outcome <- Triage_noop
-             end;
-             record_action "worker_request_posted"
-               ~reason:"backlog triage session failed; posted worker request"
+             triage_state.last_triage_started_at <- Time_compat.now ();
+             triage_state.last_triage_outcome <- Triage_noop;
+             record_action "worker_failed"
+               ~reason:"triage worker failed"
                ~error:err;
-             Eio.traceln "[Gardener] Backlog triage start failed: %s" err;
+             Eio.traceln "[Gardener] Triage worker failed: %s" err;
              let store = Board.global () in
              let msg =
                Printf.sprintf
-                 "[Gardener] %d unclaimed tasks (P1-P2: %d, oldest: %.1fh). Worker needed. Session start failed: %s"
+                 "[Gardener] %d unclaimed tasks (P1-P2: %d, oldest: %.1fh). Triage worker failed: %s"
                  backlog.todo_count backlog.high_priority_todo
                  backlog.oldest_todo_age_hours err
              in

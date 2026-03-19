@@ -234,50 +234,27 @@ let decide_retire ~config ~health ~(agent_stats : agent_stats) : retirement_deci
 let execute_spawn ?sw ?room_config ~(decision : spawn_decision) () : (string, string) result =
   match decision with
   | SpawnApproved { topic; proposed_traits; proposed_hours = _; reason; _ } ->
-      Eio.traceln "[Gardener] Executing OAS spawn: %s (reason: %s)" topic reason;
+      ignore (sw, room_config);
+      Eio.traceln "[Gardener] Executing OAS worker spawn: %s (reason: %s)" topic reason;
       let config = load_config () in
-      let resolved_sw = match sw with Some s -> Some s | None -> !sw_ref in
-      let resolved_rc = match room_config with Some rc -> Some rc | None -> !room_config_ref in
-      (match resolved_sw, resolved_rc with
-       | None, _ ->
-           trip_circuit ~config;
-           Error "execute_spawn: no Eio.Switch available (gardener not started?)"
-       | _, None ->
-           trip_circuit ~config;
-           Error "execute_spawn: no room_config available (gardener not started?)"
-       | Some sw, Some room_config ->
       let traits_str = String.concat ", " proposed_traits in
-      let prompt = Printf.sprintf
-        "You are a MASC agent spawned by Gardener to address: %s\n\
-         Traits: %s\n\
-         Your task: Check the room for pending tasks (masc_status), claim one (masc_claim_next), and work on it.\n\
-         When done, broadcast your results and leave the room."
-        topic traits_str
-      in
-      let agent_name = Printf.sprintf "gardener-worker-%s"
-        (String.sub (Digest.to_hex (Digest.string topic)) 0 8) in
-      (try
-        let result = Spawn_eio.spawn ~sw ~agent_name ~prompt
-          ~room_config ~timeout_seconds:300 () in
-        if result.Spawn_eio.success then begin
-          record_spawn ();
-          reset_circuit ();
-          let msg = Printf.sprintf "OAS worker '%s' spawned for '%s' (elapsed: %dms)"
-            agent_name topic result.Spawn_eio.elapsed_ms in
-          let store = Board.global () in
-          (try ignore (Board.create_post store ~author:"gardener"
-            ~content:(Printf.sprintf "New agent deployed: %s\nTopic: %s\nReason: %s" agent_name topic reason)
-            ~ttl_hours:24 ())
-           with exn -> Log.Spawn.error "Board.create_post failed: %s" (Printexc.to_string exn));
-          Ok msg
-        end else begin
-          trip_circuit ~config;
-          Error (Printf.sprintf "OAS spawn failed: %s"
-            (String.sub result.Spawn_eio.output 0 (min 200 (String.length result.Spawn_eio.output))))
-        end
-      with exn ->
-        trip_circuit ~config;
-        Error (Printf.sprintf "OAS spawn exception: %s" (Printexc.to_string exn))))
+      (match Gardener_worker.run_for_gap ~topic ~traits_str ~reason with
+       | Ok result ->
+           record_spawn ();
+           reset_circuit ();
+           let msg = Printf.sprintf
+             "OAS worker completed for '%s' (turns=%d, session=%s)"
+             topic result.Oas_worker.turns result.Oas_worker.session_id in
+           let store = Board.global () in
+           (try ignore (Board.create_post store ~author:"gardener"
+             ~content:(Printf.sprintf "Worker completed: %s\nTopic: %s\nReason: %s\nTurns: %d"
+               result.Oas_worker.session_id topic reason result.Oas_worker.turns)
+             ~ttl_hours:24 ())
+            with exn -> Log.Spawn.error "Board.create_post failed: %s" (Printexc.to_string exn));
+           Ok msg
+       | Error e ->
+           trip_circuit ~config;
+           Error (Printf.sprintf "OAS worker failed: %s" e))
   | SpawnDeferred { topic = _; reason; _ } ->
       Error (Printf.sprintf "Spawn deferred: %s" reason)
   | SpawnRejected { topic; reason } ->

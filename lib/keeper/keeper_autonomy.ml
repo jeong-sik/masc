@@ -235,35 +235,11 @@ Keep it concise — max 3 sentences per step.|}
      then String.sub keeper_context 0 500 ^ "..."
      else keeper_context)
 
-let generate_action_plan ~model ~goal ~keeper_context =
+let generate_action_plan ~goal ~keeper_context =
   let prompt = build_plan_prompt goal ~keeper_context in
-  let req : Llm_types.completion_request = {
-    model;
-    messages = [Agent_sdk.Types.user_msg prompt];
-    temperature = 0.3;
-    max_tokens = 500;
-    tools = [];
-    response_format = `Text;
-  } in
-  (* Use Oas_worker.run directly to avoid dependency cycle
-     (Keeper_autonomy → Keeper_oas_adapter → ... → Keeper_autonomy).
-     Tool-free single-shot: OAS Agent with max_turns=1, no tools. *)
-  match Eio_context.get_net_opt (), Eio_context.get_switch_opt () with
-  | None, _ | _, None ->
-      (* Eio context unavailable — fall back to direct LLM call *)
-      (match Llm_orchestration.complete req with
-       | Ok resp -> Ok (Llm_types.text_of_response resp)
-       | Error e -> Error (sprintf "plan generation failed: %s" e))
-  | Some net, Some sw ->
-      let oas_config = { (Oas_worker.default_config
-        ~name:"keeper-autonomy-plan"
-        ~model_spec:model
-        ~system_prompt:"You are a planning agent. Generate concrete action plans."
-        ~tools:[]) with
-        max_turns = 1;
-        max_tokens = 500;
-        temperature = 0.3;
-      } in
-      match Oas_worker.run ~sw ~net ~config:oas_config prompt with
-      | Ok r -> Ok (Llm_types.text_of_response r.Oas_worker.response)
-      | Error e -> Error (sprintf "plan generation failed: %s" e)
+  match
+    Llm_cascade.call ~cascade_name:"keeper_autonomy" ~prompt
+      ~temperature:0.3 ~max_tokens:500 ()
+  with
+  | Ok r -> Ok r.Llm_cascade.response
+  | Error e -> Error (sprintf "plan generation failed: %s" e)

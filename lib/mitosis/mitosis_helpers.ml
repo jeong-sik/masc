@@ -449,7 +449,7 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
               ("recheck_status_samples", `List [`String "warn"]);
               ("recheck_stability", `Float 1.0);
             ]
-        | Ok model ->
+        | Ok _model ->
             let req = Verifier_oas.{
               action_description =
                 Printf.sprintf "masc_mitosis_handoff outcome review (%s)" perspective;
@@ -463,9 +463,9 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
                   match ctx.clock with
                   | Some (Clock clock) when judge_timeout_sec > 0.0 ->
                       Eio.Time.with_timeout_exn clock judge_timeout_sec (fun () ->
-                        Verifier_oas.verify ~model req)
+                        Verifier_oas.verify req)
                   | _ ->
-                      Verifier_oas.verify ~model req
+                      Verifier_oas.verify req
                 in
                 `Verdict verdict
               with

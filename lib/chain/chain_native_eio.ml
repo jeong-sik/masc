@@ -294,22 +294,22 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
         | _ -> prompt
       in
       call_spawn_model runtime ~agent_name ~model_override ~prompt:full_prompt ~timeout_sec ()
-  | Ok (Direct spec) ->
-      let req : Llm_types.completion_request =
-        {
-          model = spec;
-          messages =
-            (match system with
-            | Some sys when trim sys <> "" ->
-                [ Agent_sdk.Types.system_msg sys; Agent_sdk.Types.user_msg prompt ]
-            | _ -> [ Agent_sdk.Types.user_msg prompt ]);
-          temperature = 0.2;
-          max_tokens = 4096;
-          tools = llm_tool_defs_of_json tools;
-          response_format = `Text;
-        }
+  | Ok (Direct _spec) ->
+      let messages : Llm_provider.Types.message list =
+        (match system with
+        | Some sys when trim sys <> "" ->
+            [ Llm_provider.Types.system_msg sys; Llm_provider.Types.user_msg prompt ]
+        | _ -> [ Llm_provider.Types.user_msg prompt ])
       in
-      (match Llm_orchestration.complete ~timeout_sec req with
+      let tools_json = match tools with
+        | Some (`List items) -> Some items
+        | _ -> None
+      in
+      (match
+        Llm_cascade.call_with_tools ~cascade_name:"chain_llm" ~messages
+          ?tools:tools_json ~temperature:0.2 ~max_tokens:4096
+          ~timeout_sec ()
+      with
       | Ok resp when trim (Llm_types.text_of_response resp) <> "" -> Ok (Llm_types.text_of_response resp)
       | Ok resp when Llm_types.has_tool_calls resp ->
           Ok (Yojson.Safe.to_string (llm_tool_calls_json (Llm_types.tool_calls_of_response resp)))

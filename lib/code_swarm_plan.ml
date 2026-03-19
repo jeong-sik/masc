@@ -322,7 +322,7 @@ FAIL: <reason> - if the diff has problems
 One line only.|}
     pattern files_str truncated_diff
 
-let verify_worker ~model ~pattern (worker : worker_plan) diff =
+let verify_worker ~pattern (worker : worker_plan) diff =
   if String.length diff = 0 then
     {
       worker_id = worker.worker_id;
@@ -333,19 +333,12 @@ let verify_worker ~model ~pattern (worker : worker_plan) diff =
     }
   else
     let prompt = build_verify_prompt ~pattern ~allowed_files:worker.files diff in
-    let req : Llm_types.completion_request =
-      {
-        model;
-        messages = [ Agent_sdk.Types.user_msg prompt ];
-        temperature = 0.0;
-        max_tokens = 200;
-        tools = [];
-        response_format = `Text;
-      }
-    in
     let verdict =
-      match Llm_orchestration.complete req with
-      | Ok resp -> Verifier_oas.parse_verdict (Llm_types.text_of_response resp)
+      match
+        Llm_cascade.call ~cascade_name:"code_swarm_verify" ~prompt
+          ~temperature:0.0 ~max_tokens:200 ()
+      with
+      | Ok r -> Verifier_oas.parse_verdict r.Llm_cascade.response
       | Error e -> Verifier_oas.Warn ("verifier_unavailable: " ^ e)
     in
     let our_verdict =
@@ -380,26 +373,15 @@ let verify_worker ~model ~pattern (worker : worker_plan) diff =
       issues;
     }
 
-let verify_plan ~base_path ~plan_id ~verify_model =
+let verify_plan ~base_path ~plan_id ~verify_model:_ =
   match load_plan base_path plan_id with
   | Error e -> Error e
   | Ok plan ->
-      let model =
-        match verify_model with
-        | Some m -> (
-            match Llm_types.model_spec_of_string m with
-            | Ok spec -> spec
-            | Error _ -> Llm_types.glm_cloud)
-        | None -> (
-            match Llm_types.default_verifier_model_spec () with
-            | Ok spec -> spec
-            | Error _ -> Llm_types.glm_cloud)
-      in
       let results =
         List.map
           (fun worker ->
             let diff, _changed = get_worker_diff ~base_path worker in
-            verify_worker ~model ~pattern:plan.pattern worker diff)
+            verify_worker ~pattern:plan.pattern worker diff)
           plan.workers
       in
       let pass_count =

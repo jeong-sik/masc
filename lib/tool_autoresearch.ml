@@ -57,7 +57,6 @@ type code_generator =
   history:Autoresearch.cycle_record list ->
   insights:string list ->
   target_file:string -> file_content:string ->
-  llm_model:string ->
   (string * string, string) Stdlib.result
 
 (** Per-loop code generator override (for tests). *)
@@ -535,12 +534,12 @@ let handle_cycle ctx args =
              generate ~goal:(Printf.sprintf "%s\n\nApply this hypothesis: %s" state.goal h)
                ~baseline:state.baseline
                ~history:state.history ~insights:state.insights
-               ~target_file ~file_content ~llm_model:state.llm_model
+               ~target_file ~file_content
              |> Result.map (fun (_generated_hyp, code) -> (h, code))
            | None ->
              generate ~goal:state.goal ~baseline:state.baseline
                ~history:state.history ~insights:state.insights
-               ~target_file ~file_content ~llm_model:state.llm_model)
+               ~target_file ~file_content)
         in
         match code_result with
         | Error e ->

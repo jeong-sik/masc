@@ -443,7 +443,7 @@ let parse_routing_decision_json (json : Yojson.Safe.t) =
 let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
   match router_judge_model () with
   | None -> None
-  | Some judge_model ->
+  | Some _judge_model ->
       let worker_class_text =
         match worker_class with
         | Some kind -> Team_session_types.worker_class_to_string kind
@@ -465,30 +465,18 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
            worker_prompt=%S\n"
           worker_class_text role_text spawn_prompt
       in
-      let request : Llm_types.completion_request =
-        {
-          model = llama_router_model_spec judge_model;
-          messages =
-            [
-              Agent_sdk.Types.system_msg
-                "You are a routing judge for a hybrid swarm. Output only JSON.";
-              Agent_sdk.Types.user_msg prompt;
-            ];
-          temperature = 0.0;
-          max_tokens = 220;
-          tools = [];
-          response_format = `Json;
-        }
-      in
-      match
-        Llm_orchestration.complete ~timeout_sec:(router_judge_timeout_sec ()) request
+      (match
+        Llm_cascade.call ~cascade_name:"routing_judge" ~prompt
+          ~system:"You are a routing judge for a hybrid swarm. Output only JSON."
+          ~temperature:0.0 ~max_tokens:220
+          ~timeout_sec:(router_judge_timeout_sec ()) ()
       with
-      | Ok response -> (
+      | Ok r -> (
           try
-            Yojson.Safe.from_string (Llm_types.text_of_response response)
+            Yojson.Safe.from_string r.Llm_cascade.response
             |> parse_routing_decision_json
           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
-      | Error _ -> None
+      | Error _ -> None)
 
 let routing_summary_line (decision : routing_decision) =
   Printf.sprintf

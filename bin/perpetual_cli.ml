@@ -144,7 +144,7 @@ let () =
 
   (* Parse model specs *)
   let models = List.filter_map (fun s ->
-    match Llm_types.model_spec_of_string s with
+    match Llm_cascade.model_spec_of_string s with
     | Ok m ->
       (* Apply max_context override if specified *)
       let m = match args.max_context with
@@ -165,7 +165,7 @@ let () =
   let verifier =
     match args.verifier_str with
     | Some s -> (
-        match Llm_types.model_spec_of_string s with
+        match Llm_cascade.model_spec_of_string s with
         | Ok m -> Some m
         | Error e ->
             eprintf "Bad verifier spec '%s': %s\n%!" s e;

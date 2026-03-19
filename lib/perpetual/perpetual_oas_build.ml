@@ -38,7 +38,7 @@ let build_perpetual_agent
   (* Resolve OAS model from primary cascade model *)
   let primary_model = match config.model_cascade with
     | m :: _ -> m
-    | [] -> Llm_types.default_local_model_spec ()
+    | [] -> Llm_cascade.default_local_model_spec ()
   in
   let oas_model = primary_model.model_id in
   (* Build provider via Phase 3 adapter.

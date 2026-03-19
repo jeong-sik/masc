@@ -23,7 +23,7 @@ let handle_keeper_model_set ctx args : tool_result =
     | Error e -> (false, "❌ " ^ e)
     | Ok None -> (false, Printf.sprintf "❌ keeper not found: %s" name)
     | Ok (Some meta) -> (
-        match Llm_types.model_spec_of_string model with
+        match Llm_cascade.model_spec_of_string model with
         | Error e -> (false, "❌ " ^ e)
         | Ok spec ->
             let runtime_ok =

@@ -57,7 +57,7 @@ lib/                    # Core library (~200 .ml files)
   env_config.ml         # Centralized env var management (12-Factor)
 bin/                    # Executable entry points
 config/
-  llm_cascade.json      # Local heartbeat model-pool config (provider:model, hot-reload)
+  cascade.json           # Local heartbeat model-pool config (provider:model, hot-reload)
   lodge.env             # Heartbeat config (tick interval, quiet hours)
 test/                   # Test suite
 ```
@@ -177,7 +177,7 @@ dune build --root . @check
 - Changes to `room.ml` state machine (affects all coordination)
 - Changes to `lodge_heartbeat.ml` tick logic (affects autonomous agents)
 - Adding new MCP tool registrations in `tools.ml`
-- Modifying `config/llm_cascade.json` model ordering
+- Modifying `config/cascade.json` model ordering
 - Changes to `board.ml` post ID generation (cryptographic)
 
 ### Never Do

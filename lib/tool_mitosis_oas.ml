@@ -22,7 +22,7 @@ module Oas = Agent_sdk
 type context = {
   config : Room_utils.config;
   agent_name : string;
-  masc_tools : Llm_types.tool_def list;
+  masc_tools : Masc_model.tool_def list;
   dispatch : name:string -> args:Yojson.Safe.t -> bool * string;
 }
 
@@ -203,7 +203,7 @@ let handle_mitosis_divide ctx args : result =
   | Error e ->
     json_err (Printf.sprintf "OAS child agent failed: %s" e)
   | Ok result ->
-    let response_text = Llm_types.text_of_response result.response in
+    let response_text = Masc_model.text_of_response result.response in
     json_ok (`Assoc [
       ("divided", `Bool true);
       ("session_id", `String result.session_id);
@@ -278,7 +278,7 @@ let handle_mitosis_handoff ctx args : result =
         ("runtime", `String "oas");
       ])
     | Ok result ->
-      let response_text = Llm_types.text_of_response result.response in
+      let response_text = Masc_model.text_of_response result.response in
       json_ok (`Assoc [
         ("action", `String "handoff");
         ("generation", `Int new_cell.Mitosis.generation);

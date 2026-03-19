@@ -47,7 +47,7 @@ type succession_dna = {
 }
 
 type successor_spec = {
-  model : Llm_types.model_spec;
+  model : Masc_model.model_spec;
   inherit_tools : bool;
   context_budget : float;
 }
@@ -279,9 +279,9 @@ let extract_dna ~(working_ctx : Context_manager.working_context)
 
 (** Normalize messages for the target model's constraints. *)
 let normalize_for_model (msgs : Agent_sdk.Types.message list)
-    (target : Llm_types.model_spec) : Agent_sdk.Types.message list =
+    (target : Masc_model.model_spec) : Agent_sdk.Types.message list =
   let msgs = match target.provider with
-    | Llm_types.Llama ->
+    | Masc_model.Llama ->
       (* Local llama runtimes: merge consecutive system messages, simplify tool messages *)
       List.map (fun (m : Agent_sdk.Types.message) ->
         match m.role with
@@ -296,7 +296,7 @@ let normalize_for_model (msgs : Agent_sdk.Types.message list)
                    name = None; tool_call_id = None }
         | _ -> m
       ) msgs
-    | Llm_types.Claude ->
+    | Masc_model.Claude ->
       (* Claude: ensure alternating user/assistant, no consecutive same roles *)
       let rec fix_alternation = function
         | [] -> []
@@ -315,7 +315,7 @@ let normalize_for_model (msgs : Agent_sdk.Types.message list)
   (* Trim to fit within target context budget *)
   let max_tokens = target.max_context * 8 / 10 in  (* Leave 20% for response *)
   let rec trim msgs =
-    let total = Llm_types.estimate_tokens msgs in
+    let total = Masc_model.estimate_tokens msgs in
     if total <= max_tokens || List.length msgs <= 2 then msgs
     else
       (* Remove oldest non-system message *)
@@ -409,7 +409,7 @@ let hydrate (dna : succession_dna) (spec : successor_spec) : Context_manager.wor
       let rec take_up_to budget acc = function
         | [] -> List.rev acc
         | m :: rest ->
-          let tok = Llm_types.estimate_tokens [m] in
+          let tok = Masc_model.estimate_tokens [m] in
           if budget - tok < 0 then List.rev acc
           else take_up_to (budget - tok) (m :: acc) rest
       in

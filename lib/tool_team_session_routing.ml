@@ -84,7 +84,7 @@ type prepared_spawn = Tool_team_session_step.prepared_spawn = {
   worker_run_id : string;
   spec : spawn_spec;
   runtime_actor_name : string option;
-  runtime_model : Llm_types.model_spec;
+  runtime_model : Masc_model.model_spec;
   runtime_lease : Local_runtime_pool.lease option;
   assigned_runtime : string option;
 }
@@ -456,14 +456,14 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
           worker_class_text role_text spawn_prompt
       in
       (match
-        Llm_cascade.call ~cascade_name:"routing_judge" ~prompt
+        Cascade.call ~cascade_name:"routing_judge" ~prompt
           ~system:"You are a routing judge for a hybrid swarm. Output only JSON."
           ~temperature:0.0 ~max_tokens:220
           ~timeout_sec:(router_judge_timeout_sec ()) ()
       with
       | Ok r -> (
           try
-            Yojson.Safe.from_string r.Llm_cascade.response
+            Yojson.Safe.from_string r.Cascade.response
             |> parse_routing_decision_json
           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
       | Error _ -> None)

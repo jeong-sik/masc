@@ -166,7 +166,7 @@ let test_keeper_tool_followup_prompt_write_done_blocks_more_tools () =
       ~user_message:"post this"
       ~draft_reply:"done"
       ~tool_outputs:
-        [ ({ Masc_mcp.Llm_types.call_name = "keeper_board_post";
+        [ ({ Masc_mcp.Masc_model.call_name = "keeper_board_post";
              call_id = "1";
              call_arguments = "{}"; }, "{\"ok\":true}") ]
       ~already_executed:[ "keeper_board_post" ]
@@ -288,7 +288,7 @@ let test_execute_keeper_tool_call_readonly_branches () =
   let config = Masc_mcp.Room.default_config (Filename.get_temp_dir_name ()) in
   let run call_name args =
     Keeper_exec_tools.execute_keeper_tool_call ~config ~meta ~ctx_work
-      { Masc_mcp.Llm_types.call_id = "1"; call_name; call_arguments = args }
+      { Masc_mcp.Masc_model.call_id = "1"; call_name; call_arguments = args }
     |> Yojson.Safe.from_string
   in
   let now_json = run "keeper_time_now" "{}" in

@@ -677,18 +677,18 @@ let parse_llm_code_response response =
             in
             Result.ok (hypothesis, trimmed)
 
-(** Generate code change via Llm_cascade "autoresearch" profile.
+(** Generate code change via Cascade "autoresearch" profile.
     Returns Ok (hypothesis, new_code) or Error reason. *)
 let generate_code_change ~goal ~baseline ~history ~insights
     ~target_file ~file_content =
   let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
     ~file_content ~target_file in
   match
-    Llm_cascade.call ~cascade_name:"autoresearch" ~prompt
+    Cascade.call ~cascade_name:"autoresearch" ~prompt
       ~temperature:0.7 ~max_tokens:4096 ~timeout_sec:120 ()
   with
   | Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
-  | Ok r -> parse_llm_code_response r.Llm_cascade.response
+  | Ok r -> parse_llm_code_response r.Cascade.response
 
 (* ================================================================ *)
 (* Loop State Management                                            *)

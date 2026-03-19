@@ -256,8 +256,8 @@
  (libraries masc_mcp alcotest str yojson))
 
 (test
- (name test_llm_cascade)
- (modules test_llm_cascade)
+ (name test_cascade)
+ (modules test_cascade)
  (libraries masc_mcp alcotest unix eio eio_main))
 
 (test

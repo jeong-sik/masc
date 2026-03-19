@@ -21,4 +21,4 @@ val starts_with : prefix:string -> string -> bool
 
     Messages starting with [memory_summary_prefix] or [goal_prefix]
     receive a minimum score of 0.95 (sticky memory). *)
-val score_messages : Llm_types.message list -> (int * float) list
+val score_messages : Masc_model.message list -> (int * float) list

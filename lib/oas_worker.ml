@@ -63,7 +63,7 @@ type run_result = {
 (* Internal: resolve provider                                        *)
 (* ================================================================ *)
 
-let resolve_provider (spec : Llm_types.model_spec) : Oas.Provider.config =
+let resolve_provider (spec : Masc_model.model_spec) : Oas.Provider.config =
   match Oas_type_adapters.to_oas_provider spec with
   | Some cfg -> cfg
   | None ->
@@ -204,12 +204,12 @@ let run_with_masc_tools
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
-    ~(masc_tools : Llm_types.tool_def list)
+    ~(masc_tools : Masc_model.tool_def list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?on_event
     (goal : string)
   : (run_result, string) result =
-  let oas_tools = List.map (fun (td : Llm_types.tool_def) ->
+  let oas_tools = List.map (fun (td : Masc_model.tool_def) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.tool_name
       ~description:td.tool_description
@@ -230,7 +230,7 @@ let require_eio () =
   | _, None -> Error "Eio net not available (running outside server context)"
 
 let resolve_cascade ~cascade_name =
-  match Llm_cascade.get_cascade ~cascade_name () with
+  match Cascade.get_cascade ~cascade_name () with
   | [] ->
     Error (Printf.sprintf "No models available for cascade '%s'" cascade_name)
   | spec :: _ ->
@@ -269,7 +269,7 @@ let run_named_with_masc_tools
     ~cascade_name
     ~goal
     ?(system_prompt = "")
-    ~(masc_tools : Llm_types.tool_def list)
+    ~(masc_tools : Masc_model.tool_def list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
     ?(temperature = 0.7)

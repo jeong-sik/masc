@@ -174,9 +174,9 @@ let test_source_metrics_fd_unlock () =
       {|fd unlock failed:|})
 
 let test_source_llm_token_parse () =
-  check bool "llm_types.ml has token count parse logging"
+  check bool "masc_model.ml has token count type"
     true (any_file_contains_pattern
-      ["lib/llm/llm_types.ml"]
+      ["lib/masc_model.ml"]
       {|token|})
 
 let test_source_keeper_proactive () =

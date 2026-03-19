@@ -455,6 +455,12 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
               let thinking_enabled =
                 Option.value ~default:false meta.thinking_enabled
               in
+              let resume_guardrails =
+                let gate =
+                  Worker_oas.gate_config_of_execution_scope meta.execution_scope
+                in
+                Verifier_oas.eval_gate_to_oas_guardrails gate
+              in
               let config, options =
                 build_resume_config ~worker_name ~model
                   ~system_prompt:
@@ -462,7 +468,8 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                        ?session_id:meta.team_session_id ?role:meta.role
                        ?selection_note:meta.selection_note ())
                   ~tools ~max_turns ~thinking_enabled ~hooks ~raw_trace
-                  ~periodic_callbacks:heartbeat_cbs ()
+                  ~periodic_callbacks:heartbeat_cbs
+                  ~guardrails:resume_guardrails ()
               in
               let agent =
                 Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config ()

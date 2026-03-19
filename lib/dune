@@ -516,7 +516,7 @@
    ;; Perpetual Agent Runtime (infinite context system)
    llm_types
    masc_eio_env
-   llm_discovery_cache
+   discovery_cache
    oas_type_adapters
    context_scoring
    compaction_types

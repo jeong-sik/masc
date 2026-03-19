@@ -1,4 +1,4 @@
-(** Llm_discovery_cache — cached wrapper over OAS [Llm_provider.Discovery].
+(** Discovery_cache — cached wrapper over OAS [Llm_provider.Discovery].
 
     All probing logic lives in OAS. This module adds:
     - TTL-based caching (30s default)
@@ -7,7 +7,7 @@
 
     No dependency on Llm_cascade.
 
-    @since 2.113.0 *)
+    @since 2.130.0 — renamed from Llm_discovery_cache *)
 
 (* ── Eio capability refs (set once at server init) ───────── *)
 

@@ -112,7 +112,8 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
   with
   | Error e ->
       (Printf.sprintf "OAS agent failed: %s" e, 0.0, [])
-  | Ok run_result ->
+  | Ok tr ->
+      let run_result = tr.Keeper_oas_adapter.oas_result in
       let content =
         let c = String.trim (Keeper_oas_adapter.text_of_run_result run_result) in
         if c = "" then "(autonomous execution completed)" else c

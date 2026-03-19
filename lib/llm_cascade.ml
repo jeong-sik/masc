@@ -14,6 +14,24 @@
     @since 2.115.0 — delegated to OAS Cascade_config
     @since 2.116.0 — call_raw, call_with_tools added *)
 
+(* ================================================================ *)
+(* Concurrency diagnostics (observability only, no throttling)       *)
+(* ================================================================ *)
+
+(** Maximum concurrent LLM calls — retained for diagnostics/dashboard.
+    No longer enforced via semaphore: llama-server handles slot-based
+    parallelism internally, and cloud APIs return rate-limit errors. *)
+let max_concurrent_llm =
+  Llm_types.int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:8 ~min_v:1 ~max_v:128
+
+(** Atomic counter tracking in-flight LLM calls (observability only). *)
+let inflight = Atomic.make 0
+
+let llm_semaphore_available () = max_concurrent_llm - Atomic.get inflight
+let llm_permits_in_use () = Atomic.get inflight
+
+(* ================================================================ *)
+
 type cascade_result = {
   response : string;
   llm_used : string;

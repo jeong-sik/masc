@@ -10,7 +10,6 @@
 module Tool_perpetual = Masc_mcp.Tool_perpetual
 module Perpetual_loop = Masc_mcp.Perpetual_loop
 module Llm_types = Masc_mcp.Llm_types
-module Llm_orchestration = Masc_mcp.Llm_orchestration
 
 (* ============================================================
    Test Helpers

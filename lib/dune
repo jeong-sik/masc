@@ -522,7 +522,6 @@
    llm_discovery_cache
    llm_oas_adapters
    llm_provider_dispatch
-   llm_orchestration
    llm_response_cache
    context_scoring
    compaction_types

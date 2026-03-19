@@ -1,5 +1,5 @@
-// OAS Agent Pipeline — real-time agent lifecycle and keeper snapshot monitor.
-// Shows recent agent selection/decision/execution events from OAS Event_bus.
+// Home execution telemetry surface.
+// Internal OAS bridge data is translated into MASC-facing runtime language here.
 
 import { html } from 'htm/preact'
 import { oasAgentEvents, oasKeeperSnapshots, oasHealthSummary } from '../../store'
@@ -24,7 +24,7 @@ function formatTs(ts: number): string {
 function OasAgentEventList() {
   const events = oasAgentEvents.value
   if (events.length === 0) {
-    return html`<div class="oas-empty">OAS agent event 대기 중...</div>`
+    return html`<div class="oas-empty">최근 실행 이벤트 없음</div>`
   }
 
   return html`
@@ -46,7 +46,7 @@ function OasAgentEventList() {
 function OasKeeperSnapshotList() {
   const snapshots = oasKeeperSnapshots.value
   if (snapshots.size === 0) {
-    return html`<div class="oas-empty">OAS keeper snapshot 대기 중...</div>`
+    return html`<div class="oas-empty">최근 키퍼 스냅샷 없음</div>`
   }
 
   const entries = [...snapshots.values()].sort((a, b) => b.timestamp - a.timestamp)
@@ -74,21 +74,22 @@ function OasKeeperSnapshotList() {
 
 export function OasPipeline() {
   const health = oasHealthSummary.value
+  const eventLabel = `${health.totalEvents}건`
 
   return html`
     <div class="oas-pipeline">
       <div class="oas-pipeline__header">
-        <span class="oas-pipeline__title">OAS Pipeline</span>
-        <span class="oas-pipeline__count">${health.totalEvents} events</span>
+        <span class="oas-pipeline__title">실행 흐름</span>
+        <span class="oas-pipeline__count">${eventLabel}</span>
       </div>
 
       <div class="oas-pipeline__section">
-        <div class="oas-section-label">Agent Lifecycle</div>
+        <div class="oas-section-label">에이전트 실행</div>
         <${OasAgentEventList} />
       </div>
 
       <div class="oas-pipeline__section">
-        <div class="oas-section-label">Keeper Context</div>
+        <div class="oas-section-label">키퍼 컨텍스트</div>
         <${OasKeeperSnapshotList} />
       </div>
     </div>

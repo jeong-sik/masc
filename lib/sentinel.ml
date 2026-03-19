@@ -527,7 +527,8 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
         let petitions_created = ref 0 in
         (* Track titles already submitted to avoid duplicate petitions per sweep *)
         let submitted_keys : (string, unit) Hashtbl.t = Hashtbl.create 8 in
-        let submit ~title ~subject_type ~risk_class ?requested_action ?(source_refs=[]) () =
+        let submit ~title ~subject_type ~risk_class ?target_id ?requested_action
+            ?(source_refs=[]) () =
           (* Dedup within a single sweep: skip if we already submitted this title *)
           if Hashtbl.mem submitted_keys title then ()
           else begin
@@ -537,9 +538,30 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
             | Some _ -> requested_action
             | None ->
                 match subject_type with
-                | "task" -> Some { action_type = "release_task"; target_type = Some "task"; target_id = None; payload = None }
-                | "keeper" -> Some { action_type = "restart_keeper"; target_type = Some "keeper"; target_id = None; payload = None }
-                | "board_post" -> Some { action_type = "flag_post"; target_type = Some "board_post"; target_id = None; payload = None }
+                | "task" ->
+                    Some
+                      {
+                        action_type = "release_task";
+                        target_type = Some "task";
+                        target_id;
+                        payload = None;
+                      }
+                | "keeper" ->
+                    Some
+                      {
+                        action_type = "restart_keeper";
+                        target_type = Some "keeper";
+                        target_id;
+                        payload = None;
+                      }
+                | "board_post" ->
+                    Some
+                      {
+                        action_type = "flag_post";
+                        target_type = Some "board_post";
+                        target_id;
+                        payload = None;
+                      }
                 | _ -> None
           in
           match Council.Governance_v2.submit_petition base_path
@@ -582,6 +604,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
                   t.id assignee (age /. 3600.0));
                 submit
                   ~title:(sprintf "Stuck task: %s (claimed by %s)" t.title assignee)
+                  ~target_id:t.id
                   ~subject_type:"task" ~risk_class:Council.Governance_v2.Low
                   ~source_refs:["task-" ^ t.id] ()
               end
@@ -592,6 +615,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
                   t.id assignee (age /. 3600.0));
                 submit
                   ~title:(sprintf "Stuck task: %s (in_progress by %s)" t.title assignee)
+                  ~target_id:t.id
                   ~subject_type:"task" ~risk_class:Council.Governance_v2.Low
                   ~source_refs:["task-" ^ t.id] ()
               end
@@ -620,6 +644,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
                   submit
                     ~title:(sprintf "Keeper %s failing (%d consecutive failures)"
                       keeper_name consecutive_failures)
+                    ~target_id:keeper_name
                     ~subject_type:"keeper" ~risk_class:Council.Governance_v2.High
                     ~source_refs:["keeper-" ^ keeper_name] ()
                 end
@@ -640,6 +665,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
             submit
               ~title:(sprintf "Flagged post by %s (down=%d, up=%d)"
                 (Board.Agent_id.to_string p.author) p.votes_down p.votes_up)
+              ~target_id:(Board.Post_id.to_string p.id)
               ~subject_type:"board_post" ~risk_class:Council.Governance_v2.Low
               ~source_refs:["post-" ^ Board.Post_id.to_string p.id] ()
         ) board_posts;
@@ -665,9 +691,7 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
            && recent_automation_posts >= (current_max_posts * 80 / 100) then begin
           let proposed = max 1 (current_max_posts * 70 / 100) in
           submit
-            ~title:(sprintf
-              "Lodge automation post volume high (%d/%d daily cap). Propose reducing to %d."
-              recent_automation_posts current_max_posts proposed)
+            ~title:"Lodge automation post volume high. Propose reducing daily cap."
             ~subject_type:"param_change"
             ~risk_class:Council.Governance_v2.Low
             ~requested_action:{
@@ -677,9 +701,11 @@ let make_governance_sweep_consumer config : (module Pulse.Consumer) =
               payload = Some (`Assoc [
                 ("param_key", `String "lodge.max_posts_per_day");
                 ("value", `Int proposed);
+                ("recent_automation_posts", `Int recent_automation_posts);
+                ("current_daily_cap", `Int current_max_posts);
               ]);
             }
-            ~source_refs:["anomaly-lodge-post-volume"] ()
+            ~source_refs:["anomaly:lodge-post-volume"] ()
         end;
 
         (* BUG-007 FIX: Execute Ready_auto_execute cases via execute_action.

@@ -153,6 +153,7 @@ let social_board_event_prompt ~(meta : keeper_meta) (event : social_board_event)
      Author: %s\n\
      Content preview:\n%s\n\n\
      If you act, use tools directly.\n\
+     Read the full thread with `keeper_board_get` before deciding whenever context is incomplete.\n\
      Preferred action order:\n\
      1. `keeper_board_comment` when a direct reply is sufficient.\n\
      2. `keeper_board_vote` when a lightweight signal is enough.\n\

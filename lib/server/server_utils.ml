@@ -69,20 +69,21 @@ let board_sort_label = function
 let is_system_board_author author =
   author = "lodge-system" || author = "team-session"
 
-let filter_board_posts ~exclude_system posts =
-  if not exclude_system then posts
-  else
-    List.filter
-      (fun (p : Board.post) ->
-         Board.classify_post_kind p <> Board.System_post
-         && not (is_system_board_author (Board.Agent_id.to_string p.author)))
-      posts
+let filter_board_posts ~exclude_system ~exclude_automation posts =
+  posts
+  |> List.filter (fun (p : Board.post) ->
+         let kind = Board.classify_post_kind p in
+         (not exclude_system
+          || (kind <> Board.System_post
+              && not (is_system_board_author (Board.Agent_id.to_string p.author))))
+         && (not exclude_automation || kind <> Board.Automation_post))
 
 let max_filtered_board_window = 5200
 
-let board_fetch_limit ~exclude_system ~limit ~offset =
+let board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset =
   let base = limit + offset in
-  if exclude_system then max base max_filtered_board_window else base
+  if exclude_system || exclude_automation then max base max_filtered_board_window
+  else base
 
 let board_post_dashboard_json ~author_karma (p : Board.post) : Yojson.Safe.t =
   let base_fields =
@@ -135,4 +136,3 @@ let standard_limit request =
 (** Standard query param: offset with default 0, min 0. *)
 let standard_offset request =
   int_query_param request "offset" ~default:0 |> max 0
-

@@ -121,11 +121,12 @@ export function fetchDashboardExecution(): Promise<DashboardExecutionResponse> {
 
 export function fetchDashboardMemory(
   sortMode: BoardSortMode,
-  opts?: { excludeSystem?: boolean },
+  opts?: { excludeSystem?: boolean; excludeAutomation?: boolean },
 ): Promise<DashboardMemoryResponse> {
   const params = new URLSearchParams()
   params.set('sort_by', sortMode)
   if (opts?.excludeSystem) params.set('exclude_system', 'true')
+  if (opts?.excludeAutomation) params.set('exclude_automation', 'true')
   return get(`/api/v1/dashboard/memory${params.toString() ? `?${params}` : ''}`)
 }
 

@@ -20,6 +20,35 @@ let append_vote_log ~target ~voter ~direction =
     rotate_if_needed path
   with Sys_error msg -> Log.BoardLog.error "persist error (append_vote_log): %s" msg
 
+let rewrite_vote_log store =
+  try
+    ensure_masc_dir ();
+    let path = vote_log_path () in
+    let tmp_path = path ^ ".tmp" in
+    let buf = Buffer.create 4096 in
+    Hashtbl.iter
+      (fun target direction ->
+        let voter =
+          match String.rindex_opt target ':' with
+          | Some idx when idx + 1 < String.length target ->
+              String.sub target (idx + 1) (String.length target - idx - 1)
+          | _ -> ""
+        in
+        let json =
+          `Assoc
+            [
+              ("target", `String target);
+              ("voter", `String voter);
+              ("direction", `String (vote_direction_to_string direction));
+              ("ts", `Float (Time_compat.now ()));
+            ]
+        in
+        Buffer.add_string buf (Yojson.Safe.to_string json ^ "\n"))
+      store.vote_log;
+    Fs_compat.save_file tmp_path (Buffer.contents buf);
+    Sys.rename tmp_path path
+  with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg
+
 let vote store ~voter ~post_id ~direction : (int, board_error) result =
   match Agent_id.of_string voter with
   | Error e -> Error e
@@ -361,6 +390,48 @@ let set_thread_id store ~post_id ~thread_id : (unit, board_error) result =
             Ok ()
       )
 
+let delete_post store ~post_id : (unit, board_error) result =
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+      with_lock store (fun () ->
+        let post_key = Post_id.to_string pid in
+        match Hashtbl.find_opt store.posts post_key with
+        | None -> Error (Post_not_found post_id)
+        | Some _ ->
+            let comment_ids =
+              Hashtbl.fold
+                (fun key (c : comment) acc ->
+                  if Post_id.to_string c.post_id = post_key then key :: acc else acc)
+                store.comments []
+            in
+            Hashtbl.remove store.posts post_key;
+            Hashtbl.remove store.comments_by_post post_key;
+            List.iter (fun comment_key -> Hashtbl.remove store.comments comment_key) comment_ids;
+            let vote_keys =
+              Hashtbl.fold
+                (fun key _ acc ->
+                  if String.starts_with ~prefix:("post:" ^ post_key ^ ":") key
+                     || List.exists
+                          (fun comment_key ->
+                            String.starts_with ~prefix:("comment:" ^ comment_key ^ ":") key)
+                          comment_ids
+                  then key :: acc
+                  else acc)
+                store.vote_log []
+            in
+            List.iter (fun key -> Hashtbl.remove store.vote_log key) vote_keys;
+            store.post_count := max 0 (!(store.post_count) - 1);
+            invalidate_post_caches store;
+            invalidate_comment_caches store;
+            rewrite_posts store;
+            rewrite_comments store;
+            rewrite_vote_log store;
+            store.dirty_posts <- false;
+            store.dirty_comments <- false;
+            store.last_flush <- Time_compat.now ();
+            Ok ())
+
 (** {1 Global Store} *)
 
 let make_global_lazy () = lazy (
@@ -392,6 +463,7 @@ let flush_dirty store =
       rewrite_comments store;
       store.dirty_comments <- false
     end;
+    rewrite_vote_log store;
     store.last_flush <- Time_compat.now ()
   )
 

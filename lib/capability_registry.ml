@@ -206,6 +206,7 @@ let privileged_keeper_tool_names : string list =
   [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit"; "keeper_github" ]
 
 let keeper_backend_tool_name = function
+  | "keeper_board_get" -> "masc_board_get"
   | "keeper_board_post" -> "masc_board_post"
   | "keeper_board_list" -> "masc_board_list"
   | "keeper_board_comment" -> "masc_board_comment"

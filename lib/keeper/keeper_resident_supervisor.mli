@@ -1,13 +1,12 @@
-(** Keeper_supervisor — OAS-inspired fiber lifecycle supervisor.
+(** Keeper_resident_supervisor — resident keepalive fiber supervision.
 
-    Wraps keeper heartbeat fibers with Eio.Promise-based liveness tracking.
-    Detects zombie fibers (Hashtbl entry with terminated fiber) and performs
-    automatic restart with exponential backoff.
+    Wraps the MASC-owned keeper heartbeat fibers with Eio.Promise-based
+    liveness tracking. Detects zombie fibers (registry entry with terminated
+    fiber) and performs automatic restart with exponential backoff.
 
-    Integrates with:
-    - Keeper_keepalive.run_heartbeat_loop for fiber body
-    - OAS Event_bus for lifecycle event publishing
-    - Sentinel Pulse for periodic sweep scheduling
+    This does not supervise the OAS [Agent.run] lifecycle. OAS turn hooks,
+    validators, and periodic callbacks remain inside the agent execution path;
+    this module only supervises the outer resident keepalive runtime.
 
     @since 2.102.0 *)
 
@@ -26,7 +25,7 @@ type supervised_state = {
 (** {1 Initialization} *)
 
 val init : bus:Agent_sdk.Event_bus.t -> unit
-(** Connect the OAS Event_bus. Call once during bootstrap. *)
+(** Connect the shared runtime Event_bus. Call once during bootstrap. *)
 
 (** {1 Supervised Execution} *)
 
@@ -36,7 +35,7 @@ val supervise_keepalive :
     Registers in both the legacy keepalive registry (backward compat)
     and the supervisor registry (Promise-based liveness tracking).
     On fiber termination, resolves the Promise and publishes
-    lifecycle events via Event_bus. *)
+    resident-lifecycle events via Event_bus. *)
 
 (** {1 Sweep and Recovery} *)
 

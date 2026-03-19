@@ -98,7 +98,7 @@ let init_task_backend () =
 let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
-  (* OAS Event_bus: shared instance for cross-subsystem communication *)
+  (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
   let event_bus = Agent_sdk.Event_bus.create () in
   (* Eio fiber isolation: each subsystem runs in its own fiber.
      If one crashes, others keep running — Eio's structured concurrency. *)
@@ -109,9 +109,9 @@ let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         Log.Server.error "subsystem %s crashed: %s" name
           (Printexc.to_string exn))
   in
-  (* OAS Event_bus → SSE bridge: relay masc:* events to dashboard *)
+  (* Event_bus → SSE bridge: relay masc:* events to dashboard *)
   Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
-  (* Inject Event_bus into Keeper for lifecycle event publishing *)
+  (* Inject Event_bus into keeper resident runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try

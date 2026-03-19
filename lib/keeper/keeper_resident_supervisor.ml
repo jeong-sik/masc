@@ -1,12 +1,9 @@
-(** Keeper_supervisor — OAS-inspired fiber lifecycle supervisor.
+(** Keeper_resident_supervisor — resident keepalive fiber supervision.
 
-    Tracks keeper heartbeat fibers via Eio.Promise liveness.
-    Detects zombies and auto-restarts with exponential backoff.
-
-    Design references:
-    - OAS Async_agent.spawn: fiber + promise pattern
-    - OAS Event_bus: typed lifecycle event pub/sub
-    - OAS Swarm runner: retry with exponential backoff
+    Supervises the MASC-owned background keepalive fibers that maintain
+    keeper presence and heartbeat snapshots. This is not the OAS [Agent.run]
+    lifecycle; it sits outside the turn loop and only manages resident
+    liveness/restart policy for keepalive work.
 
     @since 2.102.0 *)
 
@@ -49,8 +46,8 @@ let init ~bus =
 (* ── Pure helpers ────────────────────────────────────────── *)
 
 let backoff_delay attempt =
-  let base = Env_config.KeeperSupervisor.backoff_base_s in
-  let max_delay = Env_config.KeeperSupervisor.backoff_max_s in
+  let base = Env_config.KeeperResidentSupervisor.backoff_base_s in
+  let max_delay = Env_config.KeeperResidentSupervisor.backoff_max_s in
   Float.min max_delay (base *. Float.of_int (1 lsl (min attempt 20)))
 
 let keep_last_n n item lst =
@@ -63,7 +60,7 @@ let keep_last_n n item lst =
 let publish_lifecycle event_name keeper_name detail =
   match !bus_ref with
   | Some bus ->
-      Oas_events.publish_keeper_lifecycle bus ~event:event_name
+      Oas_events.publish_keeper_resident_lifecycle bus ~event:event_name
         ~keeper_name ~detail
   | None -> ()
 
@@ -77,7 +74,7 @@ let fiber_health_of name =
       | None -> Fiber_alive
       | Some `Stopped -> Fiber_unknown  (* cleaned up by sweep *)
       | Some (`Crashed _) ->
-          if !(entry.restart_count) >= Env_config.KeeperSupervisor.max_restarts
+          if !(entry.restart_count) >= Env_config.KeeperResidentSupervisor.max_restarts
           then Fiber_dead
           else Fiber_zombie
 
@@ -164,7 +161,7 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
 
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
-  let max_restarts = Env_config.KeeperSupervisor.max_restarts in
+  let max_restarts = Env_config.KeeperResidentSupervisor.max_restarts in
   let to_restart = ref [] in
   let to_remove = ref [] in
   Hashtbl.iter (fun name entry ->

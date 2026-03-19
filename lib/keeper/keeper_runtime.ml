@@ -103,7 +103,8 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
                 if already_running then false
                 else if max_keepers > 0 && !remaining_slots <= 0 then false
                 else (
-                  Keeper_supervisor.supervise_keepalive ~proactive_warmup_sec ctx m;
+                  Keeper_resident_supervisor.supervise_keepalive
+                    ~proactive_warmup_sec ctx m;
                   if max_keepers > 0 then remaining_slots := !remaining_slots - 1;
                   true
                 )
@@ -128,10 +129,10 @@ let start_supervisor_sweep ctx =
   else begin
     let consumer : (module Pulse.Consumer) =
       (module struct
-        let name = "keeper-supervisor-sweep"
+        let name = "keeper-resident-supervisor-sweep"
         let should_act _beat = true
         let on_beat _beat =
-          (try Keeper_supervisor.sweep_and_recover ctx
+          (try Keeper_resident_supervisor.sweep_and_recover ctx
            with exn ->
              Log.Keeper.error "supervisor sweep failed: %s"
                (Printexc.to_string exn));
@@ -140,15 +141,17 @@ let start_supervisor_sweep ctx =
     in
     let p = Pulse.create
       ~clock:ctx.clock
-      ~rhythm:(Guardian.fixed_rhythm
-                 Env_config.KeeperSupervisor.sweep_interval_sec)
+      ~rhythm:{ Pulse.base_s = Env_config.KeeperResidentSupervisor.sweep_interval_sec;
+                 min_s = Env_config.KeeperResidentSupervisor.sweep_interval_sec;
+                 max_s = Env_config.KeeperResidentSupervisor.sweep_interval_sec;
+                 quiet = (0, 0) }
       ~lifecycle:Perpetual
       ~consumers:[consumer]
     in
     Pulse.run ~sw:ctx.sw p;
     supervisor_sweep_started := true;
-    Log.Keeper.info "supervisor sweep started (interval %.0fs)"
-      Env_config.KeeperSupervisor.sweep_interval_sec
+    Log.Keeper.info "resident supervisor sweep started (interval %.0fs)"
+      Env_config.KeeperResidentSupervisor.sweep_interval_sec
   end
 
 let existing_keepalive_bootstrap_done = ref false

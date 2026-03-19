@@ -1,8 +1,8 @@
-(** Test suite for Keeper_supervisor — fiber liveness tracking and recovery.
+(** Test suite for Keeper_resident_supervisor — fiber liveness tracking and recovery.
     Pure tests for backoff/helpers + Eio tests for Promise-based tracking. *)
 
 open Alcotest
-module Sup = Masc_mcp.Keeper_supervisor
+module Sup = Masc_mcp.Keeper_resident_supervisor
 module KT = Masc_mcp.Keeper_types
 
 (* ── Pure tests: backoff_delay ──────────────────────────── *)
@@ -68,7 +68,7 @@ let test_crash_log_empty_for_unknown () =
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
-  run "keeper_supervisor" [
+  run "keeper_resident_supervisor" [
     "backoff", [
       test_case "attempt 0 = base" `Quick test_backoff_delay_attempt_0;
       test_case "exponential growth" `Quick test_backoff_delay_exponential;

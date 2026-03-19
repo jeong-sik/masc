@@ -89,12 +89,21 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 
 ## Keeper 시스템
 
-장기 실행 AI 에이전트. OAS(Agent SDK) 기반 실행 + Supervisor 자동 복구.
+Keeper는 두 층으로 동작한다.
+
+- OAS `Agent.run` 내부 실행: tool loop, hooks, validators, periodic callbacks
+- MASC resident runtime: presence keepalive, heartbeat snapshot, resident restart policy
 
 ### 실행 경로
 
 ```
 keeper_turn → keeper_oas_adapter → Oas_worker → OAS Agent.run (+ Eval_gate)
+```
+
+### Resident 경로
+
+```
+keeper_runtime → keeper_keepalive → keeper_resident_supervisor
 ```
 
 ### 생명주기 상태
@@ -110,10 +119,11 @@ keeper_turn → keeper_oas_adapter → Oas_worker → OAS Agent.run (+ Eval_gate
 
 ### Supervisor
 
+- 대상은 `Agent.run` turn lifecycle이 아니라 resident keepalive fiber
 - 30초마다 sweep (Pulse consumer, `keeper_runtime`에서 등록)
 - crash 감지 시 exponential backoff 자동 restart (10s, 20s, 40s, 80s, 160s)
-- 5회 연속 실패 시 Dead. `Oas_events.publish_keeper_lifecycle` 이벤트 발행
-- OAS `Eio.Promise` 패턴 기반, Event_bus로 외부 구독 가능
+- 5회 연속 실패 시 Dead. `masc:keeper:resident_lifecycle` 이벤트 발행
+- OAS Event_bus는 transport로만 사용하고, restart budget/health 의미는 MASC가 소유
 
 ### 도구
 

@@ -202,9 +202,9 @@ module KeeperAlert = struct
     get_float ~default:0.85 "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
 end
 
-(** {1 Keeper Supervisor Configuration} *)
+(** {1 Keeper Resident Supervisor Configuration} *)
 
-module KeeperSupervisor = struct
+module KeeperResidentSupervisor = struct
   (** Maximum restart attempts before declaring a keeper dead *)
   let max_restarts =
     get_int ~default:5 "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS"

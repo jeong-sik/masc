@@ -238,8 +238,8 @@ Keep it concise — max 3 sentences per step.|}
 let generate_action_plan ~goal ~keeper_context =
   let prompt = build_plan_prompt goal ~keeper_context in
   match
-    Llm_cascade.call ~cascade_name:"keeper_autonomy" ~prompt
+    Cascade.call ~cascade_name:"keeper_autonomy" ~prompt
       ~temperature:0.3 ~max_tokens:500 ()
   with
-  | Ok r -> Ok r.Llm_cascade.response
+  | Ok r -> Ok r.Cascade.response
   | Error e -> Error (sprintf "plan generation failed: %s" e)

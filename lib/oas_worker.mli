@@ -1,7 +1,7 @@
 (** Oas_worker — Unified entry point for OAS-based MASC tool modules.
 
     Callers pass a [cascade_name] string; model resolution is delegated
-    to [Llm_cascade.get_cascade].  Internal [config] / [build] / [run]
+    to [Cascade.get_cascade].  Internal [config] / [build] / [run]
     are implementation details and not exported.
 
     @since Phase 1 — MASC→OAS migration

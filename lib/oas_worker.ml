@@ -230,7 +230,7 @@ let require_eio () =
   | _, None -> Error "Eio net not available (running outside server context)"
 
 let resolve_cascade ~cascade_name =
-  match Llm_cascade.get_cascade ~cascade_name () with
+  match Cascade.get_cascade ~cascade_name () with
   | [] ->
     Error (Printf.sprintf "No models available for cascade '%s'" cascade_name)
   | spec :: _ ->

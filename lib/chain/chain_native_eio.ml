@@ -299,7 +299,7 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
         | _ -> None
       in
       (match
-        Llm_cascade.call_with_tools ~cascade_name:"chain_llm" ~messages
+        Cascade.call_with_tools ~cascade_name:"chain_llm" ~messages
           ?tools:tools_json ~temperature:0.2 ~max_tokens:4096
           ~timeout_sec ()
       with

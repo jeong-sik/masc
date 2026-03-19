@@ -7,7 +7,7 @@
     - Task hygiene (orphaned/stuck task warnings) — LLM-driven
     - Keeper health monitoring — LLM-driven
 
-    LLM judgment layer via Prompt_registry + Llm_cascade.
+    LLM judgment layer via Prompt_registry + Cascade.
     When LLM is unavailable, judgment consumers skip silently.
 
     OAS integration: exports Agent Card, publishes events via Event_bus.
@@ -107,7 +107,7 @@ let parse_llm_json_safe s =
     else None
 
 (** Call sentinel LLM via cascade: render prompt from registry, run through
-    model specs from Llm_cascade. Returns parsed JSON or None on failure. *)
+    model specs from Cascade. Returns parsed JSON or None on failure. *)
 let call_sentinel_llm ~cascade_name ~prompt_id ~vars () =
   if not Env_config.Sentinel.llm_enabled then None
   else
@@ -117,7 +117,7 @@ let call_sentinel_llm ~cascade_name ~prompt_id ~vars () =
         None
     | Ok prompt ->
         let timeout = Env_config.Sentinel.llm_timeout_sec in
-        (match Llm_cascade.call ~cascade_name ~prompt
+        (match Cascade.call ~cascade_name ~prompt
             ~temperature:0.3 ~timeout_sec:timeout ~max_tokens:800 () with
         | Ok r when String.length r.response > 5 ->
             log_debug (sprintf "LLM response from %s (%d chars)" r.llm_used

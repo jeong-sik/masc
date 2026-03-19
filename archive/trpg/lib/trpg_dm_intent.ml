@@ -305,7 +305,7 @@ let extract_with_llm (text : string) : (dm_intent, string) result =
   let prompt = build_classification_prompt text in
   try
     match
-      Llm_cascade.call ~cascade_name:"trpg_intent" ~prompt
+      Cascade.call ~cascade_name:"trpg_intent" ~prompt
         ~temperature:0.1 ~timeout_sec:15 ~max_tokens:200
         ~accept:llm_response_is_valid ()
     with

@@ -1,4 +1,4 @@
-(** LLM Cascade — thin wrapper over OAS Cascade_config.
+(** Cascade — thin wrapper over OAS Cascade_config.
 
     MASC defines cascade name -> model list policy (default_model_strings).
     OAS handles config loading, model parsing, health filtering, and execution.
@@ -38,12 +38,12 @@ type cascade_result = {
   duration_ms : int;
 }
 
-(** Locate config/llm_cascade.json via CWD or ME_ROOT.
+(** Locate config/cascade.json via CWD or ME_ROOT.
     Returns [Some path] when the file exists on disk. *)
 let default_config_path () : string option =
   let candidates =
     let cwd_candidate =
-      Filename.concat (Sys.getcwd ()) "config/llm_cascade.json"
+      Filename.concat (Sys.getcwd ()) "config/cascade.json"
     in
     let me_root_candidate =
       let me =
@@ -53,7 +53,7 @@ let default_config_path () : string option =
       in
       Filename.concat
         (Filename.concat me "workspace/yousleepwhen/masc-mcp")
-        "config/llm_cascade.json"
+        "config/cascade.json"
     in
     [ cwd_candidate; me_root_candidate ]
   in

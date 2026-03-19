@@ -124,7 +124,7 @@
    credits_dashboard
    cp_microarch_summary
    cp_search_fabric
-   llm_cascade
+   cascade
    ;; WebRTC modules removed — use ocaml-webrtc library directly
    eio_context
    encryption

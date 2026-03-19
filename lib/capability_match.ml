@@ -254,7 +254,7 @@ let score_with_llm (agent : agent_profile) (task : task_profile)
     : (float, string) result =
   let prompt = build_scoring_prompt agent task in
   match
-    Llm_cascade.call ~cascade_name:"capability_match" ~prompt
+    Cascade.call ~cascade_name:"capability_match" ~prompt
       ~temperature:0.1 ~timeout_sec:15 ~max_tokens:20
       ~accept:llm_score_is_valid ()
   with

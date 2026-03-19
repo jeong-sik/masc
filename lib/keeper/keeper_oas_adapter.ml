@@ -123,7 +123,7 @@ let run_with_tools
       let usage = Llm_types.usage_of_response oas_result.response in
       let cost_report = Some (Eval_gate.cost_report
         ~accumulated_cost:!accumulated_cost_ref
-        ~api_calls:1
+        ~api_calls:(max 1 oas_result.turns)
         ~input_tokens:usage.input_tokens
         ~output_tokens:usage.output_tokens)
       in

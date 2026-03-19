@@ -302,17 +302,6 @@ let router_judge_model () =
   | Some _ as explicit -> explicit
   | None -> inferred_lead_model ()
 
-let llama_router_model_spec model_id =
-  {
-    Llm_types.provider = Llm_types.Llama;
-    model_id;
-    max_context = 262_144;
-    api_url = Env_config.Llama.server_url;
-    api_key_env = None;
-    cost_per_1k_input = 0.0;
-    cost_per_1k_output = 0.0;
-  }
-
 let classify_risk ~task_profile ~spawn_prompt ~spawn_role =
   let text = normalized_spawn_text ~spawn_prompt ~spawn_role in
   let base = default_risk_for_profile task_profile in

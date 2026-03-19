@@ -330,7 +330,6 @@
    swarm_status_inputs
    swarm_status_lanes
    swarm_status_build
-   swarm_behaviors_eio
    swarm_checkpoint
    swarm_eio
    telemetry_eio

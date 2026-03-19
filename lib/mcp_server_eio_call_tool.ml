@@ -341,7 +341,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   in
   let structured_content =
     match name with
-    | "masc_swarm_live_run"
+    | "masc_swarm_live_run" | "masc_swarm_live_status"
     | "masc_team_session_status"
     | "masc_operator_digest" -> (
         try Some (Yojson.Safe.from_string message) with _ -> None)

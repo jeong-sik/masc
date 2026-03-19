@@ -226,26 +226,14 @@ let run_social_board_event_turn
           let user_message = Agent_sdk.Types.user_msg prompt in
           let ctx_work = Context_manager.append ctx_work user_message in
           Context_manager.persist_message session user_message;
-          let _execute_tool_calls
-              ~(ctx_work : Context_manager.working_context)
-              (tcs : Llm_types.tool_call list) : (Llm_types.tool_call * string) list =
-            List.map
-              (fun (tc : Llm_types.tool_call) ->
-                 let output =
-                   try execute_keeper_tool_call ~config:ctx.config ~meta ~ctx_work tc
-                   with exn ->
-                     Log.Keeper.error "social tool %s failed: %s" tc.call_name (Printexc.to_string exn);
-                     Yojson.Safe.to_string
-                       (`Assoc
-                         [
-                           ("error", `String "Tool execution failed (internal error)");
-                           ("tool", `String tc.call_name);
-                         ])
-                 in
-                 (tc, output))
-              tcs
+          (* Social context: L3-equivalent guardrails (read + board tools) *)
+          let social_gate =
+            Keeper_exec_autonomy.autonomous_gate_config
+              ~autonomy_level:Keeper_autonomy.L3_Guided
           in
-          (* OAS Agent lifecycle: run_with_tools replaces manual tool loop *)
+          let guardrails =
+            Verifier_oas.eval_gate_to_oas_guardrails social_gate
+          in
           let max_tool_rounds = Keeper_config.keeper_max_tool_rounds () in
           let system_prompt = ctx_work.system_prompt in
           let goal = prompt in
@@ -255,7 +243,8 @@ let run_social_board_event_turn
                 ~system_prompt ~goal
                 ~max_turns:max_tool_rounds
                 ~temperature:(Keeper_config.keeper_planning_temp ())
-                ~max_tokens:(Keeper_config.keeper_social_initial_max_tokens ()) ())
+                ~max_tokens:(Keeper_config.keeper_social_initial_max_tokens ())
+                ~guardrails ())
           in
           match oas_result with
           | Error e -> Error e

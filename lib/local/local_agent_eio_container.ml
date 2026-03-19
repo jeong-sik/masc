@@ -532,7 +532,8 @@ let append_worker_completion_log ~base_path ~team_session_id ~worker_name
 (** Build (config, options) for Agent.resume — the continue_worker path.
     New workers use Worker_oas.build_agent (Builder pattern) instead. *)
 let build_resume_config ~worker_name ~model ~system_prompt ~tools ~max_turns
-    ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = []) () =
+    ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
+    ?(guardrails : Oas.Guardrails.t option) () =
   let config =
     {
       Oas.Types.default_config with
@@ -549,17 +550,21 @@ let build_resume_config ~worker_name ~model ~system_prompt ~tools ~max_turns
       tool_choice = Some Oas.Types.Auto;
     }
   in
+  let effective_guardrails =
+    match guardrails with
+    | Some g -> g
+    | None ->
+        { Oas.Guardrails.tool_filter =
+            Oas.Guardrails.AllowList (oas_tool_names tools);
+          max_tool_calls_per_turn = Some 12;
+        }
+  in
   let options =
     {
       Oas.Agent.default_options with
       provider = Some (oas_provider_of_model model);
       hooks;
-      guardrails =
-        {
-          Oas.Guardrails.tool_filter =
-            Oas.Guardrails.AllowList (oas_tool_names tools);
-          max_tool_calls_per_turn = Some 12;
-        };
+      guardrails = effective_guardrails;
       raw_trace = Some raw_trace;
       periodic_callbacks;
     }

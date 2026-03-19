@@ -197,10 +197,10 @@ let test_post_create_structured_payload () =
     Yojson.Safe.Util.(json |> member "post_kind" |> to_string);
   Alcotest.(check string) "source meta kept" "keeper_autonomy"
     Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string);
-  Alcotest.(check bool) "state extracted" true
-    (String.length
-       Yojson.Safe.Util.(json |> member "meta" |> member "state_block" |> to_string)
-     > 0)
+  (* state_block is stripped by tool_board before reaching board_core,
+     so meta.state_block is absent (null) in the created post. *)
+  Alcotest.(check bool) "state_block absent after strip" true
+    (Yojson.Safe.Util.(json |> member "meta" |> member "state_block") = `Null)
 
 let test_post_create_empty_content () =
   Eio_main.run @@ fun _env ->

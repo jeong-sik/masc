@@ -88,6 +88,8 @@ let test_swarm_live_run_rejects_invalid_run_id () =
         Yojson.Safe.Util.(json |> member "message" |> to_string))
 
 let test_swarm_live_run_reports_sync_self_unsupported_after_preflight () =
+  (* When allow_sync_self=false the harness is forked asynchronously
+     after a successful preflight, returning (true, status:"started"). *)
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -121,13 +123,10 @@ let test_swarm_live_run_reports_sync_self_unsupported_after_preflight () =
                     ("worker_count", `Int 1);
                   ])
             in
-            Alcotest.(check bool) "sync self blocked" false ok;
+            Alcotest.(check bool) "async fork ok" true ok;
             let json = Yojson.Safe.from_string body in
-            Alcotest.(check string) "status error" "error"
+            Alcotest.(check string) "status started" "started"
               Yojson.Safe.Util.(json |> member "status" |> to_string);
-            Alcotest.(check string) "runtime blocker"
-              "sync_self_unsupported"
-              Yojson.Safe.Util.(json |> member "runtime_blocker" |> to_string);
-            Alcotest.(check bool) "doctor path included" true
-              Yojson.Safe.Util.(json |> member "runtime_doctor_path" <> `Null)))))
+            Alcotest.(check string) "run_id echoed" "sync-self-blocked"
+              Yojson.Safe.Util.(json |> member "run_id" |> to_string)))))
 

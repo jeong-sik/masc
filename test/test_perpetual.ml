@@ -142,14 +142,10 @@ let test_llm_client () = group "LLM Client" (fun () ->
    | Error _ -> assert_true "parse_model:empty_model_rejected" true
    | Ok _ -> assert_true "parse_model:empty_model_should_fail" false);
 
-  (* 3b. MLX and Custom provider parsing *)
+  (* 3b. MLX provider was removed (PR #799); parsing should fail *)
   (match Llm_types.model_spec_of_string "mlx:qwen3.5-35b" with
-   | Ok m ->
-     assert_equal "parse_model:mlx_id" "qwen3.5-35b" m.model_id;
-     assert_true "parse_model:mlx_provider"
-       (m.provider = Llm_types.Custom "mlx");
-     assert_equal "parse_model:mlx_url" "http://127.0.0.1:8091" m.api_url
-   | Error e -> assert_true ("parse_model:mlx_failed: " ^ e) false);
+   | Error _ -> assert_true "parse_model:mlx_rejected" true
+   | Ok _ -> assert_true "parse_model:mlx_should_fail" false);
 
   (match Llm_types.model_spec_of_string "custom:mymodel@http://localhost:9999" with
    | Ok m ->

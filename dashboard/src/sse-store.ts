@@ -1,5 +1,9 @@
 // SSE event reaction and periodic refresh — extracted from store.ts
 // Routes SSE events to the minimal refresh function needed.
+//
+// Event routing uses a declarative map for simple refresh-only events,
+// and named handlers for events with custom logic (conditional hydration,
+// async imports, signal-only updates).
 
 import { lastEvent, connected } from './sse'
 import {
@@ -13,7 +17,7 @@ import {
 } from './store'
 import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
 
-// --- Governance/CommandPlane/Operator refresh registration (avoids circular import) ---
+// --- Refresh function registration (avoids circular imports) ---
 
 let _refreshGovernanceFn: (() => void) | null = null
 export function registerGovernanceRefresh(fn: () => void): void {
@@ -35,7 +39,7 @@ export function registerMissionRefresh(fn: () => void): void {
   _refreshMissionFn = fn
 }
 
-// --- SSE event reaction ---
+// --- Debounced scheduling ---
 
 const _debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 let _fetchDebounce: ReturnType<typeof setTimeout> | null = null
@@ -48,106 +52,146 @@ function scheduleRefresh(key: string, fn: () => void, delayMs = 500): void {
   }, delayMs)
 }
 
+// --- Declarative event routing ---
+// Simple events that map directly to a debounced refresh target.
+// Complex events (conditional logic, async imports) use named handlers below.
+
+type RefreshTarget = 'execution' | 'board' | 'mdal' | 'operator'
+
+interface SimpleRoute {
+  target: RefreshTarget
+  debounceMs?: number
+}
+
+const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
+  // Agent lifecycle
+  agent_joined:   { target: 'execution' },
+  agent_left:     { target: 'execution' },
+  // Broadcasts
+  broadcast:      { target: 'execution' },
+  // Keeper lifecycle (also triggers operator refresh via handler)
+  keeper_handoff:       { target: 'execution' },
+  keeper_compaction:    { target: 'execution' },
+  keeper_guardrail:     { target: 'execution' },
+  // Client input
+  client_input_approved:  { target: 'operator', debounceMs: 300 },
+  client_input_rejected:  { target: 'operator', debounceMs: 300 },
+  client_input_updated:   { target: 'operator', debounceMs: 300 },
+  // Board
+  board_post:           { target: 'board' },
+  'masc/board_post':    { target: 'board' },
+  board_comment:        { target: 'board' },
+  'masc/board_comment': { target: 'board' },
+  // MDAL
+  mdal_started:    { target: 'mdal', debounceMs: 350 },
+  mdal_iteration:  { target: 'mdal', debounceMs: 350 },
+  mdal_completed:  { target: 'mdal', debounceMs: 350 },
+  mdal_stopped:    { target: 'mdal', debounceMs: 350 },
+}
+
+// Prefix patterns for events that use startsWith matching
+const PREFIX_ROUTES: Array<{ prefix: string; target: RefreshTarget }> = [
+  { prefix: 'task_',      target: 'execution' },
+  { prefix: 'masc/task_', target: 'execution' },
+]
+
+const REFRESH_FNS: Record<RefreshTarget, () => void> = {
+  execution: refreshExecution,
+  board:     refreshBoard,
+  mdal:      refreshMdal,
+  operator:  () => _refreshOperatorFn?.(),
+}
+
+// --- Named handlers for complex events ---
+
+const KEEPER_LIFECYCLE_EVENTS = new Set([
+  'keeper_handoff', 'keeper_compaction', 'keeper_guardrail', 'keeper_turn_complete',
+])
+
+function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void {
+  if (!event.name) return
+  const next = new Map(keeperHeartbeats.value)
+  next.set(event.name, event.ts_unix ? event.ts_unix * 1000 : Date.now())
+  keeperHeartbeats.value = next
+}
+
+function handleKeeperLifecycle(event: { type: string; name?: string }): void {
+  // All keeper lifecycle events trigger operator refresh
+  scheduleRefresh('operator', () => _refreshOperatorFn?.(), 600)
+
+  // keeper_turn_complete: re-hydrate active keeper's conversation thread
+  if (event.type === 'keeper_turn_complete') {
+    const keeperName = event.name ?? ''
+    const viewing = activeKeeperName.value
+    if (keeperName && keeperName === viewing) {
+      scheduleRefresh(`keeper_thread_${keeperName}`, () => {
+        void hydrateKeeperStatus(keeperName, true)
+      }, 800)
+    }
+  }
+}
+
+function handleDashboardRefresh(): void {
+  invalidateDashboardCache()
+  if (!_fetchDebounce) {
+    _fetchDebounce = setTimeout(() => {
+      refreshDashboard()
+      _refreshCommandPlaneFn?.()
+      _refreshOperatorFn?.()
+      _fetchDebounce = null
+    }, 500)
+  }
+}
+
+async function handleGovernance(): Promise<void> {
+  _refreshGovernanceFn?.()
+  const { loadRuntimeParams } = await import('./components/governance')
+  loadRuntimeParams()
+}
+
+// --- SSE reaction setup ---
+
 export function setupSSEReaction(): () => void {
   const unsubscribe = lastEvent.subscribe((event) => {
     if (!event) return
 
-    // Keeper heartbeat — update signal directly, zero network calls
-    if (event.type === 'keeper_heartbeat' && event.name) {
-      const next = new Map(keeperHeartbeats.value)
-      next.set(event.name, event.ts_unix ? event.ts_unix * 1000 : Date.now())
-      keeperHeartbeats.value = next
+    // 1. Keeper heartbeat — signal-only, zero network calls
+    if (event.type === 'keeper_heartbeat') {
+      handleKeeperHeartbeat(event)
       return
     }
 
-    // Agent events → execution surface refresh
-    if (event.type === 'agent_joined' || event.type === 'agent_left') {
-      scheduleRefresh('execution', refreshExecution)
-    }
-
-    // Dashboard data events — debounced full refresh
+    // 2. Dashboard-wide data events — debounced full refresh
     if (isDashboardRefreshEvent(event.type)) {
-      invalidateDashboardCache()
-      if (!_fetchDebounce) {
-        _fetchDebounce = setTimeout(() => {
-          refreshDashboard()
-          _refreshCommandPlaneFn?.()
-          _refreshOperatorFn?.()
-          _fetchDebounce = null
-        }, 500)
+      handleDashboardRefresh()
+    }
+
+    // 3. Simple route: exact match
+    const simpleRoute = SIMPLE_ROUTES[event.type]
+    if (simpleRoute) {
+      scheduleRefresh(
+        simpleRoute.target,
+        REFRESH_FNS[simpleRoute.target],
+        simpleRoute.debounceMs,
+      )
+    }
+
+    // 4. Simple route: prefix match
+    for (const { prefix, target } of PREFIX_ROUTES) {
+      if (event.type.startsWith(prefix)) {
+        scheduleRefresh(target, REFRESH_FNS[target])
+        break
       }
     }
 
-    // Task events → execution surface refresh
-    if (event.type.startsWith('task_') || event.type.startsWith('masc/task_')) {
-      scheduleRefresh('execution', refreshExecution)
+    // 5. Keeper lifecycle — additional operator refresh + thread hydration
+    if (KEEPER_LIFECYCLE_EVENTS.has(event.type)) {
+      handleKeeperLifecycle(event)
     }
 
-    // Broadcast → execution timeline refresh
-    if (event.type === 'broadcast') {
-      scheduleRefresh('execution', refreshExecution)
-    }
-
-    // Keeper lifecycle events → execution + operator refresh
-    if (
-      event.type === 'keeper_handoff'
-      || event.type === 'keeper_compaction'
-      || event.type === 'keeper_guardrail'
-      || event.type === 'keeper_turn_complete'
-    ) {
-      scheduleRefresh('execution', refreshExecution)
-      scheduleRefresh('operator', () => _refreshOperatorFn?.(), 600)
-
-      // Re-hydrate conversation thread for the active keeper so chat
-      // updates without a manual page refresh.
-      if (event.type === 'keeper_turn_complete') {
-        const keeperName = event.name ?? ''
-        const viewing = activeKeeperName.value
-        if (keeperName && keeperName === viewing) {
-          scheduleRefresh(`keeper_thread_${keeperName}`, () => {
-            void hydrateKeeperStatus(keeperName, true)
-          }, 800)
-        }
-      }
-    }
-
-    // Client input approval/rejection → operator refresh
-    if (
-      event.type === 'client_input_approved'
-      || event.type === 'client_input_rejected'
-      || event.type === 'client_input_updated'
-    ) {
-      scheduleRefresh('operator', () => _refreshOperatorFn?.(), 300)
-    }
-
-    // Board events → board refresh only
-    if (
-      event.type === 'board_post'
-      || event.type === 'masc/board_post'
-      || event.type === 'board_comment'
-      || event.type === 'masc/board_comment'
-    ) {
-      scheduleRefresh('board', refreshBoard)
-    }
-
-    // Governance events (including param changes from governance enforcement)
+    // 6. Governance events
     if (event.type.startsWith('decision_') || event.type === 'governance_param_changed') {
-      scheduleRefresh('governance', async () => {
-        _refreshGovernanceFn?.()
-        // Also refresh runtime params panel so it reflects param changes immediately
-        const { loadRuntimeParams } = await import('./components/governance')
-        loadRuntimeParams()
-      })
-    }
-
-    // MDAL events
-    if (
-      event.type === 'mdal_started'
-      || event.type === 'mdal_iteration'
-      || event.type === 'mdal_completed'
-      || event.type === 'mdal_stopped'
-    ) {
-      scheduleRefresh('mdal', refreshMdal, 350)
+      scheduleRefresh('governance', () => void handleGovernance())
     }
   })
 
@@ -160,7 +204,13 @@ export function setupSSEReaction(): () => void {
   }
 }
 
-// --- Periodic refresh (for keeper presence heartbeats that don't emit SSE) ---
+// --- Periodic refresh ---
+
+const PERIODIC_REFRESH_MS =
+  typeof import.meta !== 'undefined' && (import.meta as Record<string, unknown>).env
+    && ((import.meta as Record<string, Record<string, unknown>>).env).DEV
+    ? 90_000
+    : 30_000
 
 let _periodicId: ReturnType<typeof setInterval> | null = null
 
@@ -172,7 +222,7 @@ export function startPeriodicRefresh(): void {
     }
     refreshDashboard()
     _refreshMissionFn?.()
-  }, 30000)
+  }, PERIODIC_REFRESH_MS)
 }
 
 export function stopPeriodicRefresh(): void {
@@ -184,7 +234,7 @@ export function stopPeriodicRefresh(): void {
 
 /** Cancel all pending SSE-triggered refresh timers.
  *  Call on route change to prevent stale fetches from firing after the user
- *  navigates to a different tab (fixes C-4/M-12 race condition). */
+ *  navigates to a different tab. */
 export function cancelPendingSSERefreshes(): void {
   for (const key of Object.keys(_debounceTimers)) {
     clearTimeout(_debounceTimers[key])

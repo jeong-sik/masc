@@ -582,6 +582,29 @@ let set_thread_id t ~post_id ~thread_id =
     | Error err -> Error (caqti_err err)
     | Ok () -> Ok ()
 
+let delete_post t ~post_id =
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+      let pid_str = Post_id.to_string pid in
+      match
+        Caqti_eio.Pool.use
+          (fun conn ->
+            let module C = (val conn : Caqti_eio.CONNECTION) in
+            let* post_opt = C.find_opt get_post_q pid_str in
+            match post_opt with
+            | None -> Ok (Error (Post_not_found post_id))
+            | Some _ ->
+                let* () = C.exec delete_comment_votes_for_post_q pid_str in
+                let* () = C.exec delete_post_votes_q pid_str in
+                let* () = C.exec delete_post_q pid_str in
+                Ok (Ok ()))
+          t.pool
+      with
+      | Error err -> Error (caqti_err err)
+      | Ok (Error e) -> Error e
+      | Ok (Ok ()) -> Ok ()
+
 (** {1 Karma Calculation} *)
 
 let karma_by_author_q =

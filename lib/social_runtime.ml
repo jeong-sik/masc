@@ -134,8 +134,19 @@ let result_activity_report checkins =
   if parts = [] then "No social activity processed."
   else String.concat " | " parts
 
-let row_json ~checked_at ~agent_name ~outcome ~summary ~reason ~action_kind
-    ~decision_reason ~failure_reason =
+let row_json ~checked_at ~(allowed_tool_names : string list)
+    ~(used_tool_names : string list) ~agent_name ~outcome ~summary ~reason
+    ~action_kind ~decision_reason ~failure_reason =
+  let reason_code =
+    match outcome, action_kind, failure_reason with
+    | "failed", _, Some _ -> "tool_or_runtime_error"
+    | "acted", "comment", _ -> "commented"
+    | "acted", "post", _ -> "posted"
+    | "acted", "vote", _ -> "voted"
+    | "passed", _, _ -> "passed"
+    | "skipped", _, _ -> "skipped"
+    | _ -> "none"
+  in
   `Assoc
     [
       ("agent_name", `String agent_name);
@@ -143,9 +154,10 @@ let row_json ~checked_at ~agent_name ~outcome ~summary ~reason ~action_kind
       ("outcome", `String outcome);
       ("summary", Option.fold ~none:`Null ~some:(fun value -> `String value) summary);
       ("reason", Option.fold ~none:`Null ~some:(fun value -> `String value) reason);
-      ("allowed_tool_names", `List []);
-      ("used_tool_names", `List []);
-      ("used_tool_call_count", `Null);
+      ("reason_code", `String reason_code);
+      ("allowed_tool_names", `List (List.map (fun value -> `String value) allowed_tool_names));
+      ("used_tool_names", `List (List.map (fun value -> `String value) used_tool_names));
+      ("used_tool_call_count", `Int (List.length used_tool_names));
       ("action_kind", `String action_kind);
       ("tool_audit_source", `String "social_runtime");
       ("tool_audit_at", `String checked_at);
@@ -277,8 +289,13 @@ let process_event ~sw ~clock ~config (event : board_event) =
                          "passed"
                    in
                    let row =
+                     let allowed_tool_names =
+                       Keeper_exec_tools.keeper_allowed_tool_names meta
+                     in
                      row_json
                        ~checked_at
+                       ~allowed_tool_names
+                       ~used_tool_names:result.tools_used
                        ~agent_name:meta.name
                        ~outcome
                        ~summary:(Some result.summary)
@@ -290,8 +307,13 @@ let process_event ~sw ~clock ~config (event : board_event) =
                    (row, (meta.name, outcome, result.reason))
                | Error err ->
                    let row =
+                     let allowed_tool_names =
+                       Keeper_exec_tools.keeper_allowed_tool_names meta
+                     in
                      row_json
                        ~checked_at
+                       ~allowed_tool_names
+                       ~used_tool_names:[]
                        ~agent_name:meta.name
                        ~outcome:"failed"
                        ~summary:None

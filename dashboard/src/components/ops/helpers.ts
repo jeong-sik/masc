@@ -551,8 +551,9 @@ export function formatMessageContent(content: string): string {
     .replace(/\[team-session:([^\]]{0,20})[^\]]*\]/g, '[session $1]')
     .replace(/ts-\d{13,}-[a-f0-9]{4,8}/g, (match) => {
       const ts = match.match(/ts-(\d{13,})/)
-      if (ts) {
-        const date = new Date(parseInt(ts[1]))
+      const tsValue = ts?.[1]
+      if (tsValue) {
+        const date = new Date(parseInt(tsValue, 10))
         return date.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
       }
       return match

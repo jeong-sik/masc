@@ -57,11 +57,16 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path
       let hearth = query_param httpun_request "hearth" in
       let sort_by = board_sort_order_of_request httpun_request in
       let exclude_system = bool_query_param httpun_request "exclude_system" ~default:false in
+      let exclude_automation =
+        bool_query_param httpun_request "exclude_automation" ~default:false
+      in
       let limit = int_query_param httpun_request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
       let offset = int_query_param httpun_request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-      let fetch_limit = board_fetch_limit ~exclude_system ~limit ~offset in
+      let fetch_limit =
+        board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
+      in
       let posts = Board_dispatch.list_posts ?hearth ~sort_by ~limit:fetch_limit () in
-      let posts = filter_board_posts ~exclude_system posts in
+      let posts = filter_board_posts ~exclude_system ~exclude_automation posts in
       let karma_map = Board_dispatch.get_all_karma () in
       let get_karma author =
         Option.value ~default:0 (List.assoc_opt author karma_map)

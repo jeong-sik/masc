@@ -62,8 +62,42 @@ let extract_task_id text =
   in
   seek 0
 
+let first_some left right =
+  match left with Some _ -> left | None -> right
+
 let supported_execution_action_types =
-  [ "add_task"; "start_operation"; "set_param" ]
+  [
+    "add_task";
+    "start_operation";
+    "set_param";
+    "release_task";
+    "restart_keeper";
+    "flag_post";
+  ]
+
+let resolve_target_id ?payload ~prefix (case_ : GV2.case_record)
+    (request : GV2.action_request) =
+  let payload_target =
+    match payload with
+    | Some payload ->
+        payload |> member "target_id" |> to_string_option
+        |> fun value -> first_some value (payload |> member "task_id" |> to_string_option)
+        |> fun value -> first_some value (payload |> member "post_id" |> to_string_option)
+        |> fun value -> first_some value (payload |> member "keeper_name" |> to_string_option)
+    | None -> None
+  in
+  let from_source_refs =
+    case_.GV2.source_refs
+    |> List.find_map (fun ref_ ->
+           if String.starts_with ~prefix ref_ && String.length ref_ > String.length prefix
+           then
+             Some
+               (String.sub ref_ (String.length prefix)
+                  (String.length ref_ - String.length prefix))
+           else None)
+  in
+  request.GV2.target_id |> fun value -> first_some value payload_target
+  |> fun value -> first_some value from_source_refs
 
 let parse_requested_action args =
   match member "requested_action" args with
@@ -370,6 +404,103 @@ let execute_action ctx (case_ : GV2.case_record) (order : GV2.execution_order) =
                   }
             | Error msg ->
                 Error (Printf.sprintf "set_param failed for %s: %s" param_key msg))
+      | "release_task" ->
+          let room_config = ensure_room_ready ctx in
+          let task_id =
+            resolve_target_id ?payload:request.GV2.payload ~prefix:"task-" case_
+              request
+          in
+          (match task_id with
+          | None | Some "" -> Error "release_task requires target_id or task-* source_ref"
+          | Some task_id -> (
+              match
+                Room.force_release_task_r room_config ~agent_name:ctx.agent_name
+                  ~task_id ()
+              with
+              | Ok result ->
+                  Ok
+                    {
+                      order with
+                      status =
+                        (match order.GV2.status with
+                        | GV2.Queued_auto -> GV2.Auto_executed
+                        | _ -> GV2.Done);
+                      updated_at = Time_compat.now ();
+                      execution_ref = Some task_id;
+                      result_summary = Some result;
+                      actor = Some ctx.agent_name;
+                    }
+              | Error e ->
+                  Error
+                    (Printf.sprintf "release_task failed for %s: %s" task_id
+                       (Types.masc_error_to_string e))))
+      | "flag_post" ->
+          let post_id =
+            resolve_target_id ?payload:request.GV2.payload ~prefix:"post-" case_
+              request
+          in
+          (match post_id with
+          | None | Some "" -> Error "flag_post requires target_id or post-* source_ref"
+          | Some post_id -> (
+              match Board_dispatch.delete_post ~post_id with
+              | Ok () ->
+                  let result_msg =
+                    Printf.sprintf "Hard-deleted board artifact %s" post_id
+                  in
+                  Ok
+                    {
+                      order with
+                      status =
+                        (match order.GV2.status with
+                        | GV2.Queued_auto -> GV2.Auto_executed
+                        | _ -> GV2.Done);
+                      updated_at = Time_compat.now ();
+                      execution_ref = Some post_id;
+                      result_summary = Some result_msg;
+                      actor = Some ctx.agent_name;
+                    }
+              | Error err ->
+                  Error
+                    (Printf.sprintf "flag_post failed for %s: %s" post_id
+                       (Board.show_board_error err))))
+      | "restart_keeper" ->
+          let room_config = ensure_room_ready ctx in
+          let keeper_name =
+            resolve_target_id ?payload:request.GV2.payload ~prefix:"keeper-" case_
+              request
+          in
+          (match keeper_name with
+          | None | Some "" ->
+              Error "restart_keeper requires target_id or keeper-* source_ref"
+          | Some keeper_name -> (
+              match Keeper_types.read_meta room_config keeper_name with
+              | Error msg -> Error msg
+              | Ok None ->
+                  Error
+                    (Printf.sprintf "restart_keeper target not found: %s"
+                       keeper_name)
+              | Ok (Some meta) ->
+                  Keeper_runtime.stop_keepalive keeper_name;
+                  ignore
+                    (Keeper_types.register_resident_keeper_from_meta room_config
+                       meta);
+                  let result_msg =
+                    Printf.sprintf
+                      "Stopped keepalive for %s. Desired resident state remains true and guardian reconcile will bring it back."
+                      keeper_name
+                  in
+                  Ok
+                    {
+                      order with
+                      status =
+                        (match order.GV2.status with
+                        | GV2.Queued_auto -> GV2.Auto_executed
+                        | _ -> GV2.Done);
+                      updated_at = Time_compat.now ();
+                      execution_ref = Some keeper_name;
+                      result_summary = Some result_msg;
+                      actor = Some ctx.agent_name;
+                    }))
       | action_type ->
           Error
             (Printf.sprintf

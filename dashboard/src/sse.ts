@@ -3,7 +3,12 @@
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
-import { updateOasKeeperSnapshot, oasLastGardenerTick, oasTotalEvents } from './store'
+import {
+  pushOasAgentEvent,
+  updateOasKeeperSnapshot,
+  oasLastGardenerTick,
+  oasTotalEvents,
+} from './store'
 import type { OasKeeperSnapshot } from './types/oas'
 
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
@@ -224,6 +229,50 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     // OAS bridge events
+    case 'oas:masc:lodge:agent_selected': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      pushOasAgentEvent({
+        type: 'selected',
+        agent_name: (p.agent_name as string) ?? '',
+        trigger: (p.trigger as string) ?? undefined,
+        thompson_score:
+          typeof p.thompson_score === 'number' ? p.thompson_score : undefined,
+        final_score: typeof p.final_score === 'number' ? p.final_score : undefined,
+        timestamp:
+          typeof p.timestamp === 'number'
+            ? p.timestamp
+            : (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000),
+      })
+      break
+    }
+    case 'oas:masc:lodge:agent_decision': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      pushOasAgentEvent({
+        type: 'decision',
+        agent_name: (p.agent_name as string) ?? '',
+        action: (p.action as string) ?? undefined,
+        trigger_reason: (p.trigger_reason as string) ?? undefined,
+        timestamp:
+          typeof p.timestamp === 'number'
+            ? p.timestamp
+            : (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000),
+      })
+      break
+    }
+    case 'oas:masc:lodge:agent_action_executed': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      pushOasAgentEvent({
+        type: 'action_executed',
+        agent_name: (p.agent_name as string) ?? '',
+        action: (p.action as string) ?? undefined,
+        success: typeof p.success === 'boolean' ? p.success : undefined,
+        timestamp:
+          typeof p.timestamp === 'number'
+            ? p.timestamp
+            : (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000),
+      })
+      break
+    }
     case 'oas:masc:keeper:snapshot': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const snap: OasKeeperSnapshot = {
@@ -234,7 +283,12 @@ function handleEvent(event: SSEEvent): void {
         timestamp: (p.timestamp as number) ?? Date.now() / 1000,
       }
       updateOasKeeperSnapshot(snap)
-      addTypedJournalEntry(snap.keeper_name, `Keeper snapshot gen=${snap.generation} ctx=${Math.round(snap.context_ratio * 100)}%`, 'oas', 'oas_keeper_snapshot')
+      addTypedJournalEntry(
+        snap.keeper_name,
+        `Keeper snapshot gen=${snap.generation} ctx=${Math.round(snap.context_ratio * 100)}%`,
+        'oas',
+        'oas_keeper_snapshot',
+      )
       break
     }
     case 'oas:masc:gardener:tick': {

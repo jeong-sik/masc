@@ -101,7 +101,7 @@ let mode_snapshot_json ctx =
 let keeper_gate_config_for_level
     ~(autonomy_level : Keeper_autonomy.autonomy_level) : Eval_gate.gate_config =
   let base_allowed = [
-    "keeper_board_post"; "keeper_board_comment"; "keeper_board_list";
+    "keeper_board_get"; "keeper_board_post"; "keeper_board_comment"; "keeper_board_list";
     "keeper_read"; "keeper_fs_read";
     "keeper_memory_search";
     "keeper_time_now"; "keeper_context_status";

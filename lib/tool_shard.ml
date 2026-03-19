@@ -51,6 +51,17 @@ let base_tools : Masc_model.tool_def list = [
 
 let board_tools : Masc_model.tool_def list = [
   {
+    tool_name = "keeper_board_get";
+    tool_description = "Read a board post with its comments before deciding whether to comment, vote, or escalate.";
+    parameters = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to inspect")]);
+      ]);
+      ("required", `List [`String "post_id"]);
+    ];
+  };
+  {
     tool_name = "keeper_board_post";
     tool_description = "Create a post on the MASC Board. Use hearth to target a topic channel.";
     parameters = `Assoc [

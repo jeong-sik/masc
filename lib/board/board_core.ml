@@ -375,6 +375,14 @@ let contains_substring haystack needle =
     in
     loop 0
 
+let author_looks_automation author =
+  String.starts_with ~prefix:"auto-" author
+  || String.starts_with ~prefix:"qa-" author
+  || contains_substring author "researcher"
+  || contains_substring author "harness"
+  || contains_substring author "smoke"
+  || contains_substring author "probe"
+
 let infer_post_kind ~author ~visibility ~expires_at ~hearth =
   let author = String.lowercase_ascii author in
   let hearth =
@@ -390,13 +398,23 @@ let infer_post_kind ~author ~visibility ~expires_at ~hearth =
               || contains_substring hearth "harness")
   then
     Automation_post
-  else if String.starts_with ~prefix:"auto-" author
-          || contains_substring author "researcher" then
+  else if author_looks_automation author then
     Automation_post
   else
     Human_post
 
-let classify_post_kind (p : post) = p.post_kind
+let classify_post_kind (p : post) =
+  let inferred =
+    infer_post_kind
+      ~author:(Agent_id.to_string p.author)
+      ~visibility:p.visibility
+      ~expires_at:p.expires_at
+      ~hearth:p.hearth
+  in
+  match p.post_kind, inferred with
+  | Human_post, (Automation_post | System_post as upgraded) -> upgraded
+  | Automation_post, System_post -> System_post
+  | stored, _ -> stored
 
 let state_start_marker = "[STATE]"
 let state_end_marker = "[/STATE]"
@@ -801,4 +819,3 @@ let list_comments store ?(limit=1000) () : comment list =
   )
 
 (** {1 Voting - Deduplicated} *)
-

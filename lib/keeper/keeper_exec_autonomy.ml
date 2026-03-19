@@ -22,7 +22,7 @@ let keeper_autonomy_enabled () =
 let autonomous_gate_config
     ~(autonomy_level : Keeper_autonomy.autonomy_level) : Eval_gate.gate_config =
   let base_allowed = [
-    "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";
+    "keeper_board_get"; "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote"; "keeper_board_list";
     "keeper_read"; "keeper_fs_read";
     "keeper_memory_search";
     "keeper_time_now"; "keeper_context_status";

@@ -26,7 +26,6 @@ function OasSummaryLines() {
   const snapshots = oasKeeperSnapshots.value
   const health = oasHealthSummary.value
 
-  // Count distinct active agents from recent events
   const activeAgents = new Set(events.map(ev => ev.agent_name))
   const firstEvent = events[0]
   const lastEventTs = firstEvent != null ? firstEvent.timestamp : null
@@ -34,9 +33,9 @@ function OasSummaryLines() {
 
   return html`
     <div class="oas-summary-lines">
-      <span>${activeAgents.size} agents active</span>
-      <span>${health.totalEvents} events${snapshots.size > 0 ? `, ${snapshots.size} keepers` : ''}</span>
-      <span>${agoMin != null ? `last ${agoMin}m ago` : 'no events yet'}</span>
+      <span>활성 에이전트 ${activeAgents.size}명</span>
+      <span>${health.totalEvents}건${snapshots.size > 0 ? `, 키퍼 ${snapshots.size}명` : ''}</span>
+      <span>${agoMin != null ? `${agoMin}분 전` : '이벤트 대기 중'}</span>
     </div>
   `
 }
@@ -71,7 +70,7 @@ function OasKeeperBars() {
 function OasRawEventList() {
   const events = oasAgentEvents.value
   if (events.length === 0) {
-    return html`<div class="oas-empty">OAS agent event 대기 중...</div>`
+    return html`<div class="oas-empty">OAS 에이전트 이벤트 대기 중...</div>`
   }
 
   return html`
@@ -92,23 +91,24 @@ function OasRawEventList() {
 
 export function OasPipeline() {
   const health = oasHealthSummary.value
+  const eventLabel = `${health.totalEvents}건`
 
   return html`
     <div class="oas-pipeline">
       <div class="oas-pipeline__header">
-        <span class="oas-pipeline__title">OAS Pipeline</span>
-        <span class="oas-pipeline__count">${health.totalEvents} events</span>
+        <span class="oas-pipeline__title">실행 흐름</span>
+        <span class="oas-pipeline__count">${eventLabel}</span>
       </div>
 
       <${OasSummaryLines} />
 
       <div class="oas-pipeline__section">
-        <div class="oas-section-label">Keeper Context</div>
+        <div class="oas-section-label">키퍼 컨텍스트</div>
         <${OasKeeperBars} />
       </div>
 
       <details class="oas-pipeline__raw-toggle">
-        <summary>Agent Lifecycle (raw events)</summary>
+        <summary>에이전트 실행 (raw events)</summary>
         <${OasRawEventList} />
       </details>
     </div>

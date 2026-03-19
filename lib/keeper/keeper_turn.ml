@@ -251,18 +251,18 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
 
             (* Single-turn LLM call with cascade *)
             let requests =
-	              List.map (fun (model : Llm_types.model_spec) ->
+	              List.map (fun (model : Masc_model.model_spec) ->
 	                let msgs =
 	                  (Agent_sdk.Types.system_msg turn_system_prompt) :: ctx_work.messages
 	                in
 	                ({
-                  Llm_types.model;
+                  Masc_model.model;
                   messages = msgs;
                   temperature = 0.7;
                   max_tokens = turn_max_tokens;
                   tools = keeper_allowed_llm_tools meta;
                   response_format = `Text;
-                } : Llm_types.completion_request)
+                } : Masc_model.completion_request)
               ) specs
             in
             let run_cascade_batch requests =
@@ -292,7 +292,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               | _ -> run_cascade_batch requests
             in
             let recall_candidates = recent_user_messages base_ctx.messages ~max_n:32 in
-            let (cascade_result0, latency0) = Llm_types.timed (fun () ->
+            let (cascade_result0, latency0) = Masc_model.timed (fun () ->
                 run_cascade requests) in
             match cascade_result0 with
             | Error e ->
@@ -304,7 +304,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 model_spec_for_used specs resp0.Llm_provider.Types.model
                 |> Option.value ~default:primary
               in
-              let cost0 = cost_usd_of_usage (Llm_types.usage_of_response resp0) used_model0 in
+              let cost0 = cost_usd_of_usage (Masc_model.usage_of_response resp0) used_model0 in
               (* Multi-round tool calling: gated dispatch + OAS lifecycle *)
               let max_tool_rounds = 3 in
               let _trunc s n = if String.length s > n then String.sub s 0 n ^ "..." else s in
@@ -341,7 +341,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       ~tool_name:name
                       ~args_json:args_str
                       ~execute:(fun () ->
-                        let tc : Llm_types.tool_call = {
+                        let tc : Masc_model.tool_call = {
                           call_id = ""; call_name = name;
                           call_arguments = args_str;
                         } in
@@ -400,21 +400,21 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               Trajectory.increment_turn trajectory_acc;
               let (base_content, base_usage, base_model_used, base_latency_ms,
                    base_cost_usd, tools_used) =
-                if not (Llm_types.has_tool_calls resp0) then
+                if not (Masc_model.has_tool_calls resp0) then
                   (* No tool calls — return initial response directly *)
-                  (Llm_types.text_of_response resp0,
-                   Llm_types.usage_of_response resp0,
+                  (Masc_model.text_of_response resp0,
+                   Masc_model.usage_of_response resp0,
                    resp0.Llm_provider.Types.model,
                    latency0, cost0, [])
                 else begin
                   (* First round: execute tool calls from initial response *)
                   let first_tcs =
-                    Llm_types.tool_calls_of_response resp0
+                    Masc_model.tool_calls_of_response resp0
                   in
                   Log.Trpg.info "Tool round 1/%d: %d tool calls"
                     max_tool_rounds (List.length first_tcs);
                   let first_outputs = List.map
-                    (fun (tc : Llm_types.tool_call) ->
+                    (fun (tc : Masc_model.tool_call) ->
                       let args =
                         try Yojson.Safe.from_string tc.call_arguments
                         with _ -> `Assoc []
@@ -426,28 +426,28 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     first_tcs
                   in
                   let first_tools = List.map
-                    (fun (tc : Llm_types.tool_call) -> tc.call_name)
+                    (fun (tc : Masc_model.tool_call) -> tc.call_name)
                     first_tcs
                   in
                   if max_tool_rounds <= 1 || !write_done_ref then begin
                     (* Write done or single round — return first-round result *)
                     let content =
                       let c =
-                        String.trim (Llm_types.text_of_response resp0)
+                        String.trim (Masc_model.text_of_response resp0)
                       in
                       if c = "" then
                         Printf.sprintf "(tools executed: %s)"
                           (String.concat ", " first_tools)
                       else c
                     in
-                    (content, Llm_types.usage_of_response resp0,
+                    (content, Masc_model.usage_of_response resp0,
                      resp0.Llm_provider.Types.model,
                      latency0, cost0, first_tools)
                   end else begin
                     (* Remaining rounds: delegate to OAS lifecycle *)
                     let followup = keeper_tool_followup_prompt
                       ~user_message:message
-                      ~draft_reply:(Llm_types.text_of_response resp0)
+                      ~draft_reply:(Masc_model.text_of_response resp0)
                       ~tool_outputs:first_outputs
                       ~already_executed:first_tools
                     in
@@ -455,7 +455,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       keeper_allowed_llm_tools
                         ~write_done:!write_done_ref meta
                     in
-                    let (oas_result, oas_latency) = Llm_types.timed
+                    let (oas_result, oas_latency) = Masc_model.timed
                       (fun () ->
                         Keeper_oas_adapter.run_with_custom_dispatch
                           ~meta
@@ -479,14 +479,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         _e;
                       let content =
                         let c =
-                          String.trim (Llm_types.text_of_response resp0)
+                          String.trim (Masc_model.text_of_response resp0)
                         in
                         if c = "" then
                           Printf.sprintf "(tools executed: %s)"
                             (String.concat ", " first_tools)
                         else c
                       in
-                      (content, Llm_types.usage_of_response resp0,
+                      (content, Masc_model.usage_of_response resp0,
                        resp0.Llm_provider.Types.model,
                        latency0, cost0, all_tools)
                     | Ok run_result ->
@@ -495,15 +495,15 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       in
                       let oas_content =
                         let c =
-                          String.trim (Llm_types.text_of_response oas_resp)
+                          String.trim (Masc_model.text_of_response oas_resp)
                         in
                         if c = "" then
                           Printf.sprintf "(tools executed: %s)"
                             (String.concat ", " all_tools)
-                        else Llm_types.text_of_response oas_resp
+                        else Masc_model.text_of_response oas_resp
                       in
                       let oas_usage =
-                        Llm_types.usage_of_response oas_resp
+                        Masc_model.usage_of_response oas_resp
                       in
                       let oas_model =
                         oas_resp.Llm_provider.Types.model
@@ -517,7 +517,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       in
                       (oas_content,
                        merge_usage
-                         (Llm_types.usage_of_response resp0) oas_usage,
+                         (Masc_model.usage_of_response resp0) oas_usage,
                        oas_model,
                        latency0 + oas_latency,
                        cost0 +. oas_cost,
@@ -555,9 +555,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       ~expected_topic:eval0.expected_topic
                   in
                   let correction_requests =
-                    List.map (fun (model : Llm_types.model_spec) ->
+                    List.map (fun (model : Masc_model.model_spec) ->
 	                      ({
-	                        Llm_types.model;
+	                        Masc_model.model;
 	                        messages = [
 	                          Agent_sdk.Types.system_msg turn_system_prompt;
 	                          Agent_sdk.Types.user_msg correction_prompt;
@@ -566,10 +566,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         max_tokens = correction_max_tokens;
                         tools = [];
                         response_format = `Text;
-                      } : Llm_types.completion_request)
+                      } : Masc_model.completion_request)
                     ) specs
                   in
-                  let (corr_result, corr_latency) = Llm_types.timed (fun () ->
+                  let (corr_result, corr_latency) = Masc_model.timed (fun () ->
                       run_cascade_batch correction_requests) in
                   match corr_result with
                   | Error _ ->
@@ -580,17 +580,17 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       model_spec_for_used specs corr.Llm_provider.Types.model
                       |> Option.value ~default:primary
                     in
-                    let corr_usage = Llm_types.usage_of_response corr in
+                    let corr_usage = Masc_model.usage_of_response corr in
                     let cost1 = cost_usd_of_usage corr_usage used_model1 in
                     let eval1 =
                       evaluate_memory_recall
                         ~user_message:message
-                        ~assistant_reply:(Llm_types.text_of_response corr)
+                        ~assistant_reply:(Masc_model.text_of_response corr)
                         ~candidates:recall_candidates
                     in
                     let evalf = { eval1 with initial_score = eval0.final_score } in
                     let merged_usage = merge_usage base_usage corr_usage in
-                    ( Llm_types.text_of_response corr, merged_usage, corr.Llm_provider.Types.model,
+                    ( Masc_model.text_of_response corr, merged_usage, corr.Llm_provider.Types.model,
                       base_latency_ms + corr_latency,
                       evalf, true, evalf.passed, false, base_cost_usd +. cost1,
                       tools_used )
@@ -622,9 +622,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       ~expected_topic:eval_after_correction.expected_topic
                   in
                   let forced_requests =
-                    List.map (fun (model : Llm_types.model_spec) ->
+                    List.map (fun (model : Masc_model.model_spec) ->
 	                      ({
-	                        Llm_types.model;
+	                        Masc_model.model;
 	                        messages = [
 	                          Agent_sdk.Types.system_msg turn_system_prompt;
 	                          Agent_sdk.Types.user_msg forced_prompt;
@@ -633,10 +633,10 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         max_tokens = correction_max_tokens;
                         tools = [];
                         response_format = `Text;
-                      } : Llm_types.completion_request)
+                      } : Masc_model.completion_request)
                     ) specs
                   in
-                  let (forced_result, forced_latency) = Llm_types.timed (fun () ->
+                  let (forced_result, forced_latency) = Masc_model.timed (fun () ->
                       run_cascade_batch forced_requests) in
                   match forced_result with
                   | Error _ ->
@@ -648,13 +648,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                         model_spec_for_used specs forced.Llm_provider.Types.model
                         |> Option.value ~default:primary
                       in
-                      let forced_usage = Llm_types.usage_of_response forced in
+                      let forced_usage = Masc_model.usage_of_response forced in
                       let cost2 = cost_usd_of_usage forced_usage used_model2 in
                       let merged_usage = merge_usage usage_after_correction forced_usage in
                       let merged_latency = latency_after_correction + forced_latency in
                       let grounded_content =
-                        let c = String.trim (Llm_types.text_of_response forced) in
-                        if c = "" then content_after_correction else Llm_types.text_of_response forced
+                        let c = String.trim (Masc_model.text_of_response forced) in
+                        if c = "" then content_after_correction else Masc_model.text_of_response forced
                       in
                       let eval2 =
                         evaluate_memory_recall
@@ -797,13 +797,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 continuity_summary = continuity_summary_from_reply;
                 last_continuity_update_ts;
                 total_output_tokens = meta.total_output_tokens + final_usage.output_tokens;
-                total_tokens = meta.total_tokens + Llm_types.total_tokens final_usage;
+                total_tokens = meta.total_tokens + Masc_model.total_tokens final_usage;
                 total_cost_usd = meta.total_cost_usd +. total_cost_usd_turn;
                 last_turn_ts = now_ts;
                 last_model_used = final_model_used;
                 last_input_tokens = final_usage.input_tokens;
                 last_output_tokens = final_usage.output_tokens;
-                last_total_tokens = Llm_types.total_tokens final_usage;
+                last_total_tokens = Masc_model.total_tokens final_usage;
                 last_latency_ms = final_latency_ms;
                 compaction_count = meta.compaction_count + (if compacted then 1 else 0);
                 last_compaction_ts = (if compacted then now_ts else meta.last_compaction_ts);

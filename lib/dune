@@ -512,7 +512,7 @@
    ;; Autonomy Adjuster — Feedback Closure (Phase 4)
    autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
-   llm_types
+   masc_model
    masc_eio_env
    discovery_cache
    oas_type_adapters

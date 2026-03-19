@@ -274,15 +274,15 @@ let process_one rctx ~state_json ~role ~actor_id ~keeper_name =
         | Error _ -> (
             match Llm_cascade.default_verifier_model_spec () with
             | Ok model -> model
-            | Error _ -> Llm_types.glm_cloud)
+            | Error _ -> Masc_model.glm_cloud)
       in
       let tier2_model =
         match Sys.getenv_opt "TRPG_HARNESS_TIER2_MODEL" with
         | Some s -> (
             match Llm_cascade.model_spec_of_string s with
             | Ok m -> m
-            | Error _ -> Llm_types.glm_cloud)
-        | None -> Llm_types.glm_cloud
+            | Error _ -> Masc_model.glm_cloud)
+        | None -> Masc_model.glm_cloud
       in
       let pctx =
         extract_prompt_context ~actor_id ~dm_persona_override state_json

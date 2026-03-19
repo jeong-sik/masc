@@ -77,7 +77,7 @@ let autonomous_gate_config
 let execute_approved_plan
     ~(config : Room.config)
     ~(meta : keeper_meta)
-    ~(specs : Llm_types.model_spec list)
+    ~(specs : Masc_model.model_spec list)
     ~(plan : string)
     ~(pa : Keeper_autonomy.proposed_action)
     ~(autonomy_level : Keeper_autonomy.autonomy_level)
@@ -127,8 +127,8 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
       let cost = cost_usd_of_usage usage used_model_spec in
       (* OAS handles tool dispatch internally; extract tool names from response *)
       let tools_used =
-        Llm_types.tool_calls_of_response run_result.response
-        |> List.map (fun (tc : Llm_types.tool_call) -> tc.call_name)
+        Masc_model.tool_calls_of_response run_result.response
+        |> List.map (fun (tc : Masc_model.tool_call) -> tc.call_name)
       in
       (content, cost, tools_used)
 
@@ -137,7 +137,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
     None to fall through to regular proactive generation.
     @since 2.74.0 *)
 let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
-    ~(specs : Llm_types.model_spec list) : keeper_meta option =
+    ~(specs : Masc_model.model_spec list) : keeper_meta option =
   if not (keeper_autonomy_enabled ()) then None
   else if meta.active_goal_ids = [] then None
   else

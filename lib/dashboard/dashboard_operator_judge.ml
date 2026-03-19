@@ -295,7 +295,7 @@ let compute_judgments ~facts_json =
   | Error message -> Error message
   | Ok response -> (
       try Ok (response.Llm_provider.Types.model,
-              Yojson.Safe.from_string (Llm_types.text_of_response response))
+              Yojson.Safe.from_string (Masc_model.text_of_response response))
       with
       | Yojson.Json_error msg ->
           Error (Printf.sprintf "Operator judge returned invalid JSON: %s" msg)

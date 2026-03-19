@@ -97,9 +97,9 @@ let handle_keeper_status ctx args : tool_result =
            compaction_policy_of_keeper m
          in
 
-         let models_resolved = `List (List.map (fun (s : Llm_types.model_spec) ->
+         let models_resolved = `List (List.map (fun (s : Masc_model.model_spec) ->
            `Assoc [
-             ("provider", `String (Llm_types.string_of_provider s.provider));
+             ("provider", `String (Masc_model.string_of_provider s.provider));
              ("model_id", `String s.model_id);
              ("max_context", `Int s.max_context);
              ("api_key_env", match s.api_key_env with None -> `Null | Some k -> `String k);
@@ -375,7 +375,7 @@ let handle_keeper_status ctx args : tool_result =
              (`List tail, total)
         in
         let all_internal_tools =
-          keeper_llm_tools |> List.map (fun tool -> tool.Llm_types.tool_name)
+          keeper_llm_tools |> List.map (fun tool -> tool.Masc_model.tool_name)
         in
         let allowed_tools = keeper_allowed_tool_names m in
         let blocked_internal_tools =

@@ -1,6 +1,6 @@
 open Alcotest
 
-module Llm = Masc_mcp.Llm_types
+module Llm = Masc_mcp.Masc_model
 module Cascade = Masc_mcp.Llm_cascade
 
 let test_string_of_provider () =

@@ -5,7 +5,7 @@
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
-  tools : Llm_types.tool_def list;
+  tools : Masc_model.tool_def list;
   removable : bool;
   description : string;
 }
@@ -40,7 +40,7 @@ val all_shards : (string, shard) Hashtbl.t
 val default_shard_names : string list
 (** Default shards for a new keeper: base, board, filesystem, shell, weather. *)
 
-val tools_of_shards : string list -> Llm_types.tool_def list
+val tools_of_shards : string list -> Masc_model.tool_def list
 (** Combine tools from multiple shard names. *)
 
 (** {1 Dynamic Shard Management} *)
@@ -74,10 +74,10 @@ val set_agent_shards : string -> string list -> unit
 
 (** {1 Tool Definitions} *)
 
-val base_tools : Llm_types.tool_def list
+val base_tools : Masc_model.tool_def list
 (** Core tools: time_now, context_status, memory_search. *)
 
-val board_tools : Llm_types.tool_def list
+val board_tools : Masc_model.tool_def list
 (** Board tools: board_post, board_list, board_comment, board_vote. *)
 
 (** {1 MCP Interface} *)
@@ -89,5 +89,5 @@ val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
 (** Execute tool_shard MCP tools (grant, revoke, list).
     Agent shard state is tracked in-memory via [agent_shards] hashtable. *)
 
-val keeper_llm_tools : Llm_types.tool_def list
+val keeper_llm_tools : Masc_model.tool_def list
 (** Full tool set (all 11 tools) — backward compatible with existing code. *)

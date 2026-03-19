@@ -4,7 +4,7 @@
     and converts back. This is Phase 1 of migrating MASC to use OAS properly.
 
     This module is deliberately independent of Context_manager to avoid circular
-    dependency. It operates on [Llm_types.message list] directly and uses its own
+    dependency. It operates on [Masc_model.message list] directly and uses its own
     strategy enum that mirrors Context_manager.compaction_strategy.
 
     MASC has 4 roles (System, User, Assistant, Tool) while OAS has the same 4.

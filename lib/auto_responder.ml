@@ -139,8 +139,8 @@ let run_cli_agent ~agent_type ~prompt =
 let cascade_name_for_agent_type agent_type =
   Printf.sprintf "auto_responder_%s" agent_type
 
-let llm_response_is_valid (resp : Llm_types.api_response) =
-  let s = String.trim (Llm_types.text_of_response resp) in
+let llm_response_is_valid (resp : Masc_model.api_response) =
+  let s = String.trim (Masc_model.text_of_response resp) in
   let s_lower = String.lowercase_ascii s in
   let len = String.length s in
   len > 0

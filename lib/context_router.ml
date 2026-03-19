@@ -186,8 +186,8 @@ let parse_intent_response (text : string) : (query_intent * float) option =
     None
 
 (** Validate that an LLM response contains a parseable intent. *)
-let intent_response_is_valid (resp : Llm_types.api_response) : bool =
-  parse_intent_response (Llm_types.text_of_response resp) <> None
+let intent_response_is_valid (resp : Masc_model.api_response) : bool =
+  parse_intent_response (Masc_model.text_of_response resp) <> None
 
 (** Classify query intent using LLM semantic understanding.
     Returns (intent, confidence) or falls back to low-confidence default. *)

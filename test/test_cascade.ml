@@ -1,7 +1,7 @@
 open Alcotest
 
 module Cascade = Masc_mcp.Cascade
-module Llm_types = Masc_mcp.Llm_types
+module Masc_model = Masc_mcp.Masc_model
 
 let with_temp_json contents f =
   let path = Filename.temp_file "cascade_" ".json" in
@@ -33,9 +33,9 @@ let test_load_models_from_config () =
       check int "spec count" 2 (List.length specs);
       match specs with
       | [ first; second ] ->
-          check bool "first is llama" true (first.provider = Llm_types.Llama);
+          check bool "first is llama" true (first.provider = Masc_model.Llama);
           check string "first model" "qwen-local" first.model_id;
-          check bool "second is llama" true (second.provider = Llm_types.Llama);
+          check bool "second is llama" true (second.provider = Masc_model.Llama);
           check string "second model" "qwen-local-fallback" second.model_id
       | _ -> fail "expected two specs")
 
@@ -49,7 +49,7 @@ let test_skips_invalid_and_missing_api_key () =
           match specs with
           | [ only ] ->
               check bool "llama provider" true
-                (only.provider = Llm_types.Llama);
+                (only.provider = Masc_model.Llama);
               check string "llama model" "qwen-live" only.model_id
           | _ -> fail "expected one surviving spec"))
 
@@ -60,7 +60,7 @@ let test_missing_config_uses_defaults () =
   match specs with
   | first :: _ ->
       check bool "default starts with llama" true
-        (first.provider = Llm_types.Llama);
+        (first.provider = Masc_model.Llama);
       check string "default llama model" Masc_mcp.Env_config.Llama.default_model
         first.model_id
   | [] -> fail "expected default fallback models"

@@ -33,7 +33,7 @@ val run_named_with_masc_tools :
   cascade_name:string ->
   goal:string ->
   ?system_prompt:string ->
-  masc_tools:Llm_types.tool_def list ->
+  masc_tools:Masc_model.tool_def list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   ?max_turns:int ->
   ?temperature:float ->

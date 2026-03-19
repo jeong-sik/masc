@@ -22,7 +22,7 @@
     No longer enforced via semaphore: llama-server handles slot-based
     parallelism internally, and cloud APIs return rate-limit errors. *)
 let max_concurrent_llm =
-  Llm_types.int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:8 ~min_v:1 ~max_v:128
+  Masc_model.int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:8 ~min_v:1 ~max_v:128
 
 (** Atomic counter tracking in-flight LLM calls (observability only). *)
 let inflight = Atomic.make 0
@@ -136,7 +136,7 @@ let default_model_strings ~cascade_name =
   | _ -> llama_glm
 
 (* ================================================================ *)
-(* Model spec parsing (moved from Llm_types)                        *)
+(* Model spec parsing (moved from Masc_model)                        *)
 (* ================================================================ *)
 
 let rec model_spec_of_string s =
@@ -184,24 +184,24 @@ let rec model_spec_of_string s =
       else
         match Provider_adapter.resolve_direct_adapter provider with
         | Some adapter when adapter.canonical_name = "llama" ->
-          Ok { Llm_types.llama_default with model_id }
+          Ok { Masc_model.llama_default with model_id }
         | Some adapter when adapter.canonical_name = "gemini-api" ->
-          if model_id = "pro" then Ok Llm_types.gemini_pro
+          if model_id = "pro" then Ok Masc_model.gemini_pro
           else if model_id = "flash" then
             let flash = Env_config_governance.Gemini.flash_model in
-            Ok { Llm_types.gemini_pro with model_id = (if flash = "" then "flash" else flash) }
+            Ok { Masc_model.gemini_pro with model_id = (if flash = "" then "flash" else flash) }
           else
-            Ok { Llm_types.gemini_pro with model_id }
+            Ok { Masc_model.gemini_pro with model_id }
         | Some adapter when adapter.canonical_name = "claude-api" ->
-          if model_id = "opus" then Ok Llm_types.claude_opus
-          else if model_id = "sonnet" then Ok Llm_types.claude_sonnet
-          else Ok { Llm_types.claude_opus with model_id }
+          if model_id = "opus" then Ok Masc_model.claude_opus
+          else if model_id = "sonnet" then Ok Masc_model.claude_sonnet
+          else Ok { Masc_model.claude_opus with model_id }
         | Some adapter when adapter.canonical_name = "codex-api" ->
-          Ok { Llm_types.openai_default with model_id }
+          Ok { Masc_model.openai_default with model_id }
         | Some adapter when adapter.canonical_name = "glm" ->
           (* "auto" or empty -> Glm_pool selects at runtime *)
           let effective_id = if model_id = "auto" then "" else model_id in
-          Ok { Llm_types.glm_cloud with model_id = effective_id }
+          Ok { Masc_model.glm_cloud with model_id = effective_id }
         | Some adapter when adapter.canonical_name = "openrouter" ->
           Ok {
             provider = OpenRouter;
@@ -294,16 +294,16 @@ let default_local_model_spec () =
       | Error _ -> (
           match default_execution_model_spec () with
           | Ok spec -> spec
-          | Error _ -> Llm_types.glm_cloud))
+          | Error _ -> Masc_model.glm_cloud))
   | None -> (
       match default_execution_model_spec () with
       | Ok spec -> spec
-      | Error _ -> Llm_types.glm_cloud)
+      | Error _ -> Masc_model.glm_cloud)
 
 (** Backward compat: return MASC model_spec list.
     Prefer {!call}, {!call_raw}, or {!call_with_tools} instead. *)
 let get_cascade ?(config_path = "") ~cascade_name () :
-    Llm_types.model_spec list =
+    Masc_model.model_spec list =
   let defaults = default_model_strings ~cascade_name in
   let configured =
     if String.length config_path > 0 then

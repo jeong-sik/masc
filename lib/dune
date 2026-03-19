@@ -218,7 +218,6 @@
    relation_materializer
    prometheus
    rate_limit
-   masc_mcp
    masc_pb
    mdal
    mdal_swarm

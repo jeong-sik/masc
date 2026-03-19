@@ -21,7 +21,7 @@ let run_cmd base_path =
   Masc_mcp.Chain_telemetry.enable_eio ();
   Masc_mcp.Generational_metrics.enable_eio ();
   Masc_mcp.Dashboard_cache.enable_eio ();
-  Masc_mcp.Time_compat.set_clock (Eio.Stdenv.clock env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   Masc_mcp.Cancellation.TokenStore.init ();
   Eio.Switch.run @@ fun sw ->
   let clock, mono_clock, net, _domain_mgr, proc_mgr, fs =

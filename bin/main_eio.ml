@@ -38,7 +38,7 @@ module Auth = Masc_mcp.Auth
 module Board = Masc_mcp.Board
 module Board_dispatch = Masc_mcp.Board_dispatch
 module Board_listener = Masc_mcp.Board_listener
-module Council = Masc_mcp.Council
+module Council = Council
 module Task_dispatch = Masc_mcp.Task_dispatch
 module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
@@ -233,7 +233,7 @@ let run_cmd host port base_path =
   Masc_mcp.Dashboard_cache.enable_eio ~clock:(Eio.Stdenv.clock env) ();
 
   (* Set global clock for Time_compat (Eio-native timestamps) *)
-  Masc_mcp.Time_compat.set_clock (Eio.Stdenv.clock env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
 
   (* Initialize thread-safe token store for cancellation support *)
   Masc_mcp.Cancellation.TokenStore.init ();

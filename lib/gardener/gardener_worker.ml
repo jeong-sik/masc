@@ -28,41 +28,50 @@ let make_dispatch () ~name ~args =
   | Some result -> result
   | None -> (false, Printf.sprintf "Unknown tool: %s" name)
 
+(** Wrap OAS worker calls so Eio exceptions (Mutex.Poisoned from LLM
+    connection failure, etc.) become [Error] results instead of crashing. *)
+let run_safe f =
+  try f ()
+  with exn ->
+    Error (Printf.sprintf "OAS worker exception: %s" (Printexc.to_string exn))
+
 let run_for_gap ~topic ~traits_str ~reason =
-  Oas_worker.run_named_with_masc_tools
-    ~cascade_name:"gardener_spawn"
-    ~system_prompt:
-      (Printf.sprintf
-         "You are a MASC Gardener worker. Address: %s\n\
-          Traits: %s\n\
-          1. masc_status -> room state\n\
-          2. masc_tasks -> find unclaimed work\n\
-          3. masc_claim_next -> claim a task\n\
-          4. Work on the claimed task\n\
-          5. masc_transition -> mark done\n\
-          6. masc_broadcast -> report results\n\
-          Terminate after completion. Do not loop."
-         topic traits_str)
-    ~goal:(Printf.sprintf "Address gap '%s': %s" topic reason)
-    ~masc_tools:(worker_tools ())
-    ~dispatch:(make_dispatch ())
-    ~max_turns:10 ~temperature:0.3 ()
+  run_safe (fun () ->
+    Oas_worker.run_named_with_masc_tools
+      ~cascade_name:"gardener_spawn"
+      ~system_prompt:
+        (Printf.sprintf
+           "You are a MASC Gardener worker. Address: %s\n\
+            Traits: %s\n\
+            1. masc_status -> room state\n\
+            2. masc_tasks -> find unclaimed work\n\
+            3. masc_claim_next -> claim a task\n\
+            4. Work on the claimed task\n\
+            5. masc_transition -> mark done\n\
+            6. masc_broadcast -> report results\n\
+            Terminate after completion. Do not loop."
+           topic traits_str)
+      ~goal:(Printf.sprintf "Address gap '%s': %s" topic reason)
+      ~masc_tools:(worker_tools ())
+      ~dispatch:(make_dispatch ())
+      ~max_turns:10 ~temperature:0.3 ())
 
 let run_for_backlog ~(backlog : Gardener_types.task_backlog_summary) =
-  Oas_worker.run_named_with_masc_tools
-    ~cascade_name:"gardener_spawn"
-    ~system_prompt:
-      "You are a MASC triage worker.\n\
-       1. masc_tasks -> review backlog\n\
-       2. masc_claim_next -> claim high-priority task\n\
-       3. Process or delegate\n\
-       4. masc_transition -> update status\n\
-       5. masc_broadcast -> report results\n\
-       Terminate after completion."
-    ~goal:
-      (Printf.sprintf
-         "Triage backlog: %d unclaimed (%d high-pri, %d orphan)."
-         backlog.todo_count backlog.high_priority_todo backlog.orphan_count)
-    ~masc_tools:(worker_tools ())
-    ~dispatch:(make_dispatch ())
-    ~max_turns:15 ~temperature:0.3 ()
+  run_safe (fun () ->
+    Oas_worker.run_named_with_masc_tools
+      ~cascade_name:"gardener_spawn"
+      ~system_prompt:
+        "You are a MASC triage worker.\n\
+         1. masc_tasks -> review backlog\n\
+         2. masc_claim_next -> claim high-priority task\n\
+         3. Process or delegate\n\
+         4. masc_transition -> update status\n\
+         5. masc_broadcast -> report results\n\
+         Terminate after completion."
+      ~goal:
+        (Printf.sprintf
+           "Triage backlog: %d unclaimed (%d high-pri, %d orphan)."
+           backlog.todo_count backlog.high_priority_todo backlog.orphan_count)
+      ~masc_tools:(worker_tools ())
+      ~dispatch:(make_dispatch ())
+      ~max_turns:15 ~temperature:0.3 ())

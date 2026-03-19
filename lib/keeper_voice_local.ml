@@ -11,7 +11,13 @@ let masc_base_dir () =
   | Some root when String.trim root <> "" -> Filename.concat root ".masc"
   | _ -> ".masc"
 
-(** Singleton session manager, lazily initialized *)
+(** Singleton session manager, lazily initialized.
+    Thread-safety: safe under single Eio domain — all fibers share one
+    OS thread, so [ref] read/write cannot race. No Eio.Mutex needed.
+    Voice_session_manager.restore is called once on first access;
+    subsequent calls to [get_session_manager] return the cached value.
+    Zombie session cleanup happens inside Voice_session_manager at
+    session-start time (expired sessions are reaped lazily). *)
 let session_manager_ref : Voice_session_manager.t option ref = ref None
 
 let get_session_manager () =

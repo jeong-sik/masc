@@ -14,12 +14,10 @@ let make_model_spec ?(model_id = "test-model") ?(provider = Llm_types.Llama) () 
   { provider;
     model_id;
     max_context = 4096;
-    api_url = "";
+    api_url = "http://127.0.0.1:8085";
     api_key_env = None;
     cost_per_1k_input = 0.0;
     cost_per_1k_output = 0.0;
-    api_url = "http://127.0.0.1:8085";
-    api_key_env = None;
   }
 
 let make_request ?(model_id = "test-model") ?(provider = Llm_types.Llama)

@@ -35,7 +35,7 @@ let test_supervised_trace_only_does_not_make_lane_present () =
   let json =
     M.Swarm_status.build_json_from_inputs
       ~timeline_limit_override:M.Swarm_status.timeline_limit
-      ~now:(M.Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
+      ~now:(Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
       ~decisions:[] ~traces:[ trace ] ~sessions:[]
   in
   let supervised = find_lane json "supervised" in
@@ -69,7 +69,7 @@ let test_managed_trace_only_does_not_make_lane_present () =
   let json =
     M.Swarm_status.build_json_from_inputs
       ~timeline_limit_override:M.Swarm_status.timeline_limit
-      ~now:(M.Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
+      ~now:(Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
       ~decisions:[] ~traces:[ trace ] ~sessions:[]
   in
   let managed = find_lane json "managed" in
@@ -82,7 +82,7 @@ let test_managed_trace_only_does_not_make_lane_present () =
        (json |> U.member "recommended_next_action" |> U.member "tool" |> U.to_string))
 
 let test_active_managed_operation_keeps_lane_present () =
-  let now = M.Time_compat.now () in
+  let now = Time_compat.now () in
   let now_iso = M.Command_plane_v2.iso_of_unix now in
   let operation : M.Swarm_status.operation_info =
     {
@@ -109,7 +109,7 @@ let test_active_managed_operation_keeps_lane_present () =
     (json |> U.member "overview" |> U.member "provenance" |> U.to_string)
 
 let test_managed_alert_only_keeps_lane_present () =
-  let now = M.Time_compat.now () in
+  let now = Time_compat.now () in
   let now_iso = M.Command_plane_v2.iso_of_unix now in
   let alert : M.Swarm_status.alert_info =
     {
@@ -133,7 +133,7 @@ let test_managed_alert_only_keeps_lane_present () =
     (managed |> U.member "present" |> U.to_bool)
 
 let test_supervised_session_keeps_lane_present () =
-  let now = M.Time_compat.now () in
+  let now = Time_compat.now () in
   let now_iso = M.Command_plane_v2.iso_of_unix now in
   let session : M.Swarm_status.session_info =
     {
@@ -152,7 +152,7 @@ let test_supervised_session_keeps_lane_present () =
   let json =
     M.Swarm_status.build_json_from_inputs
       ~timeline_limit_override:M.Swarm_status.timeline_limit
-      ~now:(M.Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
+      ~now:(Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
       ~decisions:[] ~traces:[] ~sessions:[ session ]
   in
   let supervised = find_lane json "supervised" in
@@ -166,7 +166,7 @@ let test_supervised_session_keeps_lane_present () =
     (json |> U.member "narrative" |> U.member "active_work" |> U.to_string <> "")
 
 let test_stale_supervised_session_keeps_stale_flag () =
-  let stale_iso = M.Command_plane_v2.iso_of_unix (M.Time_compat.now () -. 1200.) in
+  let stale_iso = M.Command_plane_v2.iso_of_unix (Time_compat.now () -. 1200.) in
   let session : M.Swarm_status.session_info =
     {
       session_id = "sess-stale";
@@ -184,7 +184,7 @@ let test_stale_supervised_session_keeps_stale_flag () =
   let json =
     M.Swarm_status.build_json_from_inputs
       ~timeline_limit_override:M.Swarm_status.timeline_limit
-      ~now:(M.Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
+      ~now:(Time_compat.now ()) ~operations:[] ~detachments:[] ~alerts:[]
       ~decisions:[] ~traces:[] ~sessions:[ session ]
   in
   let supervised = find_lane json "supervised" in
@@ -211,7 +211,7 @@ let test_stale_supervised_session_keeps_stale_flag () =
     (stale_gap |> U.member "why_it_matters" |> U.to_string <> "")
 
 let test_recommendation_lane_drives_narrative_lane_and_start_event () =
-  let now = M.Time_compat.now () in
+  let now = Time_compat.now () in
   let current_iso = M.Command_plane_v2.iso_of_unix now in
   let stale_iso = M.Command_plane_v2.iso_of_unix (now -. 1200.) in
   let old_iso = M.Command_plane_v2.iso_of_unix (now -. 90.) in
@@ -284,7 +284,7 @@ let test_recommendation_lane_drives_narrative_lane_and_start_event () =
 
 let test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_present ()
     =
-  let now = M.Time_compat.now () in
+  let now = Time_compat.now () in
   let stale_iso = M.Command_plane_v2.iso_of_unix (now -. 3600.) in
   let operation : M.Swarm_status.operation_info =
     {
@@ -349,7 +349,7 @@ let test_terminal_projected_session_artifacts_do_not_keep_supervised_lane_presen
        (supervised |> U.member "hard_flags" |> U.to_list))
 
 let test_terminal_managed_artifacts_do_not_keep_managed_lane_present () =
-  let now = M.Time_compat.now () in
+  let now = Time_compat.now () in
   let stale_iso = M.Command_plane_v2.iso_of_unix (now -. 3600.) in
   let operation : M.Swarm_status.operation_info =
     {

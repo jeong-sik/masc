@@ -19,6 +19,8 @@ val run_with_tools :
   max_turns:int ->
   temperature:float ->
   max_tokens:int ->
+  ?guardrails:Agent_sdk.Guardrails.t ->
+  unit ->
   (Oas_worker.run_result, string) result
 
 (** Tool-free LLM call (deliberation, correction, forced grounding).

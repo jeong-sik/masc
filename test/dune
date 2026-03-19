@@ -188,6 +188,12 @@
  (modules test_oas_integration)
  (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
 
+; Verifier_oas bridge tests (eval_gate→guardrails, verdict→hook, read-only)
+(test
+ (name test_verifier_oas_bridge)
+ (modules test_verifier_oas_bridge)
+ (libraries masc_mcp agent_sdk alcotest yojson))
+
 ; OAS adapter tests (sentinel roundtrip, context_compact_oas strategies)
 (test
  (name test_oas_adapters)

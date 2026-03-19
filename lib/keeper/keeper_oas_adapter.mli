@@ -29,6 +29,24 @@ val run_with_tools :
   unit ->
   (tools_run_result, string) result
 
+(** Tool loop with caller-provided dispatch closure.
+    Unlike [run_with_tools], the caller controls tool execution
+    (Eval_gate, Trajectory, custom logging). Returns raw OAS result;
+    caller manages tool tracking externally. *)
+val run_with_custom_dispatch :
+  meta:keeper_meta ->
+  ?model_spec_override:Llm_types.model_spec ->
+  system_prompt:string ->
+  goal:string ->
+  max_turns:int ->
+  temperature:float ->
+  max_tokens:int ->
+  masc_tools:Llm_types.tool_def list ->
+  dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
+  ?guardrails:Agent_sdk.Guardrails.t ->
+  unit ->
+  (Oas_worker.run_result, string) result
+
 (** Tool-free LLM call (deliberation, correction, forced grounding).
     Wraps [Oas_worker.run] without tools. *)
 val run_simple :

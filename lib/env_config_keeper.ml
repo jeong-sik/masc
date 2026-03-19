@@ -202,6 +202,26 @@ module KeeperAlert = struct
     get_float ~default:0.85 "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
 end
 
+(** {1 Keeper Supervisor Configuration} *)
+
+module KeeperSupervisor = struct
+  (** Maximum restart attempts before declaring a keeper dead *)
+  let max_restarts =
+    get_int ~default:5 "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS"
+
+  (** Base delay for exponential backoff between restarts (seconds) *)
+  let backoff_base_s =
+    get_float ~default:10.0 "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S"
+
+  (** Maximum backoff delay cap (seconds) *)
+  let backoff_max_s =
+    get_float ~default:300.0 "MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S"
+
+  (** Interval between supervisor sweep runs (seconds) *)
+  let sweep_interval_sec =
+    get_float ~default:30.0 "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
+end
+
 module Sentinel = struct
   let enabled = get_bool ~default:true "MASC_SENTINEL_ENABLED"
   let heartbeat_interval_sec = get_float ~default:30.0 "MASC_SENTINEL_HEARTBEAT_SEC"

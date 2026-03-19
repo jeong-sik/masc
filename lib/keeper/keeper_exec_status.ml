@@ -660,8 +660,13 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
               | _ -> None)
         else None
 
-let keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts
-    =
+let keeper_health_state ?(fiber_health = Fiber_unknown)
+    ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts () =
+  (* Supervisor-level health takes priority *)
+  match fiber_health with
+  | Fiber_zombie -> "zombie"
+  | Fiber_dead -> "dead"
+  | _ ->
   let agent_exists = json_bool "exists" agent_status false in
   let agent_status_text =
     json_string_opt "status" agent_status
@@ -697,6 +702,8 @@ let keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ~no
 
 let keeper_next_action_path ~health_state ~quiet_reason =
   match health_state with
+  | "zombie" -> "auto_restart"
+  | "dead" -> "manual_restart"
   | "offline" | "stale" | "degraded" -> "recover"
   | _ -> (
       match quiet_reason with
@@ -717,6 +724,10 @@ let keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts =
 
 let keeper_diagnostic_summary ~health_state ~quiet_reason =
   match health_state with
+  | "zombie" ->
+      "Keeper fiber has terminated but registry entry persists. Supervisor will auto-restart."
+  | "dead" ->
+      "Keeper restart budget exhausted. Manual restart via masc_keeper_up required."
   | "offline" | "stale" | "degraded" ->
       "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
   | _ -> (
@@ -839,7 +850,7 @@ let keeper_diagnostic_json
     classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts
   in
   let health_state =
-    keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts
+    keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ~now_ts ()
   in
   let next_action_path = keeper_next_action_path ~health_state ~quiet_reason in
   let last_reply_status, last_reply_at, last_reply_preview =

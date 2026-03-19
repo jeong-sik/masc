@@ -194,8 +194,8 @@ let () =
   eprintf "Perpetual Agent CLI\n%!";
   eprintf "Goal: %s\n%!" args.goal;
   eprintf "Models: %s\n%!" (String.concat ", "
-    (List.map (fun (m : Masc_model.model_spec) ->
-      sprintf "%s:%s" (Masc_model.string_of_provider m.provider) m.model_id
+    (List.map (fun (m : Cascade.model_spec) ->
+      sprintf "%s:%s" (Cascade.string_of_provider m.provider) m.model_id
     ) models));
   eprintf "Verify: %b (model: %s)\n%!" args.verify config.verifier_model.model_id;
   eprintf "Thresholds: compact=%.0f%%, handoff=%.0f%%\n%!"

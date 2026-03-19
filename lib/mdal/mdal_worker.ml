@@ -53,34 +53,34 @@ let worker_name_for_state (state : Mdal.loop_state) =
   sprintf "mdal-%s-%02d" safe_loop (state.current_iteration + 1)
 
 let model_provider_label = function
-  | Masc_model.Llama -> "llama"
-  | Masc_model.Claude -> "claude"
-  | Masc_model.OpenAI -> "openai"
-  | Masc_model.Gemini -> "gemini"
-  | Masc_model.Glm_cloud -> "glm"
-  | Masc_model.OpenRouter -> "openrouter"
-  | Masc_model.Custom name -> "custom:" ^ name
+  | Cascade.Llama -> "llama"
+  | Cascade.Claude -> "claude"
+  | Cascade.OpenAI -> "openai"
+  | Cascade.Gemini -> "gemini"
+  | Cascade.Glm_cloud -> "glm"
+  | Cascade.OpenRouter -> "openrouter"
+  | Cascade.Custom name -> "custom:" ^ name
 
-let model_label (spec : Masc_model.model_spec) =
+let model_label (spec : Cascade.model_spec) =
   sprintf "%s:%s" (model_provider_label spec.provider) spec.model_id
 
-let validate_model_spec (spec : Masc_model.model_spec) :
-    (Masc_model.model_spec, string) result =
+let validate_model_spec (spec : Cascade.model_spec) :
+    (Cascade.model_spec, string) result =
   match spec.provider with
-  | Masc_model.Claude
-  | Masc_model.OpenAI
-  | Masc_model.Gemini
-  | Masc_model.Llama
-  | Masc_model.Glm_cloud -> Ok spec
-  | Masc_model.OpenRouter
-  | Masc_model.Custom _ ->
+  | Cascade.Claude
+  | Cascade.OpenAI
+  | Cascade.Gemini
+  | Cascade.Llama
+  | Cascade.Glm_cloud -> Ok spec
+  | Cascade.OpenRouter
+  | Cascade.Custom _ ->
       Error
         (sprintf
            "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
            (model_provider_label spec.provider))
 
 let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
-    (Masc_model.model_spec * string, string) result =
+    (Cascade.model_spec * string, string) result =
   let parse_worker_model raw =
     match Cascade.model_spec_of_string raw with
     | Error _ as e -> e
@@ -96,14 +96,14 @@ let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
       if String.contains normalized ':' then parse_worker_model normalized
       else
         match normalized with
-        | "claude" -> Ok (Masc_model.claude_opus, model_label Masc_model.claude_opus)
+        | "claude" -> Ok (Cascade.claude_opus, model_label Cascade.claude_opus)
         | "openai" | "codex-api" ->
-            Ok (Masc_model.openai_default, model_label Masc_model.openai_default)
-        | "gemini" -> Ok (Masc_model.gemini_pro, model_label Masc_model.gemini_pro)
+            Ok (Cascade.openai_default, model_label Cascade.openai_default)
+        | "gemini" -> Ok (Cascade.gemini_pro, model_label Cascade.gemini_pro)
         | "ollama" ->
             Error (Provider_adapter.bare_ollama_migration_message ())
         | "glm" ->
-            Ok (Masc_model.glm_cloud, model_label Masc_model.glm_cloud)
+            Ok (Cascade.glm_cloud, model_label Cascade.glm_cloud)
         | "llama" ->
             Error
               "MDAL strict worker requires `worker_model` for llama providers, e.g. `llama:<model-id>`."

@@ -290,7 +290,7 @@ let compute_judgments ~base_path:_ ~factual_json =
   | Error message -> Error message
   | Ok response -> (
       try
-        let parsed = Yojson.Safe.from_string (Masc_model.text_of_response response) in
+        let parsed = Yojson.Safe.from_string (Cascade.text_of_response response) in
         let generated_at = now_iso () in
         let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
         let items =

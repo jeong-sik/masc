@@ -16,7 +16,7 @@ let make_test_messages () : Agent_sdk.Types.message list =
     Agent_sdk.Types.system_msg "You are a helpful assistant.";
     Agent_sdk.Types.user_msg "Hello, what is 2+2?";
     Agent_sdk.Types.assistant_msg "The answer is 4.";
-    Masc_model.tool_msg ~name:"calculator" ~call_id:"call-1" "result: 4";
+    Cascade.tool_msg ~name:"calculator" ~call_id:"call-1" "result: 4";
     Agent_sdk.Types.user_msg "Thanks, now solve x^2 = 9.";
     Agent_sdk.Types.assistant_msg "x = 3 or x = -3.";
   ]
@@ -54,7 +54,7 @@ let test_roundtrip_system_msg_dropped () =
     true (Option.is_none result)
 
 let test_roundtrip_tool_msg () =
-  let msg = Masc_model.tool_msg ~name:"calc" ~call_id:"tc-1" "tool output here" in
+  let msg = Cascade.tool_msg ~name:"calc" ~call_id:"tc-1" "tool output here" in
   match Oas_type_adapters.to_oas_message msg with
   | None -> Alcotest.fail "tool message should not be dropped"
   | Some oas ->

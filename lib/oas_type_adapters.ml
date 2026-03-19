@@ -1,12 +1,12 @@
 (** OAS type adapters — convert MASC model types to OAS (Agent SDK) types.
 
-    Thin wrappers bridging {!Masc_model.model_spec} and {!Masc_model.message}
+    Thin wrappers bridging {!Cascade.model_spec} and {!Cascade.message}
     to their OAS counterparts.  Most conversions are structural identity
     (shared type aliases); [to_oas_provider] performs actual mapping.
 
     @since 2.130.0 — extracted from Llm_provider_dispatch *)
 
-let to_oas_provider (spec : Masc_model.model_spec) : Agent_sdk.Provider.config option =
+let to_oas_provider (spec : Cascade.model_spec) : Agent_sdk.Provider.config option =
   match spec.provider with
   | Claude ->
     Some { Agent_sdk.Provider.provider = Anthropic;
@@ -31,9 +31,9 @@ let to_oas_provider (spec : Masc_model.model_spec) : Agent_sdk.Provider.config o
            model_id = spec.model_id;
            api_key_env = Option.value ~default:"" spec.api_key_env }
 
-let to_oas_message (m : Masc_model.message) : Agent_sdk.Types.message option =
+let to_oas_message (m : Cascade.message) : Agent_sdk.Types.message option =
   match m.role with System -> None | _ -> Some m
 
-let of_oas_message (m : Agent_sdk.Types.message) : Masc_model.message = m
-let of_oas_usage (u : Agent_sdk.Types.api_usage) : Masc_model.token_usage = u
-let to_oas_usage (u : Masc_model.token_usage) : Agent_sdk.Types.api_usage = u
+let of_oas_message (m : Agent_sdk.Types.message) : Cascade.message = m
+let of_oas_usage (u : Agent_sdk.Types.api_usage) : Cascade.token_usage = u
+let to_oas_usage (u : Cascade.token_usage) : Agent_sdk.Types.api_usage = u

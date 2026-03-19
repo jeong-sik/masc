@@ -143,12 +143,6 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
     | None -> None
     | Some L1_Reactive -> None
     | Some level ->
-        let primary = match specs with p :: _ -> p | [] -> Llm_types.default_local_model_spec () in
-        let verify_model =
-          match Llm_types.default_verifier_model_spec () with
-          | Ok model -> model
-          | Error _ -> primary
-        in
         let keeper_context =
           Printf.sprintf "keeper=%s autonomy=%s turns=%d cost=$%.4f"
             meta.name (Keeper_autonomy.autonomy_level_to_string level)
@@ -234,8 +228,6 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~goal_ids:meta.active_goal_ids
               ~keeper_name:meta.name
               ~keeper_context
-              ~plan_model:primary
-              ~verify_model
               ~autonomy_level:level
             in
             (match result with

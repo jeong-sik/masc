@@ -145,7 +145,6 @@ let perpetual_hooks
   let pre_tool_use =
     if config.feedback_enabled then
       Some (Verifier_oas.make_pre_tool_hook
-        ~model:config.verifier_model
         ~goal:config.initial_goal
         ~context_summary:(sprintf "Turn %d, generation %d"
           pstate.turn_count pstate.generation))

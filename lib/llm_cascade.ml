@@ -3,8 +3,16 @@
     MASC defines cascade name -> model list policy (default_model_strings).
     OAS handles config loading, model parsing, health filtering, and execution.
 
+    Public entry points:
+    - {!call} — prompt-in/text-out convenience (returns cascade_result)
+    - {!call_raw} — prompt-in, returns full api_response
+    - {!call_with_tools} — messages + tools, returns full api_response
+
+    All three route through OAS Cascade_config.complete_named.
+
     @since 2.114.0 — original
-    @since 2.115.0 — delegated to OAS Cascade_config *)
+    @since 2.115.0 — delegated to OAS Cascade_config
+    @since 2.116.0 — call_raw, call_with_tools added *)
 
 type cascade_result = {
   response : string;
@@ -67,7 +75,15 @@ let default_model_strings ~cascade_name =
   (* theory of mind — local llama, glm fallback *)
   | "tom" -> llama_glm
   (* verifier — local llama, glm fallback *)
-  | "verifier" -> llama_glm
+  | "verifier" | "code_swarm_verify" -> llama_glm
+  (* keeper — local llama, glm fallback *)
+  | "keeper_autonomy" -> llama_glm
+  (* routing — local llama, glm fallback *)
+  | "routing_judge" -> llama_glm
+  (* chain — local llama, glm fallback *)
+  | "chain_llm" -> llama_glm
+  (* autoresearch — local llama, glm fallback *)
+  | "autoresearch" -> llama_glm
   (* trpg — local llama, glm fallback *)
   | "trpg_intent" -> llama_glm
   (* briefing — llama first, flash-tier cloud chain, glm fallback *)
@@ -98,9 +114,8 @@ let default_model_strings ~cascade_name =
   (* unregistered cascade: llama + glm as safety net *)
   | _ -> llama_glm
 
-(** Backward compat: return MASC model_spec list for callers that need
-    to pass specs to Llm_orchestration directly. Uses OAS Cascade_config
-    for config loading, then maps back to Llm_types. *)
+(** Backward compat: return MASC model_spec list.
+    Prefer {!call}, {!call_raw}, or {!call_with_tools} instead. *)
 let get_cascade ?(config_path = "") ~cascade_name () :
     Llm_types.model_spec list =
   let defaults = default_model_strings ~cascade_name in
@@ -139,17 +154,40 @@ let get_cascade ?(config_path = "") ~cascade_name () :
 (** Accept validator type: api_response -> bool.
     Now that MASC validators use api_response directly, no bridging needed. *)
 
-(** Call LLM cascade. Routes directly through OAS Cascade_config.complete_named,
-    bypassing MASC's Llm_orchestration. *)
-let call ~cascade_name ~prompt
+(** Format OAS http_error as cascade error string. *)
+let format_cascade_error ~cascade_name = function
+  | Llm_provider.Http_client.HttpError { code; body } ->
+    Printf.sprintf "[cascade] %s: HTTP %d: %s" cascade_name code
+      (if String.length body > 200
+       then String.sub body 0 200 ^ "..."
+       else body)
+  | Llm_provider.Http_client.NetworkError { message } ->
+    Printf.sprintf "[cascade] %s: %s" cascade_name message
+
+(** Internal: resolve config, call OAS complete_named, map errors to string. *)
+let complete_cascade ~cascade_name ~messages
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
-    ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
+    ?(max_tokens = 500) ?(accept = fun _ -> true) ?tools () =
   let env = Llm_eio_env.get () in
   let defaults = default_model_strings ~cascade_name in
   let config_path_opt =
     if String.length config_path > 0 then Some config_path
     else default_config_path ()
   in
+  match
+    Llm_provider.Cascade_config.complete_named
+      ~sw:env.sw ~net:env.net ?clock:env.clock
+      ?config_path:config_path_opt
+      ~name:cascade_name ~defaults ~messages
+      ?tools ~temperature ~max_tokens ~accept ~timeout_sec ()
+  with
+  | Ok resp -> Ok resp
+  | Error err -> Error (format_cascade_error ~cascade_name err)
+
+(** Prompt-in, text-out convenience. Returns {!cascade_result}. *)
+let call ~cascade_name ~prompt
+    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
+    ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
   let messages : Llm_provider.Types.message list =
     (match system with
      | Some s -> [ Llm_provider.Types.system_msg s ]
@@ -158,25 +196,36 @@ let call ~cascade_name ~prompt
   in
   let t0 = Time_compat.now () in
   match
-    Llm_provider.Cascade_config.complete_named
-      ~sw:env.sw ~net:env.net ?clock:env.clock
-      ?config_path:config_path_opt
-      ~name:cascade_name ~defaults ~messages
-      ~temperature ~max_tokens ~accept ~timeout_sec ()
+    complete_cascade ~cascade_name ~messages
+      ~config_path ~temperature ~timeout_sec ~max_tokens ~accept ()
   with
   | Ok resp ->
-    let t1 = Time_compat.now () in
-    let duration_ms = int_of_float ((t1 -. t0) *. 1000.0) in
+    let duration_ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
     Ok
       {
         response = Llm_provider.Cascade_config.text_of_response resp;
         llm_used = resp.Llm_provider.Types.model;
         duration_ms;
       }
-  | Error (Llm_provider.Http_client.HttpError { code; body }) ->
-    Error (Printf.sprintf "[cascade] %s: HTTP %d: %s" cascade_name code
-             (if String.length body > 200
-              then String.sub body 0 200 ^ "..."
-              else body))
-  | Error (Llm_provider.Http_client.NetworkError { message }) ->
-    Error (Printf.sprintf "[cascade] %s: %s" cascade_name message)
+  | Error _ as e -> e
+
+(** Prompt-in, full api_response out. Use when callers need model name,
+    tool_calls, or usage from the response. *)
+let call_raw ~cascade_name ~prompt
+    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
+    ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
+  let messages : Llm_provider.Types.message list =
+    (match system with
+     | Some s -> [ Llm_provider.Types.system_msg s ]
+     | None -> [])
+    @ [ Llm_provider.Types.user_msg prompt ]
+  in
+  complete_cascade ~cascade_name ~messages
+    ~config_path ~temperature ~timeout_sec ~max_tokens ~accept ()
+
+(** Messages + tools in, full api_response out. For tool-using LLM calls. *)
+let call_with_tools ~cascade_name ~messages
+    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
+    ?(max_tokens = 500) ?(accept = fun _ -> true) ?tools () =
+  complete_cascade ~cascade_name ~messages
+    ~config_path ~temperature ~timeout_sec ~max_tokens ~accept ?tools ()

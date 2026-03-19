@@ -98,7 +98,6 @@ let risk_guard ~(autonomy_level : Keeper_autonomy.autonomy_level)
     Layer 2: Risk guard (fast, no LLM)
     Layer 3: LLM verification via verifier.ml (cheap model, 200 tokens) *)
 let verify_action
-    ~(model : Llm_types.model_spec)
     ~(autonomy_level : Keeper_autonomy.autonomy_level)
     (req : keeper_verification_request) : keeper_verdict =
   (* Layer 1: Cost guard *)
@@ -122,7 +121,7 @@ let verify_action
       else
         req.keeper_context;
   } in
-  let verdict = Verifier_oas.verify ~model verifier_req in
+  let verdict = Verifier_oas.verify verifier_req in
   of_verifier_verdict verdict
 
 (* ================================================================ *)
@@ -172,8 +171,6 @@ let run_pipeline
     ~(goal_ids : string list)
     ~(keeper_name : string)
     ~(keeper_context : string)
-    ~(plan_model : Llm_types.model_spec)
-    ~(verify_model : Llm_types.model_spec)
     ~(autonomy_level : Keeper_autonomy.autonomy_level)
     : pipeline_result =
   (* Step 1: Evaluate next action *)
@@ -190,7 +187,7 @@ let run_pipeline
       else
         (* Step 3: Generate action plan *)
         match Keeper_autonomy.generate_action_plan
-                ~model:plan_model ~goal:{ id = pa.goal_id; horizon = "short";
+                ~goal:{ id = pa.goal_id; horizon = "short";
                   title = pa.goal_title; metric = None; target_value = None;
                   due_date = None; priority = 3; status = "active";
                   parent_goal_id = None; last_review_note = None;
@@ -206,7 +203,7 @@ let run_pipeline
               action_plan = plan;
               keeper_context;
             } in
-            match verify_action ~model:verify_model ~autonomy_level req with
+            match verify_action ~autonomy_level req with
             | Proceed -> Approved (pa, plan)
             | ProceedWithCaution warning -> Cautioned (pa, plan, warning)
             | Block reason -> Rejected (pa, reason)

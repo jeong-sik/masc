@@ -677,26 +677,18 @@ let parse_llm_code_response response =
             in
             Result.ok (hypothesis, trimmed)
 
-(** Generate code change by calling Llm_orchestration.complete.
+(** Generate code change via Llm_cascade "autoresearch" profile.
     Returns Ok (hypothesis, new_code) or Error reason. *)
 let generate_code_change ~goal ~baseline ~history ~insights
-    ~target_file ~file_content ~llm_model =
+    ~target_file ~file_content =
   let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
     ~file_content ~target_file in
-  match Llm_types.model_spec_of_string llm_model with
-  | Result.Error e -> Result.error (Printf.sprintf "Invalid model spec: %s" e)
-  | Result.Ok model ->
-    let req : Llm_types.completion_request = {
-      model;
-      messages = [Agent_sdk.Types.user_msg prompt];
-      temperature = 0.7;
-      max_tokens = 4096;
-      tools = [];
-      response_format = `Text;
-    } in
-    (match Llm_orchestration.complete ~timeout_sec:120 req with
-    | Result.Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
-    | Result.Ok resp -> parse_llm_code_response (Llm_types.text_of_response resp))
+  match
+    Llm_cascade.call ~cascade_name:"autoresearch" ~prompt
+      ~temperature:0.7 ~max_tokens:4096 ~timeout_sec:120 ()
+  with
+  | Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
+  | Ok r -> parse_llm_code_response r.Llm_cascade.response
 
 (* ================================================================ *)
 (* Loop State Management                                            *)

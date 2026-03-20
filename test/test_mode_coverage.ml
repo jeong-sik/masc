@@ -161,9 +161,11 @@ let test_categories_agent () =
   check bool "has core_room" true (List.mem Mode.Core_Room cats);
   check bool "has core_task" true (List.mem Mode.Core_Task cats);
   check bool "has worktree" true (List.mem Mode.Worktree cats);
+  check bool "has board" true (List.mem Mode.Board cats);
+  check bool "has comm" true (List.mem Mode.Comm cats);
   check bool "no core_session" false (List.mem Mode.Core_Session cats);
   check bool "no core_ops" false (List.mem Mode.Core_Ops cats);
-  check int "count" 3 (List.length cats)
+  check int "count" 5 (List.length cats)
 
 let test_categories_full () =
   let cats = Mode.categories_for_mode Mode.Full in

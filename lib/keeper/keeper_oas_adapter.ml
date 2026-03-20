@@ -105,32 +105,7 @@ let run_with_tools
   | Error e -> Error e
 
 (* ================================================================ *)
-(* Public: run_with_custom_dispatch                                  *)
-(* ================================================================ *)
-
-(** Run with a custom dispatch function and explicit tool list.
-    Uses cascade-name-based API (post-#1730).
-    [model_spec_override] is accepted for backward compat but ignored —
-    model resolution happens inside [Oas_worker.run_named_with_masc_tools]. *)
-let run_with_custom_dispatch
-    ~(meta : keeper_meta)
-    ?(model_spec_override : Cascade.model_spec option)
-    ~(system_prompt : string)
-    ~(goal : string)
-    ~(max_turns : int)
-    ~(temperature : float)
-    ~(max_tokens : int)
-    ~(masc_tools : Types.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
-    ?(guardrails : Agent_sdk.Guardrails.t option)
-    ()
-  : (Oas_worker.run_result, string) result =
-  ignore model_spec_override;
-  let cascade_name = Printf.sprintf "keeper_%s" meta.name in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:(Printf.sprintf "keeper-%s" meta.name) in
-  Oas_worker.run_named_with_masc_tools
-    ~cascade_name ~goal ~system_prompt ~masc_tools ~dispatch
-    ~max_turns ~temperature ~max_tokens ?guardrails ~memory ()
+(* run_with_custom_dispatch removed — Keeper uses Agent.run() via keeper_agent_run.ml *)
 
 (* ================================================================ *)
 (* Public: run_simple                                                *)

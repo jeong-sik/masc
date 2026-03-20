@@ -186,7 +186,7 @@ let parse_intent_response (text : string) : (query_intent * float) option =
     None
 
 (** Validate that an LLM response contains a parseable intent. *)
-let intent_response_is_valid (resp : Cascade.api_response) : bool =
+let intent_response_is_valid (resp : Llm_provider.Types.api_response) : bool =
   parse_intent_response (Cascade.text_of_response resp) <> None
 
 (** Classify query intent using LLM semantic understanding.

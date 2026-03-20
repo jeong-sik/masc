@@ -264,7 +264,7 @@ let get_chain_id_for_preset = function
   | "figma" -> Some "walph-figma"
   | _ -> None
 
-let walph_response_is_valid (resp : Cascade.api_response) =
+let walph_response_is_valid (resp : Llm_provider.Types.api_response) =
   let content = String.trim (Cascade.text_of_response resp) in
   let lower = String.lowercase_ascii content in
   let len = String.length content in

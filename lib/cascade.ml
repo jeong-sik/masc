@@ -50,11 +50,6 @@ type model_spec = {
   cost_per_1k_output : float;
 }
 
-type role = Agent_sdk.Types.role = System | User | Assistant | Tool
-
-(** Message type — now unified with OAS. No more MASC-specific name/tool_call_id fields. *)
-type message = Agent_sdk.Types.message
-
 type tool_def = {
   tool_name : string;
   tool_description : string;
@@ -67,40 +62,31 @@ type tool_call = {
   call_arguments : string;
 }
 
-(** Token usage — now unified with OAS api_usage. Use [total_tokens] function
-    instead of the removed field. *)
-type token_usage = Agent_sdk.Types.api_usage
-
-(** Compute total tokens (was a record field, now derived). *)
-let total_tokens (u : token_usage) = u.input_tokens + u.output_tokens
+(** Compute total tokens from OAS api_usage. *)
+let total_tokens (u : Agent_sdk.Types.api_usage) = u.input_tokens + u.output_tokens
 
 type completion_request = {
   model : model_spec;
-  messages : message list;
+  messages : Agent_sdk.Types.message list;
   temperature : float;
   max_tokens : int;
   tools : tool_def list;
   response_format : [ `Text | `Json ];
 }
 
-(** LLM completion result — OAS api_response directly.
-    No more MASC-specific wrapper; use helpers below for field access.
-    @since Phase 2 — OAS SDK Only *)
-type api_response = Llm_provider.Types.api_response
-
-(** Zero usage sentinel for api_response with [usage = None]. *)
-let zero_usage : token_usage =
+(** Zero usage sentinel. *)
+let zero_usage : Agent_sdk.Types.api_usage =
   { Agent_sdk.Types.input_tokens = 0;
     output_tokens = 0;
     cache_creation_input_tokens = 0;
     cache_read_input_tokens = 0 }
 
 (** Extract usage from an api_response, defaulting to zero. *)
-let usage_of_response (resp : api_response) : token_usage =
+let usage_of_response (resp : Llm_provider.Types.api_response) : Agent_sdk.Types.api_usage =
   match resp.usage with Some u -> u | None -> zero_usage
 
 (** Extract text content from an api_response. *)
-let text_of_response (resp : api_response) : string =
+let text_of_response (resp : Llm_provider.Types.api_response) : string =
   Agent_sdk.Types.text_of_content resp.content
 
 (** Measure wall-clock latency of a thunk in milliseconds.
@@ -123,11 +109,11 @@ let tool_calls_of_content (blocks : Agent_sdk.Types.content_block list)
     blocks
 
 (** Extract tool calls from an api_response. *)
-let tool_calls_of_response (resp : api_response) : tool_call list =
+let tool_calls_of_response (resp : Llm_provider.Types.api_response) : tool_call list =
   tool_calls_of_content resp.content
 
 (** Check if an api_response has any tool calls. *)
-let has_tool_calls (resp : api_response) : bool =
+let has_tool_calls (resp : Llm_provider.Types.api_response) : bool =
   List.exists
     (function Agent_sdk.Types.ToolUse _ -> true | _ -> false)
     resp.content
@@ -150,8 +136,6 @@ let string_of_provider = function
   | Glm_cloud -> "glm_cloud"
   | OpenRouter -> "openrouter"
   | Custom s -> sprintf "custom(%s)" s
-
-let string_of_role = Agent_sdk.Types.role_to_string
 
 let llama_default = {
   provider = Llama;
@@ -213,16 +197,8 @@ let gemini_pro = {
   cost_per_1k_output = 0.0;
 }
 
-let system_msg = Agent_sdk.Types.system_msg
-let user_msg = Agent_sdk.Types.user_msg
-let assistant_msg = Agent_sdk.Types.assistant_msg
-
 let tool_msg ~name:_ ~call_id text =
   Agent_sdk.Types.tool_result_msg ~tool_use_id:call_id ~content:text ()
-
-(** Extract text content from a message.
-    Delegates to Agent_sdk.Types.text_of_content for rich content_block list. *)
-let text_of_message = Agent_sdk.Types.text_of_message
 
 (* ================================================================ *)
 (* UTF-8 Sanitization                                               *)
@@ -246,7 +222,7 @@ let sanitize_text_utf8 (s : string) : string =
   loop 0;
   Buffer.contents buf
 
-let sanitize_message_utf8 (m : message) : message =
+let sanitize_message_utf8 (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
   { m with
     content = List.map (fun block ->
       match block with
@@ -260,12 +236,12 @@ let sanitize_message_utf8 (m : message) : message =
     ) m.content;
   }
 
-let sanitize_messages_utf8 (msgs : message list) : message list =
+let sanitize_messages_utf8 (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
   List.map sanitize_message_utf8 msgs
 
 (** Heuristic: ~4 characters per token (conservative estimate). *)
-let estimate_tokens (msgs : message list) =
-  List.fold_left (fun acc (m : message) -> acc + (String.length (text_of_message m) / 4) + 4) 0 msgs
+let estimate_tokens (msgs : Agent_sdk.Types.message list) =
+  List.fold_left (fun acc (m : Agent_sdk.Types.message) -> acc + (String.length (Agent_sdk.Types.text_of_message m) / 4) + 4) 0 msgs
 
 
 
@@ -591,7 +567,7 @@ let get_cascade ?(config_path = "") ~cascade_name () :
         cascade_name;
       available_model_specs_of_strings fallback)
 
-(** Accept validator type: api_response -> bool.
+(** Accept validator type: Llm_provider.Types.api_response -> bool.
     Now that MASC validators use api_response directly, no bridging needed. *)
 
 (** Format OAS http_error as cascade error string. *)

@@ -73,7 +73,7 @@ val text_of_run_result : Oas_worker.run_result -> string
 
 (** Extract usage from an OAS run result.
     Returns zero usage if response has no usage data. *)
-val usage_of_run_result : Oas_worker.run_result -> Cascade.token_usage
+val usage_of_run_result : Oas_worker.run_result -> Agent_sdk.Types.api_usage
 
 (** Extract model ID string from an OAS run result. *)
 val model_of_run_result : Oas_worker.run_result -> string

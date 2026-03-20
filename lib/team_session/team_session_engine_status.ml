@@ -275,6 +275,8 @@ let session_status_json (config : Room.config) (session : Team_session_types.ses
             ("proof_json", `String (Team_session_store.proof_json_path config session.session_id));
           ] );
       ("linked_autoresearch", linked_autoresearch);
+      ("plan", Team_session_plan.to_json session);
+      ("plan_progress", `Float (Team_session_plan.progress session));
     ]
 
 

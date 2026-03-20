@@ -332,7 +332,7 @@ function ActorContributionRow({ item }: { item: DashboardProofActorContribution 
   const lastSeen = item.last_active_at ?? item.recent_request_at ?? null
   const isPlanned = item.activity_state === 'planned_only'
   return html`
-    <article class="mission-activity-row proof-actor-row" style="${isPlanned ? 'opacity: 0.45;' : ''}"
+    <article class="mission-activity-row proof-actor-row" style="${isPlanned ? 'opacity: 0.45;' : ''}">
       <div class="mission-activity-head">
         <div>
           <strong>${item.actor}</strong>

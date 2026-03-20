@@ -285,14 +285,10 @@ let default_model_strings ~cascade_name =
   match cascade_name with
   (* heartbeat — llama first, glm fallback *)
   | "heartbeat_action" | "heartbeat_wake" -> llama_glm
-  (* sentinel — llama first, glm fallback *)
-  | "sentinel_board" | "sentinel_task" | "sentinel_keeper" -> llama_glm
   (* lodge subsystems — llama first, glm fallback *)
   | "lodge_direct" | "lodge_context_rewrite" | "lodge_trait_gen"
   | "lodge_comment" | "lodge_agent_match" ->
       llama_glm
-  (* gardener — llama first, glm fallback *)
-  | "gardener_spawn" | "gardener_retire" -> llama_glm
   (* classification — local llama, glm fallback *)
   | "classification" | "context_router" | "capability_match" -> llama_glm
   (* theory of mind — local llama, glm fallback *)

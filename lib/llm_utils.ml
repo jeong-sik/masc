@@ -96,9 +96,20 @@ let sanitize_message_utf8 (m : Agent_sdk.Types.message) : Agent_sdk.Types.messag
 let sanitize_messages_utf8 (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
   List.map sanitize_message_utf8 msgs
 
-(** Heuristic: ~4 characters per token (conservative estimate). *)
+(** Heuristic token estimate: ~4 chars per token.
+    Calculates length from content blocks directly to avoid
+    allocating intermediate concatenated strings. *)
 let estimate_tokens (msgs : Agent_sdk.Types.message list) =
-  List.fold_left (fun acc (m : Agent_sdk.Types.message) -> acc + (String.length (Agent_sdk.Types.text_of_message m) / 4) + 4) 0 msgs
+  let block_length = function
+    | Agent_sdk.Types.Text s -> String.length s
+    | Agent_sdk.Types.ToolResult { content; _ } -> String.length content
+    | Agent_sdk.Types.ToolUse { input; _ } ->
+        String.length (Yojson.Safe.to_string input)
+    | _ -> 0
+  in
+  List.fold_left (fun acc (m : Agent_sdk.Types.message) ->
+    let content_len = List.fold_left (fun sum b -> sum + block_length b) 0 m.content in
+    acc + (content_len / 4) + 4) 0 msgs
 
 (* ================================================================ *)
 (* Concurrency diagnostics (observability only, no throttling)       *)

@@ -1,18 +1,23 @@
-(** Memory_oas_bridge — Connect MASC memory systems to OAS Memory.t.
+(** Memory_oas_bridge — Connect MASC memory systems to OAS Memory.t 5-tier.
 
-    Implements [Agent_sdk.Memory.long_term_backend] using MASC's
-    [Memory_stream] and [Institution_eio] as the persistence layer.
+    Tier mapping:
+    - {b Long_term} — [long_term_backend] via [Memory_stream] (persist/retrieve/query)
+    - {b Episodic}  — [seed_episodes] loads [Memory_stream] entries as OAS episodes;
+                       [flush_episodes] writes new episodes back to [Memory_stream]
+    - {b Procedural} — [seed_procedures_as_oas] loads [Procedural_memory] entries;
+                        [flush_procedures] writes back
+    - {b Working/Scratchpad} — managed by OAS in-memory; no backend needed
 
-    This bridge allows OAS Agent.t to use [Memory.store ~tier:Long_term]
-    and [Memory.recall ~tier:Long_term] transparently, with MASC's
-    existing JSONL-based memory stream handling the actual persistence.
+    Usage:
+    {[
+      let memory = Memory_oas_bridge.create_memory_full ~agent_name ~config () in
+      (* All 5 tiers operational *)
+      let _ = Agent_sdk.Memory.recall_episodes memory () in
+      let _ = Agent_sdk.Memory.best_procedure memory ~pattern:"deploy" in
+    ]}
 
-    Key mapping:
-    - [persist ~key json] → [Memory_stream.add_memory] (importance from JSON or default 5)
-    - [retrieve ~key] → [Memory_stream.retrieve] with key as query (top-1)
-    - [remove ~key] → no-op (JSONL is append-only, entries decay via scoring)
-
-    @since 2.122.0 *)
+    @since 2.122.0 (long_term only)
+    @since 2.124.0 (5-tier: episodic + procedural seeding/flushing) *)
 
 (** Default importance for memories stored via OAS Memory.store.
     Configurable via MASC_MEMORY_OAS_DEFAULT_IMPORTANCE. *)
@@ -169,3 +174,210 @@ let seed_memory_bank ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(lim
     Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "memory_bank" json;
     List.length entries
   end
+
+(* ================================================================ *)
+(* Episodic tier: Memory_stream <-> OAS episodes                    *)
+(* ================================================================ *)
+
+(** Convert a [Memory_stream.memory_entry] to an OAS [episode].
+
+    Mapping:
+    - [importance] (1-10 int) → [salience] (0.0-1.0 float)
+    - [content] → [action]
+    - [entry_type] → [outcome]: all mapped to [Neutral] (Memory_stream
+      entries are observations, not success/failure outcomes)
+    - [agent_name] → [participants] singleton list *)
+let episode_of_entry (e : Memory_stream.memory_entry) : Agent_sdk.Memory.episode =
+  {
+    id = e.id;
+    timestamp = e.timestamp;
+    participants = [ e.agent_name ];
+    action = e.content;
+    outcome = Agent_sdk.Memory.Neutral;
+    salience = Float.min 1.0 (Float.max 0.0
+      (Float.of_int e.importance /. 10.0));
+    metadata =
+      (match e.links with
+       | [] -> []
+       | links ->
+         [ ("links", `List (List.map (fun s -> `String s) links)) ]);
+  }
+
+(** Pre-seed the Episodic tier from [Memory_stream].
+
+    Loads recent entries and stores them as OAS episodes with salience
+    derived from importance scores.  OAS handles time-decay via
+    [recall_episodes ~decay_rate].  Returns the number of episodes seeded. *)
+let seed_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
+    ~(limit : int) : int =
+  let entries = Memory_stream.retrieve ~agent_name ~query:"*" ~limit in
+  List.iter (fun e ->
+    Agent_sdk.Memory.store_episode memory (episode_of_entry e)
+  ) entries;
+  List.length entries
+
+(** Flush new OAS episodes back to [Memory_stream].
+
+    Extracts episodes from the Episodic tier (above [min_salience]) and
+    persists any that do not already exist in [Memory_stream].
+    Returns the number of new episodes flushed. *)
+let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
+  let episodes =
+    Agent_sdk.Memory.recall_episodes memory
+      ~min_salience:0.1 ~limit:100 ()
+  in
+  let flushed = ref 0 in
+  List.iter (fun (ep : Agent_sdk.Memory.episode) ->
+    (* Only flush episodes created during the session (not pre-seeded).
+       Pre-seeded episodes have IDs from Memory_stream, which have a
+       known format.  New episodes have IDs assigned by OAS. *)
+    let existing = Memory_stream.retrieve ~agent_name ~query:ep.id ~limit:1 in
+    if existing = [] then begin
+      let importance =
+        Float.to_int (Float.round (ep.salience *. 10.0))
+        |> max 1 |> min 10
+      in
+      Memory_stream.add_memory
+        ~agent_name ~content:ep.action ~importance
+        (Memory_stream.Observation ep.action);
+      incr flushed
+    end
+  ) episodes;
+  !flushed
+
+(* ================================================================ *)
+(* Procedural tier: Procedural_memory <-> OAS procedures            *)
+(* ================================================================ *)
+
+(** Convert a [Procedural_memory.procedure] to an OAS [procedure].
+
+    MASC's [pattern] field contains "When X, do Y" as a single string.
+    OAS separates [pattern] (trigger) from [action] (what to do).
+    We use the full string for both fields since they are combined
+    in MASC's representation. *)
+let oas_procedure_of_masc (p : Procedural_memory.procedure) :
+    Agent_sdk.Memory.procedure =
+  {
+    id = p.id;
+    pattern = p.pattern;
+    action = p.pattern;  (* MASC combines trigger+action in pattern *)
+    success_count = p.success_count;
+    failure_count = p.failure_count;
+    confidence = p.confidence;
+    last_used = p.last_applied;
+    metadata = [
+      ("agent_name", `String p.agent_name);
+      ("created_at", `Float p.created_at);
+      ("evidence_count", `Int (List.length p.evidence));
+    ];
+  }
+
+(** Pre-seed the Procedural tier from [Procedural_memory].
+
+    Loads crystallized procedures (adaptive threshold: 3+/70% OR 2+/100%)
+    and stores them as OAS procedures with confidence tracking.
+    Returns the number of procedures seeded. *)
+let seed_procedures_as_oas ~(memory : Agent_sdk.Memory.t)
+    ~(agent_name : string) ~(limit : int) : int =
+  let procs = Procedural_memory.top_procedures ~agent_name ~limit in
+  List.iter (fun p ->
+    Agent_sdk.Memory.store_procedure memory (oas_procedure_of_masc p)
+  ) procs;
+  List.length procs
+
+(** Flush OAS procedures back to [Procedural_memory].
+
+    Extracts procedures from the Procedural tier that have been updated
+    (new success/failure counts) and persists them.
+    Returns the number of procedures flushed. *)
+let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
+  let oas_procs =
+    Agent_sdk.Memory.matching_procedures memory
+      ~pattern:"" ()
+  in
+  let flushed = ref 0 in
+  List.iter (fun (op : Agent_sdk.Memory.procedure) ->
+    let existing = Procedural_memory.load_procedures ~agent_name in
+    let updated =
+      match List.find_opt (fun (p : Procedural_memory.procedure) ->
+        p.id = op.id
+      ) existing with
+      | Some old_p ->
+        (* Only flush if counts changed *)
+        if old_p.success_count <> op.success_count
+           || old_p.failure_count <> op.failure_count then begin
+          let updated_p = { old_p with
+            success_count = op.success_count;
+            failure_count = op.failure_count;
+            confidence = op.confidence;
+            last_applied = op.last_used;
+          } in
+          Procedural_memory.save_procedure ~agent_name updated_p;
+          true
+        end else false
+      | None ->
+        (* New procedure from OAS — create in MASC *)
+        let new_p : Procedural_memory.procedure = {
+          id = op.id;
+          agent_name;
+          pattern = op.pattern;
+          evidence = [];
+          success_count = op.success_count;
+          failure_count = op.failure_count;
+          confidence = op.confidence;
+          created_at = Unix.gettimeofday ();
+          last_applied = op.last_used;
+        } in
+        Procedural_memory.save_procedure ~agent_name new_p;
+        true
+    in
+    if updated then incr flushed
+  ) oas_procs;
+  !flushed
+
+(* ================================================================ *)
+(* Full 5-tier memory constructor                                    *)
+(* ================================================================ *)
+
+(** Create an OAS [Memory.t] with all 5 tiers populated.
+
+    Seeds:
+    - Long_term: [long_term_backend] via [Memory_stream]
+    - Episodic: last [episode_limit] entries from [Memory_stream]
+    - Procedural: top [procedure_limit] crystallized procedures
+    - Working/Scratchpad: empty (managed by OAS at runtime)
+
+    Optionally seeds institution and memory bank to Long_term if
+    [config] is provided.
+
+    @param episode_limit default 50
+    @param procedure_limit default 20 *)
+let create_memory_full ~(agent_name : string)
+    ?(config : Room_utils.config option)
+    ?(episode_limit = 50) ?(procedure_limit = 20)
+    () : Agent_sdk.Memory.t =
+  let memory = create_memory ~agent_name in
+  (* Episodic tier *)
+  let _ep_count = seed_episodes ~memory ~agent_name ~limit:episode_limit in
+  (* Procedural tier *)
+  let _proc_count =
+    seed_procedures_as_oas ~memory ~agent_name ~limit:procedure_limit
+  in
+  (* Optional Long_term seeds *)
+  (match config with
+   | Some cfg ->
+     let _inst = seed_institution ~memory ~config:cfg in
+     let _bank = seed_memory_bank ~memory ~agent_name ~limit:20 in
+     ()
+   | None -> ());
+  memory
+
+(** Flush all mutable tiers back to MASC persistent storage.
+
+    Call after [Agent.run] completes to persist new episodes and
+    updated procedures.  Returns [(episodes_flushed, procedures_flushed)]. *)
+let flush_all ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
+    : int * int =
+  let ep = flush_episodes ~memory ~agent_name in
+  let pr = flush_procedures ~memory ~agent_name in
+  (ep, pr)

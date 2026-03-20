@@ -29,7 +29,13 @@ let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
 let handle_keeper_msg ?on_text_delta ctx args : tool_result =
-  ignore on_text_delta; (* streaming not yet wired to Agent.run() *)
+  let on_event = match on_text_delta with
+    | None -> None
+    | Some cb -> Some (fun (evt : Agent_sdk.Types.sse_event) ->
+        match evt with
+        | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
+        | _ -> ())
+  in
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
   if not (validate_name name) then
@@ -193,7 +199,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 ~build_turn_prompt
                 ~user_message:message
                 ~cascade_name:"keeper_turn"
-                ~generation:meta.generation ()
+                ~generation:meta.generation
+                ?on_event ()
             with
             | Error e ->
               (try ignore (Trajectory.finalize trajectory_acc

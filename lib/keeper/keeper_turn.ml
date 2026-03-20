@@ -1,5 +1,9 @@
 (** Keeper_turn -- keeper lifecycle and message-turn handlers.
 
+    Orchestrates keeper turns by building domain-specific system prompt
+    configuration and delegating to {!Keeper_agent_run.run_turn} which
+    owns the full context lifecycle (checkpoint, Context_manager, Agent.run).
+
     Sub-modules:
     - Keeper_turn_up: start/reconfigure
     - Keeper_turn_session: team-session integration
@@ -113,43 +117,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          let specs = Cascade.available_model_specs_of_strings effective_models in
          let primary = match specs with m0 :: _ -> m0 | [] -> Cascade.default_local_model_spec () in
             let base_dir = session_base_dir ctx.config in
-            mkdir_p base_dir;
-            let (session, ctx_opt) = load_context_from_checkpoint
-              ~trace_id:meta.trace_id ~primary_model_max_tokens:primary.max_context ~base_dir in
-            let base_ctx =
-              match ctx_opt with
-              | Some c -> c
-              | None ->
-                Context_manager.create
-                  ~system_prompt:(
-                    build_keeper_system_prompt
-                      ~goal:meta.goal
-                      ~short_goal:meta.short_goal
-                      ~mid_goal:meta.mid_goal
-                      ~long_goal:meta.long_goal
-                      ~soul_profile:meta.soul_profile
-                      ~will:meta.will
-                      ~needs:meta.needs
-                      ~desires:meta.desires
-                      ~instructions:meta.instructions)
-                  ~max_tokens:primary.max_context
-            in
-	            let ctx_work =
-	              (* Always re-apply the current keeper prompt so goal/instructions updates
-	                 actually take effect even when restoring an old checkpoint. *)
-	              Context_manager.set_system_prompt base_ctx
-                ~system_prompt:(
-                  build_keeper_system_prompt
-                    ~goal:meta.goal
-                    ~short_goal:meta.short_goal
-                    ~mid_goal:meta.mid_goal
-                    ~long_goal:meta.long_goal
-                    ~soul_profile:meta.soul_profile
-                    ~will:meta.will
-                    ~needs:meta.needs
-	                    ~desires:meta.desires
-	                    ~instructions:meta.instructions)
-            in
             let policy_mode_learned = keeper_policy_mode_is_learned meta in
             let effective_no_skill_route = no_skill_route || policy_mode_learned in
             let fallback_skill_route =
@@ -166,74 +133,68 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               if policy_mode_learned then SkillSelectHeuristic
               else keeper_skill_selection_mode ()
             in
-            let continuity_snapshot = latest_state_snapshot_from_messages ctx_work.messages in
-            let continuity_summary =
-              match continuity_snapshot with
-              | Some s -> keeper_state_snapshot_to_summary_text s
-              | None -> (
+            let build_turn_prompt ~base_system_prompt ~messages =
+              let continuity_snapshot = latest_state_snapshot_from_messages messages in
+              let continuity_summary =
+                match continuity_snapshot with
+                | Some s -> keeper_state_snapshot_to_summary_text s
+                | None ->
                   let trimmed = String.trim meta.continuity_summary in
-                  if trimmed = "" then "No continuity snapshot available." else trimmed)
-            in
-            let base_turn_system_prompt =
-              if effective_no_skill_route then
-                ctx_work.system_prompt
-              else
-                match skill_selection_mode with
-                | SkillSelectHeuristic ->
-                    skill_route_system_prompt_heuristic
-                      ~base_system_prompt:ctx_work.system_prompt
-                      ~route:fallback_skill_route
-                | SkillSelectAgent ->
-                    skill_route_system_prompt_agent
-                      ~base_system_prompt:ctx_work.system_prompt
-                      ~fallback_route:fallback_skill_route
-                      ~soul_profile:meta.soul_profile
-            in
-            let turn_system_prompt =
-              append_continuity_context_prompt
-                ~base_prompt:base_turn_system_prompt
-                continuity_snapshot
-                ~continuity_summary
-            in
-            let turn_system_prompt =
-              let policy_guards = [
-                (effective_no_skill_route,
-                 "Output guard: NEVER output lines starting with SKILL: or SKILL_REASON:.");
-                (no_state_block,
-                 "Output guard: NEVER output [STATE] or [/STATE] blocks in this turn.");
-              ] in
-              let policy_lines =
-                List.filter_map
-                  (fun (active, line) -> if active then Some line else None)
-                  policy_guards
+                  if trimmed = "" then "No continuity snapshot available." else trimmed
               in
-              match policy_lines with
-              | [] -> turn_system_prompt
-              | _ ->
-                  Printf.sprintf "%s\n\n%s"
-                    turn_system_prompt
-                    (String.concat "\n" policy_lines)
-            in
-            let turn_system_prompt =
+              let base_turn_system_prompt =
+                if effective_no_skill_route then
+                  base_system_prompt
+                else
+                  match skill_selection_mode with
+                  | SkillSelectHeuristic ->
+                      skill_route_system_prompt_heuristic
+                        ~base_system_prompt
+                        ~route:fallback_skill_route
+                  | SkillSelectAgent ->
+                      skill_route_system_prompt_agent
+                        ~base_system_prompt
+                        ~fallback_route:fallback_skill_route
+                        ~soul_profile:meta.soul_profile
+              in
+              let prompt =
+                append_continuity_context_prompt
+                  ~base_prompt:base_turn_system_prompt
+                  continuity_snapshot
+                  ~continuity_summary
+              in
+              let prompt =
+                let policy_guards = [
+                  (effective_no_skill_route,
+                   "Output guard: NEVER output lines starting with SKILL: or SKILL_REASON:.");
+                  (no_state_block,
+                   "Output guard: NEVER output [STATE] or [/STATE] blocks in this turn.");
+                ] in
+                let policy_lines =
+                  List.filter_map
+                    (fun (active, line) -> if active then Some line else None)
+                    policy_guards
+                in
+                match policy_lines with
+                | [] -> prompt
+                | _ ->
+                    Printf.sprintf "%s\n\n%s"
+                      prompt
+                      (String.concat "\n" policy_lines)
+              in
               match turn_instructions with
-              | None -> turn_system_prompt
+              | None -> prompt
               | Some ti ->
                   Printf.sprintf "%s\n\n--- Turn-specific instructions ---\n%s"
-                    turn_system_prompt ti
+                    prompt ti
             in
-	            let user_msg = Agent_sdk.Types.user_msg message in
-	            let ctx_work = Context_manager.append ctx_work user_msg in
-	            Context_manager.persist_message session user_msg;
-
-            (* === Agent.run() === *)
-            let ctx_ref = ref ctx_work in
-            let cascade_name = "keeper_turn" in
             match
               Keeper_agent_run.run_turn
-                ~config:ctx.config ~meta ~session ~ctx_ref
-                ~system_prompt:turn_system_prompt
+                ~config:ctx.config ~meta ~base_dir
+                ~max_context:primary.max_context
+                ~build_turn_prompt
                 ~user_message:message
-                ~cascade_name
+                ~cascade_name:"keeper_turn"
                 ~generation:meta.generation ()
             with
             | Error e ->

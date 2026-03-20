@@ -194,12 +194,13 @@ let intent_response_is_valid (resp : Cascade.api_response) : bool =
 let classify_intent_llm (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
-    Cascade.call ~cascade_name:"context_router" ~prompt
+    Cascade.complete ~cascade_name:"context_router"
+      ~messages:[Cascade.user_msg prompt]
       ~temperature:0.1 ~timeout_sec:10 ~max_tokens:20
       ~accept:intent_response_is_valid ()
   with
-  | Ok r -> (
-      match parse_intent_response r.response with
+  | Ok resp -> (
+      match parse_intent_response (Cascade.text_of_response resp) with
       | Some result -> result
       | None -> (Coordination, 0.3))  (* unparseable → low-confidence fallback *)
   | Error _err -> (Coordination, 0.3)  (* LLM error → low-confidence fallback *)
@@ -208,12 +209,13 @@ let classify_intent_llm (query : string) : query_intent * float =
 let classify_intent_hybrid (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
-    Cascade.call ~cascade_name:"context_router" ~prompt
+    Cascade.complete ~cascade_name:"context_router"
+      ~messages:[Cascade.user_msg prompt]
       ~temperature:0.1 ~timeout_sec:10 ~max_tokens:20
       ~accept:intent_response_is_valid ()
   with
-  | Ok r -> (
-      match parse_intent_response r.response with
+  | Ok resp -> (
+      match parse_intent_response (Cascade.text_of_response resp) with
       | Some result -> result
       | None -> classify_intent_heuristic query)
   | Error _err -> classify_intent_heuristic query

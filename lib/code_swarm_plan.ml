@@ -335,10 +335,11 @@ let verify_worker ~pattern (worker : worker_plan) diff =
     let prompt = build_verify_prompt ~pattern ~allowed_files:worker.files diff in
     let verdict =
       match
-        Cascade.call ~cascade_name:"code_swarm_verify" ~prompt
+        Cascade.complete ~cascade_name:"code_swarm_verify"
+          ~messages:[Cascade.user_msg prompt]
           ~temperature:0.0 ~max_tokens:200 ()
       with
-      | Ok r -> Verifier_oas.parse_verdict r.Cascade.response
+      | Ok resp -> Verifier_oas.parse_verdict (Cascade.text_of_response resp)
       | Error e -> Verifier_oas.Warn ("verifier_unavailable: " ^ e)
     in
     let our_verdict =

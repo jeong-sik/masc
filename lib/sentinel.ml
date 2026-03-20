@@ -117,15 +117,19 @@ let call_sentinel_llm ~cascade_name ~prompt_id ~vars () =
         None
     | Ok prompt ->
         let timeout = Env_config.Sentinel.llm_timeout_sec in
-        (match Cascade.call ~cascade_name ~prompt
+        (match Cascade.complete ~cascade_name
+            ~messages:[Cascade.user_msg prompt]
             ~temperature:0.3 ~timeout_sec:timeout ~max_tokens:800 () with
-        | Ok r when String.length r.response > 5 ->
-            log_debug (sprintf "LLM response from %s (%d chars)" r.llm_used
-                   (String.length r.response));
-            parse_llm_json_safe r.response
-        | Ok r ->
-            log_warn (sprintf "LLM response too short from %s" r.llm_used);
-            None
+        | Ok resp ->
+            let text = Cascade.text_of_response resp in
+            let model = resp.Llm_provider.Types.model in
+            if String.length text > 5 then (
+              log_debug (sprintf "LLM response from %s (%d chars)" model
+                     (String.length text));
+              parse_llm_json_safe text)
+            else (
+              log_warn (sprintf "LLM response too short from %s" model);
+              None)
         | Error err ->
             log_warn (sprintf "LLM cascade %s failed: %s" cascade_name err);
             None)

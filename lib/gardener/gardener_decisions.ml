@@ -44,11 +44,12 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
 
   let response =
     match
-      Cascade.call ~cascade_name:"gardener_spawn" ~prompt
+      Cascade.complete ~cascade_name:"gardener_spawn"
+        ~messages:[Cascade.user_msg prompt]
         ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~max_tokens:200 () with
-    | Ok r -> r.Cascade.response
+    | Ok resp -> Cascade.text_of_response resp
     | Error _ -> ""
   in
 
@@ -436,11 +437,12 @@ Room 내 활성 에이전트: %d
 
   let response =
     match
-      Cascade.call ~cascade_name:"gardener_spawn" ~prompt
+      Cascade.complete ~cascade_name:"gardener_spawn"
+        ~messages:[Cascade.user_msg prompt]
         ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~max_tokens:300 () with
-    | Ok r -> Ok r.Cascade.response
+    | Ok resp -> Ok (Cascade.text_of_response resp)
     | Error err -> Error ("llm intervention failed: " ^ err)
   in
 

@@ -289,7 +289,8 @@ let compute_judgments ~facts_json =
   let timeout_sec = Env_config.Llm.operator_judge_timeout_seconds in
   let prompt = prompt_for_facts facts_json in
   match
-    Cascade.call_raw ~cascade_name:"operator_judge" ~prompt
+    Cascade.complete ~cascade_name:"operator_judge"
+      ~messages:[Cascade.user_msg prompt]
       ~temperature:0.2 ~timeout_sec ~max_tokens:4096 ()
   with
   | Error message -> Error message

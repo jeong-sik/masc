@@ -287,6 +287,7 @@ let llm_permits_in_use () = Atomic.get inflight
 
 (* ================================================================ *)
 
+(** @deprecated Use {!complete} instead. *)
 type cascade_result = {
   response : string;
   llm_used : string;
@@ -604,8 +605,10 @@ let format_cascade_error ~cascade_name = function
   | Llm_provider.Http_client.NetworkError { message } ->
     Printf.sprintf "[cascade] %s: %s" cascade_name message
 
-(** Internal: resolve config, call OAS complete_named, map errors to string. *)
-let complete_cascade ~cascade_name ~messages
+(** Direct OAS bridge — single entry point for all LLM cascade calls.
+    Replaces {!call}, {!call_raw}, and {!call_with_tools}.
+    Returns OAS [api_response] directly; error formatted as string. *)
+let complete ~cascade_name ~messages
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
     ?(max_tokens = 500) ?(accept = fun _ -> true) ?tools () =
   let env = Masc_eio_env.get () in
@@ -624,48 +627,5 @@ let complete_cascade ~cascade_name ~messages
   | Ok resp -> Ok resp
   | Error err -> Error (format_cascade_error ~cascade_name err)
 
-(** Prompt-in, text-out convenience. Returns {!cascade_result}. *)
-let call ~cascade_name ~prompt
-    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
-    ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
-  let messages : Llm_provider.Types.message list =
-    (match system with
-     | Some s -> [ Llm_provider.Types.system_msg s ]
-     | None -> [])
-    @ [ Llm_provider.Types.user_msg prompt ]
-  in
-  let t0 = Time_compat.now () in
-  match
-    complete_cascade ~cascade_name ~messages
-      ~config_path ~temperature ~timeout_sec ~max_tokens ~accept ()
-  with
-  | Ok resp ->
-    let duration_ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
-    Ok
-      {
-        response = Llm_provider.Cascade_config.text_of_response resp;
-        llm_used = resp.Llm_provider.Types.model;
-        duration_ms;
-      }
-  | Error _ as e -> e
-
-(** Prompt-in, full api_response out. Use when callers need model name,
-    tool_calls, or usage from the response. *)
-let call_raw ~cascade_name ~prompt
-    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
-    ?(max_tokens = 500) ?(accept = fun _ -> true) ?system () =
-  let messages : Llm_provider.Types.message list =
-    (match system with
-     | Some s -> [ Llm_provider.Types.system_msg s ]
-     | None -> [])
-    @ [ Llm_provider.Types.user_msg prompt ]
-  in
-  complete_cascade ~cascade_name ~messages
-    ~config_path ~temperature ~timeout_sec ~max_tokens ~accept ()
-
-(** Messages + tools in, full api_response out. For tool-using LLM calls. *)
-let call_with_tools ~cascade_name ~messages
-    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
-    ?(max_tokens = 500) ?(accept = fun _ -> true) ?tools () =
-  complete_cascade ~cascade_name ~messages
-    ~config_path ~temperature ~timeout_sec ~max_tokens ~accept ?tools ()
+(* call, call_raw, call_with_tools removed — use {!complete} directly.
+   Callers build messages and handle api_response/errors themselves. *)

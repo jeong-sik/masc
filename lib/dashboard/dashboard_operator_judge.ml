@@ -290,7 +290,7 @@ let compute_judgments ~facts_json =
   let prompt = prompt_for_facts facts_json in
   match
     Cascade.complete ~cascade_name:"operator_judge"
-      ~messages:[Cascade.user_msg prompt]
+      ~messages:[Llm_provider.Types.user_msg prompt]
       ~temperature:0.2 ~timeout_sec ~max_tokens:4096 ()
   with
   | Error message -> Error message

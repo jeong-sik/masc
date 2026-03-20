@@ -1,18 +1,7 @@
-(** Cascade — thin wrapper over OAS Cascade_config.
+(** Cascade — MASC LLM call module.
 
-    MASC defines cascade name -> model list policy (default_model_strings).
-    OAS handles config loading, model parsing, health filtering, and execution.
-
-    Public entry points:
-    - {!call} — prompt-in/text-out convenience (returns cascade_result)
-    - {!call_raw} — prompt-in, returns full api_response
-    - {!call_with_tools} — messages + tools, returns full api_response
-
-    All three route through OAS Cascade_config.complete_named.
-
-    @since 2.114.0 — original
-    @since 2.115.0 — delegated to OAS Cascade_config
-    @since 2.116.0 — call_raw, call_with_tools added *)
+    Model types, cascade profile defaults, model spec parsing,
+    and {!complete} which delegates to OAS [Cascade_config.complete_named]. *)
 
 (* ================================================================ *)
 (* Model types and helpers — absorbed from Masc_model               *)
@@ -262,13 +251,6 @@ let llm_semaphore_available () = max_concurrent_llm - Atomic.get inflight
 let llm_permits_in_use () = Atomic.get inflight
 
 (* ================================================================ *)
-
-(** @deprecated Use {!complete} instead. *)
-type cascade_result = {
-  response : string;
-  llm_used : string;
-  duration_ms : int;
-}
 
 (** Locate config/cascade.json via CWD or ME_ROOT.
     Falls back to legacy config/llm_cascade.json if new name not found.
@@ -603,5 +585,3 @@ let complete ~cascade_name ~messages
   | Ok resp -> Ok resp
   | Error err -> Error (format_cascade_error ~cascade_name err)
 
-(* call, call_raw, call_with_tools removed — use {!complete} directly.
-   Callers build messages and handle api_response/errors themselves. *)

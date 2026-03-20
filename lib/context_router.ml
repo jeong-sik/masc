@@ -195,7 +195,7 @@ let classify_intent_llm (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
     Cascade.complete ~cascade_name:"context_router"
-      ~messages:[Cascade.user_msg prompt]
+      ~messages:[Llm_provider.Types.user_msg prompt]
       ~temperature:0.1 ~timeout_sec:10 ~max_tokens:20
       ~accept:intent_response_is_valid ()
   with
@@ -210,7 +210,7 @@ let classify_intent_hybrid (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
     Cascade.complete ~cascade_name:"context_router"
-      ~messages:[Cascade.user_msg prompt]
+      ~messages:[Llm_provider.Types.user_msg prompt]
       ~temperature:0.1 ~timeout_sec:10 ~max_tokens:20
       ~accept:intent_response_is_valid ()
   with

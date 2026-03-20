@@ -458,8 +458,8 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
       (match
         Cascade.complete ~cascade_name:"routing_judge"
           ~messages:[
-            Cascade.system_msg "You are a routing judge for a hybrid swarm. Output only JSON.";
-            Cascade.user_msg prompt]
+            Llm_provider.Types.system_msg "You are a routing judge for a hybrid swarm. Output only JSON.";
+            Llm_provider.Types.user_msg prompt]
           ~temperature:0.0 ~max_tokens:220
           ~timeout_sec:(router_judge_timeout_sec ()) ()
       with

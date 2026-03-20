@@ -7,6 +7,7 @@ import { Memory } from './memory'
 import { Governance } from './governance'
 import { Proof } from './proof'
 import { Planning } from './goals'
+import { ErrorBoundary } from './common/error-boundary'
 
 type WorkSection = 'board' | 'governance' | 'evidence' | 'planning'
 
@@ -41,11 +42,13 @@ export function Work() {
         `)}
       </div>
 
-      ${current === 'board' ? html`<${Memory} />`
-        : current === 'governance' ? html`<${Governance} />`
-        : current === 'evidence' ? html`<${Proof} />`
-        : html`<${Planning} />`
-      }
+      <${ErrorBoundary} label=${current}>
+        ${current === 'board' ? html`<${Memory} />`
+          : current === 'governance' ? html`<${Governance} />`
+          : current === 'evidence' ? html`<${Proof} />`
+          : html`<${Planning} />`
+        }
+      </>
     </div>
   `
 }

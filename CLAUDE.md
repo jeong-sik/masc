@@ -95,7 +95,6 @@ curl http://127.0.0.1:8935/health
 - `ME_ROOT` — repo 루트. 미지정 시 `$HOME/me`를 우선 사용
 - `MASC_DASHBOARD_PROXY_TARGET` — dashboard dev server가 프록시할 API origin
 - `MASC_BOARD_BACKEND` — Board 백엔드 선택 (`pg` default, `jsonl` for file-based)
-- `MASC_GLM_POOL_LIMIT_<MODEL>` — GLM 모델별 concurrency limit 오버라이드
 
 ### 로그
 script-based 실행에서는 표준 출력/표준 오류를 현재 셸 또는 호출 스크립트에서 직접 관리한다.

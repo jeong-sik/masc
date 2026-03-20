@@ -1,6 +1,6 @@
 open Alcotest
 
-module Cascade = Masc_mcp.Cascade
+module Llm_utils = Masc_mcp.Llm_utils
 module Model_spec = Masc_mcp.Model_spec
 
 let test_string_of_provider () =
@@ -16,7 +16,7 @@ let test_message_constructors () =
   check bool "tool call id in content" true has_call1
 
 let test_estimate_tokens_positive () =
-  let tokens = Cascade.estimate_tokens [ Agent_sdk.Types.user_msg "hello world" ] in
+  let tokens = Llm_utils.estimate_tokens [ Agent_sdk.Types.user_msg "hello world" ] in
   check bool "positive" true (tokens > 0)
 
 let test_model_spec_of_string_llama () =
@@ -35,7 +35,7 @@ let test_model_spec_of_string_invalid () =
 
 let test_sanitize_text_utf8 () =
   let invalid = "\xffhello" in
-  let sanitized = Cascade.sanitize_text_utf8 invalid in
+  let sanitized = Llm_utils.sanitize_text_utf8 invalid in
   check bool "keeps suffix" true (String.ends_with ~suffix:"hello" sanitized);
   check bool "not empty" true (String.length sanitized > 0)
 

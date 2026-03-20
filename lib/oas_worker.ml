@@ -241,7 +241,107 @@ let run_with_masc_tools
   run ~sw ~net ~config ?on_event goal
 
 (* ================================================================ *)
-(* Single-shot cascade call (replaces Cascade.complete)              *)
+(* Cascade profile defaults (moved from Cascade module)              *)
+(* ================================================================ *)
+
+(** Locate config/cascade.json via CWD or ME_ROOT.
+    Falls back to legacy config/llm_cascade.json if new name not found.
+    Returns [Some path] when the file exists on disk. *)
+let default_config_path () : string option =
+  let base dir name = Filename.concat (Filename.concat dir "config") name in
+  let cwd = Sys.getcwd () in
+  let me_root =
+    Sys.getenv_opt "ME_ROOT"
+    |> Option.value
+         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
+  in
+  let masc_root = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
+  let candidates =
+    [ base cwd "cascade.json";
+      base masc_root "cascade.json";
+      base cwd "llm_cascade.json";
+      base masc_root "llm_cascade.json" ]
+  in
+  List.find_opt Sys.file_exists candidates
+
+(** Build a provider:model label, filtering out empty models. *)
+let label provider model =
+  if model = "" then None
+  else Some (Printf.sprintf "%s:%s" provider model)
+
+(** Build a label list, discarding entries with empty models. *)
+let labels_of pairs =
+  List.filter_map (fun (p, m) -> label p m) pairs
+
+let default_model_strings ~cascade_name =
+  let llama_model = Env_config.Llama.default_model in
+  let glm_model = Env_config.Llm.default_model in
+  let glm_flash = Env_config.Llm.flash_model in
+  (* llama + glm:auto — GLM provider selects model at runtime *)
+  let llama_glm =
+    (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
+    @ [ "glm:auto" ]
+  in
+  match cascade_name with
+  (* heartbeat — llama first, glm fallback *)
+  | "heartbeat_action" | "heartbeat_wake" -> llama_glm
+  (* sentinel — llama first, glm fallback *)
+  | "sentinel_board" | "sentinel_task" | "sentinel_keeper" -> llama_glm
+  (* lodge subsystems — llama first, glm fallback *)
+  | "lodge_direct" | "lodge_context_rewrite" | "lodge_trait_gen"
+  | "lodge_comment" | "lodge_agent_match" ->
+      llama_glm
+  (* gardener — llama first, glm fallback *)
+  | "gardener_spawn" | "gardener_retire" -> llama_glm
+  (* classification — local llama, glm fallback *)
+  | "classification" | "context_router" | "capability_match" -> llama_glm
+  (* theory of mind — local llama, glm fallback *)
+  | "tom" -> llama_glm
+  (* verifier — local llama, glm fallback *)
+  | "verifier" | "code_swarm_verify" | "code_swarm" -> llama_glm
+  (* keeper — local llama, glm fallback *)
+  | "keeper_autonomy" | "keeper_proactive" | "keeper_deliberation"
+  | "keeper_reply" | "keeper_social" | "keeper_turn" -> llama_glm
+  (* routing — local llama, glm fallback *)
+  | "routing_judge" | "team_router" -> llama_glm
+  (* chain — local llama, glm fallback *)
+  | "chain_llm" -> llama_glm
+  (* autoresearch — local llama, glm fallback *)
+  | "autoresearch" -> llama_glm
+  (* trpg — local llama, glm fallback *)
+  | "trpg_intent" -> llama_glm
+  (* briefing — llama first, flash-tier cloud chain, glm fallback *)
+  | "briefing" ->
+      (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
+      @ labels_of [ ("glm", glm_flash); ("gemini", Env_config.Gemini.flash_model) ]
+      @ [ "glm:auto" ]
+  | "governance_judge" | "operator_judge" -> llama_glm
+  (* walph — default execution models *)
+  | "walph" -> llama_glm
+  (* auto_responder — agent_type-specific cascades *)
+  | "auto_responder_claude" ->
+      labels_of [ ("claude", Env_config.Claude.default_model) ]
+      @ [ "glm:auto" ]
+  | "auto_responder_gemini" ->
+      labels_of [ ("gemini", Env_config.Gemini.flash_model) ]
+      @ [ "glm:auto" ]
+  | "auto_responder_glm" ->
+      labels_of [ ("glm", glm_model) ]
+      @ [ "glm:auto" ]
+  | "auto_responder" -> llama_glm
+  (* spawn glm — cloud-only cascade *)
+  | "spawn_glm" ->
+      labels_of [ ("glm", glm_model); ("glm", glm_flash) ]
+      @ [ "glm:auto" ]
+  (* mitosis — cell division / handoff *)
+  | "mitosis" -> llama_glm
+  (* topic extraction — fast local model, glm fallback *)
+  | "topic_extraction" -> llama_glm
+  (* unregistered cascade: llama + glm as safety net *)
+  | _ -> llama_glm
+
+(* ================================================================ *)
+(* Single-shot cascade call                                          *)
 (* ================================================================ *)
 
 (** Format OAS http_error as cascade error string. *)
@@ -256,16 +356,16 @@ let format_cascade_error ~cascade_name = function
 
 (** Single-shot LLM call via cascade policy.
     Drop-in replacement for the former [Cascade.complete].
-    Policy (model selection, config path) is read from {!Cascade};
+    Policy (model selection, config path) uses local cascade defaults;
     execution goes through [Llm_provider.Cascade_config.complete_named]. *)
 let complete_single ~cascade_name ~messages
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
     ?(max_tokens = 500) ?(accept = fun _ -> true) ?tools () =
   let env = Masc_eio_env.get () in
-  let defaults = Cascade.default_model_strings ~cascade_name in
+  let defaults = default_model_strings ~cascade_name in
   let config_path_opt =
     if String.length config_path > 0 then Some config_path
-    else Cascade.default_config_path ()
+    else default_config_path ()
   in
   match
     Llm_provider.Cascade_config.complete_named
@@ -289,9 +389,9 @@ let require_eio () =
 
 (** Resolve cascade model specs from config + defaults. *)
 let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
-  let defaults = Cascade.default_model_strings ~cascade_name in
+  let defaults = default_model_strings ~cascade_name in
   let configured =
-    match Cascade.default_config_path () with
+    match default_config_path () with
     | Some path ->
       let from_file =
         Llm_provider.Cascade_config.load_profile ~config_path:path ~name:cascade_name
@@ -302,7 +402,7 @@ let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
   let specs = Model_spec.available_model_specs_of_strings configured in
   if specs <> [] then specs
   else
-    let fallback = Cascade.default_model_strings ~cascade_name in
+    let fallback = default_model_strings ~cascade_name in
     if configured = fallback then (
       Printf.eprintf "[cascade] %s: no callable models from built-in defaults\n%!" cascade_name;
       [])
@@ -317,7 +417,7 @@ let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
     - Agent.run() returns an error (model unavailable, network issue)
     - [accept] returns [false] (response validation failure)
 
-    This preserves the cascade fallback behavior of [Cascade.complete]
+    This preserves the cascade fallback behavior of the former [Cascade.complete]
     while routing all LLM calls through Agent.run().
 
     @param accept Optional response validator. Default accepts all.

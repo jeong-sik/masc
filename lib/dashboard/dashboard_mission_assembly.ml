@@ -374,13 +374,8 @@ let archived_agent_meta_map config agent_names =
          with Yojson.Json_error _ -> ());
   table
 
-let keeper_alias_by_agent_name snapshot_json =
+let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
   let table = Hashtbl.create 8 in
-  let keepers =
-    match member_assoc "keepers" snapshot_json |> member_assoc "items" with
-    | `List items -> items
-    | _ -> []
-  in
   List.iter
     (fun keeper ->
       let keeper_name = trim_to_option (string_field "name" keeper) in
@@ -392,7 +387,7 @@ let keeper_alias_by_agent_name snapshot_json =
     keepers;
   table
 
-let build_agent_briefs config sessions attention_queue _room_json snapshot_json =
+let build_agent_briefs config sessions attention_queue _room_json (keepers : Yojson.Safe.t list) =
   let now_ts = Time_compat.now () in
   let task_lookup = build_task_lookup config in
   let messages =
@@ -422,7 +417,7 @@ let build_agent_briefs config sessions attention_queue _room_json snapshot_json 
       @ List.concat_map (fun (session : session_context) -> session.member_names) sessions)
   in
   let archived_meta_by_name = archived_agent_meta_map config agent_names in
-  let keeper_aliases = keeper_alias_by_agent_name snapshot_json in
+  let keeper_aliases = keeper_alias_by_agent_name keepers in
   agent_names
   |> List.map (fun agent_name ->
          let agent = List.assoc_opt agent_name room_agent_by_name in
@@ -539,11 +534,7 @@ let build_agent_briefs config sessions attention_queue _room_json snapshot_json 
            else Float.compare right.last_seen_ts left.last_seen_ts)
   |> List.map (fun (row : agent_context) -> row.json)
 
-let build_keeper_briefs snapshot_json =
-  let keepers = member_assoc "keepers" snapshot_json |> member_assoc "items" |> function
-    | `List items -> items
-    | _ -> []
-  in
+let build_keeper_briefs (keepers : Yojson.Safe.t list) =
   keepers
   |> List.filter_map (fun keeper ->
          let name = string_field "name" keeper in

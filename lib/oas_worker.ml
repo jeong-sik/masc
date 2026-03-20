@@ -28,6 +28,7 @@ type config = {
   max_tokens : int;
   temperature : float;
   hooks : Oas.Hooks.hooks option;
+  context_reducer : Oas.Context_reducer.t option;
   guardrails : Oas.Guardrails.t option;
   event_bus : Oas.Event_bus.t option;
   checkpoint_dir : string option;
@@ -42,6 +43,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     max_tokens = 4096;
     temperature = 0.7;
     hooks = None;
+    context_reducer = None;
     guardrails = None;
     event_bus = None;
     checkpoint_dir = None;
@@ -134,6 +136,10 @@ let build
   in
   let builder = match config.hooks with
     | Some h -> Oas.Builder.with_hooks h builder
+    | None -> builder
+  in
+  let builder = match config.context_reducer with
+    | Some r -> Oas.Builder.with_context_reducer r builder
     | None -> builder
   in
   let builder = match config.description with
@@ -261,6 +267,8 @@ let run_named
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
     ?guardrails
+    ?hooks
+    ?context_reducer
     ?memory
     ?on_event
     ()
@@ -277,6 +285,8 @@ let run_named
     max_tokens;
     temperature;
     guardrails;
+    hooks;
+    context_reducer;
     memory;
     description = Some (Printf.sprintf "cascade:%s" cascade_name);
   } in

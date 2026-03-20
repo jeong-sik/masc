@@ -302,6 +302,7 @@ let run_named_with_masc_tools
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
     ?guardrails
+    ?hooks
     ?memory
     ?on_event
     ()
@@ -318,6 +319,7 @@ let run_named_with_masc_tools
     max_tokens;
     temperature;
     guardrails;
+    hooks;
     memory;
     description = Some (Printf.sprintf "cascade:%s" cascade_name);
   } in

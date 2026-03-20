@@ -61,9 +61,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
         keeper_shell_readonly_tool_names @ with_voice
       else with_voice
     in
-    match canonical_policy_action_budget meta.policy_action_budget with
-    | "board" -> dedupe_tool_names (keeper_board_tool_names @ with_shell)
-    | _ -> dedupe_tool_names with_shell
+    dedupe_tool_names (keeper_board_tool_names @ with_shell)
   else keeper_model_tools |> List.map (fun tool -> tool.Types.name)
 
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :

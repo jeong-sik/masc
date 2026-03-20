@@ -140,7 +140,7 @@ let categories_for_mode = function
   | Coding -> core_all @ [Worktree; Code; Health; Plan; Consensus]
   | Full -> all_categories
   | Solo -> [Core_Room; Core_Task; Worktree]
-  | Agent -> [Core_Room; Core_Task; Worktree]
+  | Agent -> [Core_Room; Core_Task; Worktree; Board; Comm]
   | Custom -> [] (* Will be loaded from config *)
 
 (** Tool name to category mapping.
@@ -465,7 +465,7 @@ let mode_description = function
   | Coding -> "Core, worktree, code navigation, health, plan, and consensus for agent development"
   | Full -> "All categories enabled (~322 tools)"
   | Solo -> "Room + task + worktree (~23 tools)"
-  | Agent -> "Focused agent: room + task + worktree (~20 tools, PR #814 sweet spot)"
+  | Agent -> "Focused agent: room + task + worktree + board + comm (~30 tools)"
   | Custom -> "User-defined category set"
 
 (** Category descriptions *)

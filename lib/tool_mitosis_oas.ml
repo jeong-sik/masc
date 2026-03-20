@@ -190,7 +190,7 @@ let handle_mitosis_divide ctx args : result =
     else
       Printf.sprintf "Continue from generation %d. Context: %s" next_gen summary
   in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:ctx.agent_name in
+  let memory = Memory_oas_bridge.create_memory_full ~agent_name:ctx.agent_name () in
   let run_result =
     Oas_worker.run_named_with_masc_tools
       ~cascade_name:"mitosis" ~goal ~system_prompt
@@ -200,6 +200,7 @@ let handle_mitosis_divide ctx args : result =
   let new_cell = Mitosis.create_stem_cell ~generation:next_gen in
   Mcp_server.current_cell := new_cell;
   Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config;
+  let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name:ctx.agent_name in
   match run_result with
   | Error e ->
     json_err (Printf.sprintf "OAS child agent failed: %s" e)
@@ -258,7 +259,7 @@ let handle_mitosis_handoff ctx args : result =
       "You are the successor agent (generation %d). Resume work from the handoff DNA above. Context ratio was %.1f%%."
       next_gen (context_ratio *. 100.0)
     in
-    let memory = Memory_oas_bridge.create_memory ~agent_name:ctx.agent_name in
+    let memory = Memory_oas_bridge.create_memory_full ~agent_name:ctx.agent_name () in
     let run_result =
       Oas_worker.run_named_with_masc_tools
         ~cascade_name:"mitosis" ~goal ~system_prompt
@@ -268,6 +269,7 @@ let handle_mitosis_handoff ctx args : result =
     let new_cell = Mitosis.create_stem_cell ~generation:next_gen in
     Mcp_server.current_cell := new_cell;
     Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_m;
+    let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name:ctx.agent_name in
     match run_result with
     | Error e ->
       json_ok (`Assoc [

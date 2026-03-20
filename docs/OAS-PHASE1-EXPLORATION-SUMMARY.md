@@ -57,7 +57,7 @@ Tests (test/)
 ├── 28 swarm tests (test_swarm.ml)
 ├── 4-layer harness tests (test_harness.ml)
 ├── Hook lifecycle tests (test_hooks.ml)
-└── Pure mock-based verification (no LLM calls)
+└── Pure mock-based verification (no MODEL calls)
 
 Examples (examples/)
 ├── codegen_agent.ml   → Pure Eio, no Lwt patterns
@@ -75,7 +75,7 @@ Examples (examples/)
 **Async Pattern**: Pure Eio (Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw -> ...)
 
 ### orchestrator.ml (283 lines)
-**Purpose**: Multi-agent orchestration without LLM routing.
+**Purpose**: Multi-agent orchestration without MODEL routing.
 **Key Types**:
 - `task` = {id, prompt, agent_name}
 - `task_result` = {task_id, agent_name, result, elapsed}
@@ -171,7 +171,7 @@ Eio_main.run @@ fun env ->
     (* test body *)
 ```
 
-**Mock Pattern**: Closure-based `mock_run` without LLM calls
+**Mock Pattern**: Closure-based `mock_run` without MODEL calls
 ```ocaml
 let mock_run text ~sw:_ _prompt =
   Ok { Types.id = "mock"; model = "mock"; stop_reason = Types.EndTurn;

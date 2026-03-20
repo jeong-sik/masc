@@ -319,7 +319,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
     };
     {
       Types.name = "lodge_research";
-      description = "Research a topic using LLM and share findings with the lodge.";
+      description = "Research a topic using the MODEL and share findings with the lodge.";
       input_schema =
         `Assoc
           [

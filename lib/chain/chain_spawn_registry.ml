@@ -206,25 +206,25 @@ let to_prometheus_text () =
   in
   let latency = s.latency in
   String.concat "" [
-    "# HELP llm_spawn_inflight Spawn inflight count\n";
-    "# TYPE llm_spawn_inflight gauge\n";
-    prom_metric "llm_spawn_inflight" (string_of_int s.inflight);
-    "# HELP llm_spawn_total Spawn total count\n";
-    "# TYPE llm_spawn_total counter\n";
-    prom_metric "llm_spawn_total" (string_of_int s.total);
-    "# HELP llm_spawn_failed Spawn failed count\n";
-    "# TYPE llm_spawn_failed counter\n";
-    prom_metric "llm_spawn_failed" (string_of_int s.failed);
-    "# HELP llm_spawn_max_inflight Spawn max inflight observed\n";
-    "# TYPE llm_spawn_max_inflight gauge\n";
-    prom_metric "llm_spawn_max_inflight" (string_of_int s.max_inflight);
-    "# HELP llm_spawn_oldest_inflight_seconds Oldest inflight spawn age\n";
-    "# TYPE llm_spawn_oldest_inflight_seconds gauge\n";
-    prom_metric "llm_spawn_oldest_inflight_seconds" oldest;
-    "# HELP llm_spawn_latency_ms Spawn latency summary (ms)\n";
-    "# TYPE llm_spawn_latency_ms gauge\n";
-    prom_metric "llm_spawn_latency_ms" (sprintf "%.3f" latency.avg_ms);
-    prom_metric "llm_spawn_latency_ms_p50" (sprintf "%.3f" latency.p50_ms);
-    prom_metric "llm_spawn_latency_ms_p95" (sprintf "%.3f" latency.p95_ms);
-    prom_metric "llm_spawn_latency_ms_p99" (sprintf "%.3f" latency.p99_ms);
+    "# HELP model_spawn_inflight Spawn inflight count\n";
+    "# TYPE model_spawn_inflight gauge\n";
+    prom_metric "model_spawn_inflight" (string_of_int s.inflight);
+    "# HELP model_spawn_total Spawn total count\n";
+    "# TYPE model_spawn_total counter\n";
+    prom_metric "model_spawn_total" (string_of_int s.total);
+    "# HELP model_spawn_failed Spawn failed count\n";
+    "# TYPE model_spawn_failed counter\n";
+    prom_metric "model_spawn_failed" (string_of_int s.failed);
+    "# HELP model_spawn_max_inflight Spawn max inflight observed\n";
+    "# TYPE model_spawn_max_inflight gauge\n";
+    prom_metric "model_spawn_max_inflight" (string_of_int s.max_inflight);
+    "# HELP model_spawn_oldest_inflight_seconds Oldest inflight spawn age\n";
+    "# TYPE model_spawn_oldest_inflight_seconds gauge\n";
+    prom_metric "model_spawn_oldest_inflight_seconds" oldest;
+    "# HELP model_spawn_latency_ms Spawn latency summary (ms)\n";
+    "# TYPE model_spawn_latency_ms gauge\n";
+    prom_metric "model_spawn_latency_ms" (sprintf "%.3f" latency.avg_ms);
+    prom_metric "model_spawn_latency_ms_p50" (sprintf "%.3f" latency.p50_ms);
+    prom_metric "model_spawn_latency_ms_p95" (sprintf "%.3f" latency.p95_ms);
+    prom_metric "model_spawn_latency_ms_p99" (sprintf "%.3f" latency.p99_ms);
   ]

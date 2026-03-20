@@ -66,7 +66,7 @@ let rec collect_nested_dependencies (node : Chain_types.node) : string list =
         collect_nested_dependencies generator
     | Chain_types.Cascade { tiers; _ } ->
         List.concat_map (fun t -> collect_nested_dependencies t.Chain_types.tier_node) tiers
-    | Chain_types.Llm _ | Chain_types.Tool _ | Chain_types.ChainRef _
+    | Chain_types.Model _ | Chain_types.Tool _ | Chain_types.ChainRef _
     | Chain_types.ChainExec _ | Chain_types.Adapter _
     | Chain_types.Masc_broadcast _ | Chain_types.Masc_listen _ | Chain_types.Masc_claim _ ->
         []
@@ -199,7 +199,7 @@ let identify_parallel_groups
 (** Calculate maximum nesting depth *)
 let rec calculate_depth (node : Chain_types.node) : int =
   match node.Chain_types.node_type with
-  | Chain_types.Llm _ | Chain_types.Tool _ | Chain_types.ChainRef _ | Chain_types.Adapter _
+  | Chain_types.Model _ | Chain_types.Tool _ | Chain_types.ChainRef _ | Chain_types.Adapter _
   | Chain_types.Masc_broadcast _ | Chain_types.Masc_listen _ | Chain_types.Masc_claim _ -> 1
   | Chain_types.Pipeline nodes | Chain_types.Fanout nodes ->
       1 + List.fold_left (fun acc n -> max acc (calculate_depth n)) 0 nodes

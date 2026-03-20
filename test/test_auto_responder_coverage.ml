@@ -1,7 +1,7 @@
 (** Auto_responder Module Coverage Tests
 
     Tests for MASC Auto-responder:
-    - mode type (Disabled, Spawn, Llm)
+    - mode type (Disabled, Spawn, Model)
     - activity_log_file: log file path
     - build_response_prompt: prompt string builder
     - extract_nickname: nickname extraction from response
@@ -46,9 +46,9 @@ let test_mode_spawn () =
   let m : Auto_responder.mode = Auto_responder.Spawn in
   check bool "spawn" true (m = Auto_responder.Spawn)
 
-let test_mode_llm () =
-  let m : Auto_responder.mode = Auto_responder.Llm in
-  check bool "llm" true (m = Auto_responder.Llm)
+let test_mode_model () =
+  let m : Auto_responder.mode = Auto_responder.Model in
+  check bool "model" true (m = Auto_responder.Model)
 
 (* ============================================================
    activity_log_file Tests
@@ -197,7 +197,7 @@ let test_get_mode_returns_valid () =
   check bool "is valid mode" true
     (mode = Auto_responder.Disabled ||
      mode = Auto_responder.Spawn ||
-     mode = Auto_responder.Llm)
+     mode = Auto_responder.Model)
 
 (* ============================================================
    Edge Cases
@@ -208,10 +208,10 @@ let test_build_response_prompt_long_content () =
   let prompt = Auto_responder.build_response_prompt ~from_agent:"a" ~content:long_content ~mention:"b" in
   check bool "handles long content" true (String.length prompt > 1000)
 
-let test_auto_responder_uses_shared_llm_client () =
-  check bool "uses Oas_worker.complete_single" true
+let test_auto_responder_uses_shared_model_runtime () =
+  check bool "uses Oas_worker.run_named" true
     (file_contains_pattern "lib/auto_responder.ml"
-       {|Oas_worker.complete_single ~cascade_name|});
+       {|Oas_worker.run_named ~cascade_name|});
   check bool "no direct run_prompt_cascade" false
     (file_contains_pattern "lib/auto_responder.ml" "Llm_orchestration.run_prompt_cascade");
   check bool "legacy Llm_direct dispatch removed"
@@ -227,7 +227,7 @@ let () =
     "mode", [
       test_case "disabled" `Quick test_mode_disabled;
       test_case "spawn" `Quick test_mode_spawn;
-      test_case "llm" `Quick test_mode_llm;
+      test_case "model" `Quick test_mode_model;
     ];
     "activity_log_file", [
       test_case "nonempty" `Quick test_activity_log_file_nonempty;
@@ -271,6 +271,6 @@ let () =
       test_case "long content" `Quick test_build_response_prompt_long_content;
     ];
     "source", [
-      test_case "shared llm client" `Quick test_auto_responder_uses_shared_llm_client;
+      test_case "shared model runtime" `Quick test_auto_responder_uses_shared_model_runtime;
     ];
   ]

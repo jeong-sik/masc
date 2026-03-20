@@ -1,10 +1,10 @@
-(** Model_spec — LLM provider types, preset specs, and model spec parsing.
+(** Model_spec — MODEL provider types, preset specs, and model spec parsing.
 
     Extracted from {!Cascade} to decouple model identity from cascade orchestration.
 
     @since 2.117.0 *)
 
-(** LLM provider discriminator. *)
+(** MODEL provider discriminator. *)
 type provider =
   | Llama
   | Claude
@@ -14,7 +14,7 @@ type provider =
   | OpenRouter
   | Custom of string
 
-(** Complete specification for an LLM endpoint. *)
+(** Complete specification for an MODEL endpoint. *)
 type model_spec = {
   provider : provider;
   model_id : string;

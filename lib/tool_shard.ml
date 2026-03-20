@@ -435,7 +435,7 @@ let list_all_shards () : (string * bool * int) list =
   ) all_shards []
 
 (** Full tool set (all 11 tools) — backward compatible *)
-let keeper_llm_tools : Types.tool_schema list =
+let keeper_model_tools : Types.tool_schema list =
   tools_of_shards default_shard_names
 
 (** {1 MCP Schemas} *)

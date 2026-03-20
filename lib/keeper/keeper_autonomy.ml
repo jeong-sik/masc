@@ -205,7 +205,7 @@ let should_auto_execute ~autonomy_level (pa : proposed_action) =
   | L5_Independent -> true
 
 (* ================================================================ *)
-(* LLM Action Plan Generation                                       *)
+(* MODEL Action Plan Generation                                       *)
 (* ================================================================ *)
 
 let build_plan_prompt (goal : Goal_store.goal) ~keeper_context =

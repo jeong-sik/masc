@@ -158,7 +158,7 @@ let ensure_bootstrap (config : Room.config) =
                load_prompt_dir (Filename.concat root "data/prompts"));
         Hashtbl.replace bootstrapped_roots config.base_path ()))
 
-let llm_tool_defs_of_json = function
+let model_tool_defs_of_json = function
   | None -> []
   | Some (`List items) ->
       items
@@ -201,24 +201,9 @@ let llm_tool_defs_of_json = function
                    })
   | Some _ -> []
 
-let llm_tool_calls_json (blocks : Agent_sdk.Types.content_block list) =
-  `List
-    (List.filter_map
-       (function
-         | Agent_sdk.Types.ToolUse { id; name; input } ->
-             Some (`Assoc [
-               ("id", `String id);
-               ("name", `String name);
-               ("arguments", `String (Yojson.Safe.to_string input));
-             ])
-         | _ -> None)
-       blocks)
-
-type llm_runner =
+type model_runner =
   | Stub
   | Direct of Model_spec.model_spec
-  | Spawn of string (* agent name *)
-  | SpawnWithModel of { agent: string; model: string }
 
 let model_runner_of_string raw =
   let model = trim raw in
@@ -243,8 +228,17 @@ let model_runner_of_string raw =
   | "glm" ->
       direct "glm:auto"
   | "stub" | "mock" -> Ok Stub
-  | "codex" -> Ok (Spawn "codex")
-  | value when starts_with ~prefix:"codex:" value -> Ok (Spawn "codex")
+  | "codex" ->
+      direct
+        (Printf.sprintf "codex-api:%s" Env_config.OpenAI.default_model)
+  | value when starts_with ~prefix:"codex:" value ->
+      let requested =
+        String.sub model 6 (String.length model - 6) |> trim
+      in
+      let effective =
+        if requested = "" then Env_config.OpenAI.default_model else requested
+      in
+      direct (Printf.sprintf "codex-api:%s" effective)
   | value -> (
       match Model_spec.model_spec_of_string model with
       | Ok parsed -> Ok (Direct parsed)
@@ -259,58 +253,67 @@ let model_runner_of_string raw =
           direct (Printf.sprintf "gemini:%s" value)
       | Error _ when starts_with ~prefix:"claude-" value ->
           direct (Printf.sprintf "claude:%s" value)
+      | Error _ when starts_with ~prefix:"codex-" value ->
+          direct (Printf.sprintf "codex-api:%s" value)
       | Error _ when starts_with ~prefix:"gpt-" value ->
-          Ok (SpawnWithModel { agent = "codex"; model = value })
+          direct (Printf.sprintf "codex-api:%s" value)
+      | Error _ when String.equal value "gpt" ->
+          direct (Printf.sprintf "codex-api:%s" Env_config.OpenAI.default_model)
+      | Error _ when starts_with ~prefix:"o1" value || starts_with ~prefix:"o3" value ->
+          direct (Printf.sprintf "codex-api:%s" value)
       | Error msg -> Error msg)
 
-let call_spawn_model (_runtime : runtime) ~agent_name ?model_override:_ ~prompt ~timeout_sec () =
-  let result =
-    Spawn.spawn ~agent_name ~prompt ~timeout_seconds:timeout_sec ()
-  in
-  if result.Spawn.success then Ok result.Spawn.output else Error result.Spawn.output
-
-let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
+let call_model_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
     ~timeout_sec () =
   match model_runner_of_string model with
   | Error msg -> Error msg
   | Ok Stub -> Ok (sprintf "[stub]%s" prompt)
-  | Ok (Spawn agent_name) ->
-      let full_prompt =
+  | Ok (Direct spec) ->
+      let system_prompt =
         match system with
-        | Some sys when trim sys <> "" -> sprintf "[system]\n%s\n\n[user]\n%s" sys prompt
-        | _ -> prompt
+        | Some sys when trim sys <> "" -> sys
+        | _ -> ""
       in
-      call_spawn_model runtime ~agent_name ~prompt:full_prompt ~timeout_sec ()
-  | Ok (SpawnWithModel { agent = agent_name; model = model_override }) ->
-      let full_prompt =
-        match system with
-        | Some sys when trim sys <> "" -> sprintf "[system]\n%s\n\n[user]\n%s" sys prompt
-        | _ -> prompt
+      let tool_defs = model_tool_defs_of_json tools in
+      let result =
+        if tool_defs = [] then
+          Oas_worker.run_model ~model_spec:spec ~goal:prompt ~system_prompt
+            ~max_turns:1 ~temperature:0.2 ~max_tokens:4096 ()
+        else
+          Oas_worker.run_model_with_masc_tools ~model_spec:spec ~goal:prompt
+            ~system_prompt ~masc_tools:tool_defs
+            ~dispatch:(fun ~name ~args ->
+              match !tool_executor_ref with
+              | None -> (false, "native MASC tool executor unavailable")
+              | Some execute_tool ->
+                  let final_args =
+                    if starts_with ~prefix:"masc_" name then
+                      match args with
+                      | `Assoc fields when List.mem_assoc "agent_name" fields -> args
+                      | `Assoc fields ->
+                          `Assoc
+                            (("agent_name", `String runtime.agent_name) :: fields)
+                      | _ -> `Assoc [ ("agent_name", `String runtime.agent_name) ]
+                    else
+                      args
+                  in
+                  execute_tool ~sw:runtime.sw ~clock:runtime.clock
+                    ?mcp_session_id:runtime.mcp_session_id
+                    ?auth_token:runtime.auth_token runtime.mcp_state ~name
+                    ~arguments:final_args)
+            ~max_turns:1 ~temperature:0.2 ~max_tokens:4096 ()
       in
-      call_spawn_model runtime ~agent_name ~model_override ~prompt:full_prompt ~timeout_sec ()
-  | Ok (Direct _spec) ->
-      let messages : Llm_provider.Types.message list =
-        (match system with
-        | Some sys when trim sys <> "" ->
-            [ Llm_provider.Types.system_msg sys; Llm_provider.Types.user_msg prompt ]
-        | _ -> [ Llm_provider.Types.user_msg prompt ])
-      in
-      let tools_json = match tools with
-        | Some (`List items) -> Some items
-        | _ -> None
-      in
-      (* Oas_worker.complete_single: raw JSON tool schemas (?tools:Yojson.Safe.t list)
-         are not compatible with OAS Tool.t. Migrate when OAS supports raw schemas. *)
-      (match
-        Oas_worker.complete_single ~cascade_name:"chain_llm" ~messages
-          ?tools:tools_json ~temperature:0.2 ~max_tokens:4096
-          ~timeout_sec ()
-      with
-      | Ok resp when trim (Llm_provider.Types.text_of_response resp) <> "" -> Ok (Llm_provider.Types.text_of_response resp)
-      | Ok resp when List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) resp.content ->
-          Ok (Yojson.Safe.to_string (llm_tool_calls_json resp.content))
-      | Ok _ -> Error "empty completion"
-      | Error msg -> Error msg)
+      (match result with
+      | Ok run_result ->
+          let text =
+            Oas_response.text_of_response run_result.Oas_worker.response
+            |> trim
+          in
+          if text <> "" then Ok text else Error "empty completion"
+      | Error msg ->
+          Error
+            (Printf.sprintf "OAS model run failed (%s, timeout=%ds): %s"
+               spec.model_id timeout_sec msg))
 
 let assoc_get_string_opt (json : Yojson.Safe.t) key =
   match U.member key json with
@@ -400,7 +403,7 @@ let call_named_tool_model (runtime : runtime) ~tool_name ~(args : Yojson.Safe.t)
         | Some value -> Ok ("llama:" ^ value)
         | None -> Provider_adapter.explicit_llama_model_label_result ())
     | "glm" ->
-        let default_model = Printf.sprintf "glm:%s" Env_config.Llm.default_model in
+        let default_model = Printf.sprintf "glm:%s" Env_config.Glm.default_model in
         Ok (match assoc_get_string_opt args "model" with
         | Some value when starts_with ~prefix:"glm:" (String.lowercase_ascii value) -> value
         | Some value -> "glm:" ^ value
@@ -408,7 +411,7 @@ let call_named_tool_model (runtime : runtime) ~tool_name ~(args : Yojson.Safe.t)
     | _ -> Ok tool_name
   in
   match model_result with
-  | Ok model -> call_llm_text runtime ~model ?system ~prompt ~timeout_sec ()
+  | Ok model -> call_model_text runtime ~model ?system ~prompt ~timeout_sec ()
   | Error msg -> Error msg
 
 let exec_tool (runtime : runtime) ~name ~(args : Yojson.Safe.t) =
@@ -459,7 +462,7 @@ let run_chain (runtime : runtime) ?chain_id ?mermaid ?input_json ~checkpoint_ena
     | Error msg -> Error (sprintf "Compile error: %s" msg)
   in
   let exec_fn ~model ?system ~prompt ?tools ?thinking () =
-    call_llm_text runtime ~model ?system ?tools ?thinking ~prompt
+    call_model_text runtime ~model ?system ?tools ?thinking ~prompt
       ~timeout_sec:(max 1 plan.chain.config.timeout) ()
   in
   let tool_exec ~name ~args = exec_tool runtime ~name ~args in
@@ -491,18 +494,18 @@ let default_orchestrator_model () =
 let orchestrate_goal (runtime : runtime) ~(on_chain_designed : Chain_types.chain -> unit) ~goal :
     (chain_orchestrate_response, string) result =
   ensure_bootstrap runtime.config;
-  let llm_call ~prompt =
+  let model_call ~prompt =
     match
-      call_llm_text runtime ~model:(default_orchestrator_model ()) ~prompt ~timeout_sec:180
+      call_model_text runtime ~model:(default_orchestrator_model ()) ~prompt ~timeout_sec:180
         ()
     with
     | Ok output -> output
-    | Error msg -> sprintf "LLM orchestration failed: %s" msg
+    | Error msg -> sprintf "MODEL orchestration failed: %s" msg
   in
   let tool_exec ~name ~args = tool_exec_json runtime ~name ~args in
   match
     Chain_orchestrator_eio.orchestrate_quick ~sw:runtime.sw ~clock:runtime.clock
-      ~llm_call ~tool_exec ~on_chain_designed ~goal ~tasks:[]
+      ~model_call ~tool_exec ~on_chain_designed ~goal ~tasks:[]
   with
   | Ok result ->
       Ok

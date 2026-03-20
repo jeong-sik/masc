@@ -95,7 +95,7 @@ let test_keeper_fallback_model_labels_prefers_available_remote_models () =
           with_env "GEMINI_API_KEY" "" (fun () ->
               let labels = Masc_mcp.Keeper_types.keeper_fallback_model_labels () in
               check (list string) "glm fallback only"
-                [Printf.sprintf "glm:%s" Masc_mcp.Env_config.Llm.default_model] labels)))
+                [Printf.sprintf "glm:%s" Masc_mcp.Env_config.Glm.default_model] labels)))
 
 let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
   with_env "ZAI_API_KEY" "zai-test" (fun () ->
@@ -113,31 +113,31 @@ let test_maybe_append_keeper_fallback_models_adds_glm_when_local_only () =
           ["llama:qwen3.5-35b-a3b-ud-q8-xl"]
         else
           ["llama:qwen3.5-35b-a3b-ud-q8-xl";
-           Printf.sprintf "glm:%s" Masc_mcp.Env_config.Llm.default_model]
+           Printf.sprintf "glm:%s" Masc_mcp.Env_config.Glm.default_model]
       in
       check (list string) "append glm fallback only when local runtime unavailable"
         expected labels)
 
-let test_llm_client_sanitize_message_utf8_repairs_invalid_fields () =
+let test_model_client_sanitize_message_utf8_repairs_invalid_fields () =
   let raw : Agent_sdk.Types.message =
     { Agent_sdk.Types.role = User;
       content = [Agent_sdk.Types.Text "hello\x80.world"]; name = None; tool_call_id = None }
   in
-  let sanitized = Masc_mcp.Llm_utils.sanitize_message_utf8 raw in
+  let sanitized = Masc_mcp.Inference_utils.sanitize_message_utf8 raw in
   check bool "role preserved" true (sanitized.role = raw.role);
   let sanitized_text = Agent_sdk.Types.text_of_message sanitized in
   let raw_text = Agent_sdk.Types.text_of_message raw in
   check bool "content valid utf8" true (string_is_valid_utf8 sanitized_text);
   check bool "content changed" true (sanitized_text <> raw_text)
 
-let test_llm_client_sanitize_messages_utf8_preserves_message_count () =
+let test_model_client_sanitize_messages_utf8_preserves_message_count () =
   let msgs =
     [
       Agent_sdk.Types.user_msg "ok\x80";
       Agent_sdk.Types.assistant_msg "fine\xFF";
     ]
   in
-  let sanitized = Masc_mcp.Llm_utils.sanitize_messages_utf8 msgs in
+  let sanitized = Masc_mcp.Inference_utils.sanitize_messages_utf8 msgs in
   check int "count preserved" 2 (List.length sanitized);
   check bool "all valid utf8" true
     (List.for_all
@@ -1346,10 +1346,10 @@ let () =
            test_keeper_fallback_model_labels_prefers_available_remote_models;
          test_case "append glm fallback for local only model" `Quick
            test_maybe_append_keeper_fallback_models_adds_glm_when_local_only;
-         test_case "llm client repairs invalid utf8 fields" `Quick
-           test_llm_client_sanitize_message_utf8_repairs_invalid_fields;
-         test_case "llm client preserves message list size" `Quick
-           test_llm_client_sanitize_messages_utf8_preserves_message_count;
+         test_case "model client repairs invalid utf8 fields" `Quick
+           test_model_client_sanitize_message_utf8_repairs_invalid_fields;
+         test_case "model client preserves message list size" `Quick
+           test_model_client_sanitize_messages_utf8_preserves_message_count;
          test_case "resolved skill route uses agent judgment" `Quick
            test_resolved_keeper_skill_route_marks_agent_judgment;
          test_case "resolved skill route falls back when parse missing" `Quick

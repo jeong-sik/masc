@@ -1,6 +1,6 @@
 (** Chain Executor Leaf Nodes - Non-recursive node executors.
 
-    Contains all leaf-level execution functions (LLM, Tool, Adapter,
+    Contains all leaf-level execution functions (MODEL, Tool, Adapter,
     MASC broadcast/listen/claim) that do not participate in the mutual
     recursion of {!Chain_executor_eio.execute_node}.
 
@@ -10,10 +10,10 @@
 (** Re-export all helper types and functions *)
 include Chain_executor_helpers
 
-(** Execute a single LLM node *)
-let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) : (string, string) result =
-  match llm with
-  | Llm { model; system; prompt; timeout = _; tools; prompt_ref; prompt_vars = _; thinking } ->
+(** Execute a single MODEL node *)
+let execute_model_node ctx ~(exec_fn : exec_fn) ~(node : node) (model : node_type) : (string, string) result =
+  match model with
+  | Model { model; system; prompt; timeout = _; tools; prompt_ref; prompt_vars = _; thinking } ->
       let inputs = resolve_inputs ctx node.input_mapping in
       let resolved_prompt = substitute_prompt prompt inputs in
       (* Apply iteration variable substitution if in GoalDriven context *)
@@ -47,8 +47,7 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
       in
       let lower_model = String.lowercase_ascii effective_model in
       let supports_tools =
-        (lower_model = "llama" ||
-         (String.length lower_model > 6 && String.sub lower_model 0 6 = "llama:"))
+        lower_model <> "stub"
       in
       let tools_enabled = tools_count > 0 && (not tools_invalid) && supports_tools in
       let tool_choice_reason =
@@ -65,7 +64,7 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
           ~run_id:ctx.checkpoint.run_id
           ~chain_id:ctx.chain_id
           ~node_id:node.id
-          ~node_type:"llm"
+          ~node_type:"model"
           ~model:effective_model
           ~success:tools_enabled
           ?error_class:(if tools_count > 0 && not tools_enabled then Some "tools_disabled" else None)
@@ -80,7 +79,7 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
           ()
       else
         ();
-      record_start ctx node.id ~node_type:"llm";
+      record_start ctx node.id ~node_type:"model";
       let start = Time_compat.now () in
 
       (* Create Langfuse generation if tracing is enabled *)
@@ -107,7 +106,7 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
               ~run_id:ctx.checkpoint.run_id
               ~chain_id:ctx.chain_id
               ~node_id:node.id
-              ~node_type:"llm"
+              ~node_type:"model"
               ~model:effective_model
               ~success:true
               ~extra:[("reason", "complex_prompt_detected")]
@@ -130,7 +129,7 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
                 ~run_id:ctx.checkpoint.run_id
                 ~chain_id:ctx.chain_id
                 ~node_id:node.id
-                ~node_type:"llm"
+                ~node_type:"model"
                 ~model:effective_model
                 ~success:false
                 ~extra:[
@@ -144,10 +143,10 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
             try_with_empty_guard ~attempt:(attempt + 1) ~prompt_to_use:enhanced_prompt
         | Ok output when is_empty_response output ->
             (* Max retries exhausted - return error *)
-            record_complete ctx node.id ~duration_ms ~success:false ~node_type:"llm";
-            record_error ctx node.id ~node_type:"llm"
+            record_complete ctx node.id ~duration_ms ~success:false ~node_type:"model";
+            record_error ctx node.id ~node_type:"model"
               (Printf.sprintf "Empty response after %d retries" max_empty_retries);
-            Error (Printf.sprintf "LLM returned empty response after %d retries" max_empty_retries)
+            Error (Printf.sprintf "MODEL returned empty response after %d retries" max_empty_retries)
         | Ok output ->
             (* Valid non-empty response *)
             let prompt_tokens = (String.length prompt_to_use + (match final_system with Some s -> String.length s | None -> 0)) / 4 in
@@ -167,7 +166,7 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
                 ~run_id:ctx.checkpoint.run_id
                 ~chain_id:ctx.chain_id
                 ~node_id:node.id
-                ~node_type:"llm"
+                ~node_type:"model"
                 ~model:effective_model
                 ~success:true
                 ~extra:[
@@ -199,11 +198,11 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
             | Some conv -> add_message conv ~role:"assistant" ~content:output ~iteration ~model
              | None -> ());
 
-            record_complete ctx node.id ~duration_ms ~success:true ~node_type:"llm";
+            record_complete ctx node.id ~duration_ms ~success:true ~node_type:"model";
             store_node_output ctx node output;
             Ok output
         | Error msg ->
-            (* Pass through LLM errors as before *)
+            (* Pass through MODEL errors as before *)
             Error msg
       in
       let final_result = try_with_empty_guard ~attempt:1 ~prompt_to_use:prompt_with_context in
@@ -232,10 +231,10 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
                Prompt_registry.update_metrics ~id ~version ~score:0.0 ()
            | None -> ());
 
-          record_complete ctx node.id ~duration_ms:error_duration_ms ~success:false ~node_type:"llm";
-          record_error ctx node.id ~node_type:"llm" msg;
+          record_complete ctx node.id ~duration_ms:error_duration_ms ~success:false ~node_type:"model";
+          record_error ctx node.id ~node_type:"model" msg;
           Error msg)
-  | _ -> Error "execute_llm_node called with non-LLM node"
+  | _ -> Error "execute_model_node called with non-MODEL node"
 
 (** MASC MCP endpoint - configurable via MASC_MCP_URL env var *)
 let _masc_mcp_url () =
@@ -490,7 +489,7 @@ let string_contains = Chain_utils.string_contains
 
 (** {2 Cascade helpers} *)
 
-(** Parse confidence level from LLM output. Returns (confidence_level, cleaned_output) *)
+(** Parse confidence level from MODEL output. Returns (confidence_level, cleaned_output) *)
 let parse_confidence_from_output (output : string) : (Chain_types.confidence_level * string) =
   let re = Str.regexp_case_fold {|[Cc]onfidence:\s*\(High\|Medium\|Low\)|} in
   try

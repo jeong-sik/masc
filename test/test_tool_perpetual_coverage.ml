@@ -4,7 +4,7 @@
     Tests dispatch routing, wrap_result, handle_status/stop/inject
     with pre-populated global state, and handle_start error paths.
 
-    Network-free: no actual LLM calls. We populate active_agents
+    Network-free: no actual MODEL calls. We populate active_agents
     directly and test handler logic. *)
 
 module Tool_perpetual = Masc_mcp.Tool_perpetual

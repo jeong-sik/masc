@@ -4,7 +4,7 @@
 # Runs 3 agents for a specified duration and measures:
 # - Upvote ratio (target: >20% vs current ~0%)
 # - Reaction diversity (pattern distance between agents)
-# - Cost (LLM calls count)
+# - Cost (MODEL calls count)
 #
 # Usage: ./scripts/test_emergent_identity.sh [duration_hours]
 # Default: 24 hours

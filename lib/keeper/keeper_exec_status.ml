@@ -589,7 +589,6 @@ let keeper_error_hint ~agent_status ~meta =
         "failed";
         "timeout";
         "graphql";
-        "llm";
         "model";
         "ollama";
         "gemini";
@@ -636,9 +635,9 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
     | Some reason
       when
         List.exists (string_contains_ci reason)
-          [ "llm"; "model"; "timeout"; "ollama"; "gemini"; "openai" ]
+          [ "model"; "timeout"; "ollama"; "gemini"; "openai" ]
       ->
-        Some "llm_error"
+        Some "model_error"
     | Some _ -> Some "unknown"
     | None ->
         let last_turn_ago_s =
@@ -693,7 +692,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     "offline"
   else
     match quiet_reason with
-    | Some "graphql_error" | Some "llm_error" -> "degraded"
+    | Some "graphql_error" | Some "model_error" -> "degraded"
     | _ ->
         if meta.total_turns = 0 && meta.proactive_count_total = 0 then "idle"
         else if last_turn_ago_s > float_of_int (max meta.proactive_idle_sec 900)
@@ -708,7 +707,7 @@ let keeper_next_action_path ~health_state ~quiet_reason =
   | _ -> (
       match quiet_reason with
       | Some "quiet_hours" -> "manual_lodge_poke"
-      | Some "graphql_error" | Some "llm_error" | Some "startup" | Some "unknown" ->
+      | Some "graphql_error" | Some "model_error" | Some "startup" | Some "unknown" ->
           "probe"
       | Some "disabled" -> "recover"
       | _ -> "direct_message")

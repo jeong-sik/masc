@@ -373,7 +373,7 @@ let handle_keeper_status ctx args : tool_result =
              (`List tail, total)
         in
         let all_internal_tools =
-          keeper_llm_tools |> List.map (fun tool -> tool.Types.name)
+          keeper_model_tools |> List.map (fun tool -> tool.Types.name)
         in
         let allowed_tools = keeper_allowed_tool_names m in
         let blocked_internal_tools =

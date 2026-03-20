@@ -178,7 +178,7 @@ let eligible_keepers config (event : board_event) : keeper_meta list =
              if
                canonical_policy_action_budget meta.policy_action_budget = "board"
                && List.mem (canonical_policy_mode meta.policy_mode)
-                    [ "learned_offline_v1"; "explicit_event_v1"; "llm_deliberation" ]
+                    [ "learned_offline_v1"; "explicit_event_v1"; "model_deliberation" ]
                && meta.name <> event.author
              then Some meta
              else None

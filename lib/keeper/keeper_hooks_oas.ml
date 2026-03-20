@@ -64,7 +64,7 @@ let make_hooks
         let ctx = !ctx_ref in
         let _ckpt = Keeper_exec_context.save_checkpoint
           session ctx ~generation in
-        let model = response.Llm_provider.Types.model in
+        let model = response.model in
         let usage = match response.usage with
           | Some u -> u.input_tokens + u.output_tokens
           | None -> 0
@@ -78,8 +78,8 @@ let make_hooks
       match event with
       | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; _ } ->
         let output_text = match output with
-          | Ok { Llm_provider.Types.content; _ } -> content
-          | Error { Llm_provider.Types.message; _ } ->
+          | Ok { Agent_sdk.Types.content; _ } -> content
+          | Error { Agent_sdk.Types.message; _ } ->
             Printf.sprintf "error: %s" message
         in
         on_tool_executed tool_name input output_text;

@@ -1,14 +1,14 @@
-# OAS Migration Audit: MASC Llm_client → OAS Api
+# OAS Migration Audit: MASC Model_client → OAS Api
 
 Date: 2026-03-16
 Status: Audit complete, migration pending (Track A, separate session)
 
 ## Summary
 
-36 LLM call sites identified across MASC codebase.
-- 7 direct `Llm_client.run_prompt_cascade` calls
+36 MODEL call sites identified across MASC codebase.
+- 7 direct `Model_client.run_prompt_cascade` calls
 - 19 `Lodge_cascade.call` calls (wraps run_prompt_cascade)
-- 10 `Llm_client.complete` calls (low-level)
+- 10 `Model_client.complete` calls (low-level)
 
 ## Classification
 
@@ -24,7 +24,7 @@ Simple prompt→response, compatible with OAS `Api.create_message_cascade`.
 | context_router.ml | 211 | Lodge_cascade "context_router" | 0.1 | Hybrid fallback |
 | gardener.ml | 973 | run_prompt_cascade | 0.3 | Spawn evaluation |
 | keeper_execution.ml | 1661 | run_prompt_cascade | 0.3 | Keeper decision |
-| keeper_autonomy.ml | 248 | Llm_client.complete | varies | Autonomous decision |
+| keeper_autonomy.ml | 248 | Model_client.complete | varies | Autonomous decision |
 | capability_match.ml | 257 | Lodge_cascade "capability_match" | default | Agent matching |
 
 ### Adapter Needed (10 sites)
@@ -57,9 +57,9 @@ Deep integration, no OAS equivalent, or requires redesign.
 | verifier.ml | 157 | Low-cost verification, different model class |
 | trpg_harness.ml | 118,213 | Game logic, separate domain |
 
-## Key Differences: Llm_client vs OAS Api
+## Key Differences: Model_client vs OAS Api
 
-| Aspect | Llm_client | OAS Api |
+| Aspect | Model_client | OAS Api |
 |--------|-----------|---------|
 | Input | prompt:string + system:string | messages list |
 | Cascade | model_spec list (ordered) | Provider.cascade (primary + fallbacks) |
@@ -75,5 +75,5 @@ Deep integration, no OAS equivalent, or requires redesign.
 4. **Phase 4**: Keeper (heaviest, last) — 6 sites
 5. **Retain**: perpetual_loop, autoresearch, verifier, trpg — 8 sites
 
-Bridge module: `Oas_llm_bridge.ml` — adapts MASC cascade_name → OAS Provider.cascade,
+Bridge module: `Oas_worker.ml` — adapts MASC cascade_name → OAS Provider.cascade,
 wraps accept predicate as post-parse validation.

@@ -23,7 +23,7 @@ open Printf
 type keeper_verification_request = {
   keeper_name : string;
   proposed_action : Keeper_autonomy.proposed_action;
-  action_plan : string;  (** LLM-generated plan text *)
+  action_plan : string;  (** MODEL-generated plan text *)
   keeper_context : string;
 }
 
@@ -94,9 +94,9 @@ let risk_guard ~(autonomy_level : Keeper_autonomy.autonomy_level)
 
 (** Verify a proposed keeper action through multi-layer checks.
 
-    Layer 1: Cost guard (fast, no LLM)
-    Layer 2: Risk guard (fast, no LLM)
-    Layer 3: LLM verification via verifier.ml (cheap model, 200 tokens) *)
+    Layer 1: Cost guard (fast, no MODEL)
+    Layer 2: Risk guard (fast, no MODEL)
+    Layer 3: MODEL verification via verifier.ml (cheap model, 200 tokens) *)
 let verify_action
     ~(autonomy_level : Keeper_autonomy.autonomy_level)
     (req : keeper_verification_request) : keeper_verdict =
@@ -108,7 +108,7 @@ let verify_action
   match risk_guard ~autonomy_level req.proposed_action with
   | Some reason -> Block reason
   | None ->
-  (* Layer 3: LLM verification *)
+  (* Layer 3: MODEL verification *)
   let verifier_req : Verifier_oas.verification_request = {
     action_description = req.proposed_action.action_description;
     action_result = req.action_plan;

@@ -6,8 +6,8 @@
   "nodes": [
     {
       "id": "query-expansion",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Expand this research query into 3-5 specific sub-questions that would help thoroughly answer it.\n\nQuery: {{input.query}}\n\nOutput as JSON: {\"sub_queries\": [\"q1\", \"q2\", \"q3\"]}"
       },
@@ -33,8 +33,8 @@
     },
     {
       "id": "extract-facts",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "claude-cli",
         "prompt": "Extract key facts from these search results. For each fact, note the source.\n\nSearch Results:\n{{search_results}}\n\nOutput as JSON: {\"facts\": [{\"claim\": \"...\", \"source\": \"...\", \"confidence\": 0.0-1.0}]}"
       },
@@ -43,8 +43,8 @@
     },
     {
       "id": "fact-check",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "codex",
         "prompt": "Cross-reference these facts. Identify:\n1. Facts supported by multiple sources (high confidence)\n2. Contradictory claims (needs resolution)\n3. Single-source facts (lower confidence)\n\nFacts:\n{{extracted_facts}}\n\nOutput as JSON: {\"verified\": [...], \"contradictions\": [...], \"unverified\": [...]}"
       },
@@ -53,8 +53,8 @@
     },
     {
       "id": "synthesize",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Synthesize a comprehensive answer to the original query based on verified facts.\n\nOriginal Query: {{input.query}}\n\nVerified Facts:\n{{fact_check_results.verified}}\n\nContradictions to address:\n{{fact_check_results.contradictions}}\n\nWrite a well-structured research report with:\n1. Executive Summary\n2. Key Findings (with citations)\n3. Areas of Uncertainty\n4. Recommendations for Further Research\n\nUse markdown formatting."
       },
@@ -63,8 +63,8 @@
     },
     {
       "id": "generate-citations",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Generate a bibliography from the sources used.\n\nFacts with sources:\n{{extracted_facts}}\n\nOutput in APA format."
       },
@@ -73,8 +73,8 @@
     },
     {
       "id": "final-assembly",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "claude-cli",
         "prompt": "Combine the research report and bibliography into a final document.\n\nReport:\n{{research_report}}\n\nBibliography:\n{{bibliography}}\n\nFormat as a complete research document with proper sections."
       },

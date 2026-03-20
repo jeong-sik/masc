@@ -134,7 +134,7 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
     - SummarizeOld uses OAS Custom strategy with heuristic summarization.
 
     SummarizeOld uses extractive summarization (first-sentence extraction).
-    A future enhancement could accept an LLM summarizer function parameter. *)
+    A future enhancement could accept an MODEL summarizer function parameter. *)
 let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
   | PruneToolOutputs ->
@@ -189,8 +189,8 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
        bridges the gap so the model knows what was discussed without reading
        every old message.
 
-       This is deterministic (no LLM call). A future enhancement could use
-       an LLM for abstractive summarization via a callback parameter. *)
+       This is deterministic (no MODEL call). A future enhancement could use
+       an MODEL for abstractive summarization via a callback parameter. *)
     Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
       let n = List.length oas_msgs in
       let first_n = 2 in

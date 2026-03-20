@@ -6,8 +6,8 @@
   "nodes": [
     {
       "id": "parse-modules",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Parse the module list and prepare parallel tasks.\n\nProject path: {{input.project_path}}\nModule paths:\n{{input.module_paths}}\n\nFor each module, output:\n{\n  \"modules\": [\n    {\n      \"path\": \"relative/path/to/module.ml\",\n      \"name\": \"module_name\",\n      \"priority\": 1-5,\n      \"estimated_functions\": number\n    }\n  ],\n  \"total_modules\": number,\n  \"parallelization_strategy\": \"by_priority|by_size|round_robin\"\n}"
       },
@@ -40,8 +40,8 @@
     },
     {
       "id": "aggregate-results",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Aggregate the coverage generation results.\n\nResults:\n{{coverage_results}}\n\nCreate a summary report:\n{\n  \"total_modules\": number,\n  \"successful\": number,\n  \"failed\": number,\n  \"total_tests_generated\": number,\n  \"average_quality_score\": 0.0-1.0,\n  \"modules\": [\n    {\n      \"path\": \"string\",\n      \"tests_generated\": number,\n      \"quality_score\": 0.0-1.0,\n      \"status\": \"success|failed|skipped\"\n    }\n  ],\n  \"recommendations\": [\"any modules that need manual attention\"]\n}"
       },

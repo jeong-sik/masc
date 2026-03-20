@@ -1,24 +1,24 @@
 {
   "id": "cascade-default",
   "name": "Default 3-Tier Cascade",
-  "description": "Cost-optimized LLM routing: local GLM -> Gemini -> Claude. Escalates on low confidence.",
+  "description": "Cost-optimized MODEL routing: local GLM -> Gemini -> Claude. Escalates on low confidence.",
   "version": "1.0.0",
   "nodes": [
     {
       "id": "glm",
-      "type": "llm",
+      "type": "model",
       "model": "glm",
       "prompt": "{{input}}"
     },
     {
       "id": "gemini",
-      "type": "llm",
+      "type": "model",
       "model": "gemini",
       "prompt": "{{input}}"
     },
     {
       "id": "claude",
-      "type": "llm",
+      "type": "model",
       "model": "claude",
       "prompt": "{{input}}"
     },
@@ -62,7 +62,7 @@
   },
   "metadata": {
     "category": "routing",
-    "use_case": "Cost optimization for general LLM queries",
+    "use_case": "Cost optimization for general MODEL queries",
     "tier_models": ["glm", "gemini", "claude"]
   }
 }

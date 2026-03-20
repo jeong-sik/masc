@@ -2,7 +2,7 @@
 
     This module is the "brain" of the Chain Engine, responsible for:
     1. Chain Design: Infer optimal Chain DSL from task descriptions
-    2. Completion Verification: LLM-based judgment of goal achievement
+    2. Completion Verification: MODEL-based judgment of goal achievement
     3. Evaluation Timing: Decide when to evaluate and potentially re-plan
 
     Architecture (Neuro-Symbolic):
@@ -11,7 +11,7 @@
     │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
     │  │ Chain       │  │ Completion  │  │ Evaluation          │ │
     │  │ Designer    │→ │ Verifier    │→ │ Timing Controller   │ │
-    │  │ (LLM)       │  │ (LLM)       │  │ (LLM + Heuristics)  │ │
+    │  │ (MODEL)       │  │ (MODEL)       │  │ (MODEL + Heuristics)  │ │
     │  └─────────────┘  └─────────────┘  └─────────────────────┘ │
     │         ↓                ↓                    ↓             │
     │  ┌──────────────────────────────────────────────────────┐  │
@@ -95,11 +95,11 @@ type composer_state = {
 (* ============================================================
    Chain Design Context Builders
 
-   These functions build prompts for LLM to design chains.
-   The actual LLM call is external (via mcp_client or tools_eio).
+   These functions build prompts for MODEL to design chains.
+   The actual MODEL call is external (via mcp_client or tools_eio).
    ============================================================ *)
 
-(** Build context for chain design LLM call *)
+(** Build context for chain design MODEL call *)
 let build_design_context ~(goal: string) ~(tasks: masc_task list) : string =
   let task_descriptions =
     match tasks with
@@ -156,7 +156,7 @@ Design an optimal execution chain for these tasks. Consider:
    - do not return edge-only Mermaid like `a --> b`
    - every terminal/output step must correspond to a declared node
    - prefer concrete executable node ids such as `plan_step`, `draft_step`, `verify_step`
-   - for LLM nodes use `LLM:<model> "<prompt>"`, for example `LLM:gemini "Draft the answer"`
+   - for MODEL nodes use `MODEL:<model> "<prompt>"`, for example `MODEL:gemini "Draft the answer"`
    - for tool nodes use `Tool:<name>` or `Tool:<name> "<input>"`
    - when a node depends on an upstream node, explicitly reference that upstream output with `{{upstream_node_id}}`
    - do not create downstream nodes that ignore their incoming edges
@@ -167,8 +167,8 @@ Return ONLY one fenced code block and nothing else.
 Use Mermaid:
 ```mermaid
 graph LR
-  task_001["LLM:gemini \"Analyze the goal\""]
-  task_002["LLM:gemini \"Draft the result using {{task_001}}\""]
+  task_001["MODEL:gemini \"Analyze the goal\""]
+  task_002["MODEL:gemini \"Draft the result using {{task_001}}\""]
   task_003["Tool:echo \"{{task_002}}\""]
   task_001 --> task_002
   task_002 --> task_003
@@ -188,12 +188,12 @@ Or JSON:
     goal
     (String.concat "\n" task_descriptions)
 
-(** Build context for completion verification LLM call *)
+(** Build context for completion verification MODEL call *)
 let build_verification_prompt ~(goal: string) ~(metrics: chain_metrics) : string =
   (* Delegate to chain_evaluator's context builder *)
   build_verification_context ~goal ~metrics
 
-(** Build context for re-planning LLM call *)
+(** Build context for re-planning MODEL call *)
 let build_replan_context
     ~(goal: string)
     ~(original_chain: chain)
@@ -372,15 +372,15 @@ let finalize state metrics =
    These are the main entry points for the Conductor to use.
    ============================================================ *)
 
-(** Get design context for LLM (Conductor will make the actual call) *)
+(** Get design context for MODEL (Conductor will make the actual call) *)
 let get_design_context state =
   build_design_context ~goal:state.goal ~tasks:state.original_tasks
 
-(** Get verification context for LLM *)
+(** Get verification context for MODEL *)
 let get_verification_context state metrics =
   build_verification_prompt ~goal:state.goal ~metrics
 
-(** Get replan context for LLM *)
+(** Get replan context for MODEL *)
 let get_replan_context state reason metrics =
   match state.current_chain with
   | Some chain -> Some (build_replan_context ~goal:state.goal ~original_chain:chain ~reason ~metrics)

@@ -1,55 +1,50 @@
 open Env_config_core
 
-(** {1 LLM Configuration} *)
+(** {1 Inference Configuration} *)
 
-module Llm = struct
-  (** Timeout for LLM API calls (seconds) *)
+module Inference = struct
+  (** Timeout for model API calls (seconds) *)
   let timeout_seconds =
-    get_float ~default:30.0 "MASC_LLM_TIMEOUT_SEC"
+    get_float ~default:30.0 "MASC_INFERENCE_TIMEOUT_SEC"
 
   (** Integer fallback for call sites that use second granularity only. *)
   let timeout_seconds_int =
     max 1 (int_of_float timeout_seconds)
 
   (** Background operator judge timeout.
-      Falls back to the global LLM timeout unless explicitly overridden. *)
+      Falls back to the global inference timeout unless explicitly overridden. *)
   let operator_judge_timeout_seconds =
     max 5
       (get_int ~default:timeout_seconds_int "MASC_OPERATOR_JUDGE_TIMEOUT_SEC")
 
   (** Dashboard governance judge timeout.
-      Falls back to the global LLM timeout unless explicitly overridden. *)
+      Falls back to the global inference timeout unless explicitly overridden. *)
   let dashboard_governance_judge_timeout_seconds =
     max 5
       (get_int ~default:timeout_seconds_int
          "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC")
 
-  (** Default GLM model for Z.ai API calls.
-      Empty = let GLM provider select at runtime. *)
-  let default_model =
-    get_string ~default:"glm-4.7" "MASC_GLM_DEFAULT_MODEL"
-
-  (** Enable LLM response cache (L1+L2). *)
+  (** Enable inference response cache (L1+L2). *)
   let cache_enabled =
-    get_bool ~default:true "MASC_LLM_CACHE_ENABLED"
+    get_bool ~default:true "MASC_INFERENCE_CACHE_ENABLED"
 
-  (** Default TTL for LLM response cache (seconds). *)
+  (** Default TTL for inference response cache (seconds). *)
   let cache_ttl_seconds =
-    get_int ~default:300 "MASC_LLM_CACHE_TTL_SEC"
+    get_int ~default:300 "MASC_INFERENCE_CACHE_TTL_SEC"
 
   (** Skip caching for oversized prompts (character count). *)
   let cache_max_prompt_chars =
-    get_int ~default:48000 "MASC_LLM_CACHE_MAX_PROMPT_CHARS"
+    get_int ~default:48000 "MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS"
 
   (** Cache only deterministic temperatures (default exact 0.0). *)
   let cache_max_temperature =
-    get_float ~default:0.0 "MASC_LLM_CACHE_MAX_TEMP"
+    get_float ~default:0.0 "MASC_INFERENCE_CACHE_MAX_TEMP"
 
   (** L1 in-memory entry cap.
       BUG-015: Reduced from 2048 to 512 — unbounded growth with 2048 default
       caused excessive memory usage in long-running servers. *)
   let cache_l1_max_entries =
-    get_int ~default:512 "MASC_LLM_CACHE_L1_MAX_ENTRIES"
+    get_int ~default:512 "MASC_INFERENCE_CACHE_L1_MAX_ENTRIES"
 
   (** Spawn cache policy:
       - off
@@ -58,6 +53,15 @@ module Llm = struct
     get_string ~default:"safe_only" "MASC_SPAWN_CACHE_POLICY"
     |> String.trim
     |> String.lowercase_ascii
+end
+
+(** {1 GLM Configuration} *)
+
+module Glm = struct
+  (** Default GLM model for Z.ai API calls.
+      Empty = let GLM provider select at runtime. *)
+  let default_model =
+    get_string ~default:"glm-4.7" "MASC_GLM_DEFAULT_MODEL"
 
   (** Default GLM flash model for lightweight tasks.
       Empty = provider decides. *)
@@ -173,11 +177,11 @@ module LodgeV2 = struct
   let max_comments_per_day =
     get_int ~default:40 "MASC_LODGE_MAX_COMMENTS_PER_DAY"
 
-  (** Delegate LLM calls to external Workers (Soul + Body pattern).
-      When true, MASC emits heartbeat_task events instead of calling LLM directly.
+  (** Delegate MODEL calls to external Workers (Soul + Body pattern).
+      When true, MASC emits heartbeat_task events instead of calling MODEL directly.
       Workers subscribe to events and invoke the local llama runtime. *)
-  let delegate_llm =
-    get_bool ~default:false "MASC_DELEGATE_LLM"
+  let delegate_inference =
+    get_bool ~default:false "MASC_DELEGATE_INFERENCE"
 end
 
 (** {1 Social Runtime — Keeper-owned public-square activity} *)
@@ -225,9 +229,9 @@ module LodgeSelection = struct
   let thompson_weight =
     get_float ~default:0.7 "MASC_LODGE_THOMPSON_WEIGHT"
 
-  (** Use LLM for final selection decision (experimental) *)
-  let use_llm_selection =
-    get_bool ~default:false "MASC_LODGE_LLM_SELECTION"
+  (** Use MODEL for final selection decision (experimental) *)
+  let use_model_selection =
+    get_bool ~default:false "MASC_LODGE_MODEL_SELECTION"
 
   (** Stats persistence interval (seconds) *)
   let stats_persist_interval_s =

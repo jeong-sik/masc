@@ -24,7 +24,7 @@
 | 문제 | 심각도 |
 |------|--------|
 | Spawn 실패 시 컨텍스트 손실 위험 | 🔴 Critical |
-| context_ratio 신뢰성 (LLM이 자기 컨텍스트를 정확히 모름) | 🔴 Critical |
+| context_ratio 신뢰성 (MODEL이 자기 컨텍스트를 정확히 모름) | 🔴 Critical |
 | 복잡도 증가 (cell, pool, prepared_dna 상태 관리) | 🟡 Medium |
 | Magic numbers (50%, 80% threshold) | 🟡 Medium |
 

@@ -15,7 +15,7 @@ type transaction_kind =
   | Earn_board_post
   | Earn_upvote
   | Earn_mention_response
-  | Spend_llm_call
+  | Spend_model_call
   | Spend_deliberation
   | Adjustment
 
@@ -67,7 +67,7 @@ let transaction_kind_to_string = function
   | Earn_board_post -> "earn_board_post"
   | Earn_upvote -> "earn_upvote"
   | Earn_mention_response -> "earn_mention_response"
-  | Spend_llm_call -> "spend_llm_call"
+  | Spend_model_call -> "spend_model_call"
   | Spend_deliberation -> "spend_deliberation"
   | Adjustment -> "adjustment"
 
@@ -76,7 +76,7 @@ let transaction_kind_of_string = function
   | "earn_board_post" -> Some Earn_board_post
   | "earn_upvote" -> Some Earn_upvote
   | "earn_mention_response" -> Some Earn_mention_response
-  | "spend_llm_call" -> Some Spend_llm_call
+  | "spend_model_call" -> Some Spend_model_call
   | "spend_deliberation" -> Some Spend_deliberation
   | "adjustment" -> Some Adjustment
   | _ -> None
@@ -230,7 +230,7 @@ let base_reward_for_kind = function
   | Earn_board_post -> reward_board_post ()
   | Earn_upvote -> reward_upvote ()
   | Earn_mention_response -> reward_mention_response ()
-  | Spend_llm_call | Spend_deliberation | Adjustment -> 0.0
+  | Spend_model_call | Spend_deliberation | Adjustment -> 0.0
 
 (** {1 Core Operations} *)
 

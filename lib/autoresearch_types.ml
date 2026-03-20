@@ -23,8 +23,8 @@ type loop_state = {
   loop_id : string;
   goal : string;
   metric_fn : string;
-  llm_model : string;
-  target_file : string;  (** File the LLM reads and modifies, relative to workdir *)
+  model_model : string;
+  target_file : string;  (** File the MODEL reads and modifies, relative to workdir *)
   mutable status : status;
   mutable error_message : string option;
   mutable current_cycle : int;
@@ -68,7 +68,7 @@ type persisted_summary = {
   total_discards : int;
   goal : string;
   metric_fn : string;
-  llm_model : string;
+  model_model : string;
   target_file : string;
   workdir : string;
   cycle_timeout_s : float;

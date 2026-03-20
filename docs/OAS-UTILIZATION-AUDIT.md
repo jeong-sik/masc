@@ -53,8 +53,8 @@ MASC-MCP: main (624d9fcc5)
 
 ### Gap 2: verifier_oas.ml Provider bypass — FIXED (this PR)
 
-- Was: direct Llm_provider.Cascade_config.complete_named call (lines 160-165)
-- Now: Oas_worker.complete_single — cascade-aware, config-path-resolved, error-formatted
+- Was: direct provider cascade call (lines 160-165)
+- Now: Oas_worker.run_named — OAS-only, cascade-aware, error-formatted
 
 ### Gap 3: Memory bridge incomplete — MEDIUM
 
@@ -71,14 +71,14 @@ Key unused modules with potential value:
 - plan.mli — goal decomposition/replanning
 - verified_output.mli — phantom-type compile-time output verification
 - trajectory.mli — structured Think/Act/Observe/Respond
-- cost_tracker.mli — LLM cost accounting
+- cost_tracker.mli — model cost accounting
 - otel_tracer.mli — OpenTelemetry tracing
 
 ## Migration Priorities
 
 | Priority | Target | Effort | Status |
 |----------|--------|--------|--------|
-| P1 | verifier_oas.ml -> Oas_worker.complete_single | 1 day | DONE (this PR) |
+| P1 | verifier_oas.ml -> Oas_worker.run_named | 1 day | DONE (this PR) |
 | P2 | Memory 3-tier completion | 3-5 days | Planned |
 | P3 | Model_spec gradual retirement | 2-3 weeks | Incremental |
 | P4 | Swarm -> OAS lib_swarm bridge | 3-4 weeks | Needs design |

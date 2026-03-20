@@ -103,12 +103,12 @@ let command_plane_help_http_json () =
               ];
             `Assoc
               [
-                ("title", `String "LLM Front Door");
+                ("title", `String "Model Front Door");
                 ("path", `String "llms.txt");
               ];
             `Assoc
               [
-                ("title", `String "LLM Front Door Full");
+                ("title", `String "Model Front Door Full");
                 ("path", `String "llms-full.txt");
               ];
           ] );

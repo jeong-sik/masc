@@ -175,11 +175,11 @@ let init () =
   add "masc_sse_capacity_evictions_total" "Total SSE clients evicted due to max client capacity" Counter;
   add "masc_sse_write_failures_total" "Total SSE write failures by reason" Counter;
   add "masc_sse_rejects_total" "Total SSE connections rejected by storm guard" Counter;
-  add "masc_llm_cache_hits_total" "Total LLM cache hits" Counter;
-  add "masc_llm_cache_misses_total" "Total LLM cache misses" Counter;
-  add "masc_llm_cache_writes_total" "Total LLM cache writes" Counter;
-  add "masc_llm_cache_bypass_total" "Total LLM cache bypass decisions" Counter;
-  add "masc_llm_cache_errors_total" "Total LLM cache errors" Counter
+  add "masc_inference_cache_hits_total" "Total inference cache hits" Counter;
+  add "masc_inference_cache_misses_total" "Total inference cache misses" Counter;
+  add "masc_inference_cache_writes_total" "Total inference cache writes" Counter;
+  add "masc_inference_cache_bypass_total" "Total inference cache bypass decisions" Counter;
+  add "masc_inference_cache_errors_total" "Total inference cache errors" Counter
 
 let start_time = Time_compat.now ()
 
@@ -246,12 +246,12 @@ let set_active_agents count =
 let set_pending_tasks count =
   set_gauge "masc_pending_tasks" (float_of_int count)
 
-let llm_cache_metrics_json () =
-  let hits = int_of_float (metric_value_or_zero "masc_llm_cache_hits_total" ()) in
-  let misses = int_of_float (metric_value_or_zero "masc_llm_cache_misses_total" ()) in
-  let writes = int_of_float (metric_value_or_zero "masc_llm_cache_writes_total" ()) in
-  let bypass = int_of_float (metric_value_or_zero "masc_llm_cache_bypass_total" ()) in
-  let errors = int_of_float (metric_value_or_zero "masc_llm_cache_errors_total" ()) in
+let inference_cache_metrics_json () =
+  let hits = int_of_float (metric_value_or_zero "masc_inference_cache_hits_total" ()) in
+  let misses = int_of_float (metric_value_or_zero "masc_inference_cache_misses_total" ()) in
+  let writes = int_of_float (metric_value_or_zero "masc_inference_cache_writes_total" ()) in
+  let bypass = int_of_float (metric_value_or_zero "masc_inference_cache_bypass_total" ()) in
+  let errors = int_of_float (metric_value_or_zero "masc_inference_cache_errors_total" ()) in
   let total_lookups = max 1 (hits + misses) in
   let hit_rate = float_of_int hits /. float_of_int total_lookups in
   `Assoc

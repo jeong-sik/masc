@@ -7,7 +7,7 @@
 
     The Chaining Designer (Composer) uses this module to:
     1. Track execution metrics
-    2. Verify completion with LLM-based judgment
+    2. Verify completion with MODEL-based judgment
     3. Decide when to evaluate and potentially re-plan
 
     Architecture:
@@ -36,7 +36,7 @@ type node_status =
 (** Individual node metrics *)
 type node_metrics = {
   node_id: string;
-  node_type: string;                 (** "llm", "tool", "pipeline", etc. *)
+  node_type: string;                 (** "model", "tool", "pipeline", etc. *)
   status: node_status;
   started_at: float option;          (** Unix timestamp *)
   completed_at: float option;
@@ -62,7 +62,7 @@ type eval_trigger =
 type verification_result = {
   is_complete: bool;                 (** Did the chain achieve its goal? *)
   confidence: float;                 (** 0.0 - 1.0 confidence score *)
-  reason: string;                    (** Explanation from LLM *)
+  reason: string;                    (** Explanation from MODEL *)
   missing_criteria: string list;     (** What's still missing? *)
   suggested_next_steps: string list; (** If incomplete, what to do? *)
 }
@@ -273,11 +273,11 @@ let should_evaluate ~(trigger: eval_trigger) ~(metrics: chain_metrics) : bool =
 (* ============================================================
    Completion Verification Context Builder
 
-   This builds context for LLM to verify if the goal is achieved.
-   The actual LLM call is done by Composer using this context.
+   This builds context for MODEL to verify if the goal is achieved.
+   The actual MODEL call is done by Composer using this context.
    ============================================================ *)
 
-(** Build verification context for Composer's LLM call *)
+(** Build verification context for Composer's MODEL call *)
 let build_verification_context ~(goal: string) ~(metrics: chain_metrics) : string =
   let node_summaries = List.map (fun n ->
     Printf.sprintf "- %s (%s): %s%s"
@@ -333,7 +333,7 @@ Respond with:
     metrics.total_duration_ms
     (String.concat "\n" node_summaries)
 
-(** Parse LLM verification response into structured result *)
+(** Parse MODEL verification response into structured result *)
 let parse_verification_response (response: string) : verification_result =
   let starts_with ~prefix s =
     let prefix_len = String.length prefix in

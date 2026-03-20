@@ -290,7 +290,7 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
     | Ok () ->
         (* Try new inference-based parsing first, fall back to old explicit syntax *)
         let parse_result =
-          (* Check if content uses explicit type prefix (LLM:, Tool:, etc.) *)
+          (* Check if content uses explicit type prefix (MODEL:, Tool:, etc.) *)
           (* Strip surrounding quotes that may be added by chain_to_mermaid *)
           let content = strip_quotes mnode.content in
           if has_explicit_type_prefix content then

@@ -71,7 +71,7 @@ type exec_context = {
   chain_id: string;
 }
 
-(** Type of LLM execution callback *)
+(** Type of MODEL execution callback *)
 type exec_fn = Chain_conversation.exec_fn
 
 (** Type of tool execution callback *)
@@ -142,7 +142,7 @@ val plan_to_steps : execution_plan -> execution_step list
 (** {1 Main Entry Point} *)
 
 (** Execute a compiled execution plan.
-    All internal node execution (LLM, tool, gate, subgraph, etc.)
+    All internal node execution (MODEL, tool, gate, subgraph, etc.)
     and the 20-arm mutual recursion are hidden behind this single entry point. *)
 val execute :
   sw:Eio.Switch.t ->

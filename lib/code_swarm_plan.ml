@@ -252,7 +252,7 @@ let create_plan ~base_path ~pattern ~file_glob ~max_workers ~exclude_files =
     Ok plan
 
 (* ================================================================ *)
-(* Verify — diff collection + LLM verification                     *)
+(* Verify — diff collection + MODEL verification                     *)
 (* ================================================================ *)
 
 (** Get git diff from a worktree branch *)
@@ -339,7 +339,7 @@ let verify_worker ~pattern (worker : worker_plan) diff =
           ~goal:prompt ~max_turns:1
           ~temperature:0.0 ~max_tokens:200 ()
       with
-      | Ok result -> Verifier_oas.parse_verdict (Llm_provider.Types.text_of_response result.Oas_worker.response)
+      | Ok result -> Verifier_oas.parse_verdict (Oas_response.text_of_response result.Oas_worker.response)
       | Error e -> Verifier_oas.Warn ("verifier_unavailable: " ^ e)
     in
     let our_verdict =

@@ -28,8 +28,8 @@ open Chain_types
 open Chain_composer
 open Chain_evaluator
 
-(** LLM call function type - provided by caller *)
-type llm_call = prompt:string -> string
+(** MODEL call function type - provided by caller *)
+type model_call = prompt:string -> string
 
 (** Tool execution function type *)
 type tool_exec = name:string -> args:Yojson.Safe.t -> Yojson.Safe.t
@@ -61,7 +61,7 @@ type orchestration_config = {
   max_replans: int;           (** Maximum re-planning attempts *)
   timeout_ms: int;            (** Overall timeout *)
   trace_enabled: bool;        (** Enable execution tracing *)
-  verify_on_complete: bool;   (** Run LLM verification on completion *)
+  verify_on_complete: bool;   (** Run MODEL verification on completion *)
 }
 
 let default_config = {
@@ -71,7 +71,7 @@ let default_config = {
   verify_on_complete = true;
 }
 
-(** Parse chain design from LLM response *)
+(** Parse chain design from MODEL response *)
 let parse_chain_design (response: string) : (chain, string) result =
   (* Try to extract Mermaid graph or JSON from response anywhere in the text *)
   (* NOTE: Must use regular string for \n to be interpreted as newline *)
@@ -111,7 +111,7 @@ let parse_chain_design (response: string) : (chain, string) result =
           in
           let referenced_vars =
             match node.node_type with
-            | Llm { prompt; system; _ } ->
+            | Model { prompt; system; _ } ->
                 let vars = extract_template_vars prompt in
                 let vars =
                   match system with
@@ -123,7 +123,7 @@ let parse_chain_design (response: string) : (chain, string) result =
                 collect_template_vars_json [] args |> List.sort_uniq String.compare
             | _ -> []
           in
-          if upstream_inputs = [] || referenced_vars = [] && not (match node.node_type with Llm _ | Tool _ -> true | _ -> false) then
+          if upstream_inputs = [] || referenced_vars = [] && not (match node.node_type with Model _ | Tool _ -> true | _ -> false) then
             None
           else
             let missing =
@@ -207,10 +207,10 @@ let parse_chain_design (response: string) : (chain, string) result =
                       try_parse_mermaid mermaid_code
                   | None ->
                       let snippet = String.sub response 0 (min 400 (String.length response)) in
-                      Error (Printf.sprintf "No valid chain format found in LLM response. Snippet: %s" snippet)))
+                      Error (Printf.sprintf "No valid chain format found in MODEL response. Snippet: %s" snippet)))
           | None ->
               let snippet = String.sub response 0 (min 400 (String.length response)) in
-              Error (Printf.sprintf "No valid chain format found in LLM response. Snippet: %s" snippet))
+              Error (Printf.sprintf "No valid chain format found in MODEL response. Snippet: %s" snippet))
 
 (** Calculate chain parallelization efficiency:
     Ratio of parallel_groups to total_nodes (0.0 = fully sequential, 1.0 = maximally parallel) *)
@@ -299,7 +299,7 @@ let orchestrate
     ~sw
     ~clock
     ~(config: orchestration_config)
-    ~(llm_call: llm_call)
+    ~(model_call: model_call)
     ~(tool_exec: tool_exec)
     ~(on_chain_designed : chain -> unit)
     ~(goal: string)
@@ -320,7 +320,7 @@ let orchestrate
         chain.id (Printexc.to_string exn)
   in
 
-  (* Design phase: Get chain from LLM (or use provided initial chain once) *)
+  (* Design phase: Get chain from MODEL (or use provided initial chain once) *)
   let pending_chain = ref initial_chain in
   Chain_log.info "orchestrator" "Initialized pending_chain=%s"
     (match initial_chain with Some c -> Printf.sprintf "Some(id=%s)" c.id | None -> "None");
@@ -331,9 +331,9 @@ let orchestrate
         pending_chain := None;
         Ok chain
     | None ->
-        Chain_log.info "orchestrator" "design_chain: No pending_chain, calling LLM...";
+        Chain_log.info "orchestrator" "design_chain: No pending_chain, calling MODEL...";
         let context = get_design_context !state in
-        let response = llm_call ~prompt:context in
+        let response = model_call ~prompt:context in
         parse_chain_design response
   in
 
@@ -342,7 +342,7 @@ let orchestrate
     match Chain_compiler.compile chain with
     | Error e -> Error (Printf.sprintf "Compile error: %s" e)
     | Ok plan ->
-      (* Create execution function for LLM nodes *)
+      (* Create execution function for MODEL nodes *)
       let timeout_sec = max 1 (config.timeout_ms / 1000) in
       let starts_with ~prefix s =
         let prefix_len = String.length prefix in
@@ -382,9 +382,9 @@ let orchestrate
           m = "3-pro" || m = "3-flash" ||
           starts_with ~prefix:"gemini-" m
         in
-        (* Wrap LLM calls with retry for recoverable errors *)
+        (* Wrap MODEL calls with retry for recoverable errors *)
         let exec_with_retry name args_with_model =
-          let result = Chain_executor_retry.execute_llm_with_retry ~clock ~provider:name (fun () ->
+          let result = Chain_executor_retry.execute_model_with_retry ~clock ~provider:name (fun () ->
             match exec_via_tool ~name ~args:args_with_model with
             | Ok v -> Ok v
             | Error msg -> Error (Chain_executor_retry.classify_error msg)
@@ -442,13 +442,13 @@ let orchestrate
         plan)
   in
 
-  (* Verify phase: Check completion with LLM *)
+  (* Verify phase: Check completion with MODEL *)
   let verify_completion (metrics: chain_metrics) =
     if not config.verify_on_complete then
       None
     else begin
       let context = get_verification_context !state metrics in
-      let response = llm_call ~prompt:context in
+      let response = model_call ~prompt:context in
       Some (parse_verification_response response)
     end
   in
@@ -579,13 +579,13 @@ let orchestrate
 let orchestrate_quick
     ~sw
     ~clock
-    ~(llm_call: llm_call)
+    ~(model_call: model_call)
     ~(tool_exec: tool_exec)
     ~(on_chain_designed : chain -> unit)
     ~(goal: string)
     ~(tasks: masc_task list)
     : (orchestration_result, orchestration_error) result =
-  orchestrate ~sw ~clock ~config:default_config ~llm_call ~tool_exec
+  orchestrate ~sw ~clock ~config:default_config ~model_call ~tool_exec
     ~on_chain_designed ~goal ~tasks ~initial_chain:None
 
 (** Create MASC tasks from simple string descriptions *)

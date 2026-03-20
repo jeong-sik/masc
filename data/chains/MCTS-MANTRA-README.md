@@ -17,7 +17,7 @@ Monte Carlo Tree Search 기반 MANTRA 코드 리뷰 체인 시스템.
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Input → Expansion → Simulation → Selection → Backprop     │
-│          (3 LLMs)    (Evaluator)   (Gate)    (GoalDriven)  │
+│        (3 models)    (Evaluator)   (Gate)    (GoalDriven)  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -32,7 +32,7 @@ Monte Carlo Tree Search 기반 MANTRA 코드 리뷰 체인 시스템.
 
 ### 사용법
 
-`masc-mcp` is the canonical chain runtime. Run the native chain server on port `8935`; old `llm-mcp` `8932` examples are retired.
+`masc-mcp` is the canonical chain runtime. Run the native chain server on port `8935`; old `model-mcp` `8932` examples are retired.
 
 ```bash
 # MCP tool call
@@ -176,7 +176,7 @@ curl -X POST http://localhost:8935/mcp -d '{
 │   Expansion ────────► Generate Children                      │
 │       │                     │                                │
 │       │                     ▼                                │
-│       │             Chain: fanout (multi-LLM)               │
+│       │             Chain: fanout (multi-MODEL)               │
 │       │                                                      │
 │   Simulation ───────► Evaluate State                         │
 │       │                     │                                │
@@ -210,7 +210,7 @@ chain.orchestrate --chain_id=mcts-mantra-hybrid --input='{"code":"..."}'
 
 ## 비용 추정
 
-| Chain | LLM Calls | Est. Tokens | Est. Cost |
+| Chain | MODEL Calls | Est. Tokens | Est. Cost |
 |-------|-----------|-------------|-----------|
 | review | 3-12 | 10K-40K | $0.05-$0.20 |
 | explore | 6 | 15K | $0.08 |

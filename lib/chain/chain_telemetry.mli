@@ -132,7 +132,7 @@ val chain_start : chain_id:string -> nodes:int -> ?mermaid_dsl:string -> unit ->
 (** [node_start ~node_id ~node_type ?parent ()] creates a NodeStart event.
 
     @param node_id Unique identifier of the node
-    @param node_type Type name (e.g., "llm", "tool", "fanout")
+    @param node_type Type name (e.g., "model", "tool", "fanout")
     @param parent Optional parent node ID for nested nodes *)
 val node_start : node_id:string -> node_type:string -> ?parent:string -> unit -> chain_event
 

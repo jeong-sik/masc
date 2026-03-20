@@ -756,7 +756,7 @@ Neo4j는 복잡한 수학 연산에 최적화되어 있지 않음.
 
 **해결 후보**:
 1. Relevance threshold — 점수 0.5 이하는 제외
-2. 2-stage selection — LLM에게 "필요한 기억만 선택"하도록 추가 호출
+2. 2-stage selection — MODEL에게 "필요한 기억만 선택"하도록 추가 호출
 3. Zero-injection default — 명시적 요청 시에만 주입
 
 ### C.5 RAG와의 차별점 모호

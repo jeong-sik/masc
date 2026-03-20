@@ -40,14 +40,14 @@ Requires: goal (what to optimize), metric_fn (shell command that outputs a float
           ("type", `String "number");
           ("description", `String "Initial baseline score. If omitted, measured by running metric_fn once.");
         ]);
-        ("llm_model", `Assoc [
+        ("model_model", `Assoc [
           ("type", `String "string");
-          ("description", `String "LLM model for code change generation (default: 'glm')");
+          ("description", `String "MODEL model for code change generation (default: 'glm')");
         ]);
         ("target_file", `Assoc [
           ("type", `String "string");
-          ("description", `String "File that the LLM will read and modify (relative to workdir). \
-The LLM receives the full file, generates a modified version, and writes it back.");
+          ("description", `String "File that the MODEL will read and modify (relative to workdir). \
+The MODEL receives the full file, generates a modified version, and writes it back.");
         ]);
       ]);
       ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);
@@ -94,9 +94,9 @@ and persists cross-links so team-session status/stop can surface the linked loop
           ("type", `String "number");
           ("description", `String "Initial baseline score. If omitted, measured by running metric_fn once.");
         ]);
-        ("llm_model", `Assoc [
+        ("model_model", `Assoc [
           ("type", `String "string");
-          ("description", `String "LLM model for code change generation (default: 'glm')");
+          ("description", `String "MODEL model for code change generation (default: 'glm')");
         ]);
       ]);
       ("required", `List [`String "goal"; `String "metric_fn"; `String "target_file"]);
@@ -140,7 +140,7 @@ The loop will finish its current cycle and save final state.";
   {
     name = "masc_autoresearch_inject";
     description = "Inject a specific hypothesis into a running autoresearch loop. \
-The next cycle will test this hypothesis instead of generating one via LLM. \
+The next cycle will test this hypothesis instead of generating one via MODEL. \
 Useful for directing the research based on human insight.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -161,7 +161,7 @@ Useful for directing the research based on human insight.";
   {
     name = "masc_autoresearch_cycle";
     description = "Run one experiment cycle of a Karpathy-style autoresearch loop. \
-Steps: read target file -> LLM generates modified code -> measure before -> write file -> \
+Steps: read target file -> MODEL generates modified code -> measure before -> write file -> \
 git commit -> measure after -> keep if improved (update baseline), git reset --hard HEAD~1 if not. \
 Call this repeatedly to drive the autonomous loop.";
     input_schema = `Assoc [
@@ -173,7 +173,7 @@ Call this repeatedly to drive the autonomous loop.";
         ]);
         ("hypothesis", `Assoc [
           ("type", `String "string");
-          ("description", `String "Hypothesis to test (optional, auto-generates via LLM if omitted)");
+          ("description", `String "Hypothesis to test (optional, auto-generates via MODEL if omitted)");
         ]);
       ]);
     ];

@@ -58,8 +58,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
 
   | Summarize max_tokens ->
       (* Token-based truncation using char estimation (1 token ≈ 4 chars).
-         This is more accurate than word count for LLM context budgets.
-         For actual summarization, use LLM node with summarization prompt. *)
+         This is more accurate than word count for MODEL context budgets.
+         For actual summarization, use MODEL node with summarization prompt. *)
       let estimated_chars = max_tokens * 4 in
       if String.length input <= estimated_chars then
         Ok input
@@ -352,7 +352,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
          Example: ["chunk1", "chunk2", "chunk3"]
 
          Use with Fanout node to process chunks in parallel:
-         Doc → Adapter(Split) → Fanout → [LLM×N] → Merge
+         Doc → Adapter(Split) → Fanout → [MODEL×N] → Merge
       *)
       let split_by_delimiter delim text =
         match delim with
@@ -474,7 +474,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
             | None -> Error "No JSON object/array found in input"
             | Some start -> extract_from start)
        | "extract_html" ->
-           (* Robust HTML extraction for LLM outputs that append metadata.
+           (* Robust HTML extraction for MODEL outputs that append metadata.
               Strategy:
               - Find the first <!doctype html ...> or <html ...>
               - Find the next </html>

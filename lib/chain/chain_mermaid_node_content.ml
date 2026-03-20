@@ -3,7 +3,7 @@
 open Chain_types
 include Chain_mermaid_parse
 
-(** Mermaid labels coming from LLM JSON responses often escape inner quotes.
+(** Mermaid labels coming from MODEL JSON responses often escape inner quotes.
     Normalize those escapes before parsing the semantic node payload. *)
 let normalize_label_content (content : string) : string =
   content
@@ -291,12 +291,12 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         (match parts with
         | [policy_type; iter_str] when policy_type = "greedy" ->
             let max_iterations = Safe_parse.int ~context:"MCTS:iter" ~default:10 iter_str in
-            (* Default simulation node - uses LLM to simulate outcomes *)
-            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false }; input_mapping = []; output_key = None; depends_on = None } in
+            (* Default simulation node - uses MODEL to simulate outcomes *)
+            let default_sim = { id = "_mcts_sim"; node_type = Model { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false }; input_mapping = []; output_key = None; depends_on = None } in
             Ok (Mcts {
               strategies = [];  (* filled from edges in post-process *)
               simulation = default_sim;
-              evaluator = "llm_judge";
+              evaluator = "model_judge";
               evaluator_prompt = None;
               policy = Greedy;
               max_iterations;
@@ -313,12 +313,12 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
               | "softmax" -> Softmax (Safe_parse.float ~context:"MCTS:softmax_temp" ~default:1.0 param_str)
               | _ -> UCB1 1.41  (* default *)
             in
-            (* Default simulation node - uses LLM to simulate outcomes *)
-            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false }; input_mapping = []; output_key = None; depends_on = None } in
+            (* Default simulation node - uses MODEL to simulate outcomes *)
+            let default_sim = { id = "_mcts_sim"; node_type = Model { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false }; input_mapping = []; output_key = None; depends_on = None } in
             Ok (Mcts {
               strategies = [];  (* filled from edges in post-process *)
               simulation = default_sim;
-              evaluator = "llm_judge";
+              evaluator = "model_judge";
               evaluator_prompt = None;
               policy;
               max_iterations;
@@ -330,7 +330,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         | _ ->
             Error (Printf.sprintf "Invalid MCTS format (expected policy:iterations or policy:param:iterations): %s" content))
       else if String.length content >= 10 && String.sub content 0 10 = "Evaluator:" then
-        (* {Evaluator:scoring_func:select_strategy:min_score} - e.g., {Evaluator:llm_judge:best:0.7} *)
+        (* {Evaluator:scoring_func:select_strategy:min_score} - e.g., {Evaluator:model_judge:best:0.7} *)
         let rest = String.sub content 10 (String.length content - 10) in
         let parts = String.split_on_char ':' rest |> List.map trim in
         (match parts with
@@ -396,26 +396,26 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, Merge:strategy, GoalDriven:..., MCTS:..., Evaluator:..., or Threshold:op+value, got: %s" content)
 
   | `Rect ->
-      (* [LLM:model "prompt"] or [LLM:model "prompt" +tools] or [Tool:name] *)
+      (* [MODEL:model "prompt"] or [MODEL:model "prompt" +tools] or [Tool:name] *)
       (* First extract +tools flag from end of content *)
       let (content_clean, has_tools) = extract_tools_flag content in
       let tools = make_tools_value has_tools in
-      if String.length content_clean > 4 && String.sub content_clean 0 4 = "LLM:" then
-        let rest = String.sub content_clean 4 (String.length content_clean - 4) in
+      if String.length content_clean > 6 && String.sub content_clean 0 6 = "MODEL:" then
+        let rest = String.sub content_clean 6 (String.length content_clean - 6) in
         (* Parse: model "prompt" or model 'prompt' or just model *)
         if Str.string_match quote_re rest 0 then
           let model = Str.matched_group 1 rest in
           let prompt = Str.matched_group 2 rest in
-          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
+          Ok (Model { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
         else if Str.string_match single_quote_re rest 0 then
           let model = Str.matched_group 1 rest in
           let prompt = Str.matched_group 2 rest in
-          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
+          Ok (Model { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
         else if Str.string_match simple_model_re rest 0 then
           let model = Str.matched_group 1 rest in
-          Ok (Llm { model = trim model; system = None; prompt = "{{input}}"; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
+          Ok (Model { model = trim model; system = None; prompt = "{{input}}"; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
         else
-          Error (Printf.sprintf "Invalid LLM format: %s" content)
+          Error (Printf.sprintf "Invalid MODEL format: %s" content)
       else if String.length content_clean > 5 && String.sub content_clean 0 5 = "Tool:" then
         let rest = String.sub content_clean 5 (String.length content_clean - 5) in
         (* Try Base64 encoded args first: "name %{base64}" *)
@@ -463,8 +463,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
                else
                  Error (Printf.sprintf "Invalid Tool format: %s" content))
       else
-        (* Default: treat as LLM with content as prompt, model = gemini *)
-        Ok (Llm { model = "gemini"; system = None; prompt = content_clean; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
+        (* Default: treat as MODEL with content as prompt, model = gemini *)
+        Ok (Model { model = "gemini"; system = None; prompt = content_clean; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
 
   | `Trap ->
       (* Trapezoid: Adapter nodes, content format: "Adapt[input → template]" or similar *)
@@ -501,7 +501,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
       else if content = "Cascade" then
         Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = Chain_types.CM_Summary; task_hint = None; default_threshold = 0.7 })
       else
-        Ok (Llm { model = "gemini"; system = None; prompt = content; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
+        Ok (Model { model = "gemini"; system = None; prompt = content; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
 
   | `Circle ->
       (* Circle nodes: MASC coordination - same logic as infer_type_from_id *)
@@ -546,4 +546,3 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
           Ok (Masc_claim { room = None; task_id = None })
         else
           Ok (Masc_broadcast { room = None; message = content; mention = [] })
-

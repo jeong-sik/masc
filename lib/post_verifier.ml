@@ -9,7 +9,7 @@
     Each dimension yields a verdict: Pass, Warn, or Fail.
     Overall verdict: any Fail → Fail, any Warn → Warn, all Pass → Pass.
 
-    LLM-based G-Eval scoring is in Post_verifier_model (separate module to
+    MODEL-based G-Eval scoring is in Post_verifier_model (separate module to
     avoid dependency cycles through Board -> Thompson_sampling -> here).
 
     @since 2.71.0 *)

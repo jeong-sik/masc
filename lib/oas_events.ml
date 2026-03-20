@@ -71,8 +71,8 @@ let publish_agent_selected (bus : Agent_sdk.Event_bus.t) ~agent_name ~trigger
   Agent_sdk.Event_bus.publish bus
     (Agent_sdk.Event_bus.Custom ("masc:lodge:agent_selected", payload))
 
-(** Publish an agent action decision event (LLM decision result).
-    Emitted after LLM decides post/comment/upvote/skip. *)
+(** Publish an agent action decision event (MODEL decision result).
+    Emitted after MODEL decides post/comment/upvote/skip. *)
 let publish_agent_decision (bus : Agent_sdk.Event_bus.t) ~agent_name ~action
     ~trigger_reason =
   let payload = `Assoc [

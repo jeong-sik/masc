@@ -158,7 +158,7 @@ Reports tool usage and decision metadata. Pair with masc_heartbeat_start to init
       ("properties", `Assoc [
         ("worker_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Worker agent name (e.g., 'llm-worker-local')");
+          ("description", `String "Worker agent name (e.g., 'model-worker-local')");
         ]);
         ("agent", `Assoc [
           ("type", `String "string");

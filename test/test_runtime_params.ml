@@ -181,8 +181,8 @@ let () =
     in
     Alcotest.(check bool) "lodge.tick_interval_seconds registered"
       true (has "lodge.tick_interval_seconds");
-    Alcotest.(check bool) "llm.default_model registered"
-      true (has "llm.default_model");
+    Alcotest.(check bool) "inference.default_model registered"
+      true (has "inference.default_model");
     (* gardener.max_daily_spawns check removed — Gardener deleted (#1834) *)
     (* Validate surfaces *)
     let surfaces = Governance_registry.surfaces in
@@ -191,8 +191,8 @@ let () =
       List.map (fun (s : Governance_registry.surface) -> s.id) surfaces
     in
     (* sentinel_timing surface check removed — Sentinel deleted (#1834) *)
-    Alcotest.(check bool) "llm_config surface"
-      true (List.mem "llm_config" surface_ids)
+    Alcotest.(check bool) "inference_config surface"
+      true (List.mem "inference_config" surface_ids)
   in
 
   let test_governance_registry_validation () =
@@ -200,8 +200,8 @@ let () =
     (match Runtime_params.set Governance_registry.lodge_tick_interval 10.0 with
      | Error _ -> ()
      | Ok () -> Alcotest.fail "should reject tick_interval < 60");
-    (* LLM model should reject empty string *)
-    (match Runtime_params.set Governance_registry.llm_default_model "" with
+    (* Default inference model should reject empty string *)
+    (match Runtime_params.set Governance_registry.inference_default_model "" with
      | Error _ -> ()
      | Ok () -> Alcotest.fail "should reject empty model name")
   in

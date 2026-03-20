@@ -43,7 +43,7 @@ val strip_suffix : suffix:string -> string -> string
 (** {1 Empty Response Handling} *)
 
 val max_empty_retries : int
-(** Maximum retries for empty LLM responses *)
+(** Maximum retries for empty MODEL responses *)
 
 val is_empty_response : string -> bool
 (** Check if response is empty or whitespace-only *)

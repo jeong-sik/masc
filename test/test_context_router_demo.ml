@@ -1,10 +1,10 @@
-(** Context Router Demo — Compare heuristic vs LLM intent classification.
-    Run with: MASC_CONTEXT_ROUTER_MODE=llm dune exec test/test_context_router_demo.exe *)
+(** Context Router Demo — Compare heuristic vs MODEL intent classification.
+    Run with: MASC_CONTEXT_ROUTER_MODE=model dune exec test/test_context_router_demo.exe *)
 
 open Masc_mcp.Context_router
 
-(* Queries that expose the gap between heuristic and LLM classification.
-   These are semantically clear to a human/LLM but miss heuristic patterns. *)
+(* Queries that expose the gap between heuristic and MODEL classification.
+   These are semantically clear to a human/MODEL but miss heuristic patterns. *)
 let test_queries = [
   (* Korean queries not covered by keyword patterns *)
   ("최근 이슈 보여줘", "Status_check — asking to show recent issues");
@@ -37,7 +37,7 @@ let () =
   let mode = get_router_mode () in
   let mode_str = match mode with
     | Heuristic -> "heuristic"
-    | Llm_mode -> "llm"
+    | Model_mode -> "model"
     | Hybrid_mode -> "hybrid"
   in
   Printf.printf "Mode: %s\n\n" mode_str;

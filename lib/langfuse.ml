@@ -1,10 +1,10 @@
-(** Langfuse Integration - LLM Observability Platform
+(** Langfuse Integration - MODEL Observability Platform
 
-    Langfuse API를 통해 LLM 호출을 트레이싱합니다.
+    Langfuse API를 통해 MODEL 호출을 트레이싱합니다.
 
     특징:
     - Trace: 전체 요청의 컨테이너 (chain 실행 단위)
-    - Generation: LLM 호출 기록 (모델, 프롬프트, 응답, 토큰)
+    - Generation: MODEL 호출 기록 (모델, 프롬프트, 응답, 토큰)
     - Span: 일반 작업 구간
 
     환경변수:
@@ -78,7 +78,7 @@ type trace = {
   started_at: float;
 }
 
-(** Generation represents an LLM call *)
+(** Generation represents an MODEL call *)
 type generation = {
   gen_id: string;
   trace_id: string;
@@ -261,7 +261,7 @@ let end_trace (trace : trace) =
   ] in
   send_to_langfuse ~endpoint:"/traces" ~body ()
 
-(** Create a generation (LLM call) *)
+(** Create a generation (MODEL call) *)
 let create_generation ~(trace : trace) ~name ~model ~input () =
   let gen = {
     gen_id = generate_id ();
@@ -312,8 +312,8 @@ let end_span (s : span) =
 
 (** {1 High-Level Wrappers} *)
 
-(** Wrap an LLM call with tracing *)
-let trace_llm ~trace ~name ~model ~input f =
+(** Wrap an MODEL call with tracing *)
+let trace_model ~trace ~name ~model ~input f =
   let gen = create_generation ~trace ~name ~model ~input () in
   try
     let (output, prompt_tokens, completion_tokens) = f () in

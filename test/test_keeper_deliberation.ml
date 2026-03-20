@@ -185,21 +185,21 @@ let test_deliberation_meta_defaults () =
 
 (* ---------- Policy mode tests ---------- *)
 
-let test_policy_mode_llm_deliberation_parse () =
-  match Contract.parse_policy_mode "llm_deliberation" with
-  | Some Contract.Llm_deliberation -> ()
-  | _ -> fail "expected Llm_deliberation"
+let test_policy_mode_model_deliberation_parse () =
+  match Contract.parse_policy_mode "model_deliberation" with
+  | Some Contract.Model_deliberation -> ()
+  | _ -> fail "expected Model_deliberation"
 
-let test_policy_mode_llm_deliberation_roundtrip () =
-  let s = Contract.policy_mode_to_string Contract.Llm_deliberation in
-  check string "to_string" "llm_deliberation" s;
+let test_policy_mode_model_deliberation_roundtrip () =
+  let s = Contract.policy_mode_to_string Contract.Model_deliberation in
+  check string "to_string" "model_deliberation" s;
   match Contract.policy_mode_of_string s with
-  | Contract.Llm_deliberation -> ()
-  | _ -> fail "expected roundtrip to Llm_deliberation"
+  | Contract.Model_deliberation -> ()
+  | _ -> fail "expected roundtrip to Model_deliberation"
 
 let test_policy_mode_is_deliberation () =
-  check bool "llm_deliberation is deliberation" true
-    (Contract.policy_mode_is_deliberation Contract.Llm_deliberation);
+  check bool "model_deliberation is deliberation" true
+    (Contract.policy_mode_is_deliberation Contract.Model_deliberation);
   check bool "heuristic is not deliberation" false
     (Contract.policy_mode_is_deliberation Contract.Heuristic);
   check bool "learned is not deliberation" false
@@ -215,7 +215,7 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
         ("trace_id", `String "trace-1");
         ("goal", `String "test deliberation");
         ("models", `List [ `String "custom:test-model" ]);
-        ("policy_mode", `String "llm_deliberation");
+        ("policy_mode", `String "model_deliberation");
         ("deliberation_count", `Int 5);
         ("deliberation_cost_total_usd", `Float 0.03);
         ("last_deliberation_ts", `Float 1710000000.0);
@@ -225,7 +225,7 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
   match Keeper_types.meta_of_json json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
-      check string "policy mode" "llm_deliberation" meta.policy_mode;
+      check string "policy mode" "model_deliberation" meta.policy_mode;
       check int "deliberation count" 5 meta.deliberation_count;
       check (float 0.001) "deliberation cost" 0.03
         meta.deliberation_cost_total_usd;
@@ -295,9 +295,9 @@ let test_world_observation_json () =
 
 (* ---------- Canonical policy mode ---------- *)
 
-let test_canonical_policy_mode_llm_deliberation () =
-  check string "canonical llm_deliberation" "llm_deliberation"
-    (Keeper_types.canonical_policy_mode "llm_deliberation")
+let test_canonical_policy_mode_model_deliberation () =
+  check string "canonical model_deliberation" "model_deliberation"
+    (Keeper_types.canonical_policy_mode "model_deliberation")
 
 let test_canonical_policy_mode_heuristic () =
   check string "canonical heuristic" "heuristic"
@@ -308,7 +308,7 @@ let test_canonical_policy_mode_unknown () =
     (Keeper_types.canonical_policy_mode "unknown_mode")
 
 (* ================================================================ *)
-(* Phase 2: LLM-Driven Deliberation tests                          *)
+(* Phase 2: MODEL-Driven Deliberation tests                          *)
 (* ================================================================ *)
 
 (* ---------- build_deliberation_prompt tests ---------- *)
@@ -844,10 +844,10 @@ let () =
         ] );
       ( "policy_mode",
         [
-          test_case "parse llm_deliberation" `Quick
-            test_policy_mode_llm_deliberation_parse;
-          test_case "llm_deliberation roundtrip" `Quick
-            test_policy_mode_llm_deliberation_roundtrip;
+          test_case "parse model_deliberation" `Quick
+            test_policy_mode_model_deliberation_parse;
+          test_case "model_deliberation roundtrip" `Quick
+            test_policy_mode_model_deliberation_roundtrip;
           test_case "is_deliberation predicate" `Quick
             test_policy_mode_is_deliberation;
         ] );
@@ -866,8 +866,8 @@ let () =
       ( "world_observation",
         [
           test_case "observation to json" `Quick test_world_observation_json;
-          test_case "canonical policy mode llm_deliberation" `Quick
-            test_canonical_policy_mode_llm_deliberation;
+          test_case "canonical policy mode model_deliberation" `Quick
+            test_canonical_policy_mode_model_deliberation;
           test_case "canonical policy mode heuristic" `Quick
             test_canonical_policy_mode_heuristic;
           test_case "canonical policy mode unknown" `Quick

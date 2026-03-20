@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/jeong-sik/masc-mcp/chain-v1.schema.json",
   "title": "Chain JSON Schema",
-  "description": "Multi-LLM DAG Workflow Definition Protocol v1.0",
+  "description": "Multi-MODEL DAG Workflow Definition Protocol v1.0",
   "type": "object",
   "required": ["id", "name", "nodes"],
   "properties": {
@@ -29,7 +29,7 @@
       "type": "array",
       "minItems": 1,
       "items": { "$ref": "#/$defs/node" },
-      "description": "DAG nodes (LLM or Tool)"
+      "description": "DAG nodes (MODEL or Tool)"
     },
     "input_schema": {
       "$ref": "#/$defs/jsonSchema",
@@ -55,12 +55,12 @@
         },
         "type": {
           "type": "string",
-          "enum": ["llm", "tool"],
-          "description": "Node type: LLM call or MCP tool call"
+          "enum": ["model", "tool"],
+          "description": "Node type: MODEL call or MCP tool call"
         },
-        "llm": {
+        "model": {
           "$ref": "#/$defs/llmConfig",
-          "description": "LLM configuration (required if type=llm)"
+          "description": "MODEL configuration (required if type=model)"
         },
         "tool": {
           "$ref": "#/$defs/toolConfig",
@@ -91,8 +91,8 @@
       },
       "allOf": [
         {
-          "if": { "properties": { "type": { "const": "llm" } } },
-          "then": { "required": ["llm"] }
+          "if": { "properties": { "type": { "const": "model" } } },
+          "then": { "required": ["model"] }
         },
         {
           "if": { "properties": { "type": { "const": "tool" } } },
@@ -107,7 +107,7 @@
         "model": {
           "type": "string",
           "enum": ["codex", "claude-cli", "gemini", "llama"],
-          "description": "LLM model to use"
+          "description": "MODEL model to use"
         },
         "prompt": {
           "type": "string",

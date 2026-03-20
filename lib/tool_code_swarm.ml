@@ -140,7 +140,7 @@ let schemas : Types.tool_schema list =
       name = "masc_code_swarm_verify";
       description =
         "Verify code swarm results: collect git diffs from each worker's \
-         worktree, send to a cheap LLM for PASS/WARN/FAIL verdict. Checks \
+         worktree, send to a cheap MODEL for PASS/WARN/FAIL verdict. Checks \
          scope creep, syntax validity, and behavior preservation.";
       input_schema =
         `Assoc

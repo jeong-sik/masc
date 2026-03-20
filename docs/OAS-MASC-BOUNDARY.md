@@ -18,9 +18,9 @@ Claude Code (consumer) → MASC-MCP (orchestration) → OAS (agent SDK)
 | 조율 상태 | 해당 없음 | Board, tasks, room, PostgreSQL |
 | 작업 메모리 | `Context` (scoped KV) | `Context_manager` (3-tier). Tier 1이 OAS Context 래핑 예정 |
 | 장기 메모리 | 해당 없음 | PostgreSQL, Neo4j, pgvector |
-| LLM 호출 | `Api`, `Provider` | `Llm_client` (프로세스 기반, curl) |
+| MODEL 호출 | `Api`, `Provider` | `Model_client` (프로세스 기반, curl) |
 | 멀티에이전트 | `Orchestrator`, `Event_bus` | Rooms, broadcasts, scheduling, voting |
-| 계승 | `Handoff` (LLM 결정) | `Succession` (컨텍스트 기반 DNA) |
+| 계승 | `Handoff` (MODEL 결정) | `Succession` (컨텍스트 기반 DNA) |
 | 사회성 | 해당 없음 | Board, Lodge, Gardener, Sentinel |
 | 관찰 가능성 | `Event_bus`, `Raw_trace` | SSE, Dashboard, Prometheus |
 

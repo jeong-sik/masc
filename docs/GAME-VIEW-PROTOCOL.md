@@ -204,7 +204,7 @@
 - 모든 high-impact 액션은 `verifier` 결과가 `PASS` 또는 허용 가능한 `WARN`이어야 한다.
 - `keeper.compaction.check`는 `repetition_risk`, `goal_alignment_score`, `context_ratio`를 함께 평가한다.
 - `keeper.handoff.check`는 `context_ratio + continuity_score + unfinished_work`를 함께 평가한다.
-- `continuity_score`와 `unfinished_work`는 LLM evaluator 결과를 우선 사용하고, 실패 시 fallback 점수를 사용한다.
+- `continuity_score`와 `unfinished_work`는 MODEL evaluator 결과를 우선 사용하고, 실패 시 fallback 점수를 사용한다.
 - handoff 판단은 `handoff_score = avg(context_ratio, continuity_score, unfinished_work)`를 기준으로 수행한다.
 
 ## 8. 상태 전이 규칙 (요약)

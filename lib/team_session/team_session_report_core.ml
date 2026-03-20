@@ -336,7 +336,7 @@ let markdown_of_report ~(session : Team_session_types.session)
     ~(team_health_json : Yojson.Safe.t)
     ~(incidents_json : Yojson.Safe.t)
     ~(communication_metrics_json : Yojson.Safe.t)
-    ~(llm_cache_metrics_json : Yojson.Safe.t)
+    ~(inference_cache_metrics_json : Yojson.Safe.t)
     ~(cascade_metrics_json : Yojson.Safe.t) ~(alert_count : int)
     ~(violation_count : int) ~(mcp_notes : string list) =
   let status = Team_session_types.status_to_string session.status in
@@ -409,28 +409,28 @@ let markdown_of_report ~(session : Team_session_types.session)
     cascade_metrics_json |> member "fallback_task_created" |> to_int_option
     |> Option.value ~default:0
   in
-  let llm_cache_hits =
-    llm_cache_metrics_json |> member "hits" |> to_int_option
+  let inference_cache_hits =
+    inference_cache_metrics_json |> member "hits" |> to_int_option
     |> Option.value ~default:0
   in
-  let llm_cache_misses =
-    llm_cache_metrics_json |> member "misses" |> to_int_option
+  let inference_cache_misses =
+    inference_cache_metrics_json |> member "misses" |> to_int_option
     |> Option.value ~default:0
   in
-  let llm_cache_writes =
-    llm_cache_metrics_json |> member "writes" |> to_int_option
+  let inference_cache_writes =
+    inference_cache_metrics_json |> member "writes" |> to_int_option
     |> Option.value ~default:0
   in
-  let llm_cache_bypass =
-    llm_cache_metrics_json |> member "bypass" |> to_int_option
+  let inference_cache_bypass =
+    inference_cache_metrics_json |> member "bypass" |> to_int_option
     |> Option.value ~default:0
   in
-  let llm_cache_errors =
-    llm_cache_metrics_json |> member "errors" |> to_int_option
+  let inference_cache_errors =
+    inference_cache_metrics_json |> member "errors" |> to_int_option
     |> Option.value ~default:0
   in
-  let llm_cache_hit_rate =
-    llm_cache_metrics_json |> member "hit_rate" |> to_float_option
+  let inference_cache_hit_rate =
+    inference_cache_metrics_json |> member "hit_rate" |> to_float_option
     |> Option.value ~default:0.0
   in
   let turn_count = session.turn_count in
@@ -627,12 +627,12 @@ let markdown_of_report ~(session : Team_session_types.session)
       Printf.sprintf "- Cascade attempted: %d" cascade_attempted;
       Printf.sprintf "- Cascade failed: %d" cascade_failed;
       Printf.sprintf "- Fallback tasks created: %d" fallback_task_created;
-      Printf.sprintf "- LLM cache hits/misses: %d/%d" llm_cache_hits
-        llm_cache_misses;
-      Printf.sprintf "- LLM cache writes: %d" llm_cache_writes;
-      Printf.sprintf "- LLM cache bypass/errors: %d/%d" llm_cache_bypass
-        llm_cache_errors;
-      Printf.sprintf "- LLM cache hit rate: %.3f" llm_cache_hit_rate;
+      Printf.sprintf "- inference cache hits/misses: %d/%d" inference_cache_hits
+        inference_cache_misses;
+      Printf.sprintf "- inference cache writes: %d" inference_cache_writes;
+      Printf.sprintf "- inference cache bypass/errors: %d/%d" inference_cache_bypass
+        inference_cache_errors;
+      Printf.sprintf "- inference cache hit rate: %.3f" inference_cache_hit_rate;
       "";
       "## Routing Distribution";
       Printf.sprintf "- Escalation count: %d" escalation_count;
@@ -748,7 +748,7 @@ let generate config (session : Team_session_types.session) :
     let mcp_notes =
       mcp_improvements session events checkpoints_count done_delta_total
     in
-    let llm_cache_metrics = Prometheus.llm_cache_metrics_json () in
+    let inference_cache_metrics = Prometheus.inference_cache_metrics_json () in
     let incidents_json =
       `Assoc
         [
@@ -777,7 +777,7 @@ let generate config (session : Team_session_types.session) :
           ("summary", summary_json);
           ("team_health", team_health);
           ("communication_metrics", communication_metrics);
-          ("llm_cache_metrics", llm_cache_metrics);
+          ("inference_cache_metrics", inference_cache_metrics);
           ("cascade_metrics", cascade_metrics);
           ( "policy",
             `Assoc
@@ -848,7 +848,7 @@ let generate config (session : Team_session_types.session) :
         ~done_delta_by_agent ~turn_count_by_agent ~team_health_json:team_health
         ~incidents_json
         ~communication_metrics_json:communication_metrics
-        ~llm_cache_metrics_json:llm_cache_metrics
+        ~inference_cache_metrics_json:inference_cache_metrics
         ~cascade_metrics_json:cascade_metrics ~alert_count ~violation_count
         ~mcp_notes
     in

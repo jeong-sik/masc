@@ -14,7 +14,7 @@
 | ID | Title | Venue | Year |
 |----|-------|-------|------|
 | R1 | [Multi-Agent Collaboration Mechanisms: A Survey](https://arxiv.org/abs/2501.06322) | arXiv | 2025 |
-| R2 | [LLM-Based Multi-Agent Systems for Software Engineering](https://dl.acm.org/doi/10.1145/3712003) | ACM TOSEM | 2024 |
+| R2 | [MODEL-Based Multi-Agent Systems for Software Engineering](https://dl.acm.org/doi/10.1145/3712003) | ACM TOSEM | 2024 |
 | R3 | [EvoAgent: Automatic Multi-Agent Generation](https://arxiv.org/abs/2406.14228) | arXiv | 2024 |
 | R4 | [EC-MAS Confluence Survey](https://www.ieee-jas.net/en/article/doi/10.1109/JAS.2025.125246) | IEEE JAS | 2025 |
 | R5 | [Hippocampus-Inspired Stability-Plasticity](https://pmc.ncbi.nlm.nih.gov/articles/PMC11591613/) | PMC | 2024 |
@@ -22,7 +22,7 @@
 | R7 | [Effective Programming: OCaml Effects](https://www.janestreet.com/tech-talks/effective-programming/) | Jane Street | 2024 |
 | R8 | [Retrofitting Effect Handlers onto OCaml](https://dl.acm.org/doi/10.1145/3453483.3454039) | ACM PLDI | 2021 |
 | R9 | [Modified Evolutionary RL for MAS](https://link.springer.com/article/10.1007/s40747-024-01385-4) | Springer | 2024 |
-| R10 | [Auto-scaling LLM-based MAS](https://www.frontiersin.org/journals/artificial-intelligence/articles/10.3389/frai.2025.1638227/full) | Frontiers | 2025 |
+| R10 | [Auto-scaling MODEL-based MAS](https://www.frontiersin.org/journals/artificial-intelligence/articles/10.3389/frai.2025.1638227/full) | Frontiers | 2025 |
 | R11 | [Active Objects with Algebraic Effects](https://link.springer.com/chapter/10.1007/978-3-031-51060-1_1) | Springer | 2024 |
 
 ---
@@ -453,7 +453,7 @@ masc_error_rate %.4f
 
 ### 문제 (R1 요약)
 
-R1은 LLM 내부 상태를 활용해 전달 비용을 줄일 수 있다는 가능성을 언급한다. 이를 KV-cache 직접 전달 가설로 정리한다.
+R1은 MODEL 내부 상태를 활용해 전달 비용을 줄일 수 있다는 가능성을 언급한다. 이를 KV-cache 직접 전달 가설로 정리한다.
 
 ### 연구 단계
 
@@ -473,13 +473,13 @@ type kv_cache = {
 
 (** Extract cache from running agent - requires API support *)
 let extract_cache ~agent_id : kv_cache option Lwt.t =
-  (* TODO: Requires LLM provider API support *)
+  (* TODO: Requires MODEL provider API support *)
   (* Claude/Gemini don't expose KV-cache yet *)
   Lwt.return None
 
 (** Inject cache into new agent - requires API support *)
 let inject_cache ~agent_id ~cache : bool Lwt.t =
-  (* TODO: Requires LLM provider API support *)
+  (* TODO: Requires MODEL provider API support *)
   Lwt.return false
 ```
 

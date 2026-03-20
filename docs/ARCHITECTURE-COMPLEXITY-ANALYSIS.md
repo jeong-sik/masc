@@ -106,8 +106,8 @@ These three systems operate at different layers and must not be merged.
 | System | Role | Decision method | Default |
 |--------|------|-----------------|---------|
 | **Guardian** | Zombie cleanup + GC (infra loop) | Deterministic (60s/7d threshold) | OFF |
-| **Sentinel** | Standing guard (board patrol, task hygiene) | LLM + deterministic hybrid | ON |
-| **Gardener** | Agent population management (spawn/retire) | LLM + budget/circuit | OFF |
+| **Sentinel** | Standing guard (board patrol, task hygiene) | MODEL + deterministic hybrid | ON |
+| **Gardener** | Agent population management (spawn/retire) | MODEL + budget/circuit | OFF |
 
 Guardian is embedded in Sentinel (guardian.ml:278, sentinel.ml:512).
 `masc_loops_owner` ref prevents concurrent execution.

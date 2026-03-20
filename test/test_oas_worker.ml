@@ -1,7 +1,7 @@
 (** Test_oas_worker — Unit tests for Phase 1 OAS migration modules:
     Oas_worker, Tool_mitosis_oas, Tool_council_oas.
 
-    LLM 0 — no real LLM calls. Tests use mock net / temp directories.
+    MODEL 0 — no real MODEL calls. Tests use mock net / temp directories.
     15 test scenarios across 3 modules.
 
     @since Phase 1 — MASC→OAS migration *)
@@ -108,7 +108,7 @@ let test_build_with_mock_net () =
     ~system_prompt:"Build test system prompt."
     ~tools:[]
   in
-  (* build should succeed — it does not call LLM, only creates Agent.t *)
+  (* build should succeed — it does not call MODEL, only creates Agent.t *)
   match Oas_worker.build ~net ~config:cfg with
   | Ok agent ->
     Agent_sdk.Agent.close agent;

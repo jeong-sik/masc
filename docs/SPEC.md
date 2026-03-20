@@ -180,7 +180,7 @@ Client Request
 | Checkpoints | interrupt, approve, reject, pending_interrupts, branch |
 | Planning & Delivery | plan_*, note_add, deliver, error_add, error_resolve |
 | Execution Memory (Runs) | run_init, run_plan, run_log, run_deliverable, run_get, run_list |
-| Cache | cache_set/get/list/delete/clear/stats (+ internal LLM response cache metrics) |
+| Cache | cache_set/get/list/delete/clear/stats (+ internal MODEL response cache metrics) |
 | Relay & Memento | relay_status, relay_checkpoint, relay_now, relay_smart_check, memento_mori, verify_handoff |
 | Mitosis | mitosis_check, mitosis_prepare, mitosis_divide, mitosis_record, mitosis_status, mitosis_pool, mitosis_all |
 | Tempo & Dashboard | tempo_get/set/adjust/reset, dashboard |
@@ -408,7 +408,7 @@ masc_handover_create --source claude --reason context_limit
 - Presence heartbeat: `masc_heartbeat` every 2-3 minutes while active to keep `last_seen` fresh and avoid zombie cleanup.
 - Background keepalive: `masc_heartbeat_start` (interval 5-300s). Use `smart=true` to skip when busy and slow down when idle.
 - Cleanup: call `masc_heartbeat_stop` on exit or before handover to avoid ghost heartbeats.
-- Persistence: agent metadata lives in `.masc/agents/*.json` (status/last_seen/capabilities). Execution memory persists in `.masc/runs/`, handovers in `.masc/handovers/`, cache in `.masc/cache/` (TTL, includes LLM response cache entries), and broadcast history in `.masc/messages/`.
+- Persistence: agent metadata lives in `.masc/agents/*.json` (status/last_seen/capabilities). Execution memory persists in `.masc/runs/`, handovers in `.masc/handovers/`, cache in `.masc/cache/` (TTL, includes MODEL response cache entries), and broadcast history in `.masc/messages/`.
 
 ```bash
 # Presence ping

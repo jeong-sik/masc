@@ -1,7 +1,7 @@
 (** Chain Types - Core type definitions for Chain DSL
 
     This module defines the fundamental types for the Chain Engine:
-    - node_type: The 21 supported node types (Llm, Tool, Pipeline, Cache, Batch, etc.)
+    - node_type: The 21 supported node types (Model, Tool, Pipeline, Cache, Batch, etc.)
     - node: A single execution unit with id and type
     - chain: A complete chain definition with nodes and config
     - chain_result: The result of chain execution
@@ -102,8 +102,8 @@ type select_strategy =
 
 (** Configuration for evaluator in FeedbackLoop *)
 type evaluator_config = {
-  scoring_func : string;             (** Scoring function: "llm_judge", "regex_match", etc. *)
-  scoring_prompt : string option;    (** Prompt for LLM judge scoring *)
+  scoring_func : string;             (** Scoring function: "model_judge", "regex_match", etc. *)
+  scoring_prompt : string option;    (** Prompt for MODEL judge scoring *)
   select_strategy : select_strategy; (** Selection strategy *)
 }
 [@@deriving yojson]
@@ -182,7 +182,7 @@ let context_mode_of_string s =
 
 (** The 23 supported node types (including Cascade) *)
 type node_type =
-  | Llm of {
+  | Model of {
       model : string;     (** Model name: gemini, claude, codex, llama:*, glm *)
       system : string option;  (** System instruction for role definition *)
       prompt : string;    (** Prompt template with {{var}} placeholders *)
@@ -243,8 +243,8 @@ type node_type =
     }
   | Evaluator of {
       candidates : node list;      (** Candidate nodes to evaluate *)
-      scoring_func : string;       (** Scoring function: "llm_judge", "regex_match", "json_schema", "anti_fake", "custom" *)
-      scoring_prompt : string option;  (** Prompt for LLM judge scoring *)
+      scoring_func : string;       (** Scoring function: "model_judge", "regex_match", "json_schema", "anti_fake", "custom" *)
+      scoring_prompt : string option;  (** Prompt for MODEL judge scoring *)
       select_strategy : select_strategy;  (** Selection strategy *)
       min_score : float option;    (** Minimum score threshold (fails if none meet it) *)
     }
@@ -301,8 +301,8 @@ type node_type =
   | Mcts of {
       strategies : node list;        (** Strategy nodes to explore *)
       simulation : node;             (** Simulation node for rollout *)
-      evaluator : string;            (** Scoring function: "llm_judge", "regex", "custom" *)
-      evaluator_prompt : string option;  (** Prompt for LLM evaluator *)
+      evaluator : string;            (** Scoring function: "model_judge", "regex", "custom" *)
+      evaluator_prompt : string option;  (** Prompt for MODEL evaluator *)
       policy : mcts_policy;          (** Selection policy: UCB1, Greedy, EpsilonGreedy, Softmax *)
       max_iterations : int;          (** Maximum MCTS iterations *)
       max_depth : int;               (** Maximum tree depth *)
@@ -447,7 +447,7 @@ type execution_plan = {
 
 (** Helper: Get node type name as string *)
 let node_type_name = function
-  | Llm _ -> "llm"
+  | Model _ -> "model"
   | Tool _ -> "tool"
   | Pipeline _ -> "pipeline"
   | Fanout _ -> "fanout"
@@ -477,9 +477,9 @@ let node_type_name = function
   | Masc_claim _ -> "masc_claim"
   | Cascade _ -> "cascade"
 
-(** Helper: Create a simple LLM node *)
-let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools ?prompt_ref ?(prompt_vars=[]) ?(thinking=false) () =
-  { id; node_type = Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars; thinking };
+(** Helper: Create a simple MODEL node *)
+let make_model_node ~id ~model ?system ~prompt ?timeout ?tools ?prompt_ref ?(prompt_vars=[]) ?(thinking=false) () =
+  { id; node_type = Model { model; system; prompt; timeout; tools; prompt_ref; prompt_vars; thinking };
     input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create an adapter node for inter-node data transformation *)
@@ -672,7 +672,7 @@ let rec count_parallel_groups (node: node) : int =
       count_parallel_groups generator
   | Cascade { tiers; _ } ->
       List.fold_left (fun acc t -> acc + count_parallel_groups t.tier_node) 0 tiers
-  | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _
+  | Model _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _
   | Masc_broadcast _ | Masc_listen _ | Masc_claim _ -> 0
 
 (** Count total parallel groups in a chain *)

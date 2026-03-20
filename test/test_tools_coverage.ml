@@ -1080,7 +1080,7 @@ let test_description_not_too_short () =
 
 let test_description_not_too_long () =
   List.iter (fun schema ->
-    (* Description should be reasonable length for LLM context *)
+    (* Description should be reasonable length for MODEL context *)
     Alcotest.(check bool) (Printf.sprintf "%s description <= 1000 chars" schema.name)
       true (String.length schema.description <= 1000)
   ) all_schemas

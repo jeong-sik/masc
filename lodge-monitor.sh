@@ -15,7 +15,7 @@ tail -f "$LOG" 2>/dev/null | while read line; do
     *"🫀 ["*"KST]"*)
       echo -e "\033[1;36m$line\033[0m" ;;  # Cyan - heartbeat tick
     *"🧠 ["*)
-      echo -e "\033[1;33m$line\033[0m" ;;  # Yellow - LLM decision
+      echo -e "\033[1;33m$line\033[0m" ;;  # Yellow - MODEL decision
     *"💬 ["*)
       echo -e "\033[1;32m$line\033[0m" ;;  # Green - comment
     *"📝 ["*)

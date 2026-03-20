@@ -1,11 +1,11 @@
 (** Perpetual_oas_build — OAS Agent.t builder for perpetual execution.
 
     Extracted from [perpetual_oas.ml]. Ties together all phase adapters
-    (context reducer, checkpoint, LLM provider, verifier, builder) to
+    (context reducer, checkpoint, MODEL provider, verifier, builder) to
     construct an OAS Agent.t configured for perpetual operation.
 
     Dependencies: [Perpetual_oas_state], [Perpetual_oas_hooks],
-    [Llm_client], [Tool_bridge], OAS Builder.
+    [Model_client], [Tool_bridge], OAS Builder.
 
     @since 2.111.0 — H2 God File split *)
 
@@ -18,7 +18,7 @@ module Oas = Agent_sdk
     Ties together all phase adapters:
     - Phase 1: context reducer strategies
     - Phase 2: checkpoint config
-    - Phase 3: LLM provider mapping
+    - Phase 3: MODEL provider mapping
     - Phase 4: verifier hook / guardrails
     - Phase 5: builder pattern
 

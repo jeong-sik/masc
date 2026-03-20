@@ -259,7 +259,7 @@ let keeper_metrics_24h_json
             end
           end
         end
-      with exn -> Log.Server.info "keeper log parse: %s" (Printexc.to_string exn))
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Server.info "keeper log parse: %s" (Printexc.to_string exn))
     lines;
   let rows =
     buckets

@@ -42,22 +42,22 @@ let params_of_json_schema (schema : Yojson.Safe.t) : Agent_sdk.Types.tool_param 
   let open Yojson.Safe.Util in
   let props =
     try schema |> member "properties" |> to_assoc
-    with _ -> []
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
   in
   let required_keys =
     try schema |> member "required" |> to_list |> List.filter_map (fun j ->
-      try Some (to_string j) with _ -> None)
-    with _ -> []
+      try Some (to_string j) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
   in
   List.filter_map (fun (key, prop) ->
     try
       let type_str =
         try prop |> member "type" |> to_string
-        with _ -> "string"
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> "string"
       in
       let description =
         try prop |> member "description" |> to_string
-        with _ -> ""
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
       in
       Some {
         Agent_sdk.Types.name = key;
@@ -65,7 +65,7 @@ let params_of_json_schema (schema : Yojson.Safe.t) : Agent_sdk.Types.tool_param 
         param_type = param_type_of_string type_str;
         required = List.mem key required_keys;
       }
-    with _ -> None
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
   ) props
 
 (** {1 OAS Tool.t Creation}

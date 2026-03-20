@@ -216,7 +216,9 @@ let get_or_compute_simple key ~ttl compute =
     (* Stale but usable — recompute inline (no fibers available) *)
     let value =
       try compute ()
-      with exn ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
         Log.Dashboard.warn "stale cache recompute failed for %s: %s"
           key (Printexc.to_string exn);
         entry.value

@@ -152,7 +152,7 @@ let make_file_read ?workdir ?on_exec () =
         param_type = Agent_sdk.Types.String; required = true };
     ]
     (fun input ->
-       match Agent_swarm_tool_input.extract_string "path" input with
+       match Worker_tool_input.extract_string "path" input with
        | Error e ->
          Error { Agent_sdk.Types.message = e; recoverable = false }
        | Ok path ->
@@ -207,8 +207,8 @@ let make_file_write ?workdir ?on_exec () =
         param_type = Agent_sdk.Types.String; required = true };
     ]
     (fun input ->
-       match Agent_swarm_tool_input.extract_string "path" input,
-             Agent_swarm_tool_input.extract_string "content" input with
+       match Worker_tool_input.extract_string "path" input,
+             Worker_tool_input.extract_string "content" input with
        | Error e, _ | _, Error e ->
          Error { Agent_sdk.Types.message = e; recoverable = false }
        | Ok path, Ok content ->
@@ -263,7 +263,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
         param_type = Agent_sdk.Types.Number; required = false };
     ]
     (fun input ->
-       match Agent_swarm_tool_input.extract_string "command" input with
+       match Worker_tool_input.extract_string "command" input with
        | Error e ->
          Error { Agent_sdk.Types.message = e; recoverable = false }
        | Ok command ->
@@ -272,7 +272,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
             Error { Agent_sdk.Types.message = e; recoverable = false }
           | Ok () ->
            let timeout =
-             Agent_swarm_tool_input.extract_float "timeout_s" input
+             Worker_tool_input.extract_float "timeout_s" input
              |> Option.value ~default:30.0
              |> Float.min 120.0
            in

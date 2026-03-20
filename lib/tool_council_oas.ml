@@ -25,6 +25,8 @@ type context = {
   base_path : string;
   agent_name : string;
   room_config : Room_utils.config option;
+  policy : Oas.Policy.t option;
+  audit : Oas.Audit.t option;
 }
 
 type result = bool * string
@@ -331,6 +333,27 @@ let schemas : Types.tool_schema list = Tool_council.schemas
 (* Dispatch                                                          *)
 (* ================================================================ *)
 
+let audit_record (ctx : context) ~action ~detail ?verdict () =
+  match ctx.audit with
+  | None -> ()
+  | Some audit ->
+    Oas.Audit.record audit {
+      id = Printf.sprintf "gov-%d" (int_of_float (Unix.gettimeofday () *. 1000.0));
+      timestamp = Unix.gettimeofday ();
+      agent_name = ctx.agent_name;
+      action;
+      decision_point = None;
+      verdict;
+      detail;
+    }
+
+let check_policy (ctx : context) ~tool_name : Oas.Policy.verdict =
+  match ctx.policy with
+  | None -> Oas.Policy.Allow
+  | Some policy ->
+    Oas.Policy.evaluate policy
+      (Oas.Policy.BeforeToolCall { tool_name; agent_name = ctx.agent_name })
+
 let dispatch (ctx : context) ~name ~args : result option =
   let handler = match name with
     | "masc_case_brief_submit" -> Some handle_case_brief_submit
@@ -348,4 +371,19 @@ let dispatch (ctx : context) ~name ~args : result option =
     | "masc_set_param" -> Some handle_set_param
     | _ -> None
   in
-  Option.map (fun h -> h ctx args) handler
+  match handler with
+  | None -> None
+  | Some h ->
+    let verdict = check_policy ctx ~tool_name:name in
+    match verdict with
+    | Oas.Policy.Deny reason ->
+      audit_record ctx ~action:name
+        ~detail:(`Assoc [("denied", `String reason)])
+        ~verdict () ;
+      Some (false, Printf.sprintf "Policy denied: %s" reason)
+    | _ ->
+      let result = h ctx args in
+      audit_record ctx ~action:name
+        ~detail:(`Assoc [("result_ok", `Bool (fst result))])
+        ~verdict () ;
+      Some result

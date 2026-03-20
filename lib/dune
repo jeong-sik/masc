@@ -126,6 +126,7 @@
    credits_dashboard
    cp_microarch_summary
    cp_search_fabric
+   model_spec
    cascade
    ;; WebRTC modules removed — use ocaml-webrtc library directly
    eio_context

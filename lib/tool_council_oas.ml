@@ -286,7 +286,7 @@ let handle_execute _ctx args =
     | Ok result ->
       json_ok (`Assoc [
         ("topic", `String topic);
-        ("deliberation", `String (Cascade.text_of_response result.response));
+        ("deliberation", `String (Llm_provider.Types.text_of_response result.response));
         ("turns", `Int result.turns);
         ("session_id", `String result.session_id);
         ("runtime", `String "oas");
@@ -309,7 +309,7 @@ let handle_execute_dry_run _ctx args =
     | Ok result ->
       json_ok (`Assoc [
         ("topic", `String topic);
-        ("analysis", `String (Cascade.text_of_response result.response));
+        ("analysis", `String (Llm_provider.Types.text_of_response result.response));
         ("turns", `Int result.turns);
         ("session_id", `String result.session_id);
         ("dry_run", `Bool true);

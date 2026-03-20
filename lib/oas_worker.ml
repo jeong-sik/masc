@@ -251,7 +251,29 @@ let require_eio () =
   | _, None -> Error "Eio net not available (running outside server context)"
 
 let resolve_cascade ~cascade_name =
-  match Cascade.get_cascade ~cascade_name () with
+  let defaults = Cascade.default_model_strings ~cascade_name in
+  let configured =
+    match Cascade.default_config_path () with
+    | Some path ->
+      let from_file =
+        Llm_provider.Cascade_config.load_profile ~config_path:path ~name:cascade_name
+      in
+      if from_file <> [] then from_file else defaults
+    | None -> defaults
+  in
+  let specs = Model_spec.available_model_specs_of_strings configured in
+  let specs =
+    if specs <> [] then specs
+    else
+      let fallback = Cascade.default_model_strings ~cascade_name in
+      if configured = fallback then (
+        Printf.eprintf "[cascade] %s: no callable models from built-in defaults\n%!" cascade_name;
+        [])
+      else (
+        Printf.eprintf "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!" cascade_name;
+        Model_spec.available_model_specs_of_strings fallback)
+  in
+  match specs with
   | [] ->
     Error (Printf.sprintf "No models available for cascade '%s'" cascade_name)
   | spec :: _ ->

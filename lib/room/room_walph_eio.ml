@@ -265,7 +265,7 @@ let get_chain_id_for_preset = function
   | _ -> None
 
 let walph_response_is_valid (resp : Llm_provider.Types.api_response) =
-  let content = String.trim (Cascade.text_of_response resp) in
+  let content = String.trim (Llm_provider.Types.text_of_response resp) in
   let lower = String.lowercase_ascii content in
   let len = String.length content in
   len > 0
@@ -279,7 +279,7 @@ let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec ~max_chars (
       ~messages:[Agent_sdk.Types.user_msg prompt] ~timeout_sec
       ~max_tokens:max_chars ~accept:walph_response_is_valid ()
   with
-  | Ok resp -> Cascade.text_of_response resp
+  | Ok resp -> Llm_provider.Types.text_of_response resp
   | Error err -> failwith err
 
 (** {1 Main Loop} *)

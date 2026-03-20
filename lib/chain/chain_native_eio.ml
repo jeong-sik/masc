@@ -304,8 +304,8 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
           ?tools:tools_json ~temperature:0.2 ~max_tokens:4096
           ~timeout_sec ()
       with
-      | Ok resp when trim (Cascade.text_of_response resp) <> "" -> Ok (Cascade.text_of_response resp)
-      | Ok resp when Cascade.has_tool_use resp ->
+      | Ok resp when trim (Llm_provider.Types.text_of_response resp) <> "" -> Ok (Llm_provider.Types.text_of_response resp)
+      | Ok resp when List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) resp.content ->
           Ok (Yojson.Safe.to_string (llm_tool_calls_json resp.content))
       | Ok _ -> Error "empty completion"
       | Error msg -> Error msg)

@@ -121,7 +121,7 @@ let call_sentinel_llm ~cascade_name ~prompt_id ~vars () =
             ~messages:[Agent_sdk.Types.user_msg prompt]
             ~temperature:0.3 ~timeout_sec:timeout ~max_tokens:800 () with
         | Ok resp ->
-            let text = Cascade.text_of_response resp in
+            let text = Llm_provider.Types.text_of_response resp in
             let model = resp.Llm_provider.Types.model in
             if String.length text > 5 then (
               log_debug (sprintf "LLM response from %s (%d chars)" model

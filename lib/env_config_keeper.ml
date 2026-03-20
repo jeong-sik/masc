@@ -41,70 +41,6 @@ module Endpoints = struct
     | Error msg -> failwith msg
 end
 
-(** {1 Gardener — Self-Organizing Agent Ecosystem} *)
-
-module Gardener = struct
-  (** Master switch for Gardener Agent *)
-  let enabled =
-    get_bool ~default:true "MASC_GARDENER_ENABLED"
-
-  (** Minimum agent population (never retire below this) *)
-  let min_agents =
-    get_int ~default:5 "MASC_GARDENER_MIN_AGENTS"
-
-  (** Maximum agent population (never spawn above this) *)
-  let max_agents =
-    get_int ~default:30 "MASC_GARDENER_MAX_AGENTS"
-
-  (** Target agent population (homeostatic sweet spot) *)
-  let target_agents =
-    get_int ~default:15 "MASC_GARDENER_TARGET_AGENTS"
-
-  (** Maximum spawns allowed per day *)
-  let max_daily_spawns =
-    get_int ~default:3 "MASC_GARDENER_MAX_DAILY_SPAWNS"
-
-  (** Maximum retirements allowed per day *)
-  let max_daily_retirements =
-    get_int ~default:2 "MASC_GARDENER_MAX_DAILY_RETIREMENTS"
-
-  (** Minimum time between spawns (seconds) *)
-  let spawn_cooldown_sec =
-    get_float ~default:3600.0 "MASC_GARDENER_SPAWN_COOLDOWN_SEC"
-
-  (** Minimum time between retirements (seconds) *)
-  let retirement_cooldown_sec =
-    get_float ~default:7200.0 "MASC_GARDENER_RETIREMENT_COOLDOWN_SEC"
-
-  (** Use LLM for complex spawn/retire decisions *)
-  let use_llm_decision =
-    get_bool ~default:true "MASC_GARDENER_USE_LLM"
-
-  (** Minimum hours before a gap signal can trigger spawn *)
-  let gap_maturity_hours =
-    get_float ~default:2.0 "MASC_GARDENER_GAP_MATURITY_HOURS"
-
-  (** Hours of inactivity before an agent is retirement-eligible *)
-  let idle_threshold_hours =
-    get_float ~default:48.0 "MASC_GARDENER_IDLE_THRESHOLD_HOURS"
-
-  (** Grace period before actual retirement (seconds) *)
-  let retirement_grace_sec =
-    get_float ~default:3600.0 "MASC_GARDENER_RETIREMENT_GRACE_SEC"
-
-  (** Consecutive failures before circuit breaker opens *)
-  let max_consecutive_failures =
-    get_int ~default:3 "MASC_GARDENER_MAX_FAILURES"
-
-  (** Circuit breaker open duration (seconds) *)
-  let circuit_cooldown_sec =
-    get_float ~default:3600.0 "MASC_GARDENER_CIRCUIT_COOLDOWN_SEC"
-
-  (** Health check interval (seconds) *)
-  let check_interval_sec =
-    get_float ~default:1800.0 "MASC_GARDENER_CHECK_INTERVAL_SEC"
-end
-
 (** {1 Keeper Bootstrap Configuration} *)
 
 module KeeperBootstrap = struct
@@ -220,25 +156,6 @@ module KeeperResidentSupervisor = struct
   (** Interval between supervisor sweep runs (seconds) *)
   let sweep_interval_sec =
     get_float ~default:30.0 "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
-end
-
-module Sentinel = struct
-  let enabled = get_bool ~default:true "MASC_SENTINEL_ENABLED"
-  let heartbeat_interval_sec = get_float ~default:30.0 "MASC_SENTINEL_HEARTBEAT_SEC"
-  let board_patrol_interval_sec = get_float ~default:600.0 "MASC_SENTINEL_BOARD_PATROL_SEC"
-  let task_hygiene_interval_sec = get_float ~default:300.0 "MASC_SENTINEL_TASK_HYGIENE_SEC"
-  let keeper_health_interval_sec = get_float ~default:300.0 "MASC_SENTINEL_KEEPER_HEALTH_SEC"
-  let task_stuck_threshold_sec = get_float ~default:600.0 "MASC_SENTINEL_TASK_STUCK_SEC"
-  let task_stale_threshold_sec = get_float ~default:1800.0 "MASC_SENTINEL_TASK_STALE_SEC"
-  let llm_enabled = get_bool ~default:true "MASC_SENTINEL_LLM_ENABLED"
-  let llm_timeout_sec = get_int ~default:30 "MASC_SENTINEL_LLM_TIMEOUT_SEC"
-
-  (** Governance sweep: auto-generate petitions for stuck tasks / inactive agents *)
-  let governance_enabled = get_bool ~default:true "MASC_SENTINEL_GOVERNANCE_ENABLED"
-  let governance_interval_sec = get_float ~default:1800.0 "MASC_SENTINEL_GOVERNANCE_INTERVAL_SEC"
-
-  (** Threshold: tasks stuck longer than this trigger a governance petition *)
-  let governance_task_stuck_sec = get_float ~default:86400.0 "MASC_SENTINEL_GOV_TASK_STUCK_SEC"
 end
 
 (** Print configuration summary for debugging *)

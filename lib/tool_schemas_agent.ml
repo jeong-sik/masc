@@ -255,23 +255,6 @@ Pair with masc_agent_fitness to review scores or masc_transition(action='claim')
       ("required", `List [`String "available_agents"]);
     ];
   };
-  {
-    name = "masc_gardener_retire_agent";
-    description = "Evaluate whether an agent should be retired based on population limits and idle thresholds. \
-Use when the ecosystem has too many agents or one appears consistently idle. \
-Returns approval/deferral/rejection. To execute, follow up with masc_gardener_execute_retire.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Name of the agent to consider for retirement");
-        ]);
-      ]);
-      ("required", `List [`String "agent_name"]);
-    ];
-  };
-
   (* masc_register_capabilities *)
   {
     name = "masc_register_capabilities";

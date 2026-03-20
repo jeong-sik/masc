@@ -1119,11 +1119,11 @@ let test_xss_in_agent_name () =
     Alcotest.(check bool) "agent registered" true (List.length state.active_agents > 0)
   )
 
-(* === Board Gardener Tests === *)
+(* === Board Admin Tests === *)
 
 (* Use 3-part nicknames so join() preserves them as-is
    (Nickname.is_generated_nickname requires 3+ dash-separated parts) *)
-let gardener_agent = "gardener-board-keeper"
+let gardener_agent = "admin-board-keeper"
 let test_agent_a = "agent-test-alpha"
 let test_agent_z = "agent-test-zombie"
 
@@ -1158,7 +1158,7 @@ let test_force_done_bypasses_assignee () =
       (match normal with Error _ -> true | Ok _ -> false);
     (* Force done succeeds *)
     let forced = Room.force_done_task_r config ~agent_name:gardener_agent ~task_id:"task-001"
-        ~notes:"auto-closed by gardener" () in
+        ~notes:"auto-closed by admin" () in
     Alcotest.(check bool) "force done ok" true
       (match forced with Ok _ -> true | Error _ -> false);
     (* Task should be done *)
@@ -1597,8 +1597,8 @@ let () =
       Alcotest.test_case "xss in agent name" `Quick test_xss_in_agent_name;
     ];
 
-    (* === Board Gardener Tests === *)
-    "board_gardener", [
+    (* === Board Admin Tests === *)
+    "board_admin", [
       Alcotest.test_case "force release bypasses assignee" `Quick test_force_release_bypasses_assignee;
       Alcotest.test_case "force done bypasses assignee" `Quick test_force_done_bypasses_assignee;
       Alcotest.test_case "audit orphan tasks" `Quick test_audit_orphan_tasks;

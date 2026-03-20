@@ -4,12 +4,10 @@
     Each parameter is registered with [Runtime_params] with validation bounds.
 
     Surfaces:
-    - [sentinel_timing]:   heartbeat / board_patrol intervals (Low risk)
     - [lodge_behavior]:    tick interval, agents per tick, quiet hours (Low risk)
     - [lodge_limits]:      daily action / post caps (Low risk)
     - [board_policy]:      default TTL, message max count (Low risk)
     - [llm_config]:        default model, timeout (High risk)
-    - [gardener_limits]:   min/target/max agents, daily spawns (High risk)
 
     @since 2.96.0 *)
 
@@ -42,24 +40,6 @@ let deserialize_string json =
   match json with
   | `String s -> Ok s
   | _ -> Error "expected string"
-
-(* ── sentinel_timing surface ─────────────────────────────────── *)
-
-let lodge_interval =
-  Runtime_params.register
-    ~key:"guardian.lodge_interval_seconds"
-    ~default:(fun () -> Env_config_governance.Guardian.lodge_interval_seconds)
-    ~validate:(validate_float_range ~min:30.0 ~max:3600.0 "lodge_interval")
-    ~serialize:(fun v -> `Float v)
-    ~deserialize:deserialize_float
-
-let lodge_iterations =
-  Runtime_params.register
-    ~key:"guardian.lodge_iterations"
-    ~default:(fun () -> Env_config_governance.Guardian.lodge_iterations)
-    ~validate:(validate_int_range ~min:1 ~max:100 "lodge_iterations")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
 
 (* ── lodge_behavior surface ──────────────────────────────────── *)
 
@@ -143,17 +123,6 @@ let llm_timeout =
     ~serialize:(fun v -> `Float v)
     ~deserialize:deserialize_float
 
-(* ── gardener_limits surface (High risk) ─────────────────────── *)
-
-let gardener_max_daily_spawns =
-  Runtime_params.register
-    ~key:"gardener.max_daily_spawns"
-    ~default:(fun () ->
-      Env_config_core.get_int ~default:3 "MASC_GARDENER_MAX_DAILY_SPAWNS")
-    ~validate:(validate_int_range ~min:0 ~max:20 "max_daily_spawns")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
-
 (* ── surface catalog ─────────────────────────────────────────── *)
 
 type surface = {
@@ -165,16 +134,6 @@ type surface = {
 
 let surfaces =
   [
-    {
-      id = "sentinel_timing";
-      description = "Guardian loop intervals";
-      risk = "low";
-      param_keys =
-        [
-          "guardian.lodge_interval_seconds";
-          "guardian.lodge_iterations";
-        ];
-    };
     {
       id = "lodge_behavior";
       description = "Lodge tick interval, agents per tick, quiet hours";
@@ -212,12 +171,6 @@ let surfaces =
           "llm.default_model";
           "llm.timeout_seconds";
         ];
-    };
-    {
-      id = "gardener_limits";
-      description = "Gardener daily spawn budget";
-      risk = "high";
-      param_keys = [ "gardener.max_daily_spawns" ];
     };
   ]
 

@@ -473,9 +473,6 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
   let tempo = Tempo.get_tempo config in
   let lodge_json = `Assoc [("status", `String "deprecated")] in
   let social_runtime_json = Social_runtime.status_json ~config in
-  let gardener_json = Gardener.status_json () in
-  let guardian_json = Guardian.status_json () in
-  let sentinel_json = Sentinel.status_json () in
   let build = Build_identity.current () in
   `Assoc
     [
@@ -490,9 +487,6 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
       ("paused", `Bool room_state.paused);
       ("lodge", lodge_json);
       ("social_runtime", social_runtime_json);
-      ("gardener", gardener_json);
-      ("guardian", guardian_json);
-      ("sentinel", sentinel_json);
       ("version", `String build.release_version);
       ("build", Build_identity.to_yojson build);
     ]
@@ -552,27 +546,7 @@ let dashboard_messages_safe config ~since_seq ~limit =
   Room.get_messages_raw_in_room config ~room_id:(dashboard_current_room_id config) ~since_seq ~limit
 
 let provider_capacity_json () : Yojson.Safe.t =
-  let gardener_enabled =
-    match Sys.getenv_opt "MASC_GARDENER_ENABLED" with
-    | Some "true" | Some "1" -> true
-    | _ -> false
-  in
-  let env_int key default =
-    match Sys.getenv_opt key with
-    | Some s -> (try int_of_string s with _ -> default)
-    | None -> default
-  in
-  `Assoc
-    [
-      ( "agent_capacity",
-        `Assoc
-          [
-            ("gardener_enabled", `Bool gardener_enabled);
-            ("min_agents", `Int (env_int "MASC_GARDENER_MIN_AGENTS" 5));
-            ("target_agents", `Int (env_int "MASC_GARDENER_TARGET_AGENTS" 15));
-            ("max_agents", `Int (env_int "MASC_GARDENER_MAX_AGENTS" 30));
-          ] );
-    ]
+  `Assoc []
 
 let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
   Dashboard_cache.get_or_compute "shell" ~ttl:2.0 (fun () ->

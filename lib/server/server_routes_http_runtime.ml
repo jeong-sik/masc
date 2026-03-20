@@ -63,9 +63,6 @@ let health_handler _request reqd =
   in
   let build = Build_identity.current () in
   let lodge_json = `Assoc [("status", `String "deprecated")] in
-  let gardener_json = Gardener.status_json () in
-  let guardian_json = Guardian.status_json () in
-  let sentinel_json = Sentinel.status_json () in
   let health_json = `Assoc [
     ("status", `String "ok");
     ("server", `String "masc-mcp");
@@ -89,9 +86,6 @@ let health_handler _request reqd =
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Sse.client_count ()));
     ("lodge", lodge_json);
-    ("gardener", gardener_json);
-    ("guardian", guardian_json);
-    ("sentinel", sentinel_json);
   ] in
   Http.Response.json (Yojson.Safe.to_string health_json) reqd
 

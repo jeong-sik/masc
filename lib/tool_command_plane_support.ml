@@ -96,7 +96,7 @@ let tail_text ?(max_chars = 4000) text =
 let swarm_live_run_dir config run_id =
   Filename.concat
     (Filename.concat (Cp_paths.control_plane_root_dir config) "swarm-live")
-    (Agent_swarm_live_harness.safe_run_id run_id)
+    (Room_utils.safe_filename run_id |> String.lowercase_ascii)
 
 let swarm_live_summary_path config run_id =
   Filename.concat (swarm_live_run_dir config run_id) "swarm-live-summary.json"
@@ -180,8 +180,8 @@ let wait_for_pid_with_timeout ~clock_opt ~timeout_sec pid =
   loop ()
 
 let run_process_with_timeout ~clock_opt ~timeout_sec ~prog ~argv ~env =
-  let stdout_path = Filename.temp_file "masc_swarm_live_stdout_" ".log" in
-  let stderr_path = Filename.temp_file "masc_swarm_live_stderr_" ".log" in
+  let stdout_path = Filename.temp_file "masc_cp_stdout_" ".log" in
+  let stderr_path = Filename.temp_file "masc_cp_stderr_" ".log" in
   let stdin_fd = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
   let stdout_fd =
     Unix.openfile stdout_path

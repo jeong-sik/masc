@@ -176,12 +176,6 @@
  (modules test_board_ttl)
  (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
 
-; Agent SDK swarm integration tests (ported from former agent-swarm package)
-(test
- (name test_agent_swarm_masc_tools)
- (modules test_agent_swarm_masc_tools)
- (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
-
 (test
  (name test_agent_swarm_dev_tools)
  (modules test_agent_swarm_dev_tools)
@@ -224,26 +218,6 @@
  (modules test_team_session_oas_bridge)
  (libraries masc_mcp agent_sdk agent_sdk.swarm alcotest yojson unix))
 (test
- (name test_agent_swarm_unit)
- (modules test_agent_swarm_unit)
- (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
-
-(test
- (name test_agent_swarm_fleet)
- (modules test_agent_swarm_fleet)
- (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
-
-(test
- (name test_swarm_e2e)
- (modules test_swarm_e2e)
- (libraries masc_mcp agent_sdk alcotest eio eio_main unix yojson))
-
-(test
- (name test_agent_swarm_runner)
- (modules test_agent_swarm_runner)
- (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
-
-(test
  (name test_tool_mdal)
  (modules test_tool_mdal)
  (libraries masc_mcp alcotest str yojson unix eio eio_main
@@ -260,10 +234,6 @@
  (modules test_mdal_store)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
-(test
- (name test_agent_swarm_live_harness)
- (modules test_agent_swarm_live_harness)
- (libraries masc_mcp agent_sdk alcotest yojson))
 ; ============================================================
 ; Eio module tests (Pure sync - Cache_eio, Metrics_store_eio, Hebbian_eio)
 ; ============================================================
@@ -379,10 +349,7 @@
           test_command_plane_v2_scheduler_core_a
           test_command_plane_v2_scheduler_core_b
           test_command_plane_v2_scheduler_policy
-          test_command_plane_v2_swarm_history
-          test_command_plane_v2_swarm_summary
-          test_command_plane_v2_search
-          test_command_plane_v2_wrapper)
+          test_command_plane_v2_search)
  (libraries masc_mcp alcotest yojson unix))
 
 (test

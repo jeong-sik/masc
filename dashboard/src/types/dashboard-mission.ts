@@ -53,6 +53,7 @@ export interface DashboardMissionAttentionQueueItem {
 export interface DashboardMissionSessionBrief {
   session_id: string
   goal: string
+  created_by?: string | null
   room?: string | null
   status?: string
   health?: string
@@ -629,4 +630,3 @@ export interface OperatorActionLogEntry {
   message: string
   delegated_tool?: string
 }
-

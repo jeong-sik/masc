@@ -38,6 +38,28 @@ type scoring_weights = {
 
 val default_weights : scoring_weights
 
+(** {1 Scoring (pure)} *)
+
+(** Recency: exponential decay 0.995^hours_since. *)
+val recency_score : now:float -> memory_entry -> float
+
+(** Importance: normalized to 0.0-1.0. *)
+val importance_score : memory_entry -> float
+
+(** Relevance: keyword overlap ratio (Phase 1 approximation). *)
+val keyword_relevance : query:string -> memory_entry -> float
+
+(** Combined score = alpha*recency + beta*importance + gamma*relevance. *)
+val score_entry : ?weights:scoring_weights -> now:float -> query:string -> memory_entry -> float
+
+(** {1 JSON Serialization} *)
+
+(** Serialize entry to JSON. *)
+val entry_to_json : memory_entry -> Yojson.Safe.t
+
+(** Deserialize entry from JSON. *)
+val entry_of_json : Yojson.Safe.t -> memory_entry option
+
 (** {1 Core Operations} *)
 
 (** Load all entries from the agent's memory stream. *)

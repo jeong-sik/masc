@@ -958,3 +958,39 @@
  (name test_phase5_validation)
  (modules test_phase5_validation)
  (libraries masc_mcp eio eio_main str yojson))
+
+; Chain mermaid parse coverage tests (strip_quotes, infer_type_from_id, parse_meta_comment, etc.)
+(test
+ (name test_chain_mermaid_parse_coverage)
+ (modules test_chain_mermaid_parse_coverage)
+ (libraries masc_mcp alcotest str yojson))
+
+; Chain coverage tests (node_content, mermaid_parser, parser_serialize)
+(test
+ (name test_chain_coverage)
+ (modules test_chain_coverage)
+ (libraries masc_mcp alcotest str yojson))
+
+; Chain category/error/types coverage tests
+(test
+ (name test_chain_category_coverage)
+ (modules test_chain_category_coverage)
+ (libraries masc_mcp alcotest str yojson))
+
+; Memory_stream + Agent_reputation coverage tests
+(test
+ (name test_memory_reputation_coverage)
+ (modules test_memory_reputation_coverage)
+ (libraries masc_mcp alcotest str yojson))
+
+; Auto_recall + Activity_feed coverage tests
+(test
+ (name test_auto_recall_activity_coverage)
+ (modules test_auto_recall_activity_coverage)
+ (libraries masc_mcp alcotest str yojson))
+
+; Chain utils/iteration/trace_types/conversation coverage tests
+(test
+ (name test_chain_utils_coverage)
+ (modules test_chain_utils_coverage)
+ (libraries masc_mcp alcotest str yojson))

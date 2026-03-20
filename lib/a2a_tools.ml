@@ -370,7 +370,7 @@ let fetch_remote_agent_card url :
     @param capability Optional filter by capability
     @return List of agent cards
 *)
-let discover config ?(endpoint : string option) ?(capability : string option) ()
+let discover config ?(endpoint : string option) ?(capability : string option) ?(schemas : Types.tool_schema list = []) ()
     : (Yojson.Safe.t, string) result =
   match endpoint with
   | Some url ->
@@ -397,7 +397,7 @@ let discover config ?(endpoint : string option) ?(capability : string option) ()
         ) agents
     in
     (* Include local agent card *)
-    let local_card = Agent_card.generate_default () in
+    let local_card = Agent_card.generate_default ~schemas () in
     let agents_json = List.map (fun (a : agent) ->
       `Assoc [
         ("name", `String a.name);

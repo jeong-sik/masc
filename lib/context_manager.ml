@@ -51,22 +51,15 @@ type compaction_strategy = Compaction_types.compaction_strategy =
   | DropLowImportance
   | SummarizeOld
 
-type compaction_result = {
-  context : working_context;
-  offloaded_path : string option;
-}
-
 (* ================================================================ *)
 (* Memory Formats                                                  *)
 (* ================================================================ *)
 
-let memory_summary_prefix = Context_scoring.memory_summary_prefix
 let goal_prefix = Context_scoring.goal_prefix
 
 let state_block_start = "[STATE]"
 let state_block_end = "[/STATE]"
 
-let starts_with = Context_scoring.starts_with
 
 let find_substring ~needle haystack ~from =
   let n_len = String.length needle in
@@ -180,16 +173,7 @@ let sync_oas_context (ctx : working_context) : working_context =
     "context_ratio" (`Float (context_ratio ctx));
   ctx
 
-let compact ctx strategies =
-  let oas_strategies = List.map (fun (s : compaction_strategy) : Context_compact_oas.strategy -> s) strategies in
-  let messages, token_count =
-    Context_compact_oas.compact
-      ~system_prompt:ctx.system_prompt
-      ~messages:ctx.messages
-      ~strategies:oas_strategies
-  in
-  let ctx = { ctx with messages; token_count; importance_scores = [] } in
-  sync_oas_context ctx
+(* compact removed — callers use Context_compact_oas.compact directly. *)
 
 (* ================================================================ *)
 (* Conversation History Offload                                     *)
@@ -249,50 +233,8 @@ let offload_messages
       (Printexc.to_string exn);
     None
 
-(** Apply compaction with history offload.
-    Messages that would be removed by compaction are saved to a markdown file
-    before compaction runs. The summary message is annotated with the offload path.
-    If offload fails, compaction proceeds normally. *)
-let compact_with_offload
-    ~(session_ctx : session_context)
-    ~(compaction_count : int)
-    (ctx : working_context)
-    (strategies : compaction_strategy list) : compaction_result =
-  (* Capture pre-compaction messages for offload *)
-  let pre_messages = ctx.messages in
-  let offloaded_path =
-    offload_messages
-      ~session_dir:session_ctx.session_dir
-      ~compaction_count
-      pre_messages
-  in
-  (* Run the compaction pipeline via OAS adapter *)
-  let compacted =
-    let oas_strategies = List.map (fun (s : compaction_strategy) : Context_compact_oas.strategy -> s) strategies in
-    let messages, token_count =
-      Context_compact_oas.compact
-        ~system_prompt:ctx.system_prompt
-        ~messages:ctx.messages
-        ~strategies:oas_strategies
-    in
-    { ctx with messages; token_count; importance_scores = [] }
-  in
-  (* If offload succeeded and SummarizeOld produced a summary, annotate it *)
-  let compacted = match offloaded_path with
-    | Some path ->
-      let annotation = sprintf "[Full conversation history saved to %s]\n\n" path in
-      let messages = List.map (fun (m : Agent_sdk.Types.message) ->
-        let mt = text_of_message m in
-        if starts_with ~prefix:memory_summary_prefix mt then
-          { m with content = [Agent_sdk.Types.Text (annotation ^ mt)] }
-        else m
-      ) compacted.messages in
-      let token_count = count_tokens compacted.system_prompt messages in
-      { compacted with messages; token_count }
-    | None -> compacted
-  in
-  let compacted = sync_oas_context compacted in
-  { context = compacted; offloaded_path }
+(* compact_with_offload removed — callers use Context_compact_oas.compact
+   + offload_messages separately. *)
 
 (* ================================================================ *)
 (* Checkpointing                                                    *)

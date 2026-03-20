@@ -42,8 +42,8 @@ let perpetual_hooks
       (* Compact threshold: apply context reduction via Phase 1 adapter *)
       if ratio >= config.compact_threshold then begin
         let before = (!ctx_ref).token_count in
-        (* Both Context_manager.compaction_strategy and Context_compact_oas.strategy
-           are now aliases for Compaction_types.compaction_strategy — no mapping needed. *)
+        (* Compaction_types.compaction_strategy and Context_compact_oas.strategy
+           are aliases — no mapping needed. *)
         let strategies = config.compact_strategies in
         let compacted_msgs, new_token_count =
           Context_compact_oas.compact

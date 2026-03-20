@@ -51,12 +51,6 @@ type compaction_strategy = Compaction_types.compaction_strategy =
   | DropLowImportance  (** Remove messages with importance < 0.3 *)
   | SummarizeOld       (** LLM-summarize oldest 30% into 1 summary message *)
 
-(** Result of compaction with optional history offload. *)
-type compaction_result = {
-  context : working_context;
-  offloaded_path : string option;  (** Path to offloaded history markdown, if saved *)
-}
-
 (** {1 Context Ratio Thresholds} *)
 
 (** Context window usage as a ratio 0.0-1.0. *)
@@ -92,10 +86,6 @@ val score_importance : working_context -> working_context
     (preserves prompt-cache prefix). *)
 val goal_prefix : string
 
-(** Apply a pipeline of compaction strategies in order.
-    Delegates to {!Context_compact_oas.compact}. *)
-val compact : working_context -> compaction_strategy list -> working_context
-
 (** Format a single message as human-readable text: "role: content". *)
 val format_message_readable : Agent_sdk.Types.message -> string
 
@@ -104,14 +94,6 @@ val format_message_readable : Agent_sdk.Types.message -> string
 val offload_messages :
   session_dir:string -> compaction_count:int ->
   Agent_sdk.Types.message list -> string option
-
-(** Apply compaction with history offload.
-    Before compaction, saves the full pre-compaction messages to a markdown file.
-    The summary message is annotated with the offload path.
-    If offload fails, compaction proceeds normally. *)
-val compact_with_offload :
-  session_ctx:session_context -> compaction_count:int ->
-  working_context -> compaction_strategy list -> compaction_result
 
 (** Sync working context stats (message_count, token_count, context_ratio)
     into the OAS Context scoped keys. Called automatically by [compact]. *)

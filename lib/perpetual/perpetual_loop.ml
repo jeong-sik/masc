@@ -37,7 +37,7 @@ type loop_config = {
   compact_threshold : float;
   prepare_threshold : float;
   handoff_threshold : float;
-  compact_strategies : Context_manager.compaction_strategy list;
+  compact_strategies : Compaction_types.compaction_strategy list;
   session_base_dir : string;
   on_event : event -> unit;
   event_bus : Agent_sdk.Event_bus.t option;

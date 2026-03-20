@@ -54,6 +54,7 @@ export interface DashboardMissionSessionBrief {
   session_id: string
   goal: string
   created_by?: string | null
+  origin_kind?: 'human' | 'system' | string
   room?: string | null
   status?: string
   health?: string

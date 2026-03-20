@@ -338,6 +338,7 @@ let test_recover_elapsed_session () =
       session_id;
       goal = "recover elapsed session";
       created_by = "tester";
+      origin_kind = Team_session_types.Origin_human;
       room_id = "default";
       operation_id = None;
       status = Team_session_types.Running;

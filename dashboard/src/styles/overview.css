@@ -37,6 +37,12 @@
   min-width: 0;
 }
 
+.situation-banner__meta {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 /* ── Attention Spotlight ─────────────────────── */
 .attention-spotlight {
   display: flex;
@@ -270,6 +276,14 @@
   justify-content: space-between;
   margin-bottom: var(--space-xs, 4px);
   gap: 12px;
+}
+
+.home-section-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .home-section-label {

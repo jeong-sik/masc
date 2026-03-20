@@ -41,6 +41,7 @@ type session_context = {
   session_id : string;
   goal : string;
   created_by : string option;
+  origin_kind : string;
   room : string option;
   status : string;
   health : string;
@@ -820,6 +821,7 @@ let build_sessions sessions attention_queue agent_briefs keeper_briefs command_p
                ("session_id", `String session.session_id);
                ("goal", `String session.goal);
                ("created_by", json_string_option session.created_by);
+               ("origin_kind", `String session.origin_kind);
                ("room", json_string_option session.room);
                ("status", `String session.status);
                ("health", `String session.health);

@@ -135,6 +135,9 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         session_id;
         goal;
         created_by;
+        origin_kind =
+          Team_session_types.infer_session_origin_kind
+            ~created_by ~orchestration_mode;
         room_id;
         operation_id;
         status = Team_session_types.Running;

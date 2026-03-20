@@ -80,6 +80,7 @@ let seed_room config session_id =
       session_id;
       goal = "Validate local64 swarm role coverage, runtime visibility, and operator census";
       created_by = "fixture-root";
+      origin_kind = Origin_human;
       room_id = "default";
       operation_id = Some "op-mission-fixture-001";
       status = Interrupted;

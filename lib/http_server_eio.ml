@@ -269,7 +269,9 @@ module Request = struct
     let stop () =
       if not !stopped then begin
         stopped := true;
-        (try Httpun.Body.Reader.close body with exn ->
+        (try Httpun.Body.Reader.close body with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
           Log.Misc.error "[http] body close failed: %s" (Printexc.to_string exn))
       end
     in
@@ -289,7 +291,9 @@ module Request = struct
            Httpun.Body.Reader.schedule_read body
              ~on_eof:(fun () ->
                let body_str = Buffer.contents buf in
-               try on_body body_str with exn ->
+               try on_body body_str with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
                  on_error (`Internal exn))
              ~on_read:(fun buffer ~off ~len ->
                if !stopped then ()
@@ -609,7 +613,9 @@ let run ~sw ~net ~clock config routes =
                ~error_handler
                client_addr
                flow
-           with exn ->
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
              Log.Http.error "Connection error: %s" (Printexc.to_string exn))
        with exn ->
          if is_cancelled exn then raise exn;

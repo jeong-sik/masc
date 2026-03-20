@@ -49,7 +49,9 @@ let json ?actor:_ ?session_id ?operation_id ~config () =
                | Error e ->
                    Log.Misc.error "dashboard proof auto-gen failed: %s" e;
                    None
-             with exn ->
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
                Log.Misc.error "dashboard proof auto-gen exception: %s" (Printexc.to_string exn);
                None))
     | _ -> None

@@ -254,7 +254,9 @@ let post_final_summary (state : Mdal.loop_state) =
          ~ttl_hours:24
          ~hearth:(Mdal.state_hearth state.loop_id)
          ())
-  with exn -> Log.Misc.warn "tool_mdal: final board post failed: %s" (Printexc.to_string exn)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Log.Misc.warn "tool_mdal: final board post failed: %s" (Printexc.to_string exn)
 
 let terminal_response ?config (state : Mdal.loop_state) ~reason ~error_message =
   assoc_with_fields (state_to_json ?config state)
@@ -280,7 +282,9 @@ let emit_stop_event (state : Mdal.loop_state) ~reason =
           ("final_metric", `Float final_metric);
           ("iterations", `Int state.current_iteration);
         ])
-  with exn -> Log.Misc.warn "tool_mdal: emit_stop_event SSE failed: %s" (Printexc.to_string exn)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Log.Misc.warn "tool_mdal: emit_stop_event SSE failed: %s" (Printexc.to_string exn)
 
 let emit_completed_event ~loop_id ~final_metric ~iterations =
   try
@@ -292,7 +296,9 @@ let emit_completed_event ~loop_id ~final_metric ~iterations =
           ("final_metric", `Float final_metric);
           ("iterations", `Int iterations);
         ])
-  with exn -> Log.Misc.warn "tool_mdal: emit_completed_event SSE failed: %s" (Printexc.to_string exn)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Log.Misc.warn "tool_mdal: emit_completed_event SSE failed: %s" (Printexc.to_string exn)
 
 let run_worker_iteration (ctx : context) (config : Room.config)
     (state : Mdal.loop_state) current_metric =
@@ -502,7 +508,7 @@ let handle_start (ctx : context) args =
          ("evidence_policy", `String "hard");
          ("execution_mode", `String (Mdal.execution_mode_to_string state.execution_mode));
          ("persistence_backend", `String (config_persistence_backend config));
-       ]) with exn -> Log.Misc.warn "tool_mdal: mdal_started SSE failed: %s" (Printexc.to_string exn));
+       ]) with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.warn "tool_mdal: mdal_started SSE failed: %s" (Printexc.to_string exn));
 
       assoc_with_fields (state_to_json ~config state)
         [ ("worker_prompt", `String (Mdal.render_worker_prompt profile [] baseline)) ])
@@ -663,7 +669,7 @@ let handle_iterate (ctx : context) args =
                                 ~ttl_hours:24
                                 ~hearth:(Mdal.iter_hearth state.loop_id)
                                 ())
-                    with exn -> Log.Misc.warn "tool_mdal: iter board post failed: %s" (Printexc.to_string exn));
+                    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.warn "tool_mdal: iter board post failed: %s" (Printexc.to_string exn));
 
                    (* Broadcast via SSE *)
                    (try Sse.broadcast (`Assoc [
@@ -673,7 +679,7 @@ let handle_iterate (ctx : context) args =
                       ("metric_before", `Float metric_before);
                       ("metric_after", `Float metric_after);
                       ("delta", `Float delta);
-                    ]) with exn -> Log.Misc.warn "tool_mdal: iter SSE broadcast failed: %s" (Printexc.to_string exn));
+                    ]) with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.warn "tool_mdal: iter SSE broadcast failed: %s" (Printexc.to_string exn));
 
                    (* Check if goal is met *)
                    let evaluation = Mdal.evaluate_iteration record in
@@ -806,7 +812,9 @@ let parse_worker_spec (json : Yojson.Safe.t) : (Mdal_swarm.worker_spec, string) 
       agent = json |> member "agent" |> to_string_option |> Option.value ~default:"default";
       max_iterations = json |> member "max_iterations" |> to_int_option |> Option.value ~default:10;
     }
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Error (Printf.sprintf "Invalid worker spec: %s" (Printexc.to_string exn))
 
 let parse_all_workers workers_json =

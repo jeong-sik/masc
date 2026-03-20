@@ -104,7 +104,9 @@ let client_for_uri ~net uri =
 
 let client_for_uri_result ~net uri =
   try Ok (client_for_uri ~net uri)
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Error (Printf.sprintf "HTTPS client init error: %s" (Printexc.to_string exn))
 
 (** ============================================

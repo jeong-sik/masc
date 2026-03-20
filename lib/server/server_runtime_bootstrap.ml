@@ -48,7 +48,9 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
   ignore (Room.init state.room_config ~agent_name:None);
   Chain_native_eio.ensure_bootstrap state.room_config;
   (try Tool_command_plane.backfill_chain_overlays state.room_config
-   with exn ->
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
      Log.Misc.error "startup backfill failed: %s"
        (Printexc.to_string exn));
   (* Warm up Tool_registry from persistent telemetry.jsonl *)
@@ -60,7 +62,9 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
        let n = Tool_registry.warm_up summary in
        Log.Misc.info "tool registry: warmed up %d tools (%d calls) from telemetry"
          n summary.total_calls
-   with exn ->
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
      Log.Misc.error "tool registry warm-up failed: %s"
        (Printexc.to_string exn));
   Mcp_server.set_sse_callback state Sse.broadcast
@@ -80,7 +84,9 @@ let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
     if stats.enabled then
       Log.Keeper.info "scanned=%d started=%d stale=%d recovering=%d"
         stats.scanned stats.started stats.stale stats.recovering
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Log.Server.error "keeper bootstrap failed: %s"
       (Printexc.to_string exn)
 
@@ -115,7 +121,9 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   let fork_subsystem name f =
     Eio.Fiber.fork ~sw (fun () ->
       try f ()
-      with exn ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
         Log.Server.error "subsystem %s crashed: %s" name
           (Printexc.to_string exn))
   in
@@ -129,7 +137,9 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
       Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config
     in
     Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Log.Server.error "subsystem orchestrator failed to start: %s"
       (Printexc.to_string exn));
   fork_subsystem "social_runtime" (fun () ->
@@ -253,7 +263,9 @@ let serve ~sw ~clock ~socket ~request_handler =
           Eio.Switch.run (fun conn_sw ->
               Eio.Switch.on_release conn_sw (fun () ->
                   try Eio.Flow.close flow
-                  with exn -> Log.Misc.warn "flow close: %s" (Printexc.to_string exn));
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn -> Log.Misc.warn "flow close: %s" (Printexc.to_string exn));
               try
                 let conn_handler =
                   Httpun_eio.Server.create_connection_handler ~sw:conn_sw
@@ -277,7 +289,9 @@ let serve ~sw ~clock ~socket ~request_handler =
                       Httpun.Body.Writer.close body)
                 in
                 conn_handler client_addr flow
-              with exn ->
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
                 Log.Misc.error "Connection error: %s"
                   (Printexc.to_string exn)))
       ;
@@ -287,7 +301,9 @@ let serve ~sw ~clock ~socket ~request_handler =
       else begin
         Log.Misc.error "Accept error: %s" (Printexc.to_string exn);
         (try Eio.Time.sleep clock backoff_s
-         with exn -> Log.Misc.warn "backoff sleep: %s" (Printexc.to_string exn));
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn -> Log.Misc.warn "backoff sleep: %s" (Printexc.to_string exn));
         accept_loop (Float.min 2.0 (backoff_s *. 1.5))
       end
   in
@@ -360,7 +376,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_dashboard_http.start_operator_refresh_loop ~state ~sw ~clock;
       Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
       start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       Log.Server.error "Background init failed (HTTP still serving): %s"
         (Printexc.to_string exn));
 

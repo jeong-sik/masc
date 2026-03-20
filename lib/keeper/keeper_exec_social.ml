@@ -76,21 +76,13 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
           let user_message = Agent_sdk.Types.user_msg prompt in
           let ctx_work = Context_manager.append ctx_work user_message in
           Context_manager.persist_message session user_message;
-          let requests =
-            List.map
-              (fun (model : Cascade.model_spec) ->
-                ({
-                  Cascade.model;
-                  messages = (Agent_sdk.Types.system_msg ctx_work.system_prompt) :: ctx_work.messages;
-                  temperature = Keeper_config.keeper_reflection_temp ();
-                  max_tokens = Keeper_config.keeper_explicit_reply_max_tokens ();
-                  tools = [];
-                  response_format = `Text;
-                } : Cascade.completion_request))
-              specs
+          let messages =
+            (Agent_sdk.Types.system_msg ctx_work.system_prompt) :: ctx_work.messages
           in
           let (cascade_result, cascade_latency) = Cascade.timed (fun () ->
-              Keeper_oas_adapter.run_cascade requests) in
+              Keeper_oas_adapter.run_cascade ~messages
+                ~temperature:(Keeper_config.keeper_reflection_temp ())
+                ~max_tokens:(Keeper_config.keeper_explicit_reply_max_tokens ()) ()) in
           match cascade_result with
           | Error e -> Error e
           | Ok resp ->

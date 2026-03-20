@@ -201,17 +201,18 @@ let llm_tool_defs_of_json = function
                    })
   | Some _ -> []
 
-let llm_tool_calls_json (calls : Cascade.tool_call list) =
+let llm_tool_calls_json (blocks : Agent_sdk.Types.content_block list) =
   `List
-    (List.map
-       (fun (call : Cascade.tool_call) ->
-         `Assoc
-           [
-             ("id", `String call.call_id);
-             ("name", `String call.call_name);
-             ("arguments", `String call.call_arguments);
-           ])
-       calls)
+    (List.filter_map
+       (function
+         | Agent_sdk.Types.ToolUse { id; name; input } ->
+             Some (`Assoc [
+               ("id", `String id);
+               ("name", `String name);
+               ("arguments", `String (Yojson.Safe.to_string input));
+             ])
+         | _ -> None)
+       blocks)
 
 type llm_runner =
   | Stub
@@ -304,8 +305,8 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
           ~timeout_sec ()
       with
       | Ok resp when trim (Cascade.text_of_response resp) <> "" -> Ok (Cascade.text_of_response resp)
-      | Ok resp when Cascade.has_tool_calls resp ->
-          Ok (Yojson.Safe.to_string (llm_tool_calls_json (Cascade.tool_calls_of_response resp)))
+      | Ok resp when Cascade.has_tool_use resp ->
+          Ok (Yojson.Safe.to_string (llm_tool_calls_json resp.content))
       | Ok _ -> Error "empty completion"
       | Error msg -> Error msg)
 

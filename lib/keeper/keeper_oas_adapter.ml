@@ -27,12 +27,7 @@ let make_dispatch ~(config : Room.config) ~(meta : keeper_meta)
   in
   let args_json = Yojson.Safe.to_string args in
   let execute () =
-    let tc : Cascade.tool_call = {
-      call_id = "";
-      call_name = name;
-      call_arguments = args_json;
-    } in
-    execute_keeper_tool_call ~config ~meta ~ctx_work tc
+    execute_keeper_tool_call ~config ~meta ~ctx_work ~name ~input:args
   in
   match gate_config with
   | None ->
@@ -167,73 +162,18 @@ let model_of_run_result (r : Oas_worker.run_result) : string =
   r.response.model
 
 (* ================================================================ *)
-(* Internal: extract prompt from completion_request list             *)
+(* Public: cascade through Cascade (single-shot, no Agent loop)      *)
 (* ================================================================ *)
 
-type prompt_params = {
-  system_prompt : string;
-  goal : string;
-  temperature : float;
-  max_tokens : int;
-}
-
-let separate_system_and_user (msgs : Agent_sdk.Types.message list) :
-    string * Agent_sdk.Types.message list =
-  let sys_parts = ref [] in
-  let rest = ref [] in
-  List.iter (fun (m : Agent_sdk.Types.message) ->
-    match m.role with
-    | Agent_sdk.Types.System -> sys_parts := Agent_sdk.Types.text_of_message m :: !sys_parts
-    | _ -> rest := m :: !rest
-  ) msgs;
-  let sys = String.concat "\n" (List.rev !sys_parts) in
-  (sys, List.rev !rest)
-
-let messages_to_goal_text (msgs : Agent_sdk.Types.message list) : string =
-  msgs
-  |> List.map (fun (m : Agent_sdk.Types.message) -> Agent_sdk.Types.text_of_message m)
-  |> List.filter (fun s -> String.length s > 0)
-  |> String.concat "\n"
-
-let extract_prompt_params
-    (requests : Cascade.completion_request list)
-  : (prompt_params, string) result =
-  match requests with
-  | [] -> Error "empty cascade request list"
-  | first :: _ ->
-      let sys_prompt, user_msgs = separate_system_and_user first.messages in
-      let goal = messages_to_goal_text user_msgs in
-      if String.length goal = 0 then
-        Error "no user messages in cascade request"
-      else
-        Ok {
-          system_prompt = sys_prompt;
-          goal;
-          temperature = first.temperature;
-          max_tokens = first.max_tokens;
-        }
-
-(* ================================================================ *)
-(* Public: cascade through Cascade (single-shot, no Agent loop) *)
-(* ================================================================ *)
-
-let run_cascade ?(cascade_name = "keeper_turn") ?timeout_sec requests =
-  match extract_prompt_params requests with
-  | Error e -> Error e
-  | Ok params ->
-  let messages : Llm_provider.Types.message list =
-    (if String.length params.system_prompt > 0 then
-       [ Llm_provider.Types.system_msg params.system_prompt ]
-     else [])
-    @ [ Llm_provider.Types.user_msg params.goal ]
-  in
-  Cascade.complete ~cascade_name ~messages
-    ~temperature:params.temperature ~max_tokens:params.max_tokens
+let run_cascade ?(cascade_name = "keeper_turn") ?timeout_sec
+    ~(messages : Agent_sdk.Types.message list) ~temperature ~max_tokens () =
+  Cascade.complete ~cascade_name ~messages ~temperature ~max_tokens
     ?timeout_sec ()
 
-let run_cascade_stream ?(cascade_name = "keeper_turn") ?timeout_sec ~on_event request ~fallback =
+let run_cascade_stream ?(cascade_name = "keeper_turn") ?timeout_sec ~on_event
+    ~(messages : Agent_sdk.Types.message list) ~temperature ~max_tokens () =
   let timeout_int = Option.map int_of_float timeout_sec in
-  match run_cascade ~cascade_name ?timeout_sec:timeout_int (request :: fallback) with
+  match run_cascade ~cascade_name ?timeout_sec:timeout_int ~messages ~temperature ~max_tokens () with
   | Ok resp ->
       let text = Cascade.text_of_response resp in
       on_event (Llm_provider.Types.MessageStart {

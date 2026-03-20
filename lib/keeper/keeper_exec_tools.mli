@@ -11,7 +11,8 @@ val execute_keeper_tool_call :
   config:Room.config ->
   meta:keeper_meta ->
   ctx_work:Context_manager.working_context ->
-  Cascade.tool_call ->
+  name:string ->
+  input:Yojson.Safe.t ->
   string
 
 val keeper_tool_loop_system_prompt : character_context:string -> string
@@ -19,7 +20,7 @@ val keeper_tool_loop_system_prompt : character_context:string -> string
 val keeper_tool_followup_prompt :
   user_message:string ->
   draft_reply:string ->
-  tool_outputs:(Cascade.tool_call * string) list ->
+  tool_outputs:(string * Yojson.Safe.t * string) list ->
   already_executed:string list ->
   string
 

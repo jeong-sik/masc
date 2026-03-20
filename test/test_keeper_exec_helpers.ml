@@ -166,9 +166,7 @@ let test_keeper_tool_followup_prompt_write_done_blocks_more_tools () =
       ~user_message:"post this"
       ~draft_reply:"done"
       ~tool_outputs:
-        [ ({ Masc_mcp.Cascade.call_name = "keeper_board_post";
-             call_id = "1";
-             call_arguments = "{}"; }, "{\"ok\":true}") ]
+        [ ("keeper_board_post", `Assoc [], "{\"ok\":true}") ]
       ~already_executed:[ "keeper_board_post" ]
   in
   check bool "write rule present" true
@@ -286,9 +284,13 @@ let test_execute_keeper_tool_call_readonly_branches () =
       (Agent_sdk.Types.user_msg "where are we meeting?")
   in
   let config = Masc_mcp.Room.default_config (Filename.get_temp_dir_name ()) in
-  let run call_name args =
+  let run name args_str =
+    let input =
+      try Yojson.Safe.from_string args_str
+      with _ -> `Assoc []
+    in
     Keeper_exec_tools.execute_keeper_tool_call ~config ~meta ~ctx_work
-      { Masc_mcp.Cascade.call_id = "1"; call_name; call_arguments = args }
+      ~name ~input
     |> Yojson.Safe.from_string
   in
   let now_json = run "keeper_time_now" "{}" in

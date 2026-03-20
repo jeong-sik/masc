@@ -38,31 +38,37 @@ let content_of_json (json : Yojson.Safe.t) : string =
      | _ -> Yojson.Safe.to_string json)
   | _ -> Yojson.Safe.to_string json
 
-(** No-op long_term_backend stubs for when PostgreSQL is unavailable. *)
-let noop_backend : Agent_sdk.Memory.long_term_backend =
-  {
-    Agent_sdk.Memory.persist = (fun ~key:_ _json -> Ok ());
-    retrieve = (fun ~key:_ -> None);
-    remove = (fun ~key:_ -> Ok ());
-    batch_persist = (fun _pairs -> Ok ());
-    query = (fun ~prefix:_ ~limit:_ -> []);
-  }
+(** Generate a timestamp-based session ID as fallback. *)
+let generate_session_id () =
+  Printf.sprintf "%d" (int_of_float (Unix.gettimeofday ()))
 
 (** Create an OAS [long_term_backend].
 
     If a PG pool is available (via [Board_dispatch.get_pg_pool]),
     uses [Memory_pg] for persistent storage scoped by [agent_name].
-    Otherwise falls back to no-op stubs. *)
-let make_backend ~(agent_name : string) : Agent_sdk.Memory.long_term_backend =
+    Otherwise falls back to session-based JSONL files under
+    [.masc/memory/<agent_name>/<session_id>.jsonl]. *)
+let make_backend ~(agent_name : string) ~(session_id : string)
+  : Agent_sdk.Memory.long_term_backend =
   match Board_dispatch.get_pg_pool () with
   | Some pool -> Memory_pg.make_backend ~pool ~agent_name
-  | None -> noop_backend
+  | None ->
+    let base_dir = Env_config.me_root () ^ "/.masc" in
+    Log.MemoryJsonl.info "Using JSONL fallback for %s (session=%s)"
+      agent_name session_id;
+    Memory_jsonl.make_backend ~base_dir ~agent_name ~session_id
 
 (** Create an OAS [Memory.t] instance.
 
-    Uses PostgreSQL long_term_backend when available, no-op stubs otherwise. *)
-let create_memory ~(agent_name : string) : Agent_sdk.Memory.t =
-  let backend = make_backend ~agent_name in
+    Uses PostgreSQL long_term_backend when available, JSONL fallback otherwise.
+    @param session_id Session identifier; defaults to timestamp-based ID. *)
+let create_memory ~(agent_name : string) ?(session_id : string option)
+    () : Agent_sdk.Memory.t =
+  let sid = match session_id with
+    | Some s -> s
+    | None -> generate_session_id ()
+  in
+  let backend = make_backend ~agent_name ~session_id:sid in
   Agent_sdk.Memory.create ~long_term:backend ()
 
 (** Format institutional memory as a JSON value suitable for
@@ -239,11 +245,12 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
     @param episode_limit default 50 (currently unused, kept for API compat)
     @param procedure_limit default 20 *)
 let create_memory_full ~(agent_name : string)
+    ?(session_id : string option)
     ?(config : Room_utils.config option)
     ?(episode_limit = 50) ?(procedure_limit = 20)
     () : Agent_sdk.Memory.t =
   ignore episode_limit;
-  let memory = create_memory ~agent_name in
+  let memory = create_memory ~agent_name ?session_id () in
   (* Procedural tier *)
   let _proc_count =
     seed_procedures_as_oas ~memory ~agent_name ~limit:procedure_limit

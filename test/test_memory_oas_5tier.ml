@@ -93,7 +93,7 @@ let test_create_memory_full_empty () =
 let test_memory_scratchpad_lifecycle () =
   let dir = setup_tmp_dir () in
   let memory =
-    Memory_oas_bridge.create_memory ~agent_name:"test-scratch"
+    Memory_oas_bridge.create_memory ~agent_name:"test-scratch" ()
   in
   (* Store to scratchpad *)
   Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
@@ -109,7 +109,7 @@ let test_memory_scratchpad_lifecycle () =
 let test_memory_working_survives_clear () =
   let dir = setup_tmp_dir () in
   let memory =
-    Memory_oas_bridge.create_memory ~agent_name:"test-working"
+    Memory_oas_bridge.create_memory ~agent_name:"test-working" ()
   in
   Oas.Memory.store memory ~tier:Oas.Memory.Working
     "session_goal" (`String "deploy v2");
@@ -128,7 +128,7 @@ let test_memory_working_survives_clear () =
 let test_memory_promote_scratchpad_to_working () =
   let dir = setup_tmp_dir () in
   let memory =
-    Memory_oas_bridge.create_memory ~agent_name:"test-promote"
+    Memory_oas_bridge.create_memory ~agent_name:"test-promote" ()
   in
   Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
     "important_finding" (`String "bug in auth");
@@ -147,7 +147,7 @@ let test_memory_promote_scratchpad_to_working () =
 
 let test_episodic_store_recall () =
   let dir = setup_tmp_dir () in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep" in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep" () in
   let ep : Oas.Memory.episode = {
     id = "ep-1";
     timestamp = Unix.gettimeofday ();
@@ -168,7 +168,7 @@ let test_episodic_store_recall () =
 
 let test_episodic_salience_ordering () =
   let dir = setup_tmp_dir () in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-sal" in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-sal" () in
   let now = Unix.gettimeofday () in
   let ep_low : Oas.Memory.episode = {
     id = "low"; timestamp = now;
@@ -194,7 +194,7 @@ let test_episodic_salience_ordering () =
 
 let test_procedural_store_recall () =
   let dir = setup_tmp_dir () in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-pr" in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-pr" () in
   let proc : Oas.Memory.procedure = {
     id = "pr-1";
     pattern = "deploy failure";
@@ -215,7 +215,7 @@ let test_procedural_store_recall () =
 
 let test_procedural_record_success () =
   let dir = setup_tmp_dir () in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-prs" in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-prs" () in
   let proc : Oas.Memory.procedure = {
     id = "pr-s";
     pattern = "test pattern";
@@ -241,7 +241,7 @@ let test_procedural_record_success () =
 
 let test_stats_all_tiers () =
   let dir = setup_tmp_dir () in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-stats" in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-stats" () in
   Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad "s1" (`Int 1);
   Oas.Memory.store memory ~tier:Oas.Memory.Working "w1" (`Int 2);
   Oas.Memory.store memory ~tier:Oas.Memory.Working "w2" (`Int 3);
@@ -268,38 +268,41 @@ let test_stats_all_tiers () =
 (* No-op backend verification                                        *)
 (* ================================================================ *)
 
-let test_noop_backend_persist () =
-  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-noop" in
+let test_jsonl_backend_persist () =
+  let sid = Printf.sprintf "test-persist-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-jsonl" ~session_id:sid in
   let result = backend.persist ~key:"test" (`String "value") in
   Alcotest.(check bool) "persist returns Ok" true (Result.is_ok result)
 
-let test_noop_backend_retrieve () =
-  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-noop" in
-  let result = backend.retrieve ~key:"test" in
-  Alcotest.(check bool) "retrieve returns None" true (Option.is_none result)
+let test_jsonl_backend_retrieve () =
+  let sid = Printf.sprintf "test-retrieve-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-jsonl" ~session_id:sid in
+  let result = backend.retrieve ~key:"nonexistent" in
+  Alcotest.(check bool) "retrieve returns None for missing key" true (Option.is_none result)
 
-let test_noop_backend_query () =
-  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-noop" in
+let test_jsonl_backend_query () =
+  let sid = Printf.sprintf "test-query-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-jsonl" ~session_id:sid in
   let result = backend.query ~prefix:"test" ~limit:10 in
-  Alcotest.(check int) "query returns empty" 0 (List.length result)
+  Alcotest.(check int) "query returns empty on fresh session" 0 (List.length result)
 
 let test_seed_memory_bank_noop () =
   let dir = setup_tmp_dir () in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-bank" in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-bank" () in
   let count = Memory_oas_bridge.seed_memory_bank ~memory ~agent_name:"test-bank" ~limit:10 in
   Alcotest.(check int) "seed_memory_bank returns 0" 0 count;
   cleanup_tmp_dir dir
 
 let test_seed_episodes_noop () =
   let dir = setup_tmp_dir () in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-seed" in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-seed" () in
   let count = Memory_oas_bridge.seed_episodes ~memory ~agent_name:"test-ep-seed" ~limit:10 in
   Alcotest.(check int) "seed_episodes returns 0" 0 count;
   cleanup_tmp_dir dir
 
 let test_flush_episodes_noop () =
   let dir = setup_tmp_dir () in
-  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-flush" in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-flush" () in
   let count = Memory_oas_bridge.flush_episodes ~memory ~agent_name:"test-ep-flush" in
   Alcotest.(check int) "flush_episodes returns 0" 0 count;
   cleanup_tmp_dir dir
@@ -333,10 +336,10 @@ let () =
     ("stats", [
       Alcotest.test_case "all tiers" `Quick test_stats_all_tiers;
     ]);
-    ("noop_backend", [
-      Alcotest.test_case "persist returns Ok" `Quick test_noop_backend_persist;
-      Alcotest.test_case "retrieve returns None" `Quick test_noop_backend_retrieve;
-      Alcotest.test_case "query returns empty" `Quick test_noop_backend_query;
+    ("jsonl_backend", [
+      Alcotest.test_case "persist returns Ok" `Quick test_jsonl_backend_persist;
+      Alcotest.test_case "retrieve returns None" `Quick test_jsonl_backend_retrieve;
+      Alcotest.test_case "query returns empty" `Quick test_jsonl_backend_query;
       Alcotest.test_case "seed_memory_bank noop" `Quick test_seed_memory_bank_noop;
       Alcotest.test_case "seed_episodes noop" `Quick test_seed_episodes_noop;
       Alcotest.test_case "flush_episodes noop" `Quick test_flush_episodes_noop;

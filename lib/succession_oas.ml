@@ -251,8 +251,13 @@ let extract_dna ~(working_ctx : Context_manager.working_context)
     ~(session_ctx : Context_manager.session_context)
     ~goal ~generation ~trace_id ~metrics =
   (* Compact the working context for transfer *)
-  let compacted = Context_manager.compact working_ctx
-    [PruneToolOutputs; MergeContiguous; SummarizeOld] in
+  let messages, token_count =
+    Context_compact_oas.compact
+      ~system_prompt:working_ctx.system_prompt
+      ~messages:working_ctx.messages
+      ~strategies:[PruneToolOutputs; MergeContiguous; SummarizeOld]
+  in
+  let compacted = { working_ctx with messages; token_count; importance_scores = [] } in
   let compressed = Context_manager.serialize_context compacted in
   let all_msgs = working_ctx.messages in
   {

@@ -152,7 +152,13 @@ let handle_compact args : result =
     let tokens_before = ctx.token_count in
     let msg_count_before = List.length ctx.messages in
     (* Apply compaction *)
-    let compacted = Context_manager.compact ctx strategies in
+    let messages, token_count =
+      Context_compact_oas.compact
+        ~system_prompt:ctx.system_prompt
+        ~messages:ctx.messages
+        ~strategies
+    in
+    let compacted = { ctx with messages; token_count; importance_scores = [] } in
     let tokens_after = compacted.token_count in
     let msg_count_after = List.length compacted.messages in
     let result_json = `Assoc [

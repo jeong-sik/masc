@@ -93,14 +93,17 @@ let compact_if_needed
       if String.starts_with ~prefix:"skipped:" reason then
         (ctx, None, reason)
       else
+        let messages, token_count =
+          Context_compact_oas.compact
+            ~system_prompt:ctx.system_prompt
+            ~messages:ctx.messages
+            ~strategies:Context_compact_oas.[
+              PruneToolOutputs; MergeContiguous;
+              DropLowImportance; SummarizeOld]
+        in
         let compacted_ctx =
-          Context_manager.compact ctx
-            Context_manager.[
-              PruneToolOutputs;
-              MergeContiguous;
-              DropLowImportance;
-              SummarizeOld;
-            ]
+          Context_manager.sync_oas_context
+            { ctx with messages; token_count; importance_scores = [] }
         in
         (compacted_ctx, Some reason, "applied:" ^ reason)
 

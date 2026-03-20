@@ -535,8 +535,6 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
     | Mod_notifications ->
         Tool_notifications.dispatch state.Mcp_server.session_registry
           ~agent_name ~name arguments
-    | Mod_gardener ->
-        Some (Tool_gardener.dispatch () name arguments)
     | Mod_inline ->
         let inline_ctx : Tool_inline_dispatch.context = {
           config; agent_name; registry; state; sw; clock; arguments;

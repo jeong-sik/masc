@@ -4,7 +4,7 @@
     Other schemas have been moved to their owning modules:
     - Tool_council, Tool_cost, Tool_rate_limit, Tool_encryption,
       Tool_relay, Tool_mitosis, Tool_handover, Tool_tempo, Tool_walph,
-      Tool_hat, Tool_gardener, Tool_inline_dispatch (via Tool_schemas_inline) *)
+      Tool_hat, Tool_inline_dispatch (via Tool_schemas_inline) *)
 
 open Types
 

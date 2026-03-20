@@ -24,7 +24,6 @@ let () = test "empty checkpoint round-trip" (fun () ->
       assert (c2.version = 1);
       assert (List.length c2.agents = 0);
       assert (c2.task_summary.total = 0);
-      assert (c2.sentinel_started_at = None);
       assert (c2.keeper_timeouts = [])
   | None -> failwith "of_json returned None"
 )
@@ -38,8 +37,6 @@ let () = test "full checkpoint round-trip" (fun () ->
       { name = "gemini"; last_seen = 1699999000.0 };
     ];
     task_summary = { total = 10; pending = 3; active = 2; done_count = 5 };
-    sentinel_started_at = Some 1699990000.0;
-    guardian_started_at = Some 1699990100.0;
     governance_pending = ["merge-pr-42"; "deploy-v2"];
     keeper_timeouts = [
       { keeper_name = "dreamer"; timeout_until = 1700001000.0; reason = "rate-limited" };
@@ -53,8 +50,6 @@ let () = test "full checkpoint round-trip" (fun () ->
       assert ((List.hd c2.agents).name = "claude");
       assert (c2.task_summary.total = 10);
       assert (c2.task_summary.pending = 3);
-      assert (c2.sentinel_started_at = Some 1699990000.0);
-      assert (c2.guardian_started_at = Some 1699990100.0);
       assert (List.length c2.governance_pending = 2);
       assert (List.length c2.keeper_timeouts = 1);
       assert ((List.hd c2.keeper_timeouts).keeper_name = "dreamer");
@@ -84,8 +79,6 @@ let () = test "save and load from file" (fun () ->
     timestamp = Time_compat.now ();
     agents = [{ name = "test-agent"; last_seen = Time_compat.now () }];
     task_summary = { total = 5; pending = 2; active = 1; done_count = 2 };
-    sentinel_started_at = Some (Time_compat.now ());
-    guardian_started_at = None;
     governance_pending = [];
     keeper_timeouts = [];
     circuit_breaker_open = [];
@@ -110,8 +103,6 @@ let () = test "active_keeper_timeouts filters expired" (fun () ->
     timestamp = now;
     agents = [];
     task_summary = { total = 0; pending = 0; active = 0; done_count = 0 };
-    sentinel_started_at = None;
-    guardian_started_at = None;
     governance_pending = [];
     keeper_timeouts = [
       { keeper_name = "expired"; timeout_until = now -. 100.0; reason = "old" };

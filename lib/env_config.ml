@@ -47,12 +47,6 @@ let print_summary () =
     Env_config_governance.LodgeSelection.max_starvation_ticks
     Env_config_governance.LodgeSelection.thompson_weight
     Env_config_governance.LodgeSelection.vote_decay_factor;
-  Log.Env.info "Gardener: enabled=%b min=%d target=%d max=%d spawns/day=%d"
-    Env_config_keeper.Gardener.enabled
-    Env_config_keeper.Gardener.min_agents
-    Env_config_keeper.Gardener.target_agents
-    Env_config_keeper.Gardener.max_agents
-    Env_config_keeper.Gardener.max_daily_spawns;
   Log.Env.info "KeeperBootstrap: enabled=%b stale_turn=%.0fs max_scan=%d"
     Env_config_keeper.KeeperBootstrap.enabled
     Env_config_keeper.KeeperBootstrap.stale_turn_seconds

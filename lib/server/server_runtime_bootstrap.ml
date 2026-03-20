@@ -95,7 +95,7 @@ let init_task_backend () =
             (Types.show_masc_error e))
   | None -> Task_dispatch.init_jsonl ()
 
-let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
+let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
@@ -124,12 +124,6 @@ let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       (Printexc.to_string exn));
   fork_subsystem "social_runtime" (fun () ->
     Social_runtime.start ~sw ~clock ~config:state.room_config);
-  fork_subsystem "gardener" (fun () ->
-    Gardener.start ~bus:event_bus ~sw ~clock ~room_config:state.room_config ());
-  fork_subsystem "sentinel_guardian" (fun () ->
-    if Env_config.Sentinel.enabled then
-      Sentinel.start ~bus:event_bus ~sw ~clock ~net state.room_config
-    else Guardian.start ~bus:event_bus ~sw ~clock state.room_config);
   fork_subsystem "governance_judge" (fun () ->
     Dashboard_governance_judge.start ~sw ~clock
       ~base_path:state.room_config.base_path
@@ -156,11 +150,7 @@ let start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
   (* Phase 5: unified startup subsystem summary *)
-  let on_off b = if b then "on" else "off" in
-  Log.info ~ctx:"startup" "subsystems: sentinel=%s guardian=%s gardener=%s"
-    (on_off Env_config.Sentinel.enabled)
-    (on_off Env_config.Guardian.enabled)
-    (on_off Env_config.Gardener.enabled)
+  Log.info ~ctx:"startup" "subsystems: resident loops started"
 
 let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
   (match Board_dispatch.get_pg_pool () with

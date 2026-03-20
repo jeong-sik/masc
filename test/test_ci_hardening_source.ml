@@ -80,9 +80,8 @@ let test_input_validation_contracts () =
   check bool "cache get triggers batch eviction" true
     (file_contains_pattern "lib/cache_eio.ml"
        "maybe_evict_expired config");
-  check bool "guardian GC runs cache eviction" true
-    (file_contains_pattern "lib/guardian.ml"
-       "Cache_eio.evict_expired config")
+  (* guardian GC cache eviction check removed — Guardian deleted (#1834) *)
+  ignore (fun () -> ())
 
 let () =
   run "ci_hardening_source"

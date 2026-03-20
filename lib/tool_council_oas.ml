@@ -279,8 +279,9 @@ let handle_execute _ctx args =
        Evaluate the following topic and produce a structured decision. \
        Include: (1) your reasoning, (2) identified risks, (3) recommended action. \
        Be concise and actionable." in
+    let memory = Memory_oas_bridge.create_memory ~agent_name:"council-deliberation" in
     match Oas_worker.run_named
-      ~cascade_name:"governance_judge" ~goal:topic ~system_prompt ()
+      ~cascade_name:"governance_judge" ~goal:topic ~system_prompt ~memory ()
     with
     | Ok result ->
       json_ok (`Assoc [
@@ -301,8 +302,9 @@ let handle_execute_dry_run _ctx args =
        Analyze the following topic WITHOUT committing any changes. \
        Produce: (1) impact analysis, (2) risks and mitigations, (3) what WOULD happen if executed. \
        This is analysis only — no actions will be taken." in
+    let memory = Memory_oas_bridge.create_memory ~agent_name:"council-dry-run" in
     match Oas_worker.run_named
-      ~cascade_name:"governance_judge" ~goal:topic ~system_prompt ()
+      ~cascade_name:"governance_judge" ~goal:topic ~system_prompt ~memory ()
     with
     | Ok result ->
       json_ok (`Assoc [

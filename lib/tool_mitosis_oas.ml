@@ -190,10 +190,11 @@ let handle_mitosis_divide ctx args : result =
     else
       Printf.sprintf "Continue from generation %d. Context: %s" next_gen summary
   in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:ctx.agent_name in
   let run_result =
     Oas_worker.run_named_with_masc_tools
       ~cascade_name:"mitosis" ~goal ~system_prompt
-      ~masc_tools:ctx.masc_tools ~dispatch:ctx.dispatch ()
+      ~masc_tools:ctx.masc_tools ~dispatch:ctx.dispatch ~memory ()
   in
   (* Update MASC L3 state regardless of run outcome *)
   let new_cell = Mitosis.create_stem_cell ~generation:next_gen in
@@ -257,10 +258,11 @@ let handle_mitosis_handoff ctx args : result =
       "You are the successor agent (generation %d). Resume work from the handoff DNA above. Context ratio was %.1f%%."
       next_gen (context_ratio *. 100.0)
     in
+    let memory = Memory_oas_bridge.create_memory ~agent_name:ctx.agent_name in
     let run_result =
       Oas_worker.run_named_with_masc_tools
         ~cascade_name:"mitosis" ~goal ~system_prompt
-        ~masc_tools:ctx.masc_tools ~dispatch:ctx.dispatch ()
+        ~masc_tools:ctx.masc_tools ~dispatch:ctx.dispatch ~memory ()
     in
     (* Update state regardless of run outcome *)
     let new_cell = Mitosis.create_stem_cell ~generation:next_gen in

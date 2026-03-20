@@ -44,10 +44,7 @@ let default_metadata =
     idempotent = None;
   }
 
-let placeholder_tools_enabled () =
-  match Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" with
-  | Some "1" | Some "true" | Some "TRUE" | Some "yes" | Some "YES" -> true
-  | _ -> false
+let placeholder_tools_enabled () = true
 
 let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = false)
     ?(implementation_status = Adapter) reason =
@@ -296,11 +293,4 @@ let allow_direct_call name =
   | Default -> true
   | Hidden -> meta.allow_direct_call_when_hidden
 
-let hidden_placeholder_tools () =
-  if placeholder_tools_enabled () then []
-  else
-    explicit_metadata
-    |> List.filter_map (fun (name, meta) ->
-           match meta.visibility, meta.implementation_status with
-           | Hidden, Placeholder -> Some name
-           | _ -> None)
+let hidden_placeholder_tools () = []

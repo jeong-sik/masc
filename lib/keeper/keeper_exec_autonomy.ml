@@ -6,12 +6,6 @@ open Keeper_memory
 open Keeper_exec_tools
 open Keeper_exec_context
 
-(** Check if keeper autonomy engine is enabled via environment variable. *)
-let keeper_autonomy_enabled () =
-  match Sys.getenv_opt "MASC_KEEPER_AUTONOMY_ENABLED" with
-  | Some s -> String.lowercase_ascii (String.trim s) = "true"
-  | None -> false
-
 (* ================================================================ *)
 (* Autonomous Execution Engine (Phase 5)                            *)
 (* ================================================================ *)
@@ -141,8 +135,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
     @since 2.74.0 *)
 let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
     ~(specs : Cascade.model_spec list) : keeper_meta option =
-  if not (keeper_autonomy_enabled ()) then None
-  else if meta.active_goal_ids = [] then None
+  if meta.active_goal_ids = [] then None
   else
     match Keeper_contract.parse_autonomy_level meta.autonomy_level with
     | None -> None

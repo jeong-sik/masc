@@ -1,10 +1,34 @@
 (** Keeper_hooks_oas — OAS hooks adapter for Keeper Agent.run().
 
-    Maps keeper-specific behaviors (checkpoint, metrics, social events)
-    to OAS hook events. Used with {!Keeper_tools_oas} to run Keeper
-    via Agent.run() instead of a manual turn loop.
+    Maps keeper-specific behaviors (checkpoint, metrics, social events,
+    safety gates) to OAS hook events.
 
-    @since Phase 4 — Keeper → Agent.run() migration *)
+    Safety checks in [pre_tool_use]:
+    - Cost budget: reject tool calls when accumulated cost exceeds limit
+    - Destructive patterns: reject bash/edit tools with dangerous commands
+      (rm -rf, drop table, force push, etc.)
+
+    These checks were previously in [Eval_gate.guarded_execute] and are
+    now natively integrated into the Agent.run() hook lifecycle.
+
+    @since Phase 4 — Keeper → Agent.run() migration
+    @since Phase 7 — Eval_gate → OAS hooks migration *)
+
+(** Bash-like tools that need destructive pattern screening. *)
+let destructive_check_tools =
+  [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit" ]
+
+(** Extract command or content string from tool input JSON for screening. *)
+let extract_command_from_input (input : Yojson.Safe.t) : string =
+  let open Yojson.Safe.Util in
+  try
+    match input |> member "command" with
+    | `String s -> s
+    | `Null | _ ->
+      (match input |> member "content" with
+       | `String s -> s
+       | _ -> "")
+  with Yojson.Safe.Util.Type_error _ -> ""
 
 (** Build OAS hooks for a keeper agent.
 
@@ -13,6 +37,8 @@
     @param session Session context for checkpoint persistence
     @param ctx_ref Mutable ref to current working context
     @param generation Current generation counter
+    @param max_cost_usd Optional cost budget (rejects tool calls above limit)
+    @param destructive_check Enable destructive pattern detection (default true)
     @param on_tool_executed Optional callback after each tool execution *)
 let make_hooks
     ~(config : Room.config)
@@ -20,6 +46,8 @@ let make_hooks
     ~(session : Context_manager.session_context)
     ~(ctx_ref : Context_manager.working_context ref)
     ~(generation : int)
+    ?(max_cost_usd : float option)
+    ?(destructive_check : bool = true)
     ?(on_tool_executed : string -> Yojson.Safe.t -> string -> unit =
         fun _ _ _ -> ())
     ()
@@ -63,9 +91,25 @@ let make_hooks
 
     pre_tool_use = Some (fun event ->
       match event with
-      | Agent_sdk.Hooks.PreToolUse { tool_name; _ } ->
-        ignore tool_name;
-        Agent_sdk.Hooks.Continue
+      | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
+        (* Safety gate 1: Cost budget *)
+        (match max_cost_usd with
+         | Some limit when accumulated_cost_usd >= limit ->
+           Log.Keeper.warn "keeper:%s cost gate: $%.4f >= $%.4f limit, skipping %s"
+             (!meta_ref).name accumulated_cost_usd limit tool_name;
+           Agent_sdk.Hooks.Skip
+         | _ ->
+           (* Safety gate 2: Destructive pattern detection *)
+           if destructive_check && List.mem tool_name destructive_check_tools then
+             let cmd = extract_command_from_input input in
+             match Eval_gate.detect_destructive cmd with
+             | Some (pattern, desc) ->
+               Log.Keeper.warn "keeper:%s destructive pattern in %s: '%s' (%s)"
+                 (!meta_ref).name tool_name pattern desc;
+               Agent_sdk.Hooks.Skip
+             | None -> Agent_sdk.Hooks.Continue
+           else
+             Agent_sdk.Hooks.Continue)
       | _ -> Agent_sdk.Hooks.Continue);
 
     on_idle = Some (fun event ->

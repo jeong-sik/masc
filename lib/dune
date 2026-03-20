@@ -507,7 +507,6 @@
    keeper_resident_supervisor
    keeper_runtime
    keeper_turn_session
-   keeper_turn_response
    keeper_turn_setup
    keeper_turn_up
    keeper_turn_lifecycle
@@ -665,7 +664,6 @@
   keeper_exec_social
   keeper_exec_proactive
   keeper_turn_session
-  keeper_turn_response
   keeper_turn_setup
   keeper_turn_up
   keeper_turn_lifecycle

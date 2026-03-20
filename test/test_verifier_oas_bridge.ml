@@ -173,6 +173,59 @@ let test_write_tools_are_not_readonly () =
   ) write_tools
 
 (* ================================================================ *)
+(* parse_verdict                                                     *)
+(* ================================================================ *)
+
+let test_parse_verdict_pass () =
+  Alcotest.(check bool) "PASS" true
+    (Verifier_oas.parse_verdict "PASS" = Pass)
+
+let test_parse_verdict_pass_with_trailing () =
+  Alcotest.(check bool) "PASS with trailing" true
+    (Verifier_oas.parse_verdict "PASS - looks good" = Pass)
+
+let test_parse_verdict_warn () =
+  match Verifier_oas.parse_verdict "WARN: minor issue" with
+  | Warn reason ->
+    Alcotest.(check bool) "reason preserved" true
+      (String.length reason > 0)
+  | _ -> Alcotest.fail "expected Warn"
+
+let test_parse_verdict_fail () =
+  match Verifier_oas.parse_verdict "FAIL: critical error" with
+  | Fail reason ->
+    Alcotest.(check bool) "reason preserved" true
+      (String.length reason > 0)
+  | _ -> Alcotest.fail "expected Fail"
+
+let test_parse_verdict_case_insensitive () =
+  Alcotest.(check bool) "pass lowercase" true
+    (Verifier_oas.parse_verdict "pass" = Pass)
+
+let test_parse_verdict_unknown_defaults_to_warn () =
+  match Verifier_oas.parse_verdict "something unexpected" with
+  | Warn _ -> ()
+  | _ -> Alcotest.fail "unknown text should default to Warn"
+
+let test_parse_verdict_empty_defaults_to_pass () =
+  Alcotest.(check bool) "empty -> Pass" true
+    (Verifier_oas.parse_verdict "" = Pass)
+
+(* ================================================================ *)
+(* should_skip (verify fast path)                                    *)
+(* ================================================================ *)
+
+let test_verify_skips_readonly () =
+  let req : Verifier_oas.verification_request = {
+    action_description = "read file contents";
+    action_result = "some data";
+    goal = "test goal";
+    context_summary = "test context";
+  } in
+  Alcotest.(check bool) "read-only skips to Pass" true
+    (Verifier_oas.verify req = Pass)
+
+(* ================================================================ *)
 (* Roundtrip: autonomous_gate_config -> guardrails                   *)
 (* ================================================================ *)
 
@@ -287,6 +340,22 @@ let () =
     ("read_only_predicate", [
       Alcotest.test_case "read tools" `Quick test_read_tools_are_readonly;
       Alcotest.test_case "write tools" `Quick test_write_tools_are_not_readonly;
+    ]);
+    ("parse_verdict", [
+      Alcotest.test_case "PASS" `Quick test_parse_verdict_pass;
+      Alcotest.test_case "PASS with trailing" `Quick
+        test_parse_verdict_pass_with_trailing;
+      Alcotest.test_case "WARN" `Quick test_parse_verdict_warn;
+      Alcotest.test_case "FAIL" `Quick test_parse_verdict_fail;
+      Alcotest.test_case "case insensitive" `Quick
+        test_parse_verdict_case_insensitive;
+      Alcotest.test_case "unknown -> Warn" `Quick
+        test_parse_verdict_unknown_defaults_to_warn;
+      Alcotest.test_case "empty -> Pass" `Quick
+        test_parse_verdict_empty_defaults_to_pass;
+    ]);
+    ("verify_skip", [
+      Alcotest.test_case "read-only skips" `Quick test_verify_skips_readonly;
     ]);
     ("autonomous_gate roundtrip", [
       Alcotest.test_case "L3 -> AllowList (strict)" `Quick test_l3_gate_roundtrip;

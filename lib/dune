@@ -89,6 +89,7 @@
    dashboard_http_keeper_detail
    dashboard_http_keeper
    dashboard_http_mdal
+   dashboard_provider_runs
    server_dashboard_http
    server_dashboard_http_core
    server_routes_http
@@ -101,6 +102,7 @@
    server_routes_http_routes_dashboard
    server_routes_http_routes_command_plane_read
    server_routes_http_routes_command_plane_write
+   server_routes_http_routes_provider_runs
    server_routes_http_routes_social
    server_h2_gateway
    server_h2_gateway_helpers

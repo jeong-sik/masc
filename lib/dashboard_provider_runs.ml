@@ -1,0 +1,537 @@
+[@@@warning "-32-33-69"]
+
+module Oas = Agent_sdk
+
+type provider_snapshot = {
+  provider : string;
+  kind : string;
+  runtime_kind : string;
+  auth_kind : string;
+  status : string;
+  available : bool;
+  supports_single_agent_run : bool;
+  default_model : string option;
+  models : string list;
+  source : string;
+  endpoint_url : string option;
+  note : string option;
+}
+
+type run_status =
+  | Queued
+  | Running
+  | Completed
+  | Failed
+
+type run_record = {
+  run_id : string;
+  provider : string;
+  model : string;
+  prompt : string;
+  created_at : string;
+  mutable status : run_status;
+  mutable started_at : string option;
+  mutable finished_at : string option;
+  mutable output : string option;
+  mutable error : string option;
+}
+
+let provider_runs : (string, run_record) Hashtbl.t = Hashtbl.create 32
+let provider_runs_mutex = Eio.Mutex.create ()
+
+let trim_nonempty value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
+let dedupe_keep_order values =
+  values
+  |> List.filter_map trim_nonempty
+  |> Provider_adapter.dedupe_keep_order
+
+let string_of_run_status = function
+  | Queued -> "queued"
+  | Running -> "running"
+  | Completed -> "completed"
+  | Failed -> "failed"
+
+let run_record_to_json (run : run_record) =
+  `Assoc
+    [
+      ("run_id", `String run.run_id);
+      ("status", `String (string_of_run_status run.status));
+      ("provider", `String run.provider);
+      ("model", `String run.model);
+      ("created_at", `String run.created_at);
+      ( "started_at",
+        match run.started_at with Some value -> `String value | None -> `Null );
+      ( "finished_at",
+        match run.finished_at with Some value -> `String value | None -> `Null );
+      ("output", match run.output with Some value -> `String value | None -> `Null);
+      ("error", match run.error with Some value -> `String value | None -> `Null);
+    ]
+
+let set_run_record run =
+  Eio.Mutex.use_rw ~protect:true provider_runs_mutex (fun () ->
+      Hashtbl.replace provider_runs run.run_id run)
+
+let update_run_record run_id f =
+  Eio.Mutex.use_rw ~protect:true provider_runs_mutex (fun () ->
+      match Hashtbl.find_opt provider_runs run_id with
+      | Some run -> f run
+      | None -> ())
+
+let find_run_record run_id =
+  Eio.Mutex.use_ro provider_runs_mutex (fun () ->
+      Hashtbl.find_opt provider_runs run_id)
+
+let make_run_id () =
+  let ts_ms = int_of_float (Time_compat.now () *. 1000.0) in
+  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
+  Printf.sprintf "run-%d-%06x" ts_ms hash
+
+let model_id_of_label label =
+  match String.index_opt label ':' with
+  | Some idx when idx < String.length label - 1 ->
+      let model =
+        String.sub label (idx + 1) (String.length label - idx - 1)
+        |> String.trim
+      in
+      if model = "" then None else Some model
+  | _ -> None
+
+let auth_kind_for_provider provider =
+  match provider with
+  | "claude-api" -> "api_key:ANTHROPIC_API_KEY"
+  | "codex-api" -> "api_key:OPENAI_API_KEY"
+  | "glm" -> "api_key:ZAI_API_KEY"
+  | "gemini-api" -> (
+      match Provider_adapter.resolve_gemini_direct_auth () with
+      | Provider_adapter.Gemini_api_key -> "api_key:GEMINI_API_KEY"
+      | Provider_adapter.Gemini_vertex_adc { project; location } ->
+          Printf.sprintf "vertex_adc:%s:%s" project location
+      | Provider_adapter.Gemini_auth_missing _ ->
+          "vertex_adc:GOOGLE_CLOUD_PROJECT:GOOGLE_CLOUD_LOCATION")
+  | "llama" -> "none"
+  | _ -> "unknown"
+
+let endpoint_url_for_provider provider =
+  match provider with
+  | "llama" -> Some Env_config_runtime.Llama.server_url
+  | "claude-api" -> Some "https://api.anthropic.com"
+  | "codex-api" -> Some "https://api.openai.com"
+  | "glm" -> Some "https://api.z.ai"
+  | "gemini-api" -> (
+      match Provider_adapter.resolve_gemini_direct_auth () with
+      | Provider_adapter.Gemini_vertex_adc { project; location } ->
+          Some
+            (Provider_adapter.gemini_vertex_openai_base_url ~project ~location)
+      | _ -> Some "https://generativelanguage.googleapis.com")
+  | _ -> None
+
+let default_model_for_provider provider =
+  match provider with
+  | "llama" -> (
+      match Provider_adapter.explicit_llama_model_id_result () with
+      | Ok model_id -> trim_nonempty model_id
+      | Error _ ->
+          (match trim_nonempty Env_config_runtime.Llama.default_model with
+          | Some value when value <> "explicit-model-required" -> Some value
+          | _ -> None))
+  | "claude-api" -> trim_nonempty Env_config_governance.Claude.default_model
+  | "codex-api" -> trim_nonempty Env_config_governance.OpenAI.default_model
+  | "gemini-api" -> trim_nonempty Env_config_governance.Gemini.default_model
+  | "glm" ->
+      let configured = trim_nonempty Env_config_governance.Llm.default_model in
+      Some (Option.value configured ~default:"auto")
+  | _ -> None
+
+let candidate_models_for_provider provider =
+  match provider with
+  | "llama" -> []
+  | "claude-api" ->
+      dedupe_keep_order [ Env_config_governance.Claude.default_model ]
+  | "codex-api" ->
+      dedupe_keep_order [ Env_config_governance.OpenAI.default_model ]
+  | "gemini-api" ->
+      dedupe_keep_order
+        [
+          Env_config_governance.Gemini.default_model;
+          Env_config_governance.Gemini.flash_model;
+        ]
+  | "glm" ->
+      dedupe_keep_order
+        [
+          Env_config_governance.Llm.default_model;
+          Env_config_governance.Llm.flash_model;
+          "auto";
+        ]
+  | _ -> []
+
+let llama_snapshot () =
+  let discovered_models, status, available, note =
+    match Tool_local_runtime_core.fetch_models_at Env_config_runtime.Llama.server_url with
+    | Ok (_url, models) -> (models, "online", true, None)
+    | Error message -> ([], "offline", false, Some message)
+  in
+  let models =
+    dedupe_keep_order
+      (discovered_models @ Option.to_list (default_model_for_provider "llama"))
+  in
+  {
+    provider = "llama";
+    kind = "local";
+    runtime_kind = "local";
+    auth_kind = "none";
+    status;
+    available;
+    supports_single_agent_run = available && models <> [];
+    default_model = default_model_for_provider "llama";
+    models;
+    source = "masc/local-runtime";
+    endpoint_url = endpoint_url_for_provider "llama";
+    note;
+  }
+
+let direct_provider_snapshot provider =
+  match provider with
+  | "claude-api" ->
+      let available = Provider_adapter.env_present "ANTHROPIC_API_KEY" in
+      let default_model = default_model_for_provider provider in
+      {
+        provider;
+        kind = "cloud";
+        runtime_kind = "direct_api";
+        auth_kind = auth_kind_for_provider provider;
+        status = if available then "configured" else "missing_auth";
+        available;
+        supports_single_agent_run = available && default_model <> None;
+        default_model;
+        models = candidate_models_for_provider provider;
+        source = "masc/provider-adapter";
+        endpoint_url = endpoint_url_for_provider provider;
+        note = None;
+      }
+  | "codex-api" ->
+      let available = Provider_adapter.env_present "OPENAI_API_KEY" in
+      let default_model = default_model_for_provider provider in
+      {
+        provider;
+        kind = "cloud";
+        runtime_kind = "direct_api";
+        auth_kind = auth_kind_for_provider provider;
+        status = if available then "configured" else "missing_auth";
+        available;
+        supports_single_agent_run = available && default_model <> None;
+        default_model;
+        models = candidate_models_for_provider provider;
+        source = "masc/provider-adapter";
+        endpoint_url = endpoint_url_for_provider provider;
+        note = None;
+      }
+  | "glm" ->
+      let available = Provider_adapter.env_present "ZAI_API_KEY" in
+      let default_model = default_model_for_provider provider in
+      {
+        provider;
+        kind = "cloud";
+        runtime_kind = "direct_api";
+        auth_kind = auth_kind_for_provider provider;
+        status = if available then "configured" else "missing_auth";
+        available;
+        supports_single_agent_run = available && default_model <> None;
+        default_model;
+        models = candidate_models_for_provider provider;
+        source = "masc/provider-adapter";
+        endpoint_url = endpoint_url_for_provider provider;
+        note = None;
+      }
+  | "gemini-api" -> (
+      let default_model = default_model_for_provider provider in
+      match Provider_adapter.resolve_gemini_direct_auth () with
+      | Provider_adapter.Gemini_api_key ->
+          {
+            provider;
+            kind = "cloud";
+            runtime_kind = "direct_api";
+            auth_kind = auth_kind_for_provider provider;
+            status = "configured";
+            available = true;
+            supports_single_agent_run = default_model <> None;
+            default_model;
+            models = candidate_models_for_provider provider;
+            source = "masc/provider-adapter";
+            endpoint_url = endpoint_url_for_provider provider;
+            note = None;
+          }
+      | Provider_adapter.Gemini_vertex_adc _ ->
+          {
+            provider;
+            kind = "cloud";
+            runtime_kind = "direct_api";
+            auth_kind = auth_kind_for_provider provider;
+            status = "vertex_adc";
+            available = true;
+            supports_single_agent_run = false;
+            default_model;
+            models = candidate_models_for_provider provider;
+            source = "masc/provider-adapter";
+            endpoint_url = endpoint_url_for_provider provider;
+            note =
+              Some
+                "Dashboard run MVP only supports Gemini via GEMINI_API_KEY. Vertex ADC inventory is visible but run is disabled.";
+          }
+      | Provider_adapter.Gemini_auth_missing message ->
+          {
+            provider;
+            kind = "cloud";
+            runtime_kind = "direct_api";
+            auth_kind = auth_kind_for_provider provider;
+            status = "missing_auth";
+            available = false;
+            supports_single_agent_run = false;
+            default_model;
+            models = candidate_models_for_provider provider;
+            source = "masc/provider-adapter";
+            endpoint_url = endpoint_url_for_provider provider;
+            note = Some message;
+          })
+  | other ->
+      {
+        provider = other;
+        kind = "cloud";
+        runtime_kind = "direct_api";
+        auth_kind = "unknown";
+        status = "unsupported";
+        available = false;
+        supports_single_agent_run = false;
+        default_model = None;
+        models = [];
+        source = "masc/provider-adapter";
+        endpoint_url = None;
+        note = Some "Unsupported provider";
+      }
+
+let provider_snapshots () : provider_snapshot list =
+  [
+    llama_snapshot ();
+    direct_provider_snapshot "claude-api";
+    direct_provider_snapshot "codex-api";
+    direct_provider_snapshot "gemini-api";
+    direct_provider_snapshot "glm";
+  ]
+
+let provider_snapshot_by_name name =
+  provider_snapshots ()
+  |> List.find_opt (fun (snapshot : provider_snapshot) ->
+         String.equal snapshot.provider name)
+
+let provider_snapshot_to_json (snapshot : provider_snapshot) =
+  `Assoc
+    [
+      ("provider", `String snapshot.provider);
+      ("kind", `String snapshot.kind);
+      ("runtime_kind", `String snapshot.runtime_kind);
+      ("auth_kind", `String snapshot.auth_kind);
+      ("status", `String snapshot.status);
+      ("available", `Bool snapshot.available);
+      ("supports_single_agent_run", `Bool snapshot.supports_single_agent_run);
+      ( "default_model",
+        match snapshot.default_model with
+        | Some value -> `String value
+        | None -> `Null );
+      ("model_count", `Int (List.length snapshot.models));
+      ("models", `List (List.map (fun model -> `String model) snapshot.models));
+      ("source", `String snapshot.source);
+      ( "endpoint_url",
+        match snapshot.endpoint_url with
+        | Some value -> `String value
+        | None -> `Null );
+      ("note", match snapshot.note with Some value -> `String value | None -> `Null);
+    ]
+
+let provider_inventory_json () =
+  let snapshots = provider_snapshots () in
+  let local_models =
+    snapshots
+    |> List.filter (fun snapshot -> snapshot.kind = "local")
+    |> List.fold_left
+         (fun acc snapshot -> acc + List.length snapshot.models)
+         0
+  in
+  let cloud_models =
+    snapshots
+    |> List.filter (fun snapshot -> snapshot.kind <> "local")
+    |> List.fold_left
+         (fun acc snapshot -> acc + List.length snapshot.models)
+         0
+  in
+  `Assoc
+    [
+      ("updated_at", `String (Types.now_iso ()));
+      ( "summary",
+        `Assoc
+          [
+            ("providers", `Int (List.length snapshots));
+            ("local_models", `Int local_models);
+            ("cloud_models", `Int cloud_models);
+          ] );
+      ( "providers",
+        `List (List.map provider_snapshot_to_json snapshots) );
+    ]
+
+let response_text_of_api_response (response : Oas.Types.api_response) =
+  Agent_sdk.Types.text_of_content response.content |> String.trim
+
+let provider_label_for_model provider model =
+  match provider with
+  | "llama" -> Ok ("llama:" ^ model)
+  | "claude-api" -> Ok ("claude:" ^ model)
+  | "codex-api" -> Ok ("openai:" ^ model)
+  | "gemini-api" -> Ok ("gemini:" ^ model)
+  | "glm" -> Ok ("glm:" ^ model)
+  | other ->
+      Error
+        (Printf.sprintf
+           "Unsupported provider '%s' for dashboard single-agent runs"
+           other)
+
+let resolve_provider_run_request ~provider ~model_opt ~prompt =
+  match provider_snapshot_by_name provider with
+  | None ->
+      Error (Printf.sprintf "Unknown provider '%s'" provider)
+  | Some snapshot ->
+      if not snapshot.supports_single_agent_run then
+        Error
+          (Option.value snapshot.note
+             ~default:
+               (Printf.sprintf
+                  "Provider '%s' is not available for dashboard single-agent runs"
+                  provider))
+      else
+        let selected_model =
+          match Option.bind model_opt trim_nonempty with
+          | Some model -> Some model
+          | None -> snapshot.default_model
+        in
+        (match selected_model with
+        | None ->
+            Error
+              (Printf.sprintf
+                 "Provider '%s' requires an explicit model"
+                 provider)
+        | Some model ->
+            if snapshot.models <> [] && not (List.mem model snapshot.models) then
+              Error
+                (Printf.sprintf
+                   "Model '%s' is not available for provider '%s'"
+                   model provider)
+            else if String.trim prompt = "" then
+              Error "prompt is required"
+            else
+              Ok (snapshot, model))
+
+let oas_provider_config_of_spec (spec : Cascade.model_spec) =
+  match spec.provider with
+  | Cascade.Gemini -> (
+      match Provider_adapter.resolve_gemini_direct_auth () with
+      | Provider_adapter.Gemini_api_key -> Oas_type_adapters.to_oas_provider spec
+      | Provider_adapter.Gemini_vertex_adc _ -> None
+      | Provider_adapter.Gemini_auth_missing _ -> None)
+  | _ -> Oas_type_adapters.to_oas_provider spec
+
+let run_system_prompt provider =
+  Printf.sprintf
+    "You are a single MASC dashboard run using provider %s. Answer directly, keep tool use disabled, and return only the final answer."
+    provider
+
+let execute_single_agent_run ~sw ~provider ~model ~prompt =
+  let label_result = provider_label_for_model provider model in
+  match label_result with
+  | Error _ as error -> error
+  | Ok label -> (
+      match Cascade.model_spec_of_string label with
+      | Error message -> Error message
+      | Ok spec -> (
+          match oas_provider_config_of_spec spec with
+          | None ->
+              Error
+                (Printf.sprintf
+                   "Provider '%s' is not runnable in dashboard single-agent mode"
+                   provider)
+          | Some provider_cfg -> (
+              let net = Eio_context.get_net () in
+              let builder =
+                Oas.Builder.create ~net ~model:provider_cfg.model_id
+                |> Oas.Builder.with_name "dashboard-single-run"
+                |> Oas.Builder.with_description
+                     "Dashboard-triggered single-agent execution"
+                |> Oas.Builder.with_system_prompt (run_system_prompt provider)
+                |> Oas.Builder.with_max_turns 4
+                |> Oas.Builder.with_max_tokens 2048
+                |> Oas.Builder.with_temperature 0.2
+                |> Oas.Builder.with_provider provider_cfg
+              in
+              match Oas.Builder.build_safe builder with
+              | Error error -> Error (Oas.Error.to_string error)
+              | Ok agent ->
+                  Fun.protect
+                    ~finally:(fun () ->
+                      try Oas.Agent.close agent with _ -> ())
+                    (fun () ->
+                      match Oas.Agent.run ~sw agent prompt with
+                      | Ok response -> Ok (response_text_of_api_response response)
+                      | Error error -> Error (Oas.Error.to_string error)) )))
+
+let start_run ~sw ~provider ~model_opt ~prompt =
+  match resolve_provider_run_request ~provider ~model_opt ~prompt with
+  | Error _ as error -> error
+  | Ok (_snapshot, model) ->
+      let run =
+        {
+          run_id = make_run_id ();
+          provider;
+          model;
+          prompt = String.trim prompt;
+          created_at = Types.now_iso ();
+          status = Queued;
+          started_at = None;
+          finished_at = None;
+          output = None;
+          error = None;
+        }
+      in
+      set_run_record run;
+      Eio.Fiber.fork ~sw (fun () ->
+          update_run_record run.run_id (fun current ->
+              current.status <- Running;
+              current.started_at <- Some (Types.now_iso ()));
+          match
+            execute_single_agent_run ~sw ~provider:run.provider ~model:run.model
+              ~prompt:run.prompt
+          with
+          | Ok output ->
+              update_run_record run.run_id (fun current ->
+                  current.status <- Completed;
+                  current.finished_at <- Some (Types.now_iso ());
+                  current.output <- Some output;
+                  current.error <- None)
+          | Error message ->
+              update_run_record run.run_id (fun current ->
+                  current.status <- Failed;
+                  current.finished_at <- Some (Types.now_iso ());
+                  current.output <- None;
+                  current.error <- Some message));
+      Ok
+        (`Assoc
+          [
+            ("run_id", `String run.run_id);
+            ("status", `String (string_of_run_status run.status));
+            ("provider", `String run.provider);
+            ("model", `String run.model);
+          ])
+
+let run_status_json run_id =
+  match find_run_record run_id with
+  | Some run -> Ok (run_record_to_json run)
+  | None ->
+      Error (Printf.sprintf "run_id '%s' not found" run_id)

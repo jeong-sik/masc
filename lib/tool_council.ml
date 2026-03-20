@@ -504,8 +504,10 @@ let execute_action ctx (case_ : GV2.case_record) (order : GV2.execution_order) =
       | action_type ->
           Error
             (Printf.sprintf
-               "unsupported execution action_type for governance v2: %s"
-               action_type))
+               "unsupported execution action_type for governance v2: '%s'. \
+                Supported: add_task, start_operation, set_param, release_task, \
+                flag_post, restart_keeper"
+               (String.trim action_type)))
 
 (* TODO(M-13): V1 governance tools (debate, consensus, sessions) are deprecated.
    Full removal requires auditing all callers and cleaning up the Debate/Consensus

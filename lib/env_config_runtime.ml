@@ -295,4 +295,4 @@ module Chain = struct
     get_string ~default:"gemini" "MASC_CHAIN_JUDGE_MODEL"
 end
 
-(** {1 Internal Guardian Configuration} *)
+(** {1 Internal Safety Configuration} *)

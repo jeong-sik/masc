@@ -2,7 +2,7 @@
 
     Subscribes to all [masc:*] events on the OAS Event_bus
     and relays them as SSE broadcasts to connected dashboard clients.
-    Pattern: gardener.ml [start_sentinel_reactor_fiber].
+    Pattern: keeper supervisor fiber.
 
     @since 2.96.0 *)
 

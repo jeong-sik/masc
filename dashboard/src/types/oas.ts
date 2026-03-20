@@ -23,6 +23,6 @@ export interface OasKeeperSnapshot {
 export interface OasHealthSummary {
   agent_events_count: number
   keeper_snapshots_count: number
-  last_gardener_tick: number | null
+  last_keeper_tick: number | null
   total_events: number
 }

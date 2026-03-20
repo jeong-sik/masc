@@ -686,7 +686,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   in
   if not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive"
   then "offline"
-  (* H-4 fix: report zombie/stale keepers regardless of keepalive or gardener state *)
+  (* H-4 fix: report zombie/stale keepers regardless of keepalive state *)
   else if is_zombie || last_seen_ago_s > stale_threshold_s then
     "stale"
   else if not keepalive_running then

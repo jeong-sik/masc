@@ -208,67 +208,6 @@ export interface SocialRuntimeStatus {
   } | null
 }
 
-export interface GardenerRuntimeStatus {
-  enabled: boolean
-  alive: boolean
-  status?: string
-  tick_in_progress?: boolean
-  tick_count?: number
-  check_interval_sec?: number
-  last_tick_started_at?: string | null
-  last_tick_completed_at?: string | null
-  next_tick_due_at?: string | null
-  last_health_check_at?: string | null
-  last_intervention?: string
-  last_decision_source?: string
-  last_action?: string
-  last_target?: string | null
-  last_reason?: string | null
-  last_error?: string | null
-  circuit_open?: boolean
-  circuit_open_until?: string | null
-  can_spawn?: boolean
-  can_retire?: boolean
-  last_spawn_attempt_at?: string | null
-  last_retirement_attempt_at?: string | null
-  spawns_today?: number
-  retirements_today?: number
-  health_summary?: {
-    total_agents?: number
-    active_agents?: number
-    idle_agents?: number
-    todo_count?: number
-    high_priority_todo?: number
-    orphan_count?: number
-    homeostatic_score?: number
-    needs_workers?: boolean
-  }
-}
-
-export interface GuardianRuntimeStatus {
-  enabled: boolean
-  mode?: string
-  masc_enabled?: boolean
-  masc_loops_running?: boolean
-  runtime_owner?: string | null
-  zombie_loop_running?: boolean
-  gc_loop_running?: boolean
-  last_zombie_cleanup?: string | null
-  last_gc?: string | null
-  last_zombie_result?: string | null
-  last_gc_result?: string | null
-}
-
-export interface SentinelRuntimeStatus {
-  enabled: boolean
-  started: boolean
-  agent_name?: string | null
-  llm_enabled?: boolean
-  uptime_s?: number
-  embedded_guardian_loops_running?: boolean
-  guardian_runtime_owner?: string | null
-  consumers?: string[]
-}
 
 export interface PendingConfirmation {
   confirm_token: string

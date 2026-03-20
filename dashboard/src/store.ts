@@ -69,7 +69,6 @@ export const agentActivity = signal<AgentActivityEntry[]>([])
 
 export interface ProviderCapacity {
   agent_capacity: {
-    gardener_enabled: boolean
     min_agents: number
     target_agents: number
     max_agents: number
@@ -124,7 +123,7 @@ const OAS_KEEPER_SNAPSHOT_MAX = 20
 
 export const oasAgentEvents = signal<OasAgentEvent[]>([])
 export const oasKeeperSnapshots = signal<Map<string, OasKeeperSnapshot>>(new Map())
-export const oasLastGardenerTick = signal<number | null>(null)
+export const oasLastKeeperTick = signal<number | null>(null)
 export const oasTotalEvents = signal(0)
 
 export function pushOasAgentEvent(event: OasAgentEvent): void {
@@ -154,12 +153,12 @@ export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
 export const oasHealthSummary: ReadonlySignal<{
   agentEventsCount: number
   keeperSnapshotsCount: number
-  lastGardenerTick: number | null
+  lastKeeperTick: number | null
   totalEvents: number
 }> = computed(() => ({
   agentEventsCount: oasAgentEvents.value.length,
   keeperSnapshotsCount: oasKeeperSnapshots.value.size,
-  lastGardenerTick: oasLastGardenerTick.value,
+  lastKeeperTick: oasLastKeeperTick.value,
   totalEvents: oasTotalEvents.value,
 }))
 

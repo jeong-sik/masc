@@ -234,7 +234,7 @@ let claim_task_r config ~agent_name ~task_id
 
 (** Unified task transition (single entrypoint).
     When [~force:true], release/cancel/done bypass the assignee guard.
-    Used by Board Gardener keeper for orphan task cleanup. *)
+    Used by keeper for orphan task cleanup. *)
 let transition_task_r config ~agent_name ~task_id ~action
     ?expected_version ?(notes="") ?(reason="") ?(force=false) () : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
@@ -345,11 +345,11 @@ let transition_task_r config ~agent_name ~task_id ~action
 let release_task_r config ~agent_name ~task_id ?expected_version () : string Types.masc_result =
   transition_task_r config ~agent_name ~task_id ~action:"release" ?expected_version ()
 
-(** Force-release a task regardless of assignee. Board Gardener privilege. *)
+(** Force-release a task regardless of assignee. Keeper privilege. *)
 let force_release_task_r config ~agent_name ~task_id () : string Types.masc_result =
   transition_task_r config ~agent_name ~task_id ~action:"release" ~force:true ()
 
-(** Force-done a task regardless of assignee. Board Gardener privilege. *)
+(** Force-done a task regardless of assignee. Keeper privilege. *)
 let force_done_task_r config ~agent_name ~task_id ~notes () : string Types.masc_result =
   transition_task_r config ~agent_name ~task_id ~action:"done" ~notes ~force:true ()
 

@@ -43,11 +43,12 @@ let cp_cleanup_fn
   : (config -> cp_cleanup_result) ref
   = ref (fun _config -> empty_cp_result)
 
-let stale_sentinel_daily_sec = 12.0 *. 3600.0
+let stale_system_daily_sec = 12.0 *. 3600.0
 
 let board_artifact_title title =
   let title = String.lowercase_ascii (String.trim title) in
   String.starts_with ~prefix:"[sentinel daily]" title
+  || String.starts_with ~prefix:"[keeper daily]" title
 
 let board_artifact_author author =
   let author = String.lowercase_ascii (String.trim author) in
@@ -60,9 +61,10 @@ let board_artifact_author author =
 let should_delete_board_artifact now (post : Board.post) =
   let author = Board.Agent_id.to_string post.author in
   board_artifact_author author
-  || (String.equal (String.lowercase_ascii author) "sentinel"
+  || ((String.equal (String.lowercase_ascii author) "sentinel"
+       || String.equal (String.lowercase_ascii author) "keeper")
       && board_artifact_title post.title
-      && now -. post.updated_at >= stale_sentinel_daily_sec)
+      && now -. post.updated_at >= stale_system_daily_sec)
 
 let cleanup_board_artifacts () =
   let now = Time_compat.now () in
@@ -186,7 +188,7 @@ let cleanup_zombies config =
         | Types.Claimed { assignee; _ }
         | Types.InProgress { assignee; _ }
           when List.exists (fun (n, _) -> n = assignee) !zombie_entries ->
-            (match !force_release_task_fn config ~agent_name:"gardener" ~task_id:task.id () with
+            (match !force_release_task_fn config ~agent_name:"keeper-gc" ~task_id:task.id () with
              | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
              | Error e ->
                  if not (List.mem assignee !release_failed_agents) then

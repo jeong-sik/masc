@@ -38,11 +38,9 @@ let handle_keeper_status ctx args : tool_result =
         get_bool args "include_compaction_history" (not fast)
       in
       let models = m.models in
-      (match model_specs_of_strings models with
-       | Error e -> (false, "❌ " ^ e)
-       | Ok specs ->
-         let primary = match specs with m0 :: _ -> m0 | [] -> Cascade.default_local_model_spec () in
-         let base_dir = session_base_dir ctx.config in
+      let specs = Cascade.available_model_specs_of_strings models in
+      let primary = match specs with m0 :: _ -> m0 | [] -> Cascade.default_local_model_spec () in
+      let base_dir = session_base_dir ctx.config in
          let ctx_opt =
            if include_context then
              let (_session, ctx_opt) =
@@ -523,7 +521,7 @@ let handle_keeper_status ctx args : tool_result =
              ("history", `String history_path);
            ]);
          ] in
-         (true, Yojson.Safe.pretty_to_string json))
+         (true, Yojson.Safe.pretty_to_string json)
 
 let handle_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in

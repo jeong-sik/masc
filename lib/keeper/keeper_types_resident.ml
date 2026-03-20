@@ -50,10 +50,18 @@ let model_spec_is_local_runtime (model : Cascade.model_spec) =
   | Cascade.Llama -> true
   | _ -> false
 
+let label_is_local_runtime (label : string) =
+  let l = String.lowercase_ascii (String.trim label) in
+  String.length l >= 6 && String.sub l 0 6 = "llama:"
+
 let model_spec_is_available (model : Cascade.model_spec) =
   match model.provider with
   | Cascade.Llama -> true
   | _ -> true
+
+(** Check whether a model label refers to an available provider.
+    Currently always returns true (all providers are considered available). *)
+let label_is_available (_label : string) = true
 
 let keeper_fallback_model_labels () =
   let gemini_available =
@@ -78,19 +86,16 @@ let keeper_fallback_model_labels () =
     else None)
 
 let maybe_append_keeper_fallback_models (models : string list) =
-  match model_specs_of_strings models with
-  | Error _ -> models
-  | Ok specs ->
-      let all_local = specs <> [] && List.for_all model_spec_is_local_runtime specs in
-      let any_available = List.exists model_spec_is_available specs in
-      if (not all_local) || any_available then
-        models
-      else
-        let extra =
-          keeper_fallback_model_labels ()
-          |> List.filter (fun label -> not (List.mem label models))
-        in
-        if extra = [] then models else models @ extra
+  let all_local = models <> [] && List.for_all label_is_local_runtime models in
+  let any_available = List.exists label_is_available models in
+  if (not all_local) || any_available then
+    models
+  else
+    let extra =
+      keeper_fallback_model_labels ()
+      |> List.filter (fun label -> not (List.mem label models))
+    in
+    if extra = [] then models else models @ extra
 
 let ensure_api_keys (models : Cascade.model_spec list) : (unit, string) result =
   let missing =
@@ -106,6 +111,16 @@ let ensure_api_keys (models : Cascade.model_spec list) : (unit, string) result =
   | [] -> Ok ()
   | xs ->
       Error (Printf.sprintf "Missing API key env vars: %s" (String.concat ", " xs))
+
+(** Check API key availability using model label strings (no model_spec needed).
+    Parses labels to extract api_key_env, filtering out unparseable labels. *)
+let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
+  let specs = Cascade.available_model_specs_of_strings labels in
+  if specs = [] && labels <> [] then
+    Error (Printf.sprintf "No valid/available model specs for labels: %s"
+      (String.concat ", " labels))
+  else
+    ensure_api_keys specs
 
 let keeper_metrics_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".metrics.jsonl")

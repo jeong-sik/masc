@@ -187,7 +187,7 @@ let parse_intent_response (text : string) : (query_intent * float) option =
 
 (** Validate that an LLM response contains a parseable intent. *)
 let intent_response_is_valid (resp : Llm_provider.Types.api_response) : bool =
-  parse_intent_response (Cascade.text_of_response resp) <> None
+  parse_intent_response (Llm_provider.Types.text_of_response resp) <> None
 
 (** Classify query intent using LLM semantic understanding.
     Returns (intent, confidence) or falls back to low-confidence default. *)
@@ -200,7 +200,7 @@ let classify_intent_llm (query : string) : query_intent * float =
       ~accept:intent_response_is_valid ()
   with
   | Ok resp -> (
-      match parse_intent_response (Cascade.text_of_response resp) with
+      match parse_intent_response (Llm_provider.Types.text_of_response resp) with
       | Some result -> result
       | None -> (Coordination, 0.3))  (* unparseable → low-confidence fallback *)
   | Error _err -> (Coordination, 0.3)  (* LLM error → low-confidence fallback *)
@@ -215,7 +215,7 @@ let classify_intent_hybrid (query : string) : query_intent * float =
       ~accept:intent_response_is_valid ()
   with
   | Ok resp -> (
-      match parse_intent_response (Cascade.text_of_response resp) with
+      match parse_intent_response (Llm_provider.Types.text_of_response resp) with
       | Some result -> result
       | None -> classify_intent_heuristic query)
   | Error _err -> classify_intent_heuristic query

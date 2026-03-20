@@ -29,7 +29,11 @@ let test_load_models_from_config () =
   with_temp_json
     {|{"heartbeat_action_models":["llama:qwen-local","llama:qwen-local-fallback"]}|}
     (fun path ->
-      let specs = Cascade.get_cascade ~config_path:path ~cascade_name:"heartbeat_action" () in
+      let from_file =
+        Llm_provider.Cascade_config.load_profile ~config_path:path ~name:"heartbeat_action"
+      in
+      check int "loaded model count" 2 (List.length from_file);
+      let specs = Model_spec.available_model_specs_of_strings from_file in
       check int "spec count" 2 (List.length specs);
       match specs with
       | [ first; second ] ->
@@ -44,7 +48,10 @@ let test_skips_invalid_and_missing_api_key () =
       with_temp_json
         {|{"heartbeat_action_models":["invalid","gemini:gemini-2.5-pro","llama:qwen-live"]}|}
         (fun path ->
-          let specs = Cascade.get_cascade ~config_path:path ~cascade_name:"heartbeat_action" () in
+          let from_file =
+            Llm_provider.Cascade_config.load_profile ~config_path:path ~name:"heartbeat_action"
+          in
+          let specs = Model_spec.available_model_specs_of_strings from_file in
           check int "only llama survives" 1 (List.length specs);
           match specs with
           | [ only ] ->
@@ -54,8 +61,8 @@ let test_skips_invalid_and_missing_api_key () =
           | _ -> fail "expected one surviving spec"))
 
 let test_missing_config_uses_defaults () =
-  let path = Filename.concat (Filename.get_temp_dir_name ()) "missing-llm-cascade.json" in
-  let specs = Cascade.get_cascade ~config_path:path ~cascade_name:"heartbeat_action" () in
+  let defaults = Cascade.default_model_strings ~cascade_name:"heartbeat_action" in
+  let specs = Model_spec.available_model_specs_of_strings defaults in
   check bool "defaults available" true (List.length specs >= 1);
   match specs with
   | first :: _ ->

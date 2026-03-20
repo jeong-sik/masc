@@ -339,7 +339,7 @@ let verify_worker ~pattern (worker : worker_plan) diff =
           ~messages:[Agent_sdk.Types.user_msg prompt]
           ~temperature:0.0 ~max_tokens:200 ()
       with
-      | Ok resp -> Verifier_oas.parse_verdict (Cascade.text_of_response resp)
+      | Ok resp -> Verifier_oas.parse_verdict (Llm_provider.Types.text_of_response resp)
       | Error e -> Verifier_oas.Warn ("verifier_unavailable: " ^ e)
     in
     let our_verdict =

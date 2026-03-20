@@ -49,7 +49,7 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
         ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~max_tokens:200 () with
-    | Ok resp -> Cascade.text_of_response resp
+    | Ok resp -> Llm_provider.Types.text_of_response resp
     | Error _ -> ""
   in
 
@@ -442,7 +442,7 @@ Room 내 활성 에이전트: %d
         ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~max_tokens:300 () with
-    | Ok resp -> Ok (Cascade.text_of_response resp)
+    | Ok resp -> Ok (Llm_provider.Types.text_of_response resp)
     | Error err -> Error ("llm intervention failed: " ^ err)
   in
 

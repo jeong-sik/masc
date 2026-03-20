@@ -8,10 +8,15 @@
     Public entry points:
     - {!complete} — messages + cascade_name, returns api_response or error
 
+    Response helpers ([text_of_response], [has_tool_use], [tool_msg])
+    removed — use {!Llm_provider.Types} directly.
+    [get_cascade] inlined into {!Oas_worker}.
+
     @since 2.114.0 — original
     @since 2.115.0 — delegated to OAS Cascade_config
     @since 2.116.0 — call_raw, call_with_tools added
-    @since 2.117.0 — model types extracted to Model_spec *)
+    @since 2.117.0 — model types extracted to Model_spec
+    @since 2.123.0 — OAS-duplicate helpers removed *)
 
 (* ================================================================ *)
 (* Helpers                                                           *)
@@ -28,7 +33,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
       max min_v (min max_v v)
 
 (* ================================================================ *)
-(* Response helpers                                                  *)
+(* Usage helpers (no OAS equivalent — kept here)                     *)
 (* ================================================================ *)
 
 (** Compute total tokens from OAS api_usage. *)
@@ -45,10 +50,6 @@ let zero_usage : Agent_sdk.Types.api_usage =
 let usage_of_response (resp : Llm_provider.Types.api_response) : Agent_sdk.Types.api_usage =
   match resp.usage with Some u -> u | None -> zero_usage
 
-(** Extract text content from an api_response. *)
-let text_of_response (resp : Llm_provider.Types.api_response) : string =
-  Agent_sdk.Types.text_of_content resp.content
-
 (** Measure wall-clock latency of a thunk in milliseconds.
     Use at call sites that need per-call timing (keeper tool loops, etc.). *)
 let timed (f : unit -> 'a) : 'a * int =
@@ -56,15 +57,6 @@ let timed (f : unit -> 'a) : 'a * int =
   let result = f () in
   let ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
   (result, ms)
-
-(** Check if an api_response contains any ToolUse blocks. *)
-let has_tool_use (resp : Llm_provider.Types.api_response) : bool =
-  List.exists
-    (function Agent_sdk.Types.ToolUse _ -> true | _ -> false)
-    resp.content
-
-let tool_msg ~name:_ ~call_id text =
-  Agent_sdk.Types.tool_result_msg ~tool_use_id:call_id ~content:text ()
 
 (* ================================================================ *)
 (* UTF-8 Sanitization                                               *)
@@ -230,43 +222,6 @@ let default_model_strings ~cascade_name =
 (* ================================================================ *)
 (* Cascade orchestration                                             *)
 (* ================================================================ *)
-
-(** Backward compat: return MASC model_spec list.
-    Prefer {!complete} instead. *)
-let get_cascade ?(config_path = "") ~cascade_name () :
-    Model_spec.model_spec list =
-  let defaults = default_model_strings ~cascade_name in
-  let configured =
-    if String.length config_path > 0 then
-      let from_file =
-        Llm_provider.Cascade_config.load_profile
-          ~config_path ~name:cascade_name
-      in
-      if from_file <> [] then from_file else defaults
-    else
-      match default_config_path () with
-      | Some path ->
-        let from_file =
-          Llm_provider.Cascade_config.load_profile
-            ~config_path:path ~name:cascade_name
-        in
-        if from_file <> [] then from_file else defaults
-      | None -> defaults
-  in
-  let specs = Model_spec.available_model_specs_of_strings configured in
-  if specs <> [] then specs
-  else
-    let fallback = default_model_strings ~cascade_name in
-    if configured = fallback then (
-      Printf.eprintf
-        "[cascade] %s: no callable models from built-in defaults\n%!"
-        cascade_name;
-      [])
-    else (
-      Printf.eprintf
-        "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!"
-        cascade_name;
-      Model_spec.available_model_specs_of_strings fallback)
 
 (** Format OAS http_error as cascade error string. *)
 let format_cascade_error ~cascade_name = function

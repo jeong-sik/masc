@@ -109,7 +109,7 @@ let score_to_verdict ~(dim_name : string) (score : int) : verdict =
 
 (** Validate that an LLM response contains parseable G-Eval scores. *)
 let geval_response_is_valid (resp : Llm_provider.Types.api_response) : bool =
-  match parse_geval_response (Cascade.text_of_response resp) with
+  match parse_geval_response (Llm_provider.Types.text_of_response resp) with
   | Ok _ -> true
   | Error _ -> false
 
@@ -125,7 +125,7 @@ let verify_llm ~content : (verification_result, string) result =
   with
   | Error err -> Error err
   | Ok resp -> (
-      match parse_geval_response (Cascade.text_of_response resp) with
+      match parse_geval_response (Llm_provider.Types.text_of_response resp) with
       | Error err -> Error err
       | Ok (r, q, s, _reasoning) ->
           let relevance = score_to_verdict ~dim_name:"relevance" r in

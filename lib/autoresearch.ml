@@ -689,7 +689,7 @@ let generate_code_change ~goal ~baseline ~history ~insights
       ~temperature:0.7 ~max_tokens:4096 ~timeout_sec:120 ()
   with
   | Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
-  | Ok resp -> parse_llm_code_response (Cascade.text_of_response resp)
+  | Ok resp -> parse_llm_code_response (Llm_provider.Types.text_of_response resp)
 
 (* ================================================================ *)
 (* Loop State Management                                            *)

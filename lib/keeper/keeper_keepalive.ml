@@ -29,41 +29,27 @@ let keeper_spawn_slots_available () =
   let max_keepers = Env_config.KeeperBootstrap.max_active_keepers in
   max_keepers <= 0 || running_keepers () < max_keepers
 
-let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
-    (m : keeper_meta) : unit =
-  if not m.presence_keepalive then ()
-  else if Hashtbl.mem keepalives m.name then ()
-  else if not (keeper_spawn_slots_available ()) then ()
-  else (
-    let stop = ref false in
-    Hashtbl.replace keepalives m.name
-      { stop; started_at = Time_compat.now () };
-    (try
-       if not (Room_utils.is_initialized ctx.config) then
-         ignore (Room.init ctx.config ~agent_name:None)
-     with exn ->
-       Log.Keeper.error "room init failed: %s"
-         (Printexc.to_string exn));
-    (try
-       let synced = ensure_keeper_room_presence ctx.config m in
-       ignore (write_meta ctx.config synced)
-     with exn ->
-       Log.Keeper.error "room presence bootstrap failed: %s"
-         (Printexc.to_string exn));
-    Eio.Fiber.fork ~sw:ctx.sw (fun () ->
-        let keepalive_started_ts = Time_compat.now () in
-        let snapshot_interval_sec =
-          match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_SEC" with
-          | Some s ->
-              (try
-                 max 15 (min 3600 (int_of_string (String.trim s)))
-               with Failure _ -> 60)
-          | None -> 60
-        in
-        let last_snapshot_ts = ref 0.0 in
-        let rec loop () =
-          if !stop then ()
-          else (
+let register_keepalive name entry =
+  Hashtbl.replace keepalives name entry
+
+let unregister_keepalive name =
+  Hashtbl.remove keepalives name
+
+let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
+    (m : keeper_meta) (stop : bool ref) : unit =
+  let keepalive_started_ts = Time_compat.now () in
+  let snapshot_interval_sec =
+    match Sys.getenv_opt "MASC_KEEPER_SNAPSHOT_SEC" with
+    | Some s ->
+        (try
+           max 15 (min 3600 (int_of_string (String.trim s)))
+         with Failure _ -> 60)
+    | None -> 60
+  in
+  let last_snapshot_ts = ref 0.0 in
+  let rec loop () =
+    if !stop then ()
+    else (
             let meta_current =
               match read_meta ctx.config m.name with
               | Ok (Some latest) -> latest
@@ -348,8 +334,32 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
             let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
             Eio.Time.sleep ctx.clock (base +. jitter);
             loop ())
-        in
-        loop ()))
+  in
+  loop ()
+
+let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
+    (m : keeper_meta) : unit =
+  if not m.presence_keepalive then ()
+  else if Hashtbl.mem keepalives m.name then ()
+  else if not (keeper_spawn_slots_available ()) then ()
+  else (
+    let stop = ref false in
+    Hashtbl.replace keepalives m.name
+      { stop; started_at = Time_compat.now () };
+    (try
+       if not (Room_utils.is_initialized ctx.config) then
+         ignore (Room.init ctx.config ~agent_name:None)
+     with exn ->
+       Log.Keeper.error "room init failed: %s"
+         (Printexc.to_string exn));
+    (try
+       let synced = ensure_keeper_room_presence ctx.config m in
+       ignore (write_meta ctx.config synced)
+     with exn ->
+       Log.Keeper.error "room presence bootstrap failed: %s"
+         (Printexc.to_string exn));
+    Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+        run_heartbeat_loop ~proactive_warmup_sec ctx m stop))
 
 let stop_keepalive name =
   match Hashtbl.find_opt keepalives name with

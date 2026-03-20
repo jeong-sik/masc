@@ -95,9 +95,10 @@ let run_with_tools
     tools_executed_ref := name :: !tools_executed_ref;
     make_dispatch ~config ~meta ~gate_config ~accumulated_cost_ref ~name ~args
   in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:(Printf.sprintf "keeper-%s" meta.name) in
   match Oas_worker.run_named_with_masc_tools
     ~cascade_name ~goal ~system_prompt ~masc_tools ~dispatch
-    ~max_turns ~temperature ~max_tokens ?guardrails ()
+    ~max_turns ~temperature ~max_tokens ?guardrails ~memory ()
   with
   | Ok oas_result ->
       Ok { oas_result; tools_executed = List.rev !tools_executed_ref }
@@ -126,9 +127,10 @@ let run_with_custom_dispatch
   : (Oas_worker.run_result, string) result =
   ignore model_spec_override;
   let cascade_name = Printf.sprintf "keeper_%s" meta.name in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:(Printf.sprintf "keeper-%s" meta.name) in
   Oas_worker.run_named_with_masc_tools
     ~cascade_name ~goal ~system_prompt ~masc_tools ~dispatch
-    ~max_turns ~temperature ~max_tokens ?guardrails ()
+    ~max_turns ~temperature ~max_tokens ?guardrails ~memory ()
 
 (* ================================================================ *)
 (* Public: run_simple                                                *)
@@ -144,9 +146,10 @@ let run_simple
     ~(max_tokens : int)
     ()
   : (Oas_worker.run_result, string) result =
-  ignore (config, meta);
+  ignore config;
+  let memory = Memory_oas_bridge.create_memory ~agent_name:(Printf.sprintf "keeper-%s" meta.name) in
   Oas_worker.run_named ~cascade_name ~goal:prompt ~system_prompt
-    ~max_turns:1 ~temperature ~max_tokens ()
+    ~max_turns:1 ~temperature ~max_tokens ~memory ()
 
 (* ================================================================ *)
 (* Public: result extractors                                         *)

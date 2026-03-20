@@ -213,6 +213,8 @@
    log
    thompson_sampling
    memory_stream
+   memory_stream_sync
+   memory_oas_bridge
    agent_planner
    reflection
    relation_materializer

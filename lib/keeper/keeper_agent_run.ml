@@ -43,10 +43,14 @@ let run_turn
     ~(generation : int)
     ()
   : (run_result, string) result =
+  let agent_name = Printf.sprintf "keeper-%s" meta.name in
   let meta_ref = ref meta in
   let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
   let hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_ref ~generation () in
+  let memory = Memory_oas_bridge.create_memory ~agent_name in
+  ignore (Memory_oas_bridge.seed_institution ~memory ~config);
+  ignore (Memory_oas_bridge.seed_procedures ~memory ~agent_name:"_global" ~limit:5);
   let reducer = Agent_sdk.Context_reducer.compose [
     { Agent_sdk.Context_reducer.strategy =
         Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 } };
@@ -60,6 +64,7 @@ let run_turn
       ~tools
       ~hooks
       ~context_reducer:reducer
+      ~memory
       ~max_turns:3
       ~temperature:0.3
       ~max_tokens:4096

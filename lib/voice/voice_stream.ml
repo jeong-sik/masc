@@ -120,7 +120,7 @@ let safe_close_client t ic =
   (try
      if not (Ws.Wsd.is_closed ic.wsd) then
        Ws.Wsd.close ic.wsd
-   with exn -> Log.Misc.warn "ws close: %s" (Printexc.to_string exn));
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.warn "ws close: %s" (Printexc.to_string exn));
   remove_client t ic.client.id
 
 let mark_client_error t ic message =
@@ -204,7 +204,9 @@ let send_bytes t ic ~kind payload =
       Eio.Mutex.use_rw ~protect:true ic.send_mutex (fun () ->
         Ws.Wsd.send_bytes ic.wsd ~kind payload ~off:0 ~len:(Bytes.length payload);
         Ws.Wsd.flushed ic.wsd finish);
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> finish (); raise e
+    | exn ->
       finish ();
       mark_client_error t ic (Printexc.to_string exn)
   end
@@ -272,16 +274,20 @@ let start ~sw ~net ~clock t =
           let flow, client_addr = Eio.Net.accept ~sw socket in
           Eio.Fiber.fork ~sw (fun () ->
             try connection_handler client_addr flow
-            with exn ->
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
               Log.error ~ctx:"voice_stream" "Handler error: %s" (Printexc.to_string exn));
           accept_loop 0.05
-        with exn ->
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
           if t.should_stop then
             ()
           else begin
             Log.error ~ctx:"voice_stream" "Accept error: %s" (Printexc.to_string exn);
             (try Eio.Time.sleep clock backoff_s
-             with exn -> Log.Misc.warn "sleep interrupted: %s" (Printexc.to_string exn));
+             with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.warn "sleep interrupted: %s" (Printexc.to_string exn));
             let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
             accept_loop next_backoff
           end
@@ -297,7 +303,7 @@ let stop t =
    | Some (Listening_socket socket) ->
      t.server_socket <- None;
      (try Eio.Resource.close socket
-      with exn -> Eio.traceln "[WARN] socket close: %s" (Printexc.to_string exn))
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Eio.traceln "[WARN] socket close: %s" (Printexc.to_string exn))
    | None -> ());
   let clients = Hashtbl.fold (fun _ ic acc -> ic :: acc) t.clients [] in
   List.iter (fun ic -> safe_close_client t ic) clients;

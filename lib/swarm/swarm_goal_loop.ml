@@ -101,7 +101,9 @@ let measure_metric metric_fn =
         Error (Printf.sprintf "metric_fn exited with code %d" code)
     | _ ->
         Error "metric_fn terminated abnormally"
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Error (Printf.sprintf "metric_fn failed: %s" (Printexc.to_string exn))
 
 (* ================================================================ *)

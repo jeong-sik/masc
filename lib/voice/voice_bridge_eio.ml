@@ -387,7 +387,9 @@ let single_voice_mcp_call ~sw ~client ~uri ~headers ~body_str =
     else
       Error (Printf.sprintf "HTTP %d: %s"
         (Cohttp.Code.code_of_status status) body_str)
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Error (Printf.sprintf "Connection error: %s" (Printexc.to_string exn))
 
 (** Make HTTP POST request to Voice MCP server with timeout and retry - Eio version *)
@@ -448,7 +450,9 @@ let extract_mcp_result json =
           (try Ok (Yojson.Safe.from_string t)
            with Yojson.Json_error _ -> Ok (`String t))
         | None -> Ok result)
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))
 
 let call_voice_mcp_endpoint ~sw ~clock ~net ~endpoint ~tool_name ~arguments =
@@ -594,7 +598,9 @@ let is_voice_server_available ~sw ~clock ~net =
                 in
                 voice_server_available := Some available;
                 Ok available
-          with exn ->
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
             Eio.traceln "[WARN] voice server check failed: %s"
               (Printexc.to_string exn);
             voice_server_available := Some false;
@@ -858,5 +864,7 @@ let health_check ~sw ~clock:_ ~net () =
           Error
             (Printf.sprintf "Unhealthy: HTTP %d"
                (Cohttp.Code.code_of_status status))
-      with exn ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
         Error (Printf.sprintf "Not reachable: %s" (Printexc.to_string exn))

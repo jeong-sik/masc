@@ -206,7 +206,9 @@ let make_request_handler routes =
       match Router.find_route routes req with
       | Some route -> route.handler req reqd
       | None -> Response.not_found reqd
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       Response.internal_error (Printexc.to_string exn) reqd
 
 (** Httpun-Compatible Adapter Layer
@@ -283,7 +285,9 @@ let run ~sw ~net ~clock config request_handler =
         Eio.Fiber.fork ~sw (fun () ->
           Eio.Switch.run (fun conn_sw ->
             Eio.Switch.on_release conn_sw (fun () ->
-              try Eio.Flow.close flow with exn ->
+              try Eio.Flow.close flow with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
                 Log.Misc.error "[h2] flow close failed: %s" (Printexc.to_string exn)
             );
             try
@@ -293,7 +297,9 @@ let run ~sw ~net ~clock config request_handler =
                 ~error_handler
                 client_addr
                 flow
-            with exn ->
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
               Log.Http.error "Connection error: %s" (Printexc.to_string exn)
           )
         )

@@ -119,7 +119,9 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       ("slo_target_age_s", `Int slo_target_age_s);
       ("slo_breached", `Bool slo_breached);
     ], true)
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Log.Dashboard.error "board_monitoring_json failed: %s"
       (Printexc.to_string exn);
     (`Assoc [
@@ -246,7 +248,9 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
       ("slo_breached", `Bool slo_breached);
       ("judge_online", `Bool judge_online);
     ], true)
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Log.Dashboard.error "governance_monitoring_json failed: %s"
       (Printexc.to_string exn);
     (`Assoc [

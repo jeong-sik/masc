@@ -813,7 +813,9 @@ let start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr () =
                with_cache_lock (fun () ->
                    cache.refresh_in_flight <- false;
                    cache.last_error <- Some reason)
-         with exn ->
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
            with_cache_lock (fun () ->
                cache.refresh_in_flight <- false;
                cache.last_error <- Some (Printexc.to_string exn)));

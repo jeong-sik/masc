@@ -506,7 +506,7 @@ let run_sync_handoff ctx args : result =
         ~to_generation:new_cell.Mitosis.generation
         ~dna_size
         ~context_ratio)
-       with exn -> Log.Mitosis_log.error "record_handoff failed: %s" (Printexc.to_string exn));
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Mitosis_log.error "record_handoff failed: %s" (Printexc.to_string exn));
       let effective_agent =
         if !selected_agent = "" then normalized_target_agent else !selected_agent
       in
@@ -579,7 +579,7 @@ let run_sync_handoff ctx args : result =
           in
           let new_state = Adaptive_thresholds.adapt current_state outcome in
           (try Adaptive_thresholds.save_state ~room:room_name new_state
-           with exn ->
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Mitosis_log.error "adaptive save failed: %s" (Printexc.to_string exn));
           Log.Mitosis_log.info "adaptive adapted room=%s prepare=%.3f->%.3f handoff=%.3f->%.3f"
             room_name
@@ -652,7 +652,7 @@ let handle_mitosis_handoff ctx args : result =
           ~saga_id
           ~status:"running"
           ~payload:(`Assoc [("message", `String "handoff saga running")]))
-         with exn -> Log.Mitosis_log.error "write_saga_state(running) failed: %s" (Printexc.to_string exn));
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Mitosis_log.error "write_saga_state(running) failed: %s" (Printexc.to_string exn));
         let started = Time_compat.now () in
         try
           let run_once () =
@@ -677,7 +677,7 @@ let handle_mitosis_handoff ctx args : result =
                 ("result", parsed);
                 ("verification", match verification with Some v -> v | None -> `Null);
               ]))
-             with exn -> Log.Mitosis_log.error "write_saga_state(result) failed: %s" (Printexc.to_string exn))
+             with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Mitosis_log.error "write_saga_state(result) failed: %s" (Printexc.to_string exn))
           in
           (match ctx.clock with
            | Some (Clock clock) ->
@@ -696,10 +696,12 @@ let handle_mitosis_handoff ctx args : result =
                       ("error", `String "verification_saga_timeout");
                       ("timeout_sec", `Float saga_timeout_sec);
                     ]))
-                   with exn -> Log.Mitosis_log.error "write_saga_state(timeout) failed: %s" (Printexc.to_string exn)))
+                   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Mitosis_log.error "write_saga_state(timeout) failed: %s" (Printexc.to_string exn)))
            | None ->
                run_once ())
-        with exn ->
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
           (try ignore (write_saga_state
             ~base_path
             ~saga_id
@@ -707,7 +709,7 @@ let handle_mitosis_handoff ctx args : result =
             ~payload:(`Assoc [
               ("error", `String (Printexc.to_string exn));
             ]))
-           with exn2 -> Log.Mitosis_log.error "write_saga_state(error) failed: %s" (Printexc.to_string exn2)));
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn2 -> Log.Mitosis_log.error "write_saga_state(error) failed: %s" (Printexc.to_string exn2)));
       let json = `Assoc [
         ("action", `String "accepted");
         ("async", `Bool true);

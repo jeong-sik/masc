@@ -48,10 +48,14 @@ if [ -z "$s2" ]; then
   exit 1
 fi
 
+echo "[5.5/12] verify base session still running before step"
+r5b="$(call_tool 4106 "masc_team_session_status" "{\"session_id\":\"$s1\"}")"
+require_ok "$r5b"
+
 echo "[6/12] masc_team_session_step + events"
-r6_turn="$(call_tool 4106 "masc_team_session_step" "{\"session_id\":\"$s1\",\"turn_kind\":\"broadcast\",\"message\":\"contract turn broadcast\"}")"
+r6_turn="$(call_tool 4107 "masc_team_session_step" "{\"session_id\":\"$s1\",\"turn_kind\":\"broadcast\",\"message\":\"contract turn broadcast\"}")"
 require_ok "$r6_turn"
-r6_events="$(call_tool 4107 "masc_team_session_events" "{\"session_id\":\"$s1\",\"event_types\":[\"team_turn\"],\"limit\":20}")"
+r6_events="$(call_tool 4108 "masc_team_session_events" "{\"session_id\":\"$s1\",\"event_types\":[\"team_turn\"],\"limit\":20}")"
 require_ok "$r6_events"
 if ! printf "%s" "$r6_events" | extract_result | jq -e '.count >= 1' >/dev/null; then
   echo "FAIL: team_turn events not found"
@@ -60,7 +64,7 @@ if ! printf "%s" "$r6_events" | extract_result | jq -e '.count >= 1' >/dev/null;
 fi
 
 echo "[7/12] masc_team_session_list"
-r6="$(call_tool 4108 "masc_team_session_list" "{\"limit\":10}")"
+r6="$(call_tool 4109 "masc_team_session_list" "{\"limit\":10}")"
 require_ok "$r6"
 if ! printf "%s" "$r6" | extract_result | jq -e --arg s1 "$s1" --arg s2 "$s2" '.sessions | map(.session_id) | index($s1) != null and index($s2) != null' >/dev/null; then
   echo "FAIL: list does not include both sessions"
@@ -69,7 +73,7 @@ if ! printf "%s" "$r6" | extract_result | jq -e --arg s1 "$s1" --arg s2 "$s2" '.
 fi
 
 echo "[8/12] masc_team_session_compare"
-r7="$(call_tool 4109 "masc_team_session_compare" "{\"base_session_id\":\"$s1\",\"target_session_id\":\"$s2\"}")"
+r7="$(call_tool 4110 "masc_team_session_compare" "{\"base_session_id\":\"$s1\",\"target_session_id\":\"$s2\"}")"
 require_ok "$r7"
 if ! printf "%s" "$r7" | extract_result | jq -e --arg s1 "$s1" --arg s2 "$s2" '.base_session_id == $s1 and .target_session_id == $s2 and .summary and .communication and .policy' >/dev/null; then
   echo "FAIL: compare payload invalid"
@@ -78,8 +82,8 @@ if ! printf "%s" "$r7" | extract_result | jq -e --arg s1 "$s1" --arg s2 "$s2" '.
 fi
 
 echo "[9/12] masc_team_session_stop (base) + report"
-_="$(call_tool 4110 "masc_team_session_stop" "{\"session_id\":\"$s1\",\"reason\":\"contract_done\",\"generate_report\":true}")"
-r8_report="$(call_tool 4111 "masc_team_session_report" "{\"session_id\":\"$s1\",\"force_regenerate\":true}")"
+_="$(call_tool 4111 "masc_team_session_stop" "{\"session_id\":\"$s1\",\"reason\":\"contract_done\",\"generate_report\":true}")"
+r8_report="$(call_tool 4112 "masc_team_session_report" "{\"session_id\":\"$s1\",\"force_regenerate\":true}")"
 require_ok "$r8_report"
 if ! printf "%s" "$r8_report" | extract_result | jq -e '.markdown_path and .json_path' >/dev/null; then
   echo "FAIL: report paths missing"
@@ -88,7 +92,7 @@ if ! printf "%s" "$r8_report" | extract_result | jq -e '.markdown_path and .json
 fi
 
 echo "[10/12] masc_team_session_prove"
-r10_prove="$(call_tool 4112 "masc_team_session_prove" "{\"session_id\":\"$s1\",\"generate_report_if_missing\":true}")"
+r10_prove="$(call_tool 4113 "masc_team_session_prove" "{\"session_id\":\"$s1\",\"generate_report_if_missing\":true}")"
 require_ok "$r10_prove"
 if ! printf "%s" "$r10_prove" | extract_result | jq -e '.proof.verdict and .proof_json_path and .proof_md_path' >/dev/null; then
   echo "FAIL: prove payload invalid"
@@ -97,9 +101,9 @@ if ! printf "%s" "$r10_prove" | extract_result | jq -e '.proof.verdict and .proo
 fi
 
 echo "[11/12] cleanup stop target"
-_="$(call_tool 4113 "masc_team_session_stop" "{\"session_id\":\"$s2\",\"reason\":\"contract_done\",\"generate_report\":false}")"
+_="$(call_tool 4114 "masc_team_session_stop" "{\"session_id\":\"$s2\",\"reason\":\"contract_done\",\"generate_report\":false}")"
 
 echo "[12/12] leave"
-_="$(call_tool 4114 "masc_leave" "{\"agent_name\":\"$AGENT_NAME\"}")"
+_="$(call_tool 4115 "masc_leave" "{\"agent_name\":\"$AGENT_NAME\"}")"
 
 echo "PASS: team_session contract harness"

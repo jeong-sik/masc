@@ -221,8 +221,6 @@ let tool_category tool_name =
   | "masc_hat_status" | "masc_hat_wear"
   (* Pause/resume *)
   | "masc_pause" | "masc_pause_status" | "masc_resume" | "masc_suspend"
-  (* Swarm live run/status *)
-  | "masc_swarm_live_run" | "masc_swarm_live_status"
   | "masc_compact_context"
   | "masc_tool_help" | "masc_tool_admin_snapshot" | "masc_keeper_tool_catalog" -> Core_Ops
 

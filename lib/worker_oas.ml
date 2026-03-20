@@ -42,7 +42,7 @@ let max_turns_cap_of_scope (scope : Team_session_types.execution_scope) : int =
 (** Derive max_turns from worker meta, applying the scope cap.
     When max_turns_override is set, it is clamped to [1, cap].
     When absent, timeout_seconds / 20 is used as a heuristic. *)
-let effective_max_turns (meta : Local_agent_eio_types.worker_container_meta) : int =
+let effective_max_turns (meta : Worker_container_types.worker_container_meta) : int =
   let cap = max_turns_cap_of_scope meta.execution_scope in
   match meta.max_turns_override with
   | Some value -> max 1 (min cap value)
@@ -57,9 +57,9 @@ let effective_max_turns (meta : Local_agent_eio_types.worker_container_meta) : i
 (** Convert MASC worker_container_meta to OAS agent_config.
     Maps worker_name, model, thinking, max_turns, and temperature. *)
 let agent_config_of_worker_meta
-    (meta : Local_agent_eio_types.worker_container_meta)
+    (meta : Worker_container_types.worker_container_meta)
     ~(system_prompt : string) : Oas.Types.agent_config =
-  let max_tokens = Local_agent_eio_types.local_worker_max_tokens () in
+  let max_tokens = Worker_container_types.local_worker_max_tokens () in
   {
     Oas.Types.default_config with
     name = meta.worker_name;
@@ -82,7 +82,7 @@ let agent_config_of_worker_meta
 (** Encode MASC-specific worker metadata as a human-readable description
     string. This preserves context (role, scope, team session, worker
     class) that has no direct OAS equivalent. *)
-let description_of_meta (meta : Local_agent_eio_types.worker_container_meta) : string =
+let description_of_meta (meta : Worker_container_types.worker_container_meta) : string =
   let lines = ref [] in
   let add key value =
     if String.trim value <> "" then
@@ -119,7 +119,7 @@ let description_of_meta (meta : Local_agent_eio_types.worker_container_meta) : s
 (* ================================================================ *)
 
 (** Re-use the existing provider mapping from local_agent_eio_container. *)
-let oas_provider_of_model = Local_agent_eio_container.oas_provider_of_model
+let oas_provider_of_model = Worker_container.oas_provider_of_model
 
 (* ================================================================ *)
 (* execution_scope -> gate_config                                    *)
@@ -171,7 +171,7 @@ let gate_config_of_execution_scope
     5. Embeds MASC metadata in the agent description *)
 let build_agent
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
-    ~(meta : Local_agent_eio_types.worker_container_meta)
+    ~(meta : Worker_container_types.worker_container_meta)
     ~(model : Model_spec.model_spec)
     ~(system_prompt : string)
     ~(tools : Oas.Tool.t list)
@@ -230,7 +230,7 @@ let make_heartbeat_callbacks
     ~(auth_token : string option)
     ~(session_id : string)
     ~(worker_name : string) : Oas.Agent.periodic_callback list =
-  let interval = Local_agent_eio_types.local_worker_heartbeat_interval_sec () in
+  let interval = Worker_container_types.local_worker_heartbeat_interval_sec () in
   if interval <= 0 then []
   else
     [
@@ -239,7 +239,7 @@ let make_heartbeat_callbacks
         callback =
           (fun () ->
             match
-              Local_agent_eio_types.call_masc_tool ~sw ~auth_token
+              Worker_container_types.call_masc_tool ~sw ~auth_token
                 ~session_id ~tool_name:"masc_heartbeat" ~args:(`Assoc [])
             with
             | Ok _ -> ()
@@ -264,20 +264,20 @@ let make_heartbeat_callbacks
 let run_worker_via_oas
     ~(sw : Eio.Switch.t)
     ~(base_path : string)
-    ~(meta : Local_agent_eio_types.worker_container_meta)
+    ~(meta : Worker_container_types.worker_container_meta)
     ~(model : Model_spec.model_spec)
     ~(system_prompt : string)
     ~(prompt : string)
     ~(tools : Oas.Tool.t list)
     ~(raw_trace : Oas.Raw_trace.t)
     ?worker_run_id
-    () : (Local_agent_eio_types.run_result, string) result =
+    () : (Worker_container_types.run_result, string) result =
   let ( let* ) = Result.bind in
   let session_id = meta.mcp_session_id in
   let team_session_id = meta.team_session_id in
   let worker_name = meta.worker_name in
   let* auth_token =
-    Local_agent_eio_types.worker_auth_token ~base_path ~worker_name
+    Worker_container_types.worker_auth_token ~base_path ~worker_name
   in
   let* net =
     match Eio_context.get_net_opt () with
@@ -305,18 +305,18 @@ let run_worker_via_oas
       ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ()
   in
   let* () =
-    Local_agent_eio_container.save_worker_meta ~base_path
+    Worker_container.save_worker_meta ~base_path
       ~team_session_id ~worker_name meta
   in
   Fun.protect
     ~finally:(fun () ->
       ignore
-        (Local_agent_eio_types.leave_worker ~sw ~auth_token
+        (Worker_container_types.leave_worker ~sw ~auth_token
            ~session_id ~worker_name))
     (fun () ->
       let _ =
         match
-          Local_agent_eio_types.join_worker ~sw ~auth_token
+          Worker_container_types.join_worker ~sw ~auth_token
             ~session_id ~worker_name
         with
         | Ok _ -> ()
@@ -329,14 +329,14 @@ let run_worker_via_oas
       in
       let tool_names =
         List.rev !tool_names_ref
-        |> Local_agent_eio_types.unique_preserve_order
+        |> Worker_container_types.unique_preserve_order
       in
       let* () =
-        Local_agent_eio_container.save_worker_checkpoint ~base_path
+        Worker_container.save_worker_checkpoint ~base_path
           ~team_session_id ~worker_name checkpoint
       in
       let* () =
-        Local_agent_eio_container.save_worker_meta ~base_path
+        Worker_container.save_worker_meta ~base_path
           ~team_session_id ~worker_name
           { meta with last_run_at = Some (Time_compat.now ()) }
       in
@@ -344,7 +344,7 @@ let run_worker_via_oas
         if String.trim meta.workspace_path <> "" then meta.workspace_path
         else base_path
       in
-      Local_agent_eio_container.materialize_direct_evidence
+      Worker_container.materialize_direct_evidence
         ~base_path ~worker_name ~worker_run_id ~meta ~prompt
         ~workspace_path ~agent ~raw_trace;
       Oas.Agent.close agent;
@@ -358,13 +358,13 @@ let run_worker_via_oas
           |> String.concat "\n"
         in
         let* () =
-          Local_agent_eio_container.append_worker_completion_log
+          Worker_container.append_worker_completion_log
             ~base_path ~team_session_id ~worker_name ~prompt
             ~tool_names ~status:"ok" ~output ()
         in
         Ok
           {
-            Local_agent_eio_types.output;
+            Worker_container_types.output;
             model_used =
               (if String.trim response.model <> "" then response.model
                else meta.effective_model);
@@ -379,7 +379,7 @@ let run_worker_via_oas
       | Error err ->
         let detail = Oas.Error.to_string err in
         let* () =
-          Local_agent_eio_container.append_worker_completion_log
+          Worker_container.append_worker_completion_log
             ~base_path ~team_session_id ~worker_name ~prompt
             ~tool_names ~status:"error" ~output:detail ~error:detail ()
         in
@@ -397,7 +397,7 @@ let run_worker_via_oas
 let orchestrate_workers
     ~(sw : Eio.Switch.t)
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
-    ~(workers : (Local_agent_eio_types.worker_container_meta
+    ~(workers : (Worker_container_types.worker_container_meta
                  * Model_spec.model_spec
                  * string (* system_prompt *)
                  * Oas.Tool.t list

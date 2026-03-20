@@ -49,8 +49,6 @@
    cp_snapshot_summaries
    cp_cleanup
    cp_lifecycle
-   cp_lifecycle_swarm_live
-   cp_lifecycle_swarm_live_core
    cp_lifecycle_search
    cp_lifecycle_intents
    cp_lifecycle_policy
@@ -151,22 +149,14 @@
    level2_config
    level4_config
    local_runtime_pool
-   agent_swarm_contract
+   sdk_tool_contract
    worker_oas
-   local_agent_eio
-   local_agent_eio_types
-   local_agent_eio_container
-   local_agent_eio_runners
-   agent_swarm_client
+   worker_runtime
+   worker_container_types
+   worker_container
+   worker_container_runners
    agent_swarm_dev_tools
-   agent_swarm_external_agent
-   agent_swarm_fleet
-   agent_swarm_live_harness
-   agent_swarm_prompts
-   agent_swarm_runner
-   agent_swarm_swarm
    agent_swarm_tool_input
-   agent_swarm_tools
    safe_parse
    prompt_registry
    prompt_composer
@@ -397,7 +387,6 @@
    tool_command_plane_chain_common
    tool_command_plane_chain_launch
    tool_command_plane_chain_query
-   tool_command_plane_swarm_live
    tool_command_plane_mutations
    tool_command_plane_dispatch
    tool_command_plane_schemas_01
@@ -594,7 +583,6 @@
  dashboard_mission_assembly
  keeper_types_profile
  keeper_types_resident
- cp_lifecycle_swarm_live
  tool_team_session_routing_workers
  cp_lifecycle_search
  cp_lifecycle_intents
@@ -635,7 +623,6 @@
  tool_command_plane_chain_common
  tool_command_plane_chain_launch
  tool_command_plane_chain_query
- tool_command_plane_swarm_live
  tool_command_plane_mutations
  tool_command_plane_dispatch
  tool_command_plane_schemas_01
@@ -662,10 +649,10 @@
   chain_mermaid_parse
   chain_mermaid_node_content
   chain_mermaid_graph
-  ;; local_agent_eio sub-modules
-  local_agent_eio_types
-  local_agent_eio_container
-  local_agent_eio_runners
+  ;; worker_container sub-modules
+  worker_container_types
+  worker_container
+  worker_container_runners
   ;; keeper_memory sub-modules
   keeper_memory_policy
   keeper_memory_bank

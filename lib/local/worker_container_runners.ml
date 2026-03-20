@@ -1,8 +1,8 @@
-(** Local_agent_eio_runners — run_worker_oas, continue_worker, run_worker. *)
+(** Worker_container_runners — run_worker_oas, continue_worker, run_worker. *)
 
 open Printf
 
-include Local_agent_eio_container
+include Worker_container
 
 let run_worker_oas ~sw ~base_path ~worker_name
     ~(model : Model_spec.model_spec) ~team_session_id

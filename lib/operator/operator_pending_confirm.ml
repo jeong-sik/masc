@@ -309,24 +309,6 @@ let available_actions : available_action list =
       description = "Use this when a keeper is stale, degraded, or offline and you need a safe down/up recovery with before-and-after diagnostics.";
       confirm_required = false;
     };
-    {
-      action_type = "swarm_run_continue";
-      target_type = "swarm_run";
-      description = "Use this when a stalled swarm-live run still has resumable managed state and you want a preview-confirm command-plane recovery chain.";
-      confirm_required = true;
-    };
-    {
-      action_type = "swarm_run_rerun";
-      target_type = "swarm_run";
-      description = "Use this when a swarm-live run has no trustworthy resumable state and you want to rerun the harness for the same run_id.";
-      confirm_required = true;
-    };
-    {
-      action_type = "swarm_run_abandon";
-      target_type = "swarm_run";
-      description = "Use this when you want to soft-abandon a swarm-live run without stopping any matched operation.";
-      confirm_required = true;
-    };
   ]
 
 let available_action_to_yojson (entry : available_action) =

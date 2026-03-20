@@ -1,7 +1,6 @@
 open Tool_command_plane_support
 open Tool_command_plane_chain_launch
 open Tool_command_plane_chain_query
-open Tool_command_plane_swarm_live
 open Tool_command_plane_mutations
 
 let dispatch (ctx : (_, _) context) ~name ~args : result option =
@@ -43,6 +42,4 @@ let dispatch (ctx : (_, _) context) ~name ~args : result option =
   | "masc_observe_swarm" -> Some (handle_observe_swarm ctx args)
   | "masc_observe_capacity" -> Some (handle_observe_capacity ctx)
   | "masc_observe_traces" -> Some (handle_observe_traces ctx args)
-  | "masc_swarm_live_run" -> Some (handle_swarm_live_run ctx args)
-  | "masc_swarm_live_status" -> Some (handle_swarm_live_status ctx args)
   | _ -> None

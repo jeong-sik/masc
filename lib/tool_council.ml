@@ -145,9 +145,6 @@ let high_risk_action_types =
     "room_resume";
     "team_stop";
     "keeper_recover";
-    "swarm_run_continue";
-    "swarm_run_rerun";
-    "swarm_run_abandon";
   ]
 
 let derive_risk_class args requested_action =

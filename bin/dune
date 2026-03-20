@@ -44,10 +44,3 @@
  (public_name masc-mitosis-cli)
  (package masc_mcp)
  (libraries masc_mcp cmdliner unix yojson))
-
-(executable
- (name agent_swarm_harness_cli)
- (modules agent_swarm_harness_cli)
- (public_name masc-agent-swarm-harness)
- (package masc_mcp)
- (libraries masc_mcp agent_sdk eio eio_main yojson))

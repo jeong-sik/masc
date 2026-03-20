@@ -3,7 +3,6 @@
 module Spawn = Masc_mcp.Spawn
 module Team_session_types = Masc_mcp.Team_session_types
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
-module Agent_swarm_prompts = Masc_mcp.Agent_swarm_prompts
 module Keeper_deliberation = Masc_mcp.Keeper_deliberation
 
 (* New modules may not be visible via Masc_mcp wrapper in large libraries
@@ -69,12 +68,6 @@ let test_build_tool_catalog_autonomous () =
   let worker_tools = Agent_tool_surfaces.build_tool_catalog ~role:"worker" () in
   Alcotest.(check bool) "more tools than worker" true
     (List.length tools >= List.length worker_tools)
-
-let test_masc_instructions_for_role () =
-  let instr = Agent_swarm_prompts.masc_instructions_for_role ~role:"worker" () in
-  Alcotest.(check bool) "non-empty" true (String.length instr > 0);
-  Alcotest.(check bool) "mentions masc_tool_help" true
-    (contains_s instr "masc_tool_help")
 
 (* ── Phase 3: Team Context ────────────────────────────────────── *)
 
@@ -250,8 +243,6 @@ let () =
             test_build_tool_catalog_coordinator;
           Alcotest.test_case "autonomous catalog" `Quick
             test_build_tool_catalog_autonomous;
-          Alcotest.test_case "dynamic instructions" `Quick
-            test_masc_instructions_for_role;
         ] );
       ( "phase3_team_context",
         [

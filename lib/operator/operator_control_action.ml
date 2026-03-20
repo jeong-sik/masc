@@ -133,9 +133,6 @@ let canonical_action_type action_type =
   | "keeper_message" -> "keeper_message"
   | "keeper_probe" -> "keeper_probe"
   | "keeper_recover" -> "keeper_recover"
-  | "swarm_run_continue" -> "swarm_run_continue"
-  | "swarm_run_rerun" -> "swarm_run_rerun"
-  | "swarm_run_abandon" -> "swarm_run_abandon"
   | other -> other
 
 let default_target_type_for action_type =
@@ -145,8 +142,6 @@ let default_target_type_for action_type =
   | "team_worker_spawn_batch" | "team_stop" ->
       "team_session"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
-  | "swarm_run_continue" | "swarm_run_rerun" | "swarm_run_abandon" ->
-      "swarm_run"
   | _ -> ""
 
 let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
@@ -220,16 +215,12 @@ let delegated_tool_for action_type =
   | "keeper_message" -> "masc_keeper_msg"
   | "keeper_probe" -> "masc_keeper_status"
   | "keeper_recover" -> "masc_keeper_recover"
-  | "swarm_run_continue" -> "swarm_run_continue_chain"
-  | "swarm_run_rerun" -> "masc_swarm_live_run"
-  | "swarm_run_abandon" -> "swarm_run_resolution"
   | "task_inject" -> "masc_add_task"
   | _ -> "unknown"
 
 let confirm_required = function
   | "room_pause" | "team_stop" | "task_inject" | "team_task_inject"
-  | "team_worker_spawn_batch" | "swarm_run_continue"
-  | "swarm_run_rerun" | "swarm_run_abandon" ->
+  | "team_worker_spawn_batch" ->
       true
   | _ -> false
 
@@ -277,124 +268,5 @@ let parse_turn_kind payload =
       Error
         "payload.turn_kind must be one of: note, broadcast, portal, task, checkpoint"
 
-let swarm_run_json_for_request (ctx : 'a context) (request : action_request) =
-  let* run_id = require_target_id request in
-  let operation_id = get_string_opt request.payload "operation_id" in
-  Ok (Command_plane_v2.swarm_live_json ctx.config ~run_id ?operation_id ())
 
-let swarm_run_recommendation_json swarm_json =
-  match U.member "resolution_recommendation" swarm_json with
-  | `Assoc _ as json -> Some json
-  | _ -> None
-
-let swarm_run_operation_id swarm_json =
-  match U.member "operation" swarm_json with
-  | `Assoc _ as operation ->
-      operation |> U.member "operation_id" |> U.to_string_option
-  | _ -> None
-
-let swarm_run_detachment_id swarm_json =
-  match U.member "detachment" swarm_json with
-  | `Assoc _ as detachment ->
-      detachment |> U.member "detachment_id" |> U.to_string_option
-  | _ -> None
-
-let swarm_run_reason swarm_json fallback =
-  match swarm_run_recommendation_json swarm_json with
-  | Some json -> (
-      match U.member "reason" json with
-      | `String reason when String.trim reason <> "" -> reason
-      | _ -> fallback)
-  | None -> fallback
-
-let swarm_run_chain_preview (request : action_request) swarm_json =
-  let run_id =
-    swarm_json |> U.member "run_id" |> U.to_string_option
-    |> Option.value ~default:(Option.value ~default:"swarm-live" request.target_id)
-  in
-  let reason =
-    swarm_run_reason swarm_json "swarm-live run needs operator resolution"
-  in
-  let operation_id = swarm_run_operation_id swarm_json in
-  let detachment_id = swarm_run_detachment_id swarm_json in
-  let base_fields =
-    [
-      ("run_id", `String run_id);
-      ("reason", `String reason);
-      ("provenance", `String "derived");
-      ("decision_engine", `String "deterministic_truth_map");
-      ("authoritative", `Bool false);
-    ]
-  in
-  let evidence =
-    match swarm_run_recommendation_json swarm_json with
-    | Some json -> (
-        match U.member "evidence" json with
-        | `Assoc _ as evidence -> evidence
-        | _ -> `Assoc [])
-    | None -> `Assoc []
-  in
-  match request.action_type with
-  | "swarm_run_continue" ->
-      let steps =
-        (match
-           swarm_json |> U.member "operation" |> U.member "status"
-           |> U.to_string_option
-         with
-        | Some "paused" -> [ `Assoc [ ("tool", `String "masc_operation_resume"); ("args", `Assoc [ ("operation_id", option_to_json (fun value -> `String value) operation_id) ]) ] ]
-        | _ -> [])
-        @
-        (match operation_id, detachment_id with
-        | Some value, _ ->
-            [ `Assoc [ ("tool", `String "masc_dispatch_tick"); ("args", `Assoc [ ("operation_id", `String value) ]) ] ]
-        | None, Some value ->
-            [ `Assoc [ ("tool", `String "masc_dispatch_tick"); ("args", `Assoc [ ("detachment_id", `String value) ]) ] ]
-        | None, None -> [])
-      in
-      `Assoc
-        (base_fields
-        @ [
-            ("resolution_kind", `String "continue");
-            ("delegated_tools", `List (List.map (fun step -> U.member "tool" step) steps));
-            ("tool_chain_preview", `List steps);
-            ("evidence", evidence);
-          ])
-  | "swarm_run_rerun" ->
-      let steps =
-        [
-          `Assoc
-            [
-              ("tool", `String "masc_swarm_live_run");
-              ("args", `Assoc [ ("run_id", `String run_id) ]);
-            ];
-        ]
-      in
-      `Assoc
-        (base_fields
-        @ [
-            ("resolution_kind", `String "rerun");
-            ("delegated_tools", `List (List.map (fun step -> U.member "tool" step) steps));
-            ("tool_chain_preview", `List steps);
-            ("evidence", evidence);
-          ])
-  | "swarm_run_abandon" ->
-      `Assoc
-        (base_fields
-        @ [
-            ("resolution_kind", `String "abandon");
-            ("delegated_tools", `List []);
-            ("tool_chain_preview", `List []);
-            ("operation_id", option_to_json (fun value -> `String value) operation_id);
-            ("detachment_id", option_to_json (fun value -> `String value) detachment_id);
-            ("evidence", evidence);
-          ])
-  | _ ->
-      `Assoc
-        [
-          ("actor", `String request.actor);
-          ("action_type", `String request.action_type);
-          ("target_type", `String request.target_type);
-          ("target_id", string_option_to_json request.target_id);
-          ("payload", request.payload);
-        ]
 

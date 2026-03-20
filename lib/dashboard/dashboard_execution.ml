@@ -252,23 +252,25 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
           ("keepers", `List keepers);
         ]
       in
+      let active_tasks = List.filter (fun (t : Types.task) ->
+        match t.task_status with
+        | Types.Done _ | Types.Cancelled _ -> false
+        | _ -> true
+      ) tasks in
+      let limited_tasks = take 50 active_tasks in
+      let task_fields = [
+        ("tasks", `List (List.map task_json limited_tasks));
+        ("task_counts", `Assoc [
+          ("active", `Int (List.length active_tasks));
+          ("total", `Int (List.length tasks));
+          ("shown", `Int (List.length limited_tasks));
+        ]);
+      ] in
       if light then
-        `Assoc base_fields
+        `Assoc (base_fields @ task_fields)
       else
-        (* Full mode: include tasks, task_counts, messages *)
-        let active_tasks = List.filter (fun (t : Types.task) ->
-          match t.task_status with
-          | Types.Done _ | Types.Cancelled _ -> false
-          | _ -> true
-        ) tasks in
-        let limited_tasks = take 50 active_tasks in
+        (* Full mode: include messages in addition to tasks *)
         `Assoc
-          (base_fields @ [
-            ("tasks", `List (List.map task_json limited_tasks));
-            ("task_counts", `Assoc [
-              ("active", `Int (List.length active_tasks));
-              ("total", `Int (List.length tasks));
-              ("shown", `Int (List.length limited_tasks));
-            ]);
+          (base_fields @ task_fields @ [
             ("messages", `List (List.map message_json messages));
           ])

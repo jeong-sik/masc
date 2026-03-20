@@ -1,4 +1,3 @@
-[@@@warning "-26-27"]
 (** Keeper_turn -- keeper lifecycle and message-turn handlers.
 
     Sub-modules:
@@ -62,12 +61,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     let new_drift_min_turn_gap_opt = Safe_ops.json_int_opt "new_drift_min_turn_gap" args in
     let inline_models = get_string_list args "models" in
     let require_existing = get_bool args "require_existing" false in
-    let timeout_sec_opt =
-      Safe_ops.json_float_opt "timeout_sec" args
-      |> Option.map (fun v ->
-             let sec = int_of_float (Float.ceil v) in
-             max 5 (min (Keeper_config.keeper_msg_timeout_max_sec ()) sec))
-    in
     match inline_soul_profile_res, new_soul_profile_res with
     | Error e, _ | _, Error e -> (false, "❌ " ^ e)
     | Ok inline_soul_profile, Ok new_soul_profile ->
@@ -101,7 +94,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           ~trace_id:meta.trace_id
           ~generation:meta.generation
       in
-      let gate_config = Eval_gate.default_config in
       let effective_models =
         effective_model_labels_for_turn meta ~inline_models
       in
@@ -232,24 +224,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
 	            let user_msg = Agent_sdk.Types.user_msg message in
 	            let ctx_work = Context_manager.append ctx_work user_msg in
 	            Context_manager.persist_message session user_msg;
-            let turn_max_tokens = keeper_turn_max_tokens () in
-            let followup_max_tokens = keeper_followup_max_tokens turn_max_tokens in
-            let correction_max_tokens = keeper_correction_max_tokens turn_max_tokens in
-            let postpass_budget_ms = keeper_msg_postpass_budget_ms () in
-            let turn_started_ts = Time_compat.now () in
-            let postpass_elapsed_ms () =
-              int_of_float
-                (max 0.0 ((Time_compat.now () -. turn_started_ts) *. 1000.0))
-            in
-            let postpass_remaining_ms () =
-              if postpass_budget_ms <= 0 then max_int
-              else max 0 (postpass_budget_ms - postpass_elapsed_ms ())
-            in
-            let has_postpass_budget () =
-              postpass_budget_ms <= 0 || postpass_remaining_ms () > 0
-            in
 
-            (* === Agent.run() — single execution path === *)
+            (* === Agent.run() === *)
             let ctx_ref = ref ctx_work in
             let cascade_name = "keeper_turn" in
             match

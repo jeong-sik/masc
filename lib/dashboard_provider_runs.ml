@@ -570,7 +570,11 @@ let start_run ~sw ~provider ~model_opt ~prompt =
                     current.output <- Some output;
                     current.error <- None)
             | Error message -> mark_failed message
-          with exn ->
+          with
+          | Eio.Cancel.Cancelled _ as exn ->
+              mark_failed "Dashboard single-agent run cancelled";
+              raise exn
+          | exn ->
             mark_failed
               (Printf.sprintf
                  "Dashboard single-agent run crashed: %s"

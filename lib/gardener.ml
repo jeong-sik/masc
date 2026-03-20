@@ -212,10 +212,18 @@ let tick ~sw ~clock:_ ~config ~room_config : unit =
         Eio.traceln "[Gardener] Task pressure: %d TODO, %d high-pri, %d orphans"
           backlog.todo_count backlog.high_priority_todo backlog.orphan_count;
         let triage_state = get_state () in
+        let max_triage_noops = 3 in
+        if triage_state.consecutive_triage_noops >= max_triage_noops then begin
+          Eio.traceln "[Gardener] Triage backoff: %d consecutive noops (>= %d), skipping"
+            triage_state.consecutive_triage_noops max_triage_noops;
+          record_action "triage_backoff"
+            ~reason:(Printf.sprintf "skipped: %d consecutive noops" triage_state.consecutive_triage_noops)
+        end else
         (match Gardener_worker.run_for_backlog ~config:room_config ~backlog with
          | Ok result ->
              triage_state.last_triage_started_at <- Time_compat.now ();
              triage_state.last_triage_outcome <- Triage_productive;
+             triage_state.consecutive_triage_noops <- 0;
              record_action "worker_completed" ~target:result.Oas_worker.session_id
                ~reason:(Printf.sprintf "triage done in %d turns" result.Oas_worker.turns);
              Eio.traceln "[Gardener] Triage worker completed: %s (turns=%d)"
@@ -233,10 +241,12 @@ let tick ~sw ~clock:_ ~config ~room_config : unit =
          | Error err ->
              triage_state.last_triage_started_at <- Time_compat.now ();
              triage_state.last_triage_outcome <- Triage_noop;
+             triage_state.consecutive_triage_noops <- triage_state.consecutive_triage_noops + 1;
              record_action "worker_failed"
                ~reason:"triage worker failed"
                ~error:err;
-             Eio.traceln "[Gardener] Triage worker failed: %s" err;
+             Eio.traceln "[Gardener] Triage worker failed (%d/%d noops): %s"
+               triage_state.consecutive_triage_noops max_triage_noops err;
              let store = Board.global () in
              let msg =
                Printf.sprintf

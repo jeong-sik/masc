@@ -71,3 +71,7 @@ val default_verifier_model_spec : unit -> (model_spec, string) result
 
 (** Best-effort local model spec: configured default > execution chain > glm_cloud. *)
 val default_local_model_spec : unit -> model_spec
+
+(** Load cascade profile from OAS config file.
+    Returns model label strings (e.g. ["llama:qwen3.5"; "glm:glm-4.7"]). *)
+val load_cascade_profile : config_path:string -> name:string -> string list

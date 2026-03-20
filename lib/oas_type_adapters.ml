@@ -4,7 +4,7 @@
     to their OAS counterparts.  Most conversions are structural identity
     (shared type aliases); [to_oas_provider] performs actual mapping.
 
-    @since 2.130.0 — extracted from Llm_provider_dispatch *)
+    @since 2.130.0 *)
 
 let to_oas_provider (spec : Model_spec.model_spec) : Agent_sdk.Provider.config option =
   match spec.provider with

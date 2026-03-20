@@ -4,7 +4,7 @@
     The switch and net handle are needed by OAS provider completions
     which use cohttp-eio for HTTP transport.
 
-    @since 2.130.0 — renamed from Llm_eio_env *)
+    @since 2.130.0 *)
 
 type t = {
   sw : Eio.Switch.t;

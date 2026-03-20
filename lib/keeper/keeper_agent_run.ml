@@ -149,7 +149,7 @@ let run_turn
         | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
         result.response.content
     in
-    let usage = Cascade.usage_of_response result.response in
+    let usage = Keeper_exec_context.usage_of_response result.response in
     let assistant_msg = Llm_provider.Types.assistant_msg text in
     Context_manager.persist_message session assistant_msg;
     ctx_ref := Context_manager.append !ctx_ref assistant_msg;

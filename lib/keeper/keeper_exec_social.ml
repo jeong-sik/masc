@@ -37,7 +37,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
       let build_turn_prompt ~base_system_prompt ~messages:_ =
         base_system_prompt
       in
-      let (run_result, latency) = Cascade.timed (fun () ->
+      let (run_result, latency) = Keeper_exec_context.timed (fun () ->
         Keeper_agent_run.run_turn
           ~config:ctx.config ~meta ~base_dir
           ~max_context:primary.max_context
@@ -72,14 +72,14 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
               total_turns = meta.total_turns + 1;
               total_input_tokens = meta.total_input_tokens + result.usage.input_tokens;
               total_output_tokens = meta.total_output_tokens + result.usage.output_tokens;
-              total_tokens = meta.total_tokens + Cascade.total_tokens result.usage;
+              total_tokens = meta.total_tokens + Keeper_exec_context.total_tokens result.usage;
               total_cost_usd =
                 meta.total_cost_usd +. cost_usd_of_usage result.usage used_model;
               last_turn_ts = now_ts;
               last_model_used = result.model_used;
               last_input_tokens = result.usage.input_tokens;
               last_output_tokens = result.usage.output_tokens;
-              last_total_tokens = Cascade.total_tokens result.usage;
+              last_total_tokens = Keeper_exec_context.total_tokens result.usage;
               last_latency_ms = latency;
             }
           in
@@ -147,7 +147,7 @@ let run_social_board_event_turn
       let build_turn_prompt ~base_system_prompt ~messages:_ =
         base_system_prompt
       in
-      let (run_result, total_latency_ms) = Cascade.timed (fun () ->
+      let (run_result, total_latency_ms) = Keeper_exec_context.timed (fun () ->
         Keeper_agent_run.run_turn
           ~config:ctx.config ~meta ~base_dir
           ~max_context:primary.max_context
@@ -198,13 +198,13 @@ let run_social_board_event_turn
               total_turns = meta.total_turns + 1;
               total_input_tokens = meta.total_input_tokens + result.usage.input_tokens;
               total_output_tokens = meta.total_output_tokens + result.usage.output_tokens;
-              total_tokens = meta.total_tokens + Cascade.total_tokens result.usage;
+              total_tokens = meta.total_tokens + Keeper_exec_context.total_tokens result.usage;
               total_cost_usd = meta.total_cost_usd +. final_cost_usd;
               last_turn_ts = now_ts;
               last_model_used = result.model_used;
               last_input_tokens = result.usage.input_tokens;
               last_output_tokens = result.usage.output_tokens;
-              last_total_tokens = Cascade.total_tokens result.usage;
+              last_total_tokens = Keeper_exec_context.total_tokens result.usage;
               last_latency_ms = total_latency_ms;
               last_autonomous_action_at =
                 (if action_kind = "none" then meta.last_autonomous_action_at else now_iso ());

@@ -8,6 +8,29 @@ open Keeper_alerting
 open Keeper_exec_tools [@@warning "-33"]
 open Keeper_exec_status
 
+(* ================================================================ *)
+(* Inline utilities (formerly timed/total_tokens/usage_of)  *)
+(* ================================================================ *)
+
+let timed (f : unit -> 'a) : 'a * int =
+  let t0 = Time_compat.now () in
+  let result = f () in
+  let ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+  (result, ms)
+
+let zero_usage : Agent_sdk.Types.api_usage =
+  { input_tokens = 0; output_tokens = 0;
+    cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
+
+let usage_of_response (resp : Llm_provider.Types.api_response)
+    : Agent_sdk.Types.api_usage =
+  match resp.usage with Some u -> u | None -> zero_usage
+
+let total_tokens (u : Agent_sdk.Types.api_usage) : int =
+  u.input_tokens + u.output_tokens
+
+(* ================================================================ *)
+
 let log_keeper_exn ~label exn =
   let tag = match exn with
     | Sys_error _ | Failure _ | Not_found
@@ -609,7 +632,7 @@ let run_proactive_generation
       in
       let temperature = proactive_temperature attempt in
       let max_tokens = 1024 in
-      let (agent_result, attempt_latency) = Cascade.timed (fun () ->
+      let (agent_result, attempt_latency) = timed (fun () ->
           Oas_worker.run_named ~cascade_name:"keeper_turn"
             ~goal:prompt ~system_prompt:turn_system_prompt
             ~tools ~max_turns:3 ~temperature ~max_tokens ()) in
@@ -621,7 +644,7 @@ let run_proactive_generation
             model_spec_for_used specs resp.Llm_provider.Types.model
             |> Option.value ~default:primary
           in
-          let attempt_usage = Cascade.usage_of_response resp in
+          let attempt_usage = usage_of_response resp in
           let attempt_cost_usd = cost_usd_of_usage attempt_usage used_model in
           let attempt_content =
             let c = String.trim (Agent_sdk.Types.text_of_content resp.content) in

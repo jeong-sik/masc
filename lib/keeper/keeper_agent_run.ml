@@ -45,15 +45,21 @@ let run_turn
   : (run_result, string) result =
   let meta_ref = ref meta in
   let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
-  let _hooks = Keeper_hooks_oas.make_hooks
+  let hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_ref ~generation () in
-  (* TODO: pass hooks to Oas_worker when it supports hooks parameter *)
+  let reducer = Agent_sdk.Context_reducer.compose [
+    { Agent_sdk.Context_reducer.strategy =
+        Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 } };
+    { strategy = Agent_sdk.Context_reducer.Merge_contiguous };
+  ] in
   match
     Oas_worker.run_named
       ~cascade_name
       ~goal:user_message
       ~system_prompt
       ~tools
+      ~hooks
+      ~context_reducer:reducer
       ~max_turns:3
       ~temperature:0.3
       ~max_tokens:4096

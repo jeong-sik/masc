@@ -94,13 +94,26 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
 
-export function ChatMessageBubble({ entry }: { entry: KeeperConversationEntry }) {
+export function ChatMessageBubble({
+  entry,
+  showMetadata = true,
+}: {
+  entry: KeeperConversationEntry
+  showMetadata?: boolean
+}) {
   const [expanded, setExpanded] = useState(false)
   const [rawExpanded, setRawExpanded] = useState(false)
   const detailItems = detailSummary(entry.details)
-  const canExpand = !!entry.details
+  const canExpand = showMetadata && !!entry.details
   const overview = entry.details ? overviewRows(entry.details) : []
   const state = stateRows(entry.details?.stateBlock)
+
+  useEffect(() => {
+    if (!showMetadata) {
+      setExpanded(false)
+      setRawExpanded(false)
+    }
+  }, [showMetadata])
 
   return html`
     <article class=${`chat-bubble ${bubbleTone(entry)}`}>
@@ -129,7 +142,7 @@ export function ChatMessageBubble({ entry }: { entry: KeeperConversationEntry })
           : null}
       </div>
 
-      ${detailItems.length > 0
+      ${showMetadata && detailItems.length > 0
         ? html`<div class="chat-detail-chip-row">
             ${detailItems.map(item => html`<span class="chat-detail-chip">${item}</span>`)}
           </div>`
@@ -205,9 +218,11 @@ export function ChatMessageBubble({ entry }: { entry: KeeperConversationEntry })
 export function ChatTranscript({
   entries,
   emptyText,
+  showMetadata,
 }: {
   entries: KeeperConversationEntry[]
   emptyText: string
+  showMetadata?: boolean
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const lastSignature = entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}`).join('|')
@@ -222,7 +237,7 @@ export function ChatTranscript({
     <div class="chat-transcript" ref=${scrollerRef}>
       ${entries.length === 0
         ? html`<div class="chat-empty-copy">${emptyText}</div>`
-        : entries.map(entry => html`<${ChatMessageBubble} key=${entry.id} entry=${entry} />`)}
+        : entries.map(entry => html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} />`)}
     </div>
   `
 }

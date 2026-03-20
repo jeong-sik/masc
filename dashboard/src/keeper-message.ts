@@ -30,7 +30,7 @@ function stripSkillRouteLines(text: string): string {
     .split('\n')
     .filter(line => {
       const trimmed = line.trim()
-      return !trimmed.startsWith('SKILL:') && !trimmed.startsWith('SKILL_REASON:')
+      return !trimmed.startsWith('SKILL')
     })
     .join('\n')
 }
@@ -69,6 +69,7 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
     skillPrimary: asString(payload.skill_primary) ?? null,
     skillReason: asString(payload.skill_reason) ?? null,
     stateBlock,
+    replyText: reply || null,
     rawPayload: payload,
   }
 }

@@ -19,6 +19,24 @@ import {
 import { ChatComposer, ChatTranscript } from './chat/primitives'
 import { showToast } from './common/toast'
 
+const KEEPER_CHAT_METADATA_VISIBLE_KEY = 'masc_keeper_chat_metadata_visible'
+
+function readKeeperChatMetadataVisible(): boolean {
+  try {
+    return localStorage.getItem(KEEPER_CHAT_METADATA_VISIBLE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function writeKeeperChatMetadataVisible(value: boolean): void {
+  try {
+    localStorage.setItem(KEEPER_CHAT_METADATA_VISIBLE_KEY, value ? 'true' : 'false')
+  } catch {
+    // Ignore persistence failures.
+  }
+}
+
 function quietReasonLabel(reason?: string | null): string {
   switch (reason) {
     case 'quiet_hours':
@@ -149,12 +167,17 @@ export function KeeperConversationPanel({
   placeholder: string
 }) {
   const [draft, setDraft] = useState('')
+  const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
 
   useEffect(() => {
     if (keeperName) {
       void hydrateKeeperStatus(keeperName)
     }
   }, [keeperName])
+
+  useEffect(() => {
+    writeKeeperChatMetadataVisible(showMetadata)
+  }, [showMetadata])
 
   const rawThread = keeperThreads.value[keeperName] ?? []
   // Filter out system/tool messages — only show user and assistant conversation
@@ -179,9 +202,19 @@ export function KeeperConversationPanel({
 
   return html`
     <div class="keeper-conversation-shell">
+      <div class="keeper-conversation-toolbar">
+        <button
+          type="button"
+          class="control-btn ghost"
+          onClick=${() => { setShowMetadata(!showMetadata) }}
+        >
+          ${showMetadata ? '메타 숨기기' : '메타 표시'}
+        </button>
+      </div>
       <${ChatTranscript}
         entries=${thread}
         emptyText="아직 직접 대화 기록이 없습니다."
+        showMetadata=${showMetadata}
       />
       <${ChatComposer}
         draft=${draft}

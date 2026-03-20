@@ -135,6 +135,10 @@ function parseSseEvent(frame: string): KeeperChatStreamEvent | null {
   }
 }
 
+function isTerminalKeeperStreamEvent(event: KeeperChatStreamEvent): boolean {
+  return event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR'
+}
+
 export async function streamKeeperMessage(
   name: string,
   message: string,
@@ -189,7 +193,16 @@ export async function streamKeeperMessage(
       buffer = rest
       for (const frame of frames) {
         const event = parseSseEvent(frame)
-        if (event) onEvent(event)
+        if (!event) continue
+        onEvent(event)
+        if (isTerminalKeeperStreamEvent(event)) {
+          try {
+            await reader.cancel()
+          } catch {
+            // Ignore stream cancellation errors after terminal events.
+          }
+          return
+        }
       }
       if (done) break
     }

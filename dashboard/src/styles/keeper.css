@@ -228,3 +228,8 @@
   flex-direction: column;
   gap: 10px;
 }
+
+.keeper-conversation-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}

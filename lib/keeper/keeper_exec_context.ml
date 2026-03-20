@@ -5,8 +5,31 @@
 open Keeper_types
 open Keeper_memory
 open Keeper_alerting
-open Keeper_exec_tools
+open Keeper_exec_tools [@@warning "-33"]
 open Keeper_exec_status
+
+(* ================================================================ *)
+(* Inline utilities (formerly timed/total_tokens/usage_of)  *)
+(* ================================================================ *)
+
+let timed (f : unit -> 'a) : 'a * int =
+  let t0 = Time_compat.now () in
+  let result = f () in
+  let ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
+  (result, ms)
+
+let zero_usage : Agent_sdk.Types.api_usage =
+  { input_tokens = 0; output_tokens = 0;
+    cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
+
+let usage_of_response (resp : Llm_provider.Types.api_response)
+    : Agent_sdk.Types.api_usage =
+  match resp.usage with Some u -> u | None -> zero_usage
+
+let total_tokens (u : Agent_sdk.Types.api_usage) : int =
+  u.input_tokens + u.output_tokens
+
+(* ================================================================ *)
 
 let log_keeper_exn ~label exn =
   let tag = match exn with
@@ -588,28 +611,8 @@ let run_proactive_generation
       continuity_snapshot
       ~continuity_summary
   in
-  let max_tool_rounds = 3 in
-  let execute_tool_calls
-      ~(ctx_work : Context_manager.working_context)
-      (blocks : Agent_sdk.Types.content_block list)
-      : (string * Yojson.Safe.t * string) list =
-    List.filter_map
-      (function
-        | Agent_sdk.Types.ToolUse { id = _; name; input } ->
-            let output =
-              try execute_keeper_tool_call ~config ~meta ~ctx_work ~name ~input
-              with exn ->
-                Log.Keeper.error "tool %s failed: %s" name (Printexc.to_string exn);
-                Yojson.Safe.to_string
-                  (`Assoc [
-                    ("error", `String "Tool execution failed (internal error)");
-                    ("tool", `String name);
-                  ])
-            in
-            Some (name, input, output)
-        | _ -> None)
-      blocks
-  in
+  let ctx_ref = ref ctx_work in
+  let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
   let rec loop attempt usage_acc latency_acc cost_acc retry_hint =
     if attempt > max_attempts then
       Some {
@@ -627,120 +630,36 @@ let run_proactive_generation
         if String.trim retry_hint = "" then base_prompt
         else Printf.sprintf "%s\n\n%s" base_prompt retry_hint
       in
-      let history_context =
-        List.filter_map (fun (msg : Agent_sdk.Types.message) ->
-          match msg.role with
-          | Agent_sdk.Types.User ->
-            Some (Printf.sprintf "User: %s"
-              (Agent_sdk.Types.text_of_content msg.content))
-          | Agent_sdk.Types.Assistant ->
-            Some (Printf.sprintf "Assistant: %s"
-              (Agent_sdk.Types.text_of_content msg.content))
-          | _ -> None
-        ) ctx_work.messages
-      in
-      let enriched_system =
-        if history_context = [] then turn_system_prompt
-        else Printf.sprintf "%s\n\nRecent conversation context:\n%s"
-          turn_system_prompt (String.concat "\n" history_context)
-      in
       let temperature = proactive_temperature attempt in
       let max_tokens = 1024 in
-      let (cascade_result0, latency0) = Cascade.timed (fun () ->
+      let (agent_result, attempt_latency) = timed (fun () ->
           Oas_worker.run_named ~cascade_name:"keeper_turn"
-            ~goal:prompt ~system_prompt:enriched_system
-            ~max_turns:1 ~temperature ~max_tokens ()) in
-      match cascade_result0 with
+            ~goal:prompt ~system_prompt:turn_system_prompt
+            ~tools ~max_turns:3 ~temperature ~max_tokens ()) in
+      match agent_result with
       | Error _ -> None
-      | Ok result0 ->
-          let resp0 = result0.Oas_worker.response in
-          let used_model0 =
-            model_spec_for_used specs resp0.Llm_provider.Types.model
+      | Ok result ->
+          let resp = result.Oas_worker.response in
+          let used_model =
+            model_spec_for_used specs resp.Llm_provider.Types.model
             |> Option.value ~default:primary
           in
-          let cost0 = cost_usd_of_usage (Cascade.usage_of_response resp0) used_model0 in
-          let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
-              ~acc_tools_used ~last_resp =
-            if not (Cascade.has_tool_use last_resp) || round > max_tool_rounds then
-              let content =
-                let c = String.trim (Cascade.text_of_response last_resp) in
-                if c = "" && acc_tools_used <> [] then
-                  Printf.sprintf "(tools executed: %s)"
-                    (String.concat ", " acc_tools_used)
-                else Cascade.text_of_response last_resp
-              in
-              ( content,
-                acc_usage,
-                last_resp.Llm_provider.Types.model,
-                acc_latency,
-                acc_cost,
-                acc_tools_used )
-            else
-              let tool_outputs =
-                execute_tool_calls ~ctx_work last_resp.content
-              in
-              let round_tools =
-                List.map (fun (name, _, _) -> name) tool_outputs
-              in
-              let all_tools_so_far = acc_tools_used @ round_tools in
-              let followup_prompt =
-                keeper_tool_followup_prompt
-                  ~user_message:prompt
-                  ~draft_reply:(Cascade.text_of_response last_resp)
-                  ~tool_outputs
-                  ~already_executed:all_tools_so_far
-              in
-              let write_done =
-                keeper_write_done all_tools_so_far
-                || List.exists
-                     (fun n -> List.mem n [ "keeper_fs_edit"; "keeper_edit" ])
-                     all_tools_so_far
-              in
-              let _next_tools =
-                keeper_allowed_llm_tools ~write_done meta
-              in
-              let followup_system =
-                keeper_tool_loop_system_prompt
-                  ~character_context:turn_system_prompt
-              in
-              let (followup_result, round_latency) = Cascade.timed (fun () ->
-                  Oas_worker.run_named ~cascade_name:"keeper_turn"
-                    ~goal:followup_prompt ~system_prompt:followup_system
-                    ~max_turns:1 ~temperature:0.3 ~max_tokens:1024 ()) in
-              match followup_result with
-              | Error _ ->
-                  ( Cascade.text_of_response last_resp,
-                    acc_usage,
-                    last_resp.Llm_provider.Types.model,
-                    acc_latency,
-                    acc_cost,
-                    acc_tools_used @ round_tools )
-              | Ok result_next ->
-                  let resp_next = result_next.Oas_worker.response in
-                  let used_model_next =
-                    model_spec_for_used specs resp_next.Llm_provider.Types.model
-                    |> Option.value ~default:primary
-                  in
-                  let resp_next_usage = Cascade.usage_of_response resp_next in
-                  let cost_next = cost_usd_of_usage resp_next_usage used_model_next in
-                  tool_loop
-                    ~round:(round + 1)
-                    ~acc_usage:(merge_usage acc_usage resp_next_usage)
-                    ~acc_latency:(acc_latency + round_latency)
-                    ~acc_cost:(acc_cost +. cost_next)
-                    ~acc_tools_used:(acc_tools_used @ round_tools)
-                    ~last_resp:resp_next
+          let attempt_usage = usage_of_response resp in
+          let attempt_cost_usd = cost_usd_of_usage attempt_usage used_model in
+          let attempt_content =
+            let c = String.trim (Agent_sdk.Types.text_of_content resp.content) in
+            let tool_names = List.filter_map (function
+              | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
+              resp.content in
+            if c = "" && tool_names <> [] then
+              Printf.sprintf "(tools executed: %s)" (String.concat ", " tool_names)
+            else c
           in
-          let (attempt_content, attempt_usage, attempt_model_used, attempt_latency_ms,
-               attempt_cost_usd, attempt_tools_used) =
-            tool_loop
-              ~round:1
-              ~acc_usage:(Cascade.usage_of_response resp0)
-              ~acc_latency:latency0
-              ~acc_cost:cost0
-              ~acc_tools_used:[]
-              ~last_resp:resp0
-          in
+          let attempt_model_used = resp.Llm_provider.Types.model in
+          let attempt_tools_used = List.filter_map (function
+            | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
+            resp.content in
+          let attempt_latency_ms = attempt_latency in
           let usage_acc = merge_usage usage_acc attempt_usage in
           let latency_acc = latency_acc + attempt_latency_ms in
           let cost_acc = cost_acc +. attempt_cost_usd in

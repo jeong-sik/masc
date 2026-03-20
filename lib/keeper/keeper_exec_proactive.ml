@@ -187,7 +187,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                     let max_ctx =
                       match model_specs with p :: _ -> p.max_context | [] -> 4096
                     in
-                    let (delib_result, delib_latency) = Cascade.timed (fun () ->
+                    let (delib_result, delib_latency) = Keeper_exec_context.timed (fun () ->
                       Keeper_agent_run.run_turn
                         ~config:ctx.config ~meta ~base_dir
                         ~max_context:max_ctx
@@ -488,7 +488,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                    + response_usage.output_tokens;
                                  total_tokens =
                                    meta.total_tokens
-                                   + Cascade.total_tokens response_usage;
+                                   + Keeper_exec_context.total_tokens response_usage;
                                  total_cost_usd =
                                    meta.total_cost_usd +. turn_cost;
                                  last_turn_ts = now_ts;
@@ -498,7 +498,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                  last_output_tokens =
                                    response_usage.output_tokens;
                                  last_total_tokens =
-                                   Cascade.total_tokens response_usage;
+                                   Keeper_exec_context.total_tokens response_usage;
                                  last_latency_ms = delib_latency;
                                  last_proactive_ts = now_ts;
                                  last_proactive_reason =
@@ -640,13 +640,13 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                              meta.total_input_tokens + generated.usage.input_tokens;
                            total_output_tokens =
                              meta.total_output_tokens + generated.usage.output_tokens;
-                           total_tokens = meta.total_tokens + Cascade.total_tokens generated.usage;
+                           total_tokens = meta.total_tokens + Keeper_exec_context.total_tokens generated.usage;
                            total_cost_usd = meta.total_cost_usd +. turn_cost;
                            last_turn_ts = now_ts;
                            last_model_used = model_used;
                            last_input_tokens = generated.usage.input_tokens;
                            last_output_tokens = generated.usage.output_tokens;
-                           last_total_tokens = Cascade.total_tokens generated.usage;
+                           last_total_tokens = Keeper_exec_context.total_tokens generated.usage;
                            last_latency_ms = generated.latency_ms;
                            compaction_count =
                              meta.compaction_count + if compacted then 1 else 0;
@@ -693,7 +693,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                     [
                                       ("input_tokens", `Int generated.usage.input_tokens);
                                       ("output_tokens", `Int generated.usage.output_tokens);
-                                      ("total_tokens", `Int (Cascade.total_tokens generated.usage));
+                                      ("total_tokens", `Int (Keeper_exec_context.total_tokens generated.usage));
                                     ] );
                                 ("latency_ms", `Int generated.latency_ms);
                                 ("cost_usd", `Float turn_cost);

@@ -110,6 +110,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
     ~guardrails
     ~temperature:0.3
     ~max_tokens:1024
+    ~max_cost_usd:gate_config.Eval_gate.max_cost_usd
     ()
   with
   | Error e ->

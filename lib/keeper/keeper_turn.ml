@@ -247,8 +247,9 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               postpass_budget_ms <= 0 || postpass_remaining_ms () > 0
             in
 
-            (* === Dual-path: Agent.run() vs manual loop === *)
-            if Keeper_agent_run.is_enabled () then begin
+            (* === Agent.run() is the default path.
+               Legacy manual loop available via KEEPER_USE_LEGACY_LOOP=true. === *)
+            if not (Keeper_agent_run.use_legacy_loop ()) then begin
               let ctx_ref = ref ctx_work in
               let cascade_name = "keeper_turn" in
               match

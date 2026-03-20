@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { HealthBeacon } from './health-beacon'
 import { missionError, missionLoading } from '../../mission-store'
+import { PanelSemanticDetails } from '../common/semantic-layer'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionBrief,
@@ -118,6 +119,9 @@ export function SituationBanner({ snap, roomHealth }: SituationBannerProps) {
     <div class="situation-banner situation-banner--${tone}">
       <${HealthBeacon} health=${roomHealth ?? tone} />
       <span class="situation-banner__text">${text}</span>
+      <span class="situation-banner__meta">
+        <${PanelSemanticDetails} panelId="home.situation_banner" compact=${true} />
+      </span>
     </div>
     ${showReasons ? html`
       <details class="situation-reasons-collapse" open=${reasons.length <= 5}>

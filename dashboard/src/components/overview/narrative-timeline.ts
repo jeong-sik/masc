@@ -26,38 +26,9 @@ interface NarrativeEvent {
   timestamp: number
 }
 
-function eventVerb(kind?: string, eventType?: string): string {
-  const k = kind ?? ''
-  const e = (eventType ?? '').toLowerCase()
-
-  if (e.includes('claim')) return '태스크를 claim'
-  if (e.includes('done') || e.includes('complete')) return '태스크를 완료'
-  if (e.includes('join')) return 'room에 참여'
-  if (e.includes('leave')) return 'room에서 퇴장'
-  if (e.includes('broadcast')) return '메시지를 브로드캐스트'
-  if (e.includes('heartbeat')) return '하트비트를 전송'
-  if (e.includes('post') || e.includes('board')) return '게시글을 작성'
-  if (e.includes('vote')) return '투표'
-  if (e.includes('comment')) return '댓글을 작성'
-  if (e.includes('spawn')) return '에이전트를 생성'
-  if (e.includes('commit')) return '커밋을 생성'
-  if (e.includes('pr') || e.includes('pull_request')) return 'PR을 처리'
-  if (k === 'tasks') return '태스크를 처리'
-  if (k === 'keepers') return '키퍼 활동'
-  if (k === 'system') return '시스템 이벤트'
-
-  return '활동'
-}
-
 function buildNarrative(entry: JournalEntry): NarrativeEvent {
   const actor = entry.agent ?? null
-  const preview = entry.preview ?? entry.text
-  const verb = eventVerb(entry.kind, entry.eventType)
-
-  const actorPrefix = actor ? `${actor}가 ` : ''
-  const text = preview
-    ? `${actorPrefix}${verb}: ${preview}`
-    : `${actorPrefix}${verb}.`
+  const text = entry.narrativeText ?? entry.preview ?? entry.text
 
   return {
     actor,

@@ -9,7 +9,6 @@ import {
   serverStatus,
 } from '../store'
 import { refreshForTab } from '../tab-refresh'
-import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
 import { navigate } from '../router'
 import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from '../operator-store'

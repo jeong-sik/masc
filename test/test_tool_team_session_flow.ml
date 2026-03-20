@@ -15,6 +15,7 @@ let test_recover_orphan_session () =
       session_id;
       goal = "test orphan cleanup";
       created_by = "tester";
+      origin_kind = Team_session_types.Origin_human;
       room_id = "default";
       operation_id = None;
       status = Team_session_types.Running;
@@ -379,4 +380,3 @@ let test_step_plain_turn_matches_legacy_turn () =
   Alcotest.(check string) "step message" "step note"
     Yojson.Safe.Util.(step_detail |> member "message" |> to_string);
   cleanup_dir base_dir
-

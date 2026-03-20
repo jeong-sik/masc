@@ -5,6 +5,37 @@ include Team_session_types_enums
 open Yojson.Safe.Util
 let dedup_strings = Dashboard_utils.dedup_strings
 
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > text_len then false
+    else if String.sub text idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
+let system_session_creator_prefixes =
+  [ "keeper"; "dashboard"; "operator"; "system"; "gardener"; "sentinel";
+    "guardian"; "lodge-system"; "team-session"; "ecosystem" ]
+
+let creator_looks_system created_by =
+  let normalized = String.lowercase_ascii (String.trim created_by) in
+  normalized <> ""
+  && List.exists
+       (fun prefix ->
+         String.equal normalized prefix
+         || String.starts_with ~prefix:(prefix ^ "-") normalized
+         || contains_substring normalized ("-" ^ prefix ^ "-"))
+       system_session_creator_prefixes
+
+let infer_session_origin_kind ~created_by ~orchestration_mode =
+  match orchestration_mode with
+  | Auto -> Origin_system
+  | Manual | Assist ->
+      if creator_looks_system created_by then Origin_system else Origin_human
+
 let planned_worker_key (w : planned_worker) =
   match w.runtime_actor with
   | Some actor when String.trim actor <> "" -> "actor:" ^ String.trim actor
@@ -434,6 +465,7 @@ let session_to_yojson (s : session) =
       ("session_id", `String s.session_id);
       ("goal", `String s.goal);
       ("created_by", `String s.created_by);
+      ("origin_kind", `String (session_origin_kind_to_string s.origin_kind));
       ("room_id", `String s.room_id);
       ("operation_id", Option.fold ~none:`Null ~some:(fun v -> `String v) s.operation_id);
       ("status", `String (status_to_string s.status));
@@ -501,6 +533,16 @@ let session_of_yojson json =
         session_id = json |> member "session_id" |> to_string;
         goal = json |> member "goal" |> to_string;
         created_by = json |> member "created_by" |> to_string_option |> Option.value ~default:"unknown";
+        origin_kind =
+          (match json |> member "origin_kind" |> to_string_option with
+          | Some raw -> session_origin_kind_of_string raw
+          | None ->
+              infer_session_origin_kind
+                ~created_by:(json |> member "created_by" |> to_string_option |> Option.value ~default:"unknown")
+                ~orchestration_mode:(
+                  json |> member "orchestration_mode" |> to_string_option
+                  |> Option.value ~default:"assist"
+                  |> orchestration_mode_of_string));
         room_id = json |> member "room_id" |> to_string_option |> Option.value ~default:"default";
         operation_id = json |> member "operation_id" |> to_string_option;
         status = json |> member "status" |> to_string_option |> Option.value ~default:"failed" |> status_of_string;

@@ -289,6 +289,7 @@ function normalizeSessionBrief(raw: unknown): DashboardMissionSessionBrief | nul
     session_id: sessionId,
     goal,
     created_by: asString(raw.created_by) ?? null,
+    origin_kind: asString(raw.origin_kind) === 'system' ? 'system' : 'human',
     room: asString(raw.room) ?? null,
     status: asString(raw.status),
     health: asString(raw.health),

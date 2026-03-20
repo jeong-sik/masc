@@ -68,18 +68,12 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
             meta.name meta.deliberation_cost_total_usd daily_budget;
           meta)
         else
-          match model_specs_of_strings meta.models with
+          match ensure_api_keys_for_labels meta.models with
           | Error msg ->
               log_proactive_failure
-                ("deliberation model specs: " ^ msg);
+                ("deliberation api keys: " ^ msg);
               meta
-          | Ok specs -> (
-              match ensure_api_keys specs with
-              | Error msg ->
-                  log_proactive_failure
-                    ("deliberation api keys: " ^ msg);
-                  meta
-              | Ok () ->
+          | Ok () ->
                   (* Parse triggers from last_triage_triggers string *)
                   let trigger_strs =
                     String.split_on_char ',' meta.last_triage_triggers
@@ -514,18 +508,19 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                               | Error msg ->
                                   Log.KeeperExec.error "write_meta failed: %s"
                                     msg);
-                             updated)))
+                             updated))
       else
-      match model_specs_of_strings meta.models with
+      match ensure_api_keys_for_labels meta.models with
       | Error msg ->
-          log_proactive_failure ("model specs: " ^ msg);
+          log_proactive_failure ("api keys: " ^ msg);
           meta
-      | Ok specs ->
-          (match ensure_api_keys specs with
-           | Error msg ->
-               log_proactive_failure ("api keys: " ^ msg);
+      | Ok () ->
+          let specs = Cascade.available_model_specs_of_strings meta.models in
+          (match specs with
+           | [] ->
+               log_proactive_failure "no available model specs";
                meta
-           | Ok () ->
+           | _ ->
                (* Phase 2: Autonomous goal turn (L2+ with active goals) *)
                (match run_autonomous_goal_turn ~config:ctx.config ~meta ~specs with
                 | Some updated_meta ->

@@ -4,7 +4,8 @@
 
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
-import type { Agent } from '../types'
+import type { Agent, Keeper } from '../types'
+import type { DashboardMissionKeeperBrief } from '../types/dashboard-mission'
 import { agents, keepers } from '../store'
 import { missionSnapshot } from '../mission-store'
 import { AgentAvatar } from './overview/agent-avatar'
@@ -55,7 +56,7 @@ interface KeeperInfo {
   autonomy_level?: string | null
 }
 
-function findKeeper(agentName: string, keeperList: any[], keeperBriefs: any[]): KeeperInfo | null {
+function findKeeper(agentName: string, keeperList: Keeper[], keeperBriefs: DashboardMissionKeeperBrief[]): KeeperInfo | null {
   // Try keeper briefs first (richer data from mission snapshot)
   for (const kb of keeperBriefs) {
     if (kb.name === agentName || kb.agent_name === agentName

@@ -2,7 +2,7 @@
 (library
  (name jiphyeon)
  (public_name masc_mcp.jiphyeon)
- (modules router archive consensus)
+ (modules archive)
  (libraries
    str
    yojson

@@ -16,6 +16,8 @@ type run_result = {
   model_used : string;
   turn_count : int;
   tool_calls_made : int;
+  usage : Agent_sdk.Types.api_usage;
+  tools_used : string list;
 }
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -37,7 +39,11 @@ type run_result = {
            and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
     @param cascade_name Cascade profile name for model selection
-    @param generation Current generation counter *)
+    @param generation Current generation counter
+    @param max_turns Maximum agent turns (default 3)
+    @param guardrails Optional OAS guardrails for tool safety gates
+    @param temperature LLM temperature (default 0.3)
+    @param max_tokens Maximum output tokens (default 4096) *)
 let run_turn
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
@@ -50,6 +56,10 @@ let run_turn
     ~(user_message : string)
     ~(cascade_name : string)
     ~(generation : int)
+    ?(max_turns : int = 3)
+    ?guardrails
+    ?(temperature : float = 0.3)
+    ?(max_tokens : int = 4096)
     ()
   : (run_result, string) result =
   (* 1. Ensure session directory *)
@@ -122,20 +132,22 @@ let run_turn
       ~hooks
       ~context_reducer:reducer
       ~memory
-      ~max_turns:3
-      ~temperature:0.3
-      ~max_tokens:4096
+      ~max_turns
+      ~temperature
+      ~max_tokens
+      ?guardrails
       ()
   with
   | Error e -> Error e
   | Ok result ->
     let text = Agent_sdk.Types.text_of_content result.response.content in
     let model = result.response.Llm_provider.Types.model in
-    let tool_count =
-      List.length (List.filter (function
-        | Agent_sdk.Types.ToolUse _ -> true | _ -> false)
-        result.response.content)
+    let tool_names =
+      List.filter_map (function
+        | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
+        result.response.content
     in
+    let usage = Cascade.usage_of_response result.response in
     let assistant_msg = Llm_provider.Types.assistant_msg text in
     Context_manager.persist_message session assistant_msg;
     ctx_ref := Context_manager.append !ctx_ref assistant_msg;
@@ -143,5 +155,7 @@ let run_turn
       response_text = text;
       model_used = model;
       turn_count = result.turns;
-      tool_calls_made = tool_count;
+      tool_calls_made = List.length tool_names;
+      usage;
+      tools_used = tool_names;
     }

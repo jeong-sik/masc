@@ -336,6 +336,7 @@ type gardener_state = {
   mutable day_start: float;  (** Start of current "day" for budget tracking *)
   mutable last_triage_started_at: float;
   mutable last_triage_outcome: triage_outcome;
+  mutable consecutive_triage_noops: int;
 } [@@deriving show]
 
 let make_gardener_state () = {
@@ -367,6 +368,7 @@ let make_gardener_state () = {
   day_start = Time_compat.now ();
   last_triage_started_at = 0.0;
   last_triage_outcome = Triage_none;
+  consecutive_triage_noops = 0;
 }
 
 (** {1 Gardener Configuration} *)

@@ -260,6 +260,7 @@ type gardener_state = {
   mutable day_start: float;  (** Start of current "day" for budget tracking *)
   mutable last_triage_started_at: float;
   mutable last_triage_outcome: triage_outcome;
+  mutable consecutive_triage_noops: int;
 }
 
 val make_gardener_state : unit -> gardener_state

@@ -636,6 +636,7 @@ let status_json () : Yojson.Safe.t =
                 ("room_active_agents", `Int state.last_room_active_agents);
                 ("last_triage_outcome", `String (string_of_triage_outcome state.last_triage_outcome));
                 ("last_triage_started_at", json_string_of_float_ts state.last_triage_started_at);
+                ("consecutive_triage_noops", `Int state.consecutive_triage_noops);
                 ("data_source", `String "room_filesystem");
                 ("staleness_warning", `String
                   (if state.last_health_check > 0.0 then

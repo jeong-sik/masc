@@ -111,7 +111,6 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     let min_agents = clamp_int ~min_v:1 ~max_v:64 min_agents in
     let now = Time_compat.now () in
     let session_id = Team_session_store.make_session_id () in
-    Team_session_store.ensure_session_dirs config session_id;
     let* () =
       match operation_id with
       | Some value -> validate_operation_attachment ~config ~operation_id:value
@@ -183,6 +182,9 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         updated_at_iso = now_iso ();
       }
     in
+    (* Create dirs only after validation succeeds — prevents orphaned
+       directories when validate_operation_attachment returns Error. *)
+    Team_session_store.ensure_session_dirs config session_id;
     Team_session_store.save_session config session;
     let* () =
       match operation_id with

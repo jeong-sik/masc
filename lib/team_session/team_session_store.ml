@@ -257,7 +257,7 @@ let list_sessions ?(since_unix = 0.0) config : Team_session_types.session list =
                     in
                     has_sub snippet {|"Running"|}
                     || has_sub snippet {|"Paused"|}
-                  with Sys_error _ | End_of_file -> false)
+                  with Sys_error _ | End_of_file | Eio.Io _ -> false)
               with Unix.Unix_error _ -> true
             ) dirs
         in

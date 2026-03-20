@@ -117,6 +117,7 @@ let run_turn
   let memory = Memory_oas_bridge.create_memory ~agent_name in
   ignore (Memory_oas_bridge.seed_institution ~memory ~config);
   ignore (Memory_oas_bridge.seed_procedures ~memory ~agent_name:"_global" ~limit:5);
+  ignore (Memory_oas_bridge.seed_memory_bank ~memory ~agent_name ~limit:10);
   let reducer = Agent_sdk.Context_reducer.compose [
     { Agent_sdk.Context_reducer.strategy =
         Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 } };

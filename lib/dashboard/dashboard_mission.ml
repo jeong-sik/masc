@@ -686,10 +686,15 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
   in
   let attention_queue = build_attention_queue incidents recommended_actions sessions in
   let session_briefs = build_session_briefs sessions attention_queue recommended_actions in
-  let agent_briefs =
-    Dashboard_mission_assembly.build_agent_briefs config sessions attention_queue room_json snapshot_json
+  let keeper_items =
+    match member_assoc "keepers" snapshot_json |> member_assoc "items" with
+    | `List items -> items
+    | _ -> []
   in
-  let keeper_briefs = Dashboard_mission_assembly.build_keeper_briefs snapshot_json in
+  let agent_briefs =
+    Dashboard_mission_assembly.build_agent_briefs config sessions attention_queue room_json keeper_items
+  in
+  let keeper_briefs = Dashboard_mission_assembly.build_keeper_briefs keeper_items in
   let internal_signals = Dashboard_mission_assembly.build_internal_signals incidents recommended_actions in
   {
     generated_at = Types.now_iso ();
@@ -740,15 +745,14 @@ let json ?actor ~config ~sw ~clock ~proc_mgr () =
   let operator_targets_json =
     `Assoc
       [
-        ("sessions", member_assoc "sessions" projection.snapshot_json |> member_assoc "items");
-        ("keepers", member_assoc "keepers" projection.snapshot_json |> member_assoc "items");
+        (* Use briefs instead of raw snapshot dumps to reduce payload
+           from ~330KB to ~30KB. Full session data is available via
+           /api/v1/dashboard/mission/session/:id for on-demand detail. *)
+        ("sessions", `List projection.session_briefs);
+        ("keepers", `List projection.keeper_briefs);
         ("pending_confirms", member_assoc "pending_confirms" projection.snapshot_json);
         ("available_actions", member_assoc "available_actions" projection.snapshot_json);
       ]
-  in
-  let sessions_json =
-    Dashboard_mission_assembly.build_sessions projection.sessions projection.attention_queue projection.agent_briefs
-      projection.keeper_briefs projection.command_json
   in
   `Assoc
     [
@@ -761,7 +765,8 @@ let json ?actor ~config ~sw ~clock ~proc_mgr () =
       ( "attention_queue",
         `List (List.map (fun (item : attention_context) -> item.json) projection.attention_queue)
       );
-      ("sessions", `List sessions_json);
+      (* Omit full sessions — frontend falls back to session_briefs *)
+      ("sessions", `List []);
       ("session_briefs", `List projection.session_briefs);
       ("agent_briefs", `List projection.agent_briefs);
       ("keeper_briefs", `List projection.keeper_briefs);

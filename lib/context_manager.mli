@@ -9,6 +9,17 @@
 
     @since 2.61.0 *)
 
+(** {1 UTF-8 Sanitization} *)
+
+(** Replace invalid UTF-8 bytes with U+FFFD replacement character. *)
+val sanitize_text_utf8 : string -> string
+
+(** Sanitize all text content in a message. *)
+val sanitize_message_utf8 : Agent_sdk.Types.message -> Agent_sdk.Types.message
+
+(** Heuristic token estimate: ~4 chars per token. *)
+val estimate_tokens : Agent_sdk.Types.message list -> int
+
 (** {1 Working Context} *)
 
 (** Working context: the message window sent to the LLM. *)

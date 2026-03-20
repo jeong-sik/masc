@@ -36,8 +36,8 @@ let handle_list _ctx _args : result =
 let handle_status _ctx _args : result =
   let endpoints = D.get_cached_or_refresh () in
   let summary = Llm_provider.Discovery.summary_to_json endpoints in
-  let permits_available = Cascade.llm_semaphore_available () in
-  let permits_in_use = Cascade.llm_permits_in_use () in
+  let permits_available = Oas_worker.llm_semaphore_available () in
+  let permits_in_use = Oas_worker.llm_permits_in_use () in
   (true, json_ok [
     ("result", `Assoc [
       ("endpoints", `List (List.map D.endpoint_to_json endpoints));
@@ -45,7 +45,7 @@ let handle_status _ctx _args : result =
       ("masc_permits", `Assoc [
         ("available", `Int permits_available);
         ("in_use", `Int permits_in_use);
-        ("max_concurrent", `Int Cascade.max_concurrent_llm);
+        ("max_concurrent", `Int Oas_worker.max_concurrent_llm);
       ]);
       ("cache_age_seconds", `Float (D.cache_age_seconds ()));
     ]);

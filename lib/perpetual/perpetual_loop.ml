@@ -395,7 +395,7 @@ let status ~config state : Yojson.Safe.t =
     ("last_usage", `Assoc [
       ("input_tokens", `Int state.last_usage.input_tokens);
       ("output_tokens", `Int state.last_usage.output_tokens);
-      ("total_tokens", `Int (Cascade.total_tokens state.last_usage));
+      ("total_tokens", `Int (state.last_usage.input_tokens + state.last_usage.output_tokens));
     ]);
     ("last_latency_ms", `Int state.last_latency_ms);
     ("last_heartbeat_ts", `Float state.last_heartbeat);

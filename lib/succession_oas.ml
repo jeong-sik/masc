@@ -320,7 +320,7 @@ let normalize_for_model (msgs : Agent_sdk.Types.message list)
   (* Trim to fit within target context budget *)
   let max_tokens = target.max_context * 8 / 10 in  (* Leave 20% for response *)
   let rec trim msgs =
-    let total = Cascade.estimate_tokens msgs in
+    let total = Context_manager.estimate_tokens msgs in
     if total <= max_tokens || List.length msgs <= 2 then msgs
     else
       (* Remove oldest non-system message *)
@@ -414,7 +414,7 @@ let hydrate (dna : succession_dna) (spec : successor_spec) : Context_manager.wor
       let rec take_up_to budget acc = function
         | [] -> List.rev acc
         | m :: rest ->
-          let tok = Cascade.estimate_tokens [m] in
+          let tok = Context_manager.estimate_tokens [m] in
           if budget - tok < 0 then List.rev acc
           else take_up_to (budget - tok) (m :: acc) rest
       in

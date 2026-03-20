@@ -15,6 +15,99 @@
 module Oas = Agent_sdk
 
 (* ================================================================ *)
+(* Cascade profile helpers (moved from Cascade)                      *)
+(* ================================================================ *)
+
+let int_of_env_default name ~default ~min_v ~max_v =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some raw ->
+      let v =
+        try int_of_string (String.trim raw)
+        with Failure _ -> default
+      in
+      max min_v (min max_v v)
+
+(** Locate config/cascade.json via CWD or ME_ROOT. *)
+let default_config_path () : string option =
+  let base dir name = Filename.concat (Filename.concat dir "config") name in
+  let cwd = Sys.getcwd () in
+  let me_root =
+    Sys.getenv_opt "ME_ROOT"
+    |> Option.value
+         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
+  in
+  let masc_root = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
+  let candidates =
+    [ base cwd "cascade.json";
+      base masc_root "cascade.json";
+      base cwd "llm_cascade.json";
+      base masc_root "llm_cascade.json" ]
+  in
+  List.find_opt Sys.file_exists candidates
+
+let cascade_label provider model =
+  if model = "" then None
+  else Some (Printf.sprintf "%s:%s" provider model)
+
+let cascade_labels_of pairs =
+  List.filter_map (fun (p, m) -> cascade_label p m) pairs
+
+let default_model_strings ~cascade_name =
+  let llama_model = Env_config.Llama.default_model in
+  let glm_model = Env_config.Llm.default_model in
+  let glm_flash = Env_config.Llm.flash_model in
+  let llama_glm =
+    (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
+    @ [ "glm:auto" ]
+  in
+  match cascade_name with
+  | "heartbeat_action" | "heartbeat_wake" -> llama_glm
+  | "sentinel_board" | "sentinel_task" | "sentinel_keeper" -> llama_glm
+  | "lodge_direct" | "lodge_context_rewrite" | "lodge_trait_gen"
+  | "lodge_comment" | "lodge_agent_match" -> llama_glm
+  | "gardener_spawn" | "gardener_retire" -> llama_glm
+  | "classification" | "context_router" | "capability_match" -> llama_glm
+  | "tom" -> llama_glm
+  | "verifier" | "code_swarm_verify" | "code_swarm" -> llama_glm
+  | "keeper_autonomy" | "keeper_proactive" | "keeper_deliberation"
+  | "keeper_reply" | "keeper_social" | "keeper_turn" -> llama_glm
+  | "routing_judge" | "team_router" -> llama_glm
+  | "chain_llm" -> llama_glm
+  | "autoresearch" -> llama_glm
+  | "trpg_intent" -> llama_glm
+  | "briefing" ->
+      (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
+      @ cascade_labels_of [ ("glm", glm_flash); ("gemini", Env_config.Gemini.flash_model) ]
+      @ [ "glm:auto" ]
+  | "governance_judge" | "operator_judge" -> llama_glm
+  | "walph" -> llama_glm
+  | "auto_responder_claude" ->
+      cascade_labels_of [ ("claude", Env_config.Claude.default_model) ]
+      @ [ "glm:auto" ]
+  | "auto_responder_gemini" ->
+      cascade_labels_of [ ("gemini", Env_config.Gemini.flash_model) ]
+      @ [ "glm:auto" ]
+  | "auto_responder_glm" ->
+      cascade_labels_of [ ("glm", glm_model) ]
+      @ [ "glm:auto" ]
+  | "auto_responder" -> llama_glm
+  | "spawn_glm" ->
+      cascade_labels_of [ ("glm", glm_model); ("glm", glm_flash) ]
+      @ [ "glm:auto" ]
+  | "mitosis" -> llama_glm
+  | "topic_extraction" -> llama_glm
+  | _ -> llama_glm
+
+(** Max concurrent LLM calls — observability only, no throttling. *)
+let max_concurrent_llm =
+  int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:8 ~min_v:1 ~max_v:128
+
+let inflight = Atomic.make 0
+let llm_semaphore_available () = max_concurrent_llm - Atomic.get inflight
+let llm_permits_in_use () = Atomic.get inflight
+
+(* ================================================================ *)
 (* Configuration                                                     *)
 (* ================================================================ *)
 
@@ -262,10 +355,10 @@ let complete_single ~cascade_name ~messages
     ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
     ?(max_tokens = 500) ?(accept = fun _ -> true) ?tools () =
   let env = Masc_eio_env.get () in
-  let defaults = Cascade.default_model_strings ~cascade_name in
+  let defaults = default_model_strings ~cascade_name in
   let config_path_opt =
     if String.length config_path > 0 then Some config_path
-    else Cascade.default_config_path ()
+    else default_config_path ()
   in
   match
     Llm_provider.Cascade_config.complete_named
@@ -289,9 +382,9 @@ let require_eio () =
 
 (** Resolve cascade model specs from config + defaults. *)
 let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
-  let defaults = Cascade.default_model_strings ~cascade_name in
+  let defaults = default_model_strings ~cascade_name in
   let configured =
-    match Cascade.default_config_path () with
+    match default_config_path () with
     | Some path ->
       let from_file =
         Llm_provider.Cascade_config.load_profile ~config_path:path ~name:cascade_name
@@ -302,7 +395,7 @@ let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
   let specs = Model_spec.available_model_specs_of_strings configured in
   if specs <> [] then specs
   else
-    let fallback = Cascade.default_model_strings ~cascade_name in
+    let fallback = default_model_strings ~cascade_name in
     if configured = fallback then (
       Printf.eprintf "[cascade] %s: no callable models from built-in defaults\n%!" cascade_name;
       [])

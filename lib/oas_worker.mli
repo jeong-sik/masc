@@ -1,7 +1,7 @@
 (** Oas_worker — Unified entry point for OAS-based MASC tool modules.
 
     Callers pass a [cascade_name] string; model resolution is handled
-    internally via [Cascade.default_model_strings] and
+    internally via [default_model_strings] and
     [Llm_provider.Cascade_config].  Internal [config] / [build] / [run]
     are implementation details and not exported.
 
@@ -10,9 +10,34 @@
 
     @since Phase 1 — MASC→OAS migration
     @since Phase 4 — public API restricted to named cascade functions
-    @since Phase 5 — complete_single moved here from Cascade *)
+    @since Phase 5 — complete_single moved here from Cascade
+    @since Phase 6 — cascade profile helpers + diagnostics moved here *)
 
 module Oas = Agent_sdk
+
+(** {1 Cascade Profile Helpers} *)
+
+(** Locate config/cascade.json via CWD or ME_ROOT. *)
+val default_config_path : unit -> string option
+
+(** Built-in model string defaults for a cascade profile name. *)
+val default_model_strings : cascade_name:string -> string list
+
+(** {1 Concurrency Diagnostics} *)
+
+(** Maximum concurrent LLM calls (from MASC_MAX_CONCURRENT_LLM env). *)
+val max_concurrent_llm : int
+
+(** Number of currently available LLM permits. *)
+val llm_semaphore_available : unit -> int
+
+(** Number of LLM permits currently in use. *)
+val llm_permits_in_use : unit -> int
+
+(** Atomic counter tracking in-flight LLM calls. *)
+val inflight : int Atomic.t
+
+(** {1 Run Results} *)
 
 type run_result = {
   response : Oas.Types.api_response;

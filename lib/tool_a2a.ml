@@ -14,7 +14,7 @@ type result = bool * string
 let handle_a2a_discover ctx args =
   let endpoint = get_string_opt args "endpoint" in
   let capability = get_string_opt args "capability" in
-  match A2a_tools.discover ctx.config ?endpoint ?capability () with
+  match A2a_tools.discover ctx.config ?endpoint ?capability ~schemas:Config.raw_all_tool_schemas () with
   | Ok json -> (true, Yojson.Safe.pretty_to_string json)
   | Error e -> (false, Printf.sprintf "❌ Discovery failed: %s" e)
 

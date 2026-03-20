@@ -360,8 +360,9 @@ let safe_text_for_followup text =
 let followup_prompt ~original_prompt ~tool_outputs ~already_used =
   let tool_lines =
     tool_outputs
-    |> List.mapi (fun idx ((tc : Cascade.tool_call), output) ->
-           sprintf "%d. %s(%s)\n%s" (idx + 1) tc.call_name tc.call_arguments
+    |> List.mapi (fun idx (name, input, output) ->
+           sprintf "%d. %s(%s)\n%s" (idx + 1) name
+             (Yojson.Safe.to_string input)
              (safe_text_for_followup output))
     |> String.concat "\n\n"
   in
@@ -500,7 +501,7 @@ let parse_text_tool_args (args_text : string) =
     in
     build [] parts
 
-let parse_text_tool_calls (content : string) : Cascade.tool_call list =
+let parse_text_tool_calls (content : string) : Agent_sdk.Types.content_block list =
   let prefix = "mcp__masc__" in
   let prefix_len = String.length prefix in
   let len = String.length content in
@@ -555,10 +556,10 @@ let parse_text_tool_calls (content : string) : Cascade.tool_call list =
             (match parse_text_tool_args args_raw with
             | Ok args_json ->
                 collect (close_idx + 1) (call_id + 1)
-                  ({
-                     Cascade.call_id = sprintf "text-fallback-%d" call_id;
-                     call_name = tool_name;
-                     call_arguments = Yojson.Safe.to_string args_json;
+                  (Agent_sdk.Types.ToolUse {
+                     id = sprintf "text-fallback-%d" call_id;
+                     name = tool_name;
+                     input = args_json;
                    }
                   :: acc)
             | Error msg ->

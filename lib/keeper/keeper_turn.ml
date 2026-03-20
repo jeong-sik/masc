@@ -247,32 +247,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               postpass_budget_ms <= 0 || postpass_remaining_ms () > 0
             in
 
-            (* Single-turn LLM call with cascade *)
-            let requests =
-	              List.map (fun (model : Cascade.model_spec) ->
-	                let msgs =
-	                  (Agent_sdk.Types.system_msg turn_system_prompt) :: ctx_work.messages
-	                in
-	                ({
-                  Cascade.model;
-                  messages = msgs;
-                  temperature = 0.7;
-                  max_tokens = turn_max_tokens;
-                  tools = keeper_allowed_llm_tools meta;
-                  response_format = `Text;
-                } : Cascade.completion_request)
-              ) specs
+            (* Single-turn LLM call params *)
+            let turn_messages =
+              (Agent_sdk.Types.system_msg turn_system_prompt) :: ctx_work.messages
             in
-            let run_cascade_batch requests =
-              Keeper_oas_adapter.run_cascade ?timeout_sec:timeout_sec_opt requests
-            in
-            (* Streaming-aware cascade: when on_text_delta is provided,
-               try streaming the first request. Text deltas are forwarded
-               to the callback in real time. If streaming fails or is
-               unavailable, fall back to the standard batch cascade. *)
-            let run_cascade requests =
-              match on_text_delta, requests with
-              | Some delta_cb, first_req :: _rest ->
+            let turn_temperature = 0.7 in
+            let run_cascade () =
+              match on_text_delta with
+              | Some delta_cb ->
                   let timeout_f =
                     Option.map float_of_int timeout_sec_opt
                   in
@@ -285,9 +267,15 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   Keeper_oas_adapter.run_cascade_stream
                     ?timeout_sec:timeout_f
                     ~on_event:stream_on_event
-                    first_req
-                    ~fallback:requests
-              | _ -> run_cascade_batch requests
+                    ~messages:turn_messages
+                    ~temperature:turn_temperature
+                    ~max_tokens:turn_max_tokens ()
+              | None ->
+                  Keeper_oas_adapter.run_cascade
+                    ?timeout_sec:timeout_sec_opt
+                    ~messages:turn_messages
+                    ~temperature:turn_temperature
+                    ~max_tokens:turn_max_tokens ()
             in
             let history_path =
               Filename.concat (Filename.concat base_dir meta.trace_id) "history.jsonl"
@@ -300,7 +288,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 ~max_history:64
             in
             let (cascade_result0, latency0) = Cascade.timed (fun () ->
-                run_cascade requests) in
+                run_cascade ()) in
             match cascade_result0 with
             | Error e ->
               (try ignore (Trajectory.finalize trajectory_acc (Trajectory.Failed e))
@@ -348,12 +336,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       ~tool_name:name
                       ~args_json:args_str
                       ~execute:(fun () ->
-                        let tc : Cascade.tool_call = {
-                          call_id = ""; call_name = name;
-                          call_arguments = args_str;
-                        } in
                         execute_keeper_tool_call
-                          ~config:ctx.config ~meta ~ctx_work tc)
+                          ~config:ctx.config ~meta ~ctx_work ~name ~input:args)
                   in
                   let output = match decision with
                     | Trajectory.Reject reason ->
@@ -407,7 +391,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               Trajectory.increment_turn trajectory_acc;
               let (base_content, base_usage, base_model_used, base_latency_ms,
                    base_cost_usd, tools_used) =
-                if not (Cascade.has_tool_calls resp0) then
+                if not (Cascade.has_tool_use resp0) then
                   (* No tool calls — return initial response directly *)
                   (Cascade.text_of_response resp0,
                    Cascade.usage_of_response resp0,
@@ -415,26 +399,22 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                    latency0, cost0, [])
                 else begin
                   (* First round: execute tool calls from initial response *)
-                  let first_tcs =
-                    Cascade.tool_calls_of_response resp0
+                  let first_outputs =
+                    List.filter_map
+                      (function
+                        | Agent_sdk.Types.ToolUse { id = _; name; input } ->
+                            let (_ok, output) =
+                              gated_dispatch ~name ~args:input
+                            in
+                            Some (name, input, output)
+                        | _ -> None)
+                      resp0.content
                   in
                   Log.Trpg.info "Tool round 1/%d: %d tool calls"
-                    max_tool_rounds (List.length first_tcs);
-                  let first_outputs = List.map
-                    (fun (tc : Cascade.tool_call) ->
-                      let args =
-                        try Yojson.Safe.from_string tc.call_arguments
-                        with _ -> `Assoc []
-                      in
-                      let (_ok, output) =
-                        gated_dispatch ~name:tc.call_name ~args
-                      in
-                      (tc, output))
-                    first_tcs
-                  in
+                    max_tool_rounds (List.length first_outputs);
                   let first_tools = List.map
-                    (fun (tc : Cascade.tool_call) -> tc.call_name)
-                    first_tcs
+                    (fun (name, _, _) -> name)
+                    first_outputs
                   in
                   if max_tool_rounds <= 1 || !write_done_ref then begin
                     (* Write done or single round — return first-round result *)
@@ -560,23 +540,16 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       ~candidate_user_msgs:recall_candidates
                       ~expected_topic:eval0.expected_topic
                   in
-                  let correction_requests =
-                    List.map (fun (model : Cascade.model_spec) ->
-	                      ({
-	                        Cascade.model;
-	                        messages = [
-	                          Agent_sdk.Types.system_msg turn_system_prompt;
-	                          Agent_sdk.Types.user_msg correction_prompt;
-	                        ];
-                        temperature = 0.2;
-                        max_tokens = correction_max_tokens;
-                        tools = [];
-                        response_format = `Text;
-                      } : Cascade.completion_request)
-                    ) specs
-                  in
+                  let correction_messages = [
+                    Agent_sdk.Types.system_msg turn_system_prompt;
+                    Agent_sdk.Types.user_msg correction_prompt;
+                  ] in
                   let (corr_result, corr_latency) = Cascade.timed (fun () ->
-                      run_cascade_batch correction_requests) in
+                      Keeper_oas_adapter.run_cascade
+                        ?timeout_sec:timeout_sec_opt
+                        ~messages:correction_messages
+                        ~temperature:0.2
+                        ~max_tokens:correction_max_tokens ()) in
                   match corr_result with
                   | Error _ ->
                     ( base_content, base_usage, base_model_used, base_latency_ms,
@@ -627,23 +600,16 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       ~candidate_user_msgs:recall_candidates
                       ~expected_topic:eval_after_correction.expected_topic
                   in
-                  let forced_requests =
-                    List.map (fun (model : Cascade.model_spec) ->
-	                      ({
-	                        Cascade.model;
-	                        messages = [
-	                          Agent_sdk.Types.system_msg turn_system_prompt;
-	                          Agent_sdk.Types.user_msg forced_prompt;
-	                        ];
-                        temperature = 0.0;
-                        max_tokens = correction_max_tokens;
-                        tools = [];
-                        response_format = `Text;
-                      } : Cascade.completion_request)
-                    ) specs
-                  in
+                  let forced_messages = [
+                    Agent_sdk.Types.system_msg turn_system_prompt;
+                    Agent_sdk.Types.user_msg forced_prompt;
+                  ] in
                   let (forced_result, forced_latency) = Cascade.timed (fun () ->
-                      run_cascade_batch forced_requests) in
+                      Keeper_oas_adapter.run_cascade
+                        ?timeout_sec:timeout_sec_opt
+                        ~messages:forced_messages
+                        ~temperature:0.0
+                        ~max_tokens:correction_max_tokens ()) in
                   match forced_result with
                   | Error _ ->
                       ( content_after_correction, usage_after_correction,

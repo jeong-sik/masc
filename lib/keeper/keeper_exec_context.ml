@@ -591,23 +591,25 @@ let run_proactive_generation
   let max_tool_rounds = 3 in
   let execute_tool_calls
       ~(ctx_work : Context_manager.working_context)
-      (tcs : Cascade.tool_call list) : (Cascade.tool_call * string) list =
-    List.map
-      (fun (tc : Cascade.tool_call) ->
-         let output =
-           try execute_keeper_tool_call ~config ~meta ~ctx_work tc
-           with exn ->
-             Log.Keeper.error "tool %s failed: %s" tc.call_name (Printexc.to_string exn);
-             Yojson.Safe.to_string
-               (`Assoc [
-                 ("error", `String "Tool execution failed (internal error)");
-                 ("tool", `String tc.call_name);
-               ])
-         in
-         (tc, output))
-      tcs
+      (blocks : Agent_sdk.Types.content_block list)
+      : (string * Yojson.Safe.t * string) list =
+    List.filter_map
+      (function
+        | Agent_sdk.Types.ToolUse { id = _; name; input } ->
+            let output =
+              try execute_keeper_tool_call ~config ~meta ~ctx_work ~name ~input
+              with exn ->
+                Log.Keeper.error "tool %s failed: %s" name (Printexc.to_string exn);
+                Yojson.Safe.to_string
+                  (`Assoc [
+                    ("error", `String "Tool execution failed (internal error)");
+                    ("tool", `String name);
+                  ])
+            in
+            Some (name, input, output)
+        | _ -> None)
+      blocks
   in
-  let run_cascade requests = Keeper_oas_adapter.run_cascade requests in
   let rec loop attempt usage_acc latency_acc cost_acc retry_hint =
     if attempt > max_attempts then
       Some {
@@ -625,24 +627,14 @@ let run_proactive_generation
         if String.trim retry_hint = "" then base_prompt
         else Printf.sprintf "%s\n\n%s" base_prompt retry_hint
       in
-      let requests =
-        List.map
-          (fun (model : Cascade.model_spec) ->
-            ({
-               Cascade.model;
-               messages =
-                 (Agent_sdk.Types.system_msg turn_system_prompt)
-                 :: (ctx_work.messages @ [ Agent_sdk.Types.user_msg prompt ]);
-               temperature = proactive_temperature attempt;
-               max_tokens = 1024; (* increased from 220 to allow tool calls *)
-               tools = keeper_allowed_llm_tools meta;
-               response_format = `Text;
-             }
-              : Cascade.completion_request))
-          specs
+      let messages =
+        (Agent_sdk.Types.system_msg turn_system_prompt)
+        :: (ctx_work.messages @ [ Agent_sdk.Types.user_msg prompt ])
       in
+      let temperature = proactive_temperature attempt in
+      let max_tokens = 1024 in
       let (cascade_result0, latency0) = Cascade.timed (fun () ->
-          run_cascade requests) in
+          Keeper_oas_adapter.run_cascade ~messages ~temperature ~max_tokens ()) in
       match cascade_result0 with
       | Error _ -> None
       | Ok resp0 ->
@@ -653,7 +645,7 @@ let run_proactive_generation
           let cost0 = cost_usd_of_usage (Cascade.usage_of_response resp0) used_model0 in
           let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
               ~acc_tools_used ~last_resp =
-            if not (Cascade.has_tool_calls last_resp) || round > max_tool_rounds then
+            if not (Cascade.has_tool_use last_resp) || round > max_tool_rounds then
               let content =
                 let c = String.trim (Cascade.text_of_response last_resp) in
                 if c = "" && acc_tools_used <> [] then
@@ -668,16 +660,13 @@ let run_proactive_generation
                 acc_cost,
                 acc_tools_used )
             else
-              let last_resp_tool_calls = Cascade.tool_calls_of_response last_resp in
+              let tool_outputs =
+                execute_tool_calls ~ctx_work last_resp.content
+              in
               let round_tools =
-                List.map
-                  (fun (tc : Cascade.tool_call) -> tc.call_name)
-                  last_resp_tool_calls
+                List.map (fun (name, _, _) -> name) tool_outputs
               in
               let all_tools_so_far = acc_tools_used @ round_tools in
-              let tool_outputs =
-                execute_tool_calls ~ctx_work last_resp_tool_calls
-              in
               let followup_prompt =
                 keeper_tool_followup_prompt
                   ~user_message:prompt
@@ -691,30 +680,18 @@ let run_proactive_generation
                      (fun n -> List.mem n [ "keeper_fs_edit"; "keeper_edit" ])
                      all_tools_so_far
               in
-              let next_tools =
+              let _next_tools =
                 keeper_allowed_llm_tools ~write_done meta
               in
-              let followup_requests =
-                List.map
-                  (fun (model : Cascade.model_spec) ->
-                     ({
-                        Cascade.model;
-                        messages = [
-                          Agent_sdk.Types.system_msg
-                            (keeper_tool_loop_system_prompt
-                               ~character_context:turn_system_prompt);
-                          Agent_sdk.Types.user_msg followup_prompt;
-                        ];
-                        temperature = 0.3;
-                        max_tokens = 1024; (* increased from 220 to allow tool calls *)
-                        tools = next_tools;
-                        response_format = `Text;
-                      }
-                       : Cascade.completion_request))
-                  specs
-              in
+              let followup_messages = [
+                Agent_sdk.Types.system_msg
+                  (keeper_tool_loop_system_prompt
+                     ~character_context:turn_system_prompt);
+                Agent_sdk.Types.user_msg followup_prompt;
+              ] in
               let (followup_result, round_latency) = Cascade.timed (fun () ->
-                  run_cascade followup_requests) in
+                  Keeper_oas_adapter.run_cascade
+                    ~messages:followup_messages ~temperature:0.3 ~max_tokens:1024 ()) in
               match followup_result with
               | Error _ ->
                   ( Cascade.text_of_response last_resp,

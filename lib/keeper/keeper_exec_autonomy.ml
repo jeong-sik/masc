@@ -127,8 +127,11 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
       let cost = cost_usd_of_usage usage used_model_spec in
       (* OAS handles tool dispatch internally; extract tool names from response *)
       let tools_used =
-        Cascade.tool_calls_of_response run_result.response
-        |> List.map (fun (tc : Cascade.tool_call) -> tc.call_name)
+        List.filter_map
+          (function
+            | Agent_sdk.Types.ToolUse { name; _ } -> Some name
+            | _ -> None)
+          run_result.response.content
       in
       (content, cost, tools_used)
 

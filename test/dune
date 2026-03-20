@@ -212,6 +212,12 @@
 
 ; Subsystem OAS integration test removed (#1834 — Gardener/Guardian/Sentinel deleted)
 
+; OAS Worker tests (streaming bridge, cascade config, mitosis, council)
+(test
+ (name test_oas_worker)
+ (modules test_oas_worker)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
+
 (test
  (name test_agent_swarm_unit)
  (modules test_agent_swarm_unit)

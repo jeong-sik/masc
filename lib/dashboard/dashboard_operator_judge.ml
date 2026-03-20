@@ -286,15 +286,16 @@ let parse_session_judgment ~config ~generated_at ~generated_at_unix ~model_used 
   | _ -> None
 
 let compute_judgments ~facts_json =
-  let timeout_sec = Env_config.Llm.operator_judge_timeout_seconds in
+  let _timeout_sec = Env_config.Llm.operator_judge_timeout_seconds in
   let prompt = prompt_for_facts facts_json in
   match
-    Oas_worker.complete_single ~cascade_name:"operator_judge"
-      ~messages:[Agent_sdk.Types.user_msg prompt]
-      ~temperature:0.2 ~timeout_sec ~max_tokens:4096 ()
+    Oas_worker.run_named ~cascade_name:"operator_judge"
+      ~goal:prompt ~max_turns:1
+      ~temperature:0.2 ~max_tokens:4096 ()
   with
   | Error message -> Error message
-  | Ok response -> (
+  | Ok result -> (
+      let response = result.Oas_worker.response in
       try Ok (response.Llm_provider.Types.model,
               Yojson.Safe.from_string (Llm_provider.Types.text_of_response response))
       with

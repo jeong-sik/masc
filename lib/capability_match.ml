@@ -254,13 +254,13 @@ let score_with_llm (agent : agent_profile) (task : task_profile)
     : (float, string) result =
   let prompt = build_scoring_prompt agent task in
   match
-    Oas_worker.complete_single ~cascade_name:"capability_match"
-      ~messages:[Agent_sdk.Types.user_msg prompt]
-      ~temperature:0.1 ~timeout_sec:15 ~max_tokens:20
+    Oas_worker.run_named ~cascade_name:"capability_match"
+      ~goal:prompt ~max_turns:1
+      ~temperature:0.1 ~max_tokens:20
       ~accept:llm_score_is_valid ()
   with
-  | Ok resp -> (
-      let text = Llm_provider.Types.text_of_response resp in
+  | Ok result -> (
+      let text = Llm_provider.Types.text_of_response result.Oas_worker.response in
       match parse_llm_score text with
       | Some f -> Ok f
       | None -> Error (Printf.sprintf "unparseable LLM response: %s" text))

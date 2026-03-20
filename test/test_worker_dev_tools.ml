@@ -14,14 +14,14 @@ let test_tool_count () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   Alcotest.(check int) "3 dev tools" 3 (List.length tools)
 
 let test_tool_names () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let names = List.map (fun (t : Tool.t) -> t.schema.name) tools in
   let expected = ["file_read"; "file_write"; "shell_exec"] in
   Alcotest.(check (list string)) "tool names match" expected names
@@ -30,7 +30,7 @@ let test_readonly_tool_names () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_readonly_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_readonly_tools ~proc_mgr ~clock () in
   let names = List.map (fun (t : Tool.t) -> t.schema.name) tools in
   let expected = ["file_read"; "shell_exec"] in
   Alcotest.(check (list string)) "readonly tool names match" expected names
@@ -41,7 +41,7 @@ let test_file_read_existing () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
   (* Write a temp file first *)
   let path = Filename.concat "/tmp" "dev_tools_test_read.txt" in
@@ -60,7 +60,7 @@ let test_file_read_nonexistent () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
   let result = Tool.execute tool
     (`Assoc [("path", `String "/tmp/nonexistent_dev_tools_xyz.txt")]) in
@@ -72,7 +72,7 @@ let test_file_read_blocked_path () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
   let result = Tool.execute tool
     (`Assoc [("path", `String "/etc/passwd")]) in
@@ -88,7 +88,7 @@ let test_file_read_path_traversal () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
   (* /tmp/../../etc/passwd normalizes to /etc/passwd — must be blocked *)
   let result = Tool.execute tool
@@ -101,7 +101,7 @@ let test_file_read_rejects_prefix_sibling () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
   let home = Sys.getenv "HOME" in
   let result = Tool.execute tool
@@ -114,7 +114,7 @@ let test_file_read_rejects_tmp_symlink_escape () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
   let path = "/tmp/agent_swarm_symlink_read_escape" in
   (try Sys.remove path with Sys_error _ -> ());
@@ -131,7 +131,7 @@ let test_file_read_truncation () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_read" tools in
   (* Create a 101KB file *)
   let path = "/tmp/dev_tools_test_large.txt" in
@@ -160,7 +160,7 @@ let test_file_write_new () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_write" tools in
   let path = "/tmp/dev_tools_test_write.txt" in
   (if Sys.file_exists path then Sys.remove path);
@@ -181,7 +181,7 @@ let test_file_write_blocked_path () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_write" tools in
   let result = Tool.execute tool
     (`Assoc [("path", `String "/etc/shadow_test");
@@ -194,7 +194,7 @@ let test_file_write_rejects_prefix_sibling () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_write" tools in
   let home = Sys.getenv "HOME" in
   let result = Tool.execute tool
@@ -208,7 +208,7 @@ let test_file_write_rejects_tmp_symlink_escape () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "file_write" tools in
   let path = "/tmp/agent_swarm_symlink_write_escape" in
   (try Sys.remove path with Sys_error _ -> ());
@@ -229,7 +229,7 @@ let test_shell_exec_echo () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
   let result = Tool.execute tool
     (`Assoc [("command", `String "echo hello")]) in
@@ -243,7 +243,7 @@ let test_shell_exec_blocked_command () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
   let result = Tool.execute tool
     (`Assoc [("command", `String "rm -rf /")]) in
@@ -282,7 +282,7 @@ let test_tool_exec_observer_bridges_to_telemetry () =
           ~duration_ms ~agent_id:"llama-local-worker" ()
       in
       let tools =
-        Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~on_exec ()
+        Worker_dev_tools.make_tools ~proc_mgr ~clock ~on_exec ()
       in
       let tmp_path = Filename.concat "/tmp" "dev_tools_observer_bridge.txt" in
       if Sys.file_exists tmp_path then Sys.remove tmp_path;
@@ -324,7 +324,7 @@ let test_shell_exec_rejects_shell_metacharacters () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
   let result = Tool.execute tool
     (`Assoc [("command", `String "echo hello; pwd")]) in
@@ -347,7 +347,7 @@ let test_shell_exec_nonexistent_cmd () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
   let result = Tool.execute tool
     (`Assoc [("command", `String "nonexistent_cmd_xyz_123")]) in
@@ -359,7 +359,7 @@ let test_shell_exec_missing_param () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
   let result = Tool.execute tool (`Assoc []) in
   (match result with
@@ -372,7 +372,7 @@ let test_readonly_shell_exec_blocks_git () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_readonly_tools ~proc_mgr ~clock () in
+  let tools = Worker_dev_tools.make_readonly_tools ~proc_mgr ~clock () in
   let tool = find_tool "shell_exec" tools in
   let result = Tool.execute tool
     (`Assoc [("command", `String "git status")]) in
@@ -384,7 +384,7 @@ let test_workdir_enforcement () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
-  let tools = Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock
+  let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock
     ~workdir:"/tmp/test_workdir" () in
   let tool = find_tool "file_write" tools in
   (* Writing inside workdir should succeed *)

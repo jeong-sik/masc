@@ -177,8 +177,8 @@
  (libraries masc_mcp alcotest eio eio_main yojson mirage-crypto-rng mirage-crypto-rng.unix))
 
 (test
- (name test_agent_swarm_dev_tools)
- (modules test_agent_swarm_dev_tools)
+ (name test_worker_dev_tools)
+ (modules test_worker_dev_tools)
  (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
 
 (test

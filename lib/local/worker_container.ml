@@ -456,12 +456,12 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
       match execution_scope with
       | Team_session_types.Observe_only ->
           Ok
-            (Agent_swarm_dev_tools.make_readonly_tools ~proc_mgr ~clock
+            (Worker_dev_tools.make_readonly_tools ~proc_mgr ~clock
                ~workdir ~on_exec ())
       | Team_session_types.Limited_code_change
       | Team_session_types.Autonomous ->
           Ok
-            (Agent_swarm_dev_tools.make_tools ~proc_mgr ~clock ~workdir
+            (Worker_dev_tools.make_tools ~proc_mgr ~clock ~workdir
                ~on_exec ()))
   | Error e, _ | _, Error e -> Error e
 

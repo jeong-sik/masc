@@ -57,7 +57,8 @@ let make_backend ~(agent_name : string) : Agent_sdk.Memory.long_term_backend =
       let importance = importance_of_json json in
       Memory_stream.add_memory
         ~agent_name ~content ~importance
-        (Memory_stream.Observation content));
+        (Memory_stream.Observation content);
+      Ok ());
 
     retrieve = (fun ~key ->
       let entries = Memory_stream.retrieve ~agent_name ~query:key ~limit:1 in
@@ -74,7 +75,28 @@ let make_backend ~(agent_name : string) : Agent_sdk.Memory.long_term_backend =
     remove = (fun ~key:_ ->
       (* Memory_stream is append-only JSONL. Old entries decay naturally
          via recency scoring. Explicit removal not supported. *)
-      ());
+      Ok ());
+
+    batch_persist = (fun pairs ->
+      List.iter (fun (key, json) ->
+        let content = Printf.sprintf "[%s] %s" key (content_of_json json) in
+        let importance = importance_of_json json in
+        Memory_stream.add_memory
+          ~agent_name ~content ~importance
+          (Memory_stream.Observation content)
+      ) pairs;
+      Ok ());
+
+    query = (fun ~prefix ~limit ->
+      let entries = Memory_stream.retrieve ~agent_name ~query:prefix ~limit in
+      List.map (fun (e : Memory_stream.memory_entry) ->
+        (e.Memory_stream.id,
+         `Assoc [
+           ("content", `String e.Memory_stream.content);
+           ("importance", `Int e.Memory_stream.importance);
+           ("timestamp", `Float e.Memory_stream.timestamp);
+         ])
+      ) entries);
   }
 
 (** Create an OAS [Memory.t] instance pre-configured with the memory_stream

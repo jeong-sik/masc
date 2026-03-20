@@ -162,9 +162,9 @@ let test_worktree_create_no_git () =
   let config = Room.default_config tmp_dir in
   let _ = Room.init config ~agent_name:None in
 
-  (* worktree_create should fail for non-git dir *)
-  let result = Room.worktree_create config ~agent_name:"claude" ~task_id:"test" ~base_branch:"main" in
-  Alcotest.(check bool) "contains error" true (String.length result > 0 && result.[0] = '\xE2');
+  (* worktree_create_r should fail for non-git dir *)
+  let result = Room.worktree_create_r config ~agent_name:"claude" ~task_id:"test" ~base_branch:"main" in
+  Alcotest.(check bool) "returns error" true (match result with Error _ -> true | Ok _ -> false);
 
   (* Cleanup *)
   let _ = Room.reset config in
@@ -320,8 +320,10 @@ let test_double_join () =
 
 let test_portal_open_and_status () =
   with_test_env (fun config ->
-    let result = Room.portal_open config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
-    Alcotest.(check bool) "portal open" true (contains_portal result);
+    let result = Room.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
+    (match result with
+     | Ok msg -> Alcotest.(check bool) "portal open" true (contains_portal msg)
+     | Error _ -> Alcotest.fail "portal_open_r should succeed");
 
     let status = Room.portal_status config ~agent_name:"claude" in
     Alcotest.(check bool) "portal status has fields" true
@@ -330,16 +332,15 @@ let test_portal_open_and_status () =
 
 let test_portal_send_without_open () =
   with_test_env (fun config ->
-    (* Send without opening portal first - returns error with ❌ *)
-    let result = Room.portal_send config ~agent_name:"claude" ~message:"hello" in
-    (* Could be ⚠ or ❌ depending on error type *)
+    (* Send without opening portal first - returns Error *)
+    let result = Room.portal_send_r config ~agent_name:"claude" ~message:"hello" in
     Alcotest.(check bool) "send without open returns error" true
-      (contains_warning result || contains_error result)
+      (match result with Error _ -> true | Ok _ -> false)
   )
 
 let test_portal_close () =
   with_test_env (fun config ->
-    let _ = Room.portal_open config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
+    let _ = Room.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
     let result = Room.portal_close config ~agent_name:"claude" in
     (* Portal close uses 🚪 emoji *)
     Alcotest.(check bool) "portal close" true (String.length result > 0)
@@ -1061,26 +1062,27 @@ let test_many_agents () =
 
 let test_portal_reopen_after_close () =
   with_test_env (fun config ->
-    let _ = Room.portal_open config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
+    let _ = Room.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
     let _ = Room.portal_close config ~agent_name:"claude" in
 
     (* Should be able to reopen *)
-    let result = Room.portal_open config ~agent_name:"claude" ~target_agent:"codex" ~initial_message:None in
-    Alcotest.(check bool) "reopen portal" true (contains_portal result)
+    let result = Room.portal_open_r config ~agent_name:"claude" ~target_agent:"codex" ~initial_message:None in
+    (match result with
+     | Ok msg -> Alcotest.(check bool) "reopen portal" true (contains_portal msg)
+     | Error _ -> Alcotest.fail "portal reopen should succeed")
   )
 
 let test_portal_send_multiple () =
   with_test_env (fun config ->
-    let _ = Room.portal_open config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
+    let _ = Room.portal_open_r config ~agent_name:"claude" ~target_agent:"gemini" ~initial_message:None in
 
     (* Send multiple messages *)
-    let r1 = Room.portal_send config ~agent_name:"claude" ~message:"First" in
-    let r2 = Room.portal_send config ~agent_name:"claude" ~message:"Second" in
-    let r3 = Room.portal_send config ~agent_name:"claude" ~message:"Third" in
-
-    Alcotest.(check bool) "send 1" true (String.length r1 > 0);
-    Alcotest.(check bool) "send 2" true (String.length r2 > 0);
-    Alcotest.(check bool) "send 3" true (String.length r3 > 0)
+    let check_send label r =
+      match r with Ok msg -> Alcotest.(check bool) label true (String.length msg > 0) | Error _ -> Alcotest.fail label
+    in
+    check_send "send 1" (Room.portal_send_r config ~agent_name:"claude" ~message:"First");
+    check_send "send 2" (Room.portal_send_r config ~agent_name:"claude" ~message:"Second");
+    check_send "send 3" (Room.portal_send_r config ~agent_name:"claude" ~message:"Third")
   )
 
 (* ============================================================ *)

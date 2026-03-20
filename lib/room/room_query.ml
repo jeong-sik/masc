@@ -57,7 +57,7 @@ let get_tasks_raw_in_room config room_id =
 (** Get raw agent list (for orchestrator) *)
 let get_agents_raw config =
   ensure_initialized config;
-  let agents_path = agents_dir_in_room config (current_room_id config) in
+  let agents_path = agents_dir (with_scope config (Named (current_room_id config))) in
   if not (Sys.file_exists agents_path) then []
   else
     Sys.readdir agents_path
@@ -74,7 +74,7 @@ let get_agents_raw config =
 let get_agents_raw_in_room config room_id =
   if not (root_is_initialized config) then []
   else
-    let agents_path = agents_dir_in_room config room_id in
+    let agents_path = agents_dir (with_scope config (Named room_id)) in
     if not (Sys.file_exists agents_path) then []
     else
       Sys.readdir agents_path
@@ -94,7 +94,7 @@ let get_agents_raw_in_room config room_id =
 let get_all_agents_in_room config room_id =
   if not (root_is_initialized config) then []
   else
-    let agents_path = agents_dir_in_room config room_id in
+    let agents_path = agents_dir (with_scope config (Named room_id)) in
     if not (Sys.file_exists agents_path) then []
     else
       Sys.readdir agents_path
@@ -160,10 +160,10 @@ let is_agent_active_at_path config path =
 let is_agent_joined_in_room config ~room_id ~agent_name =
   if not (root_is_initialized config) then false
   else
-    let actual_name = resolve_agent_name_in_room config ~room_id agent_name in
+    let actual_name = resolve_agent_name (with_scope config (Named room_id)) agent_name in
     let filename = safe_filename actual_name ^ ".json" in
     (* Check room-scoped path first *)
-    let room_agents = agents_dir_in_room config room_id in
+    let room_agents = agents_dir (with_scope config (Named room_id)) in
     let room_path = Filename.concat room_agents filename in
     if is_agent_active_at_path config room_path then true
     else

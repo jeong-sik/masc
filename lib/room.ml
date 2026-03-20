@@ -174,7 +174,7 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
   let nickname =
     if Nickname.is_generated_nickname agent_name then agent_name
     else
-      let resolved = resolve_agent_name_in_room config ~room_id agent_name in
+      let resolved = resolve_agent_name (with_scope config (Named room_id)) agent_name in
       if resolved <> agent_name && Nickname.is_generated_nickname resolved then
         resolved
       else
@@ -317,7 +317,7 @@ let leave config ~agent_name =
   end else
     Printf.sprintf "⚠ %s was not in the room" actual_name
 
-(* broadcast and broadcast_in_room are now in Room_state *)
+(* broadcast is in Room_state *)
 
 (** Initialize MASC room *)
 let init config ~agent_name =

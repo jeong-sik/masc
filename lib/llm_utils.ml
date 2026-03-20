@@ -27,16 +27,14 @@ let int_of_env_default name ~default ~min_v ~max_v =
 (** Compute total tokens from OAS api_usage. *)
 let total_tokens (u : Agent_sdk.Types.api_usage) = u.input_tokens + u.output_tokens
 
-(** Zero usage sentinel. *)
-let zero_usage : Agent_sdk.Types.api_usage =
-  { Agent_sdk.Types.input_tokens = 0;
-    output_tokens = 0;
-    cache_creation_input_tokens = 0;
-    cache_read_input_tokens = 0 }
+(** Zero usage sentinel — delegates to OAS Types.zero_api_usage.
+    @since 2.123.0 — delegated to OAS *)
+let zero_usage : Agent_sdk.Types.api_usage = Llm_provider.Types.zero_api_usage
 
-(** Extract usage from an api_response, defaulting to zero. *)
+(** Extract usage from an api_response, defaulting to zero.
+    @since 2.123.0 — delegates to OAS Types.usage_of_response *)
 let usage_of_response (resp : Llm_provider.Types.api_response) : Agent_sdk.Types.api_usage =
-  match resp.usage with Some u -> u | None -> zero_usage
+  Llm_provider.Types.usage_of_response resp
 
 (** Measure wall-clock latency of a thunk in milliseconds.
     Use at call sites that need per-call timing (keeper tool loops, etc.). *)

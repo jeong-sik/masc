@@ -29,15 +29,19 @@ type run_record = {
   model : string;
   prompt : string;
   created_at : string;
+  created_at_unix : float;
   mutable status : run_status;
   mutable started_at : string option;
   mutable finished_at : string option;
+  mutable finished_at_unix : float option;
   mutable output : string option;
   mutable error : string option;
 }
 
 let provider_runs : (string, run_record) Hashtbl.t = Hashtbl.create 32
 let provider_runs_mutex = Eio.Mutex.create ()
+let finished_run_ttl_seconds = 3600.0
+let max_finished_runs = 128
 
 let trim_nonempty value =
   let trimmed = String.trim value in
@@ -70,14 +74,51 @@ let run_record_to_json (run : run_record) =
       ("error", match run.error with Some value -> `String value | None -> `Null);
     ]
 
+let is_terminal_status = function
+  | Completed | Failed -> true
+  | Queued | Running -> false
+
+let run_sort_key (run : run_record) =
+  match run.finished_at_unix with Some ts -> ts | None -> run.created_at_unix
+
+let rec drop_oldest_finished overflow records =
+  match (overflow, records) with
+  | n, _ when n <= 0 -> ()
+  | _, [] -> ()
+  | n, (run_id, _) :: rest ->
+      Hashtbl.remove provider_runs run_id;
+      drop_oldest_finished (n - 1) rest
+
+let prune_run_records_locked now_unix =
+  let expired_finished = ref [] in
+  let finished_records = ref [] in
+  Hashtbl.iter
+    (fun run_id run ->
+      match run.finished_at_unix with
+      | Some finished_at when now_unix -. finished_at > finished_run_ttl_seconds ->
+          expired_finished := run_id :: !expired_finished
+      | Some _ when is_terminal_status run.status ->
+          finished_records := (run_id, run_sort_key run) :: !finished_records
+      | _ -> ())
+    provider_runs;
+  List.iter (fun run_id -> Hashtbl.remove provider_runs run_id) !expired_finished;
+  let overflow = List.length !finished_records - max_finished_runs in
+  if overflow > 0 then
+    !finished_records
+    |> List.sort (fun (_, left) (_, right) -> Float.compare left right)
+    |> drop_oldest_finished overflow
+
 let set_run_record run =
   Eio.Mutex.use_rw ~protect:true provider_runs_mutex (fun () ->
-      Hashtbl.replace provider_runs run.run_id run)
+      Hashtbl.replace provider_runs run.run_id run;
+      prune_run_records_locked (Unix.gettimeofday ()))
 
 let update_run_record run_id f =
   Eio.Mutex.use_rw ~protect:true provider_runs_mutex (fun () ->
       match Hashtbl.find_opt provider_runs run_id with
-      | Some run -> f run
+      | Some run ->
+          f run;
+          prune_run_records_locked (Unix.gettimeofday ())
       | None -> ())
 
 let find_run_record run_id =
@@ -486,6 +527,7 @@ let start_run ~sw ~provider ~model_opt ~prompt =
   match resolve_provider_run_request ~provider ~model_opt ~prompt with
   | Error _ as error -> error
   | Ok (_snapshot, model) ->
+      let created_at_unix = Unix.gettimeofday () in
       let run =
         {
           run_id = make_run_id ();
@@ -493,34 +535,46 @@ let start_run ~sw ~provider ~model_opt ~prompt =
           model;
           prompt = String.trim prompt;
           created_at = Types.now_iso ();
+          created_at_unix;
           status = Queued;
           started_at = None;
           finished_at = None;
+          finished_at_unix = None;
           output = None;
           error = None;
         }
       in
       set_run_record run;
       Eio.Fiber.fork ~sw (fun () ->
-          update_run_record run.run_id (fun current ->
-              current.status <- Running;
-              current.started_at <- Some (Types.now_iso ()));
-          match
-            execute_single_agent_run ~sw ~provider:run.provider ~model:run.model
-              ~prompt:run.prompt
-          with
-          | Ok output ->
-              update_run_record run.run_id (fun current ->
-                  current.status <- Completed;
-                  current.finished_at <- Some (Types.now_iso ());
-                  current.output <- Some output;
-                  current.error <- None)
-          | Error message ->
-              update_run_record run.run_id (fun current ->
-                  current.status <- Failed;
-                  current.finished_at <- Some (Types.now_iso ());
-                  current.output <- None;
-                  current.error <- Some message));
+          let mark_failed message =
+            update_run_record run.run_id (fun current ->
+                current.status <- Failed;
+                current.finished_at <- Some (Types.now_iso ());
+                current.finished_at_unix <- Some (Unix.gettimeofday ());
+                current.output <- None;
+                current.error <- Some message)
+          in
+          try
+            update_run_record run.run_id (fun current ->
+                current.status <- Running;
+                current.started_at <- Some (Types.now_iso ()));
+            match
+              execute_single_agent_run ~sw ~provider:run.provider ~model:run.model
+                ~prompt:run.prompt
+            with
+            | Ok output ->
+                update_run_record run.run_id (fun current ->
+                    current.status <- Completed;
+                    current.finished_at <- Some (Types.now_iso ());
+                    current.finished_at_unix <- Some (Unix.gettimeofday ());
+                    current.output <- Some output;
+                    current.error <- None)
+            | Error message -> mark_failed message
+          with exn ->
+            mark_failed
+              (Printf.sprintf
+                 "Dashboard single-agent run crashed: %s"
+                 (Printexc.to_string exn)));
       Ok
         (`Assoc
           [

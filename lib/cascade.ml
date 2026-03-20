@@ -1,7 +1,7 @@
-(** Cascade — thin wrapper over OAS Cascade_config.
+(** Cascade — MASC LLM call module.
 
-    MASC defines cascade name -> model list policy (default_model_strings).
-    OAS handles config loading, model parsing, health filtering, and execution.
+    Model types, cascade profile defaults, model spec parsing,
+    and {!complete} which delegates to OAS [Cascade_config.complete_named].
 
     Public entry points:
     - {!call} — prompt-in/text-out convenience (returns cascade_result)
@@ -222,13 +222,6 @@ let llm_semaphore_available () = max_concurrent_llm - Atomic.get inflight
 let llm_permits_in_use () = Atomic.get inflight
 
 (* ================================================================ *)
-
-(** @deprecated Use {!complete} instead. *)
-type cascade_result = {
-  response : string;
-  llm_used : string;
-  duration_ms : int;
-}
 
 (** Locate config/cascade.json via CWD or ME_ROOT.
     Falls back to legacy config/llm_cascade.json if new name not found.

@@ -25,6 +25,8 @@ val run_named :
   ?temperature:float ->
   ?max_tokens:int ->
   ?guardrails:Oas.Guardrails.t ->
+  ?hooks:Oas.Hooks.hooks ->
+  ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   unit ->

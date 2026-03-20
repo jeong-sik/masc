@@ -106,3 +106,20 @@ let seed_institution ~(memory : Agent_sdk.Memory.t) ~(config : Room_utils.config
     Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "institution" json;
     true
   | None -> false
+
+(** Pre-seed crystallized procedural memory into a [Memory.t] instance.
+
+    Loads top-N procedures (adaptive threshold: standard 3+/70% OR rare 2+/100%)
+    and stores as a single Long_term entry.  Returns the number of procedures seeded. *)
+let seed_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limit : int) : int =
+  let procs = Procedural_memory.top_procedures ~agent_name ~limit in
+  if procs = [] then 0
+  else begin
+    let json = `Assoc [
+      ("agent_name", `String agent_name);
+      ("procedures", `List (List.map Procedural_memory.to_json procs));
+      ("count", `Int (List.length procs));
+    ] in
+    Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "procedures" json;
+    List.length procs
+  end

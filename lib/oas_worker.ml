@@ -33,6 +33,7 @@ type config = {
   checkpoint_dir : string option;
   session_id : string option;
   description : string option;
+  memory : Oas.Memory.t option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -46,6 +47,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     checkpoint_dir = None;
     session_id = None;
     description = None;
+    memory = None;
   }
 
 (* ================================================================ *)
@@ -136,6 +138,10 @@ let build
   in
   let builder = match config.description with
     | Some d -> Oas.Builder.with_description d builder
+    | None -> builder
+  in
+  let builder = match config.memory with
+    | Some m -> Oas.Builder.with_memory m builder
     | None -> builder
   in
   Oas.Builder.build_safe builder
@@ -255,6 +261,7 @@ let run_named
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
     ?guardrails
+    ?memory
     ?on_event
     ()
   : (run_result, string) result =
@@ -270,6 +277,7 @@ let run_named
     max_tokens;
     temperature;
     guardrails;
+    memory;
     description = Some (Printf.sprintf "cascade:%s" cascade_name);
   } in
   run ~sw ~net ~config ?on_event goal
@@ -284,6 +292,7 @@ let run_named_with_masc_tools
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
     ?guardrails
+    ?memory
     ?on_event
     ()
   : (run_result, string) result =
@@ -299,6 +308,7 @@ let run_named_with_masc_tools
     max_tokens;
     temperature;
     guardrails;
+    memory;
     description = Some (Printf.sprintf "cascade:%s" cascade_name);
   } in
   run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event goal

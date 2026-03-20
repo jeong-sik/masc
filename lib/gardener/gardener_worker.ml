@@ -53,6 +53,7 @@ let make_dispatch ~(config : Room.config) ~(agent_name : string) () ~name ~args 
 let run_for_gap ~(config : Room.config) ~topic ~traits_str ~reason =
   let agent_name = Printf.sprintf "gardener-worker-%s" topic in
   let institution_context = Institution_eio.load_and_format_for_welcome ~fs:() config in
+  let memory = Memory_oas_bridge.create_memory ~agent_name in
   Oas_worker.run_named_with_masc_tools
     ~cascade_name:"gardener_spawn"
     ~system_prompt:
@@ -73,11 +74,13 @@ let run_for_gap ~(config : Room.config) ~topic ~traits_str ~reason =
     ~goal:(Printf.sprintf "Address gap '%s': %s" topic reason)
     ~masc_tools:(worker_tools ())
     ~dispatch:(make_dispatch ~config ~agent_name ())
+    ~memory
     ~max_turns:10 ~temperature:0.3 ()
 
 let run_for_backlog ~(config : Room.config) ~(backlog : Gardener_types.task_backlog_summary) =
   let agent_name = "gardener-triage-worker" in
   let institution_context = Institution_eio.load_and_format_for_welcome ~fs:() config in
+  let memory = Memory_oas_bridge.create_memory ~agent_name in
   Oas_worker.run_named_with_masc_tools
     ~cascade_name:"gardener_spawn"
     ~system_prompt:
@@ -98,4 +101,5 @@ let run_for_backlog ~(config : Room.config) ~(backlog : Gardener_types.task_back
          backlog.todo_count backlog.high_priority_todo backlog.orphan_count)
     ~masc_tools:(worker_tools ())
     ~dispatch:(make_dispatch ~config ~agent_name ())
+    ~memory
     ~max_turns:15 ~temperature:0.3 ()

@@ -19,7 +19,7 @@ let cleanup_dir dir =
   in
   rm dir
 
-let test_ensure_bootstrap_loads_sentinel_prompts () =
+let test_ensure_bootstrap_omits_legacy_sentinel_prompts () =
   let dir = test_dir () in
   let previous_source_base = Sys.getenv_opt "MASC_CHAIN_SOURCE_BASE_PATH" in
   Fun.protect
@@ -39,19 +39,20 @@ let test_ensure_bootstrap_loads_sentinel_prompts () =
       let config = Lib.Room.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "fixture-root"));
       Lib.Chain_native_eio.ensure_bootstrap config;
-      check bool "sentinel-board-patrol registered" true
-        (Option.is_some (Lib.Prompt_registry.get ~id:"sentinel-board-patrol" ()));
-      check bool "sentinel-task-hygiene registered" true
-        (Option.is_some (Lib.Prompt_registry.get ~id:"sentinel-task-hygiene" ()));
-      check bool "sentinel-keeper-health registered" true
-        (Option.is_some (Lib.Prompt_registry.get ~id:"sentinel-keeper-health" ())))
+      let has_legacy_sentinel_prompt =
+        Lib.Prompt_registry.list_all ()
+        |> List.exists (fun entry ->
+               String.starts_with ~prefix:"sentinel-" entry.Lib.Prompt_registry.id)
+      in
+      check bool "legacy sentinel prompts removed" false
+        has_legacy_sentinel_prompt)
 
 let () =
   Alcotest.run "chain_native_eio_bootstrap"
     [
       ( "bootstrap",
         [
-          test_case "loads sentinel prompts from repo data/prompts" `Quick
-            test_ensure_bootstrap_loads_sentinel_prompts;
+          test_case "omits legacy sentinel prompts from repo data/prompts" `Quick
+            test_ensure_bootstrap_omits_legacy_sentinel_prompts;
         ] );
     ]

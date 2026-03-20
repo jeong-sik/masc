@@ -38,7 +38,6 @@ TOOLS=(
   "masc_broadcast"
   "masc_tasks"
   "masc_agents"
-  "masc_gardener_health"
   "masc_mitosis_status"
   "masc_perpetual_status"
 )

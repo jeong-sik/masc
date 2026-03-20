@@ -61,6 +61,7 @@ let run_turn
     ?(temperature : float = 0.3)
     ?(max_tokens : int = 4096)
     ?max_cost_usd
+    ?on_event
     ()
   : (run_result, string) result =
   (* 1. Ensure session directory *)
@@ -138,6 +139,7 @@ let run_turn
       ~temperature
       ~max_tokens
       ?guardrails
+      ?on_event
       ()
   with
   | Error e -> Error e

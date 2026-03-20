@@ -194,14 +194,14 @@ let intent_response_is_valid (resp : Llm_provider.Types.api_response) : bool =
 let classify_intent_llm (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
-    Cascade.complete ~cascade_name:"context_router"
-      ~messages:[Agent_sdk.Types.user_msg prompt]
-      ~temperature:0.1 ~timeout_sec:10 ~max_tokens:20
+    Oas_worker.run_named ~cascade_name:"context_router"
+      ~goal:prompt ~max_turns:1
+      ~temperature:0.1 ~max_tokens:20
       ~accept:intent_response_is_valid ()
   with
-  | Ok resp -> (
-      match parse_intent_response (Llm_provider.Types.text_of_response resp) with
-      | Some result -> result
+  | Ok result -> (
+      match parse_intent_response (Llm_provider.Types.text_of_response result.Oas_worker.response) with
+      | Some r -> r
       | None -> (Coordination, 0.3))  (* unparseable → low-confidence fallback *)
   | Error _err -> (Coordination, 0.3)  (* LLM error → low-confidence fallback *)
 
@@ -209,14 +209,14 @@ let classify_intent_llm (query : string) : query_intent * float =
 let classify_intent_hybrid (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
-    Cascade.complete ~cascade_name:"context_router"
-      ~messages:[Agent_sdk.Types.user_msg prompt]
-      ~temperature:0.1 ~timeout_sec:10 ~max_tokens:20
+    Oas_worker.run_named ~cascade_name:"context_router"
+      ~goal:prompt ~max_turns:1
+      ~temperature:0.1 ~max_tokens:20
       ~accept:intent_response_is_valid ()
   with
-  | Ok resp -> (
-      match parse_intent_response (Llm_provider.Types.text_of_response resp) with
-      | Some result -> result
+  | Ok result -> (
+      match parse_intent_response (Llm_provider.Types.text_of_response result.Oas_worker.response) with
+      | Some r -> r
       | None -> classify_intent_heuristic query)
   | Error _err -> classify_intent_heuristic query
 

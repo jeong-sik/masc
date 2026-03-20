@@ -273,13 +273,13 @@ let walph_response_is_valid (resp : Llm_provider.Types.api_response) =
   && not (len >= 14 && String.sub content 0 14 = "Empty response")
   && not (len >= 9 && String.sub content 0 9 = "{\"error\":")
 
-let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec ~max_chars () =
+let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec:_ ~max_chars () =
   match
-    Cascade.complete ~cascade_name:"walph"
-      ~messages:[Agent_sdk.Types.user_msg prompt] ~timeout_sec
+    Oas_worker.run_named ~cascade_name:"walph"
+      ~goal:prompt ~max_turns:1
       ~max_tokens:max_chars ~accept:walph_response_is_valid ()
   with
-  | Ok resp -> Llm_provider.Types.text_of_response resp
+  | Ok result -> Llm_provider.Types.text_of_response result.Oas_worker.response
   | Error err -> failwith err
 
 (** {1 Main Loop} *)

@@ -299,8 +299,10 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
         | Some (`List items) -> Some items
         | _ -> None
       in
+      (* Retained Cascade.complete: raw JSON tool schemas (?tools:Yojson.Safe.t list)
+         are not compatible with OAS Tool.t. Migrate when OAS supports raw schemas. *)
       (match
-        Cascade.complete ~cascade_name:"chain_llm" ~messages
+        Oas_worker.complete_single ~cascade_name:"chain_llm" ~messages
           ?tools:tools_json ~temperature:0.2 ~max_tokens:4096
           ~timeout_sec ()
       with

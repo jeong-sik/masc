@@ -1,22 +1,19 @@
-(** Cascade — MASC LLM call module.
+(** Cascade — MASC LLM cascade policy module.
 
-    Cascade profile defaults and {!complete} which delegates to
-    OAS [Cascade_config.complete_named].
+    Holds cascade profile defaults ({!default_model_strings}),
+    config path resolution ({!default_config_path}), usage helpers,
+    concurrency diagnostics, and UTF-8 sanitization.
+
+    LLM execution moved to {!Oas_worker.complete_single} (single-shot)
+    and {!Oas_worker.run_named} (multi-turn).
 
     Model types and spec parsing live in {!Model_spec}.
 
-    Public entry points:
-    - {!complete} — messages + cascade_name, returns api_response or error
-
-    Response helpers ([text_of_response], [has_tool_use], [tool_msg])
-    removed — use {!Llm_provider.Types} directly.
-    [get_cascade] inlined into {!Oas_worker}.
-
     @since 2.114.0 — original
     @since 2.115.0 — delegated to OAS Cascade_config
-    @since 2.116.0 — call_raw, call_with_tools added
     @since 2.117.0 — model types extracted to Model_spec
-    @since 2.123.0 — OAS-duplicate helpers removed *)
+    @since 2.123.0 — OAS-duplicate helpers removed
+    @since 2.124.0 — complete/format_cascade_error moved to Oas_worker *)
 
 (* ================================================================ *)
 (* Helpers                                                           *)
@@ -219,40 +216,5 @@ let default_model_strings ~cascade_name =
   (* unregistered cascade: llama + glm as safety net *)
   | _ -> llama_glm
 
-(* ================================================================ *)
-(* Cascade orchestration                                             *)
-(* ================================================================ *)
-
-(** Format OAS http_error as cascade error string. *)
-let format_cascade_error ~cascade_name = function
-  | Llm_provider.Http_client.HttpError { code; body } ->
-    Printf.sprintf "[cascade] %s: HTTP %d: %s" cascade_name code
-      (if String.length body > 200
-       then String.sub body 0 200 ^ "..."
-       else body)
-  | Llm_provider.Http_client.NetworkError { message } ->
-    Printf.sprintf "[cascade] %s: %s" cascade_name message
-
-(** Direct OAS bridge — single entry point for all LLM cascade calls.
-    Returns OAS [api_response] directly; error formatted as string. *)
-let complete ~cascade_name ~messages
-    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
-    ?(max_tokens = 500) ?(accept = fun _ -> true) ?tools () =
-  let env = Masc_eio_env.get () in
-  let defaults = default_model_strings ~cascade_name in
-  let config_path_opt =
-    if String.length config_path > 0 then Some config_path
-    else default_config_path ()
-  in
-  match
-    Llm_provider.Cascade_config.complete_named
-      ~sw:env.sw ~net:env.net ?clock:env.clock
-      ?config_path:config_path_opt
-      ~name:cascade_name ~defaults ~messages
-      ?tools ~temperature ~max_tokens ~accept ~timeout_sec ()
-  with
-  | Ok resp -> Ok resp
-  | Error err -> Error (format_cascade_error ~cascade_name err)
-
-(* call, call_raw, call_with_tools removed — use {!complete} directly.
-   Callers build messages and handle api_response/errors themselves. *)
+(* complete, format_cascade_error removed — use {!Oas_worker.complete_single}.
+   call, call_raw, call_with_tools were removed earlier. *)

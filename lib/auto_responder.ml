@@ -152,11 +152,12 @@ let call_llm_direct_sync ~agent_type ~prompt =
   let cascade_name = cascade_name_for_agent_type agent_type in
   try
     match
-      Cascade.complete ~cascade_name
-        ~messages:[Agent_sdk.Types.user_msg prompt]
-        ~accept:llm_response_is_valid ~timeout_sec:30 ~max_tokens:500 ()
+      Oas_worker.run_named ~cascade_name
+        ~goal:prompt ~max_turns:1
+        ~accept:llm_response_is_valid ~max_tokens:500 ()
     with
-    | Ok resp ->
+    | Ok result ->
+        let resp = result.Oas_worker.response in
         let text = Llm_provider.Types.text_of_response resp in
         debug_log
           (Printf.sprintf "LLM_MODEL_USED %s for agent_type=%s"

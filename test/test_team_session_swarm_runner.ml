@@ -189,6 +189,45 @@ let test_manual_mode_produces_supervisor () =
   Alcotest.(check string) "mode supervisor"
     "Swarm_types.Supervisor" mode_str
 
+let test_run_swarm_empty_workers_keeps_session_running () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let tmp = Filename.temp_dir "masc-test" "" in
+  let config = Room.default_config tmp in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let session =
+    make_test_session ~orchestration_mode:Team_session_types.Assist "s-idle"
+  in
+  Team_session_store.ensure_session_dirs config session.session_id;
+  Team_session_store.save_session config session;
+  match
+    Team_session_swarm_runner.run_swarm ~sw ~clock:(Eio.Stdenv.clock env) ~config
+      ~session_id:session.session_id ~masc_tools:[]
+      ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
+  with
+  | Error e ->
+      Alcotest.failf "expected idle session to remain running, got %s" e
+  | Ok updated ->
+      Alcotest.(check string) "status remains running" "running"
+        (Team_session_types.status_to_string updated.status);
+      let reloaded =
+        Team_session_store.load_session config session.session_id |> Option.get
+      in
+      Alcotest.(check string) "stored status remains running" "running"
+        (Team_session_types.status_to_string reloaded.status);
+      let events =
+        Team_session_store.read_events ~max_events:10 config session.session_id
+      in
+      let has_deferred_event =
+        List.exists
+          (fun json ->
+            Yojson.Safe.Util.(
+              json |> member "event_type" |> to_string = "swarm_deferred"))
+          events
+      in
+      Alcotest.(check bool) "swarm deferred event recorded" true
+        has_deferred_event
+
 (* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
@@ -214,5 +253,9 @@ let () =
         test_auto_mode_produces_decentralized;
       Alcotest.test_case "manual -> supervisor" `Quick
         test_manual_mode_produces_supervisor;
+    ];
+    "runner", [
+      Alcotest.test_case "empty workers keep session running" `Quick
+        test_run_swarm_empty_workers_keeps_session_running;
     ];
   ]

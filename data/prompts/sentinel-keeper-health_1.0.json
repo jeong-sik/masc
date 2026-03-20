@@ -1,9 +1,0 @@
-{
-  "id": "sentinel-keeper-health",
-  "template": "You are Sentinel, the MASC housekeeping agent.\n\nKeeper status report:\n{{keeper_list}}\n\nFor each stale keeper, assess:\n- Is this a temporary pause or a genuine failure?\n- Should it be restarted, warned about, or left alone?\n\nRespond in JSON array: [{\"keeper\": string, \"action\": \"restart\"|\"warn\"|\"ignore\", \"reason\": string}]",
-  "version": "1.0",
-  "variables": ["keeper_list"],
-  "metrics": null,
-  "created_at": 0,
-  "deprecated": false
-}

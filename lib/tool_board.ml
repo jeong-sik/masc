@@ -416,10 +416,12 @@ let handle_profile args =
   if agent = "" then (false, "❌ agent required")
   else
     let all_posts : Board.post list = Board_dispatch.list_posts ~limit:1000 () in
-    let agent_posts = List.filter (fun (p : Board.post) -> Board.Agent_id.to_string p.author = agent) all_posts in
+    let norm s = String.lowercase_ascii (String.trim s) in
+    let agent_norm = norm agent in
+    let agent_posts = List.filter (fun (p : Board.post) -> norm (Board.Agent_id.to_string p.author) = agent_norm) all_posts in
     let post_votes = List.fold_left (fun acc (p : Board.post) -> acc + p.votes_up - p.votes_down) 0 agent_posts in
     let all_comments : Board.comment list = Board_dispatch.list_comments () in
-    let agent_comments = List.filter (fun (c : Board.comment) -> Board.Agent_id.to_string c.author = agent) all_comments in
+    let agent_comments = List.filter (fun (c : Board.comment) -> norm (Board.Agent_id.to_string c.author) = agent_norm) all_comments in
     let comment_votes = List.fold_left (fun acc (c : Board.comment) -> acc + c.votes_up - c.votes_down) 0 agent_comments in
     (true, Printf.sprintf "📊 **%s** 프로필\n📝 게시물: %d개 (%+d점)\n💬 코멘트: %d개 (%+d점)\n⭐ 총: %+d점"
       agent (List.length agent_posts) post_votes (List.length agent_comments) comment_votes (post_votes + comment_votes))

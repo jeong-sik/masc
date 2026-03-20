@@ -149,7 +149,7 @@
    level2_config
    level4_config
    local_runtime_pool
-   agent_swarm_contract
+   sdk_tool_contract
    worker_oas
    local_agent_eio
    local_agent_eio_types

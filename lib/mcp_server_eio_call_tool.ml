@@ -171,7 +171,7 @@ let resolve_managed_agent_call ?mcp_session_id params =
   let identity =
     Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments
   in
-  Agent_swarm_contract.resolve_requested_tool_call
+  Sdk_tool_contract.resolve_requested_tool_call
     ~agent_name:identity.Agent_identity.agent_name
     ~requested_name ~arguments
 

@@ -149,7 +149,7 @@ let local_worker_public_tool_names : string list =
     @ mdal_auditable_tool_names)
 
 let local_worker_contract_schemas : Types.tool_schema list =
-  Agent_swarm_contract.sdk_tool_schemas
+  Sdk_tool_contract.sdk_tool_schemas
 
 let local_worker_compat_passthrough_schemas : Types.tool_schema list =
   [

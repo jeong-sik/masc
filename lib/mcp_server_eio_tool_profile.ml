@@ -85,7 +85,7 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
                && Tool_catalog.is_visible schema.name)
       in
       dedupe_tool_schemas_by_name
-        (Agent_swarm_contract.sdk_tool_schemas @ passthrough)
+        (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
   | Operator_remote -> Tool_operator.remote_schemas
   | Role_filtered mode ->
       let categories = Mode.categories_for_mode mode in

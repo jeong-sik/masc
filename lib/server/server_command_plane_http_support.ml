@@ -72,16 +72,16 @@ let compute_cp_summary ~state =
 
 let start_cp_summary_refresh_loop ~state ~sw ~clock =
   Eio.Fiber.fork ~sw (fun () ->
-    Printf.eprintf "[INFO] Dashboard: starting cp-summary proactive refresh loop.\n%!";
+    Log.CmdPlane.info "starting cp-summary proactive refresh loop";
     let rec loop () =
       let t0 = Time_compat.now () in
       (try
         _cp_summary_ref := compute_cp_summary ~state;
         let dt = Time_compat.now () -. t0 in
-        Printf.eprintf "[INFO] Dashboard: cp-summary refreshed (%.1fs).\n%!" dt
+        Log.CmdPlane.info "cp-summary refreshed (%.1fs)" dt
       with exn ->
         let dt = Time_compat.now () -. t0 in
-        Printf.eprintf "[WARN] Dashboard: cp-summary refresh failed (%.1fs): %s\n%!"
+        Log.CmdPlane.warn "cp-summary refresh failed (%.1fs): %s"
           dt (Printexc.to_string exn));
       Eio.Time.sleep clock _cp_summary_refresh_interval_s;
       loop ()

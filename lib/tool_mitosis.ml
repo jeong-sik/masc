@@ -119,7 +119,7 @@ let handle_mitosis_divide ctx args : result =
         ] in
         (true, Yojson.Safe.pretty_to_string json)
       end else begin
-        Printf.eprintf "[MITOSIS/ERROR] mitosis_divide spawn failed, state unchanged\n%!";
+        Log.Mitosis_log.error "mitosis_divide spawn failed, state unchanged";
         let json = `Assoc [
           ("success", `Bool false);
           ("error", `String "Spawn failed");
@@ -138,7 +138,7 @@ let handle_mitosis_check _ctx args : result =
   
   (* P0-2: Warn if context_ratio is default 0.0 *)
   if raw_ratio = 0.0 then
-    Printf.eprintf "[MITOSIS/WARN] context_ratio is 0.0 - did you forget to estimate it?\n%!";
+    Log.Mitosis_log.warn "context_ratio is 0.0 - did you forget to estimate it?";
 
   (* P0-1: Configurable thresholds *)
   let prepare_threshold = get_float args "prepare_threshold" 0.5 in
@@ -375,7 +375,7 @@ let continuity_regression_check ~full_context ~compressed_context =
 let run_sync_handoff ctx args : result =
   (* P2-2: Experiment flag — log when experimental mitosis path is active *)
   if Env_config.Mitosis.experiment_enabled then
-    Printf.eprintf "[MITOSIS/EXPERIMENT] Experimental mitosis path active\n%!";
+    Log.Mitosis_log.info "Experimental mitosis path active";
   (* P1-3: Handoff cooldown — prevent rapid repeated handoffs *)
   let cooldown = Env_config.Mitosis.handoff_cooldown_seconds in
   let now = Time_compat.now () in
@@ -409,7 +409,7 @@ let run_sync_handoff ctx args : result =
       let spawn_timeout = int_of_float (get_float args "spawn_timeout" (Float.of_int Mitosis.Defaults.spawn_timeout_seconds)) in
 
       if raw_ratio = 0.0 then
-        Printf.eprintf "[MITOSIS/WARN] context_ratio is 0.0 - did you forget to estimate it?\n%!";
+        Log.Mitosis_log.warn "context_ratio is 0.0 - did you forget to estimate it?";
 
       let room_name = Filename.basename ctx.config.Room_utils.base_path in
       let adaptive_enabled = Env_config.Mitosis.adaptive_thresholds_enabled in
@@ -418,7 +418,7 @@ let run_sync_handoff ctx args : result =
       let prepare_threshold = get_float args "prepare_threshold" effective.Adaptive_thresholds.prepare in
       let handoff_threshold = get_float args "handoff_threshold" effective.Adaptive_thresholds.handoff in
       if adaptive_enabled then
-        Printf.eprintf "[MITOSIS/ADAPTIVE] room=%s prepare=%.3f handoff=%.3f\n%!"
+        Log.Mitosis_log.info "adaptive room=%s prepare=%.3f handoff=%.3f"
           room_name prepare_threshold handoff_threshold;
 
       let cell = !(Mcp_server.current_cell) in
@@ -506,7 +506,7 @@ let run_sync_handoff ctx args : result =
         ~to_generation:new_cell.Mitosis.generation
         ~dna_size
         ~context_ratio)
-       with exn -> Printf.eprintf "[mitosis] record_handoff failed: %s\n%!" (Printexc.to_string exn));
+       with exn -> Log.Mitosis_log.error "record_handoff failed: %s" (Printexc.to_string exn));
       let effective_agent =
         if !selected_agent = "" then normalized_target_agent else !selected_agent
       in
@@ -520,7 +520,7 @@ let run_sync_handoff ctx args : result =
         (* P2-3: Record spawn failure metric *)
         Mitosis_metrics.inc_error ~reason:"spawn_failed" ();
         (* Spawn failed! Suggest fallback to compaction instead of losing context *)
-        Printf.eprintf "[MITOSIS/ERROR] Spawn failed for %s, suggesting fallback\n%!" target_agent;
+        Log.Mitosis_log.error "Spawn failed for %s, suggesting fallback" target_agent;
         let base_path = ctx.config.Room_utils.base_path in
         let session_id = get_session_id () in
         let fallback_ep = queue_episode
@@ -580,8 +580,8 @@ let run_sync_handoff ctx args : result =
           let new_state = Adaptive_thresholds.adapt current_state outcome in
           (try Adaptive_thresholds.save_state ~room:room_name new_state
            with exn ->
-             Printf.eprintf "[MITOSIS/ADAPTIVE] save failed: %s\n%!" (Printexc.to_string exn));
-          Printf.eprintf "[MITOSIS/ADAPTIVE] adapted room=%s prepare=%.3f->%.3f handoff=%.3f->%.3f\n%!"
+             Log.Mitosis_log.error "adaptive save failed: %s" (Printexc.to_string exn));
+          Log.Mitosis_log.info "adaptive adapted room=%s prepare=%.3f->%.3f handoff=%.3f->%.3f"
             room_name
             current_state.thresholds.prepare new_state.thresholds.prepare
             current_state.thresholds.handoff new_state.thresholds.handoff
@@ -652,7 +652,7 @@ let handle_mitosis_handoff ctx args : result =
           ~saga_id
           ~status:"running"
           ~payload:(`Assoc [("message", `String "handoff saga running")]))
-         with exn -> Printf.eprintf "[mitosis] write_saga_state(running) failed: %s\n%!" (Printexc.to_string exn));
+         with exn -> Log.Mitosis_log.error "write_saga_state(running) failed: %s" (Printexc.to_string exn));
         let started = Time_compat.now () in
         try
           let run_once () =
@@ -677,7 +677,7 @@ let handle_mitosis_handoff ctx args : result =
                 ("result", parsed);
                 ("verification", match verification with Some v -> v | None -> `Null);
               ]))
-             with exn -> Printf.eprintf "[mitosis] write_saga_state(result) failed: %s\n%!" (Printexc.to_string exn))
+             with exn -> Log.Mitosis_log.error "write_saga_state(result) failed: %s" (Printexc.to_string exn))
           in
           (match ctx.clock with
            | Some (Clock clock) ->
@@ -696,7 +696,7 @@ let handle_mitosis_handoff ctx args : result =
                       ("error", `String "verification_saga_timeout");
                       ("timeout_sec", `Float saga_timeout_sec);
                     ]))
-                   with exn -> Printf.eprintf "[mitosis] write_saga_state(timeout) failed: %s\n%!" (Printexc.to_string exn)))
+                   with exn -> Log.Mitosis_log.error "write_saga_state(timeout) failed: %s" (Printexc.to_string exn)))
            | None ->
                run_once ())
         with exn ->
@@ -707,7 +707,7 @@ let handle_mitosis_handoff ctx args : result =
             ~payload:(`Assoc [
               ("error", `String (Printexc.to_string exn));
             ]))
-           with exn2 -> Printf.eprintf "[mitosis] write_saga_state(error) failed: %s\n%!" (Printexc.to_string exn2)));
+           with exn2 -> Log.Mitosis_log.error "write_saga_state(error) failed: %s" (Printexc.to_string exn2)));
       let json = `Assoc [
         ("action", `String "accepted");
         ("async", `Bool true);

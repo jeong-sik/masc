@@ -11,7 +11,7 @@
 (** {1 Internal helpers} *)
 
 let log_err tag msg =
-  Printf.eprintf "[relation-materializer] %s failed: %s\n%!" tag msg
+  Log.Misc.error "relation-materializer %s failed: %s" tag msg
 
 (** Build a single batched GraphQL mutation using aliases.
     20 peers → 1 HTTP request with 20 aliased fields.

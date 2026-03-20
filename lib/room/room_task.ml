@@ -411,7 +411,7 @@ let complete_task config ~agent_name ~task_id ~notes =
                let active = (Room_state.read_state config).active_agents in
                Relation_materializer.on_task_done ~assignee:agent_name ~active_agents:active
              with exn ->
-               Printf.eprintf "[relation-materializer] task hook error: %s\n%!"
+               Log.RoomTask.error "relation-materializer task hook error: %s"
                  (Printexc.to_string exn));
             Printf.sprintf "✅ %s completed %s" agent_name task_id
           end

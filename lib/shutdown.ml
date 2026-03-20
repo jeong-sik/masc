@@ -163,7 +163,7 @@ let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
     ignore (Thread.create (fun () ->
       Unix.sleepf state.config.force_timeout_s;
       if not (Atomic.get done_flag) then begin
-        Printf.eprintf "[MASC] Shutdown exceeded %.0fs force timeout, forcing exit.\n%!"
+        Log.Server.error "Shutdown exceeded %.0fs force timeout, forcing exit"
           state.config.force_timeout_s;
         exit 1
       end

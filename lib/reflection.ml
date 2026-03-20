@@ -110,11 +110,11 @@ let reflect ~agent_name ~identity ~call_model =
   let is_valid = String.length response > 10 in
   if is_valid then begin
     mark_reflected ~agent_name;
-    eprintf "[reflection] %s reflected: %s\n%!"
+    Log.Misc.info "%s reflected: %s"
       agent_name (String.sub response 0 (min 60 (String.length response)));
     response
   end else begin
-    eprintf "[reflection] %s reflection failed: empty/invalid response\n%!" agent_name;
+    Log.Misc.warn "%s reflection failed: empty/invalid response" agent_name;
     mark_reflected ~agent_name;  (* Still mark to avoid infinite retry *)
     "(reflection failed)"
   end

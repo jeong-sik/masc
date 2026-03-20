@@ -310,7 +310,7 @@ let leave config ~agent_name =
     (try Relation_materializer.on_agent_leave
            ~leaving_agent:actual_name ~active_agents:peers_before_leave
      with exn ->
-       Printf.eprintf "[relation-materializer] leave hook error: %s\n%!"
+       Log.Room.error "relation-materializer leave hook error: %s"
          (Printexc.to_string exn));
 
     Printf.sprintf "✅ %s left the room" actual_name

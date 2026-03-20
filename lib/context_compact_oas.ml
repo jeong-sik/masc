@@ -14,8 +14,6 @@
 
     @since Phase 1 — OAS Context_reducer integration *)
 
-open Printf
-
 (* ================================================================ *)
 (* Strategy Type (shared via Compaction_types)                       *)
 (* ================================================================ *)
@@ -317,8 +315,8 @@ let compact
     let token_count = count_tokens system_prompt result_messages in
     (result_messages, token_count)
   end else begin
-    eprintf "[context_compact_oas] WARNING: sentinel corruption detected after \
-             reduction with strategies [%s], falling back to original messages\n%!"
+    Log.Memory.warn "sentinel corruption detected after \
+             reduction with strategies [%s], falling back to original messages"
       (String.concat ", " (List.map (fun s -> match s with
         | PruneToolOutputs -> "PruneToolOutputs"
         | MergeContiguous -> "MergeContiguous"

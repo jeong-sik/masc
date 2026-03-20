@@ -343,7 +343,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          Runs in separate OS domains, bypassing fiber contention. *)
       let exec_pool = Eio.Executor_pool.create ~sw ~domain_count:2 domain_mgr in
       Server_dashboard_http.set_executor_pool exec_pool;
-      Printf.eprintf "[INFO] Executor_pool created (2 domains) for dashboard.\n%!";
+      Log.Server.info "Executor_pool created (2 domains) for dashboard";
       Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_refresh_loop ~state ~sw ~clock;

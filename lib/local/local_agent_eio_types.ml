@@ -556,7 +556,7 @@ let parse_text_tool_calls (content : string) : Agent_sdk.Types.content_block lis
                    }
                   :: acc)
             | Error msg ->
-                eprintf "[local-worker] ignored text tool call (%s): %s\n%!"
+                Log.LocalWorker.warn "ignored text tool call (%s): %s"
                   tool_name msg;
                 collect (close_idx + 1) call_id acc)
   in

@@ -76,7 +76,7 @@ let run_perpetual_via_oas
   (* Acquire Eio net — abort early if unavailable *)
   match Eio_context.get_net_opt () with
   | None ->
-    eprintf "[perpetual_oas] Eio net not available, cannot run OAS path\n%!";
+    Log.Perpetual.error "Eio net not available, cannot run OAS path";
     emit (Error "Eio net not available for OAS perpetual path");
     state.running <- false;
     Error "Eio net not available for OAS perpetual path"
@@ -86,14 +86,14 @@ let run_perpetual_via_oas
   Perpetual_oas_state.update_state (fun ps ->
     ps.generation <- state.generation) pstate;
   let ctx_ref = ref state.context in
-  eprintf "[perpetual_oas] Starting OAS loop: goal=%s, trace=%s, gen=%d\n%!"
+  Log.Perpetual.info "Starting OAS loop: goal=%s, trace=%s, gen=%d"
     config.initial_goal trace_id pstate.generation;
   (* Build the initial agent — abort early on failure *)
   match
     Perpetual_oas_build.build_perpetual_agent ~config ~pstate ~emit ~ctx_ref ~net
   with
   | Error e ->
-    eprintf "[perpetual_oas] Failed to build agent: %s\n%!" e;
+    Log.Perpetual.error "Failed to build agent: %s" e;
     emit (Error (sprintf "OAS agent build failed: %s" e));
     state.running <- false;
     Error (sprintf "OAS agent build failed: %s" e)
@@ -110,7 +110,7 @@ let run_perpetual_via_oas
     Fs_compat.save_file checkpoint_path
       (Oas.Checkpoint.to_string oas_ckpt)
   with exn ->
-    eprintf "[perpetual_oas] Checkpoint save failed: %s\n%!"
+    Log.Perpetual.error "Checkpoint save failed: %s"
       (Printexc.to_string exn));
   (* Also save MASC-format checkpoint for cross-compatibility
      (inlined from deleted oas_checkpoint_bridge) *)
@@ -169,11 +169,11 @@ let run_perpetual_via_oas
     Fs_compat.save_file ckpt_path2
       (Oas.Checkpoint.to_string masc_oas_ckpt)
   with exn ->
-    eprintf "[perpetual_oas] MASC checkpoint save failed: %s\n%!"
+    Log.Perpetual.error "MASC checkpoint save failed: %s"
       (Printexc.to_string exn));
   (* Handle handoff: extract DNA, increment generation *)
   if pstate.handoff_triggered then begin
-    eprintf "[perpetual_oas] Handoff triggered at gen %d, preparing DNA\n%!"
+    Log.Perpetual.info "Handoff triggered at gen %d, preparing DNA"
       pstate.generation;
     let metrics : Succession_oas.succession_metrics = {
       total_turns = pstate.turn_count;
@@ -200,7 +200,7 @@ let run_perpetual_via_oas
       Fs_compat.save_file dna_path
         (Oas.Checkpoint.to_string dna_ckpt)
     with exn ->
-      eprintf "[perpetual_oas] DNA checkpoint save failed: %s\n%!"
+      Log.Perpetual.error "DNA checkpoint save failed: %s"
         (Printexc.to_string exn));
     (* Update MASC state for potential successor *)
     state.generation <- pstate.generation + 1;
@@ -227,12 +227,12 @@ let run_perpetual_via_oas
       then String.sub text 0 200 ^ "..."
       else text
     in
-    eprintf "[perpetual_oas] Loop ended: turns=%d, tokens=%d, cost=$%.4f\n%!"
+    Log.Perpetual.info "Loop ended: turns=%d, tokens=%d, cost=$%.4f"
       pstate.turn_count pstate.total_tokens pstate.total_cost;
-    eprintf "[perpetual_oas] Final response: %s\n%!" summary
+    Log.Perpetual.info "Final response: %s" summary
   | Error err ->
     let detail = Oas.Error.to_string err in
-    eprintf "[perpetual_oas] Loop ended with error: %s\n%!" detail;
+    Log.Perpetual.error "Loop ended with error: %s" detail;
     emit (Error (sprintf "OAS perpetual loop error: %s" detail)));
   Ok ()
 
@@ -249,4 +249,4 @@ let run
   : unit =
   run_perpetual_via_oas ~sw ~config ~state
   |> Result.iter_error (fun e ->
-    eprintf "[perpetual_oas] OAS path aborted: %s\n%!" e)
+    Log.Perpetual.error "OAS path aborted: %s" e)

@@ -269,7 +269,7 @@ let publish_to_event_bus bus (ev : event) =
 let stop state =
   state.running <- false;
   (* Save final OAS checkpoint on graceful stop *)
-  eprintf "[perpetual] Saving final checkpoint: trace=%s turns=%d\n%!"
+  Log.Perpetual.info "Saving final checkpoint: trace=%s turns=%d"
     state.trace_id state.turn_count
 
 (* ================================================================ *)

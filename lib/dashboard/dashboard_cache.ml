@@ -117,8 +117,7 @@ let get_or_compute_eio key ~ttl compute =
           in
           let elapsed = now () -. started_at in
           if elapsed > max_wait_sec || waited > max_wait_sec then begin
-            Printf.eprintf
-              "[WARN] Dashboard cache: evicting stale Computing slot for %s (%.1fs elapsed)\n%!"
+            Log.Dashboard.warn "cache: evicting stale Computing slot for %s (%.1fs elapsed)"
               key elapsed;
             Hashtbl.remove table key;
             Eio.Condition.broadcast cond;
@@ -157,12 +156,11 @@ let get_or_compute_eio key ~ttl compute =
                 (Ready { value; expires_at = ts +. ttl;
                          stale_until = ts +. ttl +. stale_grace })
             | _ ->
-              Printf.eprintf
-                "[INFO] Dashboard cache: bg-revalidate discarded for %s (slot replaced)\n%!"
+              Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)"
                 key);
           Eio.Condition.broadcast cond
         | exception exn ->
-          Printf.eprintf "[WARN] Dashboard cache bg-revalidate failed (%s): %s\n%!"
+          Log.Dashboard.warn "cache bg-revalidate failed (%s): %s"
             key (Printexc.to_string exn);
           Eio.Mutex.use_rw ~protect:true mu (fun () ->
             match Hashtbl.find_opt table key with
@@ -192,8 +190,7 @@ let get_or_compute_eio key ~ttl compute =
                (Ready { value; expires_at = ts +. ttl;
                         stale_until = ts +. ttl +. stale_grace })
            | _ ->
-             Printf.eprintf
-               "[INFO] Dashboard cache: compute result discarded for %s (slot replaced)\n%!"
+             Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)"
                key);
          Eio.Condition.broadcast cond;
          value
@@ -270,7 +267,7 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
       with
       | Ok value -> value
       | Error `Timeout ->
-        Printf.eprintf "[WARN] Dashboard cache compute timeout: %s (%.0fs)\n%!" key timeout_sec;
+        Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
         raise (Compute_timeout key))
   with Compute_timeout k ->
     timeout_error_json k timeout_sec

@@ -51,13 +51,13 @@ let start_execution_refresh_loop ~state ~sw ~clock =
      in
      _execution_json_ref := json;
      let dt = Time_compat.now () -. t0 in
-     Printf.eprintf "[INFO] Dashboard: execution warm cache done (%.1fs).\n%!" dt
+     Log.Dashboard.info "execution warm cache done (%.1fs)" dt
    with exn ->
      let dt = Time_compat.now () -. t0 in
-     Printf.eprintf "[WARN] Dashboard: execution warm cache failed (%.1fs): %s\n%!"
+     Log.Dashboard.warn "execution warm cache failed (%.1fs): %s"
        dt (Printexc.to_string exn));
   Eio.Fiber.fork ~sw (fun () ->
-    Printf.eprintf "[INFO] Dashboard: starting execution refresh loop.\n%!";
+    Log.Dashboard.info "starting execution refresh loop";
     let rec loop () =
       let t0 = Time_compat.now () in
       (try
@@ -78,13 +78,13 @@ let start_execution_refresh_loop ~state ~sw ~clock =
         in
         _execution_json_ref := json;
         let dt = Time_compat.now () -. t0 in
-        Printf.eprintf "[INFO] Dashboard: execution refreshed (%.0fB, %.1fs, %s).\n%!"
+        Log.Dashboard.info "execution refreshed (%.0fB, %.1fs, %s)"
           (Float.of_int (String.length (Yojson.Safe.to_string json)))
           dt
           (if !_executor_pool <> None then "pool" else "in-domain")
       with exn ->
         let dt = Time_compat.now () -. t0 in
-        Printf.eprintf "[WARN] Dashboard: execution refresh failed (%.1fs): %s\n%!"
+        Log.Dashboard.warn "execution refresh failed (%.1fs): %s"
           dt (Printexc.to_string exn));
       Eio.Time.sleep clock _execution_refresh_interval_s;
       loop ()

@@ -1,14 +1,14 @@
 (** Keeper_agent_run — Run a single keeper turn via OAS Agent.run().
 
-    Replaces the manual LLM call + tool dispatch loop in keeper_turn.ml
-    with Agent.run(). Uses {!Keeper_tools_oas} for tool wrapping and
+    Owns the full context lifecycle: checkpoint loading, context creation,
+    base system prompt application, and message persistence.
+    Callers provide domain-specific system prompt logic via
+    [build_turn_prompt] callback.
+
+    Uses {!Keeper_tools_oas} for tool wrapping and
     {!Keeper_hooks_oas} for lifecycle hooks (checkpoint, metrics, social).
 
-    This is the Phase C entry point of Issue #1797.
-    Callers can switch between the old manual loop and this function
-    via [KEEPER_USE_AGENT_RUN=true] environment variable.
-
-    @since Phase 4 — Keeper → Agent.run() migration *)
+    @since Phase 5 — Context_manager encapsulation *)
 
 (** Result of a single Agent.run() keeper turn. *)
 type run_result = {
@@ -20,29 +20,85 @@ type run_result = {
 
 (** Run a single keeper turn via OAS Agent.run().
 
-    Builds OAS Tool.t from keeper tools, attaches keeper hooks
-    (checkpoint, metrics, social events), and delegates to
+    Loads checkpoint, creates working context with the base keeper system
+    prompt, then calls [build_turn_prompt] with the base prompt and message
+    history so the caller can layer skill routing, continuity context,
+    policy guards, and turn-specific instructions on top.
+
+    After the callback returns the final system prompt, appends the user
+    message, builds OAS tools + hooks, and delegates to
     [Oas_worker.run_named] which internally calls Agent.run().
 
     @param config Room configuration
     @param meta Keeper metadata
-    @param session Session context for persistence
-    @param ctx_ref Mutable ref to working context
-    @param system_prompt Full system prompt for the turn
+    @param base_dir Session base directory for checkpoints
+    @param max_context Maximum context window tokens
+    @param build_turn_prompt Callback: receives the base keeper system prompt
+           and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
     @param cascade_name Cascade profile name for model selection
     @param generation Current generation counter *)
 let run_turn
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
-    ~(session : Context_manager.session_context)
-    ~(ctx_ref : Context_manager.working_context ref)
-    ~(system_prompt : string)
+    ~(base_dir : string)
+    ~(max_context : int)
+    ~(build_turn_prompt :
+        base_system_prompt:string ->
+        messages:Agent_sdk.Types.message list ->
+        string)
     ~(user_message : string)
     ~(cascade_name : string)
     ~(generation : int)
     ()
   : (run_result, string) result =
+  (* 1. Ensure session directory *)
+  Keeper_types.mkdir_p base_dir;
+  (* 2. Load checkpoint *)
+  let (session, ctx_opt) =
+    Keeper_exec_context.load_context_from_checkpoint
+      ~trace_id:meta.trace_id
+      ~primary_model_max_tokens:max_context
+      ~base_dir
+  in
+  (* 3. Build base system prompt from meta *)
+  let base_system_prompt =
+    Keeper_prompt.build_keeper_system_prompt
+      ~goal:meta.goal
+      ~short_goal:meta.short_goal
+      ~mid_goal:meta.mid_goal
+      ~long_goal:meta.long_goal
+      ~soul_profile:meta.soul_profile
+      ~will:meta.will
+      ~needs:meta.needs
+      ~desires:meta.desires
+      ~instructions:meta.instructions
+  in
+  (* 4. Create or restore working context, re-apply current prompt *)
+  let base_ctx =
+    match ctx_opt with
+    | Some c -> c
+    | None ->
+      Context_manager.create
+        ~system_prompt:base_system_prompt
+        ~max_tokens:max_context
+  in
+  let ctx_work =
+    Context_manager.set_system_prompt base_ctx
+      ~system_prompt:base_system_prompt
+  in
+  (* 5. Build final turn system prompt via caller callback *)
+  let turn_system_prompt =
+    build_turn_prompt
+      ~base_system_prompt
+      ~messages:ctx_work.messages
+  in
+  (* 6. Append user message and persist *)
+  let user_msg = Agent_sdk.Types.user_msg user_message in
+  let ctx_work = Context_manager.append ctx_work user_msg in
+  Context_manager.persist_message session user_msg;
+  (* 7. Set up agent *)
+  let ctx_ref = ref ctx_work in
   let agent_name = Printf.sprintf "keeper-%s" meta.name in
   let meta_ref = ref meta in
   let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
@@ -56,11 +112,12 @@ let run_turn
         Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 } };
     { strategy = Agent_sdk.Context_reducer.Merge_contiguous };
   ] in
+  (* 8. Run Agent *)
   match
     Oas_worker.run_named
       ~cascade_name
       ~goal:user_message
-      ~system_prompt
+      ~system_prompt:turn_system_prompt
       ~tools
       ~hooks
       ~context_reducer:reducer
@@ -79,7 +136,6 @@ let run_turn
         | Agent_sdk.Types.ToolUse _ -> true | _ -> false)
         result.response.content)
     in
-    (* Persist assistant response to session *)
     let assistant_msg = Llm_provider.Types.assistant_msg text in
     Context_manager.persist_message session assistant_msg;
     ctx_ref := Context_manager.append !ctx_ref assistant_msg;
@@ -89,4 +145,3 @@ let run_turn
       turn_count = result.turns;
       tool_calls_made = tool_count;
     }
-

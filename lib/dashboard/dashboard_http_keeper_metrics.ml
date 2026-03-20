@@ -440,25 +440,5 @@ let top_count_name_and_count
   | [] -> None
 
 let get_agent_identity (name : string) =
-  let contains s sub =
-    let len = String.length s in
-    let sub_len = String.length sub in
-    if sub_len > len then false
-    else
-      let rec loop i =
-        if i + sub_len > len then false
-        else if String.sub s i sub_len = sub then true
-        else loop (i + 1)
-      in
-      loop 0
-  in
-  let name = String.lowercase_ascii name in
-  if contains name "claude" then ("🧠", "클로드")
-  else if contains name "gemini" then ("💎", "제미나이")
-  else if contains name "codex" then ("🤖", "코덱스")
-  else if contains name "lodge" then ("🏠", "롯지 키퍼")
-  else if contains name "gardener" then ("🌿", "정원사")
-  else if contains name "review" then ("🔍", "리뷰어")
-  else if contains name "test" then ("🧪", "테스터")
-  else ("🤖", name)
+  Dashboard_execution_helpers.get_agent_identity name
 

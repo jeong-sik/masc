@@ -293,7 +293,7 @@ let parse_llm_intent (text : string) : (dm_intent, string) result =
                     (String.sub s 0 (min 100 (String.length s)))))
 
 (** Validate that an LLM response contains a parseable non-Unknown intent. *)
-let llm_response_is_valid (resp : Cascade.api_response) : bool =
+let llm_response_is_valid (resp : Llm_provider.Types.api_response) : bool =
   match parse_llm_intent (Cascade.text_of_response resp) with
   | Ok intent -> not (equal_intent_category intent.primary Unknown)
   | Error _ -> false

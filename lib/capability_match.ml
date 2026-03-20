@@ -245,7 +245,7 @@ let parse_llm_score (text : string) : float option =
       scan 0
 
 (** Validate that an LLM response contains a parseable score. *)
-let llm_score_is_valid (resp : Cascade.api_response) : bool =
+let llm_score_is_valid (resp : Llm_provider.Types.api_response) : bool =
   parse_llm_score (Cascade.text_of_response resp) <> None
 
 (** Call LLM to score agent-task compatibility.

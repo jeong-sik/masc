@@ -568,13 +568,13 @@ let parse_text_tool_calls (content : string) : Cascade.tool_call list =
   in
   collect 0 1 []
 
-let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Cascade.token_usage =
+let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Agent_sdk.Types.api_usage =
   { Agent_sdk.Types.input_tokens;
     output_tokens;
     cache_creation_input_tokens = 0;
     cache_read_input_tokens = 0 }
 
-let merge_usage (a : Cascade.token_usage) (b : Cascade.token_usage) : Cascade.token_usage =
+let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
   { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
     cache_creation_input_tokens =
@@ -583,7 +583,7 @@ let merge_usage (a : Cascade.token_usage) (b : Cascade.token_usage) : Cascade.to
       a.cache_read_input_tokens + b.cache_read_input_tokens }
 
 let estimate_cost_usd (model : Cascade.model_spec)
-    (usage : Cascade.token_usage) : float option =
+    (usage : Agent_sdk.Types.api_usage) : float option =
   let input_cost =
     (float_of_int usage.input_tokens /. 1000.0) *. model.cost_per_1k_input
   in

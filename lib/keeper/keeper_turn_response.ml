@@ -14,7 +14,7 @@ open Keeper_execution
 type turn_env = {
   meta_turn : keeper_meta;
   safe_reply : string;
-  final_usage : Cascade.token_usage;
+  final_usage : Agent_sdk.Types.api_usage;
   final_model_used : string;
   final_latency_ms : int;
   total_cost_usd_turn : float;

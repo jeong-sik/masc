@@ -160,7 +160,7 @@ let run_simple
 let text_of_run_result (r : Oas_worker.run_result) : string =
   Cascade.text_of_response r.response
 
-let usage_of_run_result (r : Oas_worker.run_result) : Cascade.token_usage =
+let usage_of_run_result (r : Oas_worker.run_result) : Agent_sdk.Types.api_usage =
   Cascade.usage_of_response r.response
 
 let model_of_run_result (r : Oas_worker.run_result) : string =
@@ -183,7 +183,7 @@ let separate_system_and_user (msgs : Agent_sdk.Types.message list) :
   let rest = ref [] in
   List.iter (fun (m : Agent_sdk.Types.message) ->
     match m.role with
-    | Agent_sdk.Types.System -> sys_parts := Cascade.text_of_message m :: !sys_parts
+    | Agent_sdk.Types.System -> sys_parts := Agent_sdk.Types.text_of_message m :: !sys_parts
     | _ -> rest := m :: !rest
   ) msgs;
   let sys = String.concat "\n" (List.rev !sys_parts) in
@@ -191,7 +191,7 @@ let separate_system_and_user (msgs : Agent_sdk.Types.message list) :
 
 let messages_to_goal_text (msgs : Agent_sdk.Types.message list) : string =
   msgs
-  |> List.map (fun (m : Agent_sdk.Types.message) -> Cascade.text_of_message m)
+  |> List.map (fun (m : Agent_sdk.Types.message) -> Agent_sdk.Types.text_of_message m)
   |> List.filter (fun s -> String.length s > 0)
   |> String.concat "\n"
 

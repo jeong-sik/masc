@@ -197,7 +197,7 @@ masc_convo_start, masc_convo_reply, masc_convo_get, decision_create, decision_fi
 Agent lifecycle: gardener, keeper, perpetual, MDAL, autoresearch, handover, library.
 
 ```
-masc_gardener_health, masc_keeper_up, masc_keeper_down, masc_keeper_msg,
+masc_keeper_up, masc_keeper_down, masc_keeper_msg,
 masc_perpetual_start, masc_mdal_start, masc_autoresearch_start,
 masc_handover_create, masc_spawn
 ```

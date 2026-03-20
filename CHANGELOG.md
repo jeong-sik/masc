@@ -988,7 +988,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Gap signal processing for spawn decisions
   - Retirement management with grace periods
   - Circuit breaker, daily budgets, cooldowns
-  - 7 MCP tools: `masc_gardener_health`, `masc_gardener_config`, `masc_gardener_propose_spawn`, etc.
+  - 7 MCP tools for the legacy gardener surface
   - 62 tests covering all safety mechanisms
 
 ## [2.57.0] - 2026-02-05

@@ -2,11 +2,10 @@
 
     When accumulated memory importance exceeds [default_threshold] (100),
     the engine retrieves top-20 memories by importance, asks the MODEL
-    "이 경험들에서 어떤 패턴/인사이트를 발견하는가?", and stores the
-    reflection as a high-importance (8-10) Memory Stream entry.
+    for pattern insights, and stores the reflection as a high-importance entry.
 
-    This creates a recursive self-improvement loop:
-    Observation → Memory → Reflection → Better Retrieval → Better Actions
+    Memory_stream has been removed. Reflection now uses no-op stubs for
+    memory read/write until a database backend is connected.
 
     @since 4.0.0 *)
 
@@ -21,7 +20,7 @@ let default_threshold =
 
 (* ---------- Tracking: last reflection timestamps ---------- *)
 
-(** In-memory table: agent_name → last reflection unix timestamp.
+(** In-memory table: agent_name -> last reflection unix timestamp.
     Persisted to .masc/memory/{agent_name}/reflection_meta.json *)
 
 let last_reflections : (string, float) Hashtbl.t = Hashtbl.create 10
@@ -74,50 +73,48 @@ let mark_reflected ~agent_name =
   save_meta ~agent_name ~timestamp:now
 
 let should_reflect ~agent_name =
-  let since = last_reflection_time ~agent_name in
-  let sum = Memory_stream.importance_sum_since ~agent_name ~since in
+  let _since = last_reflection_time ~agent_name in
+  (* No-op: Memory_stream removed. importance_sum_since always returns 0. *)
+  let sum = 0 in
   sum >= default_threshold
 
 let reflect ~agent_name ~identity ~call_model =
-  (* 1. Retrieve top 20 memories by importance *)
-  let memories = Memory_stream.retrieve ~agent_name ~query:"" ~limit:20 in
+  (* 1. No memories available (Memory_stream removed) *)
+  let mem_str = "(no memory backend)" in
 
-  (* 2. Format them for the MODEL *)
-  let mem_str = Memory_stream.format_memories memories in
-
-  (* 3. Build reflection prompt *)
-  let prompt = sprintf {|너는 %s.
+  (* 2. Build reflection prompt *)
+  let prompt = sprintf {|%s.
 %s
-
-다음은 너의 최근 경험들이다:
 
 %s
 
-질문: 이 경험들에서 어떤 패턴이나 인사이트를 발견하는가?
-- 반복되는 주제는?
-- 너의 관점이 어떻게 변했는가?
-- 앞으로 어떻게 행동을 개선할 수 있는가?
+%s
+- %s
+- %s
+- %s
 
-2-3문장으로 핵심 인사이트만 답변해. 한국어로.|}
-    agent_name identity mem_str
+%s|}
+    agent_name identity
+    "다음은 너의 최근 경험들이다:"
+    mem_str
+    "반복되는 주제는?"
+    "너의 관점이 어떻게 변했는가?"
+    "앞으로 어떻게 행동을 개선할 수 있는가?"
+    "2-3문장으로 핵심 인사이트만 답변해. 한국어로."
   in
 
-  (* 4. Call MODEL *)
+  (* 3. Call MODEL *)
   let response = call_model ~prompt in
 
-  (* 5. Store reflection as high-importance memory *)
+  (* 4. Reflection result (no memory write -- Memory_stream removed) *)
   let is_valid = String.length response > 10 in
   if is_valid then begin
-    Memory_stream.add_memory ~agent_name
-      ~content:(sprintf "[성찰] %s" response)
-      ~importance:9
-      (Memory_stream.Reflection "periodic");
     mark_reflected ~agent_name;
-    eprintf "[reflection] ✅ %s reflected: %s\n%!"
+    eprintf "[reflection] %s reflected: %s\n%!"
       agent_name (String.sub response 0 (min 60 (String.length response)));
     response
   end else begin
-    eprintf "[reflection] ⚠️ %s reflection failed: empty/invalid response\n%!" agent_name;
+    eprintf "[reflection] %s reflection failed: empty/invalid response\n%!" agent_name;
     mark_reflected ~agent_name;  (* Still mark to avoid infinite retry *)
-    "(성찰 실패)"
+    "(reflection failed)"
   end

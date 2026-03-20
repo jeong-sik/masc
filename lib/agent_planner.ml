@@ -141,7 +141,7 @@ let fallback_plan ~agent_name =
 let build_plan_prompt ~agent_name ~identity ~memories =
   let memory_str =
     if List.length memories = 0 then "(기억 없음)"
-    else Memory_stream.format_memories memories
+    else "(no memory backend)"
   in
   let date = today_kst () in
   let hour = current_hour_kst () in
@@ -230,12 +230,7 @@ let get_or_create_plan ~agent_name ~identity ~memories ~call_model =
     let response = call_model ~prompt in
     let plan = match parse_plan_response ~agent_name ~response with
       | Some p ->
-        (* Record plan creation as a memory *)
-        let goals_str = String.concat ", " p.goals in
-        Memory_stream.add_memory ~agent_name
-          ~content:(sprintf "오늘 계획: %s" goals_str)
-          ~importance:6
-          (Memory_stream.Plan "daily");
+        (* Plan creation memory recording removed (Memory_stream removed) *)
         save_plan p;
         eprintf "[planner] ✅ Created plan for %s: %d goals, %d blocks\n%!"
           agent_name (List.length p.goals) (List.length p.hourly_blocks);

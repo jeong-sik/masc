@@ -1,20 +1,13 @@
 (** Memory_oas_bridge — Connect MASC memory systems to OAS Memory.t 5-tier.
 
     Tier mapping:
-    - {b Long_term} — [long_term_backend] via [Memory_stream] (persist/retrieve/query)
-    - {b Episodic}  — [seed_episodes] loads [Memory_stream] entries as OAS episodes;
-                       [flush_episodes] writes new episodes back to [Memory_stream]
+    - {b Long_term} — no-op stubs (Memory_stream removed)
+    - {b Episodic}  — no-op (Memory_stream removed)
     - {b Procedural} — [seed_procedures_as_oas] loads [Procedural_memory] entries;
                         [flush_procedures] writes back
     - {b Working/Scratchpad} — managed by OAS in-memory; no backend needed
 
-    Usage:
-    {[
-      let memory = Memory_oas_bridge.create_memory_full ~agent_name ~config () in
-      (* All 5 tiers operational *)
-      let _ = Agent_sdk.Memory.recall_episodes memory () in
-      let _ = Agent_sdk.Memory.best_procedure memory ~pattern:"deploy" in
-    ]}
+    (* TODO: Replace no-op long_term_backend with OAS Memory.t database backend *)
 
     @since 2.122.0 (long_term only)
     @since 2.124.0 (5-tier: episodic + procedural seeding/flushing) *)
@@ -45,70 +38,31 @@ let content_of_json (json : Yojson.Safe.t) : string =
      | _ -> Yojson.Safe.to_string json)
   | _ -> Yojson.Safe.to_string json
 
-(** Create an OAS [long_term_backend] backed by [Memory_stream] for a
-    specific agent.
+(** Create an OAS [long_term_backend] with no-op stubs.
 
-    Usage:
-    {[
-      let backend = Memory_oas_bridge.make_backend ~agent_name:"keeper-dm" in
-      let memory = Agent_sdk.Memory.create ~long_term:backend () in
-      (* Agent.t can now use Memory.store/recall ~tier:Long_term *)
-    ]}
+    Memory_stream has been removed. All operations are no-ops until
+    a database-backed replacement is implemented.
+
+    (* TODO: Replace no-op long_term_backend with OAS Memory.t database backend *)
 *)
 let make_backend ~(agent_name : string) : Agent_sdk.Memory.long_term_backend =
+  ignore agent_name;
   {
-    Agent_sdk.Memory.persist = (fun ~key json ->
-      let content = Printf.sprintf "[%s] %s" key (content_of_json json) in
-      let importance = importance_of_json json in
-      Memory_stream.add_memory
-        ~agent_name ~content ~importance
-        (Memory_stream.Observation content);
-      Ok ());
+    Agent_sdk.Memory.persist = (fun ~key:_ _json -> Ok ());
 
-    retrieve = (fun ~key ->
-      let entries = Memory_stream.retrieve ~agent_name ~query:key ~limit:1 in
-      match entries with
-      | entry :: _ ->
-        Some (`Assoc [
-          ("id", `String entry.Memory_stream.id);
-          ("content", `String entry.Memory_stream.content);
-          ("importance", `Int entry.Memory_stream.importance);
-          ("timestamp", `Float entry.Memory_stream.timestamp);
-        ])
-      | [] -> None);
+    retrieve = (fun ~key:_ -> None);
 
-    remove = (fun ~key:_ ->
-      (* Memory_stream is append-only JSONL. Old entries decay naturally
-         via recency scoring. Explicit removal not supported. *)
-      Ok ());
+    remove = (fun ~key:_ -> Ok ());
 
-    batch_persist = (fun pairs ->
-      List.iter (fun (key, json) ->
-        let content = Printf.sprintf "[%s] %s" key (content_of_json json) in
-        let importance = importance_of_json json in
-        Memory_stream.add_memory
-          ~agent_name ~content ~importance
-          (Memory_stream.Observation content)
-      ) pairs;
-      Ok ());
+    batch_persist = (fun _pairs -> Ok ());
 
-    query = (fun ~prefix ~limit ->
-      let entries = Memory_stream.retrieve ~agent_name ~query:prefix ~limit in
-      List.map (fun (e : Memory_stream.memory_entry) ->
-        (e.Memory_stream.id,
-         `Assoc [
-           ("content", `String e.Memory_stream.content);
-           ("importance", `Int e.Memory_stream.importance);
-           ("timestamp", `Float e.Memory_stream.timestamp);
-         ])
-      ) entries);
+    query = (fun ~prefix:_ ~limit:_ -> []);
   }
 
-(** Create an OAS [Memory.t] instance pre-configured with the memory_stream
-    backend for a specific agent.
+(** Create an OAS [Memory.t] instance with no-op long_term backend.
 
-    This is the primary entry point for integrating OAS Memory into MASC
-    agent execution paths (gardener workers, keeper, perpetual agents). *)
+    (* TODO: Replace no-op long_term_backend with OAS Memory.t database backend *)
+*)
 let create_memory ~(agent_name : string) : Agent_sdk.Memory.t =
   let backend = make_backend ~agent_name in
   Agent_sdk.Memory.create ~long_term:backend ()
@@ -151,99 +105,34 @@ let seed_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limi
     List.length procs
   end
 
-(** Pre-seed the keeper's memory bank (recent observations and reflections)
-    into a [Memory.t] instance.
+(** Pre-seed the keeper's memory bank.
 
-    Loads the last [limit] entries from the agent's memory stream and stores
-    them as a single Long_term entry.  Returns the number of entries seeded. *)
+    No-op: Memory_stream has been removed.
+    Returns 0 (no entries seeded). *)
 let seed_memory_bank ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limit : int) : int =
-  let entries = Memory_stream.retrieve ~agent_name ~query:"*" ~limit in
-  if entries = [] then 0
-  else begin
-    let json = `Assoc [
-      ("agent_name", `String agent_name);
-      ("entries", `List (List.map (fun (e : Memory_stream.memory_entry) ->
-        `Assoc [
-          ("id", `String e.id);
-          ("content", `String e.content);
-          ("importance", `Int e.importance);
-          ("timestamp", `Float e.timestamp);
-        ]) entries));
-      ("count", `Int (List.length entries));
-    ] in
-    Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "memory_bank" json;
-    List.length entries
-  end
+  ignore (memory, agent_name, limit);
+  0
 
 (* ================================================================ *)
-(* Episodic tier: Memory_stream <-> OAS episodes                    *)
+(* Episodic tier: no-op (Memory_stream removed)                      *)
 (* ================================================================ *)
 
-(** Convert a [Memory_stream.memory_entry] to an OAS [episode].
+(** Pre-seed the Episodic tier.
 
-    Mapping:
-    - [importance] (1-10 int) → [salience] (0.0-1.0 float)
-    - [content] → [action]
-    - [entry_type] → [outcome]: all mapped to [Neutral] (Memory_stream
-      entries are observations, not success/failure outcomes)
-    - [agent_name] → [participants] singleton list *)
-let episode_of_entry (e : Memory_stream.memory_entry) : Agent_sdk.Memory.episode =
-  {
-    id = e.id;
-    timestamp = e.timestamp;
-    participants = [ e.agent_name ];
-    action = e.content;
-    outcome = Agent_sdk.Memory.Neutral;
-    salience = Float.min 1.0 (Float.max 0.0
-      (Float.of_int e.importance /. 10.0));
-    metadata =
-      (match e.links with
-       | [] -> []
-       | links ->
-         [ ("links", `List (List.map (fun s -> `String s) links)) ]);
-  }
-
-(** Pre-seed the Episodic tier from [Memory_stream].
-
-    Loads recent entries and stores them as OAS episodes with salience
-    derived from importance scores.  OAS handles time-decay via
-    [recall_episodes ~decay_rate].  Returns the number of episodes seeded. *)
+    No-op: Memory_stream has been removed.
+    Returns 0 (no episodes seeded). *)
 let seed_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
     ~(limit : int) : int =
-  let entries = Memory_stream.retrieve ~agent_name ~query:"*" ~limit in
-  List.iter (fun e ->
-    Agent_sdk.Memory.store_episode memory (episode_of_entry e)
-  ) entries;
-  List.length entries
+  ignore (memory, agent_name, limit);
+  0
 
-(** Flush new OAS episodes back to [Memory_stream].
+(** Flush new OAS episodes.
 
-    Extracts episodes from the Episodic tier (above [min_salience]) and
-    persists any that do not already exist in [Memory_stream].
-    Returns the number of new episodes flushed. *)
+    No-op: Memory_stream has been removed.
+    Returns 0 (no episodes flushed). *)
 let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
-  let episodes =
-    Agent_sdk.Memory.recall_episodes memory
-      ~min_salience:0.1 ~limit:100 ()
-  in
-  let flushed = ref 0 in
-  List.iter (fun (ep : Agent_sdk.Memory.episode) ->
-    (* Only flush episodes created during the session (not pre-seeded).
-       Pre-seeded episodes have IDs from Memory_stream, which have a
-       known format.  New episodes have IDs assigned by OAS. *)
-    let existing = Memory_stream.retrieve ~agent_name ~query:ep.id ~limit:1 in
-    if existing = [] then begin
-      let importance =
-        Float.to_int (Float.round (ep.salience *. 10.0))
-        |> max 1 |> min 10
-      in
-      Memory_stream.add_memory
-        ~agent_name ~content:ep.action ~importance
-        (Memory_stream.Observation ep.action);
-      incr flushed
-    end
-  ) episodes;
-  !flushed
+  ignore (memory, agent_name);
+  0
 
 (* ================================================================ *)
 (* Procedural tier: Procedural_memory <-> OAS procedures            *)
@@ -316,7 +205,7 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
           true
         end else false
       | None ->
-        (* New procedure from OAS — create in MASC *)
+        (* New procedure from OAS -- create in MASC *)
         let new_p : Procedural_memory.procedure = {
           id = op.id;
           agent_name;
@@ -342,23 +231,23 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
 (** Create an OAS [Memory.t] with all 5 tiers populated.
 
     Seeds:
-    - Long_term: [long_term_backend] via [Memory_stream]
-    - Episodic: last [episode_limit] entries from [Memory_stream]
+    - Long_term: no-op backend (Memory_stream removed)
+    - Episodic: no-op (Memory_stream removed)
     - Procedural: top [procedure_limit] crystallized procedures
     - Working/Scratchpad: empty (managed by OAS at runtime)
 
-    Optionally seeds institution and memory bank to Long_term if
-    [config] is provided.
+    Optionally seeds institution to Long_term if [config] is provided.
 
-    @param episode_limit default 50
+    (* TODO: Replace no-op long_term_backend with OAS Memory.t database backend *)
+
+    @param episode_limit default 50 (currently unused, kept for API compat)
     @param procedure_limit default 20 *)
 let create_memory_full ~(agent_name : string)
     ?(config : Room_utils.config option)
     ?(episode_limit = 50) ?(procedure_limit = 20)
     () : Agent_sdk.Memory.t =
+  ignore episode_limit;
   let memory = create_memory ~agent_name in
-  (* Episodic tier *)
-  let _ep_count = seed_episodes ~memory ~agent_name ~limit:episode_limit in
   (* Procedural tier *)
   let _proc_count =
     seed_procedures_as_oas ~memory ~agent_name ~limit:procedure_limit
@@ -367,15 +256,15 @@ let create_memory_full ~(agent_name : string)
   (match config with
    | Some cfg ->
      let _inst = seed_institution ~memory ~config:cfg in
-     let _bank = seed_memory_bank ~memory ~agent_name ~limit:20 in
      ()
    | None -> ());
   memory
 
 (** Flush all mutable tiers back to MASC persistent storage.
 
-    Call after [Agent.run] completes to persist new episodes and
-    updated procedures.  Returns [(episodes_flushed, procedures_flushed)]. *)
+    Call after [Agent.run] completes to persist updated procedures.
+    Episodes are no longer flushed (Memory_stream removed).
+    Returns [(episodes_flushed, procedures_flushed)]. *)
 let flush_all ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
     : int * int =
   let ep = flush_episodes ~memory ~agent_name in

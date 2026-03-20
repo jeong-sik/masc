@@ -103,7 +103,8 @@ let execute_spawn_pipeline
                      let elapsed_ms =
                        int_of_float ((Time_compat.now () -. start_time) *. 1000.0)
                      in
-                     let spawn_result, oas_trace_ref, oas_tool_names, oas_tool_call_count =
+                     let spawn_result, oas_trace_ref, oas_tool_names, oas_tool_call_count,
+                         trace_summary_json, trace_validation_json =
                        match oas_result with
                        | Ok result ->
                          let text = Agent_sdk.Types.text_of_content result.response.content in
@@ -114,6 +115,25 @@ let execute_spawn_pipeline
                              result.response.content
                          in
                          let usage = result.response.usage in
+                         let cost_usd =
+                           Option.map (fun (cp : Agent_sdk.Checkpoint.t) ->
+                             cp.usage.estimated_cost_usd) result.checkpoint
+                         in
+                         let trace_summary =
+                           Some (`Assoc [
+                             ("oas_session_id", `String result.session_id);
+                             ("turns", `Int result.turns);
+                             ("model", `String prepared.runtime_model.model_id);
+                             ("tool_names", `List (List.map (fun n -> `String n) tool_names));
+                             ("tool_call_count", `Int (List.length tool_names));
+                             ("input_tokens",
+                               Option.fold ~none:`Null
+                                 ~some:(fun (u : Agent_sdk.Types.api_usage) -> `Int u.input_tokens) usage);
+                             ("output_tokens",
+                               Option.fold ~none:`Null
+                                 ~some:(fun (u : Agent_sdk.Types.api_usage) -> `Int u.output_tokens) usage);
+                           ])
+                         in
                          ({ Spawn.success = true;
                             output = text;
                             exit_code = 0;
@@ -122,11 +142,16 @@ let execute_spawn_pipeline
                             output_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.output_tokens) usage;
                             cache_creation_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.cache_creation_input_tokens) usage;
                             cache_read_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.cache_read_input_tokens) usage;
-                            cost_usd = None;
+                            cost_usd;
                           },
-                          None,
+                          Some { Agent_sdk.Raw_trace.worker_run_id = prepared.worker_run_id;
+                                path = result.session_id; start_seq = 0; end_seq = result.turns;
+                                agent_name = prepared.spec.spawn_agent;
+                                session_id = Some result.session_id },
                           tool_names,
-                          List.length tool_names)
+                          List.length tool_names,
+                          trace_summary,
+                          (None : Yojson.Safe.t option))
                        | Error e ->
                          ({ Spawn.success = false;
                             output = e;
@@ -140,14 +165,13 @@ let execute_spawn_pipeline
                           },
                           None,
                           [],
-                          0)
+                          0,
+                          None,
+                          None)
                      in
                      let output_preview =
                        deps.truncate_for_event spawn_result.output
                      in
-                     let trace_summary_json = (None : Yojson.Safe.t option) in
-                     let trace_validation_json = (None : Yojson.Safe.t option) in
-                     let _oas_trace_ref = oas_trace_ref in
                      (match spawn_result.success with
                      | true ->
                          release_prepared_runtime prepared
@@ -183,7 +207,7 @@ let execute_spawn_pipeline
                           .oas_worker_evidence_session_id
                             ~worker_run_id:
                               prepared.worker_run_id)
-                       ?trace_ref:None
+                       ?trace_ref:oas_trace_ref
                        ?trace_summary:trace_summary_json
                        ?trace_validation:trace_validation_json
                          ~trace_capability:"raw"

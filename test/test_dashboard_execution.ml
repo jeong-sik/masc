@@ -27,6 +27,7 @@ let test_dashboard_execution_fixture () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let config = Lib.Room_utils.default_config dir in
+      Unix.putenv "MASC_DASHBOARD_FIXTURES_ENABLED" "true";
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =

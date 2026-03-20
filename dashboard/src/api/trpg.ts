@@ -120,7 +120,7 @@ function normalizeEvent(value: unknown, actorNames: Map<string, string>): TrpgEv
   const type = asString(raw.type, 'event')
   return {
     type,
-    actor: actorName || actorId || 'system',
+    actor: actorName || actorId || undefined,
     actor_id: actorId || undefined,
     actor_name: actorName || undefined,
     seq: asInt(raw.seq),
@@ -130,7 +130,7 @@ function normalizeEvent(value: unknown, actorNames: Map<string, string>): TrpgEv
     visibility: asString(raw.visibility, '') || asString(payload.visibility, '') || undefined,
     event_id: asString(raw.event_id, '') || undefined,
     content: eventContent(type, payload),
-    timestamp: asString(raw.ts, '') || asString(raw.timestamp, '') || new Date().toISOString(),
+    timestamp: asString(raw.ts, '') || asString(raw.timestamp, '') || undefined,
   }
 }
 

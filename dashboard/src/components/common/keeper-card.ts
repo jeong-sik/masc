@@ -8,7 +8,7 @@ export type CanonicalKeeperCardModel = {
   koreanName?: string | null
   runtimeLabel?: string | null
   emoji?: string | null
-  tone: string
+  tone?: string
   statusRaw?: string | null
   statusLabel: string
   stateClass?: string | null
@@ -61,14 +61,15 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
     || (model.recentTools?.length ?? 0) > 0
     || (model.allowedTools?.length ?? 0) > 0
 
+  const toneClass = model.tone ?? ''
   const wrapperClass =
     variant === 'mission'
-      ? `mission-activity-card ${model.tone}`
+      ? `mission-activity-card ${toneClass}`
       : 'keeper-canonical-card'
   const buttonClass =
     variant === 'mission'
       ? 'mission-card-select'
-      : `monitor-row ${model.tone}${model.stateClass ? ` state-${model.stateClass}` : ''}`
+      : `monitor-row ${toneClass}${model.stateClass ? ` state-${model.stateClass}` : ''}`
 
   return html`
     <article class=${wrapperClass}>
@@ -89,9 +90,9 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
             ? html`
                 <${MitosisRing} ratio=${model.contextRatio ?? 0} size=${34} stroke=${4} />
                 <${StatusBadge} status=${model.statusRaw ?? 'unknown'} />
-                ${model.stateLabel ? html`<span class="monitor-pill ${model.tone}">${model.stateLabel}</span>` : null}
+                ${model.stateLabel ? html`<span class="monitor-pill ${toneClass}">${model.stateLabel}</span>` : null}
               `
-            : html`<span class="command-chip ${model.tone}">${model.statusLabel}</span>`}
+            : html`<span class="command-chip ${toneClass}">${model.statusLabel}</span>`}
         </div>
 
         <div class=${variant === 'mission' ? 'mission-activity-meta' : 'monitor-meta'}>

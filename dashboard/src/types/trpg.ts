@@ -51,7 +51,7 @@ export interface TrpgEvent {
   event_id?: string
   content: string
   dice_roll?: DiceRoll
-  timestamp: string
+  timestamp?: string
 }
 
 export interface DiceRoll {

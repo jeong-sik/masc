@@ -7,7 +7,7 @@ import type { TrpgCharacterStats } from './trpg'
 export interface Agent {
   name: string
   agent_type?: string
-  status: 'active' | 'busy' | 'listening' | 'idle' | 'inactive' | 'offline'
+  status?: 'active' | 'busy' | 'listening' | 'idle' | 'inactive' | 'offline'
   current_task: string | null
   context_ratio?: number
   joined_at?: string
@@ -28,7 +28,7 @@ export interface Agent {
 export interface Task {
   id: string
   title: string
-  status: 'todo' | 'in_progress' | 'claimed' | 'done' | 'cancelled'
+  status?: 'todo' | 'in_progress' | 'claimed' | 'done' | 'cancelled'
   priority?: number
   assignee?: string
   description?: string
@@ -39,9 +39,9 @@ export interface Task {
 export interface Message {
   id?: string
   seq?: number
-  from: string
+  from?: string
   content: string
-  timestamp: string
+  timestamp?: string
   type?: string
 }
 

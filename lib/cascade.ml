@@ -164,7 +164,7 @@ let default_model_strings ~cascade_name =
   let llama_model = Env_config.Llama.default_model in
   let glm_model = Env_config.Llm.default_model in
   let glm_flash = Env_config.Llm.flash_model in
-  (* llama + glm:auto — Glm_pool selects model at runtime *)
+  (* llama + glm:auto — GLM provider selects model at runtime *)
   let llama_glm =
     (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
     @ [ "glm:auto" ]
@@ -216,7 +216,7 @@ let default_model_strings ~cascade_name =
       labels_of [ ("glm", glm_model) ]
       @ [ "glm:auto" ]
   | "auto_responder" -> llama_glm
-  (* spawn glm — cloud cascade via Glm_pool *)
+  (* spawn glm — cloud-only cascade *)
   | "spawn_glm" ->
       labels_of [ ("glm", glm_model); ("glm", glm_flash) ]
       @ [ "glm:auto" ]

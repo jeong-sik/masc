@@ -490,6 +490,14 @@ let build_operation_arguments ~agent_name binding json =
           build [] binding.arg_bindings
       | _ -> Error "input must be a JSON object")
 
+let resolve_requested_tool_call ~agent_name ~requested_name ~arguments =
+  match sdk_binding_by_name requested_name with
+  | None -> Ok (requested_name, arguments)
+  | Some binding ->
+      build_operation_arguments ~agent_name binding arguments
+      |> Result.map (fun translated_arguments ->
+             (binding.canonical_operation, translated_arguments))
+
 let sdk_alias_json binding =
   let static_arguments =
     binding.arg_bindings

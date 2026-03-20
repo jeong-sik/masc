@@ -388,7 +388,7 @@ masc_join --agent claude --capabilities "typescript,review"
 masc_worktree_create --agent claude --task_id PK-12345
 
 # 4. Claim task before starting
-masc_claim --task_id task-001
+masc_transition --task_id task-001 --action claim
 
 # 5. Broadcast status
 masc_broadcast "Starting task-001"
@@ -426,7 +426,7 @@ masc_heartbeat_stop --heartbeat_id hb-xxxx
 | Anti-Pattern | Problem | Solution |
 |--------------|---------|----------|
 | Polling `masc_messages` | Wastes resources | Use `masc_listen` |
-| Skip `masc_claim` | Task conflicts | Always claim first |
+| Skip task claim | Task conflicts | Always claim first with `masc_transition --action claim` or `masc_claim_next` |
 | Ignore heartbeat | Marked as zombie | Call every 2-3 mins |
 | Direct file edit | Bypasses tracking | Use worktree |
 | No handover on exit | Lost context | Always create DNA |

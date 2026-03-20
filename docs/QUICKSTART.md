@@ -69,7 +69,7 @@ masc_switch_mode(mode="standard")     # 도구 수 제한 시
 ## 6. 주의
 
 - `masc_set_room`은 repo-root room semantics를 따른다.
-- `masc_claim`만으로는 session `current_task`가 잡히지 않는다.
+- `masc_transition(action="claim")`은 session `current_task`를 자동으로 안 잡는다. `masc_claim_next`는 current builds에서 auto-bind 한다.
 - 긴 작업에서는 `masc_heartbeat`가 필요하다.
 
 이 세부 usage는 Quick Start가 아니라 runbook 문서가 SSOT다.

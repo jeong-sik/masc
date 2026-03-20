@@ -143,7 +143,7 @@ let sdk_bindings : sdk_tool_binding list =
       sdk_name = "masc_set_current_task";
       canonical_operation = "masc_plan_set_task";
       description =
-        "Bind the claimed task as current_task after a claim step.";
+        "Bind the claimed task as current_task when your claim path did not do it automatically.";
       input_schema =
         object_schema ~required:[ "task_id" ]
           [

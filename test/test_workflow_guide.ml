@@ -42,7 +42,7 @@ let test_join_failure () =
 
 let test_claim_success () =
   let g = WG.next_steps ~tool_name:"masc_claim" ~success:true in
-  check_has_tool g.next_steps "masc_plan_set_task";
+  check_has_tool g.next_steps "masc_worktree_create";
   check bool "claim has common_mistakes" true (List.length g.common_mistakes > 0)
 
 let test_plan_set_task_success () =
@@ -151,7 +151,7 @@ let test_state_ready_to_work () =
 
 let test_claim_next_alias () =
   let g = WG.next_steps ~tool_name:"masc_claim_next" ~success:true in
-  check_has_tool g.next_steps "masc_plan_set_task"
+  check_has_tool g.next_steps "masc_worktree_create"
 
 let test_complete_task_removed () =
   (* masc_complete_task was a ghost tool — it no longer routes to guidance *)

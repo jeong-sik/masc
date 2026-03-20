@@ -157,6 +157,7 @@
    worker_container_runners
    worker_dev_tools
    worker_tool_input
+   worker_verification
    safe_parse
    prompt_registry
    prompt_composer

@@ -19,6 +19,7 @@ type run_result = {
   tool_names : string list;
   session_id : string;
   raw_trace_run : Oas.Raw_trace.run_ref option;
+  api_response : Oas.Types.api_response option;
 }
 
 type worker_container_state =

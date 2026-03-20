@@ -456,16 +456,14 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
           worker_class_text role_text spawn_prompt
       in
       (match
-        Oas_worker.complete_single ~cascade_name:"routing_judge"
-          ~messages:[
-            Agent_sdk.Types.system_msg "You are a routing judge for a hybrid swarm. Output only JSON.";
-            Agent_sdk.Types.user_msg prompt]
-          ~temperature:0.0 ~max_tokens:220
-          ~timeout_sec:(router_judge_timeout_sec ()) ()
+        Oas_worker.run_named ~cascade_name:"routing_judge"
+          ~system_prompt:"You are a routing judge for a hybrid swarm. Output only JSON."
+          ~goal:prompt ~max_turns:1
+          ~temperature:0.0 ~max_tokens:220 ()
       with
-      | Ok resp -> (
+      | Ok result -> (
           try
-            Yojson.Safe.from_string (Llm_provider.Types.text_of_response resp)
+            Yojson.Safe.from_string (Llm_provider.Types.text_of_response result.Oas_worker.response)
             |> parse_routing_decision_json
           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
       | Error _ -> None)

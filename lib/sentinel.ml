@@ -116,11 +116,12 @@ let call_sentinel_llm ~cascade_name ~prompt_id ~vars () =
         log_warn (sprintf "prompt %s render failed: %s" prompt_id msg);
         None
     | Ok prompt ->
-        let timeout = Env_config.Sentinel.llm_timeout_sec in
-        (match Oas_worker.complete_single ~cascade_name
-            ~messages:[Agent_sdk.Types.user_msg prompt]
-            ~temperature:0.3 ~timeout_sec:timeout ~max_tokens:800 () with
-        | Ok resp ->
+        let _timeout = Env_config.Sentinel.llm_timeout_sec in
+        (match Oas_worker.run_named ~cascade_name
+            ~goal:prompt ~max_turns:1
+            ~temperature:0.3 ~max_tokens:800 () with
+        | Ok result ->
+            let resp = result.Oas_worker.response in
             let text = Llm_provider.Types.text_of_response resp in
             let model = resp.Llm_provider.Types.model in
             if String.length text > 5 then (

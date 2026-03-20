@@ -44,12 +44,11 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
 
   let response =
     match
-      Oas_worker.complete_single ~cascade_name:"gardener_spawn"
-        ~messages:[Agent_sdk.Types.user_msg prompt]
+      Oas_worker.run_named ~cascade_name:"gardener_spawn"
+        ~goal:prompt ~max_turns:1
         ~temperature:0.3
-        ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~max_tokens:200 () with
-    | Ok resp -> Llm_provider.Types.text_of_response resp
+    | Ok result -> Llm_provider.Types.text_of_response result.Oas_worker.response
     | Error _ -> ""
   in
 
@@ -437,12 +436,11 @@ Room 내 활성 에이전트: %d
 
   let response =
     match
-      Oas_worker.complete_single ~cascade_name:"gardener_spawn"
-        ~messages:[Agent_sdk.Types.user_msg prompt]
+      Oas_worker.run_named ~cascade_name:"gardener_spawn"
+        ~goal:prompt ~max_turns:1
         ~temperature:0.3
-        ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
         ~max_tokens:300 () with
-    | Ok resp -> Ok (Llm_provider.Types.text_of_response resp)
+    | Ok result -> Ok (Llm_provider.Types.text_of_response result.Oas_worker.response)
     | Error err -> Error ("llm intervention failed: " ^ err)
   in
 
@@ -636,7 +634,6 @@ let status_json () : Yojson.Safe.t =
                 ("room_active_agents", `Int state.last_room_active_agents);
                 ("last_triage_outcome", `String (string_of_triage_outcome state.last_triage_outcome));
                 ("last_triage_started_at", json_string_of_float_ts state.last_triage_started_at);
-                ("consecutive_triage_noops", `Int state.consecutive_triage_noops);
                 ("data_source", `String "room_filesystem");
                 ("staleness_warning", `String
                   (if state.last_health_check > 0.0 then

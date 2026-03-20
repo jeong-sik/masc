@@ -5,7 +5,7 @@
 
     This module is deliberately independent of Context_manager to avoid circular
     dependency. It operates on [Agent_sdk.Types.message list] directly and uses its own
-    strategy enum that mirrors Context_manager.compaction_strategy.
+    strategy enum shared via Compaction_types.compaction_strategy.
 
     MASC has 4 roles (System, User, Assistant, Tool) while OAS has the same 4.
     OAS Context_reducer strategies operate on OAS message lists and respect

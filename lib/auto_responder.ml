@@ -153,7 +153,7 @@ let call_llm_direct_sync ~agent_type ~prompt =
   try
     match
       Cascade.complete ~cascade_name
-        ~messages:[Cascade.user_msg prompt]
+        ~messages:[Agent_sdk.Types.user_msg prompt]
         ~accept:llm_response_is_valid ~timeout_sec:30 ~max_tokens:500 ()
     with
     | Ok resp ->

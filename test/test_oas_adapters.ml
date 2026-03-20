@@ -69,13 +69,19 @@ let test_roundtrip_tool_msg () =
       true (String.length text > 0)
 
 (* ================================================================ *)
-(* Context_manager.compact tests (routes through Context_compact_oas) *)
+(* Compaction tests (via Context_compact_oas directly) *)
+
+let compact_ctx (ctx : Context_manager.working_context) strategies =
+  let messages, token_count =
+    Context_compact_oas.compact
+      ~system_prompt:ctx.system_prompt ~messages:ctx.messages ~strategies in
+  { ctx with Context_manager.messages; token_count; importance_scores = [] }
 (* ================================================================ *)
 
 let test_compact_prune_tool_outputs () =
   let ctx = Context_manager.create ~system_prompt:"test system" ~max_tokens:4000 in
   let ctx = List.fold_left Context_manager.append ctx (make_test_messages ()) in
-  let compacted = Context_manager.compact ctx [Context_manager.PruneToolOutputs] in
+  let compacted = compact_ctx ctx [Context_compact_oas.PruneToolOutputs] in
   (* PruneToolOutputs on short tool output should not drop messages *)
   Alcotest.(check bool) "messages preserved"
     true (List.length compacted.messages > 0);
@@ -93,7 +99,7 @@ let test_compact_merge_contiguous () =
     Agent_sdk.Types.assistant_msg "response";
   ] in
   let ctx = List.fold_left Context_manager.append ctx msgs in
-  let compacted = Context_manager.compact ctx [Context_manager.MergeContiguous] in
+  let compacted = compact_ctx ctx [Context_compact_oas.MergeContiguous] in
   (* MergeContiguous should merge the two consecutive user messages *)
   Alcotest.(check bool) "merged reduces count"
     true (List.length compacted.messages <= List.length msgs)
@@ -108,7 +114,7 @@ let test_compact_summarize_old () =
       Agent_sdk.Types.assistant_msg (Printf.sprintf "assistant response %d" i)
   ) in
   let ctx = List.fold_left Context_manager.append ctx msgs in
-  let compacted = Context_manager.compact ctx [Context_manager.SummarizeOld] in
+  let compacted = compact_ctx ctx [Context_compact_oas.SummarizeOld] in
   (* SummarizeOld with keep-first-and-last should reduce message count *)
   Alcotest.(check bool) "summarize_old reduces messages"
     true (List.length compacted.messages < List.length msgs);
@@ -122,7 +128,7 @@ let test_compact_small_list_unchanged () =
     Agent_sdk.Types.assistant_msg "world";
   ] in
   let ctx = List.fold_left Context_manager.append ctx msgs in
-  let compacted = Context_manager.compact ctx [Context_manager.SummarizeOld] in
+  let compacted = compact_ctx ctx [Context_compact_oas.SummarizeOld] in
   (* Small list (< first_n + last_n = 7) should be unchanged *)
   Alcotest.(check int) "small list unchanged"
     (List.length msgs) (List.length compacted.messages)

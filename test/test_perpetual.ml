@@ -17,6 +17,16 @@ open Printf
 (* Test Infrastructure                                              *)
 (* ================================================================ *)
 
+(** Compact a working_context via OAS Context_reducer directly. *)
+let compact_ctx (ctx : Context_manager.working_context)
+    (strategies : Compaction_types.compaction_strategy list)
+    : Context_manager.working_context =
+  let messages, token_count =
+    Context_compact_oas.compact
+      ~system_prompt:ctx.system_prompt ~messages:ctx.messages ~strategies
+  in
+  { ctx with messages; token_count; importance_scores = [] }
+
 let test_count = ref 0
 let pass_count = ref 0
 let fail_count = ref 0
@@ -266,7 +276,7 @@ let test_context_manager () = group "Context Manager" (fun () ->
   let long_tool_msg = { (Cascade.tool_msg ~name:"t" ~call_id:"c" (String.make 1000 'x'))
     with role = Agent_sdk.Types.Tool } in
   let ctx5 = Context_manager.append ctx long_tool_msg in
-  let pruned = Context_manager.compact ctx5 [PruneToolOutputs] in
+  let pruned = compact_ctx ctx5 [PruneToolOutputs] in
   let pruned_msg = List.hd pruned.messages in
   assert_true "prune:shorter" (String.length (Agent_sdk.Types.text_of_message pruned_msg) < 1000);
   assert_true "prune:has_truncated" (
@@ -279,7 +289,7 @@ let test_context_manager () = group "Context Manager" (fun () ->
     Agent_sdk.Types.user_msg "part2";
     Agent_sdk.Types.assistant_msg "response";
   ] in
-  let merged = Context_manager.compact ctx6 [MergeContiguous] in
+  let merged = compact_ctx ctx6 [MergeContiguous] in
   assert_equal "merge:count" 2 (List.length merged.messages);
 
   (* 9. SummarizeOld *)
@@ -287,7 +297,7 @@ let test_context_manager () = group "Context Manager" (fun () ->
     if i mod 2 = 0 then Agent_sdk.Types.user_msg (sprintf "q%d" i)
     else Agent_sdk.Types.assistant_msg (sprintf "a%d" i)) in
   let ctx7 = Context_manager.append_many ctx many_msgs in
-  let summarized = Context_manager.compact ctx7 [SummarizeOld] in
+  let summarized = compact_ctx ctx7 [SummarizeOld] in
   assert_true "summarize:fewer_messages"
     (List.length summarized.messages < List.length ctx7.messages);
 
@@ -297,7 +307,7 @@ let test_context_manager () = group "Context Manager" (fun () ->
       if i mod 2 = 0
       then Agent_sdk.Types.user_msg (sprintf "detailed question %d with lots of context: %s" i (String.make 200 'x'))
       else Agent_sdk.Types.assistant_msg (sprintf "comprehensive answer %d: %s" i (String.make 300 'y')))) in
-  let compacted = Context_manager.compact long_ctx
+  let compacted = compact_ctx long_ctx
     [PruneToolOutputs; MergeContiguous; SummarizeOld] in
   assert_true "compact:reduces_tokens"
     (compacted.token_count <= long_ctx.token_count);
@@ -342,7 +352,7 @@ let test_context_manager () = group "Context Manager" (fun () ->
     Agent_sdk.Types.assistant_msg "ok";  (* Short = low importance *)
     Agent_sdk.Types.user_msg "another detailed question with context";
   ] in
-  let dropped = Context_manager.compact ctx8 [DropLowImportance] in
+  let dropped = compact_ctx ctx8 [DropLowImportance] in
   assert_true "drop:removes_some"
     (List.length dropped.messages <= List.length ctx8.messages);
 )
@@ -761,7 +771,7 @@ let test_integration () = group "Integration" (fun () ->
       then Agent_sdk.Types.user_msg (sprintf "detailed question %d with context: %s" i (String.make 200 'x'))
       else Agent_sdk.Types.assistant_msg (sprintf "comprehensive answer %d: %s" i (String.make 300 'y')))) in
   let before = big_ctx.token_count in
-  let after_ctx = Context_manager.compact big_ctx
+  let after_ctx = compact_ctx big_ctx
     [PruneToolOutputs; MergeContiguous; SummarizeOld] in
   assert_true "integration:compact_reduces"
     (after_ctx.token_count < before);
@@ -786,7 +796,7 @@ let test_integration () = group "Integration" (fun () ->
     [Agent_sdk.Types.user_msg "run grep";
      Cascade.tool_msg ~name:"grep" ~call_id:"c1" (String.make 800 'r');
      Agent_sdk.Types.assistant_msg "found results"] in
-  let pruned_oas = Context_manager.compact ctx_with_tools [PruneToolOutputs] in
+  let pruned_oas = compact_ctx ctx_with_tools [PruneToolOutputs] in
   let tool_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
     m.role = Agent_sdk.Types.Tool) pruned_oas.messages in
   assert_equal "oas_prune:tool_preserved" 1 (List.length tool_msgs);
@@ -917,38 +927,18 @@ let test_history_offload () = group "History Offload" (fun () ->
       if i mod 2 = 0
       then Agent_sdk.Types.user_msg (sprintf "question %d with detail: %s" i (String.make 200 'x'))
       else Agent_sdk.Types.assistant_msg (sprintf "answer %d: %s" i (String.make 300 'y')))) in
-  let result = Context_manager.compact_with_offload
-    ~session_ctx:session ~compaction_count:1
-    ctx [Context_manager.PruneToolOutputs; Context_manager.MergeContiguous;
-         Context_manager.SummarizeOld] in
-  assert_true "compact_offload:has_path" (Option.is_some result.offloaded_path);
+  (* offload + compact separately (compact_with_offload removed) *)
+  let offloaded_path = Context_manager.offload_messages
+    ~session_dir:session.session_dir ~compaction_count:1 ctx.messages in
+  let compacted = compact_ctx ctx [PruneToolOutputs; MergeContiguous; SummarizeOld] in
+  assert_true "compact_offload:has_path" (Option.is_some offloaded_path);
   assert_true "compact_offload:context_reduced"
-    (result.context.token_count < ctx.token_count);
+    (compacted.token_count < ctx.token_count);
   assert_true "compact_offload:file_exists"
-    (Sys.file_exists (Option.get result.offloaded_path));
+    (Sys.file_exists (Option.get offloaded_path));
 
-  (* 6. Summary message contains offload path annotation.
-     When use_oas_reducer()=true, SummarizeOld uses Keep_first_and_last (no summary
-     prefix), so annotation injection has no target — annotation is absent.
-     Both behaviors are correct; verify offload file was written instead. *)
-  let has_annotation = List.exists (fun (m : Agent_sdk.Types.message) ->
-    let text = Agent_sdk.Types.text_of_message m in
-    try let _ = Str.search_forward
-      (Str.regexp_string "[Full conversation history saved to") text 0 in true
-    with Not_found -> false
-  ) result.context.messages in
-  let oas_reducer_on =
-    match Sys.getenv_opt "MASC_USE_OAS_REDUCER" with
-    | Some v -> String.lowercase_ascii (String.trim v) <> "false"
-    | None -> true in
-  if oas_reducer_on then
-    assert_true "compact_offload:offload_file_written" (Option.is_some result.offloaded_path)
-  else
-    assert_true "compact_offload:has_annotation" has_annotation;
-
-  (* 7. compact (original) still works unchanged *)
-  let orig = Context_manager.compact ctx
-    [Context_manager.PruneToolOutputs; Context_manager.SummarizeOld] in
+  (* 7. compact still works *)
+  let orig = compact_ctx ctx [PruneToolOutputs; SummarizeOld] in
   assert_true "compact:original_unchanged"
     (orig.token_count < ctx.token_count);
 

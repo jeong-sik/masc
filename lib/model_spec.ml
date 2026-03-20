@@ -47,7 +47,8 @@ let string_of_provider = function
   | Custom s -> sprintf "custom(%s)" s
 
 (* ================================================================ *)
-(* OAS registry + pricing helpers                                    *)
+(* OAS Provider facade                                               *)
+(* All OAS Llm_provider references are confined to this section.     *)
 (* ================================================================ *)
 
 let default_registry = Llm_provider.Provider_registry.default ()
@@ -284,3 +285,12 @@ let default_local_model_spec () =
       match default_execution_model_spec () with
       | Ok spec -> spec
       | Error _ -> glm_cloud)
+
+(* ================================================================ *)
+(* Cascade config (OAS Provider facade)                              *)
+(* ================================================================ *)
+
+(** Load cascade profile from OAS config file.
+    Returns model label strings (e.g. ["llama:qwen3.5"; "glm:glm-4.7"]). *)
+let load_cascade_profile ~config_path ~name : string list =
+  Llm_provider.Cascade_config.load_profile ~config_path ~name

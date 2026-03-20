@@ -1,7 +1,7 @@
 [@@@warning "-32-33-69"]
 (** Tool_model_catalog — MCP tool layer over OAS Discovery (via {!Discovery_cache}).
 
-    All probing logic is in OAS [Llm_provider.Discovery].
+    All probing logic is in OAS Provider Discovery.
     This module provides the MCP tool interface for agents.
 
     @since 2.113.0 *)
@@ -35,7 +35,7 @@ let handle_list _ctx _args : result =
 
 let handle_status _ctx _args : result =
   let endpoints = D.get_cached_or_refresh () in
-  let summary = Llm_provider.Discovery.summary_to_json endpoints in
+  let summary = D.summary_to_json endpoints in
   let permits_available = Inference_utils.model_permits_available () in
   let permits_in_use = Inference_utils.model_permits_in_use () in
   (true, json_ok [
@@ -61,12 +61,11 @@ let handle_recommend _ctx args : result =
     | Some "reasoning" | Some "analysis" | Some "planning" -> true
     | _ -> false
   in
-  let open Llm_provider.Discovery in
-  let healthy = List.filter (fun (e : endpoint_status) -> e.healthy) endpoints in
-  let with_idle = List.filter (fun (e : endpoint_status) ->
+  let healthy = List.filter (fun (e : D.endpoint_info) -> e.healthy) endpoints in
+  let with_idle = List.filter (fun (e : D.endpoint_info) ->
     match e.slots with Some s -> s.idle > 0 | None -> true) healthy in
   let candidates = if with_idle <> [] then with_idle else healthy in
-  let scored = List.map (fun (e : endpoint_status) ->
+  let scored = List.map (fun (e : D.endpoint_info) ->
     let idle = match e.slots with Some s -> s.idle | None -> 0 in
     let reasoning_bonus =
       if needs_reasoning && e.capabilities.supports_reasoning then 10 else 0

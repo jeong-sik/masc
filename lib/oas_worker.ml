@@ -350,7 +350,7 @@ let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
     match default_config_path () with
     | Some path ->
       let from_file =
-        Llm_provider.Cascade_config.load_profile ~config_path:path ~name:cascade_name
+        Model_spec.load_cascade_profile ~config_path:path ~name:cascade_name
       in
       if from_file <> [] then from_file else defaults
     | None -> defaults

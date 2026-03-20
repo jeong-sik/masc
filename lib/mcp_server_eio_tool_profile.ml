@@ -94,7 +94,7 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
 let tool_allowed_in_profile state profile tool_name =
   match profile with
   | Full ->
-      tool_schemas_for_profile state Full
+      tool_schemas_for_profile ~include_deprecated:true state Full
       |> List.exists (fun (schema : Types.tool_schema) ->
              String.equal schema.name tool_name)
   | Managed_agent ->

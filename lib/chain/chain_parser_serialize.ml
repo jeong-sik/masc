@@ -399,10 +399,16 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
         ] in
         let fields = match filter with Some f -> fields @ [("filter", `String f)] | None -> fields in
         (match room with Some r -> fields @ [("room", `String r)] | None -> fields)
-    | Masc_claim { task_id; room } ->
-        let fields = [("type", `String "masc_claim")] in
-        let fields = match task_id with Some t -> fields @ [("task_id", `String t)] | None -> fields in
-        (match room with Some r -> fields @ [("room", `String r)] | None -> fields)
+    | Masc_claim { task_id; _ } ->
+        (match task_id with
+         | Some task_id ->
+             [
+               ("type", `String "masc_transition");
+               ("action", `String "claim");
+               ("task_id", `String task_id);
+             ]
+         | None ->
+             [ ("type", `String "masc_claim_next") ])
     | Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold } ->
         let tier_json = `List (List.map Chain_types.cascade_tier_to_yojson tiers) in
         let fields = [

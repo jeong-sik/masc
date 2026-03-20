@@ -582,6 +582,28 @@ Tip: Look for status='todo' tasks to claim.";
     ];
   };
   {
+    name = "masc_claim";
+    description = "Deprecated compatibility alias for claiming a specific task by task_id. Prefer masc_transition with action='claim' for exact task ownership.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("agent_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Your agent name");
+        ]);
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Task ID to claim");
+        ]);
+        ("agent_role", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional semantic role for the claim");
+        ]);
+      ]);
+      ("required", `List [`String "agent_name"; `String "task_id"]);
+    ];
+  };
+  {
     name = "masc_claim_next";
     description = "Automatically claim the highest priority unclaimed task. Use this when you want to pick up the most important available work without manually checking the task board. Returns the claimed task details including priority level.";
     input_schema = `Assoc [
@@ -661,6 +683,7 @@ let dispatch ctx ~name ~args : result option =
   match name with
   | "masc_add_task" -> Some (handle_add_task ctx args)
   | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ctx args)
+  | "masc_claim" -> Some (handle_claim ctx args)
   | "masc_claim_next" -> Some (handle_claim_next ctx args)
   | "masc_transition" -> Some (handle_transition ctx args)
   | "masc_update_priority" -> Some (handle_update_priority ctx args)

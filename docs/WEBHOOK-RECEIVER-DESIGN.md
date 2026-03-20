@@ -268,10 +268,10 @@ let notify_room ~room_name ~task =
    → broadcast: "New task: [PR] Review #42"
 
 3. Agent가 task 확인
-   → masc_task_list --room pr-review --status pending
+   → masc_tasks --status todo
 
 4. Agent가 claim
-   → masc_claim --task-id xxx
+   → masc_transition --task-id xxx --action claim
 
 5. Agent가 작업 수행 후 완료
    → masc_done --task-id xxx --result "approved"
@@ -309,7 +309,7 @@ let masc_webhook_history ?room ?source ?limit () =
 (* 이미 있는 tools를 webhook과 연동 *)
 
 (** Task 목록 - room 필터 추가 *)
-let masc_task_list ?room ?status ?source () = ...
+let masc_tasks ?status ?include_done ?include_cancelled () = ...
 
 (** Task 상세 - webhook payload 포함 *)
 let masc_task_get ~task_id () =
@@ -411,7 +411,7 @@ curl http://localhost:8935/health
 # → tasks in rooms 확인
 
 # 4. Agent가 claim
-masc_claim --task-id <생성된 task id>
+masc_transition --task-id <생성된 task id> --action claim
 ```
 
 ---

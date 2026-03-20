@@ -18,6 +18,15 @@ let test_public_visible_surface_hides_deprecated_aliases () =
   check bool "public hides masc_claim alias" false
     (List.mem "masc_claim" names)
 
+let test_include_deprecated_surface_exposes_claim_alias () =
+  let names =
+    Lib.Capability_registry.visible_public_tool_schemas_from
+      ~include_deprecated:true Lib.Config.raw_all_tool_schemas
+    |> List.map (fun (schema : Lib.Types.tool_schema) -> schema.name)
+  in
+  check bool "deprecated surface contains masc_claim" true
+    (List.mem "masc_claim" names)
+
 let test_board_post_capability_merges_public_and_keeper_projections () =
   let capability =
     Lib.Capability_registry.all_capabilities_from Lib.Config.raw_all_tool_schemas
@@ -100,6 +109,8 @@ let () =
         [
           test_case "public surface hides deprecated aliases" `Quick
             test_public_visible_surface_hides_deprecated_aliases;
+          test_case "include_deprecated exposes claim alias" `Quick
+            test_include_deprecated_surface_exposes_claim_alias;
           test_case "board capability merges public and keeper projections"
             `Quick
             test_board_post_capability_merges_public_and_keeper_projections;

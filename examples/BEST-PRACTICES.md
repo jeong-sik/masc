@@ -36,14 +36,14 @@ Human → 최종 결정
 masc_broadcast "PR #123 ready for review: feat(auth): add OAuth support"
 
 # 2. Claude가 리뷰 태스크 클레임
-masc_claim --task "review-pr-123" --agent claude
+masc_transition --task-id "review-pr-123" --action claim --agent claude
 
 # 3. Claude 리뷰 완료 후 결과 브로드캐스트
 masc_broadcast "Claude review complete: 3 suggestions, 1 concern"
 masc_done --task "review-pr-123"
 
 # 4. Gemini가 대안 제안 태스크 클레임
-masc_claim --task "suggest-pr-123" --agent gemini
+masc_transition --task-id "suggest-pr-123" --action claim --agent gemini
 
 # 5. 최종 결과 정리
 masc_broadcast "Review complete. Human decision required."
@@ -69,10 +69,11 @@ masc_broadcast "Review complete. Human decision required."
 {
   "method": "tools/call",
   "params": {
-    "name": "masc_claim",
+    "name": "masc_transition",
     "arguments": {
       "task_id": "review-pr-123",
-      "agent": "claude"
+      "agent": "claude",
+      "action": "claim"
     }
   }
 }

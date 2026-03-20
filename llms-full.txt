@@ -27,8 +27,8 @@ Use this before any real work:
 1. `masc_set_room`
 2. `masc_join`
 3. `masc_status`
-4. `masc_claim` or `masc_add_task`
-5. `masc_plan_set_task`
+4. `masc_transition(action=claim)` or `masc_claim_next` or `masc_add_task`
+5. `masc_plan_set_task` after `masc_transition(action=claim)`
 6. `masc_heartbeat`
 
 ### 2. Managed large-team orchestration

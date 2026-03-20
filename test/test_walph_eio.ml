@@ -313,9 +313,9 @@ let test_eio_error_cutoff () =
     (status |> member "last_stop_reason" |> to_string)
 
 let test_eio_default_dispatch_uses_shared_cascade () =
-  check bool "uses Cascade.call" true
+  check bool "uses Cascade.complete" true
     (file_contains_pattern "lib/room/room_walph_eio.ml"
-       {|Cascade.call ~cascade_name:"walph"|});
+       {|Cascade.complete ~cascade_name:"walph"|});
   check bool "legacy direct dispatch removed" false
     (file_contains_pattern "lib/room/room_walph_eio.ml" "Llm_direct.dispatch");
   check bool "no direct run_prompt_cascade" false

@@ -152,14 +152,16 @@ let call_llm_direct_sync ~agent_type ~prompt =
   let cascade_name = cascade_name_for_agent_type agent_type in
   try
     match
-      Cascade.call ~cascade_name ~prompt
+      Cascade.complete ~cascade_name
+        ~messages:[Cascade.user_msg prompt]
         ~accept:llm_response_is_valid ~timeout_sec:30 ~max_tokens:500 ()
     with
-    | Ok result ->
+    | Ok resp ->
+        let text = Cascade.text_of_response resp in
         debug_log
-          (Printf.sprintf "LLM_MODEL_USED %s for agent_type=%s" result.llm_used
-             agent_type);
-        if String.trim result.response = "" then "no response" else result.response
+          (Printf.sprintf "LLM_MODEL_USED %s for agent_type=%s"
+             resp.Llm_provider.Types.model agent_type);
+        if String.trim text = "" then "no response" else text
     | Error err ->
         Log.AutoResponder.error "LLM cascade failed: %s" err;
         "no response"

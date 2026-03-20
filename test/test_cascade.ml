@@ -77,9 +77,9 @@ let test_call_returns_error_when_no_models () =
         {|{"heartbeat_action_models":["gemini:fake-model"]}|}
         (fun path ->
           let result =
-            Cascade.call
+            Cascade.complete
               ~cascade_name:"heartbeat_action"
-              ~prompt:"test"
+              ~messages:[Cascade.user_msg "test"]
               ~timeout_sec:1
               ~config_path:path
               ()

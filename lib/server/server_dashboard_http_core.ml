@@ -198,7 +198,7 @@ let start_operator_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   Eio.Fiber.fork ~sw (fun () ->
-    Printf.eprintf "[INFO] Dashboard: starting operator proactive refresh loop.\n%!";
+    Log.Dashboard.info "starting operator proactive refresh loop";
     let rec loop () =
       let t0 = Time_compat.now () in
       let ctx : _ Operator_control.context =
@@ -212,10 +212,10 @@ let start_operator_refresh_loop ~state ~sw ~clock =
          | Ok json -> _operator_digest_ref := json
          | Error _ -> ());
         let dt = Time_compat.now () -. t0 in
-        Printf.eprintf "[INFO] Dashboard: operator refreshed (%.1fs).\n%!" dt
+        Log.Dashboard.info "operator refreshed (%.1fs)" dt
       with exn ->
         let dt = Time_compat.now () -. t0 in
-        Printf.eprintf "[WARN] Dashboard: operator refresh failed (%.1fs): %s\n%!"
+        Log.Dashboard.warn "operator refresh failed (%.1fs): %s"
           dt (Printexc.to_string exn));
       Eio.Time.sleep clock _operator_refresh_interval_s;
       loop ()
@@ -327,13 +327,13 @@ let start_mission_refresh_loop ~state ~sw ~clock =
      in
      _mission_json_ref := json;
      let dt = Time_compat.now () -. t0 in
-     Printf.eprintf "[INFO] Dashboard: mission warm cache done (%.1fs).\n%!" dt
+     Log.Dashboard.info "mission warm cache done (%.1fs)" dt
    with exn ->
      let dt = Time_compat.now () -. t0 in
-     Printf.eprintf "[WARN] Dashboard: mission warm cache failed (%.1fs): %s\n%!"
+     Log.Dashboard.warn "mission warm cache failed (%.1fs): %s"
        dt (Printexc.to_string exn));
   Eio.Fiber.fork ~sw (fun () ->
-    Printf.eprintf "[INFO] Dashboard: starting mission proactive refresh loop.\n%!";
+    Log.Dashboard.info "starting mission proactive refresh loop";
     let rec loop () =
       let t0 = Time_compat.now () in
       (try
@@ -343,12 +343,12 @@ let start_mission_refresh_loop ~state ~sw ~clock =
         in
         _mission_json_ref := json;
         let dt = Time_compat.now () -. t0 in
-        Printf.eprintf "[INFO] Dashboard: mission refreshed (%.0fB, %.1fs).\n%!"
+        Log.Dashboard.info "mission refreshed (%.0fB, %.1fs)"
           (Float.of_int (String.length (Yojson.Safe.to_string json)))
           dt
       with exn ->
         let dt = Time_compat.now () -. t0 in
-        Printf.eprintf "[WARN] Dashboard: mission refresh failed (%.1fs): %s\n%!"
+        Log.Dashboard.warn "mission refresh failed (%.1fs): %s"
           dt (Printexc.to_string exn));
       Eio.Time.sleep clock _mission_refresh_interval_s;
       loop ()

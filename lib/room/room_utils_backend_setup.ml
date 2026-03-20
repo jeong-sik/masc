@@ -48,7 +48,7 @@ let with_domain_local_pg_backend ~sw config =
     (match Backend.PostgresNative.create_eio_readonly ~sw ~env config.backend_config with
     | Ok t -> Some { config with backend = PostgresNative t }
     | Error err ->
-      Printf.eprintf "[WARN] Domain-local PG backend failed: %s\n%!"
+      Log.Room.warn "Domain-local PG backend failed: %s"
         (Backend.show_error err);
       None)
   | Memory _ | FileSystem _ ->

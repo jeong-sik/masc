@@ -7,11 +7,11 @@ let generate_and_mark_report ~(config : Room.config)
       match Team_session_store.mark_report_generated config session.session_id with
       | Ok _ -> ()
       | Error e ->
-          Printf.eprintf
-            "[team_session] failed to mark report generated (%s): %s\n%!"
+          Log.Session.error
+            "failed to mark report generated (%s): %s"
             session.session_id e)
   | Error e ->
-      Printf.eprintf "[team_session] report generation failed (%s): %s\n%!"
+      Log.Session.error "report generation failed (%s): %s"
         session.session_id e;
       Team_session_store.append_event config session.session_id
         ~event_type:"report_generation_failed"

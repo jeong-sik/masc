@@ -153,7 +153,7 @@ let persist ~base_path =
     Fs_compat.save_file tmp (Yojson.Safe.pretty_to_string json);
     Sys.rename tmp path
   with exn ->
-    Printf.eprintf "Runtime_params.persist: %s\n%!" (Printexc.to_string exn)
+    Log.Config.error "Runtime_params.persist: %s" (Printexc.to_string exn)
 
 let restore ~base_path =
   let path = params_file base_path in
@@ -171,13 +171,13 @@ let restore ~base_path =
                     match erased.set_from_json json with
                     | Ok () -> ()
                     | Error msg ->
-                        Printf.eprintf
-                          "Runtime_params.restore: skipping %s: %s\n%!" key msg))
+                        Log.Config.warn
+                          "Runtime_params.restore: skipping %s: %s" key msg))
               pairs)
       | _ ->
-          Printf.eprintf "Runtime_params.restore: invalid JSON in %s\n%!" path
+          Log.Config.warn "Runtime_params.restore: invalid JSON in %s" path
     with exn ->
-      Printf.eprintf "Runtime_params.restore: %s\n%!" (Printexc.to_string exn))
+      Log.Config.error "Runtime_params.restore: %s" (Printexc.to_string exn))
 
 (* ── audit ───────────────────────────────────────────────────── *)
 

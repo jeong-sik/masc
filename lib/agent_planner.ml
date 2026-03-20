@@ -216,7 +216,7 @@ let parse_plan_response ~agent_name ~response : daily_plan option =
       created_at = Time_compat.now ();
     }
   with e ->
-    eprintf "[planner] Failed to parse plan for %s: %s\n%!" agent_name (Printexc.to_string e);
+    Log.Planner.error "Failed to parse plan for %s: %s" agent_name (Printexc.to_string e);
     None
 
 (* ---------- Public API ---------- *)
@@ -232,11 +232,11 @@ let get_or_create_plan ~agent_name ~identity ~memories ~call_model =
       | Some p ->
         (* Plan creation memory recording removed (Memory_stream removed) *)
         save_plan p;
-        eprintf "[planner] ✅ Created plan for %s: %d goals, %d blocks\n%!"
+        Log.Planner.info "Created plan for %s: %d goals, %d blocks"
           agent_name (List.length p.goals) (List.length p.hourly_blocks);
         p
       | None ->
-        eprintf "[planner] ⚠️ MODEL plan failed for %s, using fallback\n%!" agent_name;
+        Log.Planner.warn "MODEL plan failed for %s, using fallback" agent_name;
         let fb = fallback_plan ~agent_name in
         save_plan fb;
         fb

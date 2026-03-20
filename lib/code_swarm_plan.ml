@@ -156,7 +156,7 @@ let grep_matches ~base_path ~pattern ~file_glob ~exclude_files =
   let output =
     try Process_eio.run_argv ~timeout_sec:30.0 argv
     with exn ->
-      eprintf "[code_swarm] grep failed: %s\n%!" (Printexc.to_string exn);
+      Log.CodeSwarm.error "grep failed: %s" (Printexc.to_string exn);
       ""
   in
   output |> String.split_on_char '\n'
@@ -503,7 +503,7 @@ let merge_workers ~base_path ~plan_id ~strategy ~auto_pr ~build_verify
                 ignore
                   (Process_eio.run_argv_with_status ~timeout_sec:10.0
                      [ "git"; "-C"; base_path; abort_cmd; "--abort" ]);
-                eprintf "[code_swarm] merge conflict for %s: %s\n%!"
+                Log.CodeSwarm.warn "merge conflict for %s: %s"
                   worker.worker_id output))
           passing_workers;
         (* Build verification *)
@@ -538,7 +538,7 @@ let merge_workers ~base_path ~plan_id ~strategy ~auto_pr ~build_verify
             match status with
             | Unix.WEXITED 0 -> Some (String.trim output)
             | _ ->
-                eprintf "[code_swarm] PR creation failed: %s\n%!" output;
+                Log.CodeSwarm.error "PR creation failed: %s" output;
                 None
           else None
         in

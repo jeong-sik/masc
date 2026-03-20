@@ -165,7 +165,7 @@ let verify (req : verification_request) : verdict =
     | Ok result ->
       parse_verdict (Oas_response.text_of_response result.response)
     | Error message ->
-      eprintf "[verifier] OAS run failed: %s (defaulting to WARN)\n%!" message;
+      Log.Verifier.error "OAS run failed: %s (defaulting to WARN)" message;
       Warn ("verifier_unavailable: " ^ message)
 
 (* ================================================================ *)
@@ -185,10 +185,10 @@ let verdict_to_hook_decision (v : verdict) : Agent_sdk.Hooks.hook_decision =
   match v with
   | Pass -> Agent_sdk.Hooks.Continue
   | Warn reason ->
-    eprintf "[verifier_oas] WARN: %s\n%!" reason;
+    Log.Verifier.warn "%s" reason;
     Agent_sdk.Hooks.Continue
   | Fail reason ->
-    eprintf "[verifier_oas] FAIL (skipping tool): %s\n%!" reason;
+    Log.Verifier.error "FAIL (skipping tool): %s" reason;
     Agent_sdk.Hooks.Skip
 
 (* ================================================================ *)

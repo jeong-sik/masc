@@ -48,10 +48,10 @@ let stem_pool () = !(Mcp_server.stem_pool)
 (** Clamp context_ratio to valid range *)
 let validate_context_ratio ratio =
   if ratio < 0.0 then (
-    Printf.eprintf "[MITOSIS_OAS/WARN] context_ratio < 0 (%.2f), clamping to 0.0\n%!" ratio;
+    Log.Mitosis_log.warn "context_ratio < 0 (%.2f), clamping to 0.0" ratio;
     0.0)
   else if ratio > 1.0 then (
-    Printf.eprintf "[MITOSIS_OAS/WARN] context_ratio > 1 (%.2f), clamping to 1.0\n%!" ratio;
+    Log.Mitosis_log.warn "context_ratio > 1 (%.2f), clamping to 1.0" ratio;
     1.0)
   else ratio
 
@@ -91,7 +91,7 @@ let handle_mitosis_check _ctx args : result =
   let raw_ratio = get_float args "context_ratio" 0.0 in
   let context_ratio = validate_context_ratio raw_ratio in
   if raw_ratio = 0.0 then
-    Printf.eprintf "[MITOSIS_OAS/WARN] context_ratio is 0.0 - did you forget to estimate it?\n%!";
+    Log.Mitosis_log.warn "context_ratio is 0.0 - did you forget to estimate it?";
   let should_prepare = Mitosis.should_prepare ~config ~cell ~context_ratio in
   let should_handoff = Mitosis.should_handoff ~config ~cell ~context_ratio in
   let phase = match should_handoff, should_prepare with

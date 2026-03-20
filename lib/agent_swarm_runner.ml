@@ -3,7 +3,9 @@
     Provides Solo mode (single agent with dev tools) and Fleet mode
     (MASC-coordinated multi-agent). All arg parsing is pure — no I/O. *)
 
+module Masc_log = Log
 open Agent_sdk
+module Log = Masc_log
 
 type runner_config = {
   goal : string;
@@ -104,7 +106,7 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
     { Hooks.empty with
       pre_tool_use = Some (fun event -> match event with
         | Hooks.PreToolUse { tool_name; input; _ } ->
-          Format.eprintf "[tool] %s %s@." tool_name
+          Log.Swarm.debug "tool: %s %s" tool_name
             (Yojson.Safe.to_string input);
           Hooks.Continue
         | _ -> Hooks.Continue) }

@@ -229,7 +229,7 @@ let offload_messages
       let _ = Unix.write_substring fd content 0 (String.length content) in ());
     Some path
   with exn ->
-    Printf.eprintf "[context_manager] offload_messages failed: %s\n%!"
+    Log.Memory.error "offload_messages failed: %s"
       (Printexc.to_string exn);
     None
 

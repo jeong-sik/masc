@@ -76,7 +76,7 @@ let parse_int_with_default json field_name default =
   | `Null -> default  (* explicit null = use default *)
   | other ->
       (* Log unexpected type but continue with default *)
-      Printf.eprintf "[WARN] chain_parser: Field '%s' expected int, got %s, using default %d\n%!"
+      Log.Chain.warn "chain_parser: Field '%s' expected int, got %s, using default %d"
         field_name (Yojson.Safe.to_string other) default;
       default
 

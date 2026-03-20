@@ -195,7 +195,7 @@ let run
         let ckpt = Oas.Agent.checkpoint ~session_id agent in
         (try persist_checkpoint ~dir ~session_id ckpt
          with exn ->
-           Printf.eprintf "[oas_worker] Checkpoint save failed: %s\n%!"
+           Log.Misc.error "oas_worker: Checkpoint save failed: %s"
              (Printexc.to_string exn));
         Some ckpt
       | None -> None
@@ -358,10 +358,10 @@ let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
   let specs = Model_spec.available_model_specs_of_strings configured in
   if specs <> [] then specs
   else if configured = defaults then (
-      Printf.eprintf "[cascade] %s: no callable models from built-in defaults\n%!" cascade_name;
+      Log.Misc.warn "cascade %s: no callable models from built-in defaults" cascade_name;
       [])
     else (
-      Printf.eprintf "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!" cascade_name;
+      Log.Misc.warn "cascade %s: configured models unavailable — retrying built-in defaults" cascade_name;
       Model_spec.available_model_specs_of_strings defaults)
 
 let config_for_model

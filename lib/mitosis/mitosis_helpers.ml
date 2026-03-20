@@ -144,10 +144,10 @@ open Tool_args
 (** Clamp context_ratio to valid range with warning - BALTHASAR feedback *)
 let validate_context_ratio ratio =
   if ratio < 0.0 then begin
-    Printf.eprintf "[MITOSIS/WARN] context_ratio < 0 (%.2f), clamping to 0.0\n%!" ratio;
+    Log.Mitosis_log.warn "context_ratio < 0 (%.2f), clamping to 0.0" ratio;
     0.0
   end else if ratio > 1.0 then begin
-    Printf.eprintf "[MITOSIS/WARN] context_ratio > 1 (%.2f), clamping to 1.0\n%!" ratio;
+    Log.Mitosis_log.warn "context_ratio > 1 (%.2f), clamping to 1.0" ratio;
     1.0
   end else
     ratio

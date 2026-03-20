@@ -183,7 +183,7 @@ let spawn_with_cascade ~ctx ~preferred_agent ~total_timeout_seconds ~prompt =
                   (try ignore (Circuit_breaker.record_failure_global
                     ~agent_id:(breaker_agent_id agent)
                     ~reason)
-                   with exn -> Printf.eprintf "[mitosis] circuit_breaker record_failure failed: %s\n%!" (Printexc.to_string exn));
+                   with exn -> Log.Spawn.error "circuit_breaker record_failure failed: %s" (Printexc.to_string exn));
                   let result = failed_spawn_result ~msg:reason ~exit_code:125 in
                   let attempts' = (agent, result) :: attempts in
                   loop attempts' (attempts_agent_left - 1) rest
@@ -205,12 +205,12 @@ let spawn_with_cascade ~ctx ~preferred_agent ~total_timeout_seconds ~prompt =
                   if result.Spawn.success then
                     (try ignore (Circuit_breaker.record_success_global
                       ~agent_id:(breaker_agent_id agent))
-                     with exn -> Printf.eprintf "[mitosis] circuit_breaker record_success failed: %s\n%!" (Printexc.to_string exn))
+                     with exn -> Log.Spawn.error "circuit_breaker record_success failed: %s" (Printexc.to_string exn))
                   else if should_penalize_failure result then
                     (try ignore (Circuit_breaker.record_failure_global
                       ~agent_id:(breaker_agent_id agent)
                       ~reason:(normalized_spawn_reason result))
-                     with exn -> Printf.eprintf "[mitosis] circuit_breaker record_failure (spawn) failed: %s\n%!" (Printexc.to_string exn));
+                     with exn -> Log.Spawn.error "circuit_breaker record_failure (spawn) failed: %s" (Printexc.to_string exn));
                   let attempts' = (agent, result) :: attempts in
                   if result.Spawn.success then
                     (result, agent, List.rev attempts')

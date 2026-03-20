@@ -105,10 +105,10 @@ let load_prompt_dir dir =
                match Prompt_registry.prompt_entry_of_yojson json with
                | Ok entry -> Prompt_registry.register entry
                | Error msg ->
-                   eprintf "[chain_native_eio] prompt parse failed for %s: %s\n%!"
+                   Log.Chain.warn "prompt parse failed for %s: %s"
                      path msg
              with exn ->
-               eprintf "[chain_native_eio] prompt load failed for %s: %s\n%!"
+               Log.Chain.error "prompt load failed for %s: %s"
                  path (Printexc.to_string exn)))
 
 let chain_source_roots (config : Room.config) =

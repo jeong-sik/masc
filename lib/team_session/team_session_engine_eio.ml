@@ -715,9 +715,8 @@ let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
                 ~session_id:session.session_id
             end
         end else begin
-          Printf.eprintf
-            "[team_session] orphan session %s (auto_resume=false): \
-             transitioning to Interrupted\n%!"
+          Log.Session.warn
+            "orphan session %s (auto_resume=false): transitioning to Interrupted"
             session.session_id;
           ignore
             (finalize_session ~config ~session_id:session.session_id

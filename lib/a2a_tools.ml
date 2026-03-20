@@ -474,6 +474,10 @@ let delegate config ~agent_name ~target ~message
     ?(artifacts : artifact list = [])
     ?(timeout = 300)
     () : (Yojson.Safe.t, string) result =
+  (* BUG: Prevent self-delegation — creates blocking self-portal *)
+  if String.equal agent_name target then
+    Error (Printf.sprintf "Self-delegation not allowed: agent '%s' cannot delegate to itself" agent_name)
+  else
   (* Timeout is stored and returned in response for client-side enforcement *)
   let timeout_ms = timeout * 1000 in
   let deadline = Time_compat.now () +. (float_of_int timeout) in

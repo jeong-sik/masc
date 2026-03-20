@@ -155,6 +155,10 @@ let handle_post_create args =
   let body = get_string_opt args "body" |> Option.map strip_state_blocks_text in
   let raw_content = match body with Some value -> value | None -> get_string args "content" "" in
   let content = strip_state_blocks_text raw_content in
+  if String.length content > Board.Limits.max_content_length then
+    (false, Printf.sprintf "Content exceeds max length (%d > %d chars)"
+       (String.length content) Board.Limits.max_content_length)
+  else
   let author = get_string args "author" "anonymous" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
   let visibility_str = get_string args "visibility" "internal" in

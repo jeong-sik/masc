@@ -20,10 +20,19 @@ type guidance = {
   common_mistakes : string list;
 }
 
-(** [next_steps ~tool_name ~success] returns workflow guidance for the
-    tool that was just called.  When [success] is false the guidance
-    focuses on recovery / prerequisite steps. *)
+(** [next_steps ~tool_name ~success] returns conservative workflow guidance for the
+    tool that was just called. When argument-specific semantics matter
+    (for example [masc_transition]), this wrapper returns the generic safe path. *)
 val next_steps : tool_name:string -> success:bool -> guidance
+
+(** [next_steps_for_call ~tool_name ~args ~success] returns workflow guidance for an
+    actual tool invocation. This is the canonical path for MCP tool-call envelopes
+    because it can inspect arguments when tool semantics depend on them. *)
+val next_steps_for_call :
+  tool_name:string ->
+  args:Yojson.Safe.t ->
+  success:bool ->
+  guidance
 
 (** [guidance_to_json g] serialises guidance to a Yojson value suitable
     for embedding in the MCP response envelope. *)

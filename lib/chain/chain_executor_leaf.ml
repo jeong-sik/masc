@@ -359,23 +359,26 @@ let execute_masc_listen ctx ~clock ~tool_exec (node : node) ~filter ~timeout_sec
       record_complete ctx node.id ~duration_ms ~success:false ~node_type:"masc_listen";
       Error msg
 
-(** Execute MASC claim node - calls masc.masc_claim or masc.masc_claim_next *)
+(** Execute MASC task-acquire node.
+    Legacy [masc_claim] inputs are normalized to canonical tool calls:
+    - specific task -> [masc_transition action=claim]
+    - queue claim   -> [masc_claim_next] *)
 let execute_masc_claim ctx ~tool_exec (node : node) ~task_id ~room : (string, string) result =
   record_start ctx node.id ~node_type:"masc_claim";
   let start = Time_compat.now () in
-  (* Choose tool based on whether task_id is provided *)
+  let _ = room in
+  (* Choose canonical tool based on whether task_id is provided. *)
   let tool_name, args = match task_id with
     | Some tid ->
-        (* Specific task claim *)
-        ("masc.masc_claim", `Assoc ([
+        ("masc.masc_transition", `Assoc ([
           ("agent_name", `String (masc_agent_name ()));
           ("task_id", `String tid);
-        ] @ (match room with Some r -> [("room", `String r)] | None -> [])))
+          ("action", `String "claim");
+        ]))
     | None ->
-        (* Claim next available task *)
         ("masc.masc_claim_next", `Assoc ([
           ("agent_name", `String (masc_agent_name ()));
-        ] @ (match room with Some r -> [("room", `String r)] | None -> [])))
+        ]))
   in
   let result =
     try tool_exec ~name:tool_name ~args

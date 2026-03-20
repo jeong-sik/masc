@@ -125,7 +125,7 @@ bench_task_lifecycle() {
     call_masc "masc_add_task" "{\"agent_name\":\"$MASC_AGENT\",\"id\":\"$task_id\",\"title\":\"Benchmark task\"}" > /dev/null
 
     # Claim task
-    call_masc "masc_claim" "{\"agent_name\":\"$MASC_AGENT\",\"task_id\":\"$task_id\"}" > /dev/null
+    call_masc "masc_transition" "{\"agent_name\":\"$MASC_AGENT\",\"task_id\":\"$task_id\",\"action\":\"claim\"}" > /dev/null
 
     # Complete task
     call_masc "masc_done" "{\"agent_name\":\"$MASC_AGENT\",\"task_id\":\"$task_id\"}" > /dev/null

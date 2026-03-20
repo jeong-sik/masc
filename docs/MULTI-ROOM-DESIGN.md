@@ -8,6 +8,7 @@ This document predates the current implementation state. Named-room support exis
 - Canonical default: repo-root room semantics via `masc_set_room`
 - Current role of named rooms: internal compatibility/helper surface
 - Public surface intent: `masc_room_*` is not part of the default `tools/list` workflow
+- Historical command references below are retained for implementation context only; they are not the recommended operator workflow.
 
 ## Problem Statement
 
@@ -19,6 +20,8 @@ Historical problem statement retained for implementation context:
 - 방 목록에서 선택해서 입장하는 UX가 없음
 
 ## Goals
+
+Historical design goals retained below. They are not the current default product surface.
 
 1. **방 목록 조회**: `masc_rooms_list` - 사용 가능한 방 목록
 2. **방 생성**: `masc_room_create` - 새 방 만들기

@@ -61,6 +61,21 @@ let deprecated ?canonical_name ?replacement ?(allow_direct_call_when_hidden = fa
     idempotent = None;
   }
 
+let deprecated_default ?canonical_name ?replacement
+    ?(implementation_status = Adapter) reason =
+  {
+    visibility = Default;
+    lifecycle = Deprecated;
+    implementation_status;
+    canonical_name;
+    replacement;
+    reason = Some reason;
+    allow_direct_call_when_hidden = false;
+    readonly = None;
+    destructive = None;
+    idempotent = None;
+  }
+
 let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
     ?(implementation_status = Real) reason =
   {
@@ -108,6 +123,11 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_votes",
       hidden_active
         "Low-usage room vote utility hidden from the default tool list; prefer decision.* or governance V2 tools for primary coordination workflows." );
+    ( "masc_claim",
+      deprecated_default
+        ~canonical_name:"masc_transition"
+        ~replacement:"masc_transition(action=claim)"
+        "Compatibility alias for specific-task claim. Prefer masc_transition(action=claim) for exact task ownership; use masc_claim_next when any queued task is acceptable." );
     ( "masc_rooms_list",
       hidden_active
         "Named-room inventory is an internal compatibility surface. Repo-root room semantics remain the canonical default workflow." );

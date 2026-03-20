@@ -24,6 +24,12 @@ let empty = { next_steps = []; preconditions = []; common_mistakes = [] }
 
 let s tool reason = { tool; reason }
 
+let transition_action args =
+  let open Yojson.Safe.Util in
+  match args |> member "action" |> to_string_option with
+  | Some action -> Some (String.lowercase_ascii (String.trim action))
+  | None -> None
+
 (* ── Golden Path 1: Room/Task Hygiene ────────────────────────────── *)
 
 let after_start ~success =
@@ -115,6 +121,51 @@ let after_transition_claim ~success =
     { next_steps =
         [ s "masc_status" "Check which tasks are available";
           s "masc_add_task" "Create a task if none exist" ];
+      preconditions = [ "room_set"; "joined" ];
+      common_mistakes = [] }
+
+let after_transition_start ~success =
+  if success then
+    { next_steps =
+        [ s "masc_heartbeat" "Signal liveness before and during longer work";
+          s "masc_broadcast" "Share that you started active implementation";
+          s "masc_transition" "Mark the task complete when implementation is finished (action=done)" ];
+      preconditions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ];
+      common_mistakes = [] }
+  else
+    { next_steps =
+        [ s "masc_status" "Check the task state before retrying the transition";
+          s "masc_workflow_guide" "Inspect your current room/task readiness" ];
+      preconditions = [ "room_set"; "joined" ];
+      common_mistakes = [] }
+
+let after_transition_release_or_cancel ~success =
+  if success then
+    { next_steps =
+        [ s "masc_status" "Check the remaining backlog after releasing or cancelling the task";
+          s "masc_transition" "Claim another task if work should continue (action=claim)";
+          s "masc_add_task" "Create a replacement task only if the cancelled work still needs tracking" ];
+      preconditions = [ "room_set"; "joined" ];
+      common_mistakes = [] }
+  else
+    { next_steps =
+        [ s "masc_status" "Check task state and ownership before retrying";
+          s "masc_workflow_guide" "Inspect your current room/task readiness" ];
+      preconditions = [ "room_set"; "joined" ];
+      common_mistakes = [] }
+
+let after_transition_generic ~success =
+  if success then
+    { next_steps =
+        [ s "masc_status" "Refresh room state after the transition";
+          s "masc_workflow_guide" "Inspect the next recommended step for your current state" ];
+      preconditions = [ "room_set"; "joined" ];
+      common_mistakes =
+        [ "masc_transition follow-up depends on action. claim may require masc_plan_set_task, while done/release/cancel do not." ] }
+  else
+    { next_steps =
+        [ s "masc_status" "Check task state before retrying the transition";
+          s "masc_workflow_guide" "Inspect your current room/task readiness" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes = [] }
 
@@ -332,7 +383,7 @@ let next_steps ~tool_name ~success =
   | "masc_plan_set_task" | "masc_set_current_task" -> after_plan_set_task ~success
   | "masc_heartbeat" -> after_heartbeat ~success
   | "masc_done" -> after_done ~success
-  | "masc_transition" -> after_transition_claim ~success
+  | "masc_transition" -> after_transition_generic ~success
   (* Golden Path 2: CPv2 *)
   | "masc_operation_start" -> after_operation_start ~success
   | "masc_dispatch_tick" -> after_dispatch_tick ~success
@@ -348,6 +399,17 @@ let next_steps ~tool_name ~success =
   | "masc_operator_digest" -> after_operator_digest ~success
   (* No guidance registered *)
   | _ -> empty
+
+let next_steps_for_call ~tool_name ~args ~success =
+  match tool_name with
+  | "masc_transition" -> (
+      match transition_action args with
+      | Some "claim" -> after_transition_claim ~success
+      | Some "start" -> after_transition_start ~success
+      | Some "done" -> after_done ~success
+      | Some ("release" | "cancel") -> after_transition_release_or_cancel ~success
+      | _ -> after_transition_generic ~success)
+  | _ -> next_steps ~tool_name ~success
 
 (* ── JSON serialisation ──────────────────────────────────────────── *)
 

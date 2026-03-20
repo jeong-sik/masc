@@ -304,7 +304,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let quality = quality_from_result ~success ~message ~attempts in
   let workflow_guidance =
     Workflow_guide.guidance_to_json
-      (Workflow_guide.next_steps ~tool_name:name ~success)
+      (Workflow_guide.next_steps_for_call ~tool_name:name ~args:arguments ~success)
   in
   let envelope =
     `Assoc [

@@ -491,6 +491,8 @@
    keeper_exec_context
    keeper_oas_adapter
    keeper_tools_oas
+   keeper_hooks_oas
+   keeper_agent_run
    keeper_exec_autonomy
    keeper_exec_proactive
    keeper_exec_social

@@ -509,7 +509,7 @@ let by_id rows key_field =
          | Some key -> Some (key, row)
          | None -> None)
 
-let json ?run_id ?operation_id (ctx : _ Operator_control.context) =
+let json ?run_id:_ ?operation_id:_ (ctx : _ Operator_control.context) =
   let config = ctx.config in
   let actor = ctx.agent_name in
   let room = room_json config in
@@ -532,12 +532,7 @@ let json ?run_id ?operation_id (ctx : _ Operator_control.context) =
     else
       Swarm_status.empty_json
   in
-  let swarm_json =
-    if Room.is_initialized config then
-      Command_plane_v2.swarm_live_json config ?run_id ?operation_id ()
-    else
-      `Assoc []
-  in
+  let swarm_json = `Assoc [] in
   let operations_json = Command_plane_v2.operation_status_json config () in
   let operation_rows =
     list_member operations_json "operations"

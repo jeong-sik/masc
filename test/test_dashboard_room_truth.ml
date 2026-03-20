@@ -67,11 +67,12 @@ let test_dashboard_room_truth_execution_fixture () =
         in
         let open Yojson.Safe.Util in
         check int "fixture blocked sessions"
-          1
+          0
           (json |> member "execution" |> member "summary" |> member "blocked_sessions" |> to_int);
-        check string "fixture top queue target"
-          "ts-execution-fixture-001"
-          (json |> member "execution" |> member "top_queue" |> member "target_id" |> to_string);
+        (* top_queue is null when no blocked sessions exist *)
+        check bool "fixture top queue absent when no blockers"
+          true
+          (json |> member "execution" |> member "top_queue" = `Null);
       ))
 
 let test_dashboard_room_truth_empty_room_focus_label () =

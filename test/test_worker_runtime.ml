@@ -6,7 +6,7 @@ let test_list_masc_tools_exposes_board_and_lodge_schemas () =
   Eio_main.run @@ fun _env ->
     Eio.Switch.run (fun sw ->
         match
-          Lib.Local_agent_eio.list_masc_tools ~sw ~auth_token:None
+          Lib.Worker_runtime.list_masc_tools ~sw ~auth_token:None
             ~session_id:"worker-test"
             ~names:
               (Some
@@ -31,7 +31,7 @@ let test_list_masc_tools_exposes_board_and_lodge_schemas () =
         | Error err -> failf "expected schema lookup to succeed: %s" err)
 
 let () =
-  Alcotest.run "local_agent_eio"
+  Alcotest.run "worker_runtime"
     [
       ( "tool_schemas",
         [ test_case "includes board and lodge tools for local workers" `Quick

@@ -2,90 +2,9 @@
 
 include Team_session_engine_policy
 
-let start_runtime_loop ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
-    ~(session_id : string) =
-  Eio.Fiber.fork ~sw (fun () ->
-      let rec loop () =
-        match Team_session_store.load_session config session_id with
-        | None ->
-            with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id)
-        | Some session ->
-            if session.status <> Team_session_types.Running then
-              with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id)
-            else
-              let runtime_snapshot =
-                with_runtimes_lock (fun () -> Hashtbl.find_opt runtimes session_id)
-              in
-              let stop_requested, stop_reason, generate_report_on_finalize =
-                match runtime_snapshot with
-                | Some r ->
-                    ( r.stop_requested,
-                      Option.value r.stop_reason ~default:"stop_requested",
-                      r.generate_report_on_finalize )
-                | None -> (true, "runtime_missing", true)
-              in
-              let now = Time_compat.now () in
-              if stop_requested then
-                let final_status =
-                  match stop_reason with
-                  | "runtime_missing" | "interrupted" | "signal" ->
-                      Team_session_types.Interrupted
-                  | _ -> Team_session_types.Completed
-                in
-                ignore
-                  (finalize_session ~config ~session_id
-                     ~final_status ~reason:stop_reason
-                     ~generate_report:generate_report_on_finalize)
-              else if now >= session.planned_end_at then
-                ignore
-                  (finalize_session ~config ~session_id
-                     ~final_status:Team_session_types.Completed
-                     ~reason:"duration_reached" ~generate_report:true)
-              else begin
-                let should_checkpoint =
-                  match session.last_checkpoint_at with
-                  | None -> true
-                  | Some ts ->
-                      now -. ts >= float_of_int session.checkpoint_interval_sec
-                in
-                if should_checkpoint then
-                  with_finalize_lock (fun () ->
-                      write_checkpoint config session;
-                      let can_persist_running_state =
-                        with_runtimes_lock (fun () ->
-                            match Hashtbl.find_opt runtimes session_id with
-                            | Some runtime ->
-                                not runtime.stop_requested && not runtime.finalizing
-                            | None -> false)
-                      in
-                      if can_persist_running_state then begin
-                        let after_policy = apply_runtime_policy ~config session in
-                        let updated =
-                          {
-                            after_policy with
-                            last_checkpoint_at = Some now;
-                            last_event_at = Some now;
-                            updated_at_iso = now_iso ();
-                          }
-                        in
-                        Team_session_store.save_session config updated;
-                        Team_session_store.append_event config session_id
-                          ~event_type:"checkpoint"
-                          ~detail:(summary_json_of_session config updated)
-                      end);
-                let sleep_sec = min 15.0 (max 1.0 (session.planned_end_at -. now)) in
-                Eio.Time.sleep clock sleep_sec;
-                loop ()
-              end
-      in
-      try loop ()
-      with exn ->
-        if is_cancelled exn then raise exn;
-        let reason = Printexc.to_string exn in
-        ignore
-          (finalize_session ~config ~session_id
-             ~final_status:Team_session_types.Failed ~reason
-             ~generate_report:true))
+(* Phase C-2d: start_runtime_loop removed.
+   All modes now use Team_session_swarm_runner.run_swarm via OAS Runner.
+   Checkpoint/policy logic is handled by swarm callbacks. *)
 
 let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
     ~(created_by : string) ~(goal : string) ~(duration_seconds : int)
@@ -265,25 +184,24 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
             finalizing = false;
             generate_report_on_finalize = true;
           });
-    (* Phase C-2a: Auto mode uses OAS Swarm Runner in a background fiber.
-       Manual/Assist modes continue to use the 15-second polling engine. *)
-    (match orchestration_mode with
-     | Team_session_types.Auto ->
-       Eio.Fiber.fork ~sw (fun () ->
-         let result =
-           Team_session_swarm_runner.run_swarm ~sw ~clock ~config
-             ~session_id ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no dispatch"))
-         in
-         match result with
-         | Ok _session ->
-           with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id)
-         | Error reason ->
-           ignore (finalize_session ~config ~session_id
-             ~final_status:Team_session_types.Failed ~reason
-             ~generate_report:true);
-           with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id))
-     | Team_session_types.Manual | Team_session_types.Assist ->
-       start_runtime_loop ~sw ~clock ~config ~session_id);
+    (* Phase C-2c: All modes use OAS Swarm Runner.
+       orchestration_mode is mapped by the bridge:
+         Auto → Decentralized, Manual/Assist → Supervisor.
+       The old 15-second polling engine (start_runtime_loop) is no longer
+       called for any mode. *)
+    Eio.Fiber.fork ~sw (fun () ->
+      let result =
+        Team_session_swarm_runner.run_swarm ~sw ~clock ~config
+          ~session_id ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no dispatch"))
+      in
+      match result with
+      | Ok _session ->
+        with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id)
+      | Error reason ->
+        ignore (finalize_session ~config ~session_id
+          ~final_status:Team_session_types.Failed ~reason
+          ~generate_report:true);
+        with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id));
     Ok
       (`Assoc
         [
@@ -729,8 +647,23 @@ let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
                        ("ts_iso", `String (now_iso ()));
                      ]
                     @ checkpoint_detail @ event_context));
-              start_runtime_loop ~sw ~clock ~config
-                ~session_id:session.session_id
+              (* Phase C-2c: reconnect also uses swarm runner *)
+              Eio.Fiber.fork ~sw (fun () ->
+                let result =
+                  Team_session_swarm_runner.run_swarm ~sw ~clock ~config
+                    ~session_id:session.session_id ~masc_tools:[]
+                    ~dispatch:(fun ~name:_ ~args:_ -> (false, "no dispatch"))
+                in
+                match result with
+                | Ok _s ->
+                  with_runtimes_lock (fun () ->
+                    Hashtbl.remove runtimes session.session_id)
+                | Error reason ->
+                  ignore (finalize_session ~config ~session_id:session.session_id
+                    ~final_status:Team_session_types.Failed ~reason
+                    ~generate_report:true);
+                  with_runtimes_lock (fun () ->
+                    Hashtbl.remove runtimes session.session_id))
             end
         end else begin
           Log.Session.warn

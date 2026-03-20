@@ -25,6 +25,7 @@ let make_test_session ?(orchestration_mode = Team_session_types.Auto)
      created_by = "test-user";
      room_id = "test-room";
      operation_id = None;
+     origin_kind = Team_session_types.Origin_human;
      status;
      duration_seconds = 600;
      execution_scope = Team_session_types.Autonomous;

@@ -103,21 +103,6 @@ let spawned_agent_public_tool_names : string list =
 let spawned_agent_prefixed_tools : string list =
   prefixed_tool_names spawned_agent_public_tool_names
 
-(** Tool surface for Gardener-spawned OAS workers.
-    Consume the managed-agent SDK contract directly instead of re-declaring
-    canonical room/task operations in MASC-local schema copies. *)
-let gardener_worker_tool_names : string list =
-  [
-    "masc_room_status";
-    "masc_list_tasks";
-    "masc_claim_next";
-    "masc_set_current_task";
-    "masc_complete_task";
-    "masc_add_task";
-    "masc_broadcast";
-    "masc_heartbeat";
-  ]
-
 let mdal_auditable_tool_names : string list =
   [
     "masc_code_search";
@@ -641,16 +626,6 @@ let resolve_named_schemas all_schemas values :
   else
     Ok schemas
 
-let gardener_worker_tool_schemas () :
-    (Types.tool_schema list, string) result =
-  let all_schemas =
-    dedupe_schemas
-      ( local_worker_internal_schemas
-      @ local_worker_contract_schemas
-      @ select_public_local_worker_schemas () )
-  in
-  resolve_named_schemas all_schemas gardener_worker_tool_names
-
 let local_worker_tool_schemas ?names () :
     (Types.tool_schema list, string) result =
   let all_schemas =
@@ -673,9 +648,6 @@ let admin_tool_names : string list =
     "masc_operator_confirm";
     "masc_team_session_stop";
     "masc_team_session_finalize";
-    "masc_gardener_execute_spawn";
-    "masc_gardener_execute_retire";
-    "masc_gardener_reset_circuit";
   ]
 
 (** Coordination tool names for coordinators and fleet leaders. *)

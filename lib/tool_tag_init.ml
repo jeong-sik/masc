@@ -153,14 +153,6 @@ let register_all () =
     "masc_library_promote"; "masc_library_search";
   ];
 
-  (* ── Mod_gardener: non-schema tools ─────────────────────────── *)
-  reg Mod_gardener [
-    "masc_gardener_health";
-    "masc_gardener_propose_spawn"; "masc_gardener_retire_agent";
-    "masc_gardener_config"; "masc_gardener_execute_spawn";
-    "masc_gardener_execute_retire";
-  ];
-
   (* ── Mod_misc: Tool_misc ──────────────────────────────────────── *)
   reg Mod_misc [
     "masc_dashboard"; "masc_verify_handoff";

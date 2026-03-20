@@ -104,10 +104,9 @@ let test_call_returns_error_when_no_models () =
 let known_cascade_names =
   [
     "heartbeat_action"; "heartbeat_wake";
-    "sentinel_board"; "sentinel_task"; "sentinel_keeper";
+    (* sentinel_board/sentinel_task/sentinel_keeper removed — Sentinel deleted (#1834) *)
     "lodge_direct"; "lodge_context_rewrite"; "lodge_trait_gen";
     "lodge_comment"; "lodge_agent_match";
-    "gardener_spawn";
     "classification"; "context_router"; "capability_match";
     "tom"; "verifier"; "trpg_intent";
     "briefing"; "walph";

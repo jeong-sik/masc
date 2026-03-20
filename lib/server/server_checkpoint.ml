@@ -3,7 +3,6 @@
     Captures server runtime state to .masc/server_checkpoint.json:
     - Room agents and their last-seen timestamps
     - Task backlog summary (version, counts by status)
-    - Sentinel/guardian uptime
     - Governance pending decisions
     - Keeper timeout states
     - Circuit breaker states
@@ -37,8 +36,6 @@ type checkpoint = {
   timestamp : float;
   agents : agent_snapshot list;
   task_summary : task_summary;
-  sentinel_started_at : float option;
-  guardian_started_at : float option;
   governance_pending : string list;
   keeper_timeouts : keeper_timeout_entry list;
   circuit_breaker_open : string list;
@@ -75,10 +72,6 @@ let to_json (c : checkpoint) : Yojson.Safe.t =
     ("timestamp", `Float c.timestamp);
     ("agents", `List (List.map agent_to_json c.agents));
     ("task_summary", task_summary_to_json c.task_summary);
-    ("sentinel_started_at",
-     (match c.sentinel_started_at with Some f -> `Float f | None -> `Null));
-    ("guardian_started_at",
-     (match c.guardian_started_at with Some f -> `Float f | None -> `Null));
     ("governance_pending", `List (List.map (fun s -> `String s) c.governance_pending));
     ("keeper_timeouts", `List (List.map keeper_timeout_to_json c.keeper_timeouts));
     ("circuit_breaker_open", `List (List.map (fun s -> `String s) c.circuit_breaker_open));
@@ -157,8 +150,6 @@ let of_json (json : Yojson.Safe.t) : checkpoint option =
              timestamp = Option.value ~default:0.0 (json_float "timestamp" fields);
              agents;
              task_summary;
-             sentinel_started_at = json_float "sentinel_started_at" fields;
-             guardian_started_at = json_float "guardian_started_at" fields;
              governance_pending = json_string_list "governance_pending" fields;
              keeper_timeouts;
              circuit_breaker_open = json_string_list "circuit_breaker_open" fields;
@@ -229,8 +220,6 @@ let empty () : checkpoint = {
   timestamp = Time_compat.now ();
   agents = [];
   task_summary = { total = 0; pending = 0; active = 0; done_count = 0 };
-  sentinel_started_at = None;
-  guardian_started_at = None;
   governance_pending = [];
   keeper_timeouts = [];
   circuit_breaker_open = [];

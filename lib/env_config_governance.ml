@@ -1,47 +1,4 @@
 open Env_config_core
-open Env_config_runtime
-
-module Guardian = struct
-  (** Enable internal guardian loops (default: false) *)
-  let enabled =
-    get_bool ~default:false "MASC_GUARDIAN_ENABLED"
-
-  (** Mode: masc | lodge | both *)
-  let mode =
-    get_string ~default:"masc" "MASC_GUARDIAN_MODE"
-
-  (** Zombie cleanup interval (seconds) *)
-  let zombie_interval_seconds =
-    get_float ~default:Zombie.cleanup_interval_seconds "MASC_GUARDIAN_ZOMBIE_INTERVAL_SEC"
-
-  (** GC interval (seconds); 0 disables *)
-  let gc_interval_seconds =
-    get_float ~default:3600.0 "MASC_GUARDIAN_GC_INTERVAL_SEC"
-
-  (** GC threshold in days *)
-  let gc_days =
-    get_int ~default:7 "MASC_GUARDIAN_GC_DAYS"
-
-  (** Lodge loop interval between runs (seconds) *)
-  let lodge_interval_seconds =
-    get_float ~default:300.0 "MASC_GUARDIAN_LODGE_INTERVAL_SEC"
-
-  (** Lodge loop iterations per run *)
-  let lodge_iterations =
-    get_int ~default:10 "MASC_GUARDIAN_LODGE_ITERATIONS"
-
-  (** Lodge loop delay between actions (ms) *)
-  let lodge_delay_ms =
-    get_int ~default:10000 "MASC_GUARDIAN_LODGE_DELAY_MS"
-
-  (** Lodge loop verbose logging *)
-  let lodge_verbose =
-    get_bool ~default:false "MASC_GUARDIAN_LODGE_VERBOSE"
-
-  (** Respect Lodge quiet hours *)
-  let lodge_respect_quiet_hours =
-    get_bool ~default:true "MASC_GUARDIAN_LODGE_RESPECT_QUIET_HOURS"
-end
 
 (** {1 LLM Configuration} *)
 
@@ -66,13 +23,6 @@ module Llm = struct
     max 5
       (get_int ~default:timeout_seconds_int
          "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC")
-
-  (** Gardener LLM decision timeout.
-      Falls back to the global LLM timeout unless explicitly overridden. *)
-  let gardener_spawn_timeout_seconds =
-    max 5
-      (get_int ~default:timeout_seconds_int
-         "MASC_GARDENER_SPAWN_LLM_TIMEOUT_SEC")
 
   (** Default GLM model for Z.ai API calls.
       Empty = let GLM provider select at runtime. *)

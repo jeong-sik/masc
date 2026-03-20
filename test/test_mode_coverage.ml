@@ -285,8 +285,7 @@ let test_tool_category_code () =
   check bool "code_read" true (Mode.tool_category "masc_code_read" = Mode.Code)
 
 let test_tool_category_ecosystem_voice () =
-  check bool "gardener_status health" true
-    (Mode.tool_category "masc_gardener_status" = Mode.Health);
+  (* gardener_status check removed — Gardener deleted (#1834) *)
   check bool "voice_speak" true (Mode.tool_category "masc_voice_speak" = Mode.Voice);
   check bool "voice_sessions" true (Mode.tool_category "masc_voice_sessions" = Mode.Voice);
   check bool "voice_conference_start" true

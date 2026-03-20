@@ -183,16 +183,14 @@ let () =
       true (has "lodge.tick_interval_seconds");
     Alcotest.(check bool) "llm.default_model registered"
       true (has "llm.default_model");
-    Alcotest.(check bool) "gardener.max_daily_spawns registered"
-      true (has "gardener.max_daily_spawns");
+    (* gardener.max_daily_spawns check removed — Gardener deleted (#1834) *)
     (* Validate surfaces *)
     let surfaces = Governance_registry.surfaces in
     Alcotest.(check bool) "has surfaces" true (List.length surfaces > 0);
     let surface_ids =
       List.map (fun (s : Governance_registry.surface) -> s.id) surfaces
     in
-    Alcotest.(check bool) "sentinel_timing surface"
-      true (List.mem "sentinel_timing" surface_ids);
+    (* sentinel_timing surface check removed — Sentinel deleted (#1834) *)
     Alcotest.(check bool) "llm_config surface"
       true (List.mem "llm_config" surface_ids)
   in

@@ -166,9 +166,6 @@ let make_request_handler ~sw ~clock ~server_start_time =
           let social_runtime_json =
             Social_runtime.status_json ~config:state.Mcp_server.room_config
           in
-          let gardener_json = Gardener.status_json () in
-          let guardian_json = Guardian.status_json () in
-          let sentinel_json = Sentinel.status_json () in
           let health_json = `Assoc [
             ("status", `String "ok");
             ("server", `String "masc-mcp");
@@ -180,9 +177,6 @@ let make_request_handler ~sw ~clock ~server_start_time =
             ("sse_clients", `Int (Sse.client_count ()));
             ("lodge", lodge_json);
             ("social_runtime", social_runtime_json);
-            ("gardener", gardener_json);
-            ("guardian", guardian_json);
-            ("sentinel", sentinel_json);
           ] in
           let body = Yojson.Safe.to_string health_json in
           h2_respond_json h2_reqd body ~extra_headers:cors

@@ -265,7 +265,25 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
             finalizing = false;
             generate_report_on_finalize = true;
           });
-    start_runtime_loop ~sw ~clock ~config ~session_id;
+    (* Phase C-2a: Auto mode uses OAS Swarm Runner in a background fiber.
+       Manual/Assist modes continue to use the 15-second polling engine. *)
+    (match orchestration_mode with
+     | Team_session_types.Auto ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           Team_session_swarm_runner.run_swarm ~sw ~clock ~config
+             ~session_id ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no dispatch"))
+         in
+         match result with
+         | Ok _session ->
+           with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id)
+         | Error reason ->
+           ignore (finalize_session ~config ~session_id
+             ~final_status:Team_session_types.Failed ~reason
+             ~generate_report:true);
+           with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id))
+     | Team_session_types.Manual | Team_session_types.Assist ->
+       start_runtime_loop ~sw ~clock ~config ~session_id);
     Ok
       (`Assoc
         [

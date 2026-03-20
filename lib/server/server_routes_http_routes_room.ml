@@ -111,10 +111,16 @@ let add_routes router =
            |> List.filteri (fun idx _ -> idx >= offset && idx < offset + limit)
          in
          let agents_json = List.map (fun (a : Types.agent) ->
+           let profile = Dashboard_execution_helpers.get_agent_profile a.name in
            `Assoc [
              ("name", `String a.name);
              ("status", `String (Types.string_of_agent_status a.status));
              ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
+             ("emoji", `String profile.emoji);
+             ("koreanName", `String profile.korean_name);
+             ("model", match profile.model with Some m -> `String m | None -> `Null);
+             ("traits", `List (List.map (fun t -> `String t) profile.traits));
+             ("interests", `List (List.map (fun i -> `String i) profile.interests));
            ]
          ) page in
          let json = `Assoc [

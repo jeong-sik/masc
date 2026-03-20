@@ -136,14 +136,19 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   in
   let agents_json =
     List.map (fun (a : Types.agent) ->
-      let (emoji, korean_name) = get_agent_identity a.name in
+      let profile = Dashboard_execution_helpers.get_agent_profile a.name in
       `Assoc [
         ("name", `String a.name);
         ("status", `String (Types.string_of_agent_status a.status));
         ("current_task", match a.current_task with Some t -> `String t | None -> `Null);
         ("last_seen", `String a.last_seen);
-        ("emoji", `String emoji);
-        ("koreanName", `String korean_name);
+        ("emoji", `String profile.emoji);
+        ("koreanName", `String profile.korean_name);
+        ("model", match profile.model with Some m -> `String m | None -> `Null);
+        ("traits", `List (List.map (fun t -> `String t) profile.traits));
+        ("interests", `List (List.map (fun i -> `String i) profile.interests));
+        ("activityLevel", match profile.activity_level with Some v -> `Float v | None -> `Null);
+        ("primaryValue", match profile.primary_value with Some v -> `String v | None -> `Null);
         ("generation", `Null);
         ("context_ratio", `Null);
         ("turn_count", `Null);
@@ -510,7 +515,7 @@ let dashboard_task_json (task : Types.task) =
     ]
 
 let dashboard_agent_json (agent : Types.agent) =
-  let (emoji, korean_name) = get_agent_identity agent.name in
+  let profile = Dashboard_execution_helpers.get_agent_profile agent.name in
   `Assoc
     [
       ("name", `String agent.name);
@@ -520,8 +525,13 @@ let dashboard_agent_json (agent : Types.agent) =
       ("joined_at", `String agent.joined_at);
       ("last_seen", `String agent.last_seen);
       ("capabilities", `List (List.map (fun item -> `String item) agent.capabilities));
-      ("emoji", `String emoji);
-      ("koreanName", `String korean_name);
+      ("emoji", `String profile.emoji);
+      ("koreanName", `String profile.korean_name);
+      ("model", match profile.model with Some m -> `String m | None -> `Null);
+      ("traits", `List (List.map (fun t -> `String t) profile.traits));
+      ("interests", `List (List.map (fun i -> `String i) profile.interests));
+      ("activityLevel", match profile.activity_level with Some v -> `Float v | None -> `Null);
+      ("primaryValue", match profile.primary_value with Some v -> `String v | None -> `Null);
     ]
 
 let dashboard_message_json (message : Types.message) =

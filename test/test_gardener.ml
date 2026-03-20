@@ -1214,12 +1214,24 @@ let suite = [
 
 (** {1 Gardener Worker Tool Surface Tests} *)
 
-let test_worker_tools_include_claim_and_transition () =
+let test_worker_tools_use_managed_aliases () =
   let names = Agent_tool_surfaces.gardener_worker_tool_names in
   check bool "claim_next present"
     true (List.mem "masc_claim_next" names);
-  check bool "transition present"
-    true (List.mem "masc_transition" names)
+  check bool "room_status present"
+    true (List.mem "masc_room_status" names);
+  check bool "list_tasks present"
+    true (List.mem "masc_list_tasks" names);
+  check bool "set_current_task present"
+    true (List.mem "masc_set_current_task" names);
+  check bool "complete_task present"
+    true (List.mem "masc_complete_task" names);
+  check bool "legacy masc_status absent"
+    false (List.mem "masc_status" names);
+  check bool "legacy masc_tasks absent"
+    false (List.mem "masc_tasks" names);
+  check bool "legacy masc_transition absent"
+    false (List.mem "masc_transition" names)
 
 let test_worker_tools_exclude_admin () =
   let names = Agent_tool_surfaces.gardener_worker_tool_names in
@@ -1236,10 +1248,7 @@ let test_worker_tool_count_bounds () =
   check bool "at most 30 tools" true (n <= 30)
 
 let test_worker_tool_names_are_resolvable () =
-  match
-    Capability_registry.local_worker_tool_schemas
-      ~names:Agent_tool_surfaces.gardener_worker_tool_names ()
-  with
+  match Agent_tool_surfaces.gardener_worker_tool_schemas () with
   | Error err -> failf "expected gardener worker schemas to resolve: %s" err
   | Ok schemas ->
       let resolved =
@@ -1262,8 +1271,8 @@ let test_run_for_gap_without_eio_returns_error () =
       | Ok _ -> fail "expected Error when Eio context is not set")
 
 let worker_suite = [
-  "worker_tools_include_claim_and_transition", `Quick,
-    test_worker_tools_include_claim_and_transition;
+  "worker_tools_use_managed_aliases", `Quick,
+    test_worker_tools_use_managed_aliases;
   "worker_tools_exclude_admin", `Quick,
     test_worker_tools_exclude_admin;
   "worker_tool_count_bounds", `Quick,

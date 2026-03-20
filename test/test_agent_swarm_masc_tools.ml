@@ -209,6 +209,28 @@ let test_cancel_requires_task_id () =
   | Ok _ ->
     Alcotest.fail "should fail without task_id"
 
+let test_resolve_sdk_tool_call_translates_complete_task () =
+  let arguments = `Assoc [("task_id", `String "task-123")] in
+  match
+    Agent_swarm_contract.resolve_requested_tool_call
+      ~agent_name:"gardener-worker"
+      ~requested_name:"masc_complete_task"
+      ~arguments
+  with
+  | Error msg -> Alcotest.failf "expected successful translation: %s" msg
+  | Ok (operation_id, translated) ->
+      Alcotest.(check string) "canonical op" "masc_transition" operation_id;
+      match translated with
+      | `Assoc fields ->
+          let find key = List.assoc key fields in
+          Alcotest.(check string) "task_id preserved" "task-123"
+            (Yojson.Safe.Util.to_string (find "task_id"));
+          Alcotest.(check string) "action injected" "done"
+            (Yojson.Safe.Util.to_string (find "action"));
+          Alcotest.(check string) "agent_name injected" "gardener-worker"
+            (Yojson.Safe.Util.to_string (find "agent_name"))
+      | _ -> Alcotest.fail "translated arguments should be an object"
+
 let () =
   Alcotest.run "MASC Tools" [
     "structure", [
@@ -224,5 +246,7 @@ let () =
         test_set_current_task_requires_task_id;
       Alcotest.test_case "release requires task_id" `Quick test_release_requires_task_id;
       Alcotest.test_case "cancel requires task_id" `Quick test_cancel_requires_task_id;
+      Alcotest.test_case "sdk tool call translation" `Quick
+        test_resolve_sdk_tool_call_translates_complete_task;
     ];
   ]

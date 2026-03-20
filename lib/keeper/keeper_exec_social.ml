@@ -292,7 +292,7 @@ let run_learned_policy_room_event
             | Ok (updated_meta, reply) ->
                 (try
                    ignore
-                     (Room.broadcast_in_room ctx.config ~room_id
+                     (Room.broadcast (Room.with_scope ctx.config (Named room_id))
                         ~from_agent:updated_meta.agent_name ~content:reply)
                  with exn ->
                    log_keeper_exn ~label:(Printf.sprintf "learned policy room broadcast failed for %s in %s" updated_meta.name room_id) exn);
@@ -449,7 +449,7 @@ let maybe_emit_explicit_room_replies (ctx : _ context) (meta : keeper_meta) : ke
                     | Ok (updated_meta, reply) ->
                         (try
                            ignore
-                             (Room.broadcast_in_room ctx.config ~room_id
+                             (Room.broadcast (Room.with_scope ctx.config (Named room_id))
                                 ~from_agent:updated_meta.agent_name ~content:reply)
                          with exn ->
                            log_keeper_exn ~label:(Printf.sprintf "explicit room broadcast failed for %s in %s" updated_meta.name room_id) exn);

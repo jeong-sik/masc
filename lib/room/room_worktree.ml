@@ -187,13 +187,6 @@ let worktree_create_r ?(link_task=true) config ~agent_name ~task_id ~base_branch
           end
   end
 
-(** Create worktree - backward compatible
-    @deprecated Use worktree_create_r for type-safe error handling *)
-let worktree_create config ~agent_name ~task_id ~base_branch =
-  match worktree_create_r config ~agent_name ~task_id ~base_branch with
-  | Ok msg -> msg
-  | Error e -> masc_error_to_string e
-
 (** Remove worktree - Result version *)
 let worktree_remove_r config ~agent_name ~task_id : string masc_result =
   if not (is_initialized config) then
@@ -236,13 +229,6 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
                 Error (IoError "Failed to remove worktree. It may have uncommitted changes.")
 	    end
     end
-
-(** Remove worktree - backward compatible
-    @deprecated Use worktree_remove_r for type-safe error handling *)
-let worktree_remove config ~agent_name ~task_id =
-  match worktree_remove_r config ~agent_name ~task_id with
-  | Ok msg -> msg
-  | Error e -> masc_error_to_string e
 
 (** List all worktrees *)
 let worktree_list config =

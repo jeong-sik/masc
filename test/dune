@@ -970,12 +970,6 @@
  (modules test_chain_category_coverage)
  (libraries masc_mcp alcotest str yojson))
 
-; Memory_stream + Agent_reputation coverage tests
-(test
- (name test_memory_reputation_coverage)
- (modules test_memory_reputation_coverage)
- (libraries masc_mcp alcotest str yojson))
-
 ; Auto_recall + Activity_feed coverage tests
 (test
  (name test_auto_recall_activity_coverage)

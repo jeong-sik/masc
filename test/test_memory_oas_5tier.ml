@@ -1,9 +1,9 @@
-(** test_memory_oas_5tier — Tests for Memory_oas_bridge 5-tier integration.
+(** test_memory_oas_5tier -- Tests for Memory_oas_bridge 5-tier integration.
 
-    Covers episode_of_entry, oas_procedure_of_masc, seed/flush roundtrips,
-    and create_memory_full without external dependencies.
+    Covers oas_procedure_of_masc, create_memory_full, and OAS Memory
+    tier lifecycle without external dependencies.
 
-    Uses temporary directories for Memory_stream JSONL files.
+    episode_of_entry tests removed (Memory_stream removed).
 
     @since 2.124.0 *)
 
@@ -23,89 +23,6 @@ let setup_tmp_dir () =
 let cleanup_tmp_dir dir =
   (* Best-effort cleanup *)
   ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir)))
-
-(* ================================================================ *)
-(* episode_of_entry                                                  *)
-(* ================================================================ *)
-
-let test_episode_basic () =
-  let entry : Memory_stream.memory_entry = {
-    id = "e-001";
-    agent_name = "test-agent";
-    content = "Observed system health check passing";
-    timestamp = 1711000000.0;
-    importance = 7;
-    entry_type = Memory_stream.Observation "health check";
-    access_count = 2;
-    last_accessed = 1711000100.0;
-    links = [];
-  } in
-  let ep = Memory_oas_bridge.episode_of_entry entry in
-  Alcotest.(check string) "id preserved" "e-001" ep.id;
-  Alcotest.(check (float 0.01)) "timestamp preserved"
-    1711000000.0 ep.timestamp;
-  Alcotest.(check (list string)) "participants"
-    ["test-agent"] ep.participants;
-  Alcotest.(check string) "action = content"
-    "Observed system health check passing" ep.action;
-  Alcotest.(check (float 0.01)) "salience = importance/10"
-    0.7 ep.salience
-
-let test_episode_salience_bounds () =
-  let make_entry importance : Memory_stream.memory_entry = {
-    id = "e-bound";
-    agent_name = "a";
-    content = "test";
-    timestamp = 0.0;
-    importance;
-    entry_type = Memory_stream.Observation "t";
-    access_count = 0;
-    last_accessed = 0.0;
-    links = [];
-  } in
-  let ep_low = Memory_oas_bridge.episode_of_entry (make_entry 0) in
-  let ep_high = Memory_oas_bridge.episode_of_entry (make_entry 15) in
-  Alcotest.(check (float 0.01)) "salience floor 0.0"
-    0.0 ep_low.salience;
-  Alcotest.(check (float 0.01)) "salience cap 1.0"
-    1.0 ep_high.salience
-
-let test_episode_with_links () =
-  let entry : Memory_stream.memory_entry = {
-    id = "e-links";
-    agent_name = "a";
-    content = "linked entry";
-    timestamp = 0.0;
-    importance = 5;
-    entry_type = Memory_stream.Reflection "ref";
-    access_count = 0;
-    last_accessed = 0.0;
-    links = ["e-001"; "e-002"];
-  } in
-  let ep = Memory_oas_bridge.episode_of_entry entry in
-  Alcotest.(check int) "metadata has links"
-    1 (List.length ep.metadata);
-  match List.assoc_opt "links" ep.metadata with
-  | Some (`List items) ->
-    Alcotest.(check int) "2 links" 2 (List.length items)
-  | _ -> Alcotest.fail "expected links in metadata"
-
-let test_episode_outcome_is_neutral () =
-  let entry : Memory_stream.memory_entry = {
-    id = "e-neutral";
-    agent_name = "a";
-    content = "action taken";
-    timestamp = 0.0;
-    importance = 5;
-    entry_type = Memory_stream.Action "deploy";
-    access_count = 0;
-    last_accessed = 0.0;
-    links = [];
-  } in
-  let ep = Memory_oas_bridge.episode_of_entry entry in
-  Alcotest.(check bool) "outcome is Neutral"
-    true
-    (ep.outcome = Oas.Memory.Neutral)
 
 (* ================================================================ *)
 (* oas_procedure_of_masc                                             *)
@@ -348,17 +265,51 @@ let test_stats_all_tiers () =
   cleanup_tmp_dir dir
 
 (* ================================================================ *)
+(* No-op backend verification                                        *)
+(* ================================================================ *)
+
+let test_noop_backend_persist () =
+  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-noop" in
+  let result = backend.persist ~key:"test" (`String "value") in
+  Alcotest.(check bool) "persist returns Ok" true (Result.is_ok result)
+
+let test_noop_backend_retrieve () =
+  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-noop" in
+  let result = backend.retrieve ~key:"test" in
+  Alcotest.(check bool) "retrieve returns None" true (Option.is_none result)
+
+let test_noop_backend_query () =
+  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-noop" in
+  let result = backend.query ~prefix:"test" ~limit:10 in
+  Alcotest.(check int) "query returns empty" 0 (List.length result)
+
+let test_seed_memory_bank_noop () =
+  let dir = setup_tmp_dir () in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-bank" in
+  let count = Memory_oas_bridge.seed_memory_bank ~memory ~agent_name:"test-bank" ~limit:10 in
+  Alcotest.(check int) "seed_memory_bank returns 0" 0 count;
+  cleanup_tmp_dir dir
+
+let test_seed_episodes_noop () =
+  let dir = setup_tmp_dir () in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-seed" in
+  let count = Memory_oas_bridge.seed_episodes ~memory ~agent_name:"test-ep-seed" ~limit:10 in
+  Alcotest.(check int) "seed_episodes returns 0" 0 count;
+  cleanup_tmp_dir dir
+
+let test_flush_episodes_noop () =
+  let dir = setup_tmp_dir () in
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-flush" in
+  let count = Memory_oas_bridge.flush_episodes ~memory ~agent_name:"test-ep-flush" in
+  Alcotest.(check int) "flush_episodes returns 0" 0 count;
+  cleanup_tmp_dir dir
+
+(* ================================================================ *)
 (* Test Suite                                                        *)
 (* ================================================================ *)
 
 let () =
   Alcotest.run "memory_oas_5tier" [
-    ("episode_of_entry", [
-      Alcotest.test_case "basic conversion" `Quick test_episode_basic;
-      Alcotest.test_case "salience bounds" `Quick test_episode_salience_bounds;
-      Alcotest.test_case "links in metadata" `Quick test_episode_with_links;
-      Alcotest.test_case "outcome is Neutral" `Quick test_episode_outcome_is_neutral;
-    ]);
     ("oas_procedure_of_masc", [
       Alcotest.test_case "basic conversion" `Quick test_procedure_basic;
       Alcotest.test_case "metadata fields" `Quick test_procedure_metadata;
@@ -381,5 +332,13 @@ let () =
     ]);
     ("stats", [
       Alcotest.test_case "all tiers" `Quick test_stats_all_tiers;
+    ]);
+    ("noop_backend", [
+      Alcotest.test_case "persist returns Ok" `Quick test_noop_backend_persist;
+      Alcotest.test_case "retrieve returns None" `Quick test_noop_backend_retrieve;
+      Alcotest.test_case "query returns empty" `Quick test_noop_backend_query;
+      Alcotest.test_case "seed_memory_bank noop" `Quick test_seed_memory_bank_noop;
+      Alcotest.test_case "seed_episodes noop" `Quick test_seed_episodes_noop;
+      Alcotest.test_case "flush_episodes noop" `Quick test_flush_episodes_noop;
     ]);
   ]

@@ -246,7 +246,8 @@ let search ~query ~limit =
         with Not_found -> false
       in
       let predicate (p : Board.post) =
-        matches_str p.content
+        matches_str p.title
+        || matches_str p.content
         || matches_str (Board.Agent_id.to_string p.author)
         || (match p.hearth with Some h -> matches_str h | None -> false)
       in

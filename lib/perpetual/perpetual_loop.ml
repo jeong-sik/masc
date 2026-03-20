@@ -28,12 +28,12 @@ type event =
 
 type loop_config = {
   initial_goal : string;
-  model_cascade : Cascade.model_spec list;
+  model_cascade : Model_spec.model_spec list;
   tools : Types.tool_schema list;
   heartbeat_interval_s : float;
   max_idle_turns : int;
   feedback_enabled : bool;
-  verifier_model : Cascade.model_spec;
+  verifier_model : Model_spec.model_spec;
   compact_threshold : float;
   prepare_threshold : float;
   handoff_threshold : float;
@@ -86,12 +86,12 @@ let default_config ~goal ~models ?verifier ?session_dir () =
   let verifier_model = match verifier with
     | Some v -> v
     | None -> (
-        match Cascade.default_verifier_model_spec () with
+        match Model_spec.default_verifier_model_spec () with
         | Ok model -> model
         | Error _ -> (
             match models with
             | model :: _ -> model
-            | [] -> Cascade.glm_cloud))
+            | [] -> Model_spec.glm_cloud))
   in
   let session_base = match session_dir with
     | Some d -> d
@@ -158,7 +158,7 @@ let create_state config =
   in
   let primary_model = match config.model_cascade with
     | m :: _ -> m
-    | [] -> Cascade.default_local_model_spec ()
+    | [] -> Model_spec.default_local_model_spec ()
   in
   let context = Context_manager.create
     ~system_prompt

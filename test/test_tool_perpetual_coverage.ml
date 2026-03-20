@@ -10,6 +10,7 @@
 module Tool_perpetual = Masc_mcp.Tool_perpetual
 module Perpetual_loop = Masc_mcp.Perpetual_loop
 module Cascade = Masc_mcp.Cascade
+module Model_spec = Masc_mcp.Model_spec
 
 (* ============================================================
    Test Helpers
@@ -25,8 +26,8 @@ let make_ctx () : Tool_perpetual.context = {
 }
 
 (** Create a default model spec for testing. *)
-let test_model : Cascade.model_spec = {
-  provider = Cascade.Llama;
+let test_model : Model_spec.model_spec = {
+  provider = Model_spec.Llama;
   model_id = "test-model";
   max_context = 4000;
   api_url = "http://127.0.0.1:8085";

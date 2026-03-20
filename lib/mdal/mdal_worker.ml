@@ -53,36 +53,36 @@ let worker_name_for_state (state : Mdal.loop_state) =
   sprintf "mdal-%s-%02d" safe_loop (state.current_iteration + 1)
 
 let model_provider_label = function
-  | Cascade.Llama -> "llama"
-  | Cascade.Claude -> "claude"
-  | Cascade.OpenAI -> "openai"
-  | Cascade.Gemini -> "gemini"
-  | Cascade.Glm_cloud -> "glm"
-  | Cascade.OpenRouter -> "openrouter"
-  | Cascade.Custom name -> "custom:" ^ name
+  | Model_spec.Llama -> "llama"
+  | Model_spec.Claude -> "claude"
+  | Model_spec.OpenAI -> "openai"
+  | Model_spec.Gemini -> "gemini"
+  | Model_spec.Glm_cloud -> "glm"
+  | Model_spec.OpenRouter -> "openrouter"
+  | Model_spec.Custom name -> "custom:" ^ name
 
-let model_label (spec : Cascade.model_spec) =
+let model_label (spec : Model_spec.model_spec) =
   sprintf "%s:%s" (model_provider_label spec.provider) spec.model_id
 
-let validate_model_spec (spec : Cascade.model_spec) :
-    (Cascade.model_spec, string) result =
+let validate_model_spec (spec : Model_spec.model_spec) :
+    (Model_spec.model_spec, string) result =
   match spec.provider with
-  | Cascade.Claude
-  | Cascade.OpenAI
-  | Cascade.Gemini
-  | Cascade.Llama
-  | Cascade.Glm_cloud -> Ok spec
-  | Cascade.OpenRouter
-  | Cascade.Custom _ ->
+  | Model_spec.Claude
+  | Model_spec.OpenAI
+  | Model_spec.Gemini
+  | Model_spec.Llama
+  | Model_spec.Glm_cloud -> Ok spec
+  | Model_spec.OpenRouter
+  | Model_spec.Custom _ ->
       Error
         (sprintf
            "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
            (model_provider_label spec.provider))
 
 let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
-    (Cascade.model_spec * string, string) result =
+    (Model_spec.model_spec * string, string) result =
   let parse_worker_model raw =
-    match Cascade.model_spec_of_string raw with
+    match Model_spec.model_spec_of_string raw with
     | Error _ as e -> e
     | Ok spec -> (
         match validate_model_spec spec with
@@ -96,14 +96,14 @@ let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
       if String.contains normalized ':' then parse_worker_model normalized
       else
         match normalized with
-        | "claude" -> Ok (Cascade.claude_opus, model_label Cascade.claude_opus)
+        | "claude" -> Ok (Model_spec.claude_opus, model_label Model_spec.claude_opus)
         | "openai" | "codex-api" ->
-            Ok (Cascade.openai_default, model_label Cascade.openai_default)
-        | "gemini" -> Ok (Cascade.gemini_pro, model_label Cascade.gemini_pro)
+            Ok (Model_spec.openai_default, model_label Model_spec.openai_default)
+        | "gemini" -> Ok (Model_spec.gemini_pro, model_label Model_spec.gemini_pro)
         | "ollama" ->
             Error (Provider_adapter.bare_ollama_migration_message ())
         | "glm" ->
-            Ok (Cascade.glm_cloud, model_label Cascade.glm_cloud)
+            Ok (Model_spec.glm_cloud, model_label Model_spec.glm_cloud)
         | "llama" ->
             Error
               "MDAL strict worker requires `worker_model` for llama providers, e.g. `llama:<model-id>`."
@@ -157,7 +157,7 @@ let run ~(sw : Eio.Switch.t) ~(config : Room.config) (state : Mdal.loop_state)
         raise (Invalid_argument message)
   in
   let model_spec =
-    match Cascade.model_spec_of_string model_label with
+    match Model_spec.model_spec_of_string model_label with
     | Ok spec -> spec
     | Error message -> raise (Invalid_argument message)
   in

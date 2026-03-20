@@ -1,12 +1,12 @@
 (** OAS type adapters — convert MASC model types to OAS (Agent SDK) types.
 
-    Thin wrappers bridging {!Cascade.model_spec} and {!Agent_sdk.Types.message}
+    Thin wrappers bridging {!Model_spec.model_spec} and {!Agent_sdk.Types.message}
     to their OAS counterparts.  Most conversions are structural identity
     (shared type aliases); [to_oas_provider] performs actual mapping.
 
     @since 2.130.0 — extracted from Llm_provider_dispatch *)
 
-let to_oas_provider (spec : Cascade.model_spec) : Agent_sdk.Provider.config option =
+let to_oas_provider (spec : Model_spec.model_spec) : Agent_sdk.Provider.config option =
   match spec.provider with
   | Claude ->
     Some { Agent_sdk.Provider.provider = Anthropic;

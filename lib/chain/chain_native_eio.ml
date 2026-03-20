@@ -216,7 +216,7 @@ let llm_tool_calls_json (blocks : Agent_sdk.Types.content_block list) =
 
 type llm_runner =
   | Stub
-  | Direct of Cascade.model_spec
+  | Direct of Model_spec.model_spec
   | Spawn of string (* agent name *)
   | SpawnWithModel of { agent: string; model: string }
 
@@ -224,7 +224,7 @@ let model_runner_of_string raw =
   let model = trim raw in
   let lower = String.lowercase_ascii model in
   let direct spec =
-    match Cascade.model_spec_of_string spec with
+    match Model_spec.model_spec_of_string spec with
     | Ok parsed -> Ok (Direct parsed)
     | Error msg -> Error msg
   in
@@ -246,7 +246,7 @@ let model_runner_of_string raw =
   | "codex" -> Ok (Spawn "codex")
   | value when starts_with ~prefix:"codex:" value -> Ok (Spawn "codex")
   | value -> (
-      match Cascade.model_spec_of_string model with
+      match Model_spec.model_spec_of_string model with
       | Ok parsed -> Ok (Direct parsed)
       | Error _ when starts_with ~prefix:"llama:" value -> direct model
       | Error _ when starts_with ~prefix:"gemini:" value -> direct model

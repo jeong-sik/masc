@@ -59,117 +59,117 @@ let test_llm_client () = group "LLM Client" (fun () ->
 
   (* 1. Provider string roundtrip *)
   assert_equal "provider_string:llama"
-    "llama" (Cascade.string_of_provider Llama);
+    "llama" (Model_spec.string_of_provider Llama);
   assert_equal "provider_string:claude"
-    "claude" (Cascade.string_of_provider Claude);
+    "claude" (Model_spec.string_of_provider Claude);
   assert_equal "provider_string:openai"
-    "openai" (Cascade.string_of_provider OpenAI);
+    "openai" (Model_spec.string_of_provider OpenAI);
   assert_equal "provider_string:gemini"
-    "gemini" (Cascade.string_of_provider Gemini);
+    "gemini" (Model_spec.string_of_provider Gemini);
 
   (* 2. Model spec parsing *)
-  (match Cascade.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl" with
+  (match Model_spec.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl" with
    | Ok m ->
      assert_equal "parse_model:llama_local_id" "qwen3.5-35b-a3b-ud-q8-xl" m.model_id;
      assert_true "parse_model:llama_local_provider"
-       (m.provider = Cascade.Llama)
+       (m.provider = Model_spec.Llama)
    | Error _ -> assert_true "parse_model:llama_local" false);
 
-  (match Cascade.model_spec_of_string "claude:opus" with
+  (match Model_spec.model_spec_of_string "claude:opus" with
    | Ok m ->
      assert_equal "parse_model:claude_id" Masc_mcp.Env_config.Claude.default_model m.model_id;
      assert_true "parse_model:claude_provider"
-       (m.provider = Cascade.Claude);
+       (m.provider = Model_spec.Claude);
      (* Verify opus cost tier to distinguish from sonnet routing *)
      assert_true "parse_model:claude_opus_cost"
        (m.cost_per_1k_input > 0.01)
    | Error _ -> assert_true "parse_model:claude" false);
 
-  (match Cascade.model_spec_of_string "gemini:gemini-2.5-flash" with
+  (match Model_spec.model_spec_of_string "gemini:gemini-2.5-flash" with
    | Ok m ->
      assert_equal "parse_model:gemini_id" "gemini-2.5-flash" m.model_id;
      assert_true "parse_model:gemini_provider"
-       (m.provider = Cascade.Gemini)
+       (m.provider = Model_spec.Gemini)
    | Error _ -> assert_true "parse_model:gemini" false);
 
-  (match Cascade.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl:latest" with
+  (match Model_spec.model_spec_of_string "llama:qwen3.5-35b-a3b-ud-q8-xl:latest" with
    | Ok m ->
      assert_equal "parse_model:llama_tagged_id" "qwen3.5-35b-a3b-ud-q8-xl:latest" m.model_id;
      assert_true "parse_model:llama_tagged_provider"
-       (m.provider = Cascade.Llama)
+       (m.provider = Model_spec.Llama)
    | Error _ -> assert_true "parse_model:llama_tagged" false);
 
-  (match Cascade.model_spec_of_string "llama:qwen3.5-coder" with
+  (match Model_spec.model_spec_of_string "llama:qwen3.5-coder" with
    | Ok m ->
      assert_equal "parse_model:llama_id" "qwen3.5-coder" m.model_id;
      assert_true "parse_model:llama_provider"
-       (m.provider = Cascade.Llama);
+       (m.provider = Model_spec.Llama);
      assert_equal "parse_model:llama_url"
        Masc_mcp.Env_config.Llama.server_url m.api_url
    | Error e -> assert_true ("parse_model:llama_failed: " ^ e) false);
 
-  (match Cascade.model_spec_of_string "anthropic:sonnet" with
+  (match Model_spec.model_spec_of_string "anthropic:sonnet" with
    | Ok m ->
      assert_equal "parse_model:anthropic_alias_id" Masc_mcp.Env_config.Claude.default_model m.model_id;
      assert_true "parse_model:anthropic_alias_provider"
-       (m.provider = Cascade.Claude)
+       (m.provider = Model_spec.Claude)
    | Error _ -> assert_true "parse_model:anthropic_alias" false);
 
-  (match Cascade.model_spec_of_string "google:flash" with
+  (match Model_spec.model_spec_of_string "google:flash" with
    | Ok m ->
      assert_equal "parse_model:google_alias_id" Masc_mcp.Env_config.Gemini.flash_model m.model_id;
      assert_true "parse_model:google_alias_provider"
-       (m.provider = Cascade.Gemini)
+       (m.provider = Model_spec.Gemini)
    | Error _ -> assert_true "parse_model:google_alias" false);
 
-  (match Cascade.model_spec_of_string "claude-api:sonnet" with
+  (match Model_spec.model_spec_of_string "claude-api:sonnet" with
    | Ok m ->
      assert_equal "parse_model:claude_api_id" Masc_mcp.Env_config.Claude.default_model m.model_id;
      assert_true "parse_model:claude_api_provider"
-       (m.provider = Cascade.Claude)
+       (m.provider = Model_spec.Claude)
    | Error _ -> assert_true "parse_model:claude_api" false);
 
-  (match Cascade.model_spec_of_string "gemini-api:gemini-2.5-flash" with
+  (match Model_spec.model_spec_of_string "gemini-api:gemini-2.5-flash" with
    | Ok m ->
      assert_equal "parse_model:gemini_api_id" "gemini-2.5-flash" m.model_id;
      assert_true "parse_model:gemini_api_provider"
-       (m.provider = Cascade.Gemini)
+       (m.provider = Model_spec.Gemini)
    | Error _ -> assert_true "parse_model:gemini_api" false);
 
-  (match Cascade.model_spec_of_string "codex-api:gpt-5-mini" with
+  (match Model_spec.model_spec_of_string "codex-api:gpt-5-mini" with
    | Ok m ->
      assert_equal "parse_model:codex_api_id" "gpt-5-mini" m.model_id;
      assert_true "parse_model:codex_api_provider"
-       (m.provider = Cascade.OpenAI)
+       (m.provider = Model_spec.OpenAI)
    | Error _ -> assert_true "parse_model:codex_api" false);
 
   (* 3. Invalid model spec *)
-  (match Cascade.model_spec_of_string "invalid" with
+  (match Model_spec.model_spec_of_string "invalid" with
    | Error _ -> assert_true "parse_model:invalid" true
    | Ok _ -> assert_true "parse_model:invalid_should_fail" false);
 
-  (match Cascade.model_spec_of_string "llama:" with
+  (match Model_spec.model_spec_of_string "llama:" with
    | Error _ -> assert_true "parse_model:empty_model_rejected" true
    | Ok _ -> assert_true "parse_model:empty_model_should_fail" false);
 
   (* 3b. MLX provider was removed (PR #799); parsing should fail *)
-  (match Cascade.model_spec_of_string "mlx:qwen3.5-35b" with
+  (match Model_spec.model_spec_of_string "mlx:qwen3.5-35b" with
    | Error _ -> assert_true "parse_model:mlx_rejected" true
    | Ok _ -> assert_true "parse_model:mlx_should_fail" false);
 
-  (match Cascade.model_spec_of_string "custom:mymodel@http://localhost:9999" with
+  (match Model_spec.model_spec_of_string "custom:mymodel@http://localhost:9999" with
    | Ok m ->
      assert_equal "parse_model:custom_with_url_id" "mymodel" m.model_id;
      assert_true "parse_model:custom_with_url_provider"
-       (m.provider = Cascade.Custom "mymodel");
+       (m.provider = Model_spec.Custom "mymodel");
      assert_equal "parse_model:custom_with_url_url" "http://localhost:9999" m.api_url
    | Error e -> assert_true ("parse_model:custom_url_failed: " ^ e) false);
 
-  (match Cascade.model_spec_of_string "custom:bare-model" with
+  (match Model_spec.model_spec_of_string "custom:bare-model" with
    | Ok m ->
      assert_equal "parse_model:custom_bare_id" "bare-model" m.model_id;
      assert_true "parse_model:custom_bare_provider"
-       (m.provider = Cascade.Custom "bare-model");
+       (m.provider = Model_spec.Custom "bare-model");
      assert_equal "parse_model:custom_bare_url" "http://127.0.0.1:8080" m.api_url
    | Error e -> assert_true ("parse_model:custom_bare_failed: " ^ e) false);
 
@@ -191,15 +191,15 @@ let test_llm_client () = group "LLM Client" (fun () ->
 
   (* 6. Built-in model specs *)
   assert_true "builtin:llama_default_context"
-    (Cascade.llama_default.max_context = 128000);
+    (Model_spec.llama_default.max_context = 128000);
   assert_true "builtin:claude_opus_cost"
-    (Cascade.claude_opus.cost_per_1k_input > 0.0);
+    (Model_spec.claude_opus.cost_per_1k_input > 0.0);
   assert_true "builtin:gemini_pro_provider"
-    (Cascade.gemini_pro.provider = Cascade.Gemini);
+    (Model_spec.gemini_pro.provider = Model_spec.Gemini);
   assert_true "builtin:openai_default_provider"
-    (Cascade.openai_default.provider = Cascade.OpenAI);
+    (Model_spec.openai_default.provider = Model_spec.OpenAI);
   assert_true "builtin:llama_default_provider"
-    (Cascade.llama_default.provider = Cascade.Llama);
+    (Model_spec.llama_default.provider = Model_spec.Llama);
   (* Set env vars so default_local_model_spec resolves llama regardless of CI env *)
   let prev_provider = Sys.getenv_opt "MASC_DEFAULT_PROVIDER" in
   let prev_model = Sys.getenv_opt "MASC_DEFAULT_MODEL" in
@@ -207,9 +207,9 @@ let test_llm_client () = group "LLM Client" (fun () ->
   Unix.putenv "MASC_DEFAULT_PROVIDER" "llama";
   Unix.putenv "MASC_DEFAULT_MODEL" "default-model";
   Unix.putenv "LLAMA_DEFAULT_MODEL" "default-model";
-  let default_local = Cascade.default_local_model_spec () in
+  let default_local = Model_spec.default_local_model_spec () in
   assert_true "builtin:default_local_provider"
-    (default_local.provider = Cascade.Llama);
+    (default_local.provider = Model_spec.Llama);
   assert_equal "builtin:default_local_model_id"
     "default-model" default_local.model_id;
   (* Restore env vars *)
@@ -460,7 +460,7 @@ let test_succession () = group "Succession" (fun () ->
     Cascade.tool_msg ~name:"grep" ~call_id:"c1" "results";
     Agent_sdk.Types.assistant_msg "done";
   ] in
-  let normalized = Succession_oas.normalize_for_model msgs Cascade.llama_default in
+  let normalized = Succession_oas.normalize_for_model msgs Model_spec.llama_default in
   (* Tool messages should be converted to user messages for local llama runtimes *)
   let tool_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
     m.role = Agent_sdk.Types.Tool) normalized in
@@ -472,13 +472,13 @@ let test_succession () = group "Succession" (fun () ->
     Agent_sdk.Types.user_msg "part2";
     Agent_sdk.Types.assistant_msg "response";
   ] in
-  let normalized2 = Succession_oas.normalize_for_model msgs2 Cascade.claude_opus in
+  let normalized2 = Succession_oas.normalize_for_model msgs2 Model_spec.claude_opus in
   assert_true "normalize:claude_merged"
     (List.length normalized2 <= List.length msgs2);
 
   (* 7. Hydrate from DNA *)
   let spec = Succession_oas.{
-    model = Cascade.llama_default;
+    model = Model_spec.llama_default;
     inherit_tools = true;
     context_budget = 0.3;
   } in
@@ -498,7 +498,7 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
 
   (* 1. Default config *)
   let config = Perpetual_loop.default_config
-    ~goal:"test" ~models:[Cascade.llama_default] () in
+    ~goal:"test" ~models:[Model_spec.llama_default] () in
   assert_equal "config:goal" "test" config.initial_goal;
   assert_float_near "config:compact" 0.5 config.compact_threshold 0.01;
   assert_float_near "config:handoff" 0.85 config.handoff_threshold 0.01;
@@ -528,7 +528,7 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
 
   (* 5. Stopped state is reflected in status *)
   let fresh_config = Perpetual_loop.default_config
-    ~goal:"test" ~models:[Cascade.llama_default] () in
+    ~goal:"test" ~models:[Model_spec.llama_default] () in
   let fresh_state = Perpetual_loop.create_state fresh_config in
   Perpetual_loop.stop fresh_state;
   assert_true "stop:running_false" (not fresh_state.running);
@@ -573,8 +573,8 @@ let test_perpetual_loop () = group "Perpetual Loop" (fun () ->
     ~goal:"multi"
     ~models:
       [
-        Cascade.llama_default;
-        { Cascade.llama_default with model_id = "qwen3.5-9b" };
+        Model_spec.llama_default;
+        { Model_spec.llama_default with model_id = "qwen3.5-9b" };
       ]
     () in
   assert_equal "cascade:model_count" 2
@@ -631,7 +631,7 @@ let test_auto_claim () = group "Auto-Claim" (fun () ->
 
   (* 1. Auto-claim disabled when no room_config *)
   let config = Perpetual_loop.default_config
-    ~goal:"test" ~models:[Cascade.llama_default] () in
+    ~goal:"test" ~models:[Model_spec.llama_default] () in
   assert_true "auto_claim:disabled_by_default" (config.room_config = None);
   let state = Perpetual_loop.create_state config in
   assert_true "auto_claim:no_current_task" (state.current_task_id = None);
@@ -755,7 +755,7 @@ let test_integration () = group "Integration" (fun () ->
   assert_equal "integration:dna_goal" "integration test" dna.goal;
 
   let spec = Succession_oas.{
-    model = Cascade.llama_default;
+    model = Model_spec.llama_default;
     inherit_tools = true;
     context_budget = 0.5;
   } in
@@ -818,10 +818,10 @@ let test_integration () = group "Integration" (fun () ->
   assert_true "roundtrip:no_tag_collision" (back_tricky.role = Agent_sdk.Types.User);
 
   (* 3e. Llm_client OAS type adapters *)
-  let provider_config = Oas_type_adapters.to_oas_provider Cascade.claude_opus in
+  let provider_config = Oas_type_adapters.to_oas_provider Model_spec.claude_opus in
   assert_true "oas_adapter:claude_mapped" (Option.is_some provider_config);
   let provider_config_custom = Oas_type_adapters.to_oas_provider
-    { Cascade.llama_default with provider = Cascade.Custom "test" } in
+    { Model_spec.llama_default with provider = Model_spec.Custom "test" } in
   assert_true "oas_adapter:custom_mapped" (Option.is_some provider_config_custom);
 
   (* 3f. Llm_client message/usage roundtrip *)

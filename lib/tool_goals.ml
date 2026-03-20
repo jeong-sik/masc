@@ -364,7 +364,7 @@ let env_keeper_models () =
 let default_keeper_models () =
   let from_env = env_keeper_models () in
   if from_env <> [] then from_env
-  else Cascade.default_execution_model_labels ()
+  else Model_spec.default_execution_model_labels ()
 
 let sanitize_keeper_name s =
   let buf = Buffer.create (String.length s) in

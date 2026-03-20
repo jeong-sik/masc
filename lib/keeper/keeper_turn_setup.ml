@@ -297,8 +297,8 @@ let ensure_keeper_exists
     (match ensure_api_keys_for_labels meta.models with
      | Error e -> Error e
      | Ok () ->
-       let specs = Cascade.available_model_specs_of_strings meta.models in
-       let primary = match specs with m0 :: _ -> m0 | [] -> Cascade.default_local_model_spec () in
+       let specs = Model_spec.available_model_specs_of_strings meta.models in
+       let primary = match specs with m0 :: _ -> m0 | [] -> Model_spec.default_local_model_spec () in
        let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
        let system_prompt =
          build_keeper_system_prompt

@@ -71,7 +71,7 @@ let autonomous_gate_config
 let execute_approved_plan
     ~(config : Room.config)
     ~(meta : keeper_meta)
-    ~(specs : Cascade.model_spec list)
+    ~(specs : Model_spec.model_spec list)
     ~(plan : string)
     ~(pa : Keeper_autonomy.proposed_action)
     ~(autonomy_level : Keeper_autonomy.autonomy_level)
@@ -79,7 +79,7 @@ let execute_approved_plan
     : string * float * string list =
   ignore trajectory_acc;
   let gate_config = autonomous_gate_config ~autonomy_level in
-  let primary = match specs with p :: _ -> p | [] -> Cascade.default_local_model_spec () in
+  let primary = match specs with p :: _ -> p | [] -> Model_spec.default_local_model_spec () in
   let system_prompt = Printf.sprintf
 {|You are a keeper agent executing an approved action plan.
 Your name: %s
@@ -134,7 +134,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
     None to fall through to regular proactive generation.
     @since 2.74.0 *)
 let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
-    ~(specs : Cascade.model_spec list) : keeper_meta option =
+    ~(specs : Model_spec.model_spec list) : keeper_meta option =
   if meta.active_goal_ids = [] then None
   else
     match Keeper_contract.parse_autonomy_level meta.autonomy_level with

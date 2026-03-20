@@ -258,20 +258,26 @@ let build_session_context session_json session_cards =
       else
         "live=recent_turns · planned=known_members"
     in
+    let status = session_status_string session_json in
+    let is_terminal = List.mem status [ "completed"; "interrupted"; "cancelled"; "expired" ] in
     let blocker_summary =
-      match top_attention with
-      | Some attention ->
-          trim_to_option (string_field "summary" attention)
-      | None ->
-          if int_field "active_agents_count" team_health < int_field ~default:1 "required_agents" team_health
-          then
-            Some
-              (Printf.sprintf "active %d / required %d"
-                 (int_field "active_agents_count" team_health)
-                 (int_field ~default:1 "required_agents" team_health))
-          else
-            Option.bind top_recommendation (fun action ->
-                trim_to_option (string_field "reason" action))
+      if is_terminal then
+        (* Terminal sessions cannot be blocked — suppress stale blockers *)
+        None
+      else
+        match top_attention with
+        | Some attention ->
+            trim_to_option (string_field "summary" attention)
+        | None ->
+            if int_field "active_agents_count" team_health < int_field ~default:1 "required_agents" team_health
+            then
+              Some
+                (Printf.sprintf "active %d / required %d"
+                   (int_field "active_agents_count" team_health)
+                   (int_field ~default:1 "required_agents" team_health))
+            else
+              Option.bind top_recommendation (fun action ->
+                  trim_to_option (string_field "reason" action))
     in
     Some
       {
@@ -280,15 +286,19 @@ let build_session_context session_json session_cards =
           trim_to_option (string_field "goal" meta)
           |> Option.value ~default:session_id;
         room = trim_to_option (string_field "room_id" meta);
-        status = session_status_string session_json;
+        status;
         health =
-          (match session_card with
-          | Some card ->
-              trim_to_option (string_field "health" card)
-              |> Option.value ~default:"ok"
-          | None ->
-              trim_to_option (string_field "status" team_health)
-              |> Option.value ~default:"ok");
+          (if is_terminal then
+             (* Terminal sessions get neutral health — no false alarms *)
+             "ok"
+           else
+             match session_card with
+             | Some card ->
+                 trim_to_option (string_field "health" card)
+                 |> Option.value ~default:"ok"
+             | None ->
+                 trim_to_option (string_field "status" team_health)
+                 |> Option.value ~default:"ok");
         member_names;
         started_at = trim_to_option (string_field "created_at_iso" meta);
         elapsed_sec =

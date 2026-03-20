@@ -79,13 +79,14 @@ val usage_of_run_result : Oas_worker.run_result -> Agent_sdk.Types.api_usage
 val model_of_run_result : Oas_worker.run_result -> string
 
 (** Cascade through [Cascade.complete] — single-shot, no agent loop.
-    [cascade_name] defaults to ["keeper_turn"]. Model specs in the
-    [completion_request] list are ignored; only prompt/system/temperature
-    are extracted. *)
+    [cascade_name] defaults to ["keeper_turn"]. *)
 val run_cascade :
   ?cascade_name:string ->
   ?timeout_sec:int ->
-  Cascade.completion_request list ->
+  messages:Agent_sdk.Types.message list ->
+  temperature:float ->
+  max_tokens:int ->
+  unit ->
   (Llm_provider.Types.api_response, string) result
 
 (** Streaming cascade with synthetic SSE events.
@@ -94,6 +95,8 @@ val run_cascade_stream :
   ?cascade_name:string ->
   ?timeout_sec:float ->
   on_event:(Llm_provider.Types.sse_event -> unit) ->
-  Cascade.completion_request ->
-  fallback:Cascade.completion_request list ->
+  messages:Agent_sdk.Types.message list ->
+  temperature:float ->
+  max_tokens:int ->
+  unit ->
   (Llm_provider.Types.api_response, string) result

@@ -56,23 +56,8 @@ type tool_def = {
   parameters : Yojson.Safe.t;
 }
 
-type tool_call = {
-  call_id : string;
-  call_name : string;
-  call_arguments : string;
-}
-
 (** Compute total tokens from OAS api_usage. *)
 let total_tokens (u : Agent_sdk.Types.api_usage) = u.input_tokens + u.output_tokens
-
-type completion_request = {
-  model : model_spec;
-  messages : Agent_sdk.Types.message list;
-  temperature : float;
-  max_tokens : int;
-  tools : tool_def list;
-  response_format : [ `Text | `Json ];
-}
 
 (** Zero usage sentinel. *)
 let zero_usage : Agent_sdk.Types.api_usage =
@@ -97,36 +82,11 @@ let timed (f : unit -> 'a) : 'a * int =
   let ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
   (result, ms)
 
-(** Extract tool calls from content blocks. *)
-let tool_calls_of_content (blocks : Agent_sdk.Types.content_block list)
-    : tool_call list =
-  List.filter_map
-    (function
-      | Agent_sdk.Types.ToolUse { id; name; input } ->
-          Some { call_id = id; call_name = name;
-                 call_arguments = Yojson.Safe.to_string input }
-      | _ -> None)
-    blocks
-
-(** Extract tool calls from an api_response. *)
-let tool_calls_of_response (resp : Llm_provider.Types.api_response) : tool_call list =
-  tool_calls_of_content resp.content
-
-(** Check if an api_response has any tool calls. *)
-let has_tool_calls (resp : Llm_provider.Types.api_response) : bool =
+(** Check if an api_response contains any ToolUse blocks. *)
+let has_tool_use (resp : Llm_provider.Types.api_response) : bool =
   List.exists
     (function Agent_sdk.Types.ToolUse _ -> true | _ -> false)
     resp.content
-
-let clamp_llama_max_tokens max_tokens =
-  max 1 (min max_tokens Env_config.Llama.max_tokens)
-
-let normalize_request (req : completion_request) =
-  match req.model.provider with
-  | Llama ->
-      let max_tokens = clamp_llama_max_tokens req.max_tokens in
-      if max_tokens = req.max_tokens then req else { req with max_tokens }
-  | _ -> req
 
 let string_of_provider = function
   | Llama -> "llama"

@@ -6,9 +6,9 @@ let test_parse_text_tool_calls_single () =
     {|mcp__masc__masc_team_session_step(session_id="ts-123", turn_kind="note", message="[local64-smoke-01] manager decide online for hybrid smoke")|}
   in
   match Local_agent_eio.parse_text_tool_calls content with
-  | [ call ] ->
-      check string "tool name" "masc_team_session_step" call.Cascade.call_name;
-      let json = Yojson.Safe.from_string call.call_arguments in
+  | [ Agent_sdk.Types.ToolUse { name; input; _ } ] ->
+      check string "tool name" "masc_team_session_step" name;
+      let json = input in
       check string "session id" "ts-123"
         Yojson.Safe.Util.(json |> member "session_id" |> to_string);
       check string "turn kind" "note"
@@ -30,11 +30,12 @@ done:local64-smoke-02
 |}
   in
   match Local_agent_eio.parse_text_tool_calls content with
-  | [ first; second ] ->
-      check string "first tool" "masc_heartbeat" first.Cascade.call_name;
-      check string "heartbeat args" "{}" first.call_arguments;
-      check string "second tool" "masc_team_session_step"
-        second.Cascade.call_name
+  | [ Agent_sdk.Types.ToolUse { name = name1; input = input1; _ };
+      Agent_sdk.Types.ToolUse { name = name2; _ } ] ->
+      check string "first tool" "masc_heartbeat" name1;
+      check string "heartbeat args" "{}"
+        (Yojson.Safe.to_string input1);
+      check string "second tool" "masc_team_session_step" name2
   | _ -> fail "expected two parsed text tool calls"
 
 let () =

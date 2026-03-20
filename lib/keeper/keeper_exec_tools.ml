@@ -103,13 +103,10 @@ let execute_keeper_tool_call
     ~(config : Room.config)
     ~(meta : keeper_meta)
     ~(ctx_work : Context_manager.working_context)
-    (tc : Cascade.tool_call) : string =
-  let args =
-    try Yojson.Safe.from_string tc.call_arguments
-    with Yojson.Json_error _ -> `Assoc []
-  in
+    ~(name : string) ~(input : Yojson.Safe.t) : string =
+  let args = input in
   let now_ts = Time_compat.now () in
-  match tc.call_name with
+  match name with
   | "keeper_time_now" ->
       Yojson.Safe.to_string
         (`Assoc
@@ -656,13 +653,13 @@ let keeper_tool_loop_system_prompt ~(character_context : string) : string =
 let keeper_tool_followup_prompt
     ~(user_message : string)
     ~(draft_reply : string)
-    ~(tool_outputs : (Cascade.tool_call * string) list)
+    ~(tool_outputs : (string * Yojson.Safe.t * string) list)
     ~(already_executed : string list) : string =
   let rendered =
     tool_outputs
-    |> List.map (fun ((tc : Cascade.tool_call), output) ->
-           Printf.sprintf "- %s(%s)\n  => %s" tc.call_name tc.call_arguments
-             output)
+    |> List.map (fun (name, input, output) ->
+           Printf.sprintf "- %s(%s)\n  => %s" name
+             (Yojson.Safe.to_string input) output)
     |> String.concat "\n"
   in
   let is_write_tool (name : string) : bool =

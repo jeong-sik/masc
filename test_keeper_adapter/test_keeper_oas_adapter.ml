@@ -8,28 +8,6 @@ module Types = Agent_sdk.Types
 (* Helper: build a minimal completion_request                       *)
 (* ================================================================ *)
 
-let make_model_spec ?(model_id = "test-model") ?(provider = Cascade.Llama) () :
-    Cascade.model_spec =
-  { provider;
-    model_id;
-    max_context = 4096;
-    api_url = "http://127.0.0.1:8085";
-    api_key_env = None;
-    cost_per_1k_input = 0.0;
-    cost_per_1k_output = 0.0;
-  }
-
-let make_request ?(model_id = "test-model") ?(provider = Cascade.Llama)
-    ?(temperature = 0.7) ?(max_tokens = 1024) ?(tools = [])
-    (messages : Types.message list) : Cascade.completion_request =
-  { model = make_model_spec ~model_id ~provider ();
-    messages;
-    temperature;
-    max_tokens;
-    tools;
-    response_format = `Text;
-  }
-
 (* ================================================================ *)
 (* Group 1: result extractors                                       *)
 (* ================================================================ *)
@@ -65,22 +43,6 @@ let test_model_of_run_result () =
   check string "model" "qwen3.5" (Adapter.model_of_run_result r)
 
 (* ================================================================ *)
-(* Group 3: run_cascade error paths (no Eio context needed)         *)
-(* ================================================================ *)
-
-let test_run_cascade_empty_requests () =
-  match Adapter.run_cascade [] with
-  | Error msg ->
-      check bool "error message present" true (String.length msg > 0)
-  | Ok _ -> fail "expected Error for empty requests"
-
-let test_run_cascade_no_user_messages () =
-  let req = make_request [Types.system_msg "system only"] in
-  match Adapter.run_cascade [req] with
-  | Error _ -> () (* expected: no user messages *)
-  | Ok _ -> fail "expected Error for request with no user messages"
-
-(* ================================================================ *)
 (* Registration                                                     *)
 (* ================================================================ *)
 
@@ -90,9 +52,5 @@ let () =
       test_case "text_of_run_result" `Quick test_text_of_run_result;
       test_case "usage_of_run_result" `Quick test_usage_of_run_result;
       test_case "model_of_run_result" `Quick test_model_of_run_result;
-    ]);
-    ("run_cascade_errors", [
-      test_case "empty requests" `Quick test_run_cascade_empty_requests;
-      test_case "no user messages" `Quick test_run_cascade_no_user_messages;
     ]);
   ]

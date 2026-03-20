@@ -375,85 +375,6 @@ export function normalizeBuildIdentity(raw: unknown): ServerStatus['build'] | un
   }
 }
 
-export function normalizeGardenerRuntimeStatus(raw: unknown): ServerStatus['gardener'] | undefined {
-  if (!isRecord(raw)) return undefined
-  return {
-    enabled: raw.enabled === true,
-    alive: raw.alive === true,
-    status: asString(raw.status) ?? undefined,
-    tick_in_progress: typeof raw.tick_in_progress === 'boolean' ? raw.tick_in_progress : undefined,
-    tick_count: asNumber(raw.tick_count) ?? undefined,
-    check_interval_sec: asNumber(raw.check_interval_sec) ?? undefined,
-    last_tick_started_at: toIsoTimestamp(raw.last_tick_started_at) ?? asString(raw.last_tick_started_at) ?? null,
-    last_tick_completed_at: toIsoTimestamp(raw.last_tick_completed_at) ?? asString(raw.last_tick_completed_at) ?? null,
-    next_tick_due_at: toIsoTimestamp(raw.next_tick_due_at) ?? asString(raw.next_tick_due_at) ?? null,
-    last_health_check_at: toIsoTimestamp(raw.last_health_check_at) ?? asString(raw.last_health_check_at) ?? null,
-    last_intervention: asString(raw.last_intervention) ?? undefined,
-    last_decision_source: asString(raw.last_decision_source) ?? undefined,
-    last_action: asString(raw.last_action) ?? undefined,
-    last_target: asString(raw.last_target) ?? null,
-    last_reason: asString(raw.last_reason) ?? null,
-    last_error: asString(raw.last_error) ?? null,
-    circuit_open: typeof raw.circuit_open === 'boolean' ? raw.circuit_open : undefined,
-    circuit_open_until: toIsoTimestamp(raw.circuit_open_until) ?? asString(raw.circuit_open_until) ?? null,
-    can_spawn: typeof raw.can_spawn === 'boolean' ? raw.can_spawn : undefined,
-    can_retire: typeof raw.can_retire === 'boolean' ? raw.can_retire : undefined,
-    last_spawn_attempt_at: toIsoTimestamp(raw.last_spawn_attempt_at) ?? asString(raw.last_spawn_attempt_at) ?? null,
-    last_retirement_attempt_at: toIsoTimestamp(raw.last_retirement_attempt_at) ?? asString(raw.last_retirement_attempt_at) ?? null,
-    spawns_today: asNumber(raw.spawns_today) ?? undefined,
-    retirements_today: asNumber(raw.retirements_today) ?? undefined,
-    health_summary: isRecord(raw.health_summary)
-      ? {
-          total_agents: asNumber(raw.health_summary.total_agents) ?? undefined,
-          active_agents: asNumber(raw.health_summary.active_agents) ?? undefined,
-          idle_agents: asNumber(raw.health_summary.idle_agents) ?? undefined,
-          todo_count: asNumber(raw.health_summary.todo_count) ?? undefined,
-          high_priority_todo: asNumber(raw.health_summary.high_priority_todo) ?? undefined,
-          orphan_count: asNumber(raw.health_summary.orphan_count) ?? undefined,
-          homeostatic_score: asNumber(raw.health_summary.homeostatic_score) ?? undefined,
-          needs_workers:
-            typeof raw.health_summary.needs_workers === 'boolean'
-              ? raw.health_summary.needs_workers
-              : undefined,
-        }
-      : undefined,
-  }
-}
-
-export function normalizeGuardianRuntimeStatus(raw: unknown): ServerStatus['guardian'] | undefined {
-  if (!isRecord(raw)) return undefined
-  return {
-    enabled: raw.enabled === true,
-    mode: asString(raw.mode) ?? undefined,
-    masc_enabled: typeof raw.masc_enabled === 'boolean' ? raw.masc_enabled : undefined,
-    masc_loops_running: typeof raw.masc_loops_running === 'boolean' ? raw.masc_loops_running : undefined,
-    runtime_owner: asString(raw.runtime_owner) ?? null,
-    zombie_loop_running: typeof raw.zombie_loop_running === 'boolean' ? raw.zombie_loop_running : undefined,
-    gc_loop_running: typeof raw.gc_loop_running === 'boolean' ? raw.gc_loop_running : undefined,
-    last_zombie_cleanup: toIsoTimestamp(raw.last_zombie_cleanup) ?? asString(raw.last_zombie_cleanup) ?? null,
-    last_gc: toIsoTimestamp(raw.last_gc) ?? asString(raw.last_gc) ?? null,
-    last_zombie_result: asString(raw.last_zombie_result) ?? null,
-    last_gc_result: asString(raw.last_gc_result) ?? null,
-  }
-}
-
-export function normalizeSentinelRuntimeStatus(raw: unknown): ServerStatus['sentinel'] | undefined {
-  if (!isRecord(raw)) return undefined
-  return {
-    enabled: raw.enabled === true,
-    started: raw.started === true,
-    agent_name: asString(raw.agent_name) ?? null,
-    llm_enabled: typeof raw.llm_enabled === 'boolean' ? raw.llm_enabled : undefined,
-    uptime_s: asNumber(raw.uptime_s) ?? undefined,
-    embedded_guardian_loops_running:
-      typeof raw.embedded_guardian_loops_running === 'boolean'
-        ? raw.embedded_guardian_loops_running
-        : undefined,
-    guardian_runtime_owner: asString(raw.guardian_runtime_owner) ?? null,
-    consumers: asStringArray(raw.consumers),
-  }
-}
-
 export function normalizeSocialRuntimeStatus(raw: unknown): SocialRuntimeStatus | undefined {
   if (!isRecord(raw)) return undefined
   const lastResult = isRecord(raw.last_result) ? raw.last_result : null
@@ -497,9 +418,6 @@ export function normalizeServerStatus(raw: unknown, generatedAt?: string): Serve
     generated_at: generatedAt ?? toIsoTimestamp(raw.generated_at) ?? undefined,
     build: normalizeBuildIdentity(raw.build),
     social_runtime: normalizeSocialRuntimeStatus(raw.social_runtime),
-    gardener: normalizeGardenerRuntimeStatus(raw.gardener) ?? undefined,
-    guardian: normalizeGuardianRuntimeStatus(raw.guardian) ?? undefined,
-    sentinel: normalizeSentinelRuntimeStatus(raw.sentinel) ?? undefined,
   }
 }
 

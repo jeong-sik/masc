@@ -28,7 +28,7 @@ export type SSEEventType =
   | 'oas:masc:lodge:agent_decision'
   | 'oas:masc:lodge:agent_action_executed'
   | 'oas:masc:keeper:snapshot'
-  | 'oas:masc:gardener:tick'
+  | 'oas:masc:keeper:tick'
 
 export interface SSEEvent {
   type: SSEEventType

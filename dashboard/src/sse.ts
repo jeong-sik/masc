@@ -6,7 +6,7 @@ import type { JournalEntry, JournalEventType, SSEEvent } from './types'
 import {
   pushOasAgentEvent,
   updateOasKeeperSnapshot,
-  oasLastGardenerTick,
+  oasLastKeeperTick,
   oasTotalEvents,
 } from './store'
 import type { OasKeeperSnapshot } from './types/oas'
@@ -291,8 +291,8 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:masc:gardener:tick': {
-      oasLastGardenerTick.value = Date.now()
+    case 'oas:masc:keeper:tick': {
+      oasLastKeeperTick.value = Date.now()
       oasTotalEvents.value++
       break
     }

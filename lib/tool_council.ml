@@ -486,7 +486,7 @@ let execute_action ctx (case_ : GV2.case_record) (order : GV2.execution_order) =
                        meta);
                   let result_msg =
                     Printf.sprintf
-                      "Stopped keepalive for %s. Desired resident state remains true and guardian reconcile will bring it back."
+                      "Stopped keepalive for %s. Desired resident state remains true and keeper reconcile will bring it back."
                       keeper_name
                   in
                   Ok

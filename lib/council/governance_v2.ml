@@ -793,7 +793,7 @@ let submit_petition base_path ~title ~origin ~subject_type ~risk_class
     in
     (* Skip duplicate petition: if case already has a petition with same key,
        just return the existing case without adding another petition.
-       This prevents sentinel sweeps from accumulating 41+ petitions per task. *)
+       This prevents automated sweeps from accumulating 41+ petitions per task. *)
     if merged && List.length case_.petition_ids > 0 then
       Ok { petition = {
              id = ""; case_id = case_.id; title; normalized_key;
@@ -871,7 +871,7 @@ let save_ruling base_path (ruling : ruling) =
   write_case base_path updated_case;
   write_ruling base_path ruling;
   (* Auto-create execution order when ruling triggers Ready_auto_execute
-     and no order exists yet. This closes the gap where sentinel-submitted
+     and no order exists yet. This closes the gap where auto-submitted
      rulings set the case status but never create the order needed for
      downstream execution. *)
   (if next_status = Ready_auto_execute then

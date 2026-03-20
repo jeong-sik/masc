@@ -89,7 +89,7 @@ let get_agents_raw_in_room config room_id =
         )
 
 (** Like [get_agents_raw_in_room] but includes Inactive agents.
-    Useful for gardener backlog-triage enrollment where inactive agents
+    Useful for keeper backlog-triage enrollment where inactive agents
     should still participate as a fallback. *)
 let get_all_agents_in_room config room_id =
   if not (root_is_initialized config) then []

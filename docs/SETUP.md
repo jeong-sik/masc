@@ -77,6 +77,6 @@ README의 예시 구성(Claude Code) 참고:
 ```text
 masc_join(agent_name: "claude")
 masc_add_task(title: "My first task")
-masc_claim(agent_name: "claude", task_id: "task-001")
+masc_transition(agent_name: "claude", task_id: "task-001", action: "claim")
 masc_done(agent_name: "claude", task_id: "task-001")
 ```

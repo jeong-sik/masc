@@ -1,9 +1,17 @@
 # MASC Multi-Room Design
 
-Status: design (not implemented/verified)
-Verification: none recorded (2026-01-25)
+Status: historical/internal compatibility note
+Verification: implemented and exercised by `dune exec --root . test/test_multi_room.exe` on 2026-03-21
+
+This document predates the current implementation state. Named-room support exists, but it is not the canonical default public workflow.
+
+- Canonical default: repo-root room semantics via `masc_set_room`
+- Current role of named rooms: internal compatibility/helper surface
+- Public surface intent: `masc_room_*` is not part of the default `tools/list` workflow
 
 ## Problem Statement
+
+Historical problem statement retained for implementation context:
 
 현재 MASC는 단일 방(Single Room) 모델:
 - `.masc/` 폴더 = 1개의 방

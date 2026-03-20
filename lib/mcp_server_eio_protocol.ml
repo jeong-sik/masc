@@ -445,7 +445,7 @@ let handle_request
                        | Ok { names; include_hidden; include_deprecated; include_usage; mode; tier; cursor } ->
                            (* BUG-017 fix: Default to Full profile for tools/list.
                               Previously wrapped in Role_filtered which filtered out
-                              core coordination tools (masc_join, masc_claim, etc.)
+                              core coordination tools (masc_join, masc_transition, etc.)
                               from discovery while tools/call still allowed them. *)
                            let list_profile =
                              match profile with

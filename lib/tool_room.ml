@@ -156,21 +156,20 @@ let inspect_state ctx =
        with Sys_error _ | Yojson.Json_error _ -> false)
     else false
   in
-  let (task_claimed, current_task_set) =
+  let task_claimed =
     if joined then
-      let agents_path =
-        Filename.concat
-          (Room.agents_dir ctx.config)
-          (Room.safe_filename ctx.agent_name ^ ".json")
-      in
-      if Sys.file_exists agents_path then
-        match Room.read_json ctx.config agents_path |> Types.agent_of_yojson with
-        | Ok agent ->
-            let claimed = agent.Types.current_task <> None in
-            (claimed, claimed)
-        | Error _ -> (false, false)
-      else (false, false)
-    else (false, false)
+      let actual_name = Room.resolve_agent_name ctx.config ctx.agent_name in
+      Room.get_tasks_raw ctx.config
+      |> List.exists (fun (task : Types.task) ->
+             match task.task_status with
+             | Types.Claimed { assignee; _ } | Types.InProgress { assignee; _ } ->
+                 assignee = ctx.agent_name || assignee = actual_name
+             | Types.Todo | Types.Done _ | Types.Cancelled _ -> false)
+    else false
+  in
+  let current_task_set =
+    if joined then Option.is_some (Planning_eio.get_current_task ctx.config)
+    else false
   in
   let worktree_active =
     if room_set then
@@ -229,7 +228,7 @@ let check_assertion st assertion =
          "Call masc_claim_next or masc_transition(action=claim) to get a task")
     | "current_task_set" ->
         (st.current_task_set,
-         "Call masc_plan_set_task after claiming a task")
+         "Call masc_plan_set_task after claim paths that did not auto-bind current_task (for example masc_transition(action=claim))")
     | "worktree_active" ->
         (st.worktree_active,
          "Call masc_worktree_create to work in an isolated branch")

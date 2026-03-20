@@ -83,6 +83,35 @@ let () = test "dispatch_claim_next" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "handle_claim_sets_planning_current_task" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim direct")]) in
+  let (success, _result) =
+    Tool_task.handle_claim ctx (`Assoc [("task_id", `String "task-001")])
+  in
+  assert success;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001")
+)
+
+let () = test "handle_claim_next_sets_planning_current_task" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Claim next")]) in
+  let (success, _result) = Tool_task.handle_claim_next ctx (`Assoc []) in
+  assert success;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001")
+)
+
+let () = test "transition_claim_leaves_planning_current_task_unset" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition claim")]) in
+  let (success, _result) =
+    Tool_task.handle_transition ctx
+      (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
+  in
+  assert success;
+  assert (Planning_eio.get_current_task ctx.config = None)
+)
+
 (* Test handle_done returns owner guidance when another agent owns the task *)
 let () = test "handle_done_owned_by_other_guidance" (fun () ->
   let ctx = make_test_ctx () in

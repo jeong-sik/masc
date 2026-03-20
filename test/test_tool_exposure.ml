@@ -119,6 +119,9 @@ let () =
                   "masc_vote_status";
                   "masc_post_create";
                   "masc_post_list";
+                  "masc_rooms_list";
+                  "masc_room_create";
+                  "masc_room_enter";
                 ]
               in
               List.iter
@@ -129,7 +132,14 @@ let () =
           test_case "hidden tools are visible with include_hidden" `Quick
             (fun () ->
               let hidden_names =
-                [ "masc_vote_create"; "masc_vote_cast"; "masc_vote_status" ]
+                [
+                  "masc_vote_create";
+                  "masc_vote_cast";
+                  "masc_vote_status";
+                  "masc_rooms_list";
+                  "masc_room_create";
+                  "masc_room_enter";
+                ]
               in
               List.iter
                 (fun name ->

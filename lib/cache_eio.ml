@@ -42,11 +42,20 @@ let sanitize_key key =
 let cache_file config key =
   Filename.concat (cache_dir config) (sanitize_key key ^ ".json")
 
-(** Entry to JSON *)
+(** Entry to JSON — truncates value at 512 bytes for listing responses *)
+let max_list_value_len = 512
+
 let entry_to_json (entry : cache_entry) : Yojson.Safe.t =
+  let value_len = String.length entry.value in
+  let display_value =
+    if value_len > max_list_value_len then
+      String.sub entry.value 0 max_list_value_len ^ "...(truncated)"
+    else entry.value
+  in
   `Assoc [
     ("key", `String entry.key);
-    ("value", `String entry.value);
+    ("value", `String display_value);
+    ("value_size", `Int value_len);
     ("created_at", `Float entry.created_at);
     ("expires_at", match entry.expires_at with
       | Some t -> `Float t

@@ -107,16 +107,12 @@ Pair with masc_cleanup_zombies to remove stale agents or masc_find_by_capability
   };
   {
     name = "masc_agent_update";
-    description = "Update an agent's metadata (status or capabilities) with transition guards. \
-Use when you need to correct an external agent's state or change your own status to busy/listening. \
-Pair with masc_agents to verify the update or masc_register_capabilities for capability-only changes.";
+    description = "Update your own agent metadata (status or capabilities) with transition guards. \
+Use when you need to change your status to busy/listening or update capabilities. \
+Only modifies the calling agent's own record. Pair with masc_agents to verify the update.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("agent_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Agent name or nickname");
-        ]);
         ("status", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional status: active | busy | listening | inactive");
@@ -127,7 +123,6 @@ Pair with masc_agents to verify the update or masc_register_capabilities for cap
           ("description", `String "Optional capability list (overwrites existing)");
         ]);
       ]);
-      ("required", `List [`String "agent_name"]);
     ];
   };
   {

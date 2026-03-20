@@ -44,13 +44,26 @@ let handle_batch_add_tasks ctx args =
     | `List l -> l
     | _ -> []
   in
-  let tasks = List.map (fun t ->
-    let title = t |> member "title" |> to_string in
+  if tasks_json = [] then
+    (false, "tasks array is empty or missing")
+  else
+  let validated = List.mapi (fun idx t ->
+    let title = String.trim (t |> member "title" |> to_string) in
     let priority = t |> member "priority" |> to_int_option |> Option.value ~default:3 in
     let description = t |> member "description" |> to_string_option |> Option.value ~default:"" in
-    (title, priority, description)
+    if title = "" then
+      Error (Printf.sprintf "item[%d]: title cannot be empty" idx)
+    else if priority < 1 || priority > 5 then
+      Error (Printf.sprintf "item[%d]: priority must be 1-5, got %d" idx priority)
+    else
+      Ok (title, priority, description)
   ) tasks_json in
-  (true, Room.batch_add_tasks ctx.config tasks)
+  let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
+  if errors <> [] then
+    (false, Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
+  else
+    let tasks = List.filter_map (function Ok t -> Some t | Error _ -> None) validated in
+    (true, Room.batch_add_tasks ctx.config tasks)
 
 let handle_claim ctx args =
   if not (try Room.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then

@@ -266,7 +266,8 @@ let search_q =
   (Caqti_type.(t2 string int) ->* post_row_t)
   (Printf.sprintf
     "SELECT %s FROM masc_board_posts \
-     WHERE %s AND (content ILIKE '%%' || $1 || '%%' \
+     WHERE %s AND (title ILIKE '%%' || $1 || '%%' \
+       OR content ILIKE '%%' || $1 || '%%' \
        OR author ILIKE '%%' || $1 || '%%' \
        OR hearth ILIKE '%%' || $1 || '%%') \
      ORDER BY (votes_up - votes_down) DESC, created_at DESC \

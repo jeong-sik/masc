@@ -300,7 +300,7 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
         | _ -> None
       in
       (match
-        Cascade.complete ~cascade_name:"chain_llm" ~messages
+        Oas_worker.complete_single ~cascade_name:"chain_llm" ~messages
           ?tools:tools_json ~temperature:0.2 ~max_tokens:4096
           ~timeout_sec ()
       with

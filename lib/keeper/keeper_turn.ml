@@ -7,7 +7,6 @@
     Sub-modules:
     - Keeper_turn_up: start/reconfigure
     - Keeper_turn_session: team-session integration
-    - Keeper_turn_response: turn_env type, JSON builders, finalize
     - Keeper_turn_setup: ensure_keeper_exists, apply_settings_update
     - Keeper_turn_lifecycle: model-set, shutdown *)
 
@@ -19,7 +18,6 @@ open Keeper_exec_tools [@@warning "-33"]
 open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_session
-open Keeper_turn_response [@@warning "-33"]
 open Keeper_turn_setup
 
 type tool_result = Keeper_types.tool_result

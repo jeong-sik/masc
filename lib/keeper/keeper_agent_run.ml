@@ -60,6 +60,7 @@ let run_turn
     ?guardrails
     ?(temperature : float = 0.3)
     ?(max_tokens : int = 4096)
+    ?max_cost_usd
     ()
   : (run_result, string) result =
   (* 1. Ensure session directory *)
@@ -113,7 +114,7 @@ let run_turn
   let meta_ref = ref meta in
   let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
   let hooks = Keeper_hooks_oas.make_hooks
-    ~config ~meta_ref ~session ~ctx_ref ~generation () in
+    ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd () in
   let memory = Memory_oas_bridge.create_memory ~agent_name in
   ignore (Memory_oas_bridge.seed_institution ~memory ~config);
   ignore (Memory_oas_bridge.seed_procedures ~memory ~agent_name:"_global" ~limit:5);

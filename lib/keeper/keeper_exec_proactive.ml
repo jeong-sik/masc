@@ -180,23 +180,31 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                     let model_specs =
                       Model_spec.available_model_specs_of_strings meta.models
                     in
-                    let (result, delib_latency) = Cascade.timed (fun () ->
-                      Keeper_oas_adapter.run_simple
-                        ~config:ctx.config
-                        ~meta
+                    let base_dir = session_base_dir ctx.config in
+                    let build_turn_prompt ~base_system_prompt:_ ~messages:_ =
+                      system
+                    in
+                    let max_ctx =
+                      match model_specs with p :: _ -> p.max_context | [] -> 4096
+                    in
+                    let (delib_result, delib_latency) = Cascade.timed (fun () ->
+                      Keeper_agent_run.run_turn
+                        ~config:ctx.config ~meta ~base_dir
+                        ~max_context:max_ctx
+                        ~build_turn_prompt
+                        ~user_message:prompt
                         ~cascade_name:"keeper_proactive"
-                        ~system_prompt:system
-                        ~prompt
+                        ~generation:meta.generation
+                        ~max_turns:1
                         ~temperature:0.3
                         ~max_tokens:1024 ()) in
-                    match result with
+                    match delib_result with
                     | Error msg ->
                         Log.KeeperExec.error "%s LLM call failed: %s"
                           meta.name msg;
                         meta
-                    | Ok run_result ->
-                        let response = run_result.Oas_worker.response in
-                        let response_usage = Cascade.usage_of_response response in
+                    | Ok result ->
+                        let response_usage = result.Keeper_agent_run.usage in
                         let turn_cost =
                           let inp =
                             float_of_int response_usage.input_tokens /. 1000.0
@@ -214,12 +222,12 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                         in
                         (match
                            Keeper_deliberation.parse_deliberation_response
-                             (Cascade.text_of_response response)
+                             (result.Keeper_agent_run.response_text)
                          with
                          | Error msg ->
                              Log.KeeperExec.error "%s parse failed: %s (raw: %s)"
                                meta.name msg
-                               (Keeper_types.short_preview (Cascade.text_of_response response));
+                               (Keeper_types.short_preview (result.Keeper_agent_run.response_text));
                              (* Update meta with cost even on parse failure *)
                              let updated =
                                { meta with
@@ -484,7 +492,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                  total_cost_usd =
                                    meta.total_cost_usd +. turn_cost;
                                  last_turn_ts = now_ts;
-                                 last_model_used = response.Llm_provider.Types.model;
+                                 last_model_used = result.Keeper_agent_run.model_used;
                                  last_input_tokens =
                                    response_usage.input_tokens;
                                  last_output_tokens =

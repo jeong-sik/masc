@@ -88,7 +88,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const briefMap = new Map(briefs.map(b => [b.agent_name, b]))
 
   const filtered = agentList
-    .filter((a: { name: string; status: string }) => {
+    .filter((a: Agent) => {
       if (filter !== 'all' && statusCategory(a.status) !== filter) return false
       if (search && !a.name.toLowerCase().includes(search.toLowerCase())) return false
       // Keeper filter from parent chip
@@ -99,19 +99,24 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       }
       return true
     })
-    .sort((a: { status: string; name: string }, b: { status: string; name: string }) => {
-      const order: Record<string, number> = { active: 0, busy: 0, listening: 0, working: 0, idle: 1, offline: 2, inactive: 2 }
-      const aOrder = order[a.status.toLowerCase()] ?? 1
-      const bOrder = order[b.status.toLowerCase()] ?? 1
+    .sort((a: Agent, b: Agent) => {
+      const order: Record<StatusFilter, number> = {
+        all: 0,
+        active: 0,
+        idle: 1,
+        offline: 2,
+      }
+      const aOrder = order[statusCategory(a.status)]
+      const bOrder = order[statusCategory(b.status)]
       if (aOrder !== bOrder) return aOrder - bOrder
       return a.name.localeCompare(b.name)
     })
 
   const counts = {
     all: agentList.length,
-    active: agentList.filter((a: { status: string }) => statusCategory(a.status) === 'active').length,
-    idle: agentList.filter((a: { status: string }) => statusCategory(a.status) === 'idle').length,
-    offline: agentList.filter((a: { status: string }) => statusCategory(a.status) === 'offline').length,
+    active: agentList.filter((a: Agent) => statusCategory(a.status) === 'active').length,
+    idle: agentList.filter((a: Agent) => statusCategory(a.status) === 'idle').length,
+    offline: agentList.filter((a: Agent) => statusCategory(a.status) === 'offline').length,
   }
 
   return html`

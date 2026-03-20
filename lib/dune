@@ -302,6 +302,8 @@
    team_session_engine_policy
    team_session_engine_eio
    team_session_oas_bridge
+   team_session_swarm_callbacks
+   team_session_swarm_runner
    ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
    safe_ops
    ;; sdp removed — in ocaml-webrtc
@@ -646,6 +648,8 @@
   team_session_engine_helpers
   team_session_engine_status
   team_session_engine_policy
+  team_session_swarm_callbacks
+  team_session_swarm_runner
   ;; chain_mermaid_parser sub-modules
   chain_mermaid_parse
   chain_mermaid_node_content

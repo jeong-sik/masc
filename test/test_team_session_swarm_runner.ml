@@ -1,0 +1,218 @@
+(** Test_team_session_swarm_runner — Unit tests for C-2a/C-2b swarm runner
+    and callbacks modules.
+
+    LLM 0 — all tests use mock closures, no real model calls.
+    Tests verify: session loading, swarm config conversion, callback wiring,
+    result application, and error paths.
+
+    @since 2.125.0 *)
+
+open Masc_mcp
+module Swarm = Agent_sdk_swarm
+
+(* ================================================================ *)
+(* Helpers                                                          *)
+(* ================================================================ *)
+
+let make_test_session ?(orchestration_mode = Team_session_types.Auto)
+    ?(model_cascade = ["llama:qwen3.5"])
+    ?(planned_workers = [])
+    ?(status = Team_session_types.Running)
+    session_id =
+  let now = Time_compat.now () in
+  ({ Team_session_types.session_id;
+     goal = "test goal";
+     created_by = "test-user";
+     room_id = "test-room";
+     operation_id = None;
+     origin_kind = Team_session_types.Origin_human;
+     status;
+     duration_seconds = 600;
+     execution_scope = Team_session_types.Autonomous;
+     checkpoint_interval_sec = 30;
+     min_agents = 1;
+     scale_profile = Team_session_types.Scale_standard;
+     control_profile = Team_session_types.Control_flat;
+     orchestration_mode;
+     communication_mode = Team_session_types.Comm_broadcast;
+     model_cascade;
+     fallback_policy = Team_session_types.Fallback_none;
+     instruction_profile = Team_session_types.Profile_standard;
+     alert_channel = Team_session_types.Alert_broadcast;
+     auto_resume = false;
+     report_formats = [Team_session_types.Markdown];
+     turn_count = 0;
+     agent_names = ["agent-1"];
+     planned_workers;
+     broadcast_count = 0;
+     portal_count = 0;
+     cascade_attempted = 0;
+     cascade_success = 0;
+     cascade_failed = 0;
+     fallback_task_created = 0;
+     min_agents_violation_streak = 0;
+     policy_violations = [];
+     baseline_done_counts = [];
+     final_done_delta_total = None;
+     final_done_delta_by_agent = None;
+     started_at = now;
+     planned_end_at = now +. 600.0;
+     stopped_at = None;
+     last_checkpoint_at = Some now;
+     last_event_at = Some now;
+     last_turn_at = None;
+     stop_reason = None;
+     generated_report = false;
+     artifacts_dir = "/tmp/masc-test";
+     created_at_iso = Types.now_iso ();
+     updated_at_iso = Types.now_iso ();
+   } : Team_session_types.session)
+
+(* ================================================================ *)
+(* Callback creation tests                                          *)
+(* ================================================================ *)
+
+let test_callbacks_all_some () =
+  let tmp = Filename.temp_dir "masc-test" "" in
+  let config = Room.default_config tmp in
+  let cbs = Team_session_swarm_callbacks.make_callbacks
+    ~config ~session_id:"test-123" in
+  Alcotest.(check bool) "on_iteration_start present"
+    true (Option.is_some cbs.on_iteration_start);
+  Alcotest.(check bool) "on_iteration_end present"
+    true (Option.is_some cbs.on_iteration_end);
+  Alcotest.(check bool) "on_agent_start present"
+    true (Option.is_some cbs.on_agent_start);
+  Alcotest.(check bool) "on_agent_done present"
+    true (Option.is_some cbs.on_agent_done);
+  Alcotest.(check bool) "on_converged present"
+    true (Option.is_some cbs.on_converged);
+  Alcotest.(check bool) "on_error present"
+    true (Option.is_some cbs.on_error)
+
+(* ================================================================ *)
+(* apply_swarm_result tests                                         *)
+(* ================================================================ *)
+
+let test_apply_converged_result () =
+  let session = make_test_session "s-conv" in
+  let result : Swarm.Swarm_types.swarm_result = {
+    iterations = [];
+    final_metric = Some 0.95;
+    converged = true;
+    total_elapsed = 12.5;
+    total_usage = { Agent_sdk.Types.total_input_tokens = 0;
+      total_output_tokens = 0; total_cache_creation_input_tokens = 0;
+      total_cache_read_input_tokens = 0; api_calls = 0;
+      estimated_cost_usd = 0.0 };
+  } in
+  let updated = Team_session_oas_bridge.apply_swarm_result session result in
+  Alcotest.(check string) "status completed"
+    "completed" (Team_session_types.status_to_string updated.status);
+  Alcotest.(check bool) "stop_reason set"
+    true (Option.is_some updated.stop_reason);
+  Alcotest.(check string) "stop_reason value"
+    "swarm_converged" (Option.get updated.stop_reason)
+
+let test_apply_exhausted_result () =
+  let session = make_test_session "s-exh" in
+  let result : Swarm.Swarm_types.swarm_result = {
+    iterations = [];
+    final_metric = None;
+    converged = false;
+    total_elapsed = 300.0;
+    total_usage = { Agent_sdk.Types.total_input_tokens = 0;
+      total_output_tokens = 0; total_cache_creation_input_tokens = 0;
+      total_cache_read_input_tokens = 0; api_calls = 0;
+      estimated_cost_usd = 0.0 };
+  } in
+  let updated = Team_session_oas_bridge.apply_swarm_result session result in
+  Alcotest.(check string) "status failed"
+    "failed" (Team_session_types.status_to_string updated.status);
+  Alcotest.(check string) "stop_reason exhausted"
+    "swarm_exhausted" (Option.get updated.stop_reason)
+
+let test_apply_updates_stopped_at () =
+  let session = make_test_session "s-ts" in
+  Alcotest.(check bool) "initially no stopped_at"
+    true (Option.is_none session.stopped_at);
+  let result : Swarm.Swarm_types.swarm_result = {
+    iterations = []; final_metric = None;
+    converged = true; total_elapsed = 1.0;
+    total_usage = { Agent_sdk.Types.total_input_tokens = 0;
+      total_output_tokens = 0; total_cache_creation_input_tokens = 0;
+      total_cache_read_input_tokens = 0; api_calls = 0;
+      estimated_cost_usd = 0.0 };
+  } in
+  let updated = Team_session_oas_bridge.apply_swarm_result session result in
+  Alcotest.(check bool) "stopped_at set"
+    true (Option.is_some updated.stopped_at)
+
+(* ================================================================ *)
+(* session_to_swarm_config tests                                    *)
+(* ================================================================ *)
+
+let test_empty_planned_workers () =
+  let session = make_test_session "s-empty" in
+  let tmp = Filename.temp_dir "masc-test" "" in
+  let config = Room.default_config tmp in
+  let swarm_cfg = Team_session_oas_bridge.session_to_swarm_config
+    ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
+    session
+  in
+  Alcotest.(check int) "entries empty" 0 (List.length swarm_cfg.entries);
+  Alcotest.(check string) "prompt" "test goal" swarm_cfg.prompt
+
+let test_auto_mode_produces_decentralized () =
+  let session = make_test_session
+    ~orchestration_mode:Team_session_types.Auto "s-auto" in
+  let tmp = Filename.temp_dir "masc-test" "" in
+  let config = Room.default_config tmp in
+  let swarm_cfg = Team_session_oas_bridge.session_to_swarm_config
+    ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
+    session
+  in
+  let mode_str = Swarm.Swarm_types.show_orchestration_mode swarm_cfg.mode in
+  Alcotest.(check string) "mode decentralized"
+    "Swarm_types.Decentralized" mode_str
+
+let test_manual_mode_produces_supervisor () =
+  let session = make_test_session
+    ~orchestration_mode:Team_session_types.Manual "s-manual" in
+  let tmp = Filename.temp_dir "masc-test" "" in
+  let config = Room.default_config tmp in
+  let swarm_cfg = Team_session_oas_bridge.session_to_swarm_config
+    ~config ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
+    session
+  in
+  let mode_str = Swarm.Swarm_types.show_orchestration_mode swarm_cfg.mode in
+  Alcotest.(check string) "mode supervisor"
+    "Swarm_types.Supervisor" mode_str
+
+(* ================================================================ *)
+(* Runner                                                           *)
+(* ================================================================ *)
+
+let () =
+  Alcotest.run "Team Session Swarm Runner" [
+    "callbacks", [
+      Alcotest.test_case "all callbacks present" `Quick
+        test_callbacks_all_some;
+    ];
+    "apply_swarm_result", [
+      Alcotest.test_case "converged result" `Quick
+        test_apply_converged_result;
+      Alcotest.test_case "exhausted result" `Quick
+        test_apply_exhausted_result;
+      Alcotest.test_case "updates stopped_at" `Quick
+        test_apply_updates_stopped_at;
+    ];
+    "session_to_swarm_config", [
+      Alcotest.test_case "empty planned workers" `Quick
+        test_empty_planned_workers;
+      Alcotest.test_case "auto -> decentralized" `Quick
+        test_auto_mode_produces_decentralized;
+      Alcotest.test_case "manual -> supervisor" `Quick
+        test_manual_mode_produces_supervisor;
+    ];
+  ]

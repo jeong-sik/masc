@@ -218,6 +218,30 @@
  (modules test_team_session_oas_bridge)
  (libraries masc_mcp agent_sdk agent_sdk.swarm alcotest yojson unix))
 (test
+ (name test_team_session_swarm_runner)
+ (modules test_team_session_swarm_runner)
+ (libraries masc_mcp agent_sdk agent_sdk.swarm alcotest yojson unix))
+(test
+ (name test_agent_swarm_unit)
+ (modules test_agent_swarm_unit)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
+
+(test
+ (name test_agent_swarm_fleet)
+ (modules test_agent_swarm_fleet)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
+
+(test
+ (name test_swarm_e2e)
+ (modules test_swarm_e2e)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main unix yojson))
+
+(test
+ (name test_agent_swarm_runner)
+ (modules test_agent_swarm_runner)
+ (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
+
+(test
  (name test_tool_mdal)
  (modules test_tool_mdal)
  (libraries masc_mcp alcotest str yojson unix eio eio_main

@@ -219,17 +219,17 @@ let run_with_masc_tools
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
-    ~(masc_tools : Cascade.tool_def list)
+    ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?on_event
     (goal : string)
   : (run_result, string) result =
-  let oas_tools = List.map (fun (td : Cascade.tool_def) ->
+  let oas_tools = List.map (fun (td : Types.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
-      ~name:td.tool_name
-      ~description:td.tool_description
-      ~input_schema:td.parameters
-      (fun input -> dispatch ~name:td.tool_name ~args:input)
+      ~name:td.name
+      ~description:td.description
+      ~input_schema:td.input_schema
+      (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   let config = { config with tools = oas_tools @ config.tools } in
   run ~sw ~net ~config ?on_event goal
@@ -286,7 +286,7 @@ let run_named_with_masc_tools
     ~cascade_name
     ~goal
     ?(system_prompt = "")
-    ~(masc_tools : Cascade.tool_def list)
+    ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(max_turns = 20)
     ?(temperature = 0.7)

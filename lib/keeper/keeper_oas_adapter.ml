@@ -120,7 +120,7 @@ let run_with_custom_dispatch
     ~(max_turns : int)
     ~(temperature : float)
     ~(max_tokens : int)
-    ~(masc_tools : Cascade.tool_def list)
+    ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ?(guardrails : Agent_sdk.Guardrails.t option)
     ()

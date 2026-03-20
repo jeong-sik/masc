@@ -5,7 +5,7 @@ val ensure_keeper_board_post_args :
 
 val keeper_allowed_tool_names : ?write_done:bool -> keeper_meta -> string list
 val keeper_allowed_llm_tools :
-  ?write_done:bool -> keeper_meta -> Cascade.tool_def list
+  ?write_done:bool -> keeper_meta -> Types.tool_schema list
 
 val execute_keeper_tool_call :
   config:Room.config ->

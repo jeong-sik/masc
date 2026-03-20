@@ -29,7 +29,7 @@ type event =
 type loop_config = {
   initial_goal : string;
   model_cascade : Cascade.model_spec list;
-  tools : Cascade.tool_def list;
+  tools : Types.tool_schema list;
   heartbeat_interval_s : float;
   max_idle_turns : int;
   feedback_enabled : bool;

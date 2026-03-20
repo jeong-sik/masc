@@ -342,15 +342,8 @@ let list_masc_tools ~sw:_sw ~(auth_token : string option) ~session_id
 let tool_schema_of_name schemas tool_name =
   List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name tool_name) schemas
 
-let tool_defs_of_schemas schemas =
-  List.map
-    (fun (schema : Types.tool_schema) ->
-      {
-        Cascade.tool_name = schema.name;
-        tool_description = schema.description;
-        parameters = schema.input_schema;
-      })
-    schemas
+let tool_defs_of_schemas (schemas : Types.tool_schema list) : Types.tool_schema list =
+  schemas
 
 let safe_text_for_followup text =
   let trimmed = String.trim text in

@@ -29,23 +29,23 @@ let make_tools
   let tool_defs =
     Keeper_exec_tools.keeper_allowed_llm_tools meta
   in
-  List.filter_map (fun (td : Cascade.tool_def) ->
-    if List.mem td.tool_name allowed_names then
+  List.filter_map (fun (td : Types.tool_schema) ->
+    if List.mem td.name allowed_names then
       Some (Tool_bridge.oas_tool_of_masc
-        ~name:td.tool_name
-        ~description:td.tool_description
-        ~input_schema:td.parameters
+        ~name:td.name
+        ~description:td.description
+        ~input_schema:td.input_schema
         (fun input ->
           try
             let result =
               Keeper_exec_tools.execute_keeper_tool_call
                 ~config ~meta ~ctx_work:(!ctx_ref)
-                ~name:td.tool_name ~input
+                ~name:td.name ~input
             in
             (true, result)
           with exn ->
             let msg = Printf.sprintf "tool %s failed: %s"
-              td.tool_name (Printexc.to_string exn) in
+              td.name (Printexc.to_string exn) in
             Log.Keeper.error "%s" msg;
             (false, msg)))
     else None

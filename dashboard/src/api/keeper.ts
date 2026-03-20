@@ -101,7 +101,7 @@ function jsonHeaders(): Record<string, string> {
   })()
   const agent = params.get('agent') ?? params.get('agent_name') ?? storedAgent
   if (token) headers['Authorization'] = `Bearer ${token}`
-  if (agent) headers['X-MASC-Agent'] = agent
+  if (agent) headers['X-MASC-Agent'] = encodeURIComponent(agent)
   return headers
 }
 

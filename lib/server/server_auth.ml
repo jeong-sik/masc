@@ -165,15 +165,16 @@ let voice_config_payload () =
   | Error json -> (`Error, json)
 
 let agent_from_request request =
+  let decode v = match Uri.pct_decode v with s -> s in
   match Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent" with
-  | Some v -> Some v
+  | Some v -> Some (decode v)
   | None ->
       match Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent-name" with
-      | Some v -> Some v
+      | Some v -> Some (decode v)
       | None ->
           (match query_param request "agent" with
-           | Some v -> Some v
-           | None -> query_param request "agent_name")
+           | Some v -> Some (decode v)
+           | None -> Option.map decode (query_param request "agent_name"))
 
 let http_status_of_auth_error = function
   | Types.Unauthorized _ | Types.InvalidToken _ | Types.TokenExpired _ -> `Unauthorized

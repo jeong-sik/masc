@@ -32,13 +32,24 @@ let get_fs_opt () =
 let has_fs () =
   Option.is_some !global_fs
 
+(** Normalize [Eio.Io] to [Sys_error] so callers only need one catch.
+    Eio operations raise [Eio.Io _] on permission errors, missing files, etc.
+    Stdlib I/O already raises [Sys_error], so wrapping only the Eio branch
+    keeps the exception contract uniform. *)
+let with_io ~path f =
+  try f ()
+  with Eio.Io _ as e ->
+    raise (Sys_error (Printf.sprintf "%s: %s" path (Printexc.to_string e)))
+
 (** Load entire file contents as string.
-    Eio-native when available, fallback to Unix. *)
+    Eio-native when available, fallback to Unix.
+    @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let load_file (path : string) : string =
   match !global_fs with
   | Some fs ->
-    let eio_path = Eio.Path.(fs / path) in
-    Eio.Path.load eio_path
+    with_io ~path (fun () ->
+      let eio_path = Eio.Path.(fs / path) in
+      Eio.Path.load eio_path)
   | None ->
     (* Fallback: blocking Unix I/O *)
     let ic = open_in path in
@@ -48,12 +59,14 @@ let load_file (path : string) : string =
     )
 
 (** Save string to file (overwrite).
-    Eio-native when available, fallback to Unix. *)
+    Eio-native when available, fallback to Unix.
+    @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let save_file (path : string) (content : string) : unit =
   match !global_fs with
   | Some fs ->
-    let eio_path = Eio.Path.(fs / path) in
-    Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content
+    with_io ~path (fun () ->
+      let eio_path = Eio.Path.(fs / path) in
+      Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
   | None ->
     (* Fallback: blocking Unix I/O *)
     let oc = open_out path in
@@ -62,12 +75,14 @@ let save_file (path : string) (content : string) : unit =
     )
 
 (** Append string to file.
-    Eio-native when available, fallback to Unix. *)
+    Eio-native when available, fallback to Unix.
+    @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let append_file (path : string) (content : string) : unit =
   match !global_fs with
   | Some fs ->
-    let eio_path = Eio.Path.(fs / path) in
-    Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content
+    with_io ~path (fun () ->
+      let eio_path = Eio.Path.(fs / path) in
+      Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content)
   | None ->
     (* Fallback: blocking Unix I/O *)
     let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
@@ -80,12 +95,14 @@ let append_file (path : string) (content : string) : unit =
 let file_exists (path : string) : bool =
   Sys.file_exists path
 
-(** Create directory recursively if not exists. *)
+(** Create directory recursively if not exists.
+    @raises Sys_error on all I/O failures. Eio.Io is normalized internally. *)
 let mkdir_p (path : string) : unit =
   match !global_fs with
   | Some fs ->
-    let eio_path = Eio.Path.(fs / path) in
-    Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path
+    with_io ~path (fun () ->
+      let eio_path = Eio.Path.(fs / path) in
+      Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 eio_path)
   | None ->
     (* Fallback: recursive mkdir without invoking a shell. *)
     let rec ensure_dir (p : string) : unit =

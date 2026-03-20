@@ -855,10 +855,7 @@ let build_continuity_briefs ~(now_ts : float) keepers session_contexts :
            let row =
              continuity_row_of_keeper ~now_ts ?related_session_id keeper
            in
-           if string_field "tone" row.json <> "ok" || row.related_session_id <> None then
-             Some row
-           else
-             None)
+           Some row)
   |> List.sort (fun (left : continuity_context) (right : continuity_context) ->
          let by_tone = Int.compare right.tone_rank left.tone_rank in
          if by_tone <> 0 then by_tone

@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { lazy, Suspense } from 'preact/compat'
 import { route, navigate } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
@@ -7,11 +8,6 @@ import { missionSnapshot } from '../mission-store'
 import { roomTruthInitializing } from '../room-truth-store'
 import { Mission } from './mission'
 import { Overview } from './overview/overview'
-import { AgentsUnified } from './agents-unified'
-import { Activity } from './activity'
-import { Work } from './work'
-import { Control } from './control'
-import { LabUnified } from './lab-unified'
 import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
 import {
@@ -22,6 +18,16 @@ import {
 import { InterveneRailCard, SnapshotCard } from './resident-runtime-rail'
 
 const buildIdentityOpen = signal(false)
+
+const LazyAgentsUnified = lazy(async () => ({ default: (await import('./agents-unified')).AgentsUnified }))
+const LazyActivity = lazy(async () => ({ default: (await import('./activity')).Activity }))
+const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
+const LazyControl = lazy(async () => ({ default: (await import('./control')).Control }))
+const LazyLabUnified = lazy(async () => ({ default: (await import('./lab-unified')).LabUnified }))
+
+function lazyTabFallback(label: string) {
+  return html`<div class="loading-indicator">${label} 불러오는 중...</div>`
+}
 
 export function ConnectionStatus() {
   const isConnected = connected.value
@@ -185,15 +191,35 @@ export function TabContent() {
     case 'situation':
       return html`<${Mission} />`
     case 'agents':
-      return html`<${AgentsUnified} />`
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('에이전트 화면')}>
+          <${LazyAgentsUnified} />
+        <//>
+      `
     case 'activity':
-      return html`<${Activity} />`
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('활동 화면')}>
+          <${LazyActivity} />
+        <//>
+      `
     case 'work':
-      return html`<${Work} />`
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('작업 화면')}>
+          <${LazyWork} />
+        <//>
+      `
     case 'control':
-      return html`<${Control} />`
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('제어 화면')}>
+          <${LazyControl} />
+        <//>
+      `
     case 'lab':
-      return html`<${LabUnified} />`
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('실험실 화면')}>
+          <${LazyLabUnified} />
+        <//>
+      `
     default:
       return html`<${Overview} />`
   }

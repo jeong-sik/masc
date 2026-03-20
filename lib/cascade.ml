@@ -14,50 +14,6 @@
     @since 2.117.0 — model types extracted to Model_spec *)
 
 (* ================================================================ *)
-(* Re-export Model_spec types for backward compatibility             *)
-(* ================================================================ *)
-
-type provider = Model_spec.provider =
-  | Llama
-  | Claude
-  | OpenAI
-  | Gemini
-  | Glm_cloud
-  | OpenRouter
-  | Custom of string
-
-type model_spec = Model_spec.model_spec = {
-  provider : provider;
-  model_id : string;
-  max_context : int;
-  api_url : string;
-  api_key_env : string option;
-  cost_per_1k_input : float;
-  cost_per_1k_output : float;
-}
-
-(* ================================================================ *)
-(* Re-export Model_spec values for backward compatibility            *)
-(* ================================================================ *)
-
-let string_of_provider = Model_spec.string_of_provider
-let llama_default = Model_spec.llama_default
-let claude_opus = Model_spec.claude_opus
-let claude_sonnet = Model_spec.claude_sonnet
-let openai_default = Model_spec.openai_default
-let glm_cloud = Model_spec.glm_cloud
-let gemini_pro = Model_spec.gemini_pro
-let model_spec_of_string = Model_spec.model_spec_of_string
-let configured_default_model_label = Model_spec.configured_default_model_label
-let default_execution_model_labels = Model_spec.default_execution_model_labels
-let default_verifier_model_labels = Model_spec.default_verifier_model_labels
-let available_model_specs_of_strings = Model_spec.available_model_specs_of_strings
-let first_available_model_spec = Model_spec.first_available_model_spec
-let default_execution_model_spec = Model_spec.default_execution_model_spec
-let default_verifier_model_spec = Model_spec.default_verifier_model_spec
-let default_local_model_spec = Model_spec.default_local_model_spec
-
-(* ================================================================ *)
 (* Helpers                                                           *)
 (* ================================================================ *)
 
@@ -278,7 +234,7 @@ let default_model_strings ~cascade_name =
 (** Backward compat: return MASC model_spec list.
     Prefer {!complete} instead. *)
 let get_cascade ?(config_path = "") ~cascade_name () :
-    model_spec list =
+    Model_spec.model_spec list =
   let defaults = default_model_strings ~cascade_name in
   let configured =
     if String.length config_path > 0 then

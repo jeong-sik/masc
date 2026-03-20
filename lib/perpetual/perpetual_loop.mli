@@ -29,12 +29,12 @@ type event =
 (** Loop configuration — immutable after creation. *)
 type loop_config = {
   initial_goal : string;
-  model_cascade : Cascade.model_spec list;   (** Ordered preference *)
+  model_cascade : Model_spec.model_spec list;   (** Ordered preference *)
   tools : Types.tool_schema list;
   heartbeat_interval_s : float;                  (** Default: 30.0 *)
   max_idle_turns : int;                          (** Stop after N turns with no progress *)
   feedback_enabled : bool;                       (** Run verifier after each action *)
-  verifier_model : Cascade.model_spec;        (** Cheap model for verification *)
+  verifier_model : Model_spec.model_spec;        (** Cheap model for verification *)
   compact_threshold : float;                     (** Default: 0.5 *)
   prepare_threshold : float;                     (** Default: 0.7 *)
   handoff_threshold : float;                     (** Default: 0.85 *)
@@ -104,7 +104,7 @@ val publish_to_event_bus : Agent_sdk.Event_bus.t -> event -> unit
 (** Default configuration builder. *)
 val default_config :
   goal:string ->
-  models:Cascade.model_spec list ->
-  ?verifier:Cascade.model_spec ->
+  models:Model_spec.model_spec list ->
+  ?verifier:Model_spec.model_spec ->
   ?session_dir:string ->
   unit -> loop_config

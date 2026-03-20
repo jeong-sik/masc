@@ -269,20 +269,20 @@ let process_one rctx ~state_json ~role ~actor_id ~keeper_name =
     | Some tier1_str ->
     try
       let tier1_model =
-        match Cascade.model_spec_of_string tier1_str with
+        match Model_spec.model_spec_of_string tier1_str with
         | Ok m -> m
         | Error _ -> (
-            match Cascade.default_verifier_model_spec () with
+            match Model_spec.default_verifier_model_spec () with
             | Ok model -> model
-            | Error _ -> Cascade.glm_cloud)
+            | Error _ -> Model_spec.glm_cloud)
       in
       let tier2_model =
         match Sys.getenv_opt "TRPG_HARNESS_TIER2_MODEL" with
         | Some s -> (
-            match Cascade.model_spec_of_string s with
+            match Model_spec.model_spec_of_string s with
             | Ok m -> m
-            | Error _ -> Cascade.glm_cloud)
-        | None -> Cascade.glm_cloud
+            | Error _ -> Model_spec.glm_cloud)
+        | None -> Model_spec.glm_cloud
       in
       let pctx =
         extract_prompt_context ~actor_id ~dm_persona_override state_json

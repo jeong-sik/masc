@@ -26,11 +26,11 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
   match ensure_api_keys_for_labels model_labels with
   | Error e -> Error e
   | Ok () ->
-      let specs = Cascade.available_model_specs_of_strings model_labels in
+      let specs = Model_spec.available_model_specs_of_strings model_labels in
       let primary =
         match specs with
         | model :: _ -> model
-        | [] -> Cascade.default_local_model_spec ()
+        | [] -> Model_spec.default_local_model_spec ()
       in
           let base_dir = session_base_dir ctx.config in
           mkdir_p base_dir;
@@ -166,11 +166,11 @@ let run_social_board_event_turn
   match ensure_api_keys_for_labels model_labels with
   | Error e -> Error e
   | Ok () ->
-      let specs = Cascade.available_model_specs_of_strings model_labels in
+      let specs = Model_spec.available_model_specs_of_strings model_labels in
       let primary =
         match specs with
         | model :: _ -> model
-        | [] -> Cascade.default_local_model_spec ()
+        | [] -> Model_spec.default_local_model_spec ()
       in
           let base_dir = session_base_dir ctx.config in
           let session, ctx_opt =

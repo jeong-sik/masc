@@ -74,9 +74,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    keeper_metrics_path ctx.config meta_current.name
                  in
                  let primary_model =
-                   match Cascade.available_model_specs_of_strings meta_current.models with
+                   match Model_spec.available_model_specs_of_strings meta_current.models with
                    | primary :: _ -> primary
-                   | [] -> Cascade.default_local_model_spec ()
+                   | [] -> Model_spec.default_local_model_spec ()
                  in
                  let base_dir = session_base_dir ctx.config in
                  let _session, ctx_opt =

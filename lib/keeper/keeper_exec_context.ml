@@ -548,8 +548,8 @@ let looks_fragmentary_history_text (raw : string) : bool =
     hard_fragment || short_unterminated || trailing_connector
 
 let run_proactive_generation
-    ~(specs : Cascade.model_spec list)
-    ~(primary : Cascade.model_spec)
+    ~(specs : Model_spec.model_spec list)
+    ~(primary : Model_spec.model_spec)
     ~(config : Room.config)
     ~(ctx_work : Context_manager.working_context)
     ~(meta : keeper_meta)

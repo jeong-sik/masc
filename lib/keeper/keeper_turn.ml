@@ -110,8 +110,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       (match ensure_api_keys_for_labels effective_models with
        | Error e -> (false, "❌ " ^ e)
        | Ok () ->
-         let specs = Cascade.available_model_specs_of_strings effective_models in
-         let primary = match specs with m0 :: _ -> m0 | [] -> Cascade.default_local_model_spec () in
+         let specs = Model_spec.available_model_specs_of_strings effective_models in
+         let primary = match specs with m0 :: _ -> m0 | [] -> Model_spec.default_local_model_spec () in
             let base_dir = session_base_dir ctx.config in
             mkdir_p base_dir;
             let (session, ctx_opt) = load_context_from_checkpoint

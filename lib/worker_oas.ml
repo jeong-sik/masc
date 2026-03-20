@@ -172,7 +172,7 @@ let gate_config_of_execution_scope
 let build_agent
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(meta : Local_agent_eio_types.worker_container_meta)
-    ~(model : Cascade.model_spec)
+    ~(model : Model_spec.model_spec)
     ~(system_prompt : string)
     ~(tools : Oas.Tool.t list)
     ~(hooks : Oas.Hooks.hooks)
@@ -265,7 +265,7 @@ let run_worker_via_oas
     ~(sw : Eio.Switch.t)
     ~(base_path : string)
     ~(meta : Local_agent_eio_types.worker_container_meta)
-    ~(model : Cascade.model_spec)
+    ~(model : Model_spec.model_spec)
     ~(system_prompt : string)
     ~(prompt : string)
     ~(tools : Oas.Tool.t list)
@@ -398,7 +398,7 @@ let orchestrate_workers
     ~(sw : Eio.Switch.t)
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(workers : (Local_agent_eio_types.worker_container_meta
-                 * Cascade.model_spec
+                 * Model_spec.model_spec
                  * string (* system_prompt *)
                  * Oas.Tool.t list
                  * Oas.Raw_trace.t

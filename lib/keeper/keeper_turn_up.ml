@@ -368,11 +368,11 @@ let handle_keeper_up ctx args : tool_result =
         (match ensure_api_keys_for_labels requested_models with
          | Error e -> (false, "❌ " ^ e)
          | Ok () ->
-           let specs = Cascade.available_model_specs_of_strings requested_models in
+           let specs = Model_spec.available_model_specs_of_strings requested_models in
            let trace_id = generate_trace_id () in
            let primary = match specs with
              | m :: _ -> m
-             | [] -> Cascade.default_local_model_spec ()
+             | [] -> Model_spec.default_local_model_spec ()
            in
              let base_dir = session_base_dir ctx.config in
              mkdir_p base_dir;

@@ -5,7 +5,7 @@ let test_parse_text_tool_calls_single () =
   let content =
     {|mcp__masc__masc_team_session_step(session_id="ts-123", turn_kind="note", message="[local64-smoke-01] manager decide online for hybrid smoke")|}
   in
-  match Local_agent_eio.parse_text_tool_calls content with
+  match Worker_runtime.parse_text_tool_calls content with
   | [ Agent_sdk.Types.ToolUse { name; input; _ } ] ->
       check string "tool name" "masc_team_session_step" name;
       let json = input in
@@ -29,7 +29,7 @@ mcp__masc__masc_team_session_step(session_id="ts-123", turn_kind="note", message
 done:local64-smoke-02
 |}
   in
-  match Local_agent_eio.parse_text_tool_calls content with
+  match Worker_runtime.parse_text_tool_calls content with
   | [ Agent_sdk.Types.ToolUse { name = name1; input = input1; _ };
       Agent_sdk.Types.ToolUse { name = name2; _ } ] ->
       check string "first tool" "masc_heartbeat" name1;
@@ -39,7 +39,7 @@ done:local64-smoke-02
   | _ -> fail "expected two parsed text tool calls"
 
 let () =
-  run "Local_agent_eio"
+  run "Worker_runtime"
     [
       ( "parser",
         [

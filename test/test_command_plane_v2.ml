@@ -53,43 +53,10 @@ let () =
             Test_command_plane_v2_scheduler_policy.test_platoon_assignment_expands_detachments_and_tick_runs;
           Alcotest.test_case "freeze requires company approval" `Quick
             Test_command_plane_v2_scheduler_policy.test_freeze_requires_company_approval;
-          Alcotest.test_case "snapshot json reports consistent sections" `Quick
-            Test_command_plane_v2_swarm_history.test_snapshot_json_reports_consistent_sections;
           Alcotest.test_case "best first search blocks and routes research pipeline"
             `Quick
             Test_command_plane_v2_search.test_best_first_search_blocks_and_routes_research_pipeline;
           Alcotest.test_case "invalid search strategy is rejected" `Quick
             Test_command_plane_v2_search.test_invalid_search_strategy_is_rejected;
-        ] );
-      ( "swarm",
-        [
-          Alcotest.test_case "swarm live restores completed workers" `Quick
-            Test_command_plane_v2_swarm_history.test_swarm_live_json_restores_completed_workers_after_leave;
-          Alcotest.test_case "swarm live ignores stale previous-run evidence" `Quick
-            Test_command_plane_v2_swarm_history.test_swarm_live_json_ignores_stale_evidence_from_previous_run;
-          Alcotest.test_case "swarm live scopes markers to sender" `Quick
-            Test_command_plane_v2_swarm_history.test_swarm_live_json_scopes_markers_to_sender;
-          Alcotest.test_case "summary json omits heavy arrays" `Quick
-            Test_command_plane_v2_swarm_summary.test_summary_json_omits_heavy_arrays_and_keeps_summaries;
-          Alcotest.test_case "summary swarm proof prefers artifact" `Quick
-            Test_command_plane_v2_swarm_summary.test_summary_json_swarm_proof_prefers_artifact;
-          Alcotest.test_case "summary swarm proof fallback and missing" `Quick
-            Test_command_plane_v2_swarm_summary.test_summary_json_swarm_proof_fallback_and_missing;
-          Alcotest.test_case "swarm live reads custom worker count from operation note" `Quick
-            Test_command_plane_v2_swarm_summary.test_swarm_live_json_reads_custom_worker_count_from_operation_note;
-          Alcotest.test_case "swarm live reads runtime doctor and blockers" `Quick
-            Test_command_plane_v2_swarm_summary.test_swarm_live_json_reads_runtime_doctor_and_blockers;
-          Alcotest.test_case "swarm live recommends rerun without resumable state" `Quick
-            Test_command_plane_v2_swarm_summary.test_swarm_live_json_recommends_rerun_without_resumable_state;
-          Alcotest.test_case "swarm live recommends continue and hides after abandon" `Quick
-            Test_command_plane_v2_swarm_summary.test_swarm_live_json_recommends_continue_for_paused_run_and_hides_after_abandon;
-          Alcotest.test_case "swarm live wrapper persists summary" `Quick
-            Test_command_plane_v2_wrapper.test_swarm_live_run_with_runner_persists_summary;
-          Alcotest.test_case "swarm live wrapper reports runner exceptions" `Quick
-            Test_command_plane_v2_wrapper.test_swarm_live_run_with_runner_returns_error_on_exception;
-          Alcotest.test_case "swarm live wrapper rejects invalid run_id" `Quick
-            Test_command_plane_v2_wrapper.test_swarm_live_run_rejects_invalid_run_id;
-          Alcotest.test_case "swarm live reports sync self unsupported" `Quick
-            Test_command_plane_v2_wrapper.test_swarm_live_run_reports_sync_self_unsupported_after_preflight;
         ] );
     ]

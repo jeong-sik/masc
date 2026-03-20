@@ -166,7 +166,7 @@ let run ~(sw : Eio.Switch.t) ~(config : Room.config) (state : Mdal.loop_state)
   in
   let worker_name = worker_name_for_state state in
   match
-    Local_agent_eio.run_worker ~sw ~base_path:config.Room_utils.base_path
+    Worker_runtime.run_worker ~sw ~base_path:config.Room_utils.base_path
       ~room_config:(Some config)
       ~worker_name ~model:model_spec ~team_session_id:None ~role:(Some "mdal")
       ~selection_note:(Some "strict-mdal-worker")

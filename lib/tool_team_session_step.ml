@@ -179,7 +179,7 @@ let execute_spawn_pipeline
                        ~success:spawn_result.success
                        ~output_preview
                        ~evidence_session_id:
-                         (Local_agent_eio
+                         (Worker_runtime
                           .oas_worker_evidence_session_id
                             ~worker_run_id:
                               prepared.worker_run_id)
@@ -451,7 +451,7 @@ let execute_delegate_pipeline
               in
               let run_delegate () =
                 match
-                  Local_agent_eio.continue_worker ~sw:ctx.sw
+                  Worker_runtime.continue_worker ~sw:ctx.sw
                     ~base_path:ctx.config.base_path
                     ~room_config:(Some ctx.config)
                     ~worker_name ~team_session_id:session_id
@@ -487,7 +487,7 @@ let execute_delegate_pipeline
                         run_result.tool_call_count
                       ~success:true ~output_preview
                       ~evidence_session_id:
-                        (Local_agent_eio
+                        (Worker_runtime
                          .oas_worker_evidence_session_id
                            ~worker_run_id)
                       ?trace_ref:run_result.raw_trace_run
@@ -560,7 +560,7 @@ let execute_delegate_pipeline
                       ~resolved_runtime:"local"
                       ~success:false ~error:err
                       ~evidence_session_id:
-                        (Local_agent_eio
+                        (Worker_runtime
                          .oas_worker_evidence_session_id
                            ~worker_run_id)
                       ~trace_capability:"summary_only" ();

@@ -85,7 +85,7 @@ let tool_schemas_for_profile ?(include_hidden = false) ?(include_deprecated = fa
                && Tool_catalog.is_visible schema.name)
       in
       dedupe_tool_schemas_by_name
-        (Agent_swarm_contract.sdk_tool_schemas @ passthrough)
+        (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
   | Operator_remote -> Tool_operator.remote_schemas
   | Role_filtered mode ->
       let categories = Mode.categories_for_mode mode in
@@ -194,28 +194,6 @@ let permissive_object_schema properties =
     ]
 
 let tool_output_schema_field = function
-  | "masc_swarm_live_run" ->
-      Some
-        (permissive_object_schema
-           [
-             ("status", `Assoc [ ("type", `String "string") ]);
-             ("run_id", `Assoc [ ("type", `String "string") ]);
-             ("pid", `Assoc [ ("type", `String "integer") ]);
-             ("worker_count", `Assoc [ ("type", `String "integer") ]);
-             ("monitor", `Assoc [ ("type", `String "string") ]);
-           ])
-  | "masc_swarm_live_status" ->
-      Some
-        (permissive_object_schema
-           [
-             ("status", `Assoc [ ("type", `String "string") ]);
-             ("run_id", `Assoc [ ("type", `String "string") ]);
-             ("pid", `Assoc [ ("type", `String "integer") ]);
-             ("summary", `Assoc [ ("type", `String "object") ]);
-             ("runtime_doctor", `Assoc [ ("type", `String "object") ]);
-             ("log_tail", `Assoc [ ("type", `String "string") ]);
-             ("swarm", `Assoc [ ("type", `String "object") ]);
-           ])
   | "masc_team_session_status" ->
       Some
         (permissive_object_schema

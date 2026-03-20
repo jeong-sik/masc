@@ -153,8 +153,7 @@ let attention_item_to_yojson (item : attention_item) =
 
 let recommended_confirm_required = function
   | "room_pause" | "team_stop" | "task_inject" | "team_task_inject"
-  | "team_worker_spawn_batch" | "swarm_run_continue"
-  | "swarm_run_rerun" | "swarm_run_abandon" ->
+  | "team_worker_spawn_batch" ->
       true
   | _ -> false
 

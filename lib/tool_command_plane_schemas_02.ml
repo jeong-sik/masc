@@ -15,7 +15,7 @@ Pair with masc_observe_alerts for derived alerts on problematic units.";
       description =
         "Read the swarm-live projection for a run or operation with pass/fail summary, hot-slot proof, and runtime blockers. \
 Use when monitoring a swarm-live execution or diagnosing why slots are blocked. \
-Pair with masc_swarm_live_run to start a new swarm run.";
+Pair with masc_observe_alerts for a full picture.";
       input_schema =
         object_schema
           [
@@ -50,33 +50,6 @@ Pair with masc_operation_status for the operation's current state.";
           [
             ("operation_id", string_prop "Operation id.");
             ("limit", integer_prop ~default:25 "Maximum events to return.");
-          ];
-    };
-    {
-      name = "masc_swarm_live_run";
-      description =
-        "Launch the swarm-live harness asynchronously, returning a run_id for status polling. \
-Runs preflight checks first; on success forks the harness in background. \
-Use masc_swarm_live_status to monitor progress and retrieve results.";
-      input_schema =
-        object_schema
-          [
-            ("run_id", string_prop "Run identifier (default: swarm-live).");
-            ( "worker_count",
-              integer_prop ~default:12
-                "Number of swarm workers to spawn (default: 12)." );
-          ];
-    };
-    {
-      name = "masc_swarm_live_status";
-      description =
-        "Check the status of an async swarm-live run launched by masc_swarm_live_run. \
-Returns running/completed/failed with summary, runtime doctor, and log tail. \
-Use after masc_swarm_live_run to poll for completion.";
-      input_schema =
-        object_schema
-          [
-            ("run_id", string_prop "Run identifier (default: swarm-live).");
           ];
     };
 ]

@@ -269,11 +269,11 @@ module Rest = struct
       [ "masc" ]
 
   let parameters_from_schema (schema : Yojson.Safe.t) =
-    let required = Agent_swarm_contract.required_names schema in
-    Agent_swarm_contract.property_map schema
+    let required = Sdk_tool_contract.required_names schema in
+    Sdk_tool_contract.property_map schema
     |> List.map (fun (name, property_schema) ->
            let description =
-             Agent_swarm_contract.string_member "description" property_schema
+             Sdk_tool_contract.string_member "description" property_schema
              |> Option.value
                   ~default:(Printf.sprintf "%s parameter" name)
            in
@@ -289,8 +289,8 @@ module Rest = struct
   let operation_catalog_entry name (schema : Types.tool_schema) =
     let entry = help_entry name in
     let aliases =
-      Agent_swarm_contract.sdk_aliases_for_operation name
-      |> List.map Agent_swarm_contract.sdk_alias_json
+      Sdk_tool_contract.sdk_aliases_for_operation name
+      |> List.map Sdk_tool_contract.sdk_alias_json
     in
     let rest_bindings =
       actual_rest_bindings_for_operation name
@@ -424,7 +424,7 @@ module Rest = struct
   let generate_openapi_document ?(host = "127.0.0.1") ?(port = 8935) () :
       Yojson.Safe.t =
     let operation_entries =
-      Agent_swarm_contract.core_remote_operation_names
+      Sdk_tool_contract.core_remote_operation_names
       |> List.filter_map (fun name ->
              match find_schema name with
              | Some schema -> Some (name, schema)
@@ -436,8 +436,8 @@ module Rest = struct
         operation_entries
     in
     let sdk_tools =
-      List.map Agent_swarm_contract.sdk_alias_json
-        Agent_swarm_contract.sdk_bindings
+      List.map Sdk_tool_contract.sdk_alias_json
+        Sdk_tool_contract.sdk_bindings
     in
     let components_schemas =
       operation_entries

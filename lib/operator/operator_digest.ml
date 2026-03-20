@@ -214,75 +214,7 @@ let room_recommendations ?command_plane_summary config =
                  }
            | _ -> None)
   in
-  let swarm_resolution_recommendation =
-    let swarm = Command_plane_v2.swarm_live_json config () in
-    match U.member "resolution_recommendation" swarm with
-    | `Assoc _ as recommendation -> (
-        match
-          recommendation |> U.member "recommended_kind" |> U.to_string_option,
-          swarm |> U.member "run_id" |> U.to_string_option
-        with
-        | Some recommended_kind, Some run_id -> (
-            let reason =
-              recommendation |> U.member "reason" |> U.to_string_option
-              |> Option.value ~default:"swarm-live run needs operator resolution"
-            in
-            let operation_id =
-              match U.member "operation" swarm with
-              | `Assoc _ as operation ->
-                  operation |> U.member "operation_id" |> U.to_string_option
-              | _ -> None
-            in
-            let payload =
-              `Assoc
-                [
-                  ("run_id", `String run_id);
-                  ("reason", `String reason);
-                  ( "evidence",
-                    match recommendation |> U.member "evidence" with
-                    | `Assoc _ as evidence -> evidence
-                    | _ -> `Assoc [] );
-                ]
-            in
-            let payload =
-              match operation_id with
-              | Some value -> (
-                  match payload with
-                  | `Assoc fields ->
-                      `Assoc (("operation_id", `String value) :: fields)
-                  | other -> other)
-              | None -> payload
-            in
-            let action_type =
-              match recommended_kind with
-              | "continue" -> "swarm_run_continue"
-              | "rerun" -> "swarm_run_rerun"
-              | "abandon" -> "swarm_run_abandon"
-              | _ -> ""
-            in
-            if action_type = "" then None
-            else
-              Some
-                {
-                  action_type;
-                  target_type = "swarm_run";
-                  target_id = Some run_id;
-                  severity =
-                    (match recommendation |> U.member "recommended_kind" |> U.to_string_option with
-                    | Some "continue" -> "warn"
-                    | _ -> "bad");
-                  reason;
-                  suggested_payload = payload;
-                })
-        | _ -> None)
-    | _ -> None
-  in
-  dedup_recommendations
-    (signal_recommendations
-    @
-    match swarm_resolution_recommendation with
-    | Some item -> [ item ]
-    | None -> [])
+  dedup_recommendations signal_recommendations
 
 let digest_json ?actor ?target_type ?target_id ?include_workers ?sessions
     (ctx : 'a context) : (Yojson.Safe.t, string) result =

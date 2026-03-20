@@ -1,8 +1,8 @@
-(** Local_agent_eio_container — worker container, meta, checkpoint, and tool building. *)
+(** Worker_container — worker container, meta, checkpoint, and tool building. *)
 
 open Printf
 
-include Local_agent_eio_types
+include Worker_container_types
 
 let tool_profile_to_string = function
   | Profile_session_min -> "session_min"

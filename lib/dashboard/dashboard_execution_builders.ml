@@ -160,22 +160,37 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     | `Int value -> Some (float_of_int value)
     | _ -> None
   in
-  let last_signal_at =
-    match trim_to_option (string_field "last_autonomous_action_at" keeper) with
-    | Some value -> Some value
-    | None -> trim_to_option (string_field "updated_at" keeper)
+  (* last_autonomous_action_at = actual keeper action (not heartbeat).
+     updated_at is polluted by heartbeat — only use as last_heartbeat_at. *)
+  let last_action_at =
+    trim_to_option (string_field "last_autonomous_action_at" keeper)
   in
+  let last_heartbeat_at =
+    trim_to_option (string_field "updated_at" keeper)
+  in
+  (* last_signal_at: prefer autonomous action, fall back to heartbeat *)
+  let last_signal_at =
+    match last_action_at with
+    | Some _ -> last_action_at
+    | None -> last_heartbeat_at
+  in
+  let last_action_ts = parse_iso_opt last_action_at |> Option.value ~default:0.0 in
   let last_signal_ts = parse_iso_opt last_signal_at |> Option.value ~default:0.0 in
-  let last_age_s =
-    if last_signal_ts > 0.0 then max 0.0 (now_ts -. last_signal_ts)
+  let last_action_age_s =
+    if last_action_ts > 0.0 then max 0.0 (now_ts -. last_action_ts)
     else infinity
   in
+  let autonomous_action_count = int_field "autonomous_action_count" keeper in
+  let turn_count = int_field "turn_count" keeper in
+  let generation = int_field "generation" keeper in
+  let goal_count = List.length (list_field "active_goal_ids" keeper) in
   let lifecycle =
     if List.mem status [ "offline"; "inactive"; "error" ] then "offline"
     else if Option.value ~default:0.0 context_ratio >= 0.85 then "handoff-imminent"
     else if Option.value ~default:0.0 context_ratio >= 0.70 then "preparing"
     else if Option.value ~default:0.0 context_ratio >= 0.50 then "compacting"
-    else if last_signal_ts > 0.0 then "active"
+    else if last_action_ts > 0.0 then "active"
+    else if last_signal_ts > 0.0 then "idle"
     else "idle"
   in
   let (state, tone, note) =
@@ -183,19 +198,20 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
       ("critical", "bad", "keeper 오프라인")
     else if lifecycle = "handoff-imminent" then
       ("critical", "bad", "핸드오프 임박")
-    else if lifecycle = "preparing" || lifecycle = "compacting" || last_age_s >= 3600.0 then
-      ( "warning",
-        "warn",
-        if last_age_s >= 3600.0 then "최근 자율 활동이 오래 비었습니다"
-        else "연속성 압력이 높습니다" )
+    else if lifecycle = "preparing" || lifecycle = "compacting" then
+      ("warning", "warn", "연속성 압력이 높습니다")
+    else if autonomous_action_count = 0 && turn_count > 0 then
+      ("warning", "warn",
+       Printf.sprintf "자율 행동 없음 (턴 %d회 수행)" turn_count)
+    else if last_action_age_s >= 3600.0 then
+      ("warning", "warn",
+       Printf.sprintf "마지막 행동 %.0f시간 전" (last_action_age_s /. 3600.0))
     else
-      ("healthy", "ok", "하트비트와 연속성 상태가 안정적입니다")
+      ("healthy", "ok", "정상 동작 중")
   in
   let continuity =
-    Printf.sprintf "Gen %d · Turns %d · Goals %d"
-      (int_field "generation" keeper)
-      (int_field "turn_count" keeper)
-      (List.length (list_field "active_goal_ids" keeper))
+    Printf.sprintf "Gen %d · Turns %d · Actions %d · Goals %d"
+      generation turn_count autonomous_action_count goal_count
   in
   let focus =
     match trim_to_option (string_field "short_goal" keeper) with
@@ -256,8 +272,20 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
           ("latest_tool_call_count", option_to_json (fun value -> `Int value) audit.latest_tool_call_count);
           ("tool_audit_source", json_string_option audit.tool_audit_source);
           ("tool_audit_at", json_string_option audit.tool_audit_at);
+          ("autonomous_action_count", `Int autonomous_action_count);
+          ("last_heartbeat_at", json_string_option last_heartbeat_at);
           ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
-          ("continuity_summary", member_assoc "continuity_summary" keeper);
+          ("continuity_summary", `String (
+            match trim_to_option (string_field "continuity_summary" keeper) with
+            | Some s -> s
+            | None ->
+              if autonomous_action_count = 0 && turn_count = 0 then
+                "아직 활동 기록이 없습니다"
+              else if autonomous_action_count = 0 then
+                Printf.sprintf "대기 중 (턴 %d회, 자율 행동 0회)" turn_count
+              else
+                Printf.sprintf "행동 %d회, 턴 %d회, 세대 %d"
+                  autonomous_action_count turn_count generation));
           ("skill_route_summary", json_string_option skill_route_summary);
           ( "model",
             match trim_to_option (string_field "active_model" keeper) with

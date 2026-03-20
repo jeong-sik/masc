@@ -12,8 +12,6 @@ type ('clock, 'net) context = ('clock, 'net) Tool_command_plane_support.context 
 type result = Tool_command_plane_support.result
 
 let backfill_chain_overlays = Tool_command_plane_chain_query.backfill_chain_overlays
-let handle_swarm_live_run_with_runner = Tool_command_plane_swarm_live.handle_swarm_live_run_with_runner
-let handle_swarm_live_run = Tool_command_plane_swarm_live.handle_swarm_live_run
 let dispatch = Tool_command_plane_dispatch.dispatch
 
 let schemas : Types.tool_schema list =

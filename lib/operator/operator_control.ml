@@ -14,26 +14,8 @@ let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
     proc_mgr = ctx.proc_mgr;
   }
 
-let tool_command_plane_ctx (ctx : 'a context) : _ Tool_command_plane.context =
-  {
-    config = ctx.config;
-    agent_name = ctx.agent_name;
-    sw = Some ctx.sw;
-    clock = Some ctx.clock;
-    net = None;
-    mcp_state = None;
-    mcp_session_id = ctx.mcp_session_id;
-    auth_token = None;
-  }
-
 let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
   match Tool_keeper.dispatch (tool_keeper_ctx ctx) ~name:tool_name ~args with
-  | Some (true, body) -> Ok (json_of_dispatch_output body)
-  | Some (false, err) -> Error err
-  | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
-
-let dispatch_command_plane_json (ctx : 'a context) ~tool_name ~args =
-  match Tool_command_plane.dispatch (tool_command_plane_ctx ctx) ~name:tool_name ~args with
   | Some (true, body) -> Ok (json_of_dispatch_output body)
   | Some (false, err) -> Error err
   | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
@@ -532,128 +514,6 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
           ])
   | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)
 
-let execute_swarm_action (ctx : 'a context) (request : action_request) =
-  match request.action_type with
-  | "swarm_run_continue" ->
-      let* () = validate_target_type "swarm_run" request in
-      let* swarm_json = swarm_run_json_for_request ctx request in
-      let operation_id = swarm_run_operation_id swarm_json in
-      let detachment_id = swarm_run_detachment_id swarm_json in
-      let pending_decisions =
-        swarm_json |> U.member "summary" |> U.member "pending_decisions"
-        |> U.to_int_option |> Option.value ~default:0
-      in
-      if pending_decisions > 0 then
-        Error "swarm run has pending approvals; resolve approvals before continue"
-      else
-        let steps =
-          (match
-             swarm_json |> U.member "operation" |> U.member "status"
-             |> U.to_string_option
-           with
-          | Some "paused" -> [ ("masc_operation_resume", `Assoc [ ("operation_id", option_to_json (fun value -> `String value) operation_id) ]) ]
-          | _ -> [])
-          @
-          (match operation_id, detachment_id with
-          | Some value, _ ->
-              [ ("masc_dispatch_tick", `Assoc [ ("operation_id", `String value) ]) ]
-          | None, Some value ->
-              [ ("masc_dispatch_tick", `Assoc [ ("detachment_id", `String value) ]) ]
-          | None, None -> [])
-        in
-        if steps = [] then
-          Error "swarm run has no resumable managed operation or detachment"
-        else
-          let* results =
-            steps
-            |> List.fold_left
-                 (fun acc (tool_name, args) ->
-                   let* collected = acc in
-                   let* result_json =
-                     dispatch_command_plane_json ctx ~tool_name ~args
-                   in
-                   Ok
-                     (collected
-                     @ [
-                         `Assoc
-                           [
-                             ("tool", `String tool_name);
-                             ("args", args);
-                             ("result", result_json);
-                           ];
-                       ]))
-                 (Ok [])
-          in
-          let run_id = Option.value ~default:"swarm-live" request.target_id in
-          let reason =
-            swarm_run_reason swarm_json
-              "command-plane recovery chain executed for swarm-live run"
-          in
-          let resolution =
-            Command_plane_v2.record_swarm_run_resolution_json ctx.config ~run_id
-              ~status:"continued" ~actor:request.actor ~reason ?operation_id
-              ?detachment_id
-              ?note:(Some "operator continue chain executed") ()
-          in
-          Ok
-            (`Assoc
-              [
-                ("delegated_tool", `String "swarm_run_continue_chain");
-                ("delegated_tools", `List (List.map (fun (tool_name, _) -> `String tool_name) steps));
-                ("result", `List results);
-                ("resolution", resolution);
-              ])
-  | "swarm_run_rerun" ->
-      let* () = validate_target_type "swarm_run" request in
-      let* swarm_json = swarm_run_json_for_request ctx request in
-      let run_id = Option.value ~default:"swarm-live" request.target_id in
-      let args = `Assoc [ ("run_id", `String run_id) ] in
-      let* rerun_result =
-        dispatch_command_plane_json ctx ~tool_name:"masc_swarm_live_run" ~args
-      in
-      let resolution =
-        Command_plane_v2.record_swarm_run_resolution_json ctx.config ~run_id
-          ~status:"rerun" ~actor:request.actor
-          ~reason:
-            (swarm_run_reason swarm_json
-               "swarm-live harness rerun requested through operator control")
-          ?operation_id:(swarm_run_operation_id swarm_json)
-          ?detachment_id:(swarm_run_detachment_id swarm_json)
-          ?note:(Some "operator rerun executed") ()
-      in
-      Ok
-        (`Assoc
-          [
-            ("delegated_tool", `String "masc_swarm_live_run");
-            ("delegated_tools", `List [ `String "masc_swarm_live_run" ]);
-            ("result", rerun_result);
-            ("resolution", resolution);
-          ])
-  | "swarm_run_abandon" ->
-      let* () = validate_target_type "swarm_run" request in
-      let* swarm_json = swarm_run_json_for_request ctx request in
-      let run_id = Option.value ~default:"swarm-live" request.target_id in
-      let resolution =
-        Command_plane_v2.record_swarm_run_resolution_json ctx.config ~run_id
-          ~status:"abandoned" ~actor:request.actor
-          ~reason:
-            (get_string request.payload "reason"
-               (swarm_run_reason swarm_json
-                  "swarm-live run was soft-abandoned by operator"))
-          ?operation_id:(swarm_run_operation_id swarm_json)
-          ?detachment_id:(swarm_run_detachment_id swarm_json)
-          ?note:(Some "soft abandon; no operation stop issued") ()
-      in
-      Ok
-        (`Assoc
-          [
-            ("delegated_tool", `String "swarm_run_resolution");
-            ("delegated_tools", `List []);
-            ("result", `Assoc [ ("recorded", `Bool true) ]);
-            ("resolution", resolution);
-          ])
-  | _ -> Error (Printf.sprintf "not a swarm action: %s" request.action_type)
-
 let execute_action (ctx : 'a context) (request : action_request) :
     (Yojson.Safe.t, string) result =
   match request.action_type with
@@ -664,8 +524,6 @@ let execute_action (ctx : 'a context) (request : action_request) :
       execute_team_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
-  | "swarm_run_continue" | "swarm_run_rerun" | "swarm_run_abandon" ->
-      execute_swarm_action ctx request
   | "" -> Error "action_type is required"
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
@@ -676,7 +534,6 @@ let validate_request request =
   | "team_broadcast" | "team_task_inject" | "team_worker_spawn_batch"
   | "team_stop"
   | "keeper_message" | "keeper_probe" | "keeper_recover"
-  | "swarm_run_continue" | "swarm_run_rerun" | "swarm_run_abandon"
   | "task_inject" ->
       Ok ()
   | "" -> Error "action_type is required"
@@ -694,10 +551,6 @@ let action_json ?actor_hint (ctx : _ context) args :
     let* token = generate_confirm_token ~clock:ctx.clock ctx.config in
     let preview =
       match request.action_type with
-      | "swarm_run_continue" | "swarm_run_rerun" | "swarm_run_abandon" -> (
-          match swarm_run_json_for_request ctx request with
-          | Ok swarm_json -> swarm_run_chain_preview request swarm_json
-          | Error _ -> preview_of_action request)
       | _ -> preview_of_action request
     in
     let entry =

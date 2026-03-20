@@ -65,8 +65,6 @@ let help_doc_refs name =
     || String.starts_with ~prefix:"masc_policy_" name
     || String.starts_with ~prefix:"masc_observe_" name
     || String.starts_with ~prefix:"masc_detachment_" name
-    || String.equal name "masc_swarm_live_run"
-    || String.equal name "masc_swarm_live_status"
   then
     [
       "docs/COMMAND-PLANE-RUNBOOK.md";
@@ -201,49 +199,6 @@ let manual_help_entry name =
               "docs/BENCHMARK-RUNBOOK.md";
             ];
           prompt_hints = [ "Use prompt 'command_truth' to inspect resulting execution evidence." ];
-        }
-  | "masc_swarm_live_run" ->
-      Some
-        {
-          name;
-          short_description = "Launch the swarm-live harness asynchronously; returns run_id for status polling.";
-          when_to_use = "Use when you need to run a swarm benchmark or multi-agent execution. Follow up with masc_swarm_live_status.";
-          key_constraints =
-            [
-              "Runs preflight first; forks harness in background on success.";
-              "Returns immediately with run_id and pid.";
-              "Use masc_swarm_live_status to poll for completion.";
-            ];
-          details_markdown =
-            "Launches the swarm-live harness asynchronously to avoid MCP reentrancy deadlock. \
-             Preflight validates runtime readiness. On success the harness runs as a background process \
-             writing artifacts to .masc/control-plane/swarm-live/<run_id>/.";
-          doc_refs =
-            [
-              "docs/COMMAND-PLANE-RUNBOOK.md";
-              "docs/BENCHMARK-RUNBOOK.md";
-            ];
-          prompt_hints = [ "Poll with masc_swarm_live_status after launch." ];
-        }
-  | "masc_swarm_live_status" ->
-      Some
-        {
-          name;
-          short_description = "Check the status of an async swarm-live run.";
-          when_to_use = "Use after masc_swarm_live_run to check if the harness is still running, completed, or failed.";
-          key_constraints =
-            [
-              "Returns running/completed/failed status with artifacts.";
-              "Includes log tail, summary JSON, and runtime doctor when available.";
-            ];
-          details_markdown =
-            "Reads the PID file and artifact directory for a given run_id to determine execution status. \
-             Returns summary and runtime doctor JSON when the harness has completed.";
-          doc_refs =
-            [
-              "docs/COMMAND-PLANE-RUNBOOK.md";
-            ];
-          prompt_hints = [];
         }
   | "masc_tool_admin_snapshot" ->
       Some

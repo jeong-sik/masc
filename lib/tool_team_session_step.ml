@@ -80,23 +80,74 @@ let execute_spawn_pipeline
                    Some (`Assoc [ ("error", `String msg) ])
                | Ok () ->
                    let execute_spawn index prepared =
-                     (* Spawn_eio removed; use blocking Spawn.spawn.
-                        Extra Spawn_eio-only params are ignored; result fields
-                        (tool_names, tool_call_count, raw_trace_run) get defaults. *)
-                     let spawn_result =
-                       Spawn.spawn
-                         ~agent_name:prepared.spec.spawn_agent
-                         ~prompt:prepared.spec.spawn_prompt
-                         ~timeout_seconds:
-                           prepared.spec.spawn_timeout_seconds
+                     (* Phase C-3a: Route spawn through OAS Agent.run via Oas_worker.
+                        This replaces the old Spawn.spawn subprocess call, giving us
+                        trace data, tool_names, and tool_call_count for free. *)
+                     let start_time = Time_compat.now () in
+                     let max_turns =
+                       match prepared.spec.max_turns with
+                       | Some n -> n | None -> 10
+                     in
+                     let oas_result =
+                       Oas_worker.run_model
+                         ~model_spec:prepared.runtime_model
+                         ~goal:prepared.spec.spawn_prompt
+                         ~system_prompt:(Printf.sprintf
+                           "You are agent '%s'. Execute the task and return a clear result."
+                           prepared.spec.spawn_agent)
+                         ~max_turns
+                         ~temperature:0.3
+                         ~max_tokens:4096
                          ()
                      in
-                   let output_preview =
+                     let elapsed_ms =
+                       int_of_float ((Time_compat.now () -. start_time) *. 1000.0)
+                     in
+                     let spawn_result, oas_trace_ref, oas_tool_names, oas_tool_call_count =
+                       match oas_result with
+                       | Ok result ->
+                         let text = Agent_sdk.Types.text_of_content result.response.content in
+                         let tool_names =
+                           List.filter_map (function
+                             | Agent_sdk.Types.ToolUse { name; _ } -> Some name
+                             | _ -> None)
+                             result.response.content
+                         in
+                         let usage = result.response.usage in
+                         ({ Spawn.success = true;
+                            output = text;
+                            exit_code = 0;
+                            elapsed_ms;
+                            input_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.input_tokens) usage;
+                            output_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.output_tokens) usage;
+                            cache_creation_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.cache_creation_input_tokens) usage;
+                            cache_read_tokens = Option.map (fun (u : Agent_sdk.Types.api_usage) -> u.cache_read_input_tokens) usage;
+                            cost_usd = None;
+                          },
+                          None,
+                          tool_names,
+                          List.length tool_names)
+                       | Error e ->
+                         ({ Spawn.success = false;
+                            output = e;
+                            exit_code = 1;
+                            elapsed_ms;
+                            input_tokens = None;
+                            output_tokens = None;
+                            cache_creation_tokens = None;
+                            cache_read_tokens = None;
+                            cost_usd = None;
+                          },
+                          None,
+                          [],
+                          0)
+                     in
+                     let output_preview =
                        deps.truncate_for_event spawn_result.output
                      in
-                     (* raw_trace_run is no longer available after Spawn_eio removal *)
                      let trace_summary_json = (None : Yojson.Safe.t option) in
                      let trace_validation_json = (None : Yojson.Safe.t option) in
+                     let _oas_trace_ref = oas_trace_ref in
                      (match spawn_result.success with
                      | true ->
                          release_prepared_runtime prepared
@@ -123,8 +174,8 @@ let execute_spawn_pipeline
                        ?resolved_runtime:prepared.assigned_runtime
                        ~resolved_model:prepared.runtime_model.model_id
                        ?routing_reason:prepared.spec.routing_reason
-                       ~tool_names:([] : string list)
-                       ~tool_call_count:0
+                       ~tool_names:oas_tool_names
+                       ~tool_call_count:oas_tool_call_count
                        ~success:spawn_result.success
                        ~output_preview
                        ~evidence_session_id:
@@ -135,12 +186,7 @@ let execute_spawn_pipeline
                        ?trace_ref:None
                        ?trace_summary:trace_summary_json
                        ?trace_validation:trace_validation_json
-                         ~trace_capability:
-                         (if false (* raw_trace_run unavailable *) then
-                            "raw"
-                          else if deps.is_local_spawn_agent prepared.spec.spawn_agent
-                          then "summary_only"
-                          else "summary_only")
+                         ~trace_capability:"raw"
                        ();
                      append_spawn_event
                        ~worker_run_id:prepared.worker_run_id
@@ -152,14 +198,9 @@ let execute_spawn_pipeline
                          (deps.effective_execution_scope_of_spec prepared.spec)
                        ?worker_class:prepared.spec.worker_class
                        ?worker_size:(deps.worker_size_of_spec prepared.spec)
-                       ?worker_backend:
-                         (if deps.is_local_spawn_agent prepared.spec.spawn_agent
-                          then Some "local" else None)
+                       ?worker_backend:(Some "oas")
                        ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
-                       ~trace_capability:
-                         (if deps.is_local_spawn_agent prepared.spec.spawn_agent
-                          then "summary_only"
-                          else "summary_only")
+                       ~trace_capability:"raw"
                        ?parent_actor:prepared.spec.parent_actor
                        ?capsule_mode:prepared.spec.capsule_mode
                        ?runtime_pool:prepared.spec.runtime_pool
@@ -175,8 +216,8 @@ let execute_spawn_pipeline
                        ?assigned_runtime:prepared.assigned_runtime
                        ?spawn_selection_note:
                          prepared.spec.spawn_selection_note
-                       ~tool_names:([] : string list)
-                       ~tool_call_count:0
+                       ~tool_names:oas_tool_names
+                       ~tool_call_count:oas_tool_call_count
                        ~success:spawn_result.success
                        ~exit_code:spawn_result.exit_code
                        ~elapsed_ms:spawn_result.elapsed_ms

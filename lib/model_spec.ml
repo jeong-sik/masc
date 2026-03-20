@@ -170,7 +170,7 @@ let rec model_spec_of_string s =
         | Some adapter when adapter.canonical_name = "codex-api" ->
           Ok { openai_default with model_id }
         | Some adapter when adapter.canonical_name = "glm" ->
-          (* "auto" or empty -> Glm_pool selects at runtime *)
+          (* "auto" or empty -> GLM provider selects at runtime *)
           let effective_id = if model_id = "auto" then "" else model_id in
           Ok { glm_cloud with model_id = effective_id }
         | Some adapter when adapter.canonical_name = "openrouter" ->

@@ -534,8 +534,8 @@ let preferred_execution_model_labels () =
          (match explicit_llama_model_label_result () with
          | Ok label -> Some label
          | Error _ -> None);
-         (* GLM: even with empty model config, include as "glm:" — Glm_pool
-            selects the model at runtime. *)
+         (* GLM: even with empty model config, include as "glm:" —
+            the GLM provider selects the model at runtime. *)
          (if env_present "ZAI_API_KEY" then
            let m = Env_config.Llm.default_model in
            Some (Printf.sprintf "glm:%s" (if m = "" then "auto" else m))

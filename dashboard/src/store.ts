@@ -67,19 +67,7 @@ export const agentActivity = signal<AgentActivityEntry[]>([])
 
 // --- Provider capacity ---
 
-export interface GlmModelStats {
-  model: string
-  in_flight: number
-  limit: number
-}
-
 export interface ProviderCapacity {
-  glm_pool: {
-    models: GlmModelStats[]
-    total_capacity: number
-    current_load: number
-    has_capacity: boolean
-  }
   agent_capacity: {
     gardener_enabled: boolean
     min_agents: number

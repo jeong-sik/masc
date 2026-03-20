@@ -552,18 +552,6 @@ let dashboard_messages_safe config ~since_seq ~limit =
   Room.get_messages_raw_in_room config ~room_id:(dashboard_current_room_id config) ~since_seq ~limit
 
 let provider_capacity_json () : Yojson.Safe.t =
-  let glm_stats = Glm_pool.get_stats () in
-  let glm_models =
-    List.map
-      (fun (model_id, in_flight, limit) ->
-        `Assoc
-          [
-            ("model", `String model_id);
-            ("in_flight", `Int in_flight);
-            ("limit", `Int limit);
-          ])
-      glm_stats
-  in
   let gardener_enabled =
     match Sys.getenv_opt "MASC_GARDENER_ENABLED" with
     | Some "true" | Some "1" -> true
@@ -576,14 +564,6 @@ let provider_capacity_json () : Yojson.Safe.t =
   in
   `Assoc
     [
-      ( "glm_pool",
-        `Assoc
-          [
-            ("models", `List glm_models);
-            ("total_capacity", `Int Glm_pool.total_capacity);
-            ("current_load", `Int (Glm_pool.current_load ()));
-            ("has_capacity", `Bool (Glm_pool.has_capacity ()));
-          ] );
       ( "agent_capacity",
         `Assoc
           [

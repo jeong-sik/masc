@@ -21,6 +21,7 @@ type social_board_event = {
   post_id : string;
   comment_id : string option;
   author : string;
+  post_author : string option;
   content : string;
   created_at : float;
 }

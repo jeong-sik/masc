@@ -239,28 +239,220 @@ let dashboard_fixture_name ?fixture () =
         | Some value when String.trim value <> "" -> Some (String.trim value)
         | _ -> None)
 
-let get_agent_identity (name : string) =
-  let contains s sub =
-    let len = String.length s in
-    let sub_len = String.length sub in
-    if sub_len > len then false
-    else
-      let rec loop i =
-        if i + sub_len > len then false
-        else if String.sub s i sub_len = sub then true
-        else loop (i + 1)
-      in
-      loop 0
+(** Agent profile enriched from persona profile.json or Neo4j cache. *)
+type agent_profile = {
+  emoji : string;
+  korean_name : string;
+  model : string option;
+  traits : string list;
+  interests : string list;
+  activity_level : float option;
+  primary_value : string option;
+}
+
+(** Extract persona name from MASC agent name.
+    "keeper-sangsu-agent" -> "sangsu", "claude-agent-abc" -> "claude-agent-abc" *)
+let extract_persona_name (agent_name : string) : string =
+  let s = agent_name in
+  let s =
+    if String.length s > 7 && String.sub s 0 7 = "keeper-" then
+      String.sub s 7 (String.length s - 7)
+    else s
   in
-  let normalized = String.lowercase_ascii name in
-  if contains normalized "claude" then ("🧠", "클로드")
-  else if contains normalized "gemini" then ("💎", "제미나이")
-  else if contains normalized "codex" then ("🤖", "코덱스")
-  else if contains normalized "lodge" then ("🏠", "롯지 키퍼")
-  else if contains normalized "gardener" then ("🌿", "정원사")
-  else if contains normalized "review" then ("🔍", "리뷰어")
-  else if contains normalized "test" then ("🧪", "테스터")
-  else ("🤖", name)
+  let s =
+    if String.length s > 6 && String.sub s (String.length s - 6) 6 = "-agent" then
+      String.sub s 0 (String.length s - 6)
+    else s
+  in
+  s
+
+(** Try loading agent profile from local persona profile.json.
+    Path: $ME_ROOT/personas/<persona_name>/profile.json *)
+let load_persona_profile (persona_name : string) : agent_profile option =
+  let me_root =
+    try Env_config.me_root ()
+    with _ -> (
+      match Sys.getenv_opt "HOME" with
+      | Some home -> Filename.concat home "me"
+      | None -> "/tmp")
+  in
+  let path =
+    Filename.concat
+      (Filename.concat (Filename.concat me_root "personas") persona_name)
+      "profile.json"
+  in
+  if not (Sys.file_exists path) then None
+  else
+    match Safe_ops.read_json_file_safe path with
+    | Error _ -> None
+    | Ok json ->
+        let open Yojson.Safe.Util in
+        let name_val =
+          (try Some (json |> member "name" |> to_string) with _ -> None)
+          |> Option.value ~default:persona_name
+        in
+        let keeper_json =
+          try Some (json |> member "keeper") with _ -> None
+        in
+        let model =
+          match keeper_json with
+          | Some kj -> (
+              try Some (kj |> member "active_model" |> to_string)
+              with _ -> None)
+          | None -> None
+        in
+        let trait =
+          try Some (json |> member "trait" |> to_string) with _ -> None
+        in
+        let traits = match trait with Some t -> [t] | None -> [] in
+        Some
+          {
+            emoji = "🎭";  (* placeholder — enriched from Neo4j later *)
+            korean_name = name_val;
+            model;
+            traits;
+            interests = [];
+            activity_level = None;
+            primary_value = None;
+          }
+
+(** Neo4j agent identity cache. Loaded lazily on first access. *)
+let neo4j_identity_cache : (string, agent_profile) Hashtbl.t = Hashtbl.create 32
+let neo4j_cache_loaded = ref false
+
+let load_neo4j_identity_cache () =
+  if !neo4j_cache_loaded then ()
+  else begin
+    neo4j_cache_loaded := true;
+    let body =
+      {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName model traits interests activityLevel primaryValue } } } }"}|}
+    in
+    match Graphql_client.request ~timeout_sec:10.0 body with
+    | Error _ -> ()
+    | Ok output -> (
+        try
+          let json = Yojson.Safe.from_string output in
+          let open Yojson.Safe.Util in
+          let edges =
+            json |> member "data" |> member "agents" |> member "edges"
+            |> to_list
+          in
+          List.iter
+            (fun edge ->
+              let node = edge |> member "node" in
+              let name =
+                try node |> member "name" |> to_string with _ -> ""
+              in
+              if name <> "" then begin
+                let emoji =
+                  (try Some (node |> member "emoji" |> to_string)
+                   with _ -> None)
+                  |> Option.value ~default:"🤖"
+                in
+                let korean_name =
+                  (try Some (node |> member "koreanName" |> to_string)
+                   with _ -> None)
+                  |> Option.value ~default:name
+                in
+                let model =
+                  try Some (node |> member "model" |> to_string)
+                  with _ -> None
+                in
+                let traits =
+                  try node |> member "traits" |> to_list |> List.map to_string
+                  with _ -> []
+                in
+                let interests =
+                  try
+                    node |> member "interests" |> to_list |> List.map to_string
+                  with _ -> []
+                in
+                let activity_level =
+                  try Some (node |> member "activityLevel" |> to_float)
+                  with _ -> None
+                in
+                let primary_value =
+                  try Some (node |> member "primaryValue" |> to_string)
+                  with _ -> None
+                in
+                Hashtbl.replace neo4j_identity_cache name
+                  {
+                    emoji;
+                    korean_name;
+                    model;
+                    traits;
+                    interests;
+                    activity_level;
+                    primary_value;
+                  }
+              end)
+            edges
+        with _ -> ())
+  end
+
+(** Merge two profiles: prefer non-default values from [overlay] over [base]. *)
+let merge_profiles ~(base : agent_profile) ~(overlay : agent_profile) : agent_profile =
+  {
+    emoji = (if overlay.emoji <> "🎭" && overlay.emoji <> "🤖" then overlay.emoji else base.emoji);
+    korean_name = (if overlay.korean_name <> "" then overlay.korean_name else base.korean_name);
+    model = (match overlay.model with Some _ -> overlay.model | None -> base.model);
+    traits = (if overlay.traits <> [] then overlay.traits else base.traits);
+    interests = (if overlay.interests <> [] then overlay.interests else base.interests);
+    activity_level = (match overlay.activity_level with Some _ -> overlay.activity_level | None -> base.activity_level);
+    primary_value = (match overlay.primary_value with Some _ -> overlay.primary_value | None -> base.primary_value);
+  }
+
+(** Get full agent profile: persona + Neo4j merged -> hardcoded fallback *)
+let get_agent_profile (name : string) : agent_profile =
+  let persona_name = extract_persona_name name in
+  load_neo4j_identity_cache ();
+  let neo4j_profile = Hashtbl.find_opt neo4j_identity_cache persona_name in
+  let persona_profile = load_persona_profile persona_name in
+  match (persona_profile, neo4j_profile) with
+  | (Some persona, Some neo4j) ->
+      (* Merge: Neo4j has emoji/traits/interests, persona has model/korean_name *)
+      merge_profiles ~base:persona ~overlay:neo4j
+  | (Some persona, None) -> persona
+  | (None, Some neo4j) -> neo4j
+  | (None, None) ->
+      (* Hardcoded fallback *)
+      let contains s sub =
+        let len = String.length s in
+        let sub_len = String.length sub in
+        if sub_len > len then false
+        else
+          let rec loop i =
+            if i + sub_len > len then false
+            else if String.sub s i sub_len = sub then true
+            else loop (i + 1)
+          in
+          loop 0
+      in
+      let normalized = String.lowercase_ascii name in
+      let (emoji, korean_name) =
+        if contains normalized "claude" then ("🧠", "클로드")
+        else if contains normalized "gemini" then ("💎", "제미나이")
+        else if contains normalized "codex" then ("🤖", "코덱스")
+        else if contains normalized "lodge" then ("🏠", "롯지 키퍼")
+        else if contains normalized "gardener" then ("🌿", "정원사")
+        else if contains normalized "review" then ("🔍", "리뷰어")
+        else if contains normalized "test" then ("🧪", "테스터")
+        else ("🤖", name)
+      in
+      {
+        emoji;
+        korean_name;
+        model = None;
+        traits = [];
+        interests = [];
+        activity_level = None;
+        primary_value = None;
+      }
+
+(** Backward-compatible wrapper: returns (emoji, korean_name) tuple *)
+let get_agent_identity (name : string) =
+  let profile = get_agent_profile name in
+  (profile.emoji, profile.korean_name)
 
 let handoff_json ~surface ?command_surface ?operation_id ~label ~target_type ~target_id
     ~focus_kind () =

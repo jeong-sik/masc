@@ -16,15 +16,16 @@ let set_env ~sw ~(net : [`Generic | `Unix] Eio.Net.ty Eio.Resource.t) =
   sw_ref := Some sw;
   net_ref := Some net
 
-(* ── Cache state ─────────────────────────────────────────── *)
+(* ── Cache state (Eio.Mutex-protected) ───────────────────── *)
 
 type endpoint_info = Llm_provider.Discovery.endpoint_status
 
+let cache_mu = Eio.Mutex.create ()
 let cached_endpoints : endpoint_info list ref = ref []
 let cache_updated_at : float ref = ref 0.0
 let cache_ttl = 30.0
 
-let refresh_cache () =
+let refresh_cache_unlocked () =
   match !sw_ref, !net_ref with
   | Some sw, Some net ->
     let endpoints = Llm_provider.Discovery.endpoints_from_env () in
@@ -32,14 +33,14 @@ let refresh_cache () =
     cached_endpoints := results;
     cache_updated_at := Time_compat.now ()
   | _ ->
-    (* Eio env not yet injected — return empty. Server init calls set_env. *)
     ()
 
 let get_cached_or_refresh () =
-  let now = Time_compat.now () in
-  if now -. !cache_updated_at > cache_ttl || !cached_endpoints = [] then
-    refresh_cache ();
-  !cached_endpoints
+  Eio.Mutex.use_rw ~protect:true cache_mu (fun () ->
+    let now = Time_compat.now () in
+    if now -. !cache_updated_at > cache_ttl || !cached_endpoints = [] then
+      refresh_cache_unlocked ();
+    !cached_endpoints)
 
 let cache_age_seconds () =
   Time_compat.now () -. !cache_updated_at

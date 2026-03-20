@@ -195,7 +195,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                         ~user_message:prompt
                         ~cascade_name:"keeper_proactive"
                         ~generation:meta.generation
-                        ~max_turns:1
+                        ~max_turns:5
                         ~temperature:0.3
                         ~max_tokens:1024 ()) in
                     match delib_result with

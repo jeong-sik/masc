@@ -45,7 +45,7 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
           ~user_message:prompt
           ~cascade_name:"keeper_turn"
           ~generation:meta.generation
-          ~max_turns:1
+          ~max_turns:5
           ~temperature:(Keeper_config.keeper_reflection_temp ())
           ~max_tokens:(Keeper_config.keeper_explicit_reply_max_tokens ())
           ()

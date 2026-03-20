@@ -94,3 +94,15 @@ let institution_as_json (config : Room_utils.config) : Yojson.Safe.t option =
   let welcome = Institution_eio.load_and_format_for_welcome ~fs:() config in
   if welcome = "" then None
   else Some (`String welcome)
+
+(** Pre-seed institutional memory into a [Memory.t] instance.
+
+    Loads institution context and stores it via [Memory.store ~tier:Long_term].
+    This makes institutional guidelines available for cross-agent recall and
+    future auto-injection hooks.  Returns [true] if institution was seeded. *)
+let seed_institution ~(memory : Agent_sdk.Memory.t) ~(config : Room_utils.config) : bool =
+  match institution_as_json config with
+  | Some json ->
+    Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "institution" json;
+    true
+  | None -> false

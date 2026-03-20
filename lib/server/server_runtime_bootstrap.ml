@@ -103,7 +103,7 @@ let init_memory_pg_schema () =
       | Error msg ->
           Log.MemoryPg.error "Schema init failed: %s (long_term_backend will use no-op)" msg)
   | None ->
-      Log.MemoryPg.info "No PG pool available; long_term_backend will use no-op stubs"
+      Log.MemoryPg.info "No PG pool available; long_term_backend will use JSONL fallback"
 
 let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =

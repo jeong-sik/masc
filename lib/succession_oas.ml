@@ -47,7 +47,7 @@ type succession_dna = {
 }
 
 type successor_spec = {
-  model : Cascade.model_spec;
+  model : Model_spec.model_spec;
   inherit_tools : bool;
   context_budget : float;
 }
@@ -284,9 +284,9 @@ let extract_dna ~(working_ctx : Context_manager.working_context)
 
 (** Normalize messages for the target model's constraints. *)
 let normalize_for_model (msgs : Agent_sdk.Types.message list)
-    (target : Cascade.model_spec) : Agent_sdk.Types.message list =
+    (target : Model_spec.model_spec) : Agent_sdk.Types.message list =
   let msgs = match target.provider with
-    | Cascade.Llama ->
+    | Model_spec.Llama ->
       (* Local llama runtimes: merge consecutive system messages, simplify tool messages *)
       List.map (fun (m : Agent_sdk.Types.message) ->
         match m.role with
@@ -301,7 +301,7 @@ let normalize_for_model (msgs : Agent_sdk.Types.message list)
                    name = None; tool_call_id = None }
         | _ -> m
       ) msgs
-    | Cascade.Claude ->
+    | Model_spec.Claude ->
       (* Claude: ensure alternating user/assistant, no consecutive same roles *)
       let rec fix_alternation = function
         | [] -> []

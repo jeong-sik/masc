@@ -67,7 +67,7 @@ type run_result = {
 (* Internal: resolve provider                                        *)
 (* ================================================================ *)
 
-let resolve_provider (spec : Cascade.model_spec) : Oas.Provider.config =
+let resolve_provider (spec : Model_spec.model_spec) : Oas.Provider.config =
   match Oas_type_adapters.to_oas_provider spec with
   | Some cfg -> cfg
   | None ->

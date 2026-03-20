@@ -1,10 +1,11 @@
 open Alcotest
 
 module Cascade = Masc_mcp.Cascade
+module Model_spec = Masc_mcp.Model_spec
 
 let test_string_of_provider () =
-  check string "llama" "llama" (Cascade.string_of_provider Cascade.Llama);
-  check string "gemini" "gemini" (Cascade.string_of_provider Cascade.Gemini)
+  check string "llama" "llama" (Model_spec.string_of_provider Model_spec.Llama);
+  check string "gemini" "gemini" (Model_spec.string_of_provider Model_spec.Gemini)
 
 let test_message_constructors () =
   let tool_msg = Cascade.tool_msg ~name:"grep" ~call_id:"call-1" "done" in
@@ -19,14 +20,14 @@ let test_estimate_tokens_positive () =
   check bool "positive" true (tokens > 0)
 
 let test_model_spec_of_string_llama () =
-  match Cascade.model_spec_of_string "llama:qwen3.5-32b" with
+  match Model_spec.model_spec_of_string "llama:qwen3.5-32b" with
   | Ok spec ->
-      check string "provider" "llama" (Cascade.string_of_provider spec.provider);
+      check string "provider" "llama" (Model_spec.string_of_provider spec.provider);
       check string "model id" "qwen3.5-32b" spec.model_id
   | Error err -> fail ("expected llama model spec, got error: " ^ err)
 
 let test_model_spec_of_string_invalid () =
-  match Cascade.model_spec_of_string "broken" with
+  match Model_spec.model_spec_of_string "broken" with
   | Ok _ -> fail "expected parse error"
   | Error err ->
       check bool "mentions provider:model" true
@@ -39,9 +40,9 @@ let test_sanitize_text_utf8 () =
   check bool "not empty" true (String.length sanitized > 0)
 
 let test_available_model_specs_of_strings_llama () =
-  match Cascade.available_model_specs_of_strings [ "llama:qwen3.5-32b" ] with
+  match Model_spec.available_model_specs_of_strings [ "llama:qwen3.5-32b" ] with
   | [ spec ] ->
-      check string "provider" "llama" (Cascade.string_of_provider spec.provider);
+      check string "provider" "llama" (Model_spec.string_of_provider spec.provider);
       check string "model id" "qwen3.5-32b" spec.model_id
   | _ -> fail "expected one available llama model"
 

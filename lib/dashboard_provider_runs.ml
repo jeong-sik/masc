@@ -471,9 +471,9 @@ let resolve_provider_run_request ~provider ~model_opt ~prompt =
             else
               Ok (snapshot, model))
 
-let oas_provider_config_of_spec (spec : Cascade.model_spec) =
+let oas_provider_config_of_spec (spec : Model_spec.model_spec) =
   match spec.provider with
-  | Cascade.Gemini -> (
+  | Model_spec.Gemini -> (
       match Provider_adapter.resolve_gemini_direct_auth () with
       | Provider_adapter.Gemini_api_key -> Oas_type_adapters.to_oas_provider spec
       | Provider_adapter.Gemini_vertex_adc _ -> None
@@ -490,7 +490,7 @@ let execute_single_agent_run ~sw ~provider ~model ~prompt =
   match label_result with
   | Error _ as error -> error
   | Ok label -> (
-      match Cascade.model_spec_of_string label with
+      match Model_spec.model_spec_of_string label with
       | Error message -> Error message
       | Ok spec -> (
           match oas_provider_config_of_spec spec with

@@ -167,7 +167,7 @@ let evaluate_next_action ~config ~goal_ids ~keeper_name:_ =
           StartPerpetualAgent {
             goal_id = goal.id;
             goal_title = goal.title;
-            models = Cascade.default_execution_model_labels ();
+            models = Model_spec.default_execution_model_labels ();
             coding_mode = true;
             coding_agent = "claude";
           }

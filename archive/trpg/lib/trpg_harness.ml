@@ -104,7 +104,7 @@ let parse_tier1 (text : string) : tier1_result =
   else
     Fail "unparseable response"
 
-let tier1_check ~(model : Cascade.model_spec) ~actor_name ~actor_persona
+let tier1_check ~(model : Model_spec.model_spec) ~actor_name ~actor_persona
     ~response_text : tier1_result =
   let prompt = build_tier1_prompt ~actor_name ~actor_persona ~response_text in
   let req : Cascade.completion_request = {
@@ -198,7 +198,7 @@ let parse_tier2 (text : string) : dimension_score list =
     find_dim Narrative_consistency "NARRATIVE_CONSISTENCY";
   ]
 
-let tier2_evaluate ~(model : Cascade.model_spec) ~actor_name ~actor_persona
+let tier2_evaluate ~(model : Model_spec.model_spec) ~actor_name ~actor_persona
     ~actor_traits ~scene_context ~response_text : dimension_score list =
   let prompt = build_tier2_prompt ~actor_name ~actor_persona ~actor_traits
     ~scene_context ~response_text in

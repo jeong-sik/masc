@@ -576,7 +576,7 @@ let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) 
     cache_read_input_tokens =
       a.cache_read_input_tokens + b.cache_read_input_tokens }
 
-let estimate_cost_usd (model : Cascade.model_spec)
+let estimate_cost_usd (model : Model_spec.model_spec)
     (usage : Agent_sdk.Types.api_usage) : float option =
   let input_cost =
     (float_of_int usage.input_tokens /. 1000.0) *. model.cost_per_1k_input

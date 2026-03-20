@@ -239,7 +239,7 @@ let generate_action_plan ~goal ~keeper_context =
   let prompt = build_plan_prompt goal ~keeper_context in
   match
     Cascade.complete ~cascade_name:"keeper_autonomy"
-      ~messages:[Cascade.user_msg prompt]
+      ~messages:[Agent_sdk.Types.user_msg prompt]
       ~temperature:0.3 ~max_tokens:500 ()
   with
   | Ok resp -> Ok (Cascade.text_of_response resp)

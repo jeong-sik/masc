@@ -1,5 +1,5 @@
 (** Keeper_deliberation — typed action space, deliberation triggers,
-    world observation builder, triage logic, and LLM-driven deliberation.
+    world observation builder, triage logic, and MODEL-driven deliberation.
 
     @since 2.90.0 *)
 
@@ -71,7 +71,7 @@ type triage_result =
 val triage_result_to_json : triage_result -> Yojson.Safe.t
 
 (** Evaluate a world observation and return triggers that warrant deliberation.
-    Pure heuristic — no LLM calls, no I/O. *)
+    Pure heuristic — no MODEL calls, no I/O. *)
 val triage : world_observation -> triage_result
 
 (** {1 Deliberation meta (tracking fields for keeper_meta)} *)
@@ -93,9 +93,9 @@ val deliberation_meta_of_json : Yojson.Safe.t -> deliberation_meta
     Equivalent to the old [if direct_mention then "reply_in_room" else "noop"]. *)
 val deterministic_baseline_action : world_observation -> deliberation_action
 
-(** {1 Phase 2: LLM-Driven Deliberation} *)
+(** {1 Phase 2: MODEL-Driven Deliberation} *)
 
-(** Default daily budget in USD for deliberation LLM calls. *)
+(** Default daily budget in USD for deliberation MODEL calls. *)
 val default_daily_budget_usd : float
 
 (** Read the daily budget from [MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD]
@@ -107,9 +107,9 @@ val daily_budget_usd_from_env : unit -> float
 val deliberation_budget_check :
   daily_budget_usd:float -> cost_today_usd:float -> bool
 
-(** Build a prompt for the LLM to decide the keeper's next action.
+(** Build a prompt for the MODEL to decide the keeper's next action.
     Describes the keeper's identity, current state, detected triggers,
-    and available actions. Asks the LLM to respond with structured JSON.
+    and available actions. Asks the MODEL to respond with structured JSON.
     When [~autonomy_level] is L3+, the [multi_step] action is included. *)
 val build_deliberation_prompt :
   ?autonomy_level:string ->
@@ -120,7 +120,7 @@ val build_deliberation_prompt :
   world_observation ->
   string
 
-(** Parse the LLM's JSON response into a typed deliberation action.
+(** Parse the MODEL's JSON response into a typed deliberation action.
     Returns [(action, reasoning, confidence)] or an [Error] message.
     Handles code fences, extra whitespace, and embedded JSON. *)
 val parse_deliberation_response :

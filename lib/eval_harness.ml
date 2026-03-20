@@ -6,7 +6,7 @@
 
     Architecture:
     - Scenario: goal + setup + expected outcomes + graders
-    - Grader: deterministic (exact/contains/regex) or LLM-based
+    - Grader: deterministic (exact/contains/regex) or MODEL-based
     - Runner: execute scenario, apply graders, produce EvalResult
     - Metrics: pass@k, mean score, consistency
 
@@ -30,16 +30,16 @@ type deterministic_grader = {
   description : string;     (** Human-readable description of what this checks *)
 }
 
-type llm_grader = {
+type model_grader = {
   prompt_template : string;   (** Template with {result}, {goal} placeholders *)
-  rubric : string;            (** Scoring rubric for the LLM *)
+  rubric : string;            (** Scoring rubric for the MODEL *)
   weight : float;             (** Score weight 0.0-1.0 *)
   description : string;
 }
 
 type grader =
   | Deterministic of deterministic_grader
-  | LlmBased of llm_grader
+  | ModelBased of model_grader
 
 (* ================================================================ *)
 (* Scenario types                                                    *)
@@ -379,12 +379,12 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
                   weight = g_float_opt g "weight" 1.0;
                   description = g_str_opt g "description" "unnamed grader";
                 })
-            | "llm" ->
-                Some (LlmBased {
+            | "model" ->
+                Some (ModelBased {
                   prompt_template = g |> member "prompt" |> to_string;
                   rubric = g_str_opt g "rubric" "";
                   weight = g_float_opt g "weight" 1.0;
-                  description = g_str_opt g "description" "LLM grader";
+                  description = g_str_opt g "description" "MODEL grader";
                 })
             | _ -> None
           ) items

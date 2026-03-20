@@ -1,6 +1,6 @@
 (** Agent Planner — Daily plan generation for Generative Agents.
 
-    Once per day, each agent generates a 24-hour plan via LLM.
+    Once per day, each agent generates a 24-hour plan via MODEL.
     Each hour has an activity description and priority (0.0-1.0).
     The heartbeat tick queries [current_block] to decide who acts.
 
@@ -135,9 +135,9 @@ let fallback_plan ~agent_name =
     created_at = Time_compat.now ();
   }
 
-(* ---------- LLM plan generation ---------- *)
+(* ---------- MODEL plan generation ---------- *)
 
-(** Build the prompt that asks the LLM to create a daily plan. *)
+(** Build the prompt that asks the MODEL to create a daily plan. *)
 let build_plan_prompt ~agent_name ~identity ~memories =
   let memory_str =
     if List.length memories = 0 then "(기억 없음)"
@@ -175,7 +175,7 @@ JSON 형식으로만 답변:
 - JSON만 출력, 설명 없이|}
     agent_name identity date hour memory_str
 
-(** Parse LLM response into a daily_plan. *)
+(** Parse MODEL response into a daily_plan. *)
 let parse_plan_response ~agent_name ~response : daily_plan option =
   try
     (* Extract JSON from response (may be wrapped in ```json ... ```) *)
@@ -221,13 +221,13 @@ let parse_plan_response ~agent_name ~response : daily_plan option =
 
 (* ---------- Public API ---------- *)
 
-let get_or_create_plan ~agent_name ~identity ~memories ~call_llm =
+let get_or_create_plan ~agent_name ~identity ~memories ~call_model =
   let date = today_kst () in
   match load_plan ~agent_name ~date with
   | Some plan -> plan
   | None ->
     let prompt = build_plan_prompt ~agent_name ~identity ~memories in
-    let response = call_llm ~prompt in
+    let response = call_model ~prompt in
     let plan = match parse_plan_response ~agent_name ~response with
       | Some p ->
         (* Record plan creation as a memory *)
@@ -241,7 +241,7 @@ let get_or_create_plan ~agent_name ~identity ~memories ~call_llm =
           agent_name (List.length p.goals) (List.length p.hourly_blocks);
         p
       | None ->
-        eprintf "[planner] ⚠️ LLM plan failed for %s, using fallback\n%!" agent_name;
+        eprintf "[planner] ⚠️ MODEL plan failed for %s, using fallback\n%!" agent_name;
         let fb = fallback_plan ~agent_name in
         save_plan fb;
         fb

@@ -286,7 +286,7 @@ let parse_session_judgment ~config ~generated_at ~generated_at_unix ~model_used 
   | _ -> None
 
 let compute_judgments ~facts_json =
-  let _timeout_sec = Env_config.Llm.operator_judge_timeout_seconds in
+  let _timeout_sec = Env_config.Inference.operator_judge_timeout_seconds in
   let prompt = prompt_for_facts facts_json in
   match
     Oas_worker.run_named ~cascade_name:"operator_judge"
@@ -296,8 +296,8 @@ let compute_judgments ~facts_json =
   | Error message -> Error message
   | Ok result -> (
       let response = result.Oas_worker.response in
-      try Ok (response.Llm_provider.Types.model,
-              Yojson.Safe.from_string (Llm_provider.Types.text_of_response response))
+      try Ok (response.model,
+              Yojson.Safe.from_string (Oas_response.text_of_response response))
       with
       | Yojson.Json_error msg ->
           Error (Printf.sprintf "Operator judge returned invalid JSON: %s" msg)

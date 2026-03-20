@@ -182,7 +182,7 @@ After masc_walph_loop starts a loop; also triggerable via broadcast '@walph STOP
     name = "masc_walph_natural";
     description = "Control a walph loop using natural language in Korean or English (e.g., 'stop the loop', 'coverage up'). \
 Use when sending free-form instructions instead of explicit STOP/PAUSE/RESUME commands. \
-Translates intent into masc_walph_control commands; falls back to LLM for ambiguous messages.";
+Translates intent into masc_walph_control commands; falls back to the MODEL for ambiguous messages.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

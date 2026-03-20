@@ -18,7 +18,7 @@ let schemas : Types.tool_schema list = [
     description = "Start a perpetual agent that runs autonomously with infinite context. \
 The agent will think → act → observe → verify in a loop, compacting context as needed \
 and handing off to successor agents when context fills up. \
-Requires: goal (what to accomplish), models (LLM cascade in priority order). \
+Requires: goal (what to accomplish), models (MODEL cascade in priority order). \
 Example models: 'default', 'default:auto', 'gemini:flash', 'claude:opus'.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -30,7 +30,7 @@ Example models: 'default', 'default:auto', 'gemini:flash', 'claude:opus'.";
         ("models", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "LLM model cascade in priority order. \
+          ("description", `String "MODEL model cascade in priority order. \
 Format: 'provider:model_id' or 'default[:model_id]'. Examples: 'default', 'default:auto', 'gemini:flash', 'claude:opus'");
         ]);
         ("verify", `Assoc [
@@ -47,7 +47,7 @@ Format: 'provider:model_id' or 'default[:model_id]'. Examples: 'default', 'defau
         ]);
         ("coding_mode", `Assoc [
           ("type", `String "boolean");
-          ("description", `String "When true, spawn Claude Code for coding tasks instead of direct LLM calls (default: false)");
+          ("description", `String "When true, spawn Claude Code for coding tasks instead of direct MODEL calls (default: false)");
         ]);
         ("coding_agent", `Assoc [
           ("type", `String "string");

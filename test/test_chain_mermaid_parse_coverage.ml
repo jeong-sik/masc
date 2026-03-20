@@ -73,8 +73,8 @@ let test_strip_quotes_whitespace () =
    2. has_explicit_type_prefix
    ============================================================ *)
 
-let test_prefix_llm () =
-  check bool "LLM:" true (Chain_mermaid_parse.has_explicit_type_prefix "LLM:gemini")
+let test_prefix_model () =
+  check bool "MODEL:" true (Chain_mermaid_parse.has_explicit_type_prefix "MODEL:gemini")
 
 let test_prefix_tool () =
   check bool "Tool:" true (Chain_mermaid_parse.has_explicit_type_prefix "Tool:eslint")
@@ -137,7 +137,7 @@ let test_prefix_empty () =
   check bool "empty" false (Chain_mermaid_parse.has_explicit_type_prefix "")
 
 let test_prefix_short () =
-  check bool "short" false (Chain_mermaid_parse.has_explicit_type_prefix "LLM")
+  check bool "short" false (Chain_mermaid_parse.has_explicit_type_prefix "MODEL")
 
 (* ============================================================
    3. extract_tools_flag / make_tools_value
@@ -571,27 +571,27 @@ let test_infer_subroutine_default_empty () =
    10c. infer_type_from_id -- Rect shape
    ============================================================ *)
 
-let test_infer_rect_explicit_llm () =
-  check_ok_with "explicit llm:" (fun nt ->
+let test_infer_rect_explicit_model () =
+  check_ok_with "explicit model:" (fun nt ->
     match nt with
-    | Llm { model = "gemini"; prompt = "hello world"; _ } -> ()
-    | Llm l -> fail (Printf.sprintf "wrong: model=%s prompt=%s" l.model l.prompt)
-    | _ -> fail "expected Llm"
-  ) (Chain_mermaid_parse.infer_type_from_id "A" `Rect "LLM:gemini hello world")
+    | Model { model = "gemini"; prompt = "hello world"; _ } -> ()
+    | Model l -> fail (Printf.sprintf "wrong: model=%s prompt=%s" l.model l.prompt)
+    | _ -> fail "expected Model"
+  ) (Chain_mermaid_parse.infer_type_from_id "A" `Rect "MODEL:gemini hello world")
 
-let test_infer_rect_explicit_llm_tools () =
-  check_ok_with "explicit llm with tools" (fun nt ->
+let test_infer_rect_explicit_model_tools () =
+  check_ok_with "explicit model with tools" (fun nt ->
     match nt with
-    | Llm { model = "claude"; tools = Some _; _ } -> ()
-    | _ -> fail "expected Llm with tools"
-  ) (Chain_mermaid_parse.infer_type_from_id "A" `Rect "LLM:claude do stuff +tools")
+    | Model { model = "claude"; tools = Some _; _ } -> ()
+    | _ -> fail "expected Model with tools"
+  ) (Chain_mermaid_parse.infer_type_from_id "A" `Rect "MODEL:claude do stuff +tools")
 
-let test_infer_rect_explicit_llm_no_prompt () =
-  (* "LLM:gemini" (no space after model) does NOT match the explicit LLM regex
+let test_infer_rect_explicit_model_no_prompt () =
+  (* "MODEL:gemini" (no space after model) does NOT match the explicit MODEL regex
      because `[ \n\t]+` requires at least one whitespace after model name.
-     Falls through to default path, still returns Ok (Llm ...). *)
-  check_ok "LLM:gemini no prompt"
-    (Chain_mermaid_parse.infer_type_from_id "A" `Rect "LLM:gemini")
+     Falls through to default path, still returns Ok (Model ...). *)
+  check_ok "MODEL:gemini no prompt"
+    (Chain_mermaid_parse.infer_type_from_id "A" `Rect "MODEL:gemini")
 
 let test_infer_rect_explicit_tool () =
   check_ok_with "explicit tool:" (fun nt ->
@@ -621,32 +621,32 @@ let test_infer_rect_explicit_tool_empty_args () =
     | _ -> fail "expected Tool with null args"
   ) (Chain_mermaid_parse.infer_type_from_id "A" `Rect "Tool:tsc")
 
-let test_infer_rect_id_llm_model () =
+let test_infer_rect_id_model_model () =
   (* ID starts with known model name *)
   check_ok_with "ID starts with gemini" (fun nt ->
     match nt with
-    | Llm { model = "gemini"; _ } -> ()
-    | _ -> fail "expected Llm gemini"
+    | Model { model = "gemini"; _ } -> ()
+    | _ -> fail "expected Model gemini"
   ) (Chain_mermaid_parse.infer_type_from_id "gemini_parse" `Rect "do parsing")
 
 let test_infer_rect_id_claude () =
   check_ok_with "ID starts with claude" (fun nt ->
     match nt with
-    | Llm { model = "claude"; _ } -> ()
-    | _ -> fail "expected Llm claude"
+    | Model { model = "claude"; _ } -> ()
+    | _ -> fail "expected Model claude"
   ) (Chain_mermaid_parse.infer_type_from_id "claude_review" `Rect "review code")
 
-let test_infer_rect_id_llm_with_tools () =
-  check_ok_with "LLM by ID with tools" (fun nt ->
+let test_infer_rect_id_model_with_tools () =
+  check_ok_with "MODEL by ID with tools" (fun nt ->
     match nt with
-    | Llm { model = "gemini"; tools = Some _; _ } -> ()
-    | _ -> fail "expected Llm gemini with tools"
+    | Model { model = "gemini"; tools = Some _; _ } -> ()
+    | _ -> fail "expected Model gemini with tools"
   ) (Chain_mermaid_parse.infer_type_from_id "gemini_tool" `Rect "search +tools")
 
-let test_infer_rect_id_llm_empty_text () =
-  check_ok_with "LLM by ID empty text" (fun nt ->
+let test_infer_rect_id_model_empty_text () =
+  check_ok_with "MODEL by ID empty text" (fun nt ->
     match nt with
-    | Llm { prompt = "{{input}}"; _ } -> ()
+    | Model { prompt = "{{input}}"; _ } -> ()
     | _ -> fail "expected default prompt"
   ) (Chain_mermaid_parse.infer_type_from_id "gemini" `Rect "")
 
@@ -657,26 +657,26 @@ let test_infer_rect_known_tool () =
     | _ -> fail "expected Tool eslint"
   ) (Chain_mermaid_parse.infer_type_from_id "eslint" `Rect "anything")
 
-let test_infer_rect_default_llm () =
-  (* Unknown ID, not a tool -> default gemini LLM *)
-  check_ok_with "default rect is LLM gemini" (fun nt ->
+let test_infer_rect_default_model () =
+  (* Unknown ID, not a tool -> default gemini MODEL *)
+  check_ok_with "default rect is MODEL gemini" (fun nt ->
     match nt with
-    | Llm { model = "gemini"; prompt = "hello"; _ } -> ()
-    | _ -> fail "expected default Llm gemini"
+    | Model { model = "gemini"; prompt = "hello"; _ } -> ()
+    | _ -> fail "expected default Model gemini"
   ) (Chain_mermaid_parse.infer_type_from_id "A" `Rect "hello")
 
-let test_infer_rect_default_llm_empty () =
+let test_infer_rect_default_model_empty () =
   check_ok_with "default rect empty text uses ID" (fun nt ->
     match nt with
-    | Llm { model = "gemini"; prompt = "my_node"; _ } -> ()
+    | Model { model = "gemini"; prompt = "my_node"; _ } -> ()
     | _ -> fail "expected prompt = ID"
   ) (Chain_mermaid_parse.infer_type_from_id "my_node" `Rect "")
 
 let test_infer_rect_default_with_tools () =
   check_ok_with "default rect with tools" (fun nt ->
     match nt with
-    | Llm { model = "gemini"; tools = Some _; _ } -> ()
-    | _ -> fail "expected default Llm with tools"
+    | Model { model = "gemini"; tools = Some _; _ } -> ()
+    | _ -> fail "expected default Model with tools"
   ) (Chain_mermaid_parse.infer_type_from_id "A" `Rect "do stuff +tools")
 
 (* ============================================================
@@ -749,7 +749,7 @@ let test_infer_stadium_cascade_bad_threshold () =
 
 let test_infer_stadium_unknown () =
   check_ok_with "unknown stadium" (fun nt ->
-    match nt with Llm _ -> () | _ -> fail "expected Llm fallback"
+    match nt with Model _ -> () | _ -> fail "expected Model fallback"
   ) (Chain_mermaid_parse.infer_type_from_id "A" `Stadium "something_else")
 
 (* ============================================================
@@ -878,47 +878,47 @@ let test_parse_node_def_underscore () =
   | None -> fail "expected Some for underscore"
 
 (* ============================================================
-   12. Additional LLM model ID tests
+   12. Additional MODEL model ID tests
    ============================================================ *)
 
 let test_infer_rect_codex () =
   check_ok_with "codex model" (fun nt ->
-    match nt with Llm { model = "codex"; _ } -> () | _ -> fail "expected codex"
+    match nt with Model { model = "codex"; _ } -> () | _ -> fail "expected codex"
   ) (Chain_mermaid_parse.infer_type_from_id "codex_gen" `Rect "generate code")
 
 let test_infer_rect_gpt () =
   check_ok_with "gpt model" (fun nt ->
-    match nt with Llm { model = "gpt"; _ } -> () | _ -> fail "expected gpt"
+    match nt with Model { model = "gpt"; _ } -> () | _ -> fail "expected gpt"
   ) (Chain_mermaid_parse.infer_type_from_id "gpt_summarize" `Rect "summarize")
 
 let test_infer_rect_o1 () =
   check_ok_with "o1 model" (fun nt ->
-    match nt with Llm { model = "o1"; _ } -> () | _ -> fail "expected o1"
+    match nt with Model { model = "o1"; _ } -> () | _ -> fail "expected o1"
   ) (Chain_mermaid_parse.infer_type_from_id "o1_reason" `Rect "reason")
 
 let test_infer_rect_o3 () =
   check_ok_with "o3 model" (fun nt ->
-    match nt with Llm { model = "o3"; _ } -> () | _ -> fail "expected o3"
+    match nt with Model { model = "o3"; _ } -> () | _ -> fail "expected o3"
   ) (Chain_mermaid_parse.infer_type_from_id "o3_think" `Rect "think")
 
 let test_infer_rect_sonnet () =
   check_ok_with "sonnet model" (fun nt ->
-    match nt with Llm { model = "sonnet"; _ } -> () | _ -> fail "expected sonnet"
+    match nt with Model { model = "sonnet"; _ } -> () | _ -> fail "expected sonnet"
   ) (Chain_mermaid_parse.infer_type_from_id "sonnet_write" `Rect "write")
 
 let test_infer_rect_opus () =
   check_ok_with "opus model" (fun nt ->
-    match nt with Llm { model = "opus"; _ } -> () | _ -> fail "expected opus"
+    match nt with Model { model = "opus"; _ } -> () | _ -> fail "expected opus"
   ) (Chain_mermaid_parse.infer_type_from_id "opus_analyze" `Rect "analyze")
 
 let test_infer_rect_haiku () =
   check_ok_with "haiku model" (fun nt ->
-    match nt with Llm { model = "haiku"; _ } -> () | _ -> fail "expected haiku"
+    match nt with Model { model = "haiku"; _ } -> () | _ -> fail "expected haiku"
   ) (Chain_mermaid_parse.infer_type_from_id "haiku_fast" `Rect "fast")
 
 let test_infer_rect_stub () =
   check_ok_with "stub model" (fun nt ->
-    match nt with Llm { model = "stub"; _ } -> () | _ -> fail "expected stub"
+    match nt with Model { model = "stub"; _ } -> () | _ -> fail "expected stub"
   ) (Chain_mermaid_parse.infer_type_from_id "stub_test" `Rect "test")
 
 (* Test known tools *)
@@ -958,7 +958,7 @@ let () =
       test_case "whitespace" `Quick test_strip_quotes_whitespace;
     ];
     "has_explicit_type_prefix", [
-      test_case "LLM:" `Quick test_prefix_llm;
+      test_case "MODEL:" `Quick test_prefix_model;
       test_case "Tool:" `Quick test_prefix_tool;
       test_case "Ref:" `Quick test_prefix_ref;
       test_case "Quorum:" `Quick test_prefix_quorum;
@@ -1067,20 +1067,20 @@ let () =
       test_case "default empty" `Quick test_infer_subroutine_default_empty;
     ];
     "infer_type_from_id:rect", [
-      test_case "explicit llm" `Quick test_infer_rect_explicit_llm;
-      test_case "explicit llm tools" `Quick test_infer_rect_explicit_llm_tools;
-      test_case "explicit llm no prompt" `Quick test_infer_rect_explicit_llm_no_prompt;
+      test_case "explicit model" `Quick test_infer_rect_explicit_model;
+      test_case "explicit model tools" `Quick test_infer_rect_explicit_model_tools;
+      test_case "explicit model no prompt" `Quick test_infer_rect_explicit_model_no_prompt;
       test_case "explicit tool" `Quick test_infer_rect_explicit_tool;
       test_case "explicit tool json args" `Quick test_infer_rect_explicit_tool_with_json_args;
       test_case "explicit tool string args" `Quick test_infer_rect_explicit_tool_with_string_args;
       test_case "explicit tool empty args" `Quick test_infer_rect_explicit_tool_empty_args;
-      test_case "ID llm model" `Quick test_infer_rect_id_llm_model;
+      test_case "ID model model" `Quick test_infer_rect_id_model_model;
       test_case "ID claude" `Quick test_infer_rect_id_claude;
-      test_case "ID llm with tools" `Quick test_infer_rect_id_llm_with_tools;
-      test_case "ID llm empty text" `Quick test_infer_rect_id_llm_empty_text;
+      test_case "ID model with tools" `Quick test_infer_rect_id_model_with_tools;
+      test_case "ID model empty text" `Quick test_infer_rect_id_model_empty_text;
       test_case "known tool eslint" `Quick test_infer_rect_known_tool;
-      test_case "default llm" `Quick test_infer_rect_default_llm;
-      test_case "default llm empty" `Quick test_infer_rect_default_llm_empty;
+      test_case "default model" `Quick test_infer_rect_default_model;
+      test_case "default model empty" `Quick test_infer_rect_default_model_empty;
       test_case "default with tools" `Quick test_infer_rect_default_with_tools;
       test_case "codex" `Quick test_infer_rect_codex;
       test_case "gpt" `Quick test_infer_rect_gpt;

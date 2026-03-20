@@ -12,8 +12,8 @@
 
 (** {1 Domain-Specific Errors} *)
 
-(** LLM Provider errors *)
-type llm_error =
+(** MODEL Provider errors *)
+type model_error =
   | GeminiError of gemini_error
   | ClaudeError of claude_error
   | CodexError of codex_error
@@ -84,7 +84,7 @@ type io_error =
 
 (** Top-level error type combining all domains *)
 type t =
-  | Llm of llm_error
+  | Model of model_error
   | Chain of chain_error
   | Mcp of mcp_error
   | Process of process_error
@@ -96,31 +96,31 @@ type t =
 
 (** Check if an error is recoverable (safe to retry) *)
 let is_recoverable = function
-  | Llm (GeminiError GeminiFunctionCallSync) -> true
-  | Llm (GeminiError GeminiRateLimit) -> true
-  | Llm (ClaudeError ClaudeRateLimit) -> true
-  | Llm (CodexError CodexRateLimit) -> true
+  | Model (GeminiError GeminiFunctionCallSync) -> true
+  | Model (GeminiError GeminiRateLimit) -> true
+  | Model (ClaudeError ClaudeRateLimit) -> true
+  | Model (CodexError CodexRateLimit) -> true
   | Process (ProcessTimeout _) -> true
   | Io (NetworkError _) -> true
   | _ -> false
 
 (** Get a human-readable error message *)
 let to_string = function
-  | Llm (GeminiError e) -> (
+  | Model (GeminiError e) -> (
       match e with
       | GeminiFunctionCallSync -> "Gemini function call sync error (recoverable)"
       | GeminiContextTooLong -> "Gemini context too long"
       | GeminiRateLimit -> "Gemini rate limit exceeded"
       | GeminiAuth -> "Gemini authentication failed"
       | GeminiUnknown msg -> Printf.sprintf "Gemini error: %s" msg)
-  | Llm (ClaudeError e) -> (
+  | Model (ClaudeError e) -> (
       match e with
       | ClaudeContextTooLong -> "Claude context too long"
       | ClaudeRateLimit -> "Claude rate limit exceeded"
       | ClaudeAuth -> "Claude authentication failed"
       | ClaudeTimeout -> "Claude request timed out"
       | ClaudeUnknown msg -> Printf.sprintf "Claude error: %s" msg)
-  | Llm (CodexError e) -> (
+  | Model (CodexError e) -> (
       match e with
       | CodexRateLimit -> "Codex rate limit exceeded"
       | CodexAuth -> "Codex authentication failed"
@@ -183,9 +183,9 @@ let of_string msg = Internal msg
 type severity = Debug | Info | Warning | Error | Critical
 
 let severity_of_error = function
-  | Llm (GeminiError GeminiFunctionCallSync) -> Warning
-  | Llm (GeminiError GeminiRateLimit) -> Warning
-  | Llm _ -> Error
+  | Model (GeminiError GeminiFunctionCallSync) -> Warning
+  | Model (GeminiError GeminiRateLimit) -> Warning
+  | Model _ -> Error
   | Chain (ChainParseError _) -> Warning
   | Chain _ -> Error
   | Mcp (McpMethodNotFound _) -> Warning

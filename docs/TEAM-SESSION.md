@@ -54,7 +54,7 @@
 - 세션 원본 상태(`session`)
 - 런타임 상태(`runtime_running`)
 - 진행 요약(`summary`): elapsed, remaining, progress, done delta
-- LLM 캐시 메트릭(`llm_cache_metrics`): hits/misses/writes/bypass/errors/hit_rate
+- inference 캐시 메트릭(`inference_cache_metrics`): hits/misses/writes/bypass/errors/hit_rate
 - command-plane 링크(`command_plane`): attached operation id/path
 - 보고서 경로(`report_paths`)
 - linked autoresearch 상태(`linked_autoresearch`, optional): loop_id/status/current_cycle/best_score/last_decision/target_file
@@ -217,7 +217,7 @@ linked autoresearch가 연결된 session이면 stop 응답에 `linked_autoresear
 - `goal_metrics`
 - `incidents`
 - `mcp_improvements`
-- `llm_cache_metrics`
+- `inference_cache_metrics`
 - `evidence`
 
 `proof.json` 핵심 키:

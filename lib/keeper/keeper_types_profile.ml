@@ -163,7 +163,7 @@ let canonical_trigger_mode = function
 let canonical_policy_mode = function
   | "learned_offline_v1" -> "learned_offline_v1"
   | "explicit_event_v1" -> "explicit_event_v1"
-  | "llm_deliberation" -> "llm_deliberation"
+  | "model_deliberation" -> "model_deliberation"
   | _ -> "heuristic"
 
 let canonical_voice_channel = function

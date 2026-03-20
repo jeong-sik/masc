@@ -252,7 +252,7 @@ let walph_should_continue config ~agent_name =
 (** {1 Preset Mapping} *)
 
 (** Map Walph preset to task type description.
-    Previously mapped to legacy chain IDs, now used for direct LLM prompting.
+    Previously mapped to legacy chain IDs, now used for direct MODEL prompting.
     @param preset The loop preset (coverage, refactor, docs, drain)
     @return Some chain_id for presets with corresponding prompts, None for drain *)
 let get_chain_id_for_preset = function
@@ -264,8 +264,8 @@ let get_chain_id_for_preset = function
   | "figma" -> Some "walph-figma"
   | _ -> None
 
-let walph_response_is_valid (resp : Llm_provider.Types.api_response) =
-  let content = String.trim (Llm_provider.Types.text_of_response resp) in
+let walph_response_is_valid (resp : Oas_response.api_response) =
+  let content = String.trim (Oas_response.text_of_response resp) in
   let lower = String.lowercase_ascii content in
   let len = String.length content in
   len > 0
@@ -273,13 +273,13 @@ let walph_response_is_valid (resp : Llm_provider.Types.api_response) =
   && not (len >= 14 && String.sub content 0 14 = "Empty response")
   && not (len >= 9 && String.sub content 0 9 = "{\"error\":")
 
-let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec:_ ~max_chars () =
+let default_model_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec:_ ~max_chars () =
   match
     Oas_worker.run_named ~cascade_name:"walph"
       ~goal:prompt ~max_turns:1
       ~max_tokens:max_chars ~accept:walph_response_is_valid ()
   with
-  | Ok result -> Llm_provider.Types.text_of_response result.Oas_worker.response
+  | Ok result -> Oas_response.text_of_response result.Oas_worker.response
   | Error err -> failwith err
 
 (** {1 Main Loop} *)
@@ -296,7 +296,7 @@ let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec:_ ~max_chars
 let walph_loop config ~net:_net ~clock ~agent_name
     ?(preset="drain") ?(max_iterations=10) ?target
     ?(max_consecutive_errors=5) ?(error_backoff_sec=2)
-    ?(llm_dispatch=default_llm_dispatch) () =
+    ?(model_dispatch=default_model_dispatch) () =
   Room.ensure_initialized config;
 
   (* Get Walph state for this specific agent *)
@@ -487,17 +487,17 @@ let walph_loop config ~net:_net ~clock ~agent_name
 	                        in
 	                        let _ = Room.broadcast config ~from_agent:agent_name
 	                          ~content:(Printf.sprintf "🔗 @walph executing '%s' for '%s'..." cid task_title) in
-	                        (* Direct LLM call — no legacy compat dependency *)
+	                        (* Direct MODEL call — no legacy compat dependency *)
 	                        try
-	                          let response = llm_dispatch
+	                          let response = model_dispatch
 	                            ~tool_name:"glm"
-	                            ~model:Env_config.Llm.default_model
+	                            ~model:Env_config.Glm.default_model
 	                            ~prompt:goal
 	                            ~timeout_sec:60
 	                            ~max_chars:4000
 	                            ()
 	                          in
-	                          if response = "" then Error "Empty LLM response"
+	                          if response = "" then Error "Empty MODEL response"
 	                          else Ok response
 	                        with exn -> Error (Printexc.to_string exn)
 	                    in
@@ -505,7 +505,7 @@ let walph_loop config ~net:_net ~clock ~agent_name
 	                    (match chain_result with
 	                     | Ok result ->
 	                         let notes_str =
-	                           Printf.sprintf "LLM result: %s"
+	                           Printf.sprintf "MODEL result: %s"
 	                             (String.sub result 0 (min 100 (String.length result)))
 	                         in
 	                         (match Room.transition_task_r config ~agent_name ~task_id ~action:"done" ~notes:notes_str () with

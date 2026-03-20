@@ -6,8 +6,8 @@
   "nodes": [
     {
       "id": "analyze",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Analyze the following file for test coverage gaps:\n\nFile: {{target}}\n\nIdentify:\n1. Uncovered functions/branches\n2. Edge cases missing tests\n3. Priority order for test generation\n\nOutput JSON with structure: {\"gaps\": [...], \"priority\": [...]}"
       },
@@ -18,8 +18,8 @@
       "type": "feedback_loop",
       "generator": {
         "id": "generate_tests",
-        "type": "llm",
-        "llm": {
+        "type": "model",
+        "model": {
           "model": "claude-cli",
           "prompt": "Based on this coverage analysis:\n{{analysis}}\n\nGenerate comprehensive tests for the highest priority gap.\nUse the project's existing test patterns.\n\nOutput only the test code."
         }

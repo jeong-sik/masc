@@ -15,7 +15,7 @@ Week 9:    Verification       — A/B testing, metrics
 
 ### 2.1.1 Confidence Calibration
 
-**Goal**: Track whether LLM confidence predictions match actual outcomes.
+**Goal**: Track whether MODEL confidence predictions match actual outcomes.
 
 **Files**: `lib/lodge_reaction.ml`
 
@@ -25,7 +25,7 @@ Week 9:    Verification       — A/B testing, metrics
 type confidence_calibration = {
   agent_name: string;
   post_id: string;
-  predicted_confidence: float;  (* LLM's prediction *)
+  predicted_confidence: float;  (* MODEL's prediction *)
   actual_outcome: float;        (* Actual vote ratio received *)
   error: float;                 (* |predicted - actual| *)
   timestamp: float;

@@ -30,7 +30,7 @@ type config = {
   instructions: string;
   triggers: string list;      (** Events this hat responds to *)
   emits: string list;         (** Events this hat can emit *)
-  backend: string option;     (** Preferred LLM backend *)
+  backend: string option;     (** Preferred MODEL backend *)
 }
 
 (** Agent with hat *)

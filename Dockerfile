@@ -29,8 +29,8 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 # Create data directory for JSONL fallback
 RUN mkdir -p /app/.masc && chown -R appuser:appgroup /app/.masc
 
-# LLM cascade config (GLM-only for Railway, no local llama-server)
-COPY config/llm_cascade.json /app/config/llm_cascade.json
+# Cascade config (GLM-only for Railway, no local llama-server)
+COPY config/cascade.json /app/config/cascade.json
 
 ENV PORT=8080
 ENV MASC_BASE_PATH=/app

@@ -2,9 +2,9 @@
 
     When a broadcast message contains an @mention, optionally:
     - Spawn the mentioned CLI agent to respond (Spawn mode)
-    - Use direct LLM call + in-process MASC tool calls to respond (Llm mode)
+    - Use direct MODEL call + in-process MASC tool calls to respond (Model mode)
 
-    Enable with: MASC_AUTO_RESPOND=true|spawn|llm
+    Enable with: MASC_AUTO_RESPOND=true|spawn|model
 
     Design:
     - No shell execution (argv-only)
@@ -14,12 +14,12 @@
 
 open Yojson.Safe.Util
 
-type mode = Disabled | Spawn | Llm
+type mode = Disabled | Spawn | Model
 
 let get_mode () =
   match Sys.getenv_opt "MASC_AUTO_RESPOND" with
   | Some "true" | Some "1" | Some "yes" | Some "spawn" -> Spawn
-  | Some "llm" | Some "fast" -> Llm
+  | Some "model" | Some "fast" -> Model
   | _ -> Disabled
 
 let is_enabled () = get_mode () <> Disabled
@@ -46,7 +46,7 @@ let activity_log ~mode ~from_agent ~mention ~status ~detail =
       time.Unix.tm_min
       time.Unix.tm_sec
   in
-  let mode_str = match mode with Disabled -> "OFF" | Spawn -> "SPAWN" | Llm -> "LLM" in
+  let mode_str = match mode with Disabled -> "OFF" | Spawn -> "SPAWN" | Model -> "MODEL" in
   let line = Printf.sprintf "[%s] [%s] %s → @%s | %s | %s\n"
     timestamp mode_str from_agent mention status detail in
   try Fs_compat.append_file log_file line
@@ -134,13 +134,13 @@ let run_cli_agent ~agent_type ~prompt =
     in
     debug_log (Printf.sprintf "SPAWN_DONE %s output=%s" status_s preview)
 
-(* --- LLM mode: shared cascade + in-process MASC HTTP tools/call --- *)
+(* --- MODEL mode: shared cascade + in-process MASC HTTP tools/call --- *)
 
 let cascade_name_for_agent_type agent_type =
   Printf.sprintf "auto_responder_%s" agent_type
 
-let llm_response_is_valid (resp : Llm_provider.Types.api_response) =
-  let s = String.trim (Llm_provider.Types.text_of_response resp) in
+let model_response_is_valid (resp : Oas_response.api_response) =
+  let s = String.trim (Oas_response.text_of_response resp) in
   let s_lower = String.lowercase_ascii s in
   let len = String.length s in
   len > 0
@@ -148,26 +148,26 @@ let llm_response_is_valid (resp : Llm_provider.Types.api_response) =
   && not (len >= 14 && String.sub s 0 14 = "Empty response")
   && not (len >= 9 && String.sub s 0 9 = "{\"error\":")
 
-let call_llm_direct_sync ~agent_type ~prompt =
+let call_model_direct_sync ~agent_type ~prompt =
   let cascade_name = cascade_name_for_agent_type agent_type in
   try
     match
       Oas_worker.run_named ~cascade_name
         ~goal:prompt ~max_turns:1
-        ~accept:llm_response_is_valid ~max_tokens:500 ()
+        ~accept:model_response_is_valid ~max_tokens:500 ()
     with
     | Ok result ->
         let resp = result.Oas_worker.response in
-        let text = Llm_provider.Types.text_of_response resp in
+        let text = Oas_response.text_of_response resp in
         debug_log
-          (Printf.sprintf "LLM_MODEL_USED %s for agent_type=%s"
-             resp.Llm_provider.Types.model agent_type);
+          (Printf.sprintf "MODEL_USED %s for agent_type=%s"
+             resp.model agent_type);
         if String.trim text = "" then "no response" else text
     | Error err ->
-        Log.AutoResponder.error "LLM cascade failed: %s" err;
+        Log.AutoResponder.error "MODEL cascade failed: %s" err;
         "no response"
   with exn ->
-    Log.AutoResponder.error "LLM call failed: %s" (Printexc.to_string exn);
+    Log.AutoResponder.error "MODEL call failed: %s" (Printexc.to_string exn);
     "no response"
 
 let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
@@ -233,17 +233,17 @@ let extract_nickname (response_text : string) : string option =
   in
   find lines
 
-let call_llm_and_broadcast ~sw ~agent_type ~prompt ~mention =
-  let response = call_llm_direct_sync ~agent_type ~prompt in
-  debug_log (Printf.sprintf "LLM_RESPONSE: %s"
+let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
+  let response = call_model_direct_sync ~agent_type ~prompt in
+  debug_log (Printf.sprintf "MODEL_RESPONSE: %s"
     (if String.length response > 100 then String.sub response 0 100 ^ "..." else response));
   if response = "" || response = "no response" then
-    Log.AutoResponder.info "LLM returned empty response"
+    Log.AutoResponder.info "MODEL returned empty response"
   else begin
     let join_args =
       `Assoc [
         ("agent_name", `String agent_type);
-        ("capabilities", `List [`String "llm-auto-responder"]);
+        ("capabilities", `List [`String "model-auto-responder"]);
       ]
     in
     match masc_call ~sw ~tool_name:"masc_join" ~args:join_args with
@@ -274,7 +274,7 @@ let call_llm_and_broadcast ~sw ~agent_type ~prompt ~mention =
 
 let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
   let mode = get_mode () in
-  let mode_str = match mode with Disabled -> "Disabled" | Spawn -> "Spawn" | Llm -> "Llm" in
+  let mode_str = match mode with Disabled -> "Disabled" | Spawn -> "Spawn" | Model -> "Model" in
   debug_log (Printf.sprintf "CALLED: from=%s mention=%s mode=%s enabled=%b"
     from_agent (match mention with Some m -> m | None -> "NONE") mode_str (is_enabled ()));
   match mention with
@@ -312,20 +312,20 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
         in
         debug_log (Printf.sprintf "DISPATCH: mode=%s task_id=%s" mode_str task_id);
         activity_log ~mode ~from_agent ~mention:m
-          ~status:(match mode with Spawn -> "SPAWN" | Llm -> "LLM" | Disabled -> "OFF")
+          ~status:(match mode with Spawn -> "SPAWN" | Model -> "MODEL" | Disabled -> "OFF")
           ~detail:task_id;
         Eio.Fiber.fork ~sw (fun () ->
           try
             match mode with
             | Disabled -> ()
-            | Llm ->
+            | Model ->
                 Log.AutoResponder.info "Calling %s for @%s" mention_base m;
-                call_llm_and_broadcast ~sw ~agent_type:mention_base ~prompt:content ~mention:from_agent
+                call_model_and_broadcast ~sw ~agent_type:mention_base ~prompt:content ~mention:from_agent
             | Spawn ->
                 if mention_base = "glm" then (
-                  (* No CLI for glm; use LLM mode path. *)
+                  (* No CLI for glm; use MODEL mode path. *)
                   Log.AutoResponder.info "Calling glm for @%s" m;
-                  call_llm_and_broadcast ~sw ~agent_type:"glm" ~prompt:content ~mention:from_agent
+                  call_model_and_broadcast ~sw ~agent_type:"glm" ~prompt:content ~mention:from_agent
                 ) else (
                   let prompt = build_response_prompt ~from_agent ~content ~mention:m in
                   Log.AutoResponder.info "Spawning %s for @%s from %s" mention_base m from_agent;

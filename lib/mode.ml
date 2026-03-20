@@ -180,7 +180,7 @@ let tool_category tool_name =
   (* Run pipeline *)
   | "masc_run_init" | "masc_run_plan" | "masc_run_log"
   | "masc_run_deliverable" | "masc_run_get" | "masc_run_list"
-  (* LLM runtime — canonical + backward-compat aliases *)
+  (* MODEL runtime — canonical + backward-compat aliases *)
   | "masc_local_runtime_models" | "masc_llama_models"
   | "masc_local_runtime_status" | "masc_llama_runtime_status"
   | "masc_runtime_verify"

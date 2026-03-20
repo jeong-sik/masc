@@ -78,7 +78,7 @@ let strip_suffix ~suffix s =
 
 (** {1 Empty Response Handling} *)
 
-(** Maximum retries for empty LLM responses (configurable via CHAIN_EMPTY_RETRIES env) *)
+(** Maximum retries for empty MODEL responses (configurable via CHAIN_EMPTY_RETRIES env) *)
 let max_empty_retries =
   Safe_parse.env_int ~var:"CHAIN_EMPTY_RETRIES" ~default:3
 

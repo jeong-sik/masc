@@ -2,7 +2,7 @@
 
 Two distinct layers exist. Understanding which is which prevents confusion.
 
-## Execution Layer (uses OAS, calls LLM)
+## Execution Layer (uses OAS, calls MODEL)
 
 | Module | Role | Entry point |
 |--------|------|-------------|
@@ -29,7 +29,7 @@ Two distinct layers exist. Understanding which is which prevents confusion.
 ./_build/default/bin/agent_swarm_runner.exe --goal "Ship the feature" --fleet --members 3
 ```
 
-## State Layer (no LLM, data structures only)
+## State Layer (no MODEL, data structures only)
 
 | Module | Role |
 |--------|------|

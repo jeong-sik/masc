@@ -139,14 +139,14 @@ let execute_mcts ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_no
         | Ok sim_output ->
             (* Score the simulation output *)
             let score = match evaluator with
-            | "llm_judge" ->
+            | "model_judge" ->
                 let prompt = match evaluator_prompt with
                   | Some p -> Printf.sprintf "%s\n\nOutput to evaluate:\n%s" p sim_output
                   | None -> Printf.sprintf "Rate this output from 0.0 to 1.0:\n%s" sim_output
                 in
                 (match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt ?tools:None () with
                  | Ok s ->
-                     let raw = Safe_parse.float ~context:"llm_judge" ~default:0.5 (String.trim s) in
+                     let raw = Safe_parse.float ~context:"model_judge" ~default:0.5 (String.trim s) in
                      Float.min 1.0 (Float.max 0.0 raw)
                  | Error _ -> 0.5)
             | "exec_test" ->
@@ -162,7 +162,7 @@ let execute_mcts ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_no
                     float_of_string (Str.matched_group 3 sim_output)
                 with Not_found -> 0.5)
             | "anti_fake" ->
-                (* Hybrid heuristic + LLM scoring for code quality *)
+                (* Hybrid heuristic + MODEL scoring for code quality *)
                 let heuristic_score =
                   let penalties = [
                     ("assert true", -0.3); ("let _ =", -0.2); ("(* TODO", -0.15);
@@ -181,17 +181,17 @@ let execute_mcts ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_no
                   ) 0.0 bonuses in
                   Float.min 1.0 (Float.max 0.0 (base +. pen +. bon))
                 in
-                (* LLM judge for semantic analysis *)
-                let llm_score =
+                (* MODEL judge for semantic analysis *)
+                let model_score =
                   let prompt = Printf.sprintf
                     "Rate this code/test quality from 0.0 to 1.0. Check for: fake tests, missing assertions, incomplete coverage.\n\n%s"
                     sim_output
                   in
                   match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt ?tools:None () with
-                  | Ok s -> Safe_parse.float ~context:"anti_fake:llm" ~default:0.5 (String.trim s)
+                  | Ok s -> Safe_parse.float ~context:"anti_fake:model" ~default:0.5 (String.trim s)
                   | Error _ -> 0.5
                 in
-                (heuristic_score +. llm_score) /. 2.0
+                (heuristic_score +. model_score) /. 2.0
             | _ ->
                 (* Default: try to parse as float or return 0.5 *)
                 Safe_parse.float ~context:"score:default" ~default:0.5 (String.trim sim_output)
@@ -308,8 +308,8 @@ let execute_evaluator ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execu
       )
   ) candidates);
 
-  (* Helper: LLM-based scoring using exec_fn *)
-  let llm_score output =
+  (* Helper: MODEL-based scoring using exec_fn *)
+  let model_score output =
     let prompt = match scoring_prompt with
       | Some p -> Printf.sprintf "%s\n\nCandidate output:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
       | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
@@ -360,11 +360,11 @@ let execute_evaluator ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execu
                 count_depth json;
                 min 1.0 (0.5 +. (float_of_int !depth *. 0.1))
                with Yojson.Json_error _ -> 0.0)
-          | "llm_judge" ->
-              (* Use LLM to score the output *)
-              llm_score output
+          | "model_judge" ->
+              (* Use MODEL to score the output *)
+              model_score output
           | "anti_fake" ->
-              (* Anti-fake test detection: Hybrid (heuristic + LLM judge) *)
+              (* Anti-fake test detection: Hybrid (heuristic + MODEL judge) *)
               let output_lower = String.lowercase_ascii output in
               (* Helper: check if haystack contains needle *)
               let contains_str needle haystack =
@@ -404,9 +404,9 @@ let execute_evaluator ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execu
                 heuristic_score := !heuristic_score +. 0.1;
               let h_score = max 0.0 (min 0.5 !heuristic_score) in
 
-              (* Phase 2: LLM judge for semantic analysis (0.0-0.5 range) *)
+              (* Phase 2: MODEL judge for semantic analysis (0.0-0.5 range) *)
               (* Few-shot examples for better accuracy *)
-              let llm_prompt = Printf.sprintf {|Analyze this test code for fake test patterns.
+              let model_prompt = Printf.sprintf {|Analyze this test code for fake test patterns.
 
 ## Few-Shot Examples:
 
@@ -447,15 +447,15 @@ Reason: Roundtrip with proper expectation
 Reply with ONLY a number between 0.0 and 1.0:|}
                 (String.sub output 0 (min 1500 (String.length output)))
               in
-              let llm_score =
-                match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt:llm_prompt ?tools:None () with
+              let model_score =
+                match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt:model_prompt ?tools:None () with
                 | Ok score_str ->
                     (try float_of_string (String.trim score_str) *. 0.5
                      with Failure _ -> 0.25)
-                | Error _ -> 0.25  (* Default if LLM fails *)
+                | Error _ -> 0.25  (* Default if MODEL fails *)
               in
-              (* Final: heuristic (50%) + LLM (50%) *)
-              h_score +. llm_score
+              (* Final: heuristic (50%) + MODEL (50%) *)
+              h_score +. model_score
           | "custom" | _ ->
               (* For custom, try to parse score from output metadata *)
               (try

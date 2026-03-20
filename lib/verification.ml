@@ -224,7 +224,7 @@ let evaluate_criterion output criterion =
       ) then Fail (Printf.sprintf "output contains forbidden '%s'" needle)
       else Pass
   | Custom _ ->
-      (* Custom criteria require human/LLM verifier judgment *)
+      (* Custom criteria require human/MODEL verifier judgment *)
       Partial (0.5, "custom criterion requires verifier judgment")
 
 (** Evaluate all criteria, return aggregate verdict *)

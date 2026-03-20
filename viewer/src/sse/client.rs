@@ -1742,7 +1742,7 @@ mod tests {
         let body = r#"{
             "events": [
                 {"seq": 1, "type": "turn.timeout", "payload": {"actor_id": "p01", "keeper": "pk-p01", "timeout_sec": 90, "phase": "round"}},
-                {"seq": 2, "type": "keeper.unavailable", "payload": {"actor_id": "p02", "keeper": "pk-p02", "reason": "LLM failed", "phase": "round"}}
+                {"seq": 2, "type": "keeper.unavailable", "payload": {"actor_id": "p02", "keeper": "pk-p02", "reason": "MODEL failed", "phase": "round"}}
             ]
         }"#;
         let mut state = TrpgMapperState::default();
@@ -1767,7 +1767,7 @@ mod tests {
 
         let unavailable_payload: Value = serde_json::from_str(&narrative_events[1].1)
             .expect("unavailable narrative payload json");
-        assert_eq!(unavailable_payload["text"], "[unavailable] p02: LLM failed");
+        assert_eq!(unavailable_payload["text"], "[unavailable] p02: MODEL failed");
     }
 
     #[test]

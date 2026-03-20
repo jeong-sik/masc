@@ -943,7 +943,7 @@ Pair with masc_memento_mori for the all-in-one convenience wrapper.";
         ]);
         ("verify", `Assoc [
           ("type", `String "boolean");
-          ("description", `String "If true (default), run LLM verifier on handoff result and store it in saga payload.");
+          ("description", `String "If true (default), run MODEL verifier on handoff result and store it in saga payload.");
           ("default", `Bool true);
         ]);
         ("verifier_models", `Assoc [

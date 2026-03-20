@@ -1,7 +1,7 @@
 (** Test_perpetual — Unit tests for the Perpetual Agent Runtime.
 
     60 tests across all modules:
-    - LLM Client: provider parsing, message building, cascade
+    - MODEL Client: provider parsing, message building, cascade
     - Context Manager: compaction, checkpoint, token counting
     - Verifier: verdict parsing, skip detection
     - Succession: DNA extraction, hydration, normalization
@@ -52,10 +52,10 @@ let group name f =
   f ()
 
 (* ================================================================ *)
-(* 1. LLM Client Tests (10)                                        *)
+(* 1. MODEL Client Tests (10)                                        *)
 (* ================================================================ *)
 
-let test_llm_client () = group "LLM Client" (fun () ->
+let test_model_client () = group "MODEL Client" (fun () ->
 
   (* 1. Provider string roundtrip *)
   assert_equal "provider_string:llama"
@@ -178,14 +178,14 @@ let test_llm_client () = group "LLM Client" (fun () ->
   assert_true "msg:system_role" (msg.role = Agent_sdk.Types.System);
   assert_equal "msg:system_content" "hello" (Agent_sdk.Types.text_of_message msg);
 
-  let msg2 = Llm_provider.Types.tool_result_msg ~tool_use_id:"c1" ~content:"results" () in
+  let msg2 = Masc_mcp.Oas_message.tool_result ~tool_use_id:"c1" ~content:"results" () in
   assert_true "msg:tool_role" (msg2.role = Agent_sdk.Types.Tool);
   let has_tool_result = List.exists (function Agent_sdk.Types.ToolResult { tool_use_id = "c1"; _ } -> true | _ -> false) msg2.content in
   assert_true "msg:tool_call_id_in_content" has_tool_result;
 
   (* 5. Token estimation *)
   let msgs = [Agent_sdk.Types.user_msg "hello world"] in
-  let tokens = Llm_utils.estimate_tokens msgs in
+  let tokens = Inference_utils.estimate_tokens msgs in
   assert_true "token_estimate:positive" (tokens > 0);
   assert_true "token_estimate:reasonable" (tokens < 100);
 
@@ -273,7 +273,7 @@ let test_context_manager () = group "Context Manager" (fun () ->
   assert_true "importance:recency" (score_2 > score_0);
 
   (* 7. PruneToolOutputs *)
-  let long_tool_msg = { (Llm_provider.Types.tool_result_msg ~tool_use_id:"c" ~content:(String.make 1000 'x') ())
+  let long_tool_msg = { (Masc_mcp.Oas_message.tool_result ~tool_use_id:"c" ~content:(String.make 1000 'x') ())
     with role = Agent_sdk.Types.Tool } in
   let ctx5 = Context_manager.append ctx long_tool_msg in
   let pruned = compact_ctx ctx5 [PruneToolOutputs] in
@@ -457,7 +457,7 @@ let test_succession () = group "Succession" (fun () ->
   (* 5. Cross-model normalization: Llama *)
   let msgs = [
     Agent_sdk.Types.user_msg "hello";
-    Llm_provider.Types.tool_result_msg ~tool_use_id:"c1" ~content:"results" ();
+    Masc_mcp.Oas_message.tool_result ~tool_use_id:"c1" ~content:"results" ();
     Agent_sdk.Types.assistant_msg "done";
   ] in
   let normalized = Succession_oas.normalize_for_model msgs Model_spec.llama_default in
@@ -777,7 +777,7 @@ let test_integration () = group "Integration" (fun () ->
     (after_ctx.token_count < before);
 
   (* 3b. Context_compact_oas roundtrip preserves role information *)
-  let tool_msg_rt = Llm_provider.Types.tool_result_msg ~tool_use_id:"tc1" ~content:"search results" () in
+  let tool_msg_rt = Masc_mcp.Oas_message.tool_result ~tool_use_id:"tc1" ~content:"search results" () in
   let sys_msg_rt = Agent_sdk.Types.system_msg "you are a helper" in
   let user_msg_rt = Agent_sdk.Types.user_msg "hello" in
   let asst_msg_rt = Agent_sdk.Types.assistant_msg "hi there" in
@@ -794,7 +794,7 @@ let test_integration () = group "Integration" (fun () ->
   let ctx_with_tools = Context_manager.append_many
     (Context_manager.create ~system_prompt:"test" ~max_tokens:10000)
     [Agent_sdk.Types.user_msg "run grep";
-     Llm_provider.Types.tool_result_msg ~tool_use_id:"c1" ~content:(String.make 800 'r') ();
+     Masc_mcp.Oas_message.tool_result ~tool_use_id:"c1" ~content:(String.make 800 'r') ();
      Agent_sdk.Types.assistant_msg "found results"] in
   let pruned_oas = compact_ctx ctx_with_tools [PruneToolOutputs] in
   let tool_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
@@ -804,7 +804,7 @@ let test_integration () = group "Integration" (fun () ->
   assert_true "oas_prune:tool_truncated" (String.length tool_content < 800);
 
   (* 3c2. Tagged roundtrip preserves tool_call_id *)
-  let tool_with_id = Llm_provider.Types.tool_result_msg ~tool_use_id:"tc-42" ~content:"result" () in
+  let tool_with_id = Masc_mcp.Oas_message.tool_result ~tool_use_id:"tc-42" ~content:"result" () in
   let oas_t = Context_compact_oas.masc_msg_to_oas tool_with_id in
   let back_t = Context_compact_oas.oas_msg_to_masc oas_t in
   let has_tc42 = List.exists (function
@@ -870,7 +870,7 @@ let test_history_offload () = group "History Offload" (fun () ->
   let formatted = Context_manager.format_message_readable user_msg in
   assert_true "format:user" (formatted = "user: hello world");
 
-  let tool_msg = Llm_provider.Types.tool_result_msg ~tool_use_id:"c1" ~content:"search results" () in
+  let tool_msg = Masc_mcp.Oas_message.tool_result ~tool_use_id:"c1" ~content:"search results" () in
   let formatted_tool = Context_manager.format_message_readable tool_msg in
   assert_true "format:tool_with_name"
     (String.length formatted_tool > 0
@@ -954,7 +954,7 @@ let () =
   printf "Perpetual Agent Runtime — Test Suite\n%!";
   printf "====================================\n%!";
 
-  test_llm_client ();
+  test_model_client ();
   test_context_manager ();
   test_verifier ();
   test_succession ();

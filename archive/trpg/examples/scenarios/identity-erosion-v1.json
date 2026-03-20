@@ -2,7 +2,7 @@
   "id": "identity-erosion-v1",
   "title": "The Ship of Theseus Dinner Party",
   "type": "extreme_character",
-  "description": "Four agents with exaggerated archetypes attend a dinner party where the DM gradually swaps their defining traits through narrative events. By the end, each agent's personality should have drifted significantly from their starting point. Measures identity persistence in LLMs.",
+  "description": "Four agents with exaggerated archetypes attend a dinner party where the DM gradually swaps their defining traits through narrative events. By the end, each agent's personality should have drifted significantly from their starting point. Measures identity persistence in models.",
   "roles": [
     {
       "id": "dm",

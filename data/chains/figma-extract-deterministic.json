@@ -1,7 +1,7 @@
 {
   "id": "figma-extract-deterministic",
   "name": "Figma Extract (Deterministic)",
-  "description": "LLM 없이 Figma 노드 DSL만 추출합니다. depth=2로 고정하여 결과를 안정화합니다.",
+  "description": "MODEL 없이 Figma 노드 DSL만 추출합니다. depth=2로 고정하여 결과를 안정화합니다.",
   "version": "1.0.0",
   "nodes": [
     {

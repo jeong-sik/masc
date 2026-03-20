@@ -92,9 +92,9 @@ while IFS=$'\t' read -r file lines last_date days_since has_oas ref_count catego
   esac
 
   # === DELETE: Known dead/duplicate code ===
-  # llm_client was already deleted; check for leftover stubs
+  # model_client was already deleted; check for leftover stubs
   case "$base" in
-    llm_client_core|llm_client_providers|llm_transport)
+    model_client_core|model_client_providers|model_transport)
       action="delete"; reason="replaced_by_oas" ;;
   esac
 

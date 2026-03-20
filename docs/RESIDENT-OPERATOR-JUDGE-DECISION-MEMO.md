@@ -14,7 +14,7 @@ The current dashboard mixes four different things under one visual surface:
 
 1. truth from command-plane and operator state
 2. derived rule-based read models
-3. cached LLM narrative in `Mission`
+3. cached MODEL narrative in `Mission`
 4. actionable operator hints
 
 That is enough for observability, but not enough for a human to trust the system as a live judgment surface. The main problem is not missing data; it is missing provenance and missing ownership of the judgment layer.
@@ -25,17 +25,17 @@ That is enough for observability, but not enough for a human to trust the system
 |---|---|---|---|---|
 | Truth | `command-plane snapshot/summary`, `operator snapshot` | canonical state | High | Raw units, operations, detachments, decisions, traces, sessions |
 | Derived | `operator digest`, `swarm_status` | intervention hints and summarized state | Medium | Mostly rule-based translation of truth |
-| LLM narrative | `Mission` briefing | human-facing summary | Medium | Snapshot-based, cached, not the command canonical path |
+| MODEL narrative | `Mission` briefing | human-facing summary | Medium | Snapshot-based, cached, not the command canonical path |
 | Ecosystem manager | `Gardener` | spawn/retire population control | High for its own domain | Not a room/session/war-room judge |
 
 ### Concrete findings
 
 - `command` is explicitly documented as `command-plane truth`, not an inferred judgment surface.
 - `operator digest` is explicitly documented as a translated intervention surface, not a raw truth API.
-- `Mission` already has an LLM judgment layer, but it is snapshot-based, cached for 300s, and designed as narrative rather than control-plane judgment.
+- `Mission` already has an MODEL judgment layer, but it is snapshot-based, cached for 300s, and designed as narrative rather than control-plane judgment.
 - `swarm_status` computes lanes, gaps, blockers, and `recommended_next_action` from snapshot inputs with deterministic functions.
 - `operator digest` computes `attention_items` and `recommended_actions` from summary signals and session digests with deterministic filtering and templated messages.
-- `Gardener` is a background loop for ecosystem homeostasis and optional LLM-assisted spawn decisions, not an always-on operator judge.
+- `Gardener` is a background loop for ecosystem homeostasis and optional MODEL-assisted spawn decisions, not an always-on operator judge.
 
 ### Source anchors
 
@@ -43,8 +43,8 @@ That is enough for observability, but not enough for a human to trust the system
 - `docs/REMOTE-MCP-OPERATOR.md`: `masc_operator_digest` is an intervention-oriented translated read model.
 - `lib/swarm_status.ml`: lane/gap/blocker/recommendation generation is deterministic.
 - `lib/operator_control.ml`: room and session `attention_items` / `recommended_actions` are deterministic translations of signals.
-- `lib/dashboard_mission_briefing.ml`: `Mission` briefing is LLM-based, fact-only, and cached.
-- `lib/gardener.ml`: `Gardener` is a resident loop for ecosystem management, with optional LLM-assisted spawn decisions.
+- `lib/dashboard_mission_briefing.ml`: `Mission` briefing is MODEL-based, fact-only, and cached.
+- `lib/gardener.ml`: `Gardener` is a resident loop for ecosystem management, with optional MODEL-assisted spawn decisions.
 
 ## The mismatch
 
@@ -54,21 +54,21 @@ The current system says "operator-first dashboard" but the command/intervene sur
 
 - The system has live truth.
 - The system has derived hints.
-- The system has one separate LLM narrative card in `Mission`.
+- The system has one separate MODEL narrative card in `Mission`.
 - The system has a resident loop, but it belongs to `Gardener`, whose job is population management.
 
 ### What is missing
 
 - one always-on owner for "what should the operator believe right now?"
 - durable judgment records with freshness, evidence, and supersession
-- explicit separation between `truth`, `derived fallback`, and `LLM judgment`
+- explicit separation between `truth`, `derived fallback`, and `MODEL judgment`
 - a single place where humans can see "this was inferred by a model, from these facts, at this time"
 
 ### Resulting trust failures
 
 - a derived hint can look like a live judgment
 - stale projections can feel current
-- cached `Mission` LLM text can disagree with fresher command truth
+- cached `Mission` MODEL text can disagree with fresher command truth
 - recommendations look authoritative without showing whether they are truth, heuristics, or model inference
 
 ## Options considered
@@ -76,9 +76,9 @@ The current system says "operator-first dashboard" but the command/intervene sur
 | Option | Summary | Trust/evidence | Freshness | Architectural fit | Cost/ops | Verdict |
 |---|---|---:|---:|---:|---:|---|
 | A. Keep current rules, add better labels | Improve wording only | Low | High | High | Low | Reject |
-| B. On-demand LLM at render time | Judge on page load/request | Medium | Medium | Medium | Medium | Reject |
-| C. Resident operator keeper only | Always-on LLM judge replaces current hints | High | High | High | Medium | Close, but too brittle without fallback |
-| D. Resident operator keeper primary + derived fallback | Always-on LLM judge, truth stays base, heuristics stay explicit fallback | Highest | High | Highest | Medium | Recommend |
+| B. On-demand MODEL at render time | Judge on page load/request | Medium | Medium | Medium | Medium | Reject |
+| C. Resident operator keeper only | Always-on MODEL judge replaces current hints | High | High | High | Medium | Close, but too brittle without fallback |
+| D. Resident operator keeper primary + derived fallback | Always-on MODEL judge, truth stays base, heuristics stay explicit fallback | Highest | High | Highest | Medium | Recommend |
 
 ### Rejected options
 
@@ -86,7 +86,7 @@ The current system says "operator-first dashboard" but the command/intervene sur
 
 Rejected because labeling alone does not create a real judgment owner. It improves honesty but does not solve the absence of live inferred supervision.
 
-#### B. On-demand LLM only
+#### B. On-demand MODEL only
 
 Rejected because it has no continuity, no durable memory of prior judgments, weak operator traceability, and higher risk of flicker between reloads. It also does not behave like a real control-room presence.
 
@@ -140,7 +140,7 @@ New role:
 
 - provide fallback when no fresh resident judgment exists
 - provide deterministic compression of truth for low-cost reads
-- remain visible as `derived`, never as `LLM judgment`
+- remain visible as `derived`, never as `MODEL judgment`
 
 ### 4. Narrative layer
 
@@ -217,7 +217,7 @@ This is not optional. A card without provenance should be treated as a design bu
 
 ### Mission
 
-- Continue to show the LLM briefing.
+- Continue to show the MODEL briefing.
 - Label it as `narrative`.
 - Do not let it override fresher command/intervene judgments.
 - If `Mission` later summarizes resident judgments, it should reference them secondarily rather than become a judgment target itself.
@@ -308,7 +308,7 @@ Today:
 
 - `command` = truth
 - `operator digest` = translated hints
-- `Mission` = cached LLM narrative
+- `Mission` = cached MODEL narrative
 
 Target:
 
@@ -322,8 +322,8 @@ Target:
 Implement a separate resident `operator/warroom keeper` and treat it as the canonical inferred judgment layer.
 
 Do not overload `Gardener`.
-Do not make render-time LLM calls the main operator brain.
-Do not keep mixing truth, heuristics, and LLM output without provenance.
+Do not make render-time MODEL calls the main operator brain.
+Do not keep mixing truth, heuristics, and MODEL output without provenance.
 
 The winning architecture is:
 

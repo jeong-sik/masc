@@ -144,7 +144,7 @@ let execute_batch ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_n
     This prevents "context contamination" where previous results pollute new analysis.
 
     Use cases:
-    - Vision analysis: Ensure LLM sees only the image, not prior HTML/text
+    - Vision analysis: Ensure MODEL sees only the image, not prior HTML/text
     - Multi-iteration loops: Each iteration starts fresh
     - Parallel independent tasks: No cross-contamination
 

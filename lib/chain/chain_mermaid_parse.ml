@@ -10,8 +10,8 @@
     ┌─────────────────────────────┬─────────────────────────────────────┐
     │ Mermaid Syntax              │ Chain AST Type                      │
     ├─────────────────────────────┼─────────────────────────────────────┤
-    │ [LLM:model "prompt"]        │ Llm { model; prompt; tools=None }   │
-    │ [LLM:model "prompt" +tools] │ Llm { model; prompt; tools=Some[] } │
+    │ [MODEL:model "prompt"]        │ Model { model; prompt; tools=None }   │
+    │ [MODEL:model "prompt" +tools] │ Model { model; prompt; tools=Some[] } │
     │ [Tool:name]                 │ Tool { name; args }                 │
     │ [[Ref:chain_id]]            │ ChainRef chain_id                   │
     │ {Quorum:N}                  │ Quorum { required = N; nodes }      │
@@ -33,10 +33,10 @@
     COMPOSABILITY: All types can compose with each other
     ═══════════════════════════════════════════════════════════════════
 
-    Example: LLM -> Pipeline -> Map -> Quorum
+    Example: MODEL -> Pipeline -> Map -> Quorum
     {[
       graph LR
-          A[LLM:gemini "Parse"] --> P[[Pipeline:step1,step2]]
+          A[MODEL:gemini "Parse"] --> P[[Pipeline:step1,step2]]
           P --> M[[Map:format,result]]
           M --> Q{Quorum:2}
     ]}
@@ -45,7 +45,7 @@
     NODE SHAPES
     ═══════════════════════════════════════════════════════════════════
 
-    - [...]   = Rectangle: LLM or Tool nodes
+    - [...]   = Rectangle: MODEL or Tool nodes
     - {...}   = Diamond: Quorum, Gate, or Merge nodes
     - [[...]] = Subroutine: Ref, Pipeline, Fanout, Map, Bind, Cache, Batch
 *)
@@ -112,7 +112,7 @@ let strip_quotes s =
     Used to determine parsing strategy: explicit prefix vs inferred type.
 
     Recognized prefixes (22 total):
-    - LLM:, Tool:, Ref: (basic nodes)
+    - MODEL:, Tool:, Ref: (basic nodes)
     - Quorum:, Gate:, Merge: (decision nodes)
     - Pipeline:, Fanout:, Map:, Bind: (composition nodes)
     - Cache:, Batch:, Spawn: (execution nodes)
@@ -123,7 +123,7 @@ let strip_quotes s =
     @return true if content starts with a recognized type prefix *)
 let has_explicit_type_prefix content =
   let prefixes = [
-    "LLM:"; "Tool:"; "Ref:";
+    "MODEL:"; "Tool:"; "Ref:";
     "Quorum:"; "Gate:"; "Merge:";
     "Pipeline:"; "Fanout:"; "Map:"; "Bind:";
     "Cache:"; "Batch:"; "Spawn:";
@@ -292,8 +292,8 @@ let simple_model_re = Str.regexp {|\([^ ]+\)|}
 let quorum_id_re = Str.regexp {|quorum_\([0-9]+\)|}
 let consensus_id_re = Str.regexp {|consensus_\([0-9]+\)|}
 
-(** Known LLM model names *)
-let llm_models = ["gemini"; "claude"; "codex"; "gpt"; "gpt4"; "gpt5"; "o1"; "o3"; "sonnet"; "opus"; "haiku"; "stub"]
+(** Known MODEL model names *)
+let model_models = ["gemini"; "claude"; "codex"; "gpt"; "gpt4"; "gpt5"; "o1"; "o3"; "sonnet"; "opus"; "haiku"; "stub"]
 
 (** Known tool names *)
 let known_tools = ["eslint"; "tsc"; "prettier"; "jest"; "vitest"; "cargo"; "dune"; "make"; "npm"; "yarn"; "pnpm"]
@@ -377,7 +377,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
           })
       else if String.length id_lower >= 5 && String.sub id_lower 0 5 = "eval_" then
         (* eval_ prefix: Evaluator node *)
-        Ok (Evaluator { candidates = []; scoring_func = "llm_judge"; scoring_prompt = None; select_strategy = Best; min_score = None })
+        Ok (Evaluator { candidates = []; scoring_func = "model_judge"; scoring_prompt = None; select_strategy = Best; min_score = None })
       else
         (* Default diamond: try to parse old syntax or default to Quorum *)
         (* First try Evaluator: prefix in text *)
@@ -401,7 +401,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
           | [scoring_func] ->
               Ok (Evaluator { candidates = []; scoring_func; scoring_prompt = None; select_strategy = Best; min_score = None })
           | _ ->
-              Ok (Evaluator { candidates = []; scoring_func = "llm_judge"; scoring_prompt = None; select_strategy = Best; min_score = None })
+              Ok (Evaluator { candidates = []; scoring_func = "model_judge"; scoring_prompt = None; select_strategy = Best; min_score = None })
         else
           (try
             (* P1.3: Extended Quorum syntax - Quorum:N, Quorum:majority, Quorum:unanimous, Quorum:weighted:T *)
@@ -431,19 +431,19 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
         Ok (ChainRef ref_id)
 
   | `Rect ->
-      (* Rectangle nodes: LLM or Tool *)
-      (* First, check for explicit "llm:<model>\nprompt" or "LLM:<model>\nprompt" in content *)
-      let llm_content_re = Str.regexp_case_fold {|^llm:\([a-z0-9_-]+\)[ \n\t]+\(.*\)$|} in
+      (* Rectangle nodes: MODEL or Tool *)
+      (* First, check for explicit "model:<model>\nprompt" or "MODEL:<model>\nprompt" in content *)
+      let model_content_re = Str.regexp_case_fold {|^model:\([a-z0-9_-]+\)[ \n\t]+\(.*\)$|} in
       let tool_content_re = Str.regexp_case_fold {|^tool:\([a-z0-9_-]+\)[ \n\t]*\(.*\)$|} in
 
-      if Str.string_match llm_content_re text 0 then
-        (* Explicit LLM syntax in content: llm:model\nprompt or llm:model\nprompt +tools *)
+      if Str.string_match model_content_re text 0 then
+        (* Explicit MODEL syntax in content: model:model\nprompt or model:model\nprompt +tools *)
         let model = String.lowercase_ascii (Str.matched_group 1 text) in
         let raw_prompt = trim (Str.matched_group 2 text) in
         let (prompt_clean, has_tools) = extract_tools_flag raw_prompt in
         let prompt = if prompt_clean = "" then "{{input}}" else prompt_clean in
         let tools = make_tools_value has_tools in
-        Ok (Llm { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
+        Ok (Model { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
       else if Str.string_match tool_content_re text 0 then
         (* Explicit Tool syntax in content: tool:name\nargs *)
         let name = Str.matched_group 1 text in
@@ -453,34 +453,34 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
         in
         Ok (Tool { name; args })
       else
-        (* Fallback: Check if ID starts with known LLM model *)
-        let is_llm = List.exists (fun model ->
+        (* Fallback: Check if ID starts with known MODEL model *)
+        let is_model = List.exists (fun model ->
           String.length id_lower >= String.length model &&
           String.sub id_lower 0 (String.length model) = model
-        ) llm_models in
+        ) model_models in
 
-        if is_llm then
+        if is_model then
           (* Extract model from ID (e.g., "gemini_parse" -> "gemini") *)
           let model = match List.find_opt (fun m ->
             String.length id_lower >= String.length m &&
             String.sub id_lower 0 (String.length m) = m
-          ) llm_models with
+          ) model_models with
             | Some m -> m
-            | None -> "gemini" (* fallback, shouldn't happen since is_llm is true *)
+            | None -> "gemini" (* fallback, shouldn't happen since is_model is true *)
           in
           let (text_clean, has_tools) = extract_tools_flag text in
           let prompt = if text_clean = "" then "{{input}}" else text_clean in
           let tools = make_tools_value has_tools in
-          Ok (Llm { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
+          Ok (Model { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
         else if List.mem id_lower known_tools then
           Ok (Tool { name = id; args = `Null })
         else
-          (* Default: treat as LLM with "gemini" default model, text as prompt *)
+          (* Default: treat as MODEL with "gemini" default model, text as prompt *)
           (* If ID is short (1-2 chars) or generic, use text as prompt *)
           let (text_clean, has_tools) = extract_tools_flag text in
           let prompt = if text_clean = "" then id else text_clean in
           let tools = make_tools_value has_tools in
-          Ok (Llm { model = "gemini"; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
+          Ok (Model { model = "gemini"; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
 
   | `Trap ->
       (* Trapezoid nodes: Adapter - parse "Adapt[input_ref → transform_type]" or similar *)
@@ -517,8 +517,8 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
       else if text = "Cascade" then
         Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = Chain_types.CM_Summary; task_hint = None; default_threshold = 0.7 })
       else
-        (* Unknown stadium text - treat as LLM with default model *)
-        Ok (Llm { model = "gemini"; system = None; prompt = text; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
+        (* Unknown stadium text - treat as MODEL with default model *)
+        Ok (Model { model = "gemini"; system = None; prompt = text; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
 
   | `Circle ->
       (* Circle nodes: MASC coordination (broadcast, listen, claim) *)

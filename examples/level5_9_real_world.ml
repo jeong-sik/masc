@@ -490,7 +490,7 @@ let example_16_known_unknowns () =
   let additional_unknowns = [
     "Whether current architecture scales to 100+ agents";
     "Long-term effects of continuous operation";
-    "Impact of different LLM combinations";
+    "Impact of different MODEL combinations";
     "Optimal balance between autonomy and coordination"
   ] in
   let state' = List.fold_left

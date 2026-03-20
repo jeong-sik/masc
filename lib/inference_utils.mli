@@ -1,4 +1,4 @@
-(** Llm_utils — LLM utility functions.
+(** Inference_utils — inference utility functions.
 
     Usage helpers, UTF-8 sanitization, token estimation, and
     concurrency diagnostics.
@@ -16,7 +16,7 @@ val total_tokens : Agent_sdk.Types.api_usage -> int
 val zero_usage : Agent_sdk.Types.api_usage
 
 (** Extract usage from an api_response, defaulting to {!zero_usage}. *)
-val usage_of_response : Llm_provider.Types.api_response -> Agent_sdk.Types.api_usage
+val usage_of_response : Oas_response.api_response -> Agent_sdk.Types.api_usage
 
 (** Measure wall-clock latency of a thunk in milliseconds. *)
 val timed : (unit -> 'a) -> 'a * int
@@ -33,14 +33,14 @@ val sanitize_messages_utf8 : Agent_sdk.Types.message list -> Agent_sdk.Types.mes
 (** Heuristic token estimate (~4 chars/token). *)
 val estimate_tokens : Agent_sdk.Types.message list -> int
 
-(** Maximum concurrent LLM calls (from [MASC_MAX_CONCURRENT_LLM], default 8). *)
-val max_concurrent_llm : int
+(** Maximum concurrent model calls (from [MASC_MAX_CONCURRENT_MODELS], default 8). *)
+val max_concurrent_models : int
 
-(** Atomic counter tracking in-flight LLM calls (observability only). *)
+(** Atomic counter tracking in-flight model calls (observability only). *)
 val inflight : int Atomic.t
 
-(** Available LLM permits: [max_concurrent_llm - inflight]. *)
-val llm_semaphore_available : unit -> int
+(** Available model permits: [max_concurrent_models - inflight]. *)
+val model_permits_available : unit -> int
 
-(** LLM permits currently in use. *)
-val llm_permits_in_use : unit -> int
+(** Model permits currently in use. *)
+val model_permits_in_use : unit -> int

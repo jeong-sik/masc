@@ -48,7 +48,7 @@ type event_type =
   | Broadcast
   | Completion
   | Error
-  | HeartbeatTask  (** Agent embodiment request — Worker should invoke LLM *)
+  | HeartbeatTask  (** Agent embodiment request — Worker should invoke MODEL *)
 [@@deriving show]
 
 let event_type_of_string = function
@@ -791,7 +791,7 @@ let emit_heartbeat_task
 *)
 
 (** Submit heartbeat task result from A2A Worker.
-    @param worker_name Worker agent name (e.g., "llm-worker-local")
+    @param worker_name Worker agent name (e.g., "model-worker-local")
     @param agent Original agent name (soul owner)
     @param status "acted" | "skipped" | "failed"
     @param summary Short completion summary

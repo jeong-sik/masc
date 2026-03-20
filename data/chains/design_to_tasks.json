@@ -17,7 +17,7 @@
     },
     {
       "id": "plan_tasks",
-      "type": "llm",
+      "type": "model",
       "model": "gemini",
       "prompt": "Analyze this Figma node summary and break it down into implementation tasks for MASC.\n\nFigma Summary:\n{{fetch_design.output}}\n\nOutput ONLY a valid JSON array of task objects with these fields:\n- title: string\n- priority: integer (1-5, 1=highest)\n- description: string (detailed implementation steps)\n\nExample:\n[{\"title\": \"Implement Header\", \"priority\": 2, \"description\": \"...\"}]"
     },

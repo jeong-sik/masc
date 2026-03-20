@@ -1,5 +1,5 @@
 (** End-to-end swarm tests verifying the full execution path.
-    Uses mock LLM server (no live LLM required).
+    Uses mock MODEL server (no live MODEL required).
     Tests: parallel execution, MASC join/leave error paths,
     on_complete callback, and async status tool. *)
 

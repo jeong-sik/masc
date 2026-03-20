@@ -486,7 +486,7 @@ let keeper_max_tool_rounds () : int =
     ~min_v:1
     ~max_v:20
 
-(** Max tokens for autonomous execution LLM calls.
+(** Max tokens for autonomous execution MODEL calls.
     Env: [MASC_KEEPER_AUTONOMOUS_MAX_TOKENS]. Default: 4000. *)
 let keeper_autonomous_max_tokens () : int =
   int_of_env_default

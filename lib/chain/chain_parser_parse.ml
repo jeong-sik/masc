@@ -99,7 +99,7 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
     (* Helper for auto-extracting input mappings from node content *)
     let auto_extract_mappings () =
       match node_type with
-      | Llm { prompt; _ } -> extract_input_mappings prompt
+      | Model { prompt; _ } -> extract_input_mappings prompt
       | Tool { args; _ } -> extract_json_mappings args
       | _ -> []
     in
@@ -173,34 +173,34 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
 and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, string) result =
   let open Yojson.Safe.Util in
   match type_str with
-  | "llm" ->
+  | "model" ->
       (* Support both flat and nested format:
-         Flat:   {"type":"llm","model":"gemini","prompt":"..."}
-         Nested: {"type":"llm","llm":{"model":"gemini","prompt":"..."}}
+         Flat:   {"type":"model","model":"gemini","prompt":"..."}
+         Nested: {"type":"model","model":{"model":"gemini","prompt":"..."}}
       *)
-      let llm_json = match json |> member "llm" with
-        | `Assoc _ as llm_obj -> llm_obj
+      let model_json = match json |> member "model" with
+        | `Assoc _ as model_obj -> model_obj
         | _ -> json
       in
-      let* model = require_string llm_json "model" in
-      let system = parse_string_opt llm_json "system" in
-      let timeout = parse_int_opt llm_json "timeout" in
+      let* model = require_string model_json "model" in
+      let system = parse_string_opt model_json "system" in
+      let timeout = parse_int_opt model_json "timeout" in
       let tools =
-        match llm_json |> member "tools" with
+        match model_json |> member "tools" with
         | `Null -> None
         | v -> Some v
       in
       (* Prompt Registry support: prompt_ref takes precedence *)
-      let prompt_ref = parse_string_opt llm_json "prompt_ref" in
+      let prompt_ref = parse_string_opt model_json "prompt_ref" in
       let prompt_vars =
-        match llm_json |> member "prompt_vars" with
+        match model_json |> member "prompt_vars" with
         | `Assoc pairs ->
             List.filter_map (fun (k, v) ->
               match v with `String s -> Some (k, s) | _ -> None) pairs
         | _ -> []
       in
       (* Phase 6: Parse thinking field for GLM reasoning mode *)
-      let thinking = parse_bool_with_default llm_json "thinking" false in
+      let thinking = parse_bool_with_default model_json "thinking" false in
       (* If prompt_ref is set, load from registry; otherwise require prompt field *)
       let* prompt =
         match prompt_ref with
@@ -219,13 +219,13 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
                   | Error e -> Error (Printf.sprintf "Failed to render prompt_ref '%s': %s" ref e))
              | None ->
                  (* If prompt_ref not found, fall back to prompt field if present *)
-                 match parse_string_opt llm_json "prompt" with
+                 match parse_string_opt model_json "prompt" with
                  | Some p -> Ok p
                  | None -> Error (Printf.sprintf "Prompt '%s' not found in registry and no fallback prompt" ref))
         | None ->
-            require_string llm_json "prompt"
+            require_string model_json "prompt"
       in
-      Ok (Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars; thinking })
+      Ok (Model { model; system; prompt; timeout; tools; prompt_ref; prompt_vars; thinking })
 
   | "tool" ->
       (* Support both flat and nested format:
@@ -542,7 +542,7 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let strategies_json = parse_list_with_default json "strategies" in
       let* strategies = parse_nodes strategies_json in
       let* simulation = parse_node (json |> member "simulation") in
-      let evaluator = parse_string_with_default json "evaluator" "llm_judge" in
+      let evaluator = parse_string_with_default json "evaluator" "model_judge" in
       let evaluator_prompt = parse_string_opt json "evaluator_prompt" in
       let* policy = parse_mcts_policy (json |> member "policy") in
       let max_iterations = parse_int_with_default json "max_iterations" 10 in
@@ -583,7 +583,7 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let* generator = parse_node generator_json in
       (* Parse evaluator_config *)
       let evaluator_config_json = json |> member "evaluator_config" in
-      let scoring_func = parse_string_with_default evaluator_config_json "scoring_func" "llm_judge" in
+      let scoring_func = parse_string_with_default evaluator_config_json "scoring_func" "model_judge" in
       let scoring_prompt = parse_string_opt evaluator_config_json "scoring_prompt" in
       let select_strategy = match evaluator_config_json |> member "select_strategy" with
         | `String "best" -> Best

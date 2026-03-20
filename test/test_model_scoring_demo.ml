@@ -1,5 +1,5 @@
-(** LLM Scoring Demo — Compare keyword vs LLM scoring results.
-    Run with: MASC_CAPABILITY_MATCH_MODE=llm dune exec test/test_llm_scoring_demo.exe *)
+(** MODEL Scoring Demo — Compare keyword vs MODEL scoring results.
+    Run with: MASC_CAPABILITY_MATCH_MODE=model dune exec test/test_model_scoring_demo.exe *)
 
 open Masc_mcp.Capability_match
 
@@ -74,7 +74,7 @@ let print_scores label agents tasks =
 
 let () =
   let mode = get_match_mode () in
-  let mode_str = match mode with Keyword -> "keyword" | Llm -> "llm" | Hybrid -> "hybrid" in
+  let mode_str = match mode with Keyword -> "keyword" | Model -> "model" | Hybrid -> "hybrid" in
   Printf.printf "Mode: %s\n" mode_str;
 
   let agents = [security_agent; frontend_agent; devops_agent] in

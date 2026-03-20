@@ -195,7 +195,7 @@ export type KeeperQuietReason =
   | 'no_recent_activity'
   | 'disabled'
   | 'startup'
-  | 'llm_error'
+  | 'model_error'
   | 'graphql_error'
   | 'never_started'
   | 'unknown'

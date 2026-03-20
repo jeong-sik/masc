@@ -2,14 +2,14 @@
 
 ## 🚀 Quick Start
 
-`masc-mcp` is now the canonical chain runtime. These examples target the native chain server on port `8935`; older `llm-mcp` `8932` references are retired.
+`masc-mcp` is now the canonical chain runtime. These examples target the native chain server on port `8935`; older `model-mcp` `8932` references are retired.
 
 ### 1. Mermaid DSL로 바로 실행
 ```bash
 # 터미널에서
 curl -X POST http://localhost:8935/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"chain.run","arguments":{"mermaid":"graph LR\n    A[LLM:ollama \"Hello\"]"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"chain.run","arguments":{"mermaid":"graph LR\n    A[MODEL:ollama \"Hello\"]"}}}'
 ```
 
 ### 2. 파일로 실행
@@ -24,16 +24,16 @@ chain.run --file examples/login-screen.mermaid
 ### 예제 1: Simple Pipeline (3 nodes)
 ```mermaid
 graph LR
-    A[LLM:stub "input"] --> B[LLM:ollama "process: {{A}}"] --> C[LLM:ollama "summarize: {{B}}"]
+    A[MODEL:stub "input"] --> B[MODEL:ollama "process: {{A}}"] --> C[MODEL:ollama "summarize: {{B}}"]
 ```
 
 ### 예제 2: MAGI 합의 (5 nodes)
 ```mermaid
 graph LR
     Input[Tool:echo "code to review"]
-    Input --> M[LLM:codex "bugs: {{Input}}"]
-    Input --> B[LLM:claude "clarity: {{Input}}"]
-    Input --> C[LLM:gemini "arch: {{Input}}"]
+    Input --> M[MODEL:codex "bugs: {{Input}}"]
+    Input --> B[MODEL:claude "clarity: {{Input}}"]
+    Input --> C[MODEL:gemini "arch: {{Input}}"]
     M --> V{Merge:concat}
     B --> V
     C --> V
@@ -43,9 +43,9 @@ graph LR
 ```mermaid
 graph LR
     Design[Tool:echo "Button 120x48 blue rounded"]
-    Design --> Web[LLM:claude "React: {{Design}}"]
-    Design --> iOS[LLM:codex "SwiftUI: {{Design}}"]
-    Design --> Android[LLM:gemini "Compose: {{Design}}"]
+    Design --> Web[MODEL:claude "React: {{Design}}"]
+    Design --> iOS[MODEL:codex "SwiftUI: {{Design}}"]
+    Design --> Android[MODEL:gemini "Compose: {{Design}}"]
     Web --> M{Merge:concat}
     iOS --> M
     Android --> M
@@ -55,8 +55,8 @@ graph LR
 ```mermaid
 graph LR
     Q[Tool:echo "complex query"]
-    Q --> Primary[LLM:gemini "answer: {{Q}}"]
-    Q --> Backup[LLM:ollama "answer: {{Q}}"]
+    Q --> Primary[MODEL:gemini "answer: {{Q}}"]
+    Q --> Backup[MODEL:ollama "answer: {{Q}}"]
     Primary --> F{Fallback}
     Backup --> F
 ```
@@ -65,9 +65,9 @@ graph LR
 ```mermaid
 graph LR
     Q[Tool:echo "Is this code safe?"]
-    Q --> A[LLM:ollama "YES or NO: {{Q}}"]
-    Q --> B[LLM:ollama "YES or NO: {{Q}}"]
-    Q --> C[LLM:ollama "YES or NO: {{Q}}"]
+    Q --> A[MODEL:ollama "YES or NO: {{Q}}"]
+    Q --> B[MODEL:ollama "YES or NO: {{Q}}"]
+    Q --> C[MODEL:ollama "YES or NO: {{Q}}"]
     A --> V{Quorum:2}
     B --> V
     C --> V
@@ -81,7 +81,7 @@ graph LR
 
 | 타입 | 문법 | 예시 |
 |------|------|------|
-| LLM | `[LLM:model "prompt"]` | `[LLM:claude "Summarize: {{A}}"]` |
+| MODEL | `[MODEL:model "prompt"]` | `[MODEL:claude "Summarize: {{A}}"]` |
 | Tool | `[Tool:name "args"]` | `[Tool:echo "data"]` |
 | Merge | `{Merge:strategy}` | `{Merge:concat}` |
 | Quorum | `{Quorum:N}` | `{Quorum:2}` |
@@ -92,7 +92,7 @@ graph LR
 | 모델 | 설명 | 비용 |
 |------|------|------|
 | `stub` | 테스트용 (입력 그대로 반환) | 무료 |
-| `ollama` | 로컬 LLM | 무료 |
+| `ollama` | 로컬 MODEL | 무료 |
 | `claude` | Claude (Anthropic) | $$ |
 | `codex` | Codex (OpenAI) | $$ |
 | `gemini` | Gemini (Google) | $ |
@@ -102,7 +102,7 @@ graph LR
 
 ```mermaid
 graph LR
-    A[LLM:stub "hello"] --> B[LLM:ollama "input was: {{A}}"]
+    A[MODEL:stub "hello"] --> B[MODEL:ollama "input was: {{A}}"]
     %% {{A}} = A 노드의 출력값
 ```
 
@@ -139,7 +139,7 @@ A --> C --> D
 
 ## 💡 Tips
 
-1. **테스트 먼저**: `stub`이나 `ollama`로 패턴 검증 후 클라우드 LLM 사용
+1. **테스트 먼저**: `stub`이나 `ollama`로 패턴 검증 후 클라우드 MODEL 사용
 2. **타임아웃**: 복잡한 체인은 `timeout` 늘리기 (기본 60초)
 3. **비용 절감**: 중간 결과 확인용 노드에는 `haiku` 사용
 4. **디버깅**: `Tool:echo`로 중간 값 확인

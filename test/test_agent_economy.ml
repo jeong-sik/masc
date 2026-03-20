@@ -142,14 +142,14 @@ let test_earn_task_done () =
             Alcotest.(check (float 0.01)) "5.0 + 10.0 = 15.0" 15.0 balance))));
   rm_rf dir
 
-let test_spend_llm_call () =
+let test_spend_model_call () =
   let dir = fresh_tmpdir () in
   reset_cache ();
   with_economy_enabled (fun () ->
     with_env "MASC_ECONOMY_INITIAL_BALANCE" "10.0" (fun () ->
       match Agent_economy.spend
         ~base_path:dir ~agent_name:"spender"
-        ~amount:0.05 ~kind:Spend_llm_call
+        ~amount:0.05 ~kind:Spend_model_call
         ~reason:"glm-4.7 call" () with
       | Error msg -> Alcotest.fail msg
       | Ok balance ->
@@ -190,7 +190,7 @@ let test_multiple_transactions () =
           (* Spend *)
           (match Agent_economy.spend
             ~base_path:dir ~agent_name:"multi"
-            ~amount:3.0 ~kind:Spend_llm_call ~reason:"big call" () with
+            ~amount:3.0 ~kind:Spend_model_call ~reason:"big call" () with
            | Error msg -> Alcotest.fail msg
            | Ok b -> Alcotest.(check (float 0.01)) "after spend" 17.0 b);
           (* Check balance *)
@@ -292,14 +292,14 @@ let test_pressure_transition_after_spend () =
             (Agent_economy.pressure_mode_to_string m1);
           (* Spend 3.0 -> 3.0 -> Frugal *)
           ignore (Agent_economy.spend ~base_path:dir ~agent_name:"transitioning"
-            ~amount:3.0 ~kind:Spend_llm_call ~reason:"big call" ());
+            ~amount:3.0 ~kind:Spend_model_call ~reason:"big call" ());
           let m2 = Agent_economy.economic_pressure
             ~base_path:dir ~agent_name:"transitioning" in
           Alcotest.(check string) "now frugal" "frugal"
             (Agent_economy.pressure_mode_to_string m2);
           (* Spend 4.0 -> -1.0 -> Hustle *)
           ignore (Agent_economy.spend ~base_path:dir ~agent_name:"transitioning"
-            ~amount:4.0 ~kind:Spend_llm_call ~reason:"huge call" ());
+            ~amount:4.0 ~kind:Spend_model_call ~reason:"huge call" ());
           let m3 = Agent_economy.economic_pressure
             ~base_path:dir ~agent_name:"transitioning" in
           Alcotest.(check string) "now hustle" "hustle"
@@ -325,7 +325,7 @@ let () =
     ]);
     ("earn_spend", [
       Alcotest.test_case "earn task done" `Quick test_earn_task_done;
-      Alcotest.test_case "spend llm call" `Quick test_spend_llm_call;
+      Alcotest.test_case "spend model call" `Quick test_spend_model_call;
       Alcotest.test_case "earn when disabled" `Quick test_earn_when_disabled;
       Alcotest.test_case "multiple transactions" `Quick test_multiple_transactions;
     ]);

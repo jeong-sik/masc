@@ -103,7 +103,7 @@ type start_params = {
   source_workdir : string;
   max_cycles : int;
   cycle_timeout_s : float;
-  llm_model : string;
+  model_model : string;
   baseline_override : float option;
 }
 
@@ -119,7 +119,7 @@ let persisted_summary_json (summary : Autoresearch.persisted_summary) =
       ("loop_id", `String summary.loop_id);
       ("goal", `String summary.goal);
       ("metric_fn", `String summary.metric_fn);
-      ("llm_model", `String summary.llm_model);
+      ("model_model", `String summary.model_model);
       ("target_file", `String summary.target_file);
       ("status", `String (Autoresearch.status_to_string summary.status));
       ("current_cycle", `Int summary.current_cycle);
@@ -154,7 +154,7 @@ let prepare_start_params ctx args =
   let source_workdir = get_string args "workdir" ctx.base_path in
   let max_cycles = get_int args "max_cycles" 100 in
   let cycle_timeout_s = get_float args "cycle_timeout_s" 300.0 in
-  let llm_model = get_string args "llm_model" "glm" in
+  let model_model = get_string args "model_model" "glm" in
   if goal = "" then
     Error "goal is required"
   else if metric_fn = "" then
@@ -170,7 +170,7 @@ let prepare_start_params ctx args =
         source_workdir;
         max_cycles;
         cycle_timeout_s;
-        llm_model;
+        model_model;
         baseline_override = get_float_opt args "baseline";
       }
 
@@ -183,7 +183,7 @@ let register_loop ctx state =
 let setup_running_loop ctx (params : start_params) =
   let state =
     Autoresearch.create_state ~goal:params.goal ~metric_fn:params.metric_fn
-      ~llm_model:params.llm_model ~target_file:params.target_file
+      ~model_model:params.model_model ~target_file:params.target_file
       ~cycle_timeout_s:params.cycle_timeout_s ~max_cycles:params.max_cycles
       ~workdir:params.source_workdir ()
   in
@@ -299,7 +299,7 @@ let handle_start ctx args =
         ("goal", `String params.goal);
         ("metric_fn", `String params.metric_fn);
         ("target_file", `String params.target_file);
-        ("llm_model", `String params.llm_model);
+        ("model_model", `String params.model_model);
         ("baseline", `Float state.baseline);
         ("max_cycles", `Int params.max_cycles);
         ("cycle_timeout_s", `Float params.cycle_timeout_s);
@@ -515,7 +515,7 @@ let handle_cycle ctx args =
           ]
         | Ok abs_path ->
         let file_content = Autoresearch.read_file abs_path in
-        (* 2. Generate code change: injected hypothesis > arg > LLM *)
+        (* 2. Generate code change: injected hypothesis > arg > MODEL *)
         let code_result =
           let forced_hypothesis =
             match Hashtbl.find_opt pending_hypotheses id with
@@ -530,7 +530,7 @@ let handle_cycle ctx args =
           (match forced_hypothesis with
            | Some h ->
              (* Injected/explicit hypothesis: pass it to generator
-                so LLM produces actual code changes for this hypothesis *)
+                so MODEL produces actual code changes for this hypothesis *)
              generate ~goal:(Printf.sprintf "%s\n\nApply this hypothesis: %s" state.goal h)
                ~baseline:state.baseline
                ~history:state.history ~insights:state.insights
@@ -583,10 +583,10 @@ let handle_cycle ctx args =
                     ("cycle", `Int state.current_cycle);
                   ]
                 | Ok None ->
-                  (* No diff: LLM produced identical code. Discard. *)
+                  (* No diff: MODEL produced identical code. Discard. *)
                   let record = Autoresearch.record_cycle state
                     ~hypothesis ~score_before ~score_after:score_before
-                    ~commit_hash:None ~elapsed_ms:0 ~model_used:state.llm_model in
+                    ~commit_hash:None ~elapsed_ms:0 ~model_used:state.model_model in
                   Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
                   state.current_cycle <- state.current_cycle + 1;
                   Autoresearch.save_state ~base_path:ctx.base_path state;
@@ -610,7 +610,7 @@ let handle_cycle ctx args =
                     Autoresearch.git_reset_last ~workdir;
                     let record = Autoresearch.record_cycle state
                       ~hypothesis ~score_before ~score_after:score_before
-                      ~commit_hash ~elapsed_ms:0 ~model_used:state.llm_model in
+                      ~commit_hash ~elapsed_ms:0 ~model_used:state.model_model in
                     Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id record;
                     state.current_cycle <- state.current_cycle + 1;
                     Autoresearch.save_state ~base_path:ctx.base_path state;
@@ -627,7 +627,7 @@ let handle_cycle ctx args =
                     (* 7. Compare and decide *)
                     let record = Autoresearch.record_cycle state
                       ~hypothesis ~score_before ~score_after
-                      ~commit_hash ~elapsed_ms ~model_used:state.llm_model in
+                      ~commit_hash ~elapsed_ms ~model_used:state.model_model in
                     (* 8. Keep or discard *)
                     (match record.decision with
                      | Autoresearch.Discard ->

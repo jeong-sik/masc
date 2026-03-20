@@ -49,8 +49,8 @@ function quietReasonLabel(reason?: string | null): string {
       return 'runtime disabled'
     case 'startup':
       return 'warming up'
-    case 'llm_error':
-      return 'llm error'
+    case 'model_error':
+      return 'model error'
     case 'graphql_error':
       return 'graphql error'
     case 'never_started':

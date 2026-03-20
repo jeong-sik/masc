@@ -245,7 +245,6 @@ let run_with_masc_tools
 (* ================================================================ *)
 
 (** Locate config/cascade.json via CWD or ME_ROOT.
-    Falls back to legacy config/llm_cascade.json if new name not found.
     Returns [Some path] when the file exists on disk. *)
 let default_config_path () : string option =
   let base dir name = Filename.concat (Filename.concat dir "config") name in
@@ -258,9 +257,7 @@ let default_config_path () : string option =
   let masc_root = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
   let candidates =
     [ base cwd "cascade.json";
-      base masc_root "cascade.json";
-      base cwd "llm_cascade.json";
-      base masc_root "llm_cascade.json" ]
+      base masc_root "cascade.json" ]
   in
   List.find_opt Sys.file_exists candidates
 
@@ -275,8 +272,8 @@ let labels_of pairs =
 
 let default_model_strings ~cascade_name =
   let llama_model = Env_config.Llama.default_model in
-  let glm_model = Env_config.Llm.default_model in
-  let glm_flash = Env_config.Llm.flash_model in
+  let glm_model = Env_config.Glm.default_model in
+  let glm_flash = Env_config.Glm.flash_model in
   (* llama + glm:auto — GLM provider selects model at runtime *)
   let llama_glm =
     (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
@@ -301,7 +298,7 @@ let default_model_strings ~cascade_name =
   (* routing — local llama, glm fallback *)
   | "routing_judge" | "team_router" -> llama_glm
   (* chain — local llama, glm fallback *)
-  | "chain_llm" -> llama_glm
+  | "chain_model" -> llama_glm
   (* autoresearch — local llama, glm fallback *)
   | "autoresearch" -> llama_glm
   (* trpg — local llama, glm fallback *)
@@ -337,44 +334,7 @@ let default_model_strings ~cascade_name =
   | _ -> llama_glm
 
 (* ================================================================ *)
-(* Single-shot cascade call                                          *)
-(* ================================================================ *)
-
-(** Format OAS http_error as cascade error string. *)
-let format_cascade_error ~cascade_name = function
-  | Llm_provider.Http_client.HttpError { code; body } ->
-    Printf.sprintf "[cascade] %s: HTTP %d: %s" cascade_name code
-      (if String.length body > 200
-       then String.sub body 0 200 ^ "..."
-       else body)
-  | Llm_provider.Http_client.NetworkError { message } ->
-    Printf.sprintf "[cascade] %s: %s" cascade_name message
-
-(** Single-shot LLM call via cascade policy.
-    Drop-in replacement for the former [Cascade.complete].
-    Policy (model selection, config path) uses local cascade defaults;
-    execution goes through [Llm_provider.Cascade_config.complete_named]. *)
-let complete_single ~cascade_name ~messages
-    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
-    ?(max_tokens = 500) ?(accept = fun _ -> true) ?tools () =
-  let env = Masc_eio_env.get () in
-  let defaults = default_model_strings ~cascade_name in
-  let config_path_opt =
-    if String.length config_path > 0 then Some config_path
-    else default_config_path ()
-  in
-  match
-    Llm_provider.Cascade_config.complete_named
-      ~sw:env.sw ~net:env.net ?clock:env.clock
-      ?config_path:config_path_opt
-      ~name:cascade_name ~defaults ~messages
-      ?tools ~temperature ~max_tokens ~accept ~timeout_sec ()
-  with
-  | Ok resp -> Ok resp
-  | Error err -> Error (format_cascade_error ~cascade_name err)
-
-(* ================================================================ *)
-(* Named cascade API — callers pass cascade_name, not model_spec    *)
+(* Named model execution                                            *)
 (* ================================================================ *)
 
 let require_eio () =
@@ -404,6 +364,35 @@ let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
       Printf.eprintf "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!" cascade_name;
       Model_spec.available_model_specs_of_strings defaults)
 
+let config_for_model
+    ~(name : string)
+    ~(model_spec : Model_spec.model_spec)
+    ~(system_prompt : string)
+    ~(tools : Oas.Tool.t list)
+    ~(max_turns : int)
+    ~(max_tokens : int)
+    ~(temperature : float)
+    ?guardrails
+    ?hooks
+    ?context_reducer
+    ?memory
+    ~(description : string option)
+    () : config =
+  let provider = resolve_provider model_spec in
+  {
+    (default_config ~name ~provider ~model_id:model_spec.model_id
+       ~system_prompt ~tools)
+    with
+    max_turns;
+    max_tokens;
+    temperature;
+    guardrails;
+    hooks;
+    context_reducer;
+    memory;
+    description;
+  }
+
 (** Run a single Agent.run() call with cascade model fallback.
 
     Tries each model in cascade order. Falls through to the next model
@@ -412,7 +401,7 @@ let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
     - [accept] returns [false] (response validation failure)
 
     This preserves the cascade fallback behavior of the former [Cascade.complete]
-    while routing all LLM calls through Agent.run().
+    while routing all MODEL calls through Agent.run().
 
     @param accept Optional response validator. Default accepts all.
     @since Phase 7 — cascade fallback in Oas_worker *)
@@ -424,7 +413,7 @@ let run_named
     ?(max_turns = 20)
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
-    ?(accept = fun (_ : Llm_provider.Types.api_response) -> true)
+    ?(accept = fun (_ : Oas_response.api_response) -> true)
     ?guardrails
     ?hooks
     ?context_reducer
@@ -444,19 +433,14 @@ let run_named
       in
       Error err
     | (spec : Model_spec.model_spec) :: rest ->
-      let provider = resolve_provider spec in
       let name = Printf.sprintf "oas-%s" cascade_name in
-      let config = { (default_config ~name ~provider ~model_id:spec.model_id
-                        ~system_prompt ~tools) with
-        max_turns;
-        max_tokens;
-        temperature;
-        guardrails;
-        hooks;
-        context_reducer;
-        memory;
-        description = Some (Printf.sprintf "cascade:%s" cascade_name);
-      } in
+      let config =
+        config_for_model ~name ~model_spec:spec ~system_prompt ~tools
+          ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
+          ?context_reducer ?memory
+          ~description:(Some (Printf.sprintf "cascade:%s" cascade_name))
+          ()
+      in
       match run ~sw ~net ~config ?on_event goal with
       | Ok result when accept result.response -> Ok result
       | Ok _ ->
@@ -470,6 +454,40 @@ let run_named
       | Error e -> Error e
   in
   try_specs None specs
+
+let run_model
+    ~model_spec
+    ~goal
+    ?(system_prompt = "")
+    ?(tools = [])
+    ?(max_turns = 20)
+    ?(temperature = 0.7)
+    ?(max_tokens = 4096)
+    ?(accept = fun (_ : Oas_response.api_response) -> true)
+    ?guardrails
+    ?hooks
+    ?context_reducer
+    ?memory
+    ?on_event
+    ()
+  : (run_result, string) result =
+  match require_eio () with
+  | Error e -> Error e
+  | Ok (sw, net) ->
+      let config =
+        config_for_model ~name:"oas-explicit-model" ~model_spec ~system_prompt
+          ~tools ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
+          ?context_reducer ?memory
+          ~description:(Some "model_spec:explicit")
+          ()
+      in
+      (match run ~sw ~net ~config ?on_event goal with
+      | Ok result when accept result.response -> Ok result
+      | Ok _ ->
+          Error
+            (Printf.sprintf "response rejected by accept from %s"
+               model_spec.model_id)
+      | Error e -> Error e)
 
 let run_named_with_masc_tools
     ~cascade_name
@@ -498,18 +516,14 @@ let run_named_with_masc_tools
       in
       Error err
     | (spec : Model_spec.model_spec) :: rest ->
-      let provider = resolve_provider spec in
       let name = Printf.sprintf "oas-%s" cascade_name in
-      let config = { (default_config ~name ~provider ~model_id:spec.model_id
-                        ~system_prompt ~tools:[]) with
-        max_turns;
-        max_tokens;
-        temperature;
-        guardrails;
-        hooks;
-        memory;
-        description = Some (Printf.sprintf "cascade:%s" cascade_name);
-      } in
+      let config =
+        config_for_model ~name ~model_spec:spec ~system_prompt ~tools:[]
+          ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
+          ?memory
+          ~description:(Some (Printf.sprintf "cascade:%s" cascade_name))
+          ()
+      in
       match run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event goal with
       | Ok result -> Ok result
       | Error e when rest <> [] ->
@@ -519,3 +533,31 @@ let run_named_with_masc_tools
       | Error e -> Error e
   in
   try_specs None specs
+
+let run_model_with_masc_tools
+    ~model_spec
+    ~goal
+    ?(system_prompt = "")
+    ~(masc_tools : Types.tool_schema list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ?(max_turns = 20)
+    ?(temperature = 0.7)
+    ?(max_tokens = 4096)
+    ?guardrails
+    ?hooks
+    ?memory
+    ?on_event
+    ()
+  : (run_result, string) result =
+  match require_eio () with
+  | Error e -> Error e
+  | Ok (sw, net) ->
+      let config =
+        config_for_model ~name:"oas-explicit-model" ~model_spec ~system_prompt
+          ~tools:[] ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
+          ?memory
+          ~description:(Some "model_spec:explicit")
+          ()
+      in
+      run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event
+        goal

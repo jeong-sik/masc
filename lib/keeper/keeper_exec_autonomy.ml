@@ -59,10 +59,10 @@ let autonomous_gate_config
         denied_tools = base_denied;
       }
 
-(** Execute an approved/cautioned action plan via LLM + tool loop with gate sandboxing.
+(** Execute an approved/cautioned action plan via MODEL + tool loop with gate sandboxing.
 
-    1. Inject plan text into LLM system prompt
-    2. LLM generates tool_calls based on plan
+    1. Inject plan text into MODEL system prompt
+    2. MODEL generates tool_calls based on plan
     3. Each tool_call goes through Eval_gate.guarded_execute
     4. Recursive tool_loop (max 3 rounds)
     5. Returns execution summary
@@ -235,10 +235,10 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    meta.name req.goal_title;
                  (* Keeper runs in heartbeat timer context without Eio.Switch.t,
                     so coding_mode (= Claude Code spawn) is structurally unavailable.
-                    Force LLM-only mode to prevent guaranteed failure. *)
+                    Force MODEL-only mode to prevent guaranteed failure. *)
                  let effective_coding_mode = false in
                  (if req.coding_mode then
-                    Log.KeeperExec.info "%s: coding_mode requested but unavailable (no Eio.Switch in heartbeat context), falling back to LLM-only" meta.name);
+                    Log.KeeperExec.info "%s: coding_mode requested but unavailable (no Eio.Switch in heartbeat context), falling back to MODEL-only" meta.name);
                  let perp_args = `Assoc [
                    ("goal", `String req.goal_title);
                    ("models", `List (List.map (fun m -> `String m) req.models));

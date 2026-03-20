@@ -6,7 +6,7 @@ Real-world chain examples demonstrating the Chain Engine's DAG execution capabil
 
 | Chain | Description | Est. Time | Est. Cost |
 |-------|-------------|-----------|-----------|
-| [consensus-review](#consensus-review) | 3-LLM consensus code review | 120s | $0.15 |
+| [consensus-review](#consensus-review) | 3-MODEL consensus code review | 120s | $0.15 |
 | [deep-research](#deep-research) | Multi-source research with fact-checking | 180s | $0.25 |
 | [pr-review-pipeline](#pr-review-pipeline) | Automated PR review | 90s | $0.12 |
 | [incident-response](#incident-response) | Automated incident triage | 120s | $0.18 |
@@ -18,7 +18,7 @@ Real-world chain examples demonstrating the Chain Engine's DAG execution capabil
 
 ## Consensus Review
 
-3-LLM consensus code review using Codex, Claude, and Gemini.
+3-MODEL consensus code review using Codex, Claude, and Gemini.
 
 ```mermaid
 graph TD
@@ -198,11 +198,11 @@ chain.orchestrate code-migration source_code="..." source_lang=Python target_lan
 
 ## Mermaid to Chain
 
-Convert Mermaid graph diagrams to executable Chain JSON definitions. **Visual Programming for Multi-LLM workflows!**
+Convert Mermaid graph diagrams to executable Chain JSON definitions. **Visual Programming for Multi-MODEL workflows!**
 
 ```mermaid
 graph TD
-    A[parse-mermaid<br/>🔬 Codex<br/>Extract structure] --> B[infer-node-types<br/>🎯 Gemini<br/>LLM vs Tool]
+    A[parse-mermaid<br/>🔬 Codex<br/>Extract structure] --> B[infer-node-types<br/>🎯 Gemini<br/>MODEL vs Tool]
     A --> C[build-dependencies<br/>🎯 Gemini<br/>Execution order]
     B --> D[generate-chain-json<br/>👩 Claude<br/>Final schema]
     C --> D
@@ -236,9 +236,9 @@ chain.orchestrate mermaid-to-chain mermaid="graph TD
 ## Architecture Patterns
 
 ### 1. **Parallel Analysis (Fan-out/Fan-in)**
-Multiple LLMs analyze the same input in parallel, then merge results.
+Multiple models analyze the same input in parallel, then merge results.
 ```
-Input → [LLM-A, LLM-B, LLM-C] → Merge → Output
+Input → [MODEL-A, MODEL-B, MODEL-C] → Merge → Output
 ```
 
 ### 2. **Sequential Pipeline**
@@ -247,18 +247,18 @@ Each stage builds on the previous one.
 Input → Stage1 → Stage2 → Stage3 → Output
 ```
 
-### 3. **Tool-LLM Interleaving**
-Alternate between tool calls (data fetching) and LLM analysis.
+### 3. **Tool-MODEL Interleaving**
+Alternate between tool calls (data fetching) and MODEL analysis.
 ```
-Tool → LLM → Tool → LLM → Output
+Tool → MODEL → Tool → MODEL → Output
 ```
 
 ### 4. **Consensus Pattern**
-Multiple LLMs provide independent reviews, then a coordinator synthesizes.
+Multiple models provide independent reviews, then a coordinator synthesizes.
 ```
-        ┌─ LLM-A ─┐
-Input ──┼─ LLM-B ─┼── Coordinator ── Output
-        └─ LLM-C ─┘
+        ┌─ MODEL-A ─┐
+Input ──┼─ MODEL-B ─┼── Coordinator ── Output
+        └─ MODEL-C ─┘
 ```
 
 ---

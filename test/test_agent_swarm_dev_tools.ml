@@ -1,4 +1,4 @@
-(** Unit tests for dev tools — no LLM required.
+(** Unit tests for dev tools — no MODEL required.
     Tests file_read, file_write, shell_exec with safety validation. *)
 
 open Agent_sdk

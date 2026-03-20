@@ -104,7 +104,7 @@ let trim_to_option = function
 let mission_briefing_criteria =
   [
     "deterministic_rules_only";
-    "no_llm_status_inference";
+    "no_model_status_inference";
     "communication_from_message_and_session_counts";
     "alignment_from_active_agents_and_focus_bindings";
     "watch_from_room_health_and_incident_counts";

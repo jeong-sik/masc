@@ -1236,7 +1236,7 @@ module rec Masc : sig
         markdown:string;
         (**
 {%html:
-<p>Formatted for LLM consumption</p>
+<p>Formatted for model consumption</p>
 %}
         *)
 
@@ -2699,7 +2699,7 @@ end = struct
         markdown:string;
         (**
 {%html:
-<p>Formatted for LLM consumption</p>
+<p>Formatted for model consumption</p>
 %}
         *)
 
@@ -5335,7 +5335,7 @@ end = struct
         markdown:string;
         (**
 {%html:
-<p>Formatted for LLM consumption</p>
+<p>Formatted for model consumption</p>
 %}
         *)
 

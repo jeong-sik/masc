@@ -8,10 +8,10 @@ Date: 2026-03-11
 `masc-mcp`에서 agent처럼 보이는 surface는 다음 중 하나로 명시되어야 한다.
 
 - `truth`: 원천 상태. 읽기 모델이 아니라 사실 기록이다.
-- `judgment`: LLM + prompt + runtime/tool path로 생성된 판단이다.
+- `judgment`: MODEL + prompt + runtime/tool path로 생성된 판단이다.
 - `derived`: truth를 결정적으로 압축하거나 번역한 읽기 모델이다.
 - `fallback`: primary judgment가 없거나 실패했을 때 쓰는 결정적 대체 경로다.
-- `narrative`: 사람을 위한 LLM 서술 계층이다. 제어면의 canonical judgment가 아니다.
+- `narrative`: 사람을 위한 MODEL 서술 계층이다. 제어면의 canonical judgment가 아니다.
 - `simulation`: 의도적으로 비실런타임인 compatibility/test surface다.
 - `placeholder`: 미완성 또는 기본 노출 금지 surface다.
 
@@ -41,7 +41,7 @@ Date: 2026-03-11
 - `capability_match` 기본값은 `hybrid`다.
 - `trpg_dm_intent` 기본값은 `hybrid`다.
 
-즉 primary path는 LLM judgment를 먼저 시도하고, 실패 시에만 fallback을 쓴다.
+즉 primary path는 MODEL judgment를 먼저 시도하고, 실패 시에만 fallback을 쓴다.
 
 ## Validation
 

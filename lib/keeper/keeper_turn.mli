@@ -14,7 +14,7 @@ val handle_keeper_up : _ Keeper_types.context -> Yojson.Safe.t -> tool_result
 
 (** Send a message to a running keeper agent.
 
-    When [on_text_delta] is provided, the initial LLM call uses streaming
+    When [on_text_delta] is provided, the initial MODEL call uses streaming
     and forwards text deltas through the callback in real time. Follow-up
     calls (tool loops, corrections, prompt fallback) run in batch mode.
     If streaming fails, the function falls back to batch automatically.

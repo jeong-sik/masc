@@ -4,9 +4,9 @@
 graph TD
     subgraph Expansion["🎲 MCTS Expansion (Developer)"]
         input["Input: code + feedback"]
-        cand1["LLM:claude 'Refactor (best practices)'"]
-        cand2["LLM:gemini 'Refactor (performance)'"]
-        cand3["LLM:codex 'Refactor (minimal)'"]
+        cand1["MODEL:claude 'Refactor (best practices)'"]
+        cand2["MODEL:gemini 'Refactor (performance)'"]
+        cand3["MODEL:codex 'Refactor (minimal)'"]
         input --> cand1
         input --> cand2
         input --> cand3

@@ -219,7 +219,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  Log.Keeper.error "heartbeat snapshot write failed: %s"
                    (Printexc.to_string exn));
               last_snapshot_ts := now_ts);
-            (* Deliberation triage: run for llm_deliberation mode keepers *)
+            (* Deliberation triage: run for model_deliberation mode keepers *)
             let meta_after_triage =
               let pm =
                 Keeper_contract.policy_mode_of_string meta_current.policy_mode

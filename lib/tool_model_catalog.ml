@@ -36,8 +36,8 @@ let handle_list _ctx _args : result =
 let handle_status _ctx _args : result =
   let endpoints = D.get_cached_or_refresh () in
   let summary = Llm_provider.Discovery.summary_to_json endpoints in
-  let permits_available = Llm_utils.llm_semaphore_available () in
-  let permits_in_use = Llm_utils.llm_permits_in_use () in
+  let permits_available = Inference_utils.model_permits_available () in
+  let permits_in_use = Inference_utils.model_permits_in_use () in
   (true, json_ok [
     ("result", `Assoc [
       ("endpoints", `List (List.map D.endpoint_to_json endpoints));
@@ -45,7 +45,7 @@ let handle_status _ctx _args : result =
       ("masc_permits", `Assoc [
         ("available", `Int permits_available);
         ("in_use", `Int permits_in_use);
-        ("max_concurrent", `Int Llm_utils.max_concurrent_llm);
+        ("max_concurrent", `Int Inference_utils.max_concurrent_models);
       ]);
       ("cache_age_seconds", `Float (D.cache_age_seconds ()));
     ]);
@@ -127,7 +127,7 @@ let dispatch ctx ~name ~args : result option =
 let schemas : tool_schema list = [
   { name = "masc_model_catalog";
     description =
-      "Query LLM provider infrastructure status and get endpoint recommendations. \
+      "Query MODEL provider infrastructure status and get endpoint recommendations. \
        Actions: 'list' (enumerate endpoints), 'status' (slot utilization + \
        MASC permit state), 'recommend' (pick best endpoint for task_type: \
        reasoning|analysis|planning|generation|general). Uses OAS Discovery \

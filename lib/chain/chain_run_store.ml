@@ -98,7 +98,7 @@ let rec collect_nodes acc (node : node) =
       collect_nodes acc generator
   | Cascade { tiers; _ } ->
       List.fold_left (fun acc t -> collect_nodes acc t.Chain_types.tier_node) acc tiers
-  | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _
+  | Model _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _
   | Masc_broadcast _ | Masc_listen _ | Masc_claim _ ->
       acc
 

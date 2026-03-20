@@ -48,7 +48,7 @@
               "type": "pipeline",
               "nodes": [
                 {
-                  "id": "spec-gemini-llm",
+                  "id": "spec-gemini-model",
                   "type": "tool",
                   "tool": {
                     "name": "gemini",
@@ -64,7 +64,7 @@
                 {
                   "id": "json-only",
                   "type": "adapter",
-                  "input_ref": "spec-gemini-llm",
+                  "input_ref": "spec-gemini-model",
                   "transform": {
                     "type": "chain",
                     "transforms": [
@@ -84,7 +84,7 @@
               "type": "pipeline",
               "nodes": [
                 {
-                  "id": "repair-gemini-llm",
+                  "id": "repair-gemini-model",
                   "type": "tool",
                   "tool": {
                     "name": "gemini",
@@ -93,14 +93,14 @@
                       "thinking_level": "high",
                       "timeout": 60,
                       "stream": false,
-                      "prompt": "Return ONLY valid JSON. No markdown, no extra text.\nIf unknown, use empty string or empty array, but NEVER omit keys.\n\nSUMMARY(JSON):\n{{summary-json}}\n\nRAW_OUTPUT:\n{{spec-gemini-llm}}\n\nOUTPUT JSON (exact keys):\n{\n  \"component_name\": string,\n  \"component_type\": string,\n  \"layout\": { \"type\": string, \"notes\": string },\n  \"tokens\": { \"colors\": [string], \"spacing\": [string], \"typography\": [string] },\n  \"texts\": [string],\n  \"structure\": [string],\n  \"implementation_notes\": [string]\n}"
+                      "prompt": "Return ONLY valid JSON. No markdown, no extra text.\nIf unknown, use empty string or empty array, but NEVER omit keys.\n\nSUMMARY(JSON):\n{{summary-json}}\n\nRAW_OUTPUT:\n{{spec-gemini-model}}\n\nOUTPUT JSON (exact keys):\n{\n  \"component_name\": string,\n  \"component_type\": string,\n  \"layout\": { \"type\": string, \"notes\": string },\n  \"tokens\": { \"colors\": [string], \"spacing\": [string], \"typography\": [string] },\n  \"texts\": [string],\n  \"structure\": [string],\n  \"implementation_notes\": [string]\n}"
                     }
                   }
                 },
                 {
                   "id": "json-only-repair",
                   "type": "adapter",
-                  "input_ref": "repair-gemini-llm",
+                  "input_ref": "repair-gemini-model",
                   "transform": {
                     "type": "chain",
                     "transforms": [
@@ -118,7 +118,7 @@
               "type": "pipeline",
               "nodes": [
                 {
-                  "id": "spec-claude-llm",
+                  "id": "spec-claude-model",
                   "type": "tool",
                   "tool": {
                     "name": "claude-cli",
@@ -134,7 +134,7 @@
                 {
                   "id": "json-only-claude",
                   "type": "adapter",
-                  "input_ref": "spec-claude-llm",
+                  "input_ref": "spec-claude-model",
                   "transform": {
                     "type": "chain",
                     "transforms": [

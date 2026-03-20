@@ -7,7 +7,7 @@
     - [lodge_behavior]:    tick interval, agents per tick, quiet hours (Low risk)
     - [lodge_limits]:      daily action / post caps (Low risk)
     - [board_policy]:      default TTL, message max count (Low risk)
-    - [llm_config]:        default model, timeout (High risk)
+    - [inference_config]:        default model, timeout (High risk)
 
     @since 2.96.0 *)
 
@@ -103,23 +103,23 @@ let message_max_count =
     ~serialize:(fun v -> `Int v)
     ~deserialize:deserialize_int
 
-(* ── llm_config surface (High risk) ──────────────────────────── *)
+(* ── inference_config surface (High risk) ──────────────────────────── *)
 
-let llm_default_model =
+let inference_default_model =
   Runtime_params.register
-    ~key:"llm.default_model"
-    ~default:(fun () -> Env_config_governance.Llm.default_model)
+    ~key:"inference.default_model"
+    ~default:(fun () -> Env_config_governance.Glm.default_model)
     ~validate:(fun v ->
       if String.length v > 0 && String.length v <= 100 then Ok ()
       else Error "model name must be 1-100 chars")
     ~serialize:(fun v -> `String v)
     ~deserialize:deserialize_string
 
-let llm_timeout =
+let inference_timeout =
   Runtime_params.register
-    ~key:"llm.timeout_seconds"
-    ~default:(fun () -> Env_config_governance.Llm.timeout_seconds)
-    ~validate:(validate_float_range ~min:5.0 ~max:300.0 "llm_timeout")
+    ~key:"inference.timeout_seconds"
+    ~default:(fun () -> Env_config_governance.Inference.timeout_seconds)
+    ~validate:(validate_float_range ~min:5.0 ~max:300.0 "inference_timeout")
     ~serialize:(fun v -> `Float v)
     ~deserialize:deserialize_float
 
@@ -163,13 +163,13 @@ let surfaces =
       param_keys = [ "message.max_count" ];
     };
     {
-      id = "llm_config";
-      description = "Default LLM model and timeout";
+      id = "inference_config";
+      description = "Default MODEL model and timeout";
       risk = "high";
       param_keys =
         [
-          "llm.default_model";
-          "llm.timeout_seconds";
+          "inference.default_model";
+          "inference.timeout_seconds";
         ];
     };
   ]

@@ -16,7 +16,7 @@ graph LR
     \""]
 
     %% === PARALLEL GENERATION ===
-    Design --> Web["LLM:claude \"
+    Design --> Web["MODEL:claude \"
         Generate React + Tailwind component.
         Design: {{Design}}
         Requirements:
@@ -26,7 +26,7 @@ graph LR
         - Error handling
     \""]
 
-    Design --> iOS["LLM:codex \"
+    Design --> iOS["MODEL:codex \"
         Generate SwiftUI View.
         Design: {{Design}}
         Requirements:
@@ -36,7 +36,7 @@ graph LR
         - Button with loading
     \""]
 
-    Design --> Android["LLM:gemini \"
+    Design --> Android["MODEL:gemini \"
         Generate Jetpack Compose.
         Design: {{Design}}
         Requirements:

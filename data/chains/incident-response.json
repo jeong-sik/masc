@@ -6,8 +6,8 @@
   "nodes": [
     {
       "id": "parse-alert",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Parse this incident alert and extract structured information:\n\nAlert:\n{{input.alert_text}}\n\nExtract JSON: {\"service\": \"...\", \"severity\": \"P1|P2|P3|P4\", \"error_type\": \"...\", \"affected_users\": \"...\", \"timestamp\": \"...\", \"metrics\": {...}}"
       },
@@ -59,8 +59,8 @@
     },
     {
       "id": "analyze-logs",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "codex",
         "prompt": "Analyze these error logs to identify patterns and root cause:\n\nService: {{parsed_alert.service}}\nError Logs:\n{{error_logs}}\n\nLook for:\n1. Error patterns (repeated exceptions, stack traces)\n2. Correlation with timestamps\n3. Affected components/endpoints\n4. Dependency failures\n\nOutput JSON: {\"error_patterns\": [...], \"likely_component\": \"...\", \"confidence\": 0.0-1.0}"
       },
@@ -69,8 +69,8 @@
     },
     {
       "id": "correlate-deploys",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Correlate incident timing with recent deployments:\n\nAlert timestamp: {{parsed_alert.timestamp}}\nRecent deployments:\n{{recent_deploys}}\n\nDetermine if any deployment could have caused this incident.\n\nOutput JSON: {\"deployment_correlated\": true|false, \"suspect_deploy\": {...}|null, \"time_delta_minutes\": N, \"rollback_recommended\": true|false}"
       },
@@ -79,8 +79,8 @@
     },
     {
       "id": "generate-hypothesis",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "claude-cli",
         "prompt": "Generate root cause hypotheses for this incident:\n\nParsed Alert:\n{{parsed_alert}}\n\nLog Analysis:\n{{log_analysis}}\n\nMetrics:\n{{service_metrics}}\n\nDeployment Correlation:\n{{deploy_correlation}}\n\nRank top 3 hypotheses by likelihood:\n\nOutput JSON: {\"hypotheses\": [{\"description\": \"...\", \"likelihood\": 0.0-1.0, \"evidence\": [...], \"mitigation\": \"...\"}]}"
       },
@@ -104,8 +104,8 @@
     },
     {
       "id": "draft-communication",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Draft incident communication based on:\n\nSeverity: {{parsed_alert.severity}}\nService: {{parsed_alert.service}}\nRoot Cause Hypotheses:\n{{root_cause_hypotheses}}\n\nGenerate:\n1. Slack message for #incidents channel\n2. Status page update (if P1/P2)\n3. Customer communication template (if needed)\n\nOutput markdown with all 3 sections."
       },
@@ -114,8 +114,8 @@
     },
     {
       "id": "assemble-response",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "claude-cli",
         "prompt": "Assemble the complete incident response package:\n\n## Alert Summary\n{{parsed_alert}}\n\n## Root Cause Analysis\n{{root_cause_hypotheses}}\n\n## Recommended Actions\nBased on runbooks:\n{{matched_runbooks}}\n\n## Communications\n{{communications}}\n\nFormat as a structured incident response document with:\n1. **TL;DR** (2 sentences)\n2. **Immediate Actions** (numbered steps)\n3. **Investigation Findings**\n4. **Communication Templates**\n5. **Follow-up Tasks**"
       },

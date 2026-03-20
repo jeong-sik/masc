@@ -224,21 +224,21 @@ let test_parse_regex_grader () =
        | _ -> Alcotest.fail "Expected Deterministic grader")
   | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
 
-let test_parse_llm_grader () =
+let test_parse_model_grader () =
   let json = Yojson.Safe.from_string {|{
-    "id": "llm-test",
-    "goal": "Test LLM grader",
+    "id": "model-test",
+    "goal": "Test MODEL grader",
     "graders": [
-      {"type": "llm", "prompt": "Did it work?", "rubric": "YES or NO", "weight": 1.0}
+      {"type": "model", "prompt": "Did it work?", "rubric": "YES or NO", "weight": 1.0}
     ]
   }|} in
   match Eval_harness.scenario_of_json json with
   | Ok s ->
       (match List.hd s.Eval_harness.graders with
-       | Eval_harness.LlmBased g ->
+       | Eval_harness.ModelBased g ->
            Alcotest.(check string) "prompt" "Did it work?" g.prompt_template;
            Alcotest.(check string) "rubric" "YES or NO" g.rubric
-       | _ -> Alcotest.fail "Expected LlmBased grader")
+       | _ -> Alcotest.fail "Expected ModelBased grader")
   | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
 
 (* ================================================================ *)
@@ -323,7 +323,7 @@ let () =
       Alcotest.test_case "minimal" `Quick test_parse_minimal_scenario;
       Alcotest.test_case "full scenario" `Quick test_parse_full_scenario;
       Alcotest.test_case "regex grader" `Quick test_parse_regex_grader;
-      Alcotest.test_case "llm grader" `Quick test_parse_llm_grader;
+      Alcotest.test_case "model grader" `Quick test_parse_model_grader;
     ]);
     ("file_loading", [
       Alcotest.test_case "missing file" `Quick test_load_missing_file;

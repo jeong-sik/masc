@@ -226,7 +226,7 @@ let keeper_stream_send_event writer mutex closed event =
   keeper_stream_send_raw writer mutex closed (Ag_ui.event_to_sse event)
 
 (** Execute keeper dispatch with real-time streaming.
-    Calls [dispatch_stream] which forwards LLM text deltas to [on_text_delta].
+    Calls [dispatch_stream] which forwards MODEL text deltas to [on_text_delta].
     Returns the same [(bool, string)] result as the batch path.
     Includes timeout, audit, and telemetry — same bookkeeping as the batch path. *)
 let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
@@ -416,7 +416,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             | _ -> "unknown"
           in
           (* Track whether any text deltas were streamed to the client.
-             When streaming is active, the LLM text is sent token-by-token
+             When streaming is active, the MODEL text is sent token-by-token
              during the call; we only need to send the final batch chunks
              if no deltas were emitted (fallback path). *)
           let deltas_sent = ref false in
@@ -461,7 +461,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                 let payload_json_opt, visible_reply =
                   extract_visible_reply body
                 in
-                (* If no deltas were streamed during the LLM call
+                (* If no deltas were streamed during the MODEL call
                    (batch fallback or tool-call-only response),
                    send the visible reply as chunked content now. *)
                 if not !deltas_sent then

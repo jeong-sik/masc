@@ -6,8 +6,8 @@
   "nodes": [
     {
       "id": "ask-codex",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "codex",
         "prompt": "What is 2+2? Answer with just the number."
       },
@@ -15,8 +15,8 @@
     },
     {
       "id": "ask-gemini",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "What is 3+3? Answer with just the number."
       },
@@ -24,8 +24,8 @@
     },
     {
       "id": "merge-answers",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "ollama",
         "prompt": "Codex said 2+2={{codex_answer}}. Gemini said 3+3={{gemini_answer}}. Sum both results and output just the final number."
       },

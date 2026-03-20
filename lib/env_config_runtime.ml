@@ -131,12 +131,12 @@ module Spawn = struct
     int_of_float (get_float ~default:60.0 "MASC_SPAWN_GRACE_PERIOD_SEC")
 end
 
-(** {1 Local LLM Server Configuration} *)
+(** {1 Local MODEL Server Configuration} *)
 
-(** Local LLM runtime config (llama-server / any OpenAI-compatible backend).
+(** Local MODEL runtime config (llama-server / any OpenAI-compatible backend).
     Environment variables retain the LLAMA_ prefix for backward compatibility. *)
 module Local_runtime = struct
-  (** OpenAI-compatible local LLM server URL *)
+  (** OpenAI-compatible local MODEL server URL *)
   let server_url =
     get_string ~default:"http://127.0.0.1:8085" "LLAMA_SERVER_URL"
 
@@ -205,12 +205,12 @@ module Voice = struct
     get_int ~default:8936 "VOICE_MCP_PORT"
 end
 
-(** {1 LLM Provider Defaults} *)
+(** {1 MODEL Provider Defaults} *)
 
-module Custom_llm = struct
+module Custom_model = struct
   (** Default URL for custom OpenAI-compatible server *)
   let default_server_url =
-    get_string ~default:"http://127.0.0.1:8080" "CUSTOM_LLM_SERVER_URL"
+    get_string ~default:"http://127.0.0.1:8080" "CUSTOM_MODEL_SERVER_URL"
 end
 
 (** {1 Network Utilities} *)
@@ -227,7 +227,7 @@ end
 (** {1 Timeout Defaults} *)
 
 module Timeout = struct
-  (** gcloud auth token fetch (used by a2a_tools, llm_client, keeper_alerting) *)
+  (** gcloud auth token fetch (used by a2a_tools, model_client, keeper_alerting) *)
   let gcloud_auth_sec =
     get_float ~default:15.0 "MASC_TIMEOUT_GCLOUD_AUTH_SEC"
 
@@ -239,9 +239,9 @@ module Timeout = struct
   let openai_compat_api_sec =
     get_int ~default:60 "MASC_TIMEOUT_OPENAI_COMPAT_SEC"
 
-  (** Grace period added on top of LLM timeouts for curl/network overhead *)
-  let llm_grace_sec =
-    get_float ~default:5.0 "MASC_TIMEOUT_LLM_GRACE_SEC"
+  (** Grace period added on top of MODEL timeouts for curl/network overhead *)
+  let model_grace_sec =
+    get_float ~default:5.0 "MASC_TIMEOUT_MODEL_GRACE_SEC"
 
   (** GraphQL query timeout (agent loading, etc.) *)
   let graphql_query_sec =
@@ -252,12 +252,12 @@ module Timeout = struct
     get_float ~default:5.0 "MASC_TIMEOUT_KEEPER_STATUS_SEC"
 end
 
-(** {1 LLM Generation Defaults} *)
+(** {1 MODEL Generation Defaults} *)
 
-module Llm_defaults = struct
-  (** Default max_tokens for LLM generation (used by spawn, chain, perpetual, etc.) *)
+module Inference_defaults = struct
+  (** Default max_tokens for MODEL generation (used by spawn, chain, perpetual, etc.) *)
   let default_max_tokens =
-    get_int ~default:4096 "MASC_LLM_DEFAULT_MAX_TOKENS"
+    get_int ~default:4096 "MASC_INFERENCE_DEFAULT_MAX_TOKENS"
 
   (** SSE retry interval in milliseconds (client reconnection hint) *)
   let sse_retry_ms =

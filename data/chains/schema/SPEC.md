@@ -1,14 +1,14 @@
 # Chain JSON Specification v1.0
 
-**Multi-LLM DAG Workflow Definition Protocol**
+**Multi-MODEL DAG Workflow Definition Protocol**
 
 ## Overview
 
-Chain JSON is a declarative format for defining multi-LLM orchestration workflows as Directed Acyclic Graphs (DAGs). It enables:
+Chain JSON is a declarative format for defining multi-MODEL orchestration workflows as Directed Acyclic Graphs (DAGs). It enables:
 
 - **Visual Programming**: Convert from Mermaid diagrams
-- **Multi-LLM**: Mix Codex, Claude, Gemini, Ollama in one workflow
-- **Tool Integration**: Seamlessly call MCP tools between LLM nodes
+- **Multi-MODEL**: Mix Codex, Claude, Gemini, Ollama in one workflow
+- **Tool Integration**: Seamlessly call MCP tools between MODEL nodes
 - **Parallel Execution**: Automatic parallelization of independent nodes
 - **Type Safety**: JSON Schema validation for inputs/outputs
 
@@ -16,7 +16,7 @@ Chain JSON is a declarative format for defining multi-LLM orchestration workflow
 
 1. **Declarative over Imperative** - Define *what*, not *how*
 2. **Language Agnostic** - Execute in OCaml, Python, TypeScript, etc.
-3. **LLM Agnostic** - Swap models without changing workflow logic
+3. **MODEL Agnostic** - Swap models without changing workflow logic
 4. **Category Theory Foundation** - Composable via Functor, Monad, Monoid
 
 ## Schema
@@ -34,8 +34,8 @@ Chain
 
 Node
 ├── id: string (kebab-case)
-├── type: "llm" | "tool"
-├── llm?: LLMConfig
+├── type: "model" | "tool"
+├── model?: ModelConfig
 ├── tool?: ToolConfig
 ├── depends_on?: string[] (node IDs)
 ├── output_key?: string
@@ -43,7 +43,7 @@ Node
 ├── retry?: RetryConfig
 └── timeout_ms?: number
 
-LLMConfig
+ModelConfig
 ├── model: "codex" | "claude-cli" | "gemini" | "ollama"
 ├── prompt: string (with {{variable}} placeholders)
 ├── system_prompt?: string
@@ -94,9 +94,9 @@ Here, B and C run in parallel after A completes.
 {
   "nodes": [
     {"id": "input", "type": "tool", ...},
-    {"id": "llm-a", "type": "llm", "depends_on": ["input"], ...},
-    {"id": "llm-b", "type": "llm", "depends_on": ["input"], ...},
-    {"id": "merge", "type": "llm", "depends_on": ["llm-a", "llm-b"], ...}
+    {"id": "model-a", "type": "model", "depends_on": ["input"], ...},
+    {"id": "model-b", "type": "model", "depends_on": ["input"], ...},
+    {"id": "merge", "type": "model", "depends_on": ["model-a", "model-b"], ...}
   ]
 }
 ```
@@ -105,19 +105,19 @@ Here, B and C run in parallel after A completes.
 ```json
 {
   "nodes": [
-    {"id": "step-1", "type": "llm", ...},
-    {"id": "step-2", "type": "llm", "depends_on": ["step-1"], ...},
-    {"id": "step-3", "type": "llm", "depends_on": ["step-2"], ...}
+    {"id": "step-1", "type": "model", ...},
+    {"id": "step-2", "type": "model", "depends_on": ["step-1"], ...},
+    {"id": "step-3", "type": "model", "depends_on": ["step-2"], ...}
   ]
 }
 ```
 
-### 3. Tool-LLM Interleaving
+### 3. Tool-MODEL Interleaving
 ```json
 {
   "nodes": [
     {"id": "fetch", "type": "tool", ...},
-    {"id": "analyze", "type": "llm", "depends_on": ["fetch"], ...},
+    {"id": "analyze", "type": "model", "depends_on": ["fetch"], ...},
     {"id": "store", "type": "tool", "depends_on": ["analyze"], ...}
   ]
 }

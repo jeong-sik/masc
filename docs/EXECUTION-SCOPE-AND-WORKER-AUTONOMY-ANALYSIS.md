@@ -16,7 +16,7 @@ The architecture **separates concerns** into:
 1. **Type-level declarations** (`execution_scope` in `planned_worker` specs)
 2. **Tool allowlisting** (`spawned_agent_public_tool_names` in `agent_tool_surfaces.ml`)
 3. **Worker completion tracking** (session state delta in `team_session_types.ml`)
-4. **LLM cascade orchestration** (`lodge_cascade.ml` for model fallbacks)
+4. **MODEL cascade orchestration** (`lodge_cascade.ml` for model fallbacks)
 
 **Key finding**: Tool availability is currently **hardcoded via allowlist**, not dynamically enforced based on `execution_scope` values. This creates a **gap**: declaring `Observe_only` in specs does not prevent tool invocation at runtime.
 
@@ -117,13 +117,13 @@ type session_state = {
 - Baseline done counts compared to final state to compute delta
 - No explicit "worker_done" callback visible; likely in masc_mcp.ml tool handlers
 
-### Gap: No LLM-Based Completion Decision
+### Gap: No MODEL-Based Completion Decision
 
 **Current mechanism**: Completion appears to be **event-based** (worker reports done, or session ends by time/turn limit)
 
 ---
 
-## Part 4: LLM Cascade and Model Orchestration
+## Part 4: MODEL Cascade and Model Orchestration
 
 ### Cascade Architecture
 
@@ -280,7 +280,7 @@ let test_autonomous_has_all_tools () =
 - ✅ Type-level declaration of intent (`execution_scope`)
 - ✅ Flexible tool allowlist system (reusable for different agent classes)
 - ✅ Session-level tracking of done counts and deltas
-- ✅ LLM cascade with fallbacks for resilience
+- ✅ MODEL cascade with fallbacks for resilience
 - ✅ Extensive metadata in spawn events
 
 ### Gaps Identified

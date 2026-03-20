@@ -42,7 +42,7 @@ type run_result = {
     @param generation Current generation counter
     @param max_turns Maximum agent turns (default 3)
     @param guardrails Optional OAS guardrails for tool safety gates
-    @param temperature LLM temperature (default 0.3)
+    @param temperature MODEL temperature (default 0.3)
     @param max_tokens Maximum output tokens (default 4096) *)
 let run_turn
     ~(config : Room.config)
@@ -149,14 +149,14 @@ let run_turn
   | Ok result ->
     let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
     let text = Agent_sdk.Types.text_of_content result.response.content in
-    let model = result.response.Llm_provider.Types.model in
+    let model = result.response.model in
     let tool_names =
       List.filter_map (function
         | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
         result.response.content
     in
     let usage = Keeper_exec_context.usage_of_response result.response in
-    let assistant_msg = Llm_provider.Types.assistant_msg text in
+    let assistant_msg = Agent_sdk.Types.assistant_msg text in
     Context_manager.persist_message session assistant_msg;
     ctx_ref := Context_manager.append !ctx_ref assistant_msg;
     Ok {

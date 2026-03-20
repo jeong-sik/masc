@@ -153,7 +153,7 @@ This path comes from `lib/handover_eio.ml`.
 ## Design Notes
 
 - JSON is used for persistence because it is easy to inspect and script against.
-- Markdown output is used because it is readable to both humans and LLMs.
+- Markdown output is used because it is readable to both humans and models.
 - Explicit claim exists to avoid duplicate resume work.
 
 ## Related

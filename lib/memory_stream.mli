@@ -21,7 +21,7 @@ type memory_entry = {
   agent_name: string;
   content: string;
   timestamp: float;
-  importance: int;          (** 1-10, LLM-judged *)
+  importance: int;          (** 1-10, MODEL-judged *)
   entry_type: memory_type;
   access_count: int;        (** How many times this memory was retrieved. @since 2.90.0 *)
   last_accessed: float;     (** Last retrieval timestamp. @since 2.90.0 *)
@@ -102,7 +102,7 @@ val importance_sum_since :
 
 (** {1 Formatting} *)
 
-(** Format memories as a context string for LLM prompts. *)
+(** Format memories as a context string for MODEL prompts. *)
 val format_memories : memory_entry list -> string
 
 (** {1 Maintenance} *)

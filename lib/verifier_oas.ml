@@ -218,7 +218,7 @@ let make_pre_tool_hook
   : Agent_sdk.Hooks.hook =
   fun event ->
     match event with
-    | Agent_sdk.Hooks.PreToolUse { tool_name; input } ->
+    | Agent_sdk.Hooks.PreToolUse { tool_name; input; _ } ->
       let action_description = sprintf "tool:%s" tool_name in
       (* Skip read-only tools without calling the LLM *)
       if should_skip ~action_description then

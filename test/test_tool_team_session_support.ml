@@ -168,6 +168,9 @@ let make_manual_session config ~goal ~created_by ~agent_names ~min_agents
       session_id;
       goal;
       created_by;
+      origin_kind =
+        Team_session_types.infer_session_origin_kind
+          ~created_by ~orchestration_mode:Team_session_types.Assist;
       room_id = "default";
       operation_id = None;
       status = Team_session_types.Running;

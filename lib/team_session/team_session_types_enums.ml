@@ -29,6 +29,10 @@ type communication_mode =
   | Comm_portal
   | Comm_hybrid
 
+type session_origin_kind =
+  | Origin_human
+  | Origin_system
+
 type scale_profile =
   | Scale_standard
   | Scale_local64
@@ -144,6 +148,7 @@ type session = {
   session_id : string;
   goal : string;
   created_by : string;
+  origin_kind : session_origin_kind;
   room_id : string;
   operation_id : string option;
   status : session_status;
@@ -263,6 +268,14 @@ let communication_mode_of_string = function
   | "portal" -> Comm_portal
   | "hybrid" -> Comm_hybrid
   | _ -> Comm_broadcast
+
+let session_origin_kind_to_string = function
+  | Origin_human -> "human"
+  | Origin_system -> "system"
+
+let session_origin_kind_of_string = function
+  | "system" -> Origin_system
+  | _ -> Origin_human
 
 let scale_profile_to_string = function
   | Scale_standard -> "standard"
@@ -463,4 +476,3 @@ let control_domain_of_string = function
   | "runtime" -> Some Domain_runtime
   | "meta" -> Some Domain_meta
   | _ -> None
-

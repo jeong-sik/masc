@@ -45,7 +45,14 @@ function addJournalEntry(
   kind: JournalEntry['kind'] = 'system',
   extra: Partial<JournalEntry> = {},
 ): void {
-  const entry: JournalEntry = { agent, text, timestamp: Date.now(), kind, ...extra }
+  const entry: JournalEntry = {
+    agent,
+    text,
+    narrativeText: extra.narrativeText ?? text,
+    timestamp: Date.now(),
+    kind,
+    ...extra,
+  }
   journal.value = [entry, ...journal.value].slice(0, MAX_JOURNAL)
 }
 
@@ -60,6 +67,29 @@ function formatBoardJournalText(label: 'Post' | 'Comment', preview: string | und
   const clipped = normalizePreview(preview)
   if (!clipped) return `New ${label.toLowerCase()}`
   return `${label}: ${clipped}`
+}
+
+function quotePreview(preview: string | undefined): string {
+  const clipped = normalizePreview(preview)
+  return clipped ? `: ${clipped}` : ''
+}
+
+function actorLabel(name: string | undefined): string {
+  const normalized = (name ?? '').trim()
+  return normalized || 'system'
+}
+
+function formatTaskNarrative(agent: string, taskId?: string, status?: string): string {
+  const actor = actorLabel(agent)
+  const task = (taskId ?? '').trim()
+  const nextStatus = (status ?? '').trim()
+  if (task && nextStatus) return `${actor}가 태스크 ${task}를 ${nextStatus} 상태로 갱신했습니다.`
+  if (task) return `${actor}가 태스크 ${task}를 갱신했습니다.`
+  return `${actor}가 태스크 상태를 갱신했습니다.`
+}
+
+function formatBoardNarrative(label: '게시글' | '댓글', author: string, preview: string | undefined): string {
+  return `${actorLabel(author)}가 ${label}을 남겼습니다${quotePreview(preview)}`
 }
 
 function addTypedJournalEntry(
@@ -147,10 +177,14 @@ function handleEvent(event: SSEEvent): void {
 
   switch (type) {
     case 'agent_joined':
-      addTypedJournalEntry(agent, 'Joined', 'system', 'agent_joined')
+      addTypedJournalEntry(agent, 'Joined', 'system', 'agent_joined', {
+        narrativeText: `${actorLabel(agent)}가 room에 참여했습니다.`,
+      })
       break
     case 'agent_left':
-      addTypedJournalEntry(agent, 'Left', 'system', 'agent_left')
+      addTypedJournalEntry(agent, 'Left', 'system', 'agent_left', {
+        narrativeText: `${actorLabel(agent)}가 room에서 나갔습니다.`,
+      })
       break
     case 'broadcast':
       addTypedJournalEntry(
@@ -158,6 +192,9 @@ function handleEvent(event: SSEEvent): void {
         `${(event.message ?? event.content ?? '').slice(0, 80)}`,
         'system',
         'broadcast',
+        {
+          narrativeText: `${actorLabel(agent)}가 공지/메시지를 보냈습니다${quotePreview(event.message ?? event.content)}`,
+        },
       )
       break
     case 'task_update':
@@ -166,6 +203,9 @@ function handleEvent(event: SSEEvent): void {
         `Task: ${event.task_id ?? ''} -> ${event.status ?? ''}`,
         'tasks',
         'task_update',
+        {
+          narrativeText: formatTaskNarrative(agent, event.task_id, event.status),
+        },
       )
       break
     case 'board_post':
@@ -177,6 +217,7 @@ function handleEvent(event: SSEEvent): void {
         'board_post',
         {
           author: event.author ?? agent,
+          narrativeText: formatBoardNarrative('게시글', event.author ?? agent, event.content ?? event.message),
           preview: normalizePreview(event.content ?? event.message),
           postId: event.post_id,
         },
@@ -191,6 +232,7 @@ function handleEvent(event: SSEEvent): void {
         'board_comment',
         {
           author: event.author ?? agent,
+          narrativeText: formatBoardNarrative('댓글', event.author ?? agent, event.content ?? event.message),
           preview: normalizePreview(event.content ?? event.message),
           postId: event.post_id,
         },
@@ -202,6 +244,11 @@ function handleEvent(event: SSEEvent): void {
         `Heartbeat gen=${event.generation ?? '?'} ctx=${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'}`,
         'keepers',
         'keeper_heartbeat',
+        {
+          narrativeText:
+            `${actorLabel(event.name ?? agent)}가 하트비트를 보냈습니다`
+            + ` (gen ${event.generation ?? '?'}, ctx ${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'})`,
+        },
       )
       break
     case 'keeper_handoff':
@@ -210,6 +257,11 @@ function handleEvent(event: SSEEvent): void {
         `Handoff gen ${event.from_generation ?? '?'} -> ${event.to_generation ?? '?'} (${event.to_model ?? '?'})`,
         'keepers',
         'keeper_handoff',
+        {
+          narrativeText:
+            `${actorLabel(event.name ?? agent)}가 keeper handoff를 수행했습니다`
+            + ` (gen ${event.from_generation ?? '?'} → ${event.to_generation ?? '?'}, ${event.to_model ?? '?'})`,
+        },
       )
       break
     case 'keeper_compaction':
@@ -218,6 +270,11 @@ function handleEvent(event: SSEEvent): void {
         `Compaction saved ${event.saved_tokens ?? '?'} tokens (${event.trigger ?? '?'})`,
         'keepers',
         'keeper_compaction',
+        {
+          narrativeText:
+            `${actorLabel(event.name ?? agent)}가 context compaction을 수행했습니다`
+            + ` (${event.saved_tokens ?? '?'} tokens, ${event.trigger ?? '?'})`,
+        },
       )
       break
     case 'keeper_guardrail':
@@ -226,6 +283,9 @@ function handleEvent(event: SSEEvent): void {
         `Guardrail: ${event.reason ?? 'stopped'}`,
         'keepers',
         'keeper_guardrail',
+        {
+          narrativeText: `${actorLabel(event.name ?? agent)}가 guardrail에 의해 중단되었습니다: ${event.reason ?? 'stopped'}`,
+        },
       )
       break
     // OAS bridge events
@@ -288,6 +348,11 @@ function handleEvent(event: SSEEvent): void {
         `Keeper snapshot gen=${snap.generation} ctx=${Math.round(snap.context_ratio * 100)}%`,
         'oas',
         'oas_keeper_snapshot',
+        {
+          narrativeText:
+            `${actorLabel(snap.keeper_name)}의 keeper snapshot이 갱신되었습니다`
+            + ` (gen ${snap.generation}, ctx ${Math.round(snap.context_ratio * 100)}%)`,
+        },
       )
       break
     }
@@ -297,7 +362,9 @@ function handleEvent(event: SSEEvent): void {
       break
     }
     default:
-      addTypedJournalEntry(agent, type, 'system', 'unknown')
+      addTypedJournalEntry(agent, type, 'system', 'unknown', {
+        narrativeText: `${actorLabel(agent)} 이벤트: ${type}`,
+      })
   }
 }
 

@@ -89,6 +89,7 @@ export type JournalEventType =
 export interface JournalEntry {
   agent: string
   text: string
+  narrativeText?: string
   timestamp: number
   kind?: 'board' | 'tasks' | 'keepers' | 'system' | 'oas'
   eventType?: JournalEventType

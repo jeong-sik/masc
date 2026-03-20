@@ -28,6 +28,7 @@ let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ])
     session_id;
     goal = "Prove multi-actor collaboration on MCP help cleanup";
     created_by = "supervisor";
+    origin_kind = Origin_human;
     room_id = "default";
     operation_id = None;
     status = Running;

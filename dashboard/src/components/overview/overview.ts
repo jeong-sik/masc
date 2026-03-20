@@ -13,6 +13,7 @@ import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
 import { OasPipeline } from './oas-pipeline'
 import { AgentAvatar } from './agent-avatar'
+import { PanelSemanticDetails } from '../common/semantic-layer'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type { DashboardMissionSessionBrief } from '../../types'
 
@@ -46,21 +47,43 @@ function splitSessionGoal(goal?: string | null, fallback?: string): { primary: s
   }
 }
 
-function isSystemSession(createdBy?: string | null): boolean {
-  const normalized = (createdBy ?? '').trim().toLowerCase()
-  if (!normalized) return false
-  const systemPrefixes = ['keeper', 'dashboard', 'operator', 'system', 'gardener', 'sentinel', 'guardian']
-  return systemPrefixes.some(prefix =>
-    normalized === prefix
-    || normalized.startsWith(`${prefix}-`)
-    || normalized.includes(`-${prefix}-`)
-  )
+function isSystemSession(session: DashboardMissionSessionBrief): boolean {
+  return session.origin_kind === 'system'
+}
+
+function HomeSectionHeader({
+  label,
+  copy,
+  semanticId,
+  linkLabel,
+  onLink,
+}: {
+  label: string
+  copy?: string
+  semanticId: string
+  linkLabel?: string
+  onLink?: () => void
+}) {
+  return html`
+    <div class="home-section-header">
+      <div>
+        <span class="home-section-label">${label}</span>
+        ${copy ? html`<div class="home-section-copy">${copy}</div>` : null}
+      </div>
+      <div class="home-section-actions">
+        <${PanelSemanticDetails} panelId=${semanticId} compact=${true} />
+        ${linkLabel && onLink
+          ? html`<a class="home-section-link" onClick=${onLink}>${linkLabel}</a>`
+          : null}
+      </div>
+    </div>
+  `
 }
 
 function renderSessionCard(s: DashboardMissionSessionBrief) {
   const { primary, secondary } = splitSessionGoal(s.goal, s.session_id)
   const creator = (s.created_by ?? '').trim()
-  const systemSession = isSystemSession(creator)
+  const systemSession = isSystemSession(s)
 
   return html`
     <div
@@ -133,18 +156,18 @@ function HotSessions() {
     if (aStatus !== bStatus) return aStatus - bStatus
     return (b.elapsed_sec ?? 0) - (a.elapsed_sec ?? 0)
   })
-  const userSessions = sorted.filter(s => !isSystemSession(s.created_by)).slice(0, 3)
-  const systemSessions = sorted.filter(s => isSystemSession(s.created_by)).slice(0, 3)
+  const userSessions = sorted.filter(s => !isSystemSession(s)).slice(0, 3)
+  const systemSessions = sorted.filter(s => isSystemSession(s)).slice(0, 3)
 
   return html`
     <div class="hot-sessions">
-      <div class="home-section-header">
-        <div>
-          <span class="home-section-label">팀 세션</span>
-          <div class="home-section-copy">홈에서는 사람 중심 작업과 자동 런타임을 나눠 보여줍니다.</div>
-        </div>
-        <a class="home-section-link" onClick=${() => navigate('situation')}>전체 보기</a>
-      </div>
+      <${HomeSectionHeader}
+        label="팀 세션"
+        copy="홈에서는 사람 중심 작업과 자동 런타임을 나눠 보여줍니다."
+        semanticId="home.hot_sessions"
+        linkLabel="전체 보기"
+        onLink=${() => navigate('situation')}
+      />
       <div class="hot-sessions__lanes">
         <${SessionLane}
           title="사용자 작업"
@@ -180,10 +203,12 @@ function AgentPulse() {
 
   return html`
     <div class="agent-pulse">
-      <div class="home-section-header">
-        <span class="home-section-label">에이전트</span>
-        <a class="home-section-link" onClick=${() => navigate('agents')}>전체 보기</a>
-      </div>
+      <${HomeSectionHeader}
+        label="에이전트"
+        semanticId="home.agent_pulse"
+        linkLabel="전체 보기"
+        onLink=${() => navigate('agents')}
+      />
       <div class="agent-pulse__grid">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
@@ -222,9 +247,10 @@ export function Overview() {
 
         <${OasPipeline} />
 
-        <div class="home-section-header">
-          <span class="home-section-label">최근 활동</span>
-        </div>
+        <${HomeSectionHeader}
+          label="최근 활동"
+          semanticId="home.narrative_timeline"
+        />
         <${NarrativeTimeline} entries=${journal} maxItems=${8} />
       </div>
     </div>

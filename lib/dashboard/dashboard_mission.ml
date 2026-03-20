@@ -7,6 +7,7 @@ type session_context = Dashboard_mission_assembly.session_context = {
   session_id : string;
   goal : string;
   created_by : string option;
+  origin_kind : string;
   room : string option;
   status : string;
   health : string;
@@ -199,6 +200,24 @@ let event_summary event_json =
   | None, None, Some value -> value
   | None, None, None -> String.map (fun ch -> if ch = '_' then ' ' else ch) event_type
 
+let session_origin_kind session_meta =
+  let created_by =
+    trim_to_option (string_field "created_by" session_meta)
+    |> Option.value ~default:"unknown"
+  in
+  let orchestration_mode =
+    trim_to_option (string_field "orchestration_mode" session_meta)
+    |> Option.value ~default:"assist"
+    |> Team_session_types.orchestration_mode_of_string
+  in
+  trim_to_option (string_field "origin_kind" session_meta)
+  |> Option.map Team_session_types.session_origin_kind_of_string
+  |> Option.value
+       ~default:
+         (Team_session_types.infer_session_origin_kind
+            ~created_by ~orchestration_mode)
+  |> Team_session_types.session_origin_kind_to_string
+
 let build_session_context session_json session_cards =
   let session_id = string_field "session_id" session_json in
   if session_id = "" then None
@@ -298,6 +317,7 @@ let build_session_context session_json session_cards =
           trim_to_option (string_field "goal" meta)
           |> Option.value ~default:session_id;
         created_by = trim_to_option (string_field "created_by" meta);
+        origin_kind = session_origin_kind meta;
         room = trim_to_option (string_field "room_id" meta);
         status;
         health =

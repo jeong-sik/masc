@@ -246,7 +246,7 @@ let parse_llm_score (text : string) : float option =
 
 (** Validate that an LLM response contains a parseable score. *)
 let llm_score_is_valid (resp : Llm_provider.Types.api_response) : bool =
-  parse_llm_score (Cascade.text_of_response resp) <> None
+  parse_llm_score (Llm_provider.Types.text_of_response resp) <> None
 
 (** Call LLM to score agent-task compatibility.
     Returns Ok float or Error string. *)
@@ -260,7 +260,7 @@ let score_with_llm (agent : agent_profile) (task : task_profile)
       ~accept:llm_score_is_valid ()
   with
   | Ok resp -> (
-      let text = Cascade.text_of_response resp in
+      let text = Llm_provider.Types.text_of_response resp in
       match parse_llm_score text with
       | Some f -> Ok f
       | None -> Error (Printf.sprintf "unparseable LLM response: %s" text))

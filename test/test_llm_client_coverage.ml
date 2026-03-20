@@ -8,7 +8,7 @@ let test_string_of_provider () =
   check string "gemini" "gemini" (Model_spec.string_of_provider Model_spec.Gemini)
 
 let test_message_constructors () =
-  let tool_msg = Cascade.tool_msg ~name:"grep" ~call_id:"call-1" "done" in
+  let tool_msg = Llm_provider.Types.tool_result_msg ~tool_use_id:"call-1" ~content:"done" () in
   check bool "system role" true
     (match (Agent_sdk.Types.system_msg "x").role with Agent_sdk.Types.System -> true | _ -> false);
   let has_call1 = List.exists (function

@@ -140,7 +140,7 @@ let cascade_name_for_agent_type agent_type =
   Printf.sprintf "auto_responder_%s" agent_type
 
 let llm_response_is_valid (resp : Llm_provider.Types.api_response) =
-  let s = String.trim (Cascade.text_of_response resp) in
+  let s = String.trim (Llm_provider.Types.text_of_response resp) in
   let s_lower = String.lowercase_ascii s in
   let len = String.length s in
   len > 0
@@ -157,7 +157,7 @@ let call_llm_direct_sync ~agent_type ~prompt =
         ~accept:llm_response_is_valid ~timeout_sec:30 ~max_tokens:500 ()
     with
     | Ok resp ->
-        let text = Cascade.text_of_response resp in
+        let text = Llm_provider.Types.text_of_response resp in
         debug_log
           (Printf.sprintf "LLM_MODEL_USED %s for agent_type=%s"
              resp.Llm_provider.Types.model agent_type);

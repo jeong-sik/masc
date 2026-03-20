@@ -72,6 +72,18 @@ val validate_chain_strict : Chain_types.chain -> (unit, string) result
     @return true if unresolved placeholders exist *)
 val has_placeholder_node : Chain_types.node -> bool
 
+(** [collect_placeholders_in_node acc node] collects all placeholder node IDs. *)
+val collect_placeholders_in_node : string list -> Chain_types.node -> string list
+
+(** [extract_template_vars s] extracts all \{\{var\}\} names from a string. *)
+val extract_template_vars : string -> string list
+
+(** [strip_braces s] removes surrounding \{\{ and \}\} if present. *)
+val strip_braces : string -> string option
+
+(** [collect_all_nodes acc node] recursively collects all nodes including nested. *)
+val collect_all_nodes : Chain_types.node list -> Chain_types.node -> Chain_types.node list
+
 (** {1 Input Mapping Extraction} *)
 
 (** [extract_input_mappings prompt] extracts input references from a prompt template.

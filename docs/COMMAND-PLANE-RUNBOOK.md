@@ -11,7 +11,7 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
 - `room`
   - 조율 범위. `masc_set_room`은 worktree가 아니라 repo-root room semantics로 수렴한다.
 - `task`
-  - backlog item. `masc_claim`은 backlog 소유권만 바꾸고, 세션 `current_task`는 자동으로 안 잡힌다.
+  - backlog item. `masc_transition(action="claim")`은 backlog 소유권만 바꾸고 planning `current_task`는 자동으로 안 잡힌다. `masc_claim_next`는 current builds에서 planning `current_task`를 함께 맞춘다.
 - `operation`
   - Command Plane V2의 관리 단위. 벤치마크/스웜 실행은 여기서 시작한다.
 - `detachment`
@@ -36,16 +36,17 @@ merged 기준 전체 구조 요약은 [MERGED-ARCHITECTURE-SSOT.md](./MERGED-ARC
    - agent identity와 capabilities를 room에 등록한다.
 3. `masc_status`
    - room 상태와 agent roster를 확인한다.
-4. `masc_claim`
+4. `masc_transition(action="claim")` 또는 `masc_claim_next`
    - 작업을 claim한다. backlog가 비어 있으면 먼저 `masc_add_task`.
-5. `masc_plan_set_task`
-   - 세션 `current_task`를 claim한 task로 맞춘다.
+5. 필요 시 `masc_plan_set_task`
+   - claim path가 planning `current_task`를 자동으로 맞추지 않았다면 세션 `current_task`를 claim한 task로 맞춘다.
 6. `masc_heartbeat`
    - 긴 작업 전/중에 liveness를 갱신한다.
 
 ### 왜 이렇게 하나
 
-- `claim != current_task`
+- `masc_transition(action="claim") != current_task`
+- `masc_claim_next -> current_task` (current builds)
 - `join != heartbeat`
 - `worktree != room`
 
@@ -268,14 +269,14 @@ Content-Type: application/json
   - CPv2 swarm proof와 dashboard truthfulness 검증이 목적
 - fleet mode
   - planner가 `masc_batch_add_tasks`로 작업을 쪼갠다
-  - workers는 `masc_claim_next`로 task를 가져가고 `masc_set_current_task`를 직접 맞춘다
+  - workers는 `masc_claim_next`로 task를 가져가고, current builds에서는 planning `current_task`도 함께 맞춰진다
   - 실험용 planner/worker orchestration이 목적
 
 주의:
 
 - fleet mode는 live harness의 대체가 아니다
 - planner가 task를 만들지 못하면 worker phase는 실제 작업을 못 한다
-- `claim_next`를 썼어도 worker가 `masc_set_current_task`를 생략하면 readiness가 어긋난다
+- worker가 `masc_transition(action="claim")` 같은 수동 claim path를 썼는데 `masc_plan_set_task`를 생략하면 readiness가 어긋난다
 
 ## Which Tool Now?
 
@@ -307,7 +308,8 @@ Content-Type: application/json
 - 그런데 planning/log tools가 task를 못 찾음
 
 정리:
-- `masc_claim` 다음에 반드시 `masc_plan_set_task`
+- `masc_transition(action="claim")` 다음에는 `masc_plan_set_task`
+- `masc_claim_next`는 current builds에서 auto-bind 되지만, 상태가 비어 있으면 `masc_plan_set_task`로 바로 맞춘다
 
 ### 3. heartbeat 없이 오래 작업
 

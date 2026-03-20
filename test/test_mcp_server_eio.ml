@@ -448,6 +448,18 @@ let test_handle_request_tools_list () =
     false
     (List.mem "masc_claim" names);
   Alcotest.(check bool)
+    "named room list hidden from list"
+    false
+    (List.mem "masc_rooms_list" names);
+  Alcotest.(check bool)
+    "named room create hidden from list"
+    false
+    (List.mem "masc_room_create" names);
+  Alcotest.(check bool)
+    "named room enter hidden from list"
+    false
+    (List.mem "masc_room_enter" names);
+  Alcotest.(check bool)
     "low-usage social tool hidden from list"
     false
     (List.mem "masc_post_create" names);

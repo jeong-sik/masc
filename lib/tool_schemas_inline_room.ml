@@ -3,7 +3,7 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_start";
-    description = "One-step onboarding: sets room, joins as agent, and optionally creates+claims a task. Use this instead of calling masc_set_room, masc_join, masc_add_task, masc_claim separately.";
+    description = "One-step onboarding: sets room, joins as agent, and optionally creates+claims a task. Use this instead of calling masc_set_room, masc_join, masc_add_task, and a separate claim step manually.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

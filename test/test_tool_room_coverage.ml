@@ -163,6 +163,51 @@ let () = test "dispatch_room_enter_no_id" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "dispatch_check_transition_claim_requires_plan_task" (fun () ->
+  Eio_main.run @@ fun _ ->
+  let ctx = make_test_ctx () in
+  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  let task_ctx = { Tool_task.config = ctx.config; agent_name = ctx.agent_name } in
+  let _ =
+    Tool_task.handle_add_task task_ctx
+      (`Assoc [("title", `String "Check transition claim")])
+  in
+  let (_success, _result) =
+    Tool_task.handle_transition task_ctx
+      (`Assoc [("task_id", `String "task-001"); ("action", `String "claim")])
+  in
+  match Tool_room.dispatch ctx ~name:"masc_check"
+          ~args:(`Assoc [("assertions", `List [`String "task_claimed"; `String "current_task_set"])]) with
+  | Some (success, result) ->
+      assert success;
+      let json = Yojson.Safe.from_string result in
+      assert (Yojson.Safe.Util.member "all_passed" json = `Bool false);
+      assert (
+        Yojson.Safe.Util.member "fix_hint" json
+        = `String
+            "Call masc_plan_set_task after claim paths that did not auto-bind current_task (for example masc_transition(action=claim))")
+  | None -> failwith "dispatch returned None"
+)
+
+let () = test "dispatch_check_claim_next_marks_current_task_set" (fun () ->
+  Eio_main.run @@ fun _ ->
+  let ctx = make_test_ctx () in
+  let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in
+  let task_ctx = { Tool_task.config = ctx.config; agent_name = ctx.agent_name } in
+  let _ =
+    Tool_task.handle_add_task task_ctx
+      (`Assoc [("title", `String "Check claim next")])
+  in
+  let (_success, _result) = Tool_task.handle_claim_next task_ctx (`Assoc []) in
+  match Tool_room.dispatch ctx ~name:"masc_check"
+          ~args:(`Assoc [("assertions", `List [`String "task_claimed"; `String "current_task_set"])]) with
+  | Some (success, result) ->
+      assert success;
+      let json = Yojson.Safe.from_string result in
+      assert (Yojson.Safe.Util.member "all_passed" json = `Bool true)
+  | None -> failwith "dispatch returned None"
+)
+
 let () = test "dispatch_room_strategy_get" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Room.init ctx.config ~agent_name:(Some "test-agent") in

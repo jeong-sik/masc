@@ -52,7 +52,7 @@ let after_set_room ~success =
   else
     { next_steps =
         [ s "masc_init" "Initialize MASC if not yet set up";
-          s "masc_rooms_list" "Check available rooms" ];
+          s "masc_start" "Retry with the repo root path if you want the one-shot setup flow" ];
       preconditions = [];
       common_mistakes = [] }
 
@@ -87,14 +87,29 @@ let after_status ~success =
       preconditions = [];
       common_mistakes = [] }
 
-let after_claim ~success =
+let after_claim_auto_bound ~success =
   if success then
     { next_steps =
-        [ s "masc_plan_set_task" "Bind claimed task as your current_task — required before work";
+        [ s "masc_worktree_create" "Create an isolated worktree for this task";
+          s "masc_heartbeat" "Signal liveness before starting long work" ];
+      preconditions = [ "room_set"; "joined" ];
+      common_mistakes =
+        [ "Forgetting masc_worktree_create — working on main branch directly" ] }
+  else
+    { next_steps =
+        [ s "masc_status" "Check which tasks are available";
+          s "masc_add_task" "Create a task if none exist" ];
+      preconditions = [ "room_set"; "joined" ];
+      common_mistakes = [] }
+
+let after_transition_claim ~success =
+  if success then
+    { next_steps =
+        [ s "masc_plan_set_task" "Bind claimed task as your planning current_task";
           s "masc_worktree_create" "Create an isolated worktree for this task" ];
       preconditions = [ "room_set"; "joined" ];
       common_mistakes =
-        [ "Starting work without masc_plan_set_task — current_task will be unset";
+        [ "masc_transition(action=claim) only claims backlog ownership — it does not bind planning current_task";
           "Forgetting masc_worktree_create — working on main branch directly" ] }
   else
     { next_steps =
@@ -312,12 +327,12 @@ let next_steps ~tool_name ~success =
   | "masc_set_room" -> after_set_room ~success
   | "masc_join" -> after_join ~success
   | "masc_status" -> after_status ~success
-  | "masc_claim" | "masc_claim_next" -> after_claim ~success
+  | "masc_claim" | "masc_claim_next" -> after_claim_auto_bound ~success
   | "masc_add_task" | "masc_batch_add_tasks" -> after_add_task ~success
   | "masc_plan_set_task" | "masc_set_current_task" -> after_plan_set_task ~success
   | "masc_heartbeat" -> after_heartbeat ~success
   | "masc_done" -> after_done ~success
-  | "masc_transition" -> after_claim ~success  (* most common: claim/done; claim path is safer *)
+  | "masc_transition" -> after_transition_claim ~success
   (* Golden Path 2: CPv2 *)
   | "masc_operation_start" -> after_operation_start ~success
   | "masc_dispatch_tick" -> after_dispatch_tick ~success
@@ -369,7 +384,7 @@ let workflow_context ~tool_name =
     | "masc_claim" | "masc_claim_next" ->
         [ "masc_join"; "masc_status" ]
     | "masc_plan_set_task" | "masc_set_current_task" ->
-        [ "masc_claim_next" ]
+        [ "masc_transition" ]
     | "masc_worktree_create" ->
         [ "masc_plan_set_task" ]
     | "masc_heartbeat" ->
@@ -431,7 +446,7 @@ let current_state_guidance ~room_set ~joined ~task_claimed
         [ s "masc_plan_set_task" "Bind your claimed task as current_task" ];
       preconditions = [ "room_set"; "joined"; "task_claimed" ];
       common_mistakes =
-        [ "masc_claim alone does not set current_task — you must call masc_plan_set_task" ] }
+        [ "Some claim paths leave planning current_task unset. This commonly happens after masc_transition(action=claim)." ] }
   else if not worktree_active then
     { next_steps =
         [ s "masc_worktree_create" "Create an isolated git worktree for this task";

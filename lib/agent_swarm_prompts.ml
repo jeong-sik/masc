@@ -33,8 +33,9 @@ Communication and liveness:
 - masc_heartbeat
 
 Important semantics:
-- claiming a task does not bind current_task automatically
-- call masc_set_current_task immediately after claiming
+- masc_claim_task requires an explicit masc_set_current_task
+- masc_claim_next auto-binds current_task in current MASC builds
+- if current_task is missing after a claim, call masc_set_current_task
 - send masc_heartbeat during longer work so visibility stays fresh|}
 
 (** Generate MASC instructions from a dynamic tool catalog.
@@ -55,8 +56,9 @@ let masc_instructions_for_role ~(role : string) () : string =
 %s
 
 Key semantics:
-- claiming a task does not bind current_task automatically
-- call masc_set_current_task immediately after claiming
+- masc_claim_task requires an explicit masc_set_current_task
+- masc_claim_next auto-binds current_task in current MASC builds
+- if current_task is missing after a claim, call masc_set_current_task
 - send masc_heartbeat during longer work so visibility stays fresh|}
       tool_list
 
@@ -157,7 +159,7 @@ Working directory: %s
 
 Loop:
 1. Use masc_claim_next to get the next unassigned task.
-2. Read the claimed task id from the tool result and call masc_set_current_task.
+2. Read the claimed task id from the tool result. If current_task is still missing, call masc_set_current_task.
 3. Send masc_heartbeat before and during longer edits or commands.
 4. Complete the task with development tools.
 5. Report concise progress with masc_broadcast.

@@ -120,7 +120,7 @@ let command_plane_help_http_json () =
                 "The coordination scope. In practice masc_set_room resolves to the repo-root room, not an arbitrary nested worktree.";
             concept ~id:"task" ~title:"Task"
               ~summary:
-                "Backlog work item. Claiming a task does not automatically set the session current_task pointer.";
+                "Backlog work item. Claim semantics differ by tool: masc_transition(action=claim) leaves planning current_task unset, while masc_claim_next auto-binds it in current builds.";
             concept ~id:"operation" ~title:"Operation"
               ~summary:
                 "Managed CPv2 execution unit owned by company/platoon/squad hierarchy.";
@@ -151,20 +151,20 @@ let command_plane_help_http_json () =
                       [ "agent visible in masc_status"; "room agent roster includes your agent" ]
                     ~pitfalls:
                       [ "masc_set_room points at repo root semantics"; "without join you are invisible to scheduling" ];
-                  step ~id:"claim" ~title:"Claim or create work" ~tool:"masc_claim"
+                  step ~id:"claim" ~title:"Claim or create work" ~tool:"masc_transition"
                     ~summary:
-                      "Claim an existing task or create one first with masc_add_task when the backlog is empty."
+                      "Claim a specific task with masc_transition(action=claim), or use masc_claim_next when any queued task is acceptable."
                     ~success_signals:
                       [ "task assignee is your agent"; "task status becomes claimed/in_progress" ]
                     ~pitfalls:
-                      [ "claiming alone does not set current_task" ];
+                      [ "masc_transition(action=claim) does not set planning current_task"; "masc_claim_next auto-binds current_task in current builds" ];
                   step ~id:"set-task" ~title:"Bind current task" ~tool:"masc_plan_set_task"
                     ~summary:
-                      "Set the current session task pointer so later planning and logs target the correct task."
+                      "Set the current session task pointer when the claim path did not auto-bind it, especially after masc_transition(action=claim)."
                     ~success_signals:
                       [ "masc_plan_get_task returns the claimed task id" ]
                     ~pitfalls:
-                      [ "dashboard can show claimed task and missing current_task at the same time" ];
+                      [ "dashboard can show claimed task and missing current_task at the same time after manual claim paths" ];
                   step ~id:"heartbeat" ~title:"Refresh presence" ~tool:"masc_heartbeat"
                     ~summary:
                       "Update liveness before or during long-running work."
@@ -308,7 +308,7 @@ let command_plane_help_http_json () =
               ~description:
                 "Core room/task tools every session should use before higher-level workflows."
               ~tools:
-                [ "masc_set_room"; "masc_join"; "masc_status"; "masc_claim"; "masc_plan_set_task"; "masc_heartbeat" ];
+                [ "masc_set_room"; "masc_join"; "masc_status"; "masc_transition"; "masc_claim_next"; "masc_plan_set_task"; "masc_heartbeat" ];
             tool_group ~id:"cpv2-core" ~title:"CPv2 Benchmark Core"
               ~description:
                 "Canonical swarm/benchmark tool family."
@@ -330,9 +330,9 @@ let command_plane_help_http_json () =
               ~fix_summary:"Treat worktrees as code-isolation only. Join the repo-root room and reason about shared room state.";
             pitfall ~id:"claimed-not-current" ~title:"Claimed task is not current task"
               ~symptom:"Task is claimed, but planning/log tools still act like no current task is selected."
-              ~why:"Claim mutates backlog ownership; it does not set the session current_task pointer."
+              ~why:"Some claim paths only mutate backlog ownership. In current builds masc_transition(action=claim) still requires an explicit current_task bind."
               ~fix_tool:"masc_plan_set_task"
-              ~fix_summary:"Call masc_plan_set_task immediately after claiming the task.";
+              ~fix_summary:"Call masc_plan_set_task after claim paths that did not auto-bind current_task.";
             pitfall ~id:"heartbeat-stale" ~title:"Agent looks stale"
               ~symptom:"Your agent appears inactive/zombie during long work even though the process is alive."
               ~why:"Heartbeat/liveness was not refreshed recently."

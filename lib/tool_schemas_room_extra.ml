@@ -11,9 +11,9 @@ open Types
 let schemas : tool_schema list = [
   {
     name = "masc_rooms_list";
-    description = "List all available MASC rooms with agent/task counts and active room indicator. \
-Use when you need to discover or switch between coordination spaces. \
-Pair with masc_room_enter to switch rooms, or masc_room_create to add one.";
+    description = "Internal compatibility tool for listing named room scopes with agent/task counts and the active room indicator. \
+Repo-root room semantics remain the canonical default workflow. \
+Use this only when you explicitly need named-room compatibility behavior.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -21,9 +21,9 @@ Pair with masc_room_enter to switch rooms, or masc_room_create to add one.";
   };
   {
     name = "masc_room_create";
-    description = "Create a new MASC room for coordination. Room ID is auto-generated from name (slugified). \
-Use when you need a separate coordination space for a different project or team. \
-After creation, call masc_room_enter to switch into the new room.";
+    description = "Internal compatibility tool for creating a named room scope. Room ID is auto-generated from name (slugified). \
+Repo-root room semantics remain the canonical default workflow. \
+Use this only when you explicitly need named-room compatibility behavior.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -41,9 +41,9 @@ After creation, call masc_room_enter to switch into the new room.";
   };
   {
     name = "masc_room_enter";
-    description = "Enter a specific MASC room by ID. Switches context and auto-joins with a unique nickname. \
-Use when switching between coordination spaces. Call masc_rooms_list first to see available rooms. \
-Pair with masc_room_create if the target room does not exist.";
+    description = "Internal compatibility tool for switching into a named room scope by ID. \
+Repo-root room semantics remain the canonical default workflow. \
+Use this only when you explicitly need named-room compatibility behavior.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

@@ -85,10 +85,3 @@ let run_turn
       tool_calls_made = tool_count;
     }
 
-(** Check if Agent.run() path is enabled via environment variable. *)
-let is_enabled () =
-  match Sys.getenv_opt "KEEPER_USE_AGENT_RUN" with
-  | Some v ->
-    let v = String.lowercase_ascii (String.trim v) in
-    v = "true" || v = "1" || v = "yes"
-  | None -> false

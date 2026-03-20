@@ -87,9 +87,57 @@ CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
 - 레거시 `/sse`, `/messages` endpoint는 deprecated 상태이며 `/mcp`로 전환이 권장됩니다.
 - 원격 감독관 표면은 `/mcp/operator`를 사용하세요. 운영 루프와 confirm 정책은 `docs/REMOTE-MCP-OPERATOR.md`, `docs/SUPERVISOR-MODE.md`에, swarm-driven 구현 표준은 `docs/SWARM-DELIVERY-RUNBOOK.md`에 정리돼 있습니다.
 
-## Keeper 사용자 매뉴얼
+## Keeper 시스템
 
-Keeper/Agent 시스템의 사용자 가이드는 [KEEPER-USER-MANUAL.md](./docs/KEEPER-USER-MANUAL.md)를 참조한다.
+Keeper는 두 층으로 동작한다.
+
+- OAS `Agent.run` 내부 실행: tool loop, hooks, validators, periodic callbacks
+- MASC resident runtime: presence keepalive, heartbeat snapshot, resident restart policy
+
+### 실행 경로
+
+```
+keeper_turn → keeper_oas_adapter → Oas_worker → OAS Agent.run (+ Eval_gate)
+```
+
+### Resident 경로
+
+```
+keeper_runtime → keeper_keepalive → keeper_resident_supervisor
+```
+
+### 생명주기 상태
+
+| 상태 | 설명 | 자동 복구 |
+|------|------|----------|
+| healthy | heartbeat 정상, 최근 활동 | - |
+| idle | heartbeat 정상, 활동 없음 | proactive 발동 대기 |
+| stale | heartbeat 지연 (4x keepalive_sec) | - |
+| zombie | entry 존재, fiber 종료됨 | supervisor 자동 restart |
+| dead | 재시작 예산(5회) 소진 | 수동 `masc_keeper_up` |
+| offline | 미등록 또는 비활성 | bootstrap 시 자동 시작 |
+
+### Supervisor
+
+- 대상은 `Agent.run` turn lifecycle이 아니라 resident keepalive fiber
+- 30초마다 sweep (Pulse consumer, `keeper_runtime`에서 등록)
+- crash 감지 시 exponential backoff 자동 restart (10s, 20s, 40s, 80s, 160s)
+- 5회 연속 실패 시 Dead. `masc:keeper:resident_lifecycle` 이벤트 발행
+- OAS Event_bus는 transport로만 사용하고, restart budget/health 의미는 MASC가 소유
+
+### 도구
+
+| 도구 | 설명 |
+|------|------|
+| `masc_keeper_up` | keeper 생성/재시작 |
+| `masc_keeper_status` | 상태 + fiber_health + crash_log |
+| `masc_keeper_msg` | 메시지 전송 |
+| `masc_keeper_down` | 정상 종료 |
+| `masc_keeper_list` | 전체 목록 |
+
+### 사용자 매뉴얼
+
+상세: [KEEPER-USER-MANUAL.md](./docs/KEEPER-USER-MANUAL.md)
 
 - 대시보드 필드 레퍼런스 (출처별 분류, `-` 값 진단)
 - Agent 프로필 매니페스트 작성법 ([예시](./docs/examples/persona-example.json))
@@ -299,6 +347,10 @@ MCP 표면, 내부 prompt plane, operator surface의 경계는 [MCP-SURFACE-AUDI
 | `MASC_LLM_CACHE_L1_MAX_ENTRIES` | 2048 | 프로세스 내 L1 캐시 엔트리 상한 |
 | `MASC_SPAWN_CACHE_POLICY` | safe_only | spawn 캐시 정책 (`off`/`safe_only`) |
 | `LLAMA_SERVER_URL` | `http://127.0.0.1:8085` | local `llama.cpp` OpenAI-compatible endpoint |
+| `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | 5 | zombie keeper 최대 자동 재시작 횟수 |
+| `MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S` | 10.0 | 재시작 간 exponential backoff 기본 딜레이 (초) |
+| `MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S` | 300.0 | backoff 상한 (초) |
+| `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | 30.0 | supervisor sweep 주기 (초) |
 
 ## 문서
 

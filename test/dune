@@ -221,25 +221,7 @@
  (name test_team_session_swarm_runner)
  (modules test_team_session_swarm_runner)
  (libraries masc_mcp agent_sdk agent_sdk.swarm alcotest yojson unix))
-(test
- (name test_agent_swarm_unit)
- (modules test_agent_swarm_unit)
- (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
-
-(test
- (name test_agent_swarm_fleet)
- (modules test_agent_swarm_fleet)
- (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
-
-(test
- (name test_swarm_e2e)
- (modules test_swarm_e2e)
- (libraries masc_mcp agent_sdk alcotest eio eio_main unix yojson))
-
-(test
- (name test_agent_swarm_runner)
- (modules test_agent_swarm_runner)
- (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
+; Agent swarm tests removed (#1903 — migrated to OAS Swarm Runner)
 
 (test
  (name test_tool_mdal)

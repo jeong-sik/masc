@@ -285,7 +285,7 @@ let compute_judgments ~base_path:_ ~factual_json =
   let prompt = prompt_for_facts factual_json in
   match
     Cascade.complete ~cascade_name:"governance_judge"
-      ~messages:[Cascade.user_msg prompt]
+      ~messages:[Agent_sdk.Types.user_msg prompt]
       ~temperature:0.2 ~timeout_sec ~max_tokens:4096 ()
   with
   | Error message -> Error message

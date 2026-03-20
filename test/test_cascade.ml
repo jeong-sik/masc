@@ -79,7 +79,7 @@ let test_call_returns_error_when_no_models () =
           let result =
             Cascade.complete
               ~cascade_name:"heartbeat_action"
-              ~messages:[Cascade.user_msg "test"]
+              ~messages:[Agent_sdk.Types.user_msg "test"]
               ~timeout_sec:1
               ~config_path:path
               ()

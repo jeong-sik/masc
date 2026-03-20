@@ -336,7 +336,7 @@ let verify_worker ~pattern (worker : worker_plan) diff =
     let verdict =
       match
         Cascade.complete ~cascade_name:"code_swarm_verify"
-          ~messages:[Cascade.user_msg prompt]
+          ~messages:[Agent_sdk.Types.user_msg prompt]
           ~temperature:0.0 ~max_tokens:200 ()
       with
       | Ok resp -> Verifier_oas.parse_verdict (Cascade.text_of_response resp)

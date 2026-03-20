@@ -28,7 +28,6 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
       ("current_room", `String current_room);
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool paused);
-      ("lodge", `Assoc [("status", `String "deprecated")]);
       ("social_runtime", social_runtime_json);
       ("version", `String Version.version);
     ]
@@ -243,8 +242,6 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
           ("status", room_status_json config);
           ("social_tick", social_tick_summary);
           ("social_checkins", `List social_checkins);
-          ("lodge_tick", `Assoc [("status", `String "deprecated")]);
-          ("lodge_checkins", `List []);
           ("execution_queue", `List (List.map (fun (row : queue_context) -> row.json) limited_queue));
           ("session_briefs", `List (List.map (fun (row : session_context) -> row.json) limited_sessions));
           ("operation_briefs", `List (List.map (fun (row : operation_context) -> row.json) limited_ops));

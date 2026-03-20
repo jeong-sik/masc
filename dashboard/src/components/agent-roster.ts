@@ -13,14 +13,16 @@ import { formatDuration } from './mission-utils'
 
 type StatusFilter = 'all' | 'active' | 'idle' | 'offline'
 
-function statusCategory(status: string): StatusFilter {
+function statusCategory(status: string | undefined): StatusFilter {
+  if (!status) return 'idle'
   const s = status.toLowerCase()
   if (s === 'active' || s === 'busy' || s === 'listening' || s === 'working') return 'active'
   if (s === 'offline' || s === 'inactive') return 'offline'
   return 'idle'
 }
 
-function statusLabel(status: string): string {
+function statusLabel(status: string | undefined): string {
+  if (!status) return '(unknown)'
   const labels: Record<string, string> = {
     active: '활성', busy: '처리 중', listening: '대기', working: '작업 중',
     idle: '유휴', offline: '오프라인', inactive: '비활성',
@@ -28,7 +30,7 @@ function statusLabel(status: string): string {
   return labels[status.toLowerCase()] ?? status
 }
 
-function statusBadgeClass(status: string): string {
+function statusBadgeClass(status: string | undefined): string {
   const cat = statusCategory(status)
   if (cat === 'active') return 'roster-badge--active'
   if (cat === 'offline') return 'roster-badge--offline'

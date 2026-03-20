@@ -20,80 +20,32 @@ let tool_call_health_json (config : Room.config) : Yojson.Safe.t =
   let failures = ref 0 in
   let timeouts = ref 0 in
   let durations_rev = ref [] in
-  let duration_count = ref 0 in
-  let duration_sum = ref 0 in
-  let keeper_status_calls = ref 0 in
-  let keeper_status_failures = ref 0 in
-  let keeper_status_timeouts = ref 0 in
-  let keeper_msg_calls = ref 0 in
-  let keeper_msg_failures = ref 0 in
-  let keeper_msg_timeouts = ref 0 in
   List.iter
     (fun (e : Tool_audit.audit_event) ->
       if e.event_type = "tool_call" then begin
         incr total;
         if not e.success then incr failures;
-        let (tool_name, timeout_now, duration_ms_opt) =
+        let (_tool_name, timeout_now, duration_ms_opt) =
           parse_tool_call_detail e.detail
         in
         if timeout_now then incr timeouts;
         (match duration_ms_opt with
-         | Some d ->
-             incr duration_count;
-             duration_sum := !duration_sum + d;
-             durations_rev := d :: !durations_rev
-         | None -> ());
-        if tool_name = "masc_keeper_status" then begin
-          incr keeper_status_calls;
-          if not e.success then incr keeper_status_failures;
-          if timeout_now then incr keeper_status_timeouts;
-        end else if tool_name = "masc_keeper_msg" then begin
-          incr keeper_msg_calls;
-          if not e.success then incr keeper_msg_failures;
-          if timeout_now then incr keeper_msg_timeouts;
-        end
+         | Some d -> durations_rev := d :: !durations_rev
+         | None -> ())
       end)
     events;
   let total_f = float_of_int !total in
   let failure_rate =
     if !total = 0 then 0.0 else float_of_int !failures /. total_f
   in
-  let timeout_rate =
-    if !total = 0 then 0.0 else float_of_int !timeouts /. total_f
-  in
-  let avg_duration_ms =
-    if !duration_count = 0 then 0.0
-    else float_of_int !duration_sum /. float_of_int !duration_count
-  in
   let p95_duration_ms = percentile_int !durations_rev ~pct:0.95 in
-  let keeper_msg_timeout_sec =
-    int_of_env_default
-      "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
-      ~default:45
-      ~min_v:10
-      ~max_v:300
-  in
   `Assoc [
     ("window_hours", `Float window_hours);
     ("tool_calls", `Int !total);
     ("failures", `Int !failures);
     ("timeouts", `Int !timeouts);
     ("failure_rate", `Float failure_rate);
-    ("timeout_rate", `Float timeout_rate);
-    ("duration_sample_count", `Int !duration_count);
-    ("avg_duration_ms", `Float avg_duration_ms);
     ("p95_duration_ms", match p95_duration_ms with Some v -> `Int v | None -> `Null);
-    ("keeper_msg_timeout_sec", `Int keeper_msg_timeout_sec);
-    ("keeper_status", `Assoc [
-      ("calls", `Int !keeper_status_calls);
-      ("failures", `Int !keeper_status_failures);
-      ("timeouts", `Int !keeper_status_timeouts);
-    ]);
-    ("keeper_msg", `Assoc [
-      ("calls", `Int !keeper_msg_calls);
-      ("failures", `Int !keeper_msg_failures);
-      ("timeouts", `Int !keeper_msg_timeouts);
-    ]);
   ]
 
 let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
@@ -166,8 +118,6 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       ("last_activity_age_s", json_int_opt last_activity_age_s);
       ("slo_target_age_s", `Int slo_target_age_s);
       ("slo_breached", `Bool slo_breached);
-      ("warn_age_s", `Int warn_age_s);
-      ("bad_age_s", `Int bad_age_s);
     ], true)
   with exn ->
     Log.Dashboard.error "board_monitoring_json failed: %s"
@@ -180,8 +130,6 @@ let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
       ("last_activity_age_s", `Null);
       ("slo_target_age_s", `Int slo_target_age_s);
       ("slo_breached", `Bool false);
-      ("warn_age_s", `Int warn_age_s);
-      ("bad_age_s", `Int bad_age_s);
     ], false)
 
 let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
@@ -297,8 +245,6 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
       ("slo_target_case_age_s", `Int slo_target_quorum_age_s);
       ("slo_breached", `Bool slo_breached);
       ("judge_online", `Bool judge_online);
-      ("warn_age_s", `Int warn_age_s);
-      ("bad_age_s", `Int bad_age_s);
     ], true)
   with exn ->
     Log.Dashboard.error "governance_monitoring_json failed: %s"
@@ -316,6 +262,4 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
       ("slo_target_case_age_s", `Int slo_target_quorum_age_s);
       ("slo_breached", `Bool false);
       ("judge_online", `Bool false);
-      ("warn_age_s", `Int warn_age_s);
-      ("bad_age_s", `Int bad_age_s);
     ], false)

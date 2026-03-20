@@ -75,7 +75,7 @@ module Llm = struct
          "MASC_GARDENER_SPAWN_LLM_TIMEOUT_SEC")
 
   (** Default GLM model for Z.ai API calls.
-      Empty = let Glm_pool select at runtime. *)
+      Empty = let GLM provider select at runtime. *)
   let default_model =
     get_string ~default:"glm-4.7" "MASC_GLM_DEFAULT_MODEL"
 

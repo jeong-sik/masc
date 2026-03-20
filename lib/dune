@@ -135,7 +135,6 @@
    federation
    federation_types
    gcm_compat
-   glm_pool
    graphql_client
    graphql_endpoint
    graphql_api

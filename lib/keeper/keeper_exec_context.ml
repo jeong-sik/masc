@@ -8,28 +8,10 @@ open Keeper_alerting
 open Keeper_exec_tools [@@warning "-33"]
 open Keeper_exec_status
 
-(* ================================================================ *)
-(* Inline utilities (formerly timed/total_tokens/usage_of)  *)
-(* ================================================================ *)
-
-let timed (f : unit -> 'a) : 'a * int =
-  let t0 = Time_compat.now () in
-  let result = f () in
-  let ms = int_of_float ((Time_compat.now () -. t0) *. 1000.0) in
-  (result, ms)
-
-let zero_usage : Agent_sdk.Types.api_usage =
-  { input_tokens = 0; output_tokens = 0;
-    cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
-
-let usage_of_response (resp : Llm_provider.Types.api_response)
-    : Agent_sdk.Types.api_usage =
-  match resp.usage with Some u -> u | None -> zero_usage
-
-let total_tokens (u : Agent_sdk.Types.api_usage) : int =
-  u.input_tokens + u.output_tokens
-
-(* ================================================================ *)
+let timed = Llm_utils.timed
+let zero_usage = Llm_utils.zero_usage
+let usage_of_response = Llm_utils.usage_of_response
+let total_tokens = Llm_utils.total_tokens
 
 let log_keeper_exn ~label exn =
   let tag = match exn with
@@ -581,10 +563,6 @@ let run_proactive_generation
     ~(idle_seconds : int) : proactive_generation_result option =
   let base_prompt =
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
-  in
-  let zero_usage : Agent_sdk.Types.api_usage =
-    { Agent_sdk.Types.input_tokens = 0; output_tokens = 0;
-      cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
   in
   let max_attempts = 3 in
   let previous_preview = String.trim meta.last_proactive_preview in

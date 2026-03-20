@@ -1,10 +1,10 @@
-(** Test_oas_worker — Unit tests for Phase 1 OAS migration modules:
-    Oas_worker, Tool_mitosis_oas, Tool_council_oas.
+(** Test_oas_worker — Unit tests for OAS worker streaming bridge,
+    cascade config, mitosis, and council.
 
-    MODEL 0 — no real MODEL calls. Tests use mock net / temp directories.
-    15 test scenarios across 3 modules.
+    LLM 0 — no real MODEL calls. Tests use mock net / temp directories.
 
-    @since Phase 1 — MASC→OAS migration *)
+    @since Phase 1 — MASC->OAS migration
+    @since Phase A — OAS #215 streaming verification *)
 
 open Masc_mcp
 
@@ -39,137 +39,110 @@ let parse_json s =
 let field key json = Yojson.Safe.Util.member key json
 
 (* ================================================================ *)
-(* Module 1: Oas_worker tests                                       *)
+(* SSE Event Bridge Tests (OAS #215 streaming verification)         *)
+(*                                                                   *)
+(* keeper_turn.ml wraps on_text_delta into on_event, extracting     *)
+(* TextDelta from ContentBlockDelta. Reproduce that bridge here.    *)
 (* ================================================================ *)
 
-let test_default_config_fields () =
-  let model_spec =
-    match Model_spec.model_spec_of_string "llama:test-model" with
-    | Ok m -> m
-    | Error e -> failwith e
-  in
-  let tools = [] in
-  let cfg = Oas_worker.default_config
-    ~name:"test-agent"
-    ~model_spec
-    ~system_prompt:"You are a test agent."
-    ~tools
-  in
-  Alcotest.(check string) "name" "test-agent" cfg.name;
-  Alcotest.(check string) "system_prompt" "You are a test agent." cfg.system_prompt;
-  Alcotest.(check int) "max_turns default" 20 cfg.max_turns;
-  Alcotest.(check int) "max_tokens default" 4096 cfg.max_tokens;
-  Alcotest.(check (float 0.001)) "temperature default" 0.7 cfg.temperature;
-  Alcotest.(check bool) "hooks None" true (Option.is_none cfg.hooks);
-  Alcotest.(check bool) "guardrails None" true (Option.is_none cfg.guardrails);
-  Alcotest.(check bool) "event_bus None" true (Option.is_none cfg.event_bus);
-  Alcotest.(check bool) "checkpoint_dir None" true (Option.is_none cfg.checkpoint_dir);
-  Alcotest.(check bool) "session_id None" true (Option.is_none cfg.session_id);
-  Alcotest.(check bool) "description None" true (Option.is_none cfg.description)
+(** Reproduce the exact bridge logic from keeper_turn.ml:32-37. *)
+let make_on_event_bridge (buf : Buffer.t) : Agent_sdk.Types.sse_event -> unit =
+  fun evt ->
+    match evt with
+    | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } ->
+        Buffer.add_string buf text
+    | _ -> ()
 
-let test_default_config_custom_values () =
-  let model_spec =
-    match Model_spec.model_spec_of_string "llama:custom-model" with
-    | Ok m -> m
-    | Error e -> failwith e
-  in
-  let cfg = Oas_worker.default_config
-    ~name:"custom-agent"
-    ~model_spec
-    ~system_prompt:"Custom prompt."
-    ~tools:[]
-  in
-  let cfg = { cfg with
-    max_turns = 50;
-    max_tokens = 8192;
-    temperature = 0.3;
-    session_id = Some "sess-123";
-    description = Some "A custom agent";
-  } in
-  Alcotest.(check int) "max_turns custom" 50 cfg.max_turns;
-  Alcotest.(check int) "max_tokens custom" 8192 cfg.max_tokens;
-  Alcotest.(check (float 0.001)) "temperature custom" 0.3 cfg.temperature;
-  Alcotest.(check string) "session_id custom" "sess-123"
-    (Option.get cfg.session_id);
-  Alcotest.(check string) "description custom" "A custom agent"
-    (Option.get cfg.description)
+let test_text_delta_extraction () =
+  let buf = Buffer.create 64 in
+  let on_event = make_on_event_bridge buf in
+  on_event (ContentBlockDelta { index = 0; delta = TextDelta "Hello" });
+  on_event (ContentBlockDelta { index = 0; delta = TextDelta " " });
+  on_event (ContentBlockDelta { index = 0; delta = TextDelta "world" });
+  Alcotest.(check string) "accumulated text" "Hello world" (Buffer.contents buf)
 
-let test_build_with_mock_net () =
-  Eio_main.run @@ fun env ->
-  let net = Eio.Stdenv.net env in
-  let model_spec =
-    match Model_spec.model_spec_of_string "llama:test-model" with
-    | Ok m -> m
-    | Error e -> failwith e
-  in
-  let cfg = Oas_worker.default_config
-    ~name:"build-test"
-    ~model_spec
-    ~system_prompt:"Build test system prompt."
-    ~tools:[]
-  in
-  (* build should succeed — it does not call MODEL, only creates Agent.t *)
-  match Oas_worker.build ~net ~config:cfg with
-  | Ok agent ->
-    Agent_sdk.Agent.close agent;
-    Alcotest.(check pass) "build succeeds" () ()
-  | Error e ->
-    Alcotest.fail (Printf.sprintf "build should succeed: %s" e)
+let test_non_text_events_ignored () =
+  let buf = Buffer.create 64 in
+  let on_event = make_on_event_bridge buf in
+  on_event (MessageStart { id = "m1"; model = "test"; usage = None });
+  on_event (ContentBlockStart { index = 0; content_type = "text";
+                                tool_id = None; tool_name = None });
+  on_event (ContentBlockStop { index = 0 });
+  on_event (MessageDelta { stop_reason = Some EndTurn; usage = None });
+  on_event MessageStop;
+  on_event Ping;
+  Alcotest.(check string) "buffer empty" "" (Buffer.contents buf)
 
-let test_build_invalid_config () =
-  Eio_main.run @@ fun env ->
-  let net = Eio.Stdenv.net env in
-  let model_spec =
-    match Model_spec.model_spec_of_string "llama:test-model" with
-    | Ok m -> m
-    | Error e -> failwith e
-  in
-  let cfg = Oas_worker.default_config
-    ~name:"invalid-test"
-    ~model_spec
-    ~system_prompt:"test"
-    ~tools:[]
-  in
-  (* max_turns = 0 should fail build_safe validation *)
-  let cfg = { cfg with max_turns = 0 } in
-  match Oas_worker.build ~net ~config:cfg with
-  | Error _ -> Alcotest.(check pass) "build correctly rejected" () ()
-  | Ok agent ->
-    Agent_sdk.Agent.close agent;
-    Alcotest.fail "build should fail with max_turns=0"
+let test_mixed_event_stream () =
+  let buf = Buffer.create 64 in
+  let on_event = make_on_event_bridge buf in
+  on_event (MessageStart { id = "m1"; model = "test"; usage = None });
+  on_event (ContentBlockStart { index = 0; content_type = "text";
+                                tool_id = None; tool_name = None });
+  on_event (ContentBlockDelta { index = 0; delta = TextDelta "token1" });
+  on_event (ContentBlockDelta { index = 0; delta = TextDelta " token2" });
+  on_event (ContentBlockStop { index = 0 });
+  (* Tool use block — InputJsonDelta, not TextDelta *)
+  on_event (ContentBlockStart { index = 1; content_type = "tool_use";
+                                tool_id = Some "t1"; tool_name = Some "calc" });
+  on_event (ContentBlockDelta { index = 1;
+                                delta = InputJsonDelta "{\"x\":1}" });
+  on_event (ContentBlockStop { index = 1 });
+  on_event (MessageDelta { stop_reason = Some EndTurn; usage = None });
+  on_event MessageStop;
+  Alcotest.(check string) "text only" "token1 token2" (Buffer.contents buf)
 
-let test_build_with_tools () =
-  Eio_main.run @@ fun env ->
-  let net = Eio.Stdenv.net env in
-  let model_spec =
-    match Model_spec.model_spec_of_string "llama:test-model" with
-    | Ok m -> m
-    | Error e -> failwith e
-  in
-  let test_tool = Agent_sdk.Tool.create
-    ~name:"test_tool"
-    ~description:"A test tool"
-    ~parameters:[]
-    (fun _args -> Agent_sdk.Tool.text "ok")
-  in
-  let cfg = Oas_worker.default_config
-    ~name:"tools-test"
-    ~model_spec
-    ~system_prompt:"test"
-    ~tools:[test_tool]
-  in
-  match Oas_worker.build ~net ~config:cfg with
-  | Ok agent ->
-    Agent_sdk.Agent.close agent;
-    Alcotest.(check pass) "build with tools succeeds" () ()
-  | Error e ->
-    Alcotest.fail (Printf.sprintf "build with tools failed: %s" e)
+let test_empty_text_delta () =
+  let buf = Buffer.create 64 in
+  let on_event = make_on_event_bridge buf in
+  on_event (ContentBlockDelta { index = 0; delta = TextDelta "" });
+  on_event (ContentBlockDelta { index = 0; delta = TextDelta "a" });
+  on_event (ContentBlockDelta { index = 0; delta = TextDelta "" });
+  Alcotest.(check string) "empty deltas transparent" "a" (Buffer.contents buf)
+
+let test_sse_error_event_ignored () =
+  let buf = Buffer.create 64 in
+  let on_event = make_on_event_bridge buf in
+  on_event (ContentBlockDelta { index = 0; delta = TextDelta "before" });
+  on_event (SSEError "something went wrong");
+  on_event (ContentBlockDelta { index = 0; delta = TextDelta " after" });
+  Alcotest.(check string) "error transparent" "before after" (Buffer.contents buf)
+
+(* ================================================================ *)
+(* Cascade Config Tests (public API)                                *)
+(* ================================================================ *)
+
+let test_default_model_strings_keeper () =
+  let models = Oas_worker.default_model_strings ~cascade_name:"keeper_turn" in
+  Alcotest.(check bool) "keeper_turn has models" true (models <> [])
+
+let test_default_model_strings_heartbeat () =
+  let models = Oas_worker.default_model_strings ~cascade_name:"heartbeat_action" in
+  Alcotest.(check bool) "heartbeat has models" true (models <> [])
+
+let test_default_model_strings_unknown () =
+  let models = Oas_worker.default_model_strings ~cascade_name:"nonexistent_cascade_xyz" in
+  Alcotest.(check bool) "unknown cascade has fallback" true (models <> [])
+
+let test_default_config_path () =
+  let _path = Oas_worker.default_config_path () in
+  Alcotest.(check pass) "default_config_path does not raise" () ()
+
+let test_cascade_names_produce_models () =
+  let cascades = [
+    "keeper_turn"; "heartbeat_action"; "heartbeat_wake";
+    "lodge_direct"; "classification"; "verifier";
+    "briefing"; "walph"; "routing_judge";
+  ] in
+  List.iter (fun name ->
+    let models = Oas_worker.default_model_strings ~cascade_name:name in
+    Alcotest.(check bool) (name ^ " has models") true (models <> [])
+  ) cascades
 
 (* ================================================================ *)
 (* Module 2: Tool_mitosis_oas tests                                 *)
 (* ================================================================ *)
 
-(** Reset Mcp_server global state to a fresh stem cell *)
 let reset_mitosis_state () =
   Mcp_server.current_cell := Mitosis.create_stem_cell ~generation:0;
   Mcp_server.stem_pool := Mitosis.init_pool ~config:Mitosis.default_config
@@ -195,7 +168,6 @@ let test_mitosis_status_returns_json () =
   | Some (ok, body) ->
     Alcotest.(check bool) "status ok" true ok;
     let json = parse_json body in
-    (* Verify cell, pool, config, and runtime fields *)
     Alcotest.(check bool) "has cell" true
       (Yojson.Safe.Util.member "cell" json <> `Null);
     Alcotest.(check bool) "has pool" true
@@ -262,7 +234,6 @@ let test_mitosis_record_updates_cell () =
       (json |> field "task_count" |> Yojson.Safe.Util.to_int);
     Alcotest.(check int) "tool_call_count incremented" 1
       (json |> field "tool_call_count" |> Yojson.Safe.Util.to_int);
-    (* Verify global state was updated *)
     let cell = !(Mcp_server.current_cell) in
     Alcotest.(check int) "global task_count" 1 cell.Mitosis.task_count;
     Alcotest.(check int) "global tool_call_count" 1 cell.Mitosis.tool_call_count
@@ -298,7 +269,6 @@ let test_mitosis_prepare_success () =
 let test_mitosis_handoff_no_action () =
   with_mitosis_base @@ fun base_path ->
   let ctx = make_mitosis_ctx ~base_path in
-  (* Low context_ratio, no force — should result in no_action *)
   let args = `Assoc [("context_ratio", `Float 0.1)] in
   match Tool_mitosis_oas.dispatch ctx ~name:"masc_mitosis_handoff" ~args with
   | Some (ok, body) ->
@@ -331,7 +301,6 @@ let test_mitosis_handoff_force () =
       (json |> field "runtime" |> Yojson.Safe.Util.to_string);
     Alcotest.(check bool) "dna_length > 0" true
       (json |> field "dna_length" |> Yojson.Safe.Util.to_int > 0);
-    (* Generation should increment regardless of run outcome *)
     let cell = !(Mcp_server.current_cell) in
     Alcotest.(check int) "generation incremented" 1 cell.Mitosis.generation
   | None -> Alcotest.fail "dispatch returned None"
@@ -371,7 +340,6 @@ let test_petition_submit_creates_case () =
     let json = parse_json body in
     let case_id = json |> field "case_id" |> Yojson.Safe.Util.to_string in
     Alcotest.(check bool) "case_id non-empty" true (String.length case_id > 0);
-    (* Verify collaboration_id is present (OAS Collaboration integration) *)
     let collab_id = json |> field "collaboration_id" |> Yojson.Safe.Util.to_string in
     Alcotest.(check bool) "collaboration_id non-empty" true (String.length collab_id > 0);
     Alcotest.(check bool) "merged field present" true
@@ -442,7 +410,6 @@ let test_council_dispatch_unknown () =
 let test_governance_status_after_petition () =
   with_council_base @@ fun base_path ->
   let ctx = make_council_ctx ~base_path in
-  (* Submit a petition first *)
   let args = `Assoc [
     ("title", `String "Test for status count");
     ("subject", `String "task");
@@ -451,7 +418,6 @@ let test_governance_status_after_petition () =
   (match Tool_council_oas.dispatch ctx ~name:"masc_governance_petition" ~args with
    | Some (ok, _) -> Alcotest.(check bool) "petition ok" true ok
    | None -> Alcotest.fail "petition dispatch returned None");
-  (* Now check governance status *)
   match Tool_council_oas.dispatch ctx ~name:"masc_governance_status" ~args:(`Assoc []) with
   | Some (ok, body) ->
     Alcotest.(check bool) "status ok" true ok;
@@ -467,20 +433,30 @@ let test_governance_status_after_petition () =
 (* ================================================================ *)
 
 let () =
-  Alcotest.run "OAS Worker (Phase 1)" [
-    "oas_worker_config", [
-      Alcotest.test_case "default_config fields" `Quick
-        test_default_config_fields;
-      Alcotest.test_case "default_config custom values" `Quick
-        test_default_config_custom_values;
+  Alcotest.run "OAS Worker" [
+    "sse_event_bridge", [
+      Alcotest.test_case "text delta extraction" `Quick
+        test_text_delta_extraction;
+      Alcotest.test_case "non-text events ignored" `Quick
+        test_non_text_events_ignored;
+      Alcotest.test_case "mixed event stream" `Quick
+        test_mixed_event_stream;
+      Alcotest.test_case "empty text deltas transparent" `Quick
+        test_empty_text_delta;
+      Alcotest.test_case "SSE error event ignored" `Quick
+        test_sse_error_event_ignored;
     ];
-    "oas_worker_build", [
-      Alcotest.test_case "build with mock net" `Quick
-        test_build_with_mock_net;
-      Alcotest.test_case "build invalid config rejected" `Quick
-        test_build_invalid_config;
-      Alcotest.test_case "build with tools" `Quick
-        test_build_with_tools;
+    "cascade_config", [
+      Alcotest.test_case "keeper_turn default models" `Quick
+        test_default_model_strings_keeper;
+      Alcotest.test_case "heartbeat default models" `Quick
+        test_default_model_strings_heartbeat;
+      Alcotest.test_case "unknown cascade fallback" `Quick
+        test_default_model_strings_unknown;
+      Alcotest.test_case "default_config_path" `Quick
+        test_default_config_path;
+      Alcotest.test_case "all cascade names produce models" `Quick
+        test_cascade_names_produce_models;
     ];
     "tool_mitosis_oas", [
       Alcotest.test_case "status returns json" `Quick

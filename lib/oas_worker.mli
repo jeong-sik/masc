@@ -44,6 +44,7 @@ val run_named :
   ?max_turns:int ->
   ?temperature:float ->
   ?max_tokens:int ->
+  ?accept:(Llm_provider.Types.api_response -> bool) ->
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->

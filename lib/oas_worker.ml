@@ -287,7 +287,8 @@ let require_eio () =
   | None, _ -> Error "Eio switch not available (running outside server context)"
   | _, None -> Error "Eio net not available (running outside server context)"
 
-let resolve_cascade ~cascade_name =
+(** Resolve cascade model specs from config + defaults. *)
+let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
   let defaults = Cascade.default_model_strings ~cascade_name in
   let configured =
     match Cascade.default_config_path () with
@@ -299,24 +300,28 @@ let resolve_cascade ~cascade_name =
     | None -> defaults
   in
   let specs = Model_spec.available_model_specs_of_strings configured in
-  let specs =
-    if specs <> [] then specs
-    else
-      let fallback = Cascade.default_model_strings ~cascade_name in
-      if configured = fallback then (
-        Printf.eprintf "[cascade] %s: no callable models from built-in defaults\n%!" cascade_name;
-        [])
-      else (
-        Printf.eprintf "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!" cascade_name;
-        Model_spec.available_model_specs_of_strings fallback)
-  in
-  match specs with
-  | [] ->
-    Error (Printf.sprintf "No models available for cascade '%s'" cascade_name)
-  | spec :: _ ->
-    let provider = resolve_provider spec in
-    Ok (provider, spec.model_id)
+  if specs <> [] then specs
+  else
+    let fallback = Cascade.default_model_strings ~cascade_name in
+    if configured = fallback then (
+      Printf.eprintf "[cascade] %s: no callable models from built-in defaults\n%!" cascade_name;
+      [])
+    else (
+      Printf.eprintf "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!" cascade_name;
+      Model_spec.available_model_specs_of_strings fallback)
 
+(** Run a single Agent.run() call with cascade model fallback.
+
+    Tries each model in cascade order. Falls through to the next model
+    when:
+    - Agent.run() returns an error (model unavailable, network issue)
+    - [accept] returns [false] (response validation failure)
+
+    This preserves the cascade fallback behavior of [Cascade.complete]
+    while routing all LLM calls through Agent.run().
+
+    @param accept Optional response validator. Default accepts all.
+    @since Phase 7 — cascade fallback in Oas_worker *)
 let run_named
     ~cascade_name
     ~goal
@@ -325,6 +330,7 @@ let run_named
     ?(max_turns = 20)
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
+    ?(accept = fun (_ : Llm_provider.Types.api_response) -> true)
     ?guardrails
     ?hooks
     ?context_reducer
@@ -335,21 +341,41 @@ let run_named
   match require_eio () with
   | Error e -> Error e
   | Ok (sw, net) ->
-  match resolve_cascade ~cascade_name with
-  | Error e -> Error e
-  | Ok (provider, model_id) ->
-  let name = Printf.sprintf "oas-%s" cascade_name in
-  let config = { (default_config ~name ~provider ~model_id ~system_prompt ~tools) with
-    max_turns;
-    max_tokens;
-    temperature;
-    guardrails;
-    hooks;
-    context_reducer;
-    memory;
-    description = Some (Printf.sprintf "cascade:%s" cascade_name);
-  } in
-  run ~sw ~net ~config ?on_event goal
+  let specs = resolve_cascade_specs ~cascade_name in
+  let rec try_specs last_error = function
+    | [] ->
+      let err = match last_error with
+        | Some e -> e
+        | None -> Printf.sprintf "No models available for cascade '%s'" cascade_name
+      in
+      Error err
+    | (spec : Model_spec.model_spec) :: rest ->
+      let provider = resolve_provider spec in
+      let name = Printf.sprintf "oas-%s" cascade_name in
+      let config = { (default_config ~name ~provider ~model_id:spec.model_id
+                        ~system_prompt ~tools) with
+        max_turns;
+        max_tokens;
+        temperature;
+        guardrails;
+        hooks;
+        context_reducer;
+        memory;
+        description = Some (Printf.sprintf "cascade:%s" cascade_name);
+      } in
+      match run ~sw ~net ~config ?on_event goal with
+      | Ok result when accept result.response -> Ok result
+      | Ok _ ->
+        Log.Misc.info "[oas_worker] cascade %s: model %s response rejected by accept, trying next"
+          cascade_name spec.model_id;
+        try_specs (Some (Printf.sprintf "accept rejected response from %s" spec.model_id)) rest
+      | Error e when rest <> [] ->
+        Log.Misc.info "[oas_worker] cascade %s: model %s failed (%s), trying next"
+          cascade_name spec.model_id e;
+        try_specs (Some e) rest
+      | Error e -> Error e
+  in
+  try_specs None specs
 
 let run_named_with_masc_tools
     ~cascade_name
@@ -369,17 +395,33 @@ let run_named_with_masc_tools
   match require_eio () with
   | Error e -> Error e
   | Ok (sw, net) ->
-  match resolve_cascade ~cascade_name with
-  | Error e -> Error e
-  | Ok (provider, model_id) ->
-  let name = Printf.sprintf "oas-%s" cascade_name in
-  let config = { (default_config ~name ~provider ~model_id ~system_prompt ~tools:[]) with
-    max_turns;
-    max_tokens;
-    temperature;
-    guardrails;
-    hooks;
-    memory;
-    description = Some (Printf.sprintf "cascade:%s" cascade_name);
-  } in
-  run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event goal
+  let specs = resolve_cascade_specs ~cascade_name in
+  let rec try_specs last_error = function
+    | [] ->
+      let err = match last_error with
+        | Some e -> e
+        | None -> Printf.sprintf "No models available for cascade '%s'" cascade_name
+      in
+      Error err
+    | (spec : Model_spec.model_spec) :: rest ->
+      let provider = resolve_provider spec in
+      let name = Printf.sprintf "oas-%s" cascade_name in
+      let config = { (default_config ~name ~provider ~model_id:spec.model_id
+                        ~system_prompt ~tools:[]) with
+        max_turns;
+        max_tokens;
+        temperature;
+        guardrails;
+        hooks;
+        memory;
+        description = Some (Printf.sprintf "cascade:%s" cascade_name);
+      } in
+      match run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event goal with
+      | Ok result -> Ok result
+      | Error e when rest <> [] ->
+        Log.Misc.info "[oas_worker] cascade %s: model %s failed (%s), trying next"
+          cascade_name spec.model_id e;
+        try_specs (Some e) rest
+      | Error e -> Error e
+  in
+  try_specs None specs

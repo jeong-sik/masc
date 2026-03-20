@@ -289,7 +289,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     init_runtime_context env
   in
 
-  (* Initialize Eio environment for MODEL HTTP calls (cohttp-eio via Llm_provider) *)
+  (* Initialize Eio environment for MODEL HTTP calls (cohttp-eio via OAS Provider) *)
   Masc_eio_env.init ~sw ~net ~clock ();
   Discovery_cache.set_env ~sw ~net;
 

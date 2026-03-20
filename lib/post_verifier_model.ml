@@ -1,7 +1,7 @@
 (** Post Verifier MODEL — G-Eval rubric scoring via MODEL cascade.
 
     Separated from Post_verifier to avoid dependency cycles:
-    Board -> Thompson_sampling -> Post_verifier would pull in Llm_client.
+    Board -> Thompson_sampling -> Post_verifier would pull in model client.
 
     Modes (MASC_VERIFIER_MODE env var):
     - "heuristic" (default): delegates to Post_verifier.verify

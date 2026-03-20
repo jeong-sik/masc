@@ -1,11 +1,11 @@
-(** Discovery_cache — cached wrapper over OAS [Llm_provider.Discovery].
+(** Discovery_cache — cached wrapper over OAS Provider Discovery.
 
     All probing logic lives in OAS. This module adds:
     - TTL-based caching (30s default)
     - Convenience queries (any_local_healthy, idle/busy counts)
     - Eio capability injection (set_env at server init)
 
-    @since 2.130.0 — renamed from Llm_discovery_cache *)
+    @since 2.130.0 *)
 
 (* ── Eio capability refs (set once at server init) ───────── *)
 
@@ -67,3 +67,4 @@ let busy_slot_count () =
 (* ── JSON (delegates to OAS) ─────────────────────────────── *)
 
 let endpoint_to_json = Llm_provider.Discovery.endpoint_status_to_json
+let summary_to_json = Llm_provider.Discovery.summary_to_json

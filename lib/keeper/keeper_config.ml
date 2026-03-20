@@ -195,31 +195,8 @@ let float_of_env_default name ~default ~min_v ~max_v =
       in
       max min_v (min max_v v)
 
-let keeper_turn_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_TURN_MAX_TOKENS"
-    ~default:1200
-    ~min_v:256
-    ~max_v:4096
-
 let keeper_status_fast_default () : bool =
   bool_of_env_default "MASC_KEEPER_STATUS_FAST_DEFAULT" ~default:false
-
-let keeper_followup_max_tokens (turn_max_tokens : int) : int =
-  (* Thinking models (e.g. Gemini 2.5) consume internal thinking tokens
-     from this budget, so follow-up needs a generous allocation.
-     Use same budget as the initial turn since the system prompt is minimal. *)
-  clamp_int turn_max_tokens ~min_v:600 ~max_v:4096
-
-let keeper_correction_max_tokens (turn_max_tokens : int) : int =
-  clamp_int (turn_max_tokens / 2) ~min_v:280 ~max_v:900
-
-let keeper_msg_postpass_budget_ms () : int =
-  int_of_env_default
-    "MASC_KEEPER_MSG_POSTPASS_BUDGET_MS"
-    ~default:12000
-    ~min_v:0
-    ~max_v:120000
 
 let keeper_compact_ratio () : float =
   float_of_env_default

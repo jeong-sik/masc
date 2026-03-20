@@ -487,12 +487,5 @@ let finalize_handoff_turn ctx ~session ~now_ts ~specs ~primary ~base_dir
     ~new_generation:next_generation env_for_handoff in
   (true, Yojson.Safe.pretty_to_string json)
 
-(** Build the complete keeper response: emit side-effects + return JSON. *)
-let build_keeper_response ctx ~session ~now_ts ~specs ~primary ~base_dir
-    ~trajectory_acc ~gate_config ~do_handoff (env : turn_env) : tool_result =
-  if not do_handoff then
-    finalize_normal_turn ctx ~session ~now_ts ~trajectory_acc ~gate_config env
-  else
-    finalize_handoff_turn ctx ~session ~now_ts ~specs ~primary ~base_dir
-      ~trajectory_acc ~gate_config env
+(* build_keeper_response removed — keeper_turn.ml uses Agent.run() directly. *)
 

@@ -779,3 +779,12 @@ let read_meta config name : (keeper_meta option, string) result =
 (* Model selection, path utilities, and JSONL helpers
    extracted to Keeper_types_resident *)
 include Keeper_types_resident
+
+(** Fiber-level health for keeper supervisor monitoring.
+    Defined here (not in Keeper_resident_supervisor) to avoid circular
+    dependencies between keeper_exec_status and the resident supervisor. *)
+type fiber_health =
+  | Fiber_alive    (** Fiber running, promise unresolved *)
+  | Fiber_zombie   (** Registry entry exists but fiber terminated *)
+  | Fiber_dead     (** Restart budget exhausted, manual recovery needed *)
+  | Fiber_unknown  (** Not in supervised registry *)

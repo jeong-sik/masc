@@ -1,13 +1,13 @@
-(** OAS Event_bus bridge for MASC social events.
+(** Agent_sdk Event_bus bridge for MASC runtime/social events.
 
     Publishes MASC coordination events (broadcasts, heartbeats, board posts)
-    to the OAS Event_bus using [Custom("masc:<type>", json)] format.
-    This makes MASC orchestration events visible to OAS subscribers
+    to the shared Event_bus using [Custom("masc:<type>", json)] format.
+    This makes MASC orchestration events visible to Event_bus subscribers
     (traces, metrics, debugging tools).
 
     @since 2.90.0 *)
 
-(** Publish a broadcast event to the OAS Event_bus. *)
+(** Publish a broadcast event to the shared Event_bus. *)
 let publish_broadcast (bus : Agent_sdk.Event_bus.t) ~agent_name ~content =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
@@ -16,7 +16,7 @@ let publish_broadcast (bus : Agent_sdk.Event_bus.t) ~agent_name ~content =
   ] in
   Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:broadcast", payload))
 
-(** Publish a heartbeat event to the OAS Event_bus. *)
+(** Publish a heartbeat event to the shared Event_bus. *)
 let publish_heartbeat (bus : Agent_sdk.Event_bus.t) ~agent_name ~turn ~context_pct =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
@@ -26,7 +26,7 @@ let publish_heartbeat (bus : Agent_sdk.Event_bus.t) ~agent_name ~turn ~context_p
   ] in
   Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:heartbeat", payload))
 
-(** Publish a board post event to the OAS Event_bus. *)
+(** Publish a board post event to the shared Event_bus. *)
 let publish_board_post (bus : Agent_sdk.Event_bus.t) ~agent_name ~post_id =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
@@ -35,7 +35,7 @@ let publish_board_post (bus : Agent_sdk.Event_bus.t) ~agent_name ~post_id =
   ] in
   Agent_sdk.Event_bus.publish bus (Agent_sdk.Event_bus.Custom ("masc:board_post", payload))
 
-(** Publish a task state change event to the OAS Event_bus. *)
+(** Publish a task state change event to the shared Event_bus. *)
 let publish_task_transition (bus : Agent_sdk.Event_bus.t) ~agent_name ~task_id ~transition =
   let payload = `Assoc [
     ("agent_name", `String agent_name);
@@ -112,6 +112,21 @@ let publish_keeper_snapshot (bus : Agent_sdk.Event_bus.t) ~keeper_name
   ] in
   Agent_sdk.Event_bus.publish bus
     (Agent_sdk.Event_bus.Custom ("masc:keeper:snapshot", payload))
+
+(** {1 Keeper Resident Lifecycle Events} *)
+
+(** Publish a resident keepalive lifecycle event.
+    Event names: "started", "stopped", "crashed", "restarted", "dead". *)
+let publish_keeper_resident_lifecycle (bus : Agent_sdk.Event_bus.t) ~event ~keeper_name
+    ~detail =
+  let payload = `Assoc [
+    ("event", `String event);
+    ("keeper_name", `String keeper_name);
+    ("detail", `String detail);
+    ("timestamp", `Float (Time_compat.now ()));
+  ] in
+  Agent_sdk.Event_bus.publish bus
+    (Agent_sdk.Event_bus.Custom ("masc:keeper:resident_lifecycle", payload))
 
 (** {1 Phase 4: Social Events} *)
 

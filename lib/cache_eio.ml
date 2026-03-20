@@ -164,6 +164,10 @@ let count_entries config =
 (** Set cache entry - synchronous *)
 let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []) ()
     : (cache_entry, string) result =
+  (* BUG-016: Reject empty key *)
+  if String.length (String.trim key) = 0 then
+    Error "Cache key must not be empty"
+  else
   (* BUG-013: Per-entry size limit *)
   let max_size = Env_config.Cache.max_entry_size in
   if String.length value > max_size then

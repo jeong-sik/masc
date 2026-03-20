@@ -343,6 +343,8 @@
    tool_tempo
    mitosis_helpers
    mitosis_spawn
+   tool_mitosis_utils
+   tool_mitosis_handoff
    tool_mitosis
    tool_mitosis_oas
    tool_portal
@@ -573,6 +575,8 @@
  dashboard_http_keeper_detail
  mitosis_helpers
  mitosis_spawn
+ tool_mitosis_utils
+ tool_mitosis_handoff
  mitosis_defaults
  board_core
  board_votes

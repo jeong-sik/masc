@@ -456,7 +456,7 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
           worker_class_text role_text spawn_prompt
       in
       (match
-        Cascade.complete ~cascade_name:"routing_judge"
+        Oas_worker.complete_single ~cascade_name:"routing_judge"
           ~messages:[
             Agent_sdk.Types.system_msg "You are a routing judge for a hybrid swarm. Output only JSON.";
             Agent_sdk.Types.user_msg prompt]

@@ -241,6 +241,43 @@ let run_with_masc_tools
   run ~sw ~net ~config ?on_event goal
 
 (* ================================================================ *)
+(* Single-shot cascade call (replaces Cascade.complete)              *)
+(* ================================================================ *)
+
+(** Format OAS http_error as cascade error string. *)
+let format_cascade_error ~cascade_name = function
+  | Llm_provider.Http_client.HttpError { code; body } ->
+    Printf.sprintf "[cascade] %s: HTTP %d: %s" cascade_name code
+      (if String.length body > 200
+       then String.sub body 0 200 ^ "..."
+       else body)
+  | Llm_provider.Http_client.NetworkError { message } ->
+    Printf.sprintf "[cascade] %s: %s" cascade_name message
+
+(** Single-shot LLM call via cascade policy.
+    Drop-in replacement for the former [Cascade.complete].
+    Policy (model selection, config path) is read from {!Cascade};
+    execution goes through [Llm_provider.Cascade_config.complete_named]. *)
+let complete_single ~cascade_name ~messages
+    ?(config_path = "") ?(temperature = 0.3) ?(timeout_sec = 30)
+    ?(max_tokens = 500) ?(accept = fun _ -> true) ?tools () =
+  let env = Masc_eio_env.get () in
+  let defaults = Cascade.default_model_strings ~cascade_name in
+  let config_path_opt =
+    if String.length config_path > 0 then Some config_path
+    else Cascade.default_config_path ()
+  in
+  match
+    Llm_provider.Cascade_config.complete_named
+      ~sw:env.sw ~net:env.net ?clock:env.clock
+      ?config_path:config_path_opt
+      ~name:cascade_name ~defaults ~messages
+      ?tools ~temperature ~max_tokens ~accept ~timeout_sec ()
+  with
+  | Ok resp -> Ok resp
+  | Error err -> Error (format_cascade_error ~cascade_name err)
+
+(* ================================================================ *)
 (* Named cascade API — callers pass cascade_name, not model_spec    *)
 (* ================================================================ *)
 

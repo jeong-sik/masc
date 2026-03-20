@@ -275,7 +275,7 @@ let walph_response_is_valid (resp : Llm_provider.Types.api_response) =
 
 let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec ~max_chars () =
   match
-    Cascade.complete ~cascade_name:"walph"
+    Oas_worker.complete_single ~cascade_name:"walph"
       ~messages:[Agent_sdk.Types.user_msg prompt] ~timeout_sec
       ~max_tokens:max_chars ~accept:walph_response_is_valid ()
   with

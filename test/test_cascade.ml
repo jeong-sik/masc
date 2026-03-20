@@ -2,6 +2,7 @@ open Alcotest
 
 module Cascade = Masc_mcp.Cascade
 module Model_spec = Masc_mcp.Model_spec
+module Oas_worker = Masc_mcp.Oas_worker
 
 let with_temp_json contents f =
   let path = Filename.temp_file "cascade_" ".json" in
@@ -85,7 +86,7 @@ let test_call_returns_error_when_no_models () =
         {|{"heartbeat_action_models":["gemini:fake-model"]}|}
         (fun path ->
           let result =
-            Cascade.complete
+            Oas_worker.complete_single
               ~cascade_name:"heartbeat_action"
               ~messages:[Agent_sdk.Types.user_msg "test"]
               ~timeout_sec:1

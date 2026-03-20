@@ -684,7 +684,7 @@ let generate_code_change ~goal ~baseline ~history ~insights
   let prompt = build_code_change_prompt ~goal ~baseline ~history ~insights
     ~file_content ~target_file in
   match
-    Cascade.complete ~cascade_name:"autoresearch"
+    Oas_worker.complete_single ~cascade_name:"autoresearch"
       ~messages:[Agent_sdk.Types.user_msg prompt]
       ~temperature:0.7 ~max_tokens:4096 ~timeout_sec:120 ()
   with

@@ -289,7 +289,7 @@ let compute_judgments ~facts_json =
   let timeout_sec = Env_config.Llm.operator_judge_timeout_seconds in
   let prompt = prompt_for_facts facts_json in
   match
-    Cascade.complete ~cascade_name:"operator_judge"
+    Oas_worker.complete_single ~cascade_name:"operator_judge"
       ~messages:[Agent_sdk.Types.user_msg prompt]
       ~temperature:0.2 ~timeout_sec ~max_tokens:4096 ()
   with

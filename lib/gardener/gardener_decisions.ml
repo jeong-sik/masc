@@ -44,7 +44,7 @@ let decide_spawn_with_llm ~config ~health ~gap : spawn_decision =
 
   let response =
     match
-      Cascade.complete ~cascade_name:"gardener_spawn"
+      Oas_worker.complete_single ~cascade_name:"gardener_spawn"
         ~messages:[Agent_sdk.Types.user_msg prompt]
         ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds
@@ -437,7 +437,7 @@ Room 내 활성 에이전트: %d
 
   let response =
     match
-      Cascade.complete ~cascade_name:"gardener_spawn"
+      Oas_worker.complete_single ~cascade_name:"gardener_spawn"
         ~messages:[Agent_sdk.Types.user_msg prompt]
         ~temperature:0.3
         ~timeout_sec:Env_config.Llm.gardener_spawn_timeout_seconds

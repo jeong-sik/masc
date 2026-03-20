@@ -375,6 +375,7 @@ let run_worker_via_oas
             tool_names;
             session_id;
             raw_trace_run;
+            api_response = Some response;
           }
       | Error err ->
         let detail = Oas.Error.to_string err in

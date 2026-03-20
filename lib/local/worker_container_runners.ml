@@ -255,6 +255,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
                   tool_names;
                   session_id = mcp_session_id;
                   raw_trace_run;
+                  api_response = Some response;
                 }
           | Error err ->
               let detail = Agent_sdk__Error.to_string err in
@@ -521,6 +522,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                       tool_names;
                       session_id = meta.mcp_session_id;
                       raw_trace_run;
+                      api_response = Some response;
                     }
               | Error err ->
                   let detail = Agent_sdk__Error.to_string err in

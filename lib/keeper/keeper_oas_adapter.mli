@@ -2,7 +2,7 @@
 
     Uses cascade-name-based model resolution (no [model_spec] construction).
     Delegates to [Oas_worker.run_named] for agent loops and
-    [Cascade.call_with_tools] for single-shot cascade calls.
+    [Cascade.complete] for single-shot cascade calls.
 
     @since OAS migration Phase 1
     @since LLM-free cascade Phase 2 *)
@@ -78,7 +78,7 @@ val usage_of_run_result : Oas_worker.run_result -> Cascade.token_usage
 (** Extract model ID string from an OAS run result. *)
 val model_of_run_result : Oas_worker.run_result -> string
 
-(** Cascade through [Cascade.call_with_tools] — single-shot, no agent loop.
+(** Cascade through [Cascade.complete] — single-shot, no agent loop.
     [cascade_name] defaults to ["keeper_turn"]. Model specs in the
     [completion_request] list are ignored; only prompt/system/temperature
     are extracted. *)

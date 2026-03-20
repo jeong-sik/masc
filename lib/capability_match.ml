@@ -254,14 +254,16 @@ let score_with_llm (agent : agent_profile) (task : task_profile)
     : (float, string) result =
   let prompt = build_scoring_prompt agent task in
   match
-    Cascade.call ~cascade_name:"capability_match" ~prompt
+    Cascade.complete ~cascade_name:"capability_match"
+      ~messages:[Cascade.user_msg prompt]
       ~temperature:0.1 ~timeout_sec:15 ~max_tokens:20
       ~accept:llm_score_is_valid ()
   with
-  | Ok r -> (
-      match parse_llm_score r.response with
+  | Ok resp -> (
+      let text = Cascade.text_of_response resp in
+      match parse_llm_score text with
       | Some f -> Ok f
-      | None -> Error (Printf.sprintf "unparseable LLM response: %s" r.response))
+      | None -> Error (Printf.sprintf "unparseable LLM response: %s" text))
   | Error err -> Error err
 
 (* ---------- Keyword Scoring ---------- *)

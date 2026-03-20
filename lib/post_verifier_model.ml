@@ -118,13 +118,14 @@ let geval_response_is_valid (resp : Cascade.api_response) : bool =
 let verify_llm ~content : (verification_result, string) result =
   let prompt = build_geval_prompt ~content in
   match
-    Cascade.call ~cascade_name:"verifier" ~prompt
+    Cascade.complete ~cascade_name:"verifier"
+      ~messages:[Cascade.user_msg prompt]
       ~temperature:0.2 ~timeout_sec:15 ~max_tokens:150
       ~accept:geval_response_is_valid ()
   with
   | Error err -> Error err
-  | Ok r -> (
-      match parse_geval_response r.response with
+  | Ok resp -> (
+      match parse_geval_response (Cascade.text_of_response resp) with
       | Error err -> Error err
       | Ok (r, q, s, _reasoning) ->
           let relevance = score_to_verdict ~dim_name:"relevance" r in

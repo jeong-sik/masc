@@ -275,10 +275,11 @@ let walph_response_is_valid (resp : Cascade.api_response) =
 
 let default_llm_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec ~max_chars () =
   match
-    Cascade.call ~cascade_name:"walph" ~prompt ~timeout_sec
+    Cascade.complete ~cascade_name:"walph"
+      ~messages:[Cascade.user_msg prompt] ~timeout_sec
       ~max_tokens:max_chars ~accept:walph_response_is_valid ()
   with
-  | Ok r -> r.response
+  | Ok resp -> Cascade.text_of_response resp
   | Error err -> failwith err
 
 (** {1 Main Loop} *)

@@ -2,7 +2,7 @@
 
     Delegates to [Oas_worker.run_named] / [run_named_with_masc_tools]
     (cascade-name-based, no model_spec construction) or to
-    [Cascade.call_with_tools] for single-shot cascade calls.
+    [Cascade.complete] for single-shot cascade calls.
 
     @since OAS migration Phase 1
     @since LLM-free cascade Phase 2 *)
@@ -227,7 +227,7 @@ let run_cascade ?(cascade_name = "keeper_turn") ?timeout_sec requests =
      else [])
     @ [ Llm_provider.Types.user_msg params.goal ]
   in
-  Cascade.call_with_tools ~cascade_name ~messages
+  Cascade.complete ~cascade_name ~messages
     ~temperature:params.temperature ~max_tokens:params.max_tokens
     ?timeout_sec ()
 

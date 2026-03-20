@@ -209,9 +209,9 @@ let test_build_response_prompt_long_content () =
   check bool "handles long content" true (String.length prompt > 1000)
 
 let test_auto_responder_uses_shared_llm_client () =
-  check bool "uses Cascade.call" true
+  check bool "uses Cascade.complete" true
     (file_contains_pattern "lib/auto_responder.ml"
-       {|Cascade.call ~cascade_name|});
+       {|Cascade.complete ~cascade_name|});
   check bool "no direct run_prompt_cascade" false
     (file_contains_pattern "lib/auto_responder.ml" "Llm_orchestration.run_prompt_cascade");
   check bool "legacy Llm_direct dispatch removed"

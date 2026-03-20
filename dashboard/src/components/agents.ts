@@ -1,6 +1,7 @@
 // 실행 표면 — 세션/작전 중심 실행 진단
 
 import { html } from 'htm/preact'
+import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { RoomTruthStrip } from './common/room-truth-strip'
 import {
@@ -33,29 +34,44 @@ export function Execution() {
   const continuityAll = executionContinuityBriefs.value
   const offlineRowsAll = executionOfflineWorkerBriefs.value
 
-  if (selectedQueueId.value && !queueRows.some(item => item.id === selectedQueueId.value)) {
-    selectedQueueId.value = null
-  }
-  if (selectedSessionId.value && !sessionRowsAll.some(item => item.session_id === selectedSessionId.value)) {
-    selectedSessionId.value = null
-  }
-  if (selectedOperationId.value && !operationRowsAll.some(item => item.operation_id === selectedOperationId.value)) {
-    selectedOperationId.value = null
-  }
+  const activeQueueId =
+    selectedQueueId.value && queueRows.some(item => item.id === selectedQueueId.value)
+      ? selectedQueueId.value
+      : null
+  const activeSelectedSessionId =
+    selectedSessionId.value && sessionRowsAll.some(item => item.session_id === selectedSessionId.value)
+      ? selectedSessionId.value
+      : null
+  const activeSelectedOperationId =
+    selectedOperationId.value && operationRowsAll.some(item => item.operation_id === selectedOperationId.value)
+      ? selectedOperationId.value
+      : null
 
-  const activeQueue = selectedQueueId.value
-    ? queueRows.find(item => item.id === selectedQueueId.value) ?? null
+  useEffect(() => {
+    if (selectedQueueId.value !== activeQueueId) {
+      selectedQueueId.value = activeQueueId
+    }
+    if (selectedSessionId.value !== activeSelectedSessionId) {
+      selectedSessionId.value = activeSelectedSessionId
+    }
+    if (selectedOperationId.value !== activeSelectedOperationId) {
+      selectedOperationId.value = activeSelectedOperationId
+    }
+  }, [activeQueueId, activeSelectedSessionId, activeSelectedOperationId])
+
+  const activeQueue = activeQueueId
+    ? queueRows.find(item => item.id === activeQueueId) ?? null
     : null
 
   const activeSessionId = (() => {
-    if (selectedSessionId.value) return selectedSessionId.value
+    if (activeSelectedSessionId) return activeSelectedSessionId
     if (!activeQueue) return null
     if (activeQueue.kind === 'session') return activeQueue.target_id
     return activeQueue.linked_session_id ?? null
   })()
 
   const activeOperationId = (() => {
-    if (selectedOperationId.value) return selectedOperationId.value
+    if (activeSelectedOperationId) return activeSelectedOperationId
     if (!activeQueue) return null
     if (activeQueue.kind === 'operation') return activeQueue.target_id
     return activeQueue.linked_operation_id ?? null

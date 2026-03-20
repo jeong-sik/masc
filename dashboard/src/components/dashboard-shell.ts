@@ -8,6 +8,7 @@ import { missionSnapshot } from '../mission-store'
 import { roomTruthInitializing } from '../room-truth-store'
 import { Mission } from './mission'
 import { Overview } from './overview/overview'
+import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
 import {
@@ -229,7 +230,23 @@ export function DashboardMain() {
   if (roomTruthInitializing.value) {
     return html`<div class="loading-indicator">서버가 데이터를 준비하고 있습니다. 잠시 후 자동으로 새로고침됩니다...</div>`
   }
-  return dashboardLoading.value && !connected.value
-    ? html`<div class="loading-indicator">대시보드 불러오는 중...</div>`
-    : html`<${TabContent} />`
+  if (dashboardLoading.value && !connected.value) {
+    return html`<div class="loading-indicator">대시보드 불러오는 중...</div>`
+  }
+
+  const routeLabel = [
+    route.value.tab,
+    route.value.params.section,
+    route.value.params.surface,
+    route.value.params.session_id,
+    route.value.params.operation_id,
+  ]
+    .filter(Boolean)
+    .join(':')
+
+  return html`
+    <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
+      <${TabContent} />
+    <//>
+  `
 }

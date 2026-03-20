@@ -45,19 +45,29 @@ export function Mission() {
     return html`<div class="empty-state">상황판 스냅샷이 아직 없습니다.</div>`
   }
 
-  if (selectedAttentionId.value && !mission.attention_queue.some(item => item.id === selectedAttentionId.value)) {
-    selectedAttentionId.value = null
-  }
-
   const sessionRows = mission.sessions
-  if (selectedSessionId.value && !sessionRows.some(item => item.session_id === selectedSessionId.value)) {
-    selectedSessionId.value = null
-  }
+  const activeSelectedAttentionId =
+    selectedAttentionId.value && mission.attention_queue.some(item => item.id === selectedAttentionId.value)
+      ? selectedAttentionId.value
+      : null
+  const activeSelectedSessionId =
+    selectedSessionId.value && sessionRows.some(item => item.session_id === selectedSessionId.value)
+      ? selectedSessionId.value
+      : null
 
-  const activeAttention = mission.attention_queue.find(item => item.id === selectedAttentionId.value) ?? null
+  useEffect(() => {
+    if (selectedAttentionId.value !== activeSelectedAttentionId) {
+      selectedAttentionId.value = activeSelectedAttentionId
+    }
+    if (selectedSessionId.value !== activeSelectedSessionId) {
+      selectedSessionId.value = activeSelectedSessionId
+    }
+  }, [activeSelectedAttentionId, activeSelectedSessionId])
+
+  const activeAttention = mission.attention_queue.find(item => item.id === activeSelectedAttentionId) ?? null
   const attentionSessionId =
     activeAttention?.related_session_ids.find(id => sessionRows.some(item => item.session_id === id)) ?? null
-  const activeSessionId = selectedSessionId.value ?? attentionSessionId ?? sessionRows[0]?.session_id ?? null
+  const activeSessionId = activeSelectedSessionId ?? attentionSessionId ?? sessionRows[0]?.session_id ?? null
   const sessionLookup = sessionLookupById()
   const focusSession = sessionRows.find(item => item.session_id === activeSessionId) ?? null
   const keeperRows = mission.keeper_briefs.slice(0, 6).map(enrichedKeeperRow)
@@ -265,7 +275,7 @@ export function Mission() {
           </div>
           <div class="mission-lane-stack">
             ${attentionQueue.length > 0
-              ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${selectedAttentionId.value === item.id} sessionLookup=${sessionLookup} />`)
+              ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${activeSelectedAttentionId === item.id} sessionLookup=${sessionLookup} />`)
               : html`<div class="empty-state">지금 세션 단위 주의 대기열은 비어 있습니다.</div>`}
           </div>
         <//>

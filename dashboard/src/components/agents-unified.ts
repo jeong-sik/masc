@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { route } from '../router'
 import { agents, keepers } from '../store'
 import { missionSnapshot } from '../mission-store'
@@ -13,10 +14,6 @@ import { Execution } from './agents'
 type AgentsView = 'all' | 'agents' | 'keepers' | 'sessions'
 
 const activeView = signal<AgentsView>('all')
-
-function chipClass(view: AgentsView): string {
-  return `agents-chip ${activeView.value === view ? 'agents-chip--active' : ''}`
-}
 
 /** Determine which agents have keeper runtime from keepers store + mission snapshot. */
 function keeperNameSet(): Set<string> {
@@ -50,15 +47,18 @@ export function AgentsUnified() {
     return html`<${AgentProfile} name=${agentParam} />`
   }
 
-  // Sync from route params if present
   const viewParam = route.value.params.view as string | undefined
-  if (viewParam === 'sessions' && activeView.value !== 'sessions') {
-    activeView.value = 'sessions'
-  } else if (viewParam === 'keepers' && activeView.value !== 'keepers') {
-    activeView.value = 'keepers'
-  } else if (viewParam === 'agents' && activeView.value !== 'agents') {
-    activeView.value = 'agents'
-  }
+  const routeView =
+    viewParam === 'sessions' || viewParam === 'keepers' || viewParam === 'agents'
+      ? viewParam
+      : null
+  const currentView = routeView ?? activeView.value
+
+  useEffect(() => {
+    if (routeView && activeView.value !== routeView) {
+      activeView.value = routeView
+    }
+  }, [routeView])
 
   // Compute counts for chip badges
   const kNames = keeperNameSet()
@@ -73,7 +73,7 @@ export function AgentsUnified() {
         ${CHIPS.map(c => html`
           <button
             key=${c.id}
-            class=${chipClass(c.id)}
+            class=${`agents-chip ${currentView === c.id ? 'agents-chip--active' : ''}`}
             onClick=${() => { activeView.value = c.id }}
           >
             ${c.label}
@@ -84,11 +84,11 @@ export function AgentsUnified() {
         `)}
       </div>
 
-      ${activeView.value === 'sessions'
+      ${currentView === 'sessions'
         ? html`<${Execution} />`
         : html`<${AgentRoster}
-            keeperFilter=${activeView.value === 'keepers' ? 'keeper-only'
-              : activeView.value === 'agents' ? 'agent-only'
+            keeperFilter=${currentView === 'keepers' ? 'keeper-only'
+              : currentView === 'agents' ? 'agent-only'
               : 'all'}
           />`
       }

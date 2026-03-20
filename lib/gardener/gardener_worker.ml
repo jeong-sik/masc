@@ -48,61 +48,54 @@ let make_dispatch ~(config : Room.config) ~(agent_name : string) () ~name ~args 
   | None ->
       (false, Printf.sprintf "Unknown tool: %s" name)
 
-(** Wrap OAS worker calls so Eio exceptions (Mutex.Poisoned from LLM
-    connection failure, etc.) become [Error] results instead of crashing. *)
-let run_safe f =
-  try f ()
-  with exn ->
-    Error (Printf.sprintf "OAS worker exception: %s" (Printexc.to_string exn))
+(* Exception handling moved to Oas_worker.run internally — no run_safe needed. *)
 
 let run_for_gap ~(config : Room.config) ~topic ~traits_str ~reason =
   let agent_name = Printf.sprintf "gardener-worker-%s" topic in
   let institution_context = Institution_eio.load_and_format_for_welcome ~fs:() config in
-  run_safe (fun () ->
-    Oas_worker.run_named_with_masc_tools
-      ~cascade_name:"gardener_spawn"
-      ~system_prompt:
-        (Printf.sprintf
-           "You are a MASC Gardener worker. Your agent_name is '%s'.\n\
-            Topic: %s\n\
-            Traits: %s\n\
-            Always include agent_name='%s' in every tool call arguments.\n\
-            1. masc_status -> room state\n\
-            2. masc_tasks -> find unclaimed work\n\
-            3. masc_claim_next -> claim a task\n\
-            4. Work on the claimed task\n\
-            5. masc_transition(task_id=..., action='done') -> mark done\n\
-            6. masc_broadcast -> report results\n\
-            Terminate after completion. Do not loop.\n\
-            %s"
-           agent_name topic traits_str agent_name institution_context)
-      ~goal:(Printf.sprintf "Address gap '%s': %s" topic reason)
-      ~masc_tools:(worker_tools ())
-      ~dispatch:(make_dispatch ~config ~agent_name ())
-      ~max_turns:10 ~temperature:0.3 ())
+  Oas_worker.run_named_with_masc_tools
+    ~cascade_name:"gardener_spawn"
+    ~system_prompt:
+      (Printf.sprintf
+         "You are a MASC Gardener worker. Your agent_name is '%s'.\n\
+          Topic: %s\n\
+          Traits: %s\n\
+          Always include agent_name='%s' in every tool call arguments.\n\
+          1. masc_status -> room state\n\
+          2. masc_tasks -> find unclaimed work\n\
+          3. masc_claim_next -> claim a task\n\
+          4. Work on the claimed task\n\
+          5. masc_transition(task_id=..., action='done') -> mark done\n\
+          6. masc_broadcast -> report results\n\
+          Terminate after completion. Do not loop.\n\
+          %s"
+         agent_name topic traits_str agent_name institution_context)
+    ~goal:(Printf.sprintf "Address gap '%s': %s" topic reason)
+    ~masc_tools:(worker_tools ())
+    ~dispatch:(make_dispatch ~config ~agent_name ())
+    ~max_turns:10 ~temperature:0.3 ()
 
 let run_for_backlog ~(config : Room.config) ~(backlog : Gardener_types.task_backlog_summary) =
   let agent_name = "gardener-triage-worker" in
   let institution_context = Institution_eio.load_and_format_for_welcome ~fs:() config in
-  run_safe (fun () ->
-    Oas_worker.run_named_with_masc_tools
-      ~cascade_name:"gardener_spawn"
-      ~system_prompt:
-        (Printf.sprintf
-           "You are a MASC triage worker. Your agent_name is '%s'.\n\
-            Always include agent_name='%s' in every tool call arguments.\n\
-            1. masc_tasks -> review backlog\n\
-            2. masc_claim_next -> claim high-priority task\n\
-            3. Process or delegate\n\
-            4. masc_transition -> update status\n\
-            5. masc_broadcast -> report results\n\
-            Terminate after completion.\n\
-            %s"
-           agent_name agent_name institution_context)
-      ~goal:
-        (Printf.sprintf
-           "Triage backlog: %d unclaimed (%d high-pri, %d orphan)."
-           backlog.todo_count backlog.high_priority_todo backlog.orphan_count)
-      ~masc_tools:(worker_tools ())
-      ~dispatch:(make_dispatch ~config ~agent_name ())
-      ~max_turns:15 ~temperature:0.3 ())
+  Oas_worker.run_named_with_masc_tools
+    ~cascade_name:"gardener_spawn"
+    ~system_prompt:
+      (Printf.sprintf
+         "You are a MASC triage worker. Your agent_name is '%s'.\n\
+          Always include agent_name='%s' in every tool call arguments.\n\
+          1. masc_tasks -> review backlog\n\
+          2. masc_claim_next -> claim high-priority task\n\
+          3. Process or delegate\n\
+          4. masc_transition -> update status\n\
+          5. masc_broadcast -> report results\n\
+          Terminate after completion.\n\
+          %s"
+         agent_name agent_name institution_context)
+    ~goal:
+      (Printf.sprintf
+         "Triage backlog: %d unclaimed (%d high-pri, %d orphan)."
+         backlog.todo_count backlog.high_priority_todo backlog.orphan_count)
+    ~masc_tools:(worker_tools ())
+    ~dispatch:(make_dispatch ~config ~agent_name ())
+    ~max_turns:15 ~temperature:0.3 ()

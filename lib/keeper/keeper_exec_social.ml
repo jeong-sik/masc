@@ -96,12 +96,24 @@ let social_board_event_prompt ~(meta : keeper_meta) (event : social_board_event)
     | Some id -> Printf.sprintf "\nComment ID: %s" id
     | None -> ""
   in
+  let relationship_hint =
+    match event.kind, event.post_author with
+    | `Board_comment, Some pa when pa = meta.name ->
+        Printf.sprintf
+          "\nRelationship: This comment is on YOUR post. Someone is engaging with you directly. \
+           You should usually respond unless the comment is trivial."
+    | `Board_comment, Some pa ->
+        Printf.sprintf "\nOriginal post author: %s" pa
+    | `Board_post, _ when event.author = meta.name ->
+        "\nRelationship: This is your own post. Skip."
+    | _ -> ""
+  in
   Printf.sprintf
     "You are resident keeper %s acting in the room's public square.\n\
      A new board event requires triage.\n\n\
      Event type: %s\n\
      Post ID: %s%s\n\
-     Author: %s\n\
+     Author: %s%s\n\
      Content preview:\n%s\n\n\
      If you act, use tools directly.\n\
      Read the full thread with `keeper_board_get` before deciding whenever context is incomplete.\n\
@@ -110,13 +122,14 @@ let social_board_event_prompt ~(meta : keeper_meta) (event : social_board_event)
      2. `keeper_board_vote` when a lightweight signal is enough.\n\
      3. `keeper_board_post` only for broader escalation or synthesis.\n\
      If no action is warranted, explain briefly why you passed.\n\
-     Never respond to your own board event.\n\
+     Never respond to events you authored yourself.\n\
      Stay in character and keep any final text concise."
     meta.name
     event_kind
     event.post_id
     comment_hint
     event.author
+    relationship_hint
     event.content
 
 let run_social_board_event_turn

@@ -12,6 +12,7 @@ type board_event =
     post_id : string;
     comment_id : string option;
     author : string;
+    post_author : string option;
     content : string;
     created_at : float;
   }
@@ -102,17 +103,25 @@ let build_post_event (post : Board.post) =
     post_id = Board.Post_id.to_string post.id;
     comment_id = None;
     author = Board.Agent_id.to_string post.author;
+    post_author = None;
     content = String.trim post.content;
     created_at = post.created_at;
   }
 
 let build_comment_event (comment : Board.comment) =
+  let post_id_str = Board.Post_id.to_string comment.post_id in
+  let post_author =
+    match Board_dispatch.get_post ~post_id:post_id_str with
+    | Ok post -> Some (Board.Agent_id.to_string post.author)
+    | Error _ -> None
+  in
   {
     key = "comment:" ^ Board.Comment_id.to_string comment.id;
     kind = `Board_comment;
-    post_id = Board.Post_id.to_string comment.post_id;
+    post_id = post_id_str;
     comment_id = Some (Board.Comment_id.to_string comment.id);
     author = Board.Agent_id.to_string comment.author;
+    post_author;
     content = String.trim comment.content;
     created_at = comment.created_at;
   }
@@ -268,6 +277,7 @@ let process_event ~sw ~clock ~config (event : board_event) =
                    post_id = event.post_id;
                    comment_id = event.comment_id;
                    author = event.author;
+                   post_author = event.post_author;
                    content = event.content;
                    created_at = event.created_at;
                  }

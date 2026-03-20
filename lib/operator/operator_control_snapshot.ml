@@ -300,9 +300,9 @@ let persistent_agents_json ?keeper_names config =
   in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
-let sessions_json config =
-  let sessions =
-    Team_session_store.list_sessions config
+let sessions_json config sessions =
+  let ordered_sessions =
+    sessions
     |> List.sort (fun (a : Team_session_types.session) (b : Team_session_types.session) ->
            compare b.started_at a.started_at)
   in
@@ -321,7 +321,7 @@ let sessions_json config =
             ("status", Team_session_engine_eio.session_status_json config session);
             ("recent_events", `List recent_events);
           ])
-      sessions
+      ordered_sessions
   in
   `Assoc [ ("count", `Int (List.length items)); ("items", `List items) ]
 
@@ -480,7 +480,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("provenance_summary", operator_surface_contract_json);
          ("room", room_json config);
          ( "sessions",
-           if initialized && include_sessions then sessions_json config
+           if initialized && include_sessions then sessions_json config tracked_sessions
            else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
          ( "keepers",
            if initialized && include_keepers then keepers_json ~keeper_names config
@@ -510,4 +510,3 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
   in
   _snapshot_cache := Some (cache_key, result, now);
   result)
-

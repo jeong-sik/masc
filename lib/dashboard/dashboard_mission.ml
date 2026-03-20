@@ -6,6 +6,7 @@ include Dashboard_utils
 type session_context = Dashboard_mission_assembly.session_context = {
   session_id : string;
   goal : string;
+  created_by : string option;
   room : string option;
   status : string;
   health : string;
@@ -62,6 +63,17 @@ type operation_context = Dashboard_mission_assembly.operation_context = {
 type archived_agent_meta = Dashboard_mission_assembly.archived_agent_meta = {
   last_event_at : string option;
 }
+
+let active_or_recent_sessions config =
+  let cutoff_unix = Time_compat.now () -. 86400.0 in
+  let cutoff_iso = iso_of_unix cutoff_unix in
+  let is_active_or_recent (session : Team_session_types.session) =
+    match session.status with
+    | Running | Paused -> true
+    | _ -> session.updated_at_iso >= cutoff_iso
+  in
+  Team_session_store.list_sessions ~since_unix:cutoff_unix config
+  |> List.filter is_active_or_recent
 
 
 let keeper_tool_audit_json_fields keeper agent_name =
@@ -285,6 +297,7 @@ let build_session_context session_json session_cards =
         goal =
           trim_to_option (string_field "goal" meta)
           |> Option.value ~default:session_id;
+        created_by = trim_to_option (string_field "created_by" meta);
         room = trim_to_option (string_field "room_id" meta);
         status;
         health =
@@ -585,6 +598,7 @@ let build_session_briefs sessions attention_queue actions =
              [
                ("session_id", `String session.session_id);
                ("goal", `String session.goal);
+               ("created_by", json_string_option session.created_by);
                ("room", json_string_option session.room);
                ("status", `String session.status);
                ("health", `String session.health);
@@ -645,6 +659,9 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
       mcp_session_id = None;
     }
   in
+  let tracked_sessions =
+    if Room.is_initialized config then active_or_recent_sessions config else []
+  in
   let snapshot_json =
     Dashboard_cache.get_or_compute
       (Printf.sprintf "snapshot:%s" actor_name)
@@ -656,6 +673,7 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
           ~include_messages:false
           ~include_sessions:true
           ~include_keepers:true
+          ~sessions:tracked_sessions
           ctx)
   in
   let digest_json =
@@ -663,7 +681,7 @@ let build_projection ?actor ~config ~sw ~clock ~proc_mgr () =
       (Printf.sprintf "digest:%s" actor_name)
       ~ttl:5.0
       (fun () ->
-        match Operator_control.digest_json ~actor:actor_name ctx with
+        match Operator_control.digest_json ~actor:actor_name ~sessions:tracked_sessions ctx with
         | Ok json -> json
         | Error message ->
             `Assoc

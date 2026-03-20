@@ -288,6 +288,7 @@ function normalizeSessionBrief(raw: unknown): DashboardMissionSessionBrief | nul
   return {
     session_id: sessionId,
     goal,
+    created_by: asString(raw.created_by) ?? null,
     room: asString(raw.room) ?? null,
     status: asString(raw.status),
     health: asString(raw.health),

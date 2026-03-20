@@ -430,7 +430,11 @@ export function Proof() {
   const operationId = params.operation_id ?? null
 
   useEffect(() => {
-    void refreshProofSnapshot(sessionId, operationId)
+    let active = true
+    refreshProofSnapshot(sessionId, operationId).catch(() => {
+      /* stored in proofError signal */
+    })
+    return () => { active = false; void active }
   }, [sessionId, operationId])
 
   const snapshot = proofSnapshot.value

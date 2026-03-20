@@ -1,9 +1,8 @@
 (** Tool permission filter *)
 
 let admin_tools =
-  [ "masc_gardener_execute_spawn"
-  ; "masc_gardener_execute_retire"
-  ; "masc_gardener_reset_circuit"
+  [ (* Legacy gardener tools removed — handlers no longer exist.
+       Kept as empty list; future admin tools go here. *)
   ]
 
 let admin_set : (string, unit) Hashtbl.t = Hashtbl.create 8

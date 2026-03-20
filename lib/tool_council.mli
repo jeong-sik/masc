@@ -13,7 +13,7 @@ val schemas : Types.tool_schema list
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> result option
 
 (** Execute a governance action (add_task, start_operation, set_param).
-    Exposed for sentinel auto-execution. *)
+    Exposed for automated execution. *)
 val execute_action :
   context ->
   Council.Governance_v2.case_record ->

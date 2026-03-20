@@ -267,7 +267,7 @@ let taskboard_tools : Types.tool_schema list = [
   };
   {
     name = "keeper_task_force_release";
-    description = "Force-release a task back to Todo regardless of current assignee. Gardener privilege for orphan cleanup.";
+    description = "Force-release a task back to Todo regardless of current assignee. Keeper privilege for orphan cleanup.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

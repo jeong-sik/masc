@@ -3,8 +3,7 @@
     Enforces capability-based access control on tool dispatch.
     Installs as a pre-hook that short-circuits unauthorized calls.
 
-    Initial scope: admin tools (gardener_execute_spawn, gardener_execute_retire,
-    gardener_reset_circuit) require "admin" capability.
+    Enforces admin-capability gating on protected tool calls.
     All other tools are unrestricted.
 
     @since 2.95.0

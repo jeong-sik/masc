@@ -22,13 +22,12 @@ function shortCommit(commit: string | null | undefined): string {
 }
 
 function residentStatusLabel(
-  kind: 'social' | 'gardener' | 'guardian' | 'sentinel',
   status: 'live' | 'quiet' | 'starting' | 'idle' | 'disabled',
 ) {
   if (status === 'live') return '가동 중'
   if (status === 'quiet') return '조용함'
   if (status === 'starting') return '기동 중'
-  if (status === 'idle') return kind === 'guardian' ? '유휴' : '대기 중'
+  if (status === 'idle') return '대기 중'
   return '비활성'
 }
 
@@ -64,9 +63,6 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
   const liveConnected = connected.value
   const build = serverStatus.value?.build
   const socialRuntime = serverStatus.value?.social_runtime
-  const gardener = serverStatus.value?.gardener
-  const guardian = serverStatus.value?.guardian
-  const sentinel = serverStatus.value?.sentinel
   const residentCards: ComponentChildren[] = []
 
   if (socialRuntime) {
@@ -74,8 +70,8 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
       renderResidentRuntimeCard(
         'Social Runtime',
         socialRuntime.enabled
-          ? residentStatusLabel('social', 'live')
-          : residentStatusLabel('social', 'disabled'),
+          ? residentStatusLabel('live')
+          : residentStatusLabel('disabled'),
         socialRuntime.enabled ? 'ok' : 'bad',
         [
           renderRuntimeStat('전략', socialRuntime.strategy ?? 'unknown'),
@@ -89,83 +85,6 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
               ?? '없음',
           ),
         ],
-      ),
-    )
-  }
-
-  if (gardener) {
-    residentCards.push(
-      renderResidentRuntimeCard(
-        'Gardener',
-        gardener.alive
-          ? residentStatusLabel('gardener', 'live')
-          : gardener.enabled
-            ? residentStatusLabel('gardener', 'starting')
-            : residentStatusLabel('gardener', 'disabled'),
-        gardener.alive ? 'ok' : gardener.enabled ? 'warn' : 'bad',
-        [
-          renderRuntimeStat(
-            '최근 tick',
-            gardener.last_tick_completed_at
-              ? html`<${TimeAgo} timestamp=${gardener.last_tick_completed_at} />`
-              : '기록 없음',
-          ),
-          renderRuntimeStat(
-            '판단',
-            `${gardener.last_intervention ?? '없음'} · ${gardener.last_decision_source ?? '없음'}`,
-          ),
-          renderRuntimeStat(
-            '백로그',
-            `미할당 ${gardener.health_summary?.todo_count ?? 0} · P1/2 ${gardener.health_summary?.high_priority_todo ?? 0}`,
-          ),
-        ],
-        gardener.last_reason ?? gardener.last_error ?? undefined,
-      ),
-    )
-  }
-
-  if (guardian) {
-    const guardianLive = guardian.masc_loops_running === true
-    residentCards.push(
-      renderResidentRuntimeCard(
-        'Guardian',
-        guardianLive
-          ? residentStatusLabel('guardian', 'live')
-          : guardian.enabled
-            ? residentStatusLabel('guardian', 'idle')
-            : residentStatusLabel('guardian', 'disabled'),
-        guardianLive ? 'ok' : guardian.enabled ? 'warn' : 'bad',
-        [
-          renderRuntimeStat('모드', guardian.mode ?? '알 수 없음'),
-          renderRuntimeStat(
-            '루프',
-            `zombie ${guardian.zombie_loop_running ? 'on' : 'off'} · gc ${guardian.gc_loop_running ? 'on' : 'off'}`,
-          ),
-          renderRuntimeStat('소유자', guardian.runtime_owner ?? '없음'),
-        ],
-        guardian.last_gc_result
-          ?? guardian.last_zombie_result
-          ?? undefined,
-      ),
-    )
-  }
-
-  if (sentinel) {
-    residentCards.push(
-      renderResidentRuntimeCard(
-        'Sentinel',
-        sentinel.started
-          ? residentStatusLabel('sentinel', 'live')
-          : sentinel.enabled
-            ? residentStatusLabel('sentinel', 'starting')
-            : residentStatusLabel('sentinel', 'disabled'),
-        sentinel.started ? 'ok' : sentinel.enabled ? 'warn' : 'bad',
-        [
-          renderRuntimeStat('에이전트', sentinel.agent_name ?? 'sentinel'),
-          renderRuntimeStat('소비자', sentinel.consumers?.length ?? 0),
-          renderRuntimeStat('가디언 소유자', sentinel.guardian_runtime_owner ?? '없음'),
-        ],
-        sentinel.llm_enabled === true ? 'LLM 기반 housekeeping resident' : undefined,
       ),
     )
   }

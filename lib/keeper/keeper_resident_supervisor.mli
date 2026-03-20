@@ -42,7 +42,7 @@ val supervise_keepalive :
 val sweep_and_recover : 'a context -> unit
 (** Scan all supervised keepers. Detect zombies (resolved Promise),
     restart with exponential backoff if within budget, mark dead otherwise.
-    Called periodically by a Sentinel Pulse consumer. *)
+    Called periodically by the keeper supervisor loop. *)
 
 (** {1 Queries} *)
 

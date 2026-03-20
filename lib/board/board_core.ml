@@ -391,7 +391,8 @@ let infer_post_kind ~author ~visibility ~expires_at ~hearth =
     | None -> ""
   in
   if author = "lodge-system" || author = "team-session"
-     || author = "sentinel" || author = "gardener" || author = "ecosystem" then
+     || author = "sentinel" || author = "gardener" || author = "keeper"
+     || author = "ecosystem" then
     System_post
   else if visibility = Internal && expires_at > 0.0 && hearth <> ""
           && (String.starts_with ~prefix:"mdal" hearth

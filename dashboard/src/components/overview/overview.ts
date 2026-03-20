@@ -49,7 +49,7 @@ function splitSessionGoal(goal?: string | null, fallback?: string): { primary: s
 function isSystemSession(createdBy?: string | null): boolean {
   const normalized = (createdBy ?? '').trim().toLowerCase()
   if (!normalized) return false
-  const systemPrefixes = ['gardener', 'keeper', 'guardian', 'sentinel', 'dashboard', 'operator', 'system']
+  const systemPrefixes = ['keeper', 'dashboard', 'operator', 'system', 'gardener', 'sentinel', 'guardian']
   return systemPrefixes.some(prefix =>
     normalized === prefix
     || normalized.startsWith(`${prefix}-`)

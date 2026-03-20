@@ -3,7 +3,35 @@
 
 ## [Unreleased]
 
+## [2.124.0] - 2026-03-21
+
 ### Added
+- **Board+Comm Agent mode** — expose Board and Comm tools to Agent mode (#1880)
+- **5-tier OAS Memory** — wire all 5 OAS Memory tiers into callers + flush_all (#1876, #1873)
+- **Team session OAS bridge** — Phase C-1 types adapter (#1890)
+- **OAS worker tests** — register test_oas_worker + SSE streaming bridge tests (#1885)
+
+### Changed
+- **Structured logging** — migrate 85 eprintf to Log.* module loggers across 31 files (#1894)
+- **OAS-only model surface** — confine Llm_provider to 2 facade modules (#1895, #1869)
+- **Replace Spawn.spawn with Oas_worker.run_model** — Phase C-3a (#1896)
+- **Remove memory_stream.ml** — 3.6GB JSONL crash fix (#1891)
+- **Remove legacy agents** — gardener/guardian/sentinel references (#1874, #1877)
+- **Delegate model_spec to OAS** — Provider_registry + Pricing (#1865)
+- **Room surface simplification** — align claim semantics (#1893)
+
+### Fixed
+- **Dashboard non-ASCII header** — encodeURIComponent for X-MASC-Agent (#1898)
+- **Dashboard** — keepers in continuity briefs (#1897), typecheck gate (#1875), proof actor tag (#1883), agent profiles (#1879), route chunks (#1881), widget audit (#1892), light-mode tasks (#1868), keeper chat metadata (#1866)
+- **Board** — title in search query (#1888), profile match, cache truncation (#1887)
+- **Input validation** — board, cache, a2a, check tools (#1886)
+- **Agent skills** — populate a2a_discover from tool registry (#1889)
+- **Post author context** — social triage prompt (#1882)
+- **Verifier** — route through Oas_worker.complete_single (#1867)
+- **CI** — restore resolvable agent_sdk floor (#1872)
+
+### Previous Unreleased (pre-v2.123.0)
+
 - **OAS Event_bus SSE bridge** — dashboard receives agent lifecycle events via SSE (#1581)
 - **Keeper token streaming** — real-time token streaming for keeper chat (#1577)
 - **`masc_agent_relations` tool** — proxy to Neo4j/GraphQL for agent collaboration network (#1561)

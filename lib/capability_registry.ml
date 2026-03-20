@@ -116,12 +116,6 @@ let canonical_capability_id tool_name =
   | Some canonical_name -> canonical_name
   | None -> tool_name
 
-let schema_of_tool_def (tool : Cascade.tool_def) : Types.tool_schema =
-  {
-    Types.name = tool.tool_name;
-    description = tool.tool_description;
-    input_schema = tool.parameters;
-  }
 
 let surface_to_string = function
   | Public_mcp -> "public_mcp"
@@ -314,10 +308,10 @@ let local_worker_internal_seeds : capability_seed list =
 
 let keeper_projection_seeds : capability_seed list =
   Tool_shard.keeper_llm_tools
-  |> List.concat_map (fun tool ->
-         let schema = schema_of_tool_def tool in
-         let backend_tool_name = keeper_backend_tool_name tool.tool_name in
-         let privileged = List.mem tool.tool_name privileged_keeper_tool_names in
+  |> List.concat_map (fun (tool : Types.tool_schema) ->
+         let schema = tool in
+         let backend_tool_name = keeper_backend_tool_name tool.name in
+         let privileged = List.mem tool.name privileged_keeper_tool_names in
          let primary_surface =
            if privileged then Keeper_privileged else Keeper_standard
          in
@@ -422,12 +416,12 @@ let local_worker_tool_schemas ?names () :
 
 let keeper_all_tool_names : string list =
   Tool_shard.keeper_llm_tools
-  |> List.map (fun tool -> tool.Cascade.tool_name)
+  |> List.map (fun tool -> tool.Types.name)
   |> unique_preserve_order
 
 let keeper_safe_tool_names : string list =
   Tool_shard.keeper_llm_tools
-  |> List.map (fun tool -> tool.Cascade.tool_name)
+  |> List.map (fun tool -> tool.Types.name)
   |> List.filter (fun name -> not (List.mem name privileged_keeper_tool_names))
   |> unique_preserve_order
 

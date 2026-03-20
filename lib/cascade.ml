@@ -50,11 +50,6 @@ type model_spec = {
   cost_per_1k_output : float;
 }
 
-type tool_def = {
-  tool_name : string;
-  tool_description : string;
-  parameters : Yojson.Safe.t;
-}
 
 (** Compute total tokens from OAS api_usage. *)
 let total_tokens (u : Agent_sdk.Types.api_usage) = u.input_tokens + u.output_tokens

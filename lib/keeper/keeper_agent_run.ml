@@ -85,11 +85,3 @@ let run_turn
       tool_calls_made = tool_count;
     }
 
-(** Check if legacy manual loop is forced via environment variable.
-    Default: false (Agent.run() is the standard path). *)
-let use_legacy_loop () =
-  match Sys.getenv_opt "KEEPER_USE_LEGACY_LOOP" with
-  | Some v ->
-    let v = String.lowercase_ascii (String.trim v) in
-    v = "true" || v = "1" || v = "yes"
-  | None -> false

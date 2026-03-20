@@ -380,3 +380,59 @@ let test_step_plain_turn_matches_legacy_turn () =
   Alcotest.(check string) "step message" "step note"
     Yojson.Safe.Util.(step_detail |> member "message" |> to_string);
   cleanup_dir base_dir
+
+let test_idle_session_stays_running_before_first_step () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let config = Room.default_config base_dir in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  ignore (Room.join config ~agent_name:"tester" ~capabilities:[] ());
+  let ctx : _ Tool_team_session.context =
+    { config; agent_name = "tester"; sw; clock = Eio.Stdenv.clock env; proc_mgr = None }
+  in
+  let session_id =
+    start_session_exn ctx ~goal:"idle-session-before-first-step" |> get_session_id
+  in
+  Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+  let status_ok, status_body =
+    dispatch_exn ctx ~name:"masc_team_session_status"
+      ~args:(`Assoc [ ("session_id", `String session_id) ])
+  in
+  Alcotest.(check bool) "status ok" true status_ok;
+  Alcotest.(check string) "session stays running" "running"
+    (session_status_of_body status_body);
+  let step_ok, _step_body =
+    dispatch_exn ctx ~name:"masc_team_session_step"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("turn_kind", `String "broadcast");
+            ("message", `String "contract turn broadcast");
+          ])
+  in
+  Alcotest.(check bool) "first step still accepted" true step_ok;
+  let events_ok, events_body =
+    dispatch_exn ctx ~name:"masc_team_session_events"
+      ~args:
+        (`Assoc
+          [
+            ("session_id", `String session_id);
+            ("event_types", `List [ `String "team_turn" ]);
+            ("limit", `Int 20);
+          ])
+  in
+  Alcotest.(check bool) "events ok" true events_ok;
+  Alcotest.(check int) "team_turn events present" 1
+    (events_count_of_body events_body);
+  ignore
+    (dispatch_exn ctx ~name:"masc_team_session_stop"
+       ~args:
+         (`Assoc
+           [
+             ("session_id", `String session_id);
+             ("reason", `String "test_cleanup");
+             ("generate_report", `Bool false);
+           ]));
+  cleanup_dir base_dir

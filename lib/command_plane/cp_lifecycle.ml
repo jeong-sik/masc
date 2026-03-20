@@ -1,8 +1,5 @@
 include Cp_lifecycle_intents
 
-(* Stub: swarm-live surface was removed. Returns empty JSON for backward compat. *)
-let swarm_live_json _config ?run_id:_ ?operation_id:_ () = `Assoc []
-
 let snapshot_json ?sessions config =
   let state = build_snapshot_state ?sessions config in
   let topology = topology_json_from_state state in

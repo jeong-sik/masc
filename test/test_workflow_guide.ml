@@ -159,9 +159,38 @@ let test_complete_task_removed () =
   check (list string) "removed ghost returns empty" []
     (List.map (fun (s : WG.step) -> s.tool) g.next_steps)
 
-let test_transition_routes_to_claim () =
+let test_transition_generic_is_safe () =
   let g = WG.next_steps ~tool_name:"masc_transition" ~success:true in
+  check_has_tool g.next_steps "masc_status";
+  check_has_tool g.next_steps "masc_workflow_guide"
+
+let test_transition_claim_call_guidance () =
+  let g =
+    WG.next_steps_for_call ~tool_name:"masc_transition"
+      ~args:(`Assoc [ ("action", `String "claim"); ("task_id", `String "task-001") ])
+      ~success:true
+  in
   check_has_tool g.next_steps "masc_plan_set_task"
+
+let test_transition_done_call_guidance () =
+  let g =
+    WG.next_steps_for_call ~tool_name:"masc_transition"
+      ~args:(`Assoc [ ("action", `String "done"); ("task_id", `String "task-001") ])
+      ~success:true
+  in
+  check_has_tool g.next_steps "masc_status";
+  check bool "done guidance omits plan_set_task" false
+    (List.exists (fun (s : WG.step) -> s.tool = "masc_plan_set_task") g.next_steps)
+
+let test_transition_release_call_guidance () =
+  let g =
+    WG.next_steps_for_call ~tool_name:"masc_transition"
+      ~args:(`Assoc [ ("action", `String "release"); ("task_id", `String "task-001") ])
+      ~success:true
+  in
+  check_has_tool g.next_steps "masc_status";
+  check bool "release guidance omits plan_set_task" false
+    (List.exists (fun (s : WG.step) -> s.tool = "masc_plan_set_task") g.next_steps)
 
 (* Structural: all tool names in guidance output exist in Config.all_tool_schemas *)
 let all_schema_names =
@@ -215,7 +244,10 @@ let () =
       test_case "unknown tool" `Quick test_unknown_tool;
       test_case "claim_next alias" `Quick test_claim_next_alias;
       test_case "complete_task removed" `Quick test_complete_task_removed;
-      test_case "transition routes to claim" `Quick test_transition_routes_to_claim;
+      test_case "transition generic is safe" `Quick test_transition_generic_is_safe;
+      test_case "transition claim call guidance" `Quick test_transition_claim_call_guidance;
+      test_case "transition done call guidance" `Quick test_transition_done_call_guidance;
+      test_case "transition release call guidance" `Quick test_transition_release_call_guidance;
     ];
     "structural", [
       test_case "next_steps reference real tools" `Quick test_next_steps_reference_real_tools;

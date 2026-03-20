@@ -152,11 +152,8 @@ let command_plane_traces_http_json ~deps ~state request =
   Command_plane_v2.list_traces_json state.Mcp_server.room_config ?operation_id
     ~limit ()
 
-let command_plane_swarm_http_json ~deps ~state request =
-  let run_id = deps.query_param request "run_id" in
-  let operation_id = deps.query_param request "operation_id" in
-  Command_plane_v2.swarm_live_json state.Mcp_server.room_config ?run_id
-    ?operation_id ()
+let command_plane_swarm_http_json ~deps:_ ~state:_ _request =
+  `Assoc []
 
 let command_plane_orchestra_http_json ~deps ~state request =
   let actor = command_plane_actor deps request in

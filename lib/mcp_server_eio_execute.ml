@@ -238,7 +238,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           let file = Printf.sprintf "/tmp/.masc_agent_%s" sid in
           (try
             Fs_compat.save_file file nickname
-          with e ->
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | e ->
             Log.Misc.error "Failed to write agent file %s: %s"
               file (Printexc.to_string e))
   in
@@ -312,13 +314,17 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         write_mcp_session_agent nickname;
         write_term_session_agent nickname;
         (try ignore (Session.register registry ~agent_name:nickname)
-         with exn -> log_mcp_exn ~label:"session register (nickname) failed" exn);
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn -> log_mcp_exn ~label:"session register (nickname) failed" exn);
         (* Prometheus + Telemetry: track auto-join *)
         Prometheus.inc_gauge "masc_active_agents" ();
         (match state.Mcp_server.fs with
          | Some fs ->
              (try Telemetry_eio.track_agent_joined ~fs config ~agent_id:nickname ()
-              with exn ->
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
                 Log.Telemetry.debug "track_agent_joined (auto): %s" (Printexc.to_string exn))
          | None -> ());
         nickname
@@ -330,7 +336,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   (* Auto-register session for non-read-only tools *)
   if agent_name <> "unknown" && not is_read_only then
     (try ignore (Session.register registry ~agent_name)
-     with exn -> log_mcp_exn ~label:"session register (tool) failed" exn);
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn -> log_mcp_exn ~label:"session register (tool) failed" exn);
 
   (* Log tool call *)
   Log.Mcp.debug "[%s] %s" agent_name name;
@@ -515,7 +523,9 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
           start_loop = Some (fun loop_state loop_config ->
             Eio.Fiber.fork ~sw (fun () ->
               try Perpetual_oas.run ~sw ~config:loop_config ~state:loop_state
-              with exn ->
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
                 log_mcp_exn ~label:(Printf.sprintf "perpetual loop crashed for %s"
                   loop_state.Perpetual_loop.trace_id) exn));
           sw = Some sw; proc_mgr = state.Mcp_server.proc_mgr;

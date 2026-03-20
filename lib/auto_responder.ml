@@ -166,7 +166,9 @@ let call_model_direct_sync ~agent_type ~prompt =
     | Error err ->
         Log.AutoResponder.error "MODEL cascade failed: %s" err;
         "no response"
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     Log.AutoResponder.error "MODEL call failed: %s" (Printexc.to_string exn);
     "no response"
 
@@ -209,10 +211,14 @@ let masc_call ~sw ~tool_name ~(args : Yojson.Safe.t) : (string, string) result =
               | [] -> raise (Failure "empty content list")
             in
             Ok txt
-          with exn ->
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
             Log.Misc.warn "auto_responder: MCP response parse failed: %s" (Printexc.to_string exn);
             Ok body_str
-      with exn ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
         Error (Printexc.to_string exn)
 
 let extract_nickname (response_text : string) : string option =
@@ -261,10 +267,14 @@ let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
             let msg = Printf.sprintf "@%s %s" mention response in
             let broadcast_args = `Assoc [("agent_name", `String nickname); ("message", `String msg)] in
             (try ignore (masc_call ~sw ~tool_name:"masc_broadcast" ~args:broadcast_args)
-             with exn -> Log.AutoResponder.error "broadcast failed: %s" (Printexc.to_string exn));
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn -> Log.AutoResponder.error "broadcast failed: %s" (Printexc.to_string exn));
             let leave_args = `Assoc [("agent_name", `String nickname)] in
             (try ignore (masc_call ~sw ~tool_name:"masc_leave" ~args:leave_args)
-             with exn -> Log.AutoResponder.error "leave failed: %s" (Printexc.to_string exn));
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn -> Log.AutoResponder.error "leave failed: %s" (Printexc.to_string exn));
             let short_resp = if String.length response > 50 then String.sub response 0 50 ^ "..." else response in
             Log.AutoResponder.info "%s: %s" nickname short_resp
       )
@@ -331,7 +341,9 @@ let maybe_respond ~sw ~base_path:_ ~from_agent ~content ~mention =
                   Log.AutoResponder.info "Spawning %s for @%s from %s" mention_base m from_agent;
                   run_cli_agent ~agent_type:mention_base ~prompt
                 )
-          with exn ->
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
             debug_log (Printf.sprintf "ERROR: %s" (Printexc.to_string exn))
         );
         Some task_id

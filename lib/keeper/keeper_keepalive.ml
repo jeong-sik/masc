@@ -58,7 +58,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             (try
                let synced = ensure_keeper_room_presence ctx.config meta_current in
                ignore (write_meta ctx.config synced)
-             with exn ->
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
                Log.Keeper.error "room heartbeat failed: %s"
                  (Printexc.to_string exn));
             let meta_current =
@@ -203,7 +205,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                                 `Float (Context_manager.context_ratio c) );
                               ("ts_unix", `Float now_ts);
                             ])
-                      with exn ->
+                      with
+                      | Eio.Cancel.Cancelled _ as e -> raise e
+                      | exn ->
                         Log.Keeper.error "heartbeat SSE broadcast failed: %s"
                           (Printexc.to_string exn));
                      (* OAS: publish keeper snapshot event *)
@@ -215,7 +219,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                             ~context_ratio:(Context_manager.context_ratio c)
                             ~message_count:(List.length c.messages)
                       | None -> ()))
-               with exn ->
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
                  Log.Keeper.error "heartbeat snapshot write failed: %s"
                    (Printexc.to_string exn));
               last_snapshot_ts := now_ts);
@@ -250,14 +256,18 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                             backlog.tasks)
                      in
                      (unclaimed, failed)
-                   with exn ->
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
                      Log.Keeper.warn "keepalive: task count query failed: %s" (Printexc.to_string exn);
                      (0, 0))
                 in
                 let current_agent_count =
                   (try
                      List.length (Room.get_agents_raw ctx.config)
-                   with exn ->
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
                      Log.Keeper.warn "keepalive: agent count query failed: %s" (Printexc.to_string exn);
                      0)
                 in
@@ -321,7 +331,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                      |> Keeper_contract.trigger_mode_is_explicit_only
                    then maybe_emit_explicit_room_replies ctx meta_after_triage
                    else maybe_emit_proactive ctx meta_after_triage
-                 with exn ->
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
                    Log.Keeper.error "proactive emission failed: %s"
                      (Printexc.to_string exn);
                    meta_after_triage)
@@ -349,13 +361,17 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
     (try
        if not (Room_utils.is_initialized ctx.config) then
          ignore (Room.init ctx.config ~agent_name:None)
-     with exn ->
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
        Log.Keeper.error "room init failed: %s"
          (Printexc.to_string exn));
     (try
        let synced = ensure_keeper_room_presence ctx.config m in
        ignore (write_meta ctx.config synced)
-     with exn ->
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
        Log.Keeper.error "room presence bootstrap failed: %s"
          (Printexc.to_string exn));
     Eio.Fiber.fork ~sw:ctx.sw (fun () ->

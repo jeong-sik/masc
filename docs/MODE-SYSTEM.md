@@ -71,7 +71,7 @@ Essential task management. Included in all modes.
 
 ```
 masc_set_room, masc_init, masc_join, masc_leave, masc_status,
-masc_add_task, masc_claim, masc_done, masc_tasks, masc_archive_view,
+masc_add_task, masc_transition, masc_done, masc_tasks, masc_archive_view,
 masc_claim_next, masc_update_priority
 ```
 

@@ -180,6 +180,25 @@ let tool_string_field tool field =
       | _ -> Alcotest.failf "tool field missing: %s" field)
   | _ -> Alcotest.fail "tool is not an object"
 
+let result_envelope_exn response =
+  match List.assoc_opt "resultEnvelope" (result_fields_exn response) with
+  | Some (`Assoc fields) -> fields
+  | _ -> Alcotest.fail "resultEnvelope missing"
+
+let workflow_next_step_names response =
+  match List.assoc_opt "workflow_guidance" (result_envelope_exn response) with
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt "next_steps" fields with
+      | Some (`List steps) ->
+          steps
+          |> List.filter_map (function
+               | `Assoc step_fields -> List.assoc_opt "tool" step_fields
+               | _ -> None)
+          |> List.filter_map (function `String value -> Some value | _ -> None)
+      | _ -> [])
+  | Some `Null | None -> []
+  | _ -> Alcotest.fail "workflow_guidance malformed"
+
 let error_code_exn response =
   match response with
   | `Assoc fields -> (
@@ -764,6 +783,169 @@ let test_handle_request_tools_call_managed_profile_sdk_alias_claim () =
     (contains_substring response_text "claimed");
   cleanup_dir base_path
 
+let test_handle_request_tools_call_transition_claim_guidance () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let sid = "mcp-transition-claim-guidance" in
+  let (ok_init, _) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_init" ~arguments:(`Assoc [])
+  in
+  Alcotest.(check bool) "init success" true ok_init;
+  let (ok_join, _) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_join"
+      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
+  in
+  Alcotest.(check bool) "join success" true ok_join;
+  ignore
+    (Masc_mcp.Room.add_task state.room_config ~title:"transition-claim"
+       ~priority:2 ~description:"");
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 114);
+          ("method", `String "tools/call");
+          ( "params",
+            `Assoc
+              [
+                ("name", `String "masc_transition");
+                ( "arguments",
+                  `Assoc
+                    [
+                      ("task_id", `String "task-001");
+                      ("action", `String "claim");
+                    ] );
+              ] );
+        ])
+  in
+  let response =
+    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
+  in
+  let steps = workflow_next_step_names response in
+  Alcotest.(check bool) "claim guidance includes plan_set_task" true
+    (List.mem "masc_plan_set_task" steps);
+  cleanup_dir base_path
+
+let test_handle_request_tools_call_transition_done_guidance () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let sid = "mcp-transition-done-guidance" in
+  let (ok_init, _) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_init" ~arguments:(`Assoc [])
+  in
+  Alcotest.(check bool) "init success" true ok_init;
+  let (ok_join, _) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_join"
+      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
+  in
+  Alcotest.(check bool) "join success" true ok_join;
+  ignore
+    (Masc_mcp.Room.add_task state.room_config ~title:"transition-done"
+       ~priority:2 ~description:"");
+  let (ok_claim, _) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_transition"
+      ~arguments:
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "claim");
+          ])
+  in
+  Alcotest.(check bool) "claim setup success" true ok_claim;
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 115);
+          ("method", `String "tools/call");
+          ( "params",
+            `Assoc
+              [
+                ("name", `String "masc_transition");
+                ( "arguments",
+                  `Assoc
+                    [
+                      ("task_id", `String "task-001");
+                      ("action", `String "done");
+                    ] );
+              ] );
+        ])
+  in
+  let response =
+    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
+  in
+  let steps = workflow_next_step_names response in
+  Alcotest.(check bool) "done guidance includes status" true
+    (List.mem "masc_status" steps);
+  Alcotest.(check bool) "done guidance omits plan_set_task" false
+    (List.mem "masc_plan_set_task" steps);
+  cleanup_dir base_path
+
+let test_handle_request_tools_call_deprecated_claim_alias () =
+  Eio_main.run @@ fun env ->
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let sid = "mcp-deprecated-claim-alias" in
+  let (ok_init, _) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_init" ~arguments:(`Assoc [])
+  in
+  Alcotest.(check bool) "init success" true ok_init;
+  let (ok_join, _) =
+    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+      ~name:"masc_join"
+      ~arguments:(`Assoc [ ("agent_name", `String "codex") ])
+  in
+  Alcotest.(check bool) "join success" true ok_join;
+  ignore
+    (Masc_mcp.Room.add_task state.room_config ~title:"deprecated-claim"
+       ~priority:2 ~description:"");
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 116);
+          ("method", `String "tools/call");
+          ( "params",
+            `Assoc
+              [
+                ("name", `String "masc_claim");
+                ("arguments", `Assoc [ ("task_id", `String "task-001") ]);
+              ] );
+        ])
+  in
+  let response =
+    Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
+  in
+  let response_text = Yojson.Safe.to_string response in
+  Alcotest.(check bool) "deprecated claim still callable" true
+    (contains_substring response_text "task-001");
+  Alcotest.(check bool) "deprecated claim guidance omits plan_set_task" false
+    (List.mem "masc_plan_set_task" (workflow_next_step_names response));
+  cleanup_dir base_path
+
 let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -873,6 +1055,39 @@ let test_handle_request_tools_list_include_hidden_metadata () =
          | _ -> false)
        tools);
 
+  cleanup_dir base_path
+
+let test_handle_request_tools_list_include_deprecated_claim_alias_metadata () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 219);
+          ("method", `String "tools/list");
+          ( "params",
+            `Assoc
+              [
+                ("include_deprecated", `Bool true);
+                ("names", `List [ `String "masc_claim" ]);
+              ] );
+        ])
+  in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let tools = tools_from_response response in
+  let claim_tool = find_tool_exn tools "masc_claim" in
+  Alcotest.(check string) "claim lifecycle" "deprecated"
+    (tool_string_field claim_tool "lifecycle");
+  Alcotest.(check string) "claim canonicalName" "masc_transition"
+    (tool_string_field claim_tool "canonicalName");
+  Alcotest.(check string) "claim replacement" "masc_transition(action=claim)"
+    (tool_string_field claim_tool "replacement");
   cleanup_dir base_path
 
 let test_handle_request_tools_list_hides_team_session_turn_by_default () =
@@ -2177,6 +2392,8 @@ let eio_tests = [
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
   "handle tools/list include hidden metadata", `Quick,
     test_handle_request_tools_list_include_hidden_metadata;
+  "handle tools/list include deprecated claim alias metadata", `Quick,
+    test_handle_request_tools_list_include_deprecated_claim_alias_metadata;
   "handle tools/list hides team_session_turn by default", `Quick,
     test_handle_request_tools_list_hides_team_session_turn_by_default;
   "handle tools/list include usage metadata", `Quick,
@@ -2189,6 +2406,12 @@ let eio_tests = [
   test_handle_request_tools_call_operator_profile_rejects_non_operator;
   "handle tools/call managed profile sdk alias claim", `Quick,
     test_handle_request_tools_call_managed_profile_sdk_alias_claim;
+  "handle tools/call transition claim guidance", `Quick,
+    test_handle_request_tools_call_transition_claim_guidance;
+  "handle tools/call transition done guidance", `Quick,
+    test_handle_request_tools_call_transition_done_guidance;
+  "handle tools/call deprecated claim alias", `Quick,
+    test_handle_request_tools_call_deprecated_claim_alias;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)

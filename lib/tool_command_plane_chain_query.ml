@@ -461,12 +461,8 @@ let handle_observe_alerts (ctx : (_, _) context) : result =
 let handle_observe_operations (ctx : (_, _) context) : result =
   (true, Yojson.Safe.to_string (Command_plane_v2.observe_operations_json ctx.config))
 
-let handle_observe_swarm (ctx : (_, _) context) args : result =
-  let run_id = get_string_opt args "run_id" in
-  let operation_id = get_string_opt args "operation_id" in
-  ( true,
-    Yojson.Safe.to_string
-      (Command_plane_v2.swarm_live_json ctx.config ?run_id ?operation_id ()) )
+let handle_observe_swarm (_ctx : (_, _) context) _args : result =
+  (true, Yojson.Safe.to_string (`Assoc []))
 
 let handle_observe_capacity (ctx : (_, _) context) : result =
   (true, Yojson.Safe.to_string (Command_plane_v2.observe_capacity_json ctx.config))

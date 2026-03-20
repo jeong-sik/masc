@@ -711,6 +711,38 @@ let test_adapter_transform_to_json () =
   ) transforms
 
 (* ============================================================
+   19a. parse_node / node_to_json — canonical claim wire forms
+   ============================================================ *)
+
+let test_parse_node_transition_claim_canonical () =
+  let json =
+    `Assoc
+      [
+        ("id", `String "n");
+        ("type", `String "masc_transition");
+        ("action", `String "claim");
+        ("task_id", `String "t1");
+      ]
+  in
+  match Chain_parser.parse_node json with
+  | Ok { node_type = Masc_claim { task_id = Some "t1"; _ }; _ } -> ()
+  | Ok _ -> fail "expected Masc_claim from canonical masc_transition claim"
+  | Error e -> fail e
+
+let test_parse_node_claim_next_canonical () =
+  let json =
+    `Assoc
+      [
+        ("id", `String "n");
+        ("type", `String "masc_claim_next");
+      ]
+  in
+  match Chain_parser.parse_node json with
+  | Ok { node_type = Masc_claim { task_id = None; _ }; _ } -> ()
+  | Ok _ -> fail "expected Masc_claim from canonical masc_claim_next"
+  | Error e -> fail e
+
+(* ============================================================
    19. node_to_json — all node_type variants
    ============================================================ *)
 
@@ -746,6 +778,29 @@ let test_node_to_json_cascade () =
                                      task_hint = Some "hint"; default_threshold = 0.7 }) in
   let j = Chain_parser.node_to_json n in
   (match j with `Assoc _ -> () | _ -> fail "not assoc")
+
+let test_node_to_json_specific_claim_emits_transition () =
+  let n = dummy_node "n" (Masc_claim { room = Some "ignored"; task_id = Some "t1" }) in
+  let j = Chain_parser.node_to_json n in
+  match j with
+  | `Assoc fields ->
+      check (option string) "type" (Some "masc_transition")
+        (Yojson.Safe.Util.to_string_option (List.assoc "type" fields));
+      check (option string) "action" (Some "claim")
+        (Yojson.Safe.Util.to_string_option (List.assoc "action" fields));
+      check (option string) "task_id" (Some "t1")
+        (Yojson.Safe.Util.to_string_option (List.assoc "task_id" fields))
+  | _ -> fail "not assoc"
+
+let test_node_to_json_claim_next_emits_claim_next () =
+  let n = dummy_node "n" (Masc_claim { room = Some "ignored"; task_id = None }) in
+  let j = Chain_parser.node_to_json n in
+  match j with
+  | `Assoc fields ->
+      check (option string) "type" (Some "masc_claim_next")
+        (Yojson.Safe.Util.to_string_option (List.assoc "type" fields));
+      check bool "no action field" false (List.mem_assoc "action" fields)
+  | _ -> fail "not assoc"
 
 let test_chain_to_json_string () =
   let n = dummy_node "n1" (dummy_model ()) in
@@ -1377,11 +1432,19 @@ let () =
       test_case "all variants" `Quick test_adapter_transform_to_json;
     ];
     "node_to_json", [
+      test_case "parse canonical transition claim" `Quick
+        test_parse_node_transition_claim_canonical;
+      test_case "parse canonical claim_next" `Quick
+        test_parse_node_claim_next_canonical;
       test_case "model full" `Quick test_node_to_json_model;
       test_case "tool namespaced" `Quick test_node_to_json_tool_namespaced;
       test_case "pipeline" `Quick test_node_to_json_pipeline;
       test_case "gate" `Quick test_node_to_json_gate;
       test_case "cascade" `Quick test_node_to_json_cascade;
+      test_case "specific claim emits transition" `Quick
+        test_node_to_json_specific_claim_emits_transition;
+      test_case "claim_next emits claim_next" `Quick
+        test_node_to_json_claim_next_emits_claim_next;
     ];
     "chain_to_json_string", [
       test_case "pretty" `Quick test_chain_to_json_string;

@@ -628,6 +628,27 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let room = parse_string_opt json "room" in
       Ok (Masc_claim { task_id; room })
 
+  | "masc_claim_next" ->
+      let room = parse_string_opt json "room" in
+      Ok (Masc_claim { task_id = None; room })
+
+  | "masc_transition" ->
+      let action = parse_string_opt json "action" in
+      let task_id = parse_string_opt json "task_id" in
+      let room = parse_string_opt json "room" in
+      (match action with
+       | Some action when String.lowercase_ascii (String.trim action) = "claim" -> (
+           match task_id with
+           | Some _ -> Ok (Masc_claim { task_id; room })
+           | None -> Error "masc_transition claim node requires task_id")
+       | Some action ->
+           Error
+             (Printf.sprintf
+                "typed masc_transition nodes only support action=claim (got %s)"
+                action)
+       | None ->
+           Error "typed masc_transition nodes require action=claim")
+
   | "cascade" ->
       let open Yojson.Safe.Util in
       let default_threshold = match parse_float_opt json "default_threshold" with Some v -> v | None -> 0.7 in
@@ -737,4 +758,3 @@ and parse_chain_inner (json : Yojson.Safe.t) : (chain, string) result =
 (** Main entry point: Parse complete chain from JSON *)
 let parse_chain (json : Yojson.Safe.t) : (chain, string) result =
   parse_chain_inner json
-

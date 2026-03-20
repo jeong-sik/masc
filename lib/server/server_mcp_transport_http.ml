@@ -204,7 +204,9 @@ let close_sse_conn info =
     info.closed <- true;
     info.stop := true;
     (try Httpun.Body.Writer.close info.writer
-     with exn ->
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
        Log.Misc.debug "close_sse_conn: %s"
          (Printexc.to_string exn));
     Sse.unregister_if_current info.session_id info.client_id)
@@ -233,7 +235,9 @@ let send_raw info data =
           Httpun.Body.Writer.flush info.writer (fun _ -> ()));
       Sse.touch info.session_id;
       true
-    with _exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _exn ->
       close_sse_conn info;
       false
 
@@ -445,7 +449,9 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                                   in
                                   let response = Httpun.Response.create ~headers `OK in
                                   Httpun.Reqd.respond_with_string reqd response body
-                      with exn ->
+                      with
+                      | Eio.Cancel.Cancelled _ as e -> raise e
+                      | exn ->
                         let protocol_version =
                           get_protocol_version_for_session ~session_id request
                         in
@@ -761,6 +767,7 @@ let ag_ui_event_of_masc_event ~room_id event =
     | None -> event
   with
   | Yojson.Json_error _ -> event
+  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Log.Transport.warn "ag_ui_event_of_masc_event failed: %s" (Printexc.to_string exn);
       event

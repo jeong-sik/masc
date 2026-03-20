@@ -137,13 +137,17 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                 backlog.tasks)
                          in
                          (unclaimed, failed)
-                       with exn ->
+                       with
+                       | Eio.Cancel.Cancelled _ as e -> raise e
+                       | exn ->
                          Log.Keeper.warn "proactive: task count query failed: %s" (Printexc.to_string exn);
                          (0, 0))
                     in
                     let active_agents =
                       (try List.length (Room.get_agents_raw ctx.config)
-                       with exn ->
+                       with
+                       | Eio.Cancel.Cancelled _ as e -> raise e
+                       | exn ->
                          Log.Keeper.warn "proactive: agent count query failed: %s" (Printexc.to_string exn);
                          0)
                     in
@@ -267,7 +271,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ~room_id:target_room
                                           ~from_agent:meta.agent_name
                                           ~content)
-                                   with exn ->
+                                   with
+                                   | Eio.Cancel.Cancelled _ as e -> raise e
+                                   | exn ->
                                      log_keeper_exn ~label:"deliberation reply_in_room failed" exn)
                               | Keeper_deliberation.Broadcast { message } ->
                                   (try
@@ -275,7 +281,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                        (Room.broadcast ctx.config
                                           ~from_agent:meta.agent_name
                                           ~content:message)
-                                   with exn ->
+                                   with
+                                   | Eio.Cancel.Cancelled _ as e -> raise e
+                                   | exn ->
                                      log_keeper_exn ~label:"deliberation broadcast failed" exn)
                               | Keeper_deliberation.TaskClaim { task_id; reason = _ } ->
                                   (try
@@ -286,7 +294,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                      in
                                      Log.KeeperExec.info "task_claim result: %s"
                                        result
-                                   with exn ->
+                                   with
+                                   | Eio.Cancel.Cancelled _ as e -> raise e
+                                   | exn ->
                                      log_keeper_exn ~label:"deliberation task_claim failed" exn)
                               | Keeper_deliberation.BoardPost { content; hearth } ->
                                   (try
@@ -296,7 +306,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ~content
                                           ?hearth
                                           ())
-                                   with exn ->
+                                   with
+                                   | Eio.Cancel.Cancelled _ as e -> raise e
+                                   | exn ->
                                      log_keeper_exn ~label:"deliberation board_post failed" exn)
                               | Keeper_deliberation.BoardComment { post_id; content } ->
                                   (try
@@ -306,7 +318,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ~author:meta.agent_name
                                           ~content
                                           ())
-                                   with exn ->
+                                   with
+                                   | Eio.Cancel.Cancelled _ as e -> raise e
+                                   | exn ->
                                      log_keeper_exn ~label:"deliberation board_comment failed" exn)
                               | Keeper_deliberation.BoardVote { post_id; direction } ->
                                   (try
@@ -320,7 +334,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                           ~voter:meta.agent_name
                                           ~post_id
                                           ~direction:dir)
-                                   with exn ->
+                                   with
+                                   | Eio.Cancel.Cancelled _ as e -> raise e
+                                   | exn ->
                                      log_keeper_exn ~label:"deliberation board_vote failed" exn)
                               | Keeper_deliberation.ProposeSpawn { topic; reason } ->
                                   (try
@@ -333,7 +349,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                        (Room.broadcast ctx.config
                                           ~from_agent:meta.agent_name
                                           ~content:msg)
-                                   with exn ->
+                                   with
+                                   | Eio.Cancel.Cancelled _ as e -> raise e
+                                   | exn ->
                                      log_keeper_exn ~label:"deliberation propose_spawn failed" exn)
                               | Keeper_deliberation.StartDiscussion { topic; context } ->
                                   (try
@@ -346,7 +364,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                        (Room.broadcast ctx.config
                                           ~from_agent:meta.agent_name
                                           ~content:msg)
-                                   with exn ->
+                                   with
+                                   | Eio.Cancel.Cancelled _ as e -> raise e
+                                   | exn ->
                                      log_keeper_exn ~label:"deliberation start_discussion failed" exn)
                               | Keeper_deliberation.ShareFinding { finding; source } ->
                                   (try
@@ -359,7 +379,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                        (Room.broadcast ctx.config
                                           ~from_agent:meta.agent_name
                                           ~content:msg)
-                                   with exn ->
+                                   with
+                                   | Eio.Cancel.Cancelled _ as e -> raise e
+                                   | exn ->
                                      log_keeper_exn ~label:"deliberation share_finding failed" exn)
                               | Keeper_deliberation.MultiStep actions ->
                                   let max_steps = 5 in
@@ -466,7 +488,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                            | Keeper_deliberation.MultiStep _ ->
                                                Log.KeeperExec.info "%s nested multi_step skipped"
                                                  meta.name
-                                         with exn ->
+                                         with
+                                         | Eio.Cancel.Cancelled _ as e -> raise e
+                                         | exn ->
                                            log_keeper_exn ~label:(Printf.sprintf "deliberation %s multi_step %d failed" meta.name !step_count) exn;
                                            stop := true)))
                                     steps_to_run);
@@ -636,7 +660,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                        let after_compact_tokens = ctx_work.token_count in
                        let compacted = after_compact_tokens < before_compact_tokens in
                        (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
-                        with exn -> log_keeper_exn ~label:"save_checkpoint (tool_loop) failed" exn);
+                        with
+                        | Eio.Cancel.Cancelled _ as e -> raise e
+                        | exn -> log_keeper_exn ~label:"save_checkpoint (tool_loop) failed" exn);
                        let turn_cost = generated.total_cost_usd in
                        let proactive_reason =
                          Printf.sprintf
@@ -753,7 +779,9 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                               ]
                           in
                           append_jsonl_line metrics_path metrics_json
-                       with exn ->
+                       with
+                       | Eio.Cancel.Cancelled _ as e -> raise e
+                       | exn ->
                          log_keeper_exn ~label:"metrics JSONL write failed" exn);
                        updated))
 

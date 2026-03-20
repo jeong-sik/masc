@@ -43,7 +43,7 @@ The key split is intentional:
 |------|------------------------|--------------------|-------|
 | Canonical MCP tools | `tools/list` | `masc_transition`, `masc_team_session_step`, `decision.create`, `experiment.start`, `trpg.dice.roll` | Default surface for normal clients |
 | Managed agent MCP | `/mcp/managed` | `masc_room_status`, `masc_list_tasks`, `masc_claim_task`, `masc_set_current_task` | Internal managed-agent surface with SDK aliases + curated passthrough tools |
-| Compatibility aliases | Hidden from `tools/list` | `masc_claim`, `experiment_start`, `masc_trpg_dice_roll` | Still callable for compatibility; not part of the truthful default inventory |
+| Compatibility aliases | Deprecated and excluded from default `tools/list` | `masc_claim`, `experiment_start`, `masc_trpg_dice_roll` | Still callable for compatibility; not part of the truthful default inventory |
 | MCP prompts | `prompts/list`, `prompts/get` | `tool_help`, `team_session_proof`, `command_truth` | Explanation/proof layer, not runtime prompt registry |
 | MCP resources | `resources/list/read` | `masc://status`, `masc://tasks`, `masc://tool-help-index` | Snapshot/read layer |
 | Remote operator | `/mcp/operator` | `masc_operator_snapshot`, `masc_operator_digest` | Separate 4-tool remote-safe profile |
@@ -154,7 +154,7 @@ flowchart TD
 
 | Type | Examples | Status |
 |------|----------|--------|
-| Intentional compatibility | `masc_claim`, `experiment_start`, `masc_trpg_*` | Hidden aliases; keep if compatibility matters |
+| Intentional compatibility | `masc_claim`, `experiment_start`, `masc_trpg_*` | Deprecated/default-off aliases; keep if compatibility matters |
 | Intentional internal-only | `Prompt_registry`, `data/prompts/*.json` | Real runtime feature, not public MCP surface |
 | Experimental but documented | `SWARM-RISC`, `GAME-VIEW-PROTOCOL` draft | Keep clearly labeled as non-canonical or draft |
 | Placeholder / review-needed | none | Dead hidden placeholder removed from the MCP schema inventory |

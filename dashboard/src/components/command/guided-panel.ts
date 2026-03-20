@@ -75,8 +75,8 @@ function GuidedPanel() {
           ? {
               title: 'Task 준비도',
               tone: 'warn',
-              detail: `${actorName} 에게 배정된 claimed task가 없습니다. 먼저 claim 하거나 만들어야 합니다.`,
-              tool: tasks.value.length > 0 ? 'masc_claim' : 'masc_add_task',
+              detail: `${actorName} 에게 배정된 claimed task가 없습니다. backlog에 task가 있으면 masc_transition(action=claim)으로 집고, 없으면 새 task를 만들어야 합니다.`,
+              tool: tasks.value.length > 0 ? 'masc_transition' : 'masc_add_task',
             }
           : !currentTask
             ? {
@@ -153,7 +153,7 @@ function GuidedPanel() {
       : !actorName || !actor
         ? 'masc_join'
         : actorTasks.length === 0
-          ? (tasks.value.length > 0 ? 'masc_claim' : 'masc_add_task')
+          ? (tasks.value.length > 0 ? 'masc_transition' : 'masc_add_task')
           : !currentTask
             ? 'masc_plan_set_task'
             : heartbeatFresh === false

@@ -310,6 +310,7 @@
    team_session_engine_status
    team_session_engine_policy
    team_session_engine_eio
+   team_session_oas_bridge
    ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
    safe_ops
    ;; sdp removed — in ocaml-webrtc

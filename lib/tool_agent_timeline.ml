@@ -59,17 +59,17 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
       ("detail", e.detail);
     ]
 
-(* Collect agent join/status events *)
+(* Collect agent join/status + heartbeat events *)
 let agent_events (config : Room.config) ~agent_name ~room_id :
     timeline_event list =
   let agents = Room.get_agents_raw_in_room config room_id in
   agents
   |> List.filter (fun (a : Types.agent) -> String.equal a.name agent_name)
-  |> List.filter_map (fun (a : Types.agent) ->
-         match parse_iso_timestamp a.joined_at with
-         | Some ts ->
-             Some
-               {
+  |> List.concat_map (fun (a : Types.agent) ->
+         let joined =
+           match parse_iso_timestamp a.joined_at with
+           | Some ts ->
+               [{
                  ts;
                  ts_iso = a.joined_at;
                  event_type = "joined";
@@ -84,8 +84,34 @@ let agent_events (config : Room.config) ~agent_name ~room_id :
                          | Some t -> `String t
                          | None -> `Null );
                      ];
-               }
-         | None -> None)
+               }]
+           | None -> []
+         in
+         (* Emit heartbeat from last_seen if it differs from joined_at *)
+         let heartbeat =
+           if String.equal a.last_seen a.joined_at then []
+           else
+             match parse_iso_timestamp a.last_seen with
+             | Some ts ->
+                 [{
+                   ts;
+                   ts_iso = a.last_seen;
+                   event_type = "heartbeat";
+                   detail =
+                     `Assoc
+                       [
+                         ("room", `String room_id);
+                         ( "status",
+                           `String (Types.agent_status_to_string a.status) );
+                         ( "current_task",
+                           match a.current_task with
+                           | Some t -> `String t
+                           | None -> `Null );
+                       ];
+                 }]
+             | None -> []
+         in
+         joined @ heartbeat)
 
 (* Collect task-related events for an agent *)
 let task_events (config : Room.config) ~agent_name ~room_id :
@@ -272,13 +298,35 @@ let build_timeline (config : Room.config) ~agent_name ~since_hours ~limit
     List.length
       (List.filter (fun e -> String.equal e.event_type "broadcast") events)
   in
-  (* Active duration: time between first and last event *)
+  (* Active duration: time between first and last event.
+     If only one event (e.g. a heartbeat), use agent joined_at..last_seen
+     clamped to the query window as a fallback. *)
   let active_duration_minutes =
-    match (events, List.rev events) with
-    | first :: _, last :: _ ->
-        let diff = last.ts -. first.ts in
-        Float.round (diff /. 60.0)
-    | _ -> 0.0
+    let event_span =
+      match (events, List.rev events) with
+      | first :: _, last :: _ when first != last ->
+          last.ts -. first.ts
+      | _ -> 0.0
+    in
+    if event_span > 0.0 then Float.round (event_span /. 60.0)
+    else
+      (* Fallback: compute from agent file joined_at..last_seen within window *)
+      let agent_duration =
+        List.concat_map (fun room_id ->
+          Room.get_agents_raw_in_room config room_id
+          |> List.filter (fun (a : Types.agent) -> String.equal a.name agent_name)
+          |> List.filter_map (fun (a : Types.agent) ->
+            match parse_iso_timestamp a.joined_at, parse_iso_timestamp a.last_seen with
+            | Some j, Some ls ->
+                let start = Float.max j cutoff in
+                let span = ls -. start in
+                if span > 0.0 then Some span else None
+            | _ -> None)
+        ) rooms
+      in
+      match agent_duration with
+      | d :: _ -> Float.round (d /. 60.0)
+      | [] -> 0.0
   in
   let since_iso =
     let tm = Unix.gmtime cutoff in

@@ -178,6 +178,7 @@ function timelineEventLabel(type: string): string {
     case 'task_completed': return '완료'
     case 'task_cancelled': return '취소'
     case 'broadcast': return '방송'
+    case 'heartbeat': return '생존'
     default: return type
   }
 }

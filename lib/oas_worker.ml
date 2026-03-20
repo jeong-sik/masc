@@ -401,14 +401,12 @@ let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
   in
   let specs = Model_spec.available_model_specs_of_strings configured in
   if specs <> [] then specs
-  else
-    let fallback = default_model_strings ~cascade_name in
-    if configured = fallback then (
+  else if configured = defaults then (
       Printf.eprintf "[cascade] %s: no callable models from built-in defaults\n%!" cascade_name;
       [])
     else (
       Printf.eprintf "[cascade] %s: configured models unavailable — retrying built-in defaults\n%!" cascade_name;
-      Model_spec.available_model_specs_of_strings fallback)
+      Model_spec.available_model_specs_of_strings defaults)
 
 (** Run a single Agent.run() call with cascade model fallback.
 

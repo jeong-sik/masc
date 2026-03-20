@@ -52,21 +52,32 @@ let timed (f : unit -> 'a) : 'a * int =
 
 let sanitize_text_utf8 (s : string) : string =
   let len = String.length s in
-  let buf = Buffer.create len in
-  let rec loop i =
-    if i >= len then ()
+  (* Fast path: scan for invalid UTF-8 without allocating *)
+  let rec has_invalid i =
+    if i >= len then false
     else
       let dec = String.get_utf_8_uchar s i in
       let dlen = Uchar.utf_decode_length dec in
-      if dlen > 0 && Uchar.utf_decode_is_valid dec then (
-        Buffer.add_substring buf s i dlen;
-        loop (i + dlen))
-      else (
-        Buffer.add_string buf "\xEF\xBF\xBD";
-        loop (i + 1))
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then has_invalid (i + dlen)
+      else true
   in
-  loop 0;
-  Buffer.contents buf
+  if not (has_invalid 0) then s
+  else
+    let buf = Buffer.create len in
+    let rec loop i =
+      if i >= len then ()
+      else
+        let dec = String.get_utf_8_uchar s i in
+        let dlen = Uchar.utf_decode_length dec in
+        if dlen > 0 && Uchar.utf_decode_is_valid dec then (
+          Buffer.add_substring buf s i dlen;
+          loop (i + dlen))
+        else (
+          Buffer.add_string buf "\xEF\xBF\xBD";
+          loop (i + 1))
+    in
+    loop 0;
+    Buffer.contents buf
 
 let sanitize_message_utf8 (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
   { m with

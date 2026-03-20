@@ -30,7 +30,7 @@ type event =
 type loop_config = {
   initial_goal : string;
   model_cascade : Cascade.model_spec list;   (** Ordered preference *)
-  tools : Cascade.tool_def list;
+  tools : Types.tool_schema list;
   heartbeat_interval_s : float;                  (** Default: 30.0 *)
   max_idle_turns : int;                          (** Stop after N turns with no progress *)
   feedback_enabled : bool;                       (** Run verifier after each action *)

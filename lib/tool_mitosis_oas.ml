@@ -22,7 +22,7 @@ module Oas = Agent_sdk
 type context = {
   config : Room_utils.config;
   agent_name : string;
-  masc_tools : Cascade.tool_def list;
+  masc_tools : Types.tool_schema list;
   dispatch : name:string -> args:Yojson.Safe.t -> bool * string;
 }
 

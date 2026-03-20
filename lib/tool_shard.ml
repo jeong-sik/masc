@@ -8,37 +8,37 @@
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
   name : string;
-  tools : Cascade.tool_def list;
+  tools : Types.tool_schema list;
   removable : bool;  (** true = can be revoked at runtime *)
   description : string;
 }
 
 (** Predefined shards *)
 
-let base_tools : Cascade.tool_def list = [
+let base_tools : Types.tool_schema list = [
   (* Time *)
   {
-    tool_name = "keeper_time_now";
-    tool_description = "Get current server time in ISO8601 and unix timestamp.";
-    parameters = `Assoc [
+    name = "keeper_time_now";
+    description = "Get current server time in ISO8601 and unix timestamp.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
   };
   (* Context status *)
   {
-    tool_name = "keeper_context_status";
-    tool_description = "Get keeper context usage and lifecycle status.";
-    parameters = `Assoc [
+    name = "keeper_context_status";
+    description = "Get keeper context usage and lifecycle status.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
   };
   (* Memory *)
   {
-    tool_name = "keeper_memory_search";
-    tool_description = "Search recent user messages in keeper memory by keyword.";
-    parameters = `Assoc [
+    name = "keeper_memory_search";
+    description = "Search recent user messages in keeper memory by keyword.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("query", `Assoc [("type", `String "string")]);
@@ -49,11 +49,11 @@ let base_tools : Cascade.tool_def list = [
   };
 ]
 
-let board_tools : Cascade.tool_def list = [
+let board_tools : Types.tool_schema list = [
   {
-    tool_name = "keeper_board_get";
-    tool_description = "Read a board post with its comments before deciding whether to comment, vote, or escalate.";
-    parameters = `Assoc [
+    name = "keeper_board_get";
+    description = "Read a board post with its comments before deciding whether to comment, vote, or escalate.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to inspect")]);
@@ -62,9 +62,9 @@ let board_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_board_post";
-    tool_description = "Create a post on the MASC Board. Use hearth to target a topic channel.";
-    parameters = `Assoc [
+    name = "keeper_board_post";
+    description = "Create a post on the MASC Board. Use hearth to target a topic channel.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("content", `Assoc [("type", `String "string"); ("description", `String "Post content (max 4000 chars)")]);
@@ -75,9 +75,9 @@ let board_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_board_list";
-    tool_description = "List recent posts on the MASC Board. Filter by hearth to see topic-specific posts.";
-    parameters = `Assoc [
+    name = "keeper_board_list";
+    description = "List recent posts on the MASC Board. Filter by hearth to see topic-specific posts.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("hearth", `Assoc [("type", `String "string"); ("description", `String "Filter by hearth topic (e.g. trpg)")]);
@@ -87,9 +87,9 @@ let board_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_board_comment";
-    tool_description = "Add a comment/reply to an existing Board post.";
-    parameters = `Assoc [
+    name = "keeper_board_comment";
+    description = "Add a comment/reply to an existing Board post.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to comment on")]);
@@ -99,9 +99,9 @@ let board_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_board_vote";
-    tool_description = "Vote on an existing Board post to signal support or disagreement.";
-    parameters = `Assoc [
+    name = "keeper_board_vote";
+    description = "Vote on an existing Board post to signal support or disagreement.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("post_id", `Assoc [("type", `String "string"); ("description", `String "Post ID to vote on")]);
@@ -112,11 +112,11 @@ let board_tools : Cascade.tool_def list = [
   };
 ]
 
-let filesystem_tools : Cascade.tool_def list = [
+let filesystem_tools : Types.tool_schema list = [
   {
-    tool_name = "keeper_fs_read";
-    tool_description = "Read a file under current project root. Use for source inspection before edits.";
-    parameters = `Assoc [
+    name = "keeper_fs_read";
+    description = "Read a file under current project root. Use for source inspection before edits.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
@@ -126,9 +126,9 @@ let filesystem_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_fs_edit";
-    tool_description = "Write/append a file under current project root. Use for concrete code changes.";
-    parameters = `Assoc [
+    name = "keeper_fs_edit";
+    description = "Write/append a file under current project root. Use for concrete code changes.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("path", `Assoc [("type", `String "string"); ("description", `String "Relative or absolute file path")]);
@@ -140,11 +140,11 @@ let filesystem_tools : Cascade.tool_def list = [
   };
 ]
 
-let shell_tools : Cascade.tool_def list = [
+let shell_tools : Types.tool_schema list = [
   {
-    tool_name = "keeper_shell_readonly";
-    tool_description = "Run a structured read-only project command. Supported ops: pwd, ls, cat, rg, git_status.";
-    parameters = `Assoc [
+    name = "keeper_shell_readonly";
+    description = "Run a structured read-only project command. Supported ops: pwd, ls, cat, rg, git_status.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("op", `Assoc [("type", `String "string"); ("description", `String "One of: pwd, ls, cat, rg, git_status")]);
@@ -157,9 +157,9 @@ let shell_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_bash";
-    tool_description = "Run a shell command from project root. Use for build/test/check commands.";
-    parameters = `Assoc [
+    name = "keeper_bash";
+    description = "Run a shell command from project root. Use for build/test/check commands.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("cmd", `Assoc [("type", `String "string"); ("description", `String "Shell command string to run via zsh -lc")]);
@@ -169,9 +169,9 @@ let shell_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_github";
-    tool_description = "Run gh CLI commands from project root. Use for PR/review/comment operations.";
-    parameters = `Assoc [
+    name = "keeper_github";
+    description = "Run gh CLI commands from project root. Use for PR/review/comment operations.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand string, e.g. 'pr view 123 --comments'")]);
@@ -182,11 +182,11 @@ let shell_tools : Cascade.tool_def list = [
   };
 ]
 
-let voice_tools : Cascade.tool_def list = [
+let voice_tools : Types.tool_schema list = [
   {
-    tool_name = "keeper_voice_speak";
-    tool_description = "Speak a short utterance as this keeper via the voice bridge, falling back to text when voice is unavailable.";
-    parameters = `Assoc [
+    name = "keeper_voice_speak";
+    description = "Speak a short utterance as this keeper via the voice bridge, falling back to text when voice is unavailable.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("message", `Assoc [("type", `String "string"); ("description", `String "Text to speak")]);
@@ -197,25 +197,25 @@ let voice_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_voice_agent";
-    tool_description = "Get your own voice configuration (assigned voice, available voices). No network required.";
-    parameters = `Assoc [
+    name = "keeper_voice_agent";
+    description = "Get your own voice configuration (assigned voice, available voices). No network required.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
   };
   {
-    tool_name = "keeper_voice_sessions";
-    tool_description = "List active voice sessions from the voice bridge.";
-    parameters = `Assoc [
+    name = "keeper_voice_sessions";
+    description = "List active voice sessions from the voice bridge.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
   };
   {
-    tool_name = "keeper_voice_session_start";
-    tool_description = "Start a voice session for this keeper using the configured voice bridge.";
-    parameters = `Assoc [
+    name = "keeper_voice_session_start";
+    description = "Start a voice session for this keeper using the configured voice bridge.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("session_name", `Assoc [("type", `String "string"); ("description", `String "Optional session name")]);
@@ -223,20 +223,20 @@ let voice_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_voice_session_end";
-    tool_description = "End the active voice session for this keeper and release bridge resources.";
-    parameters = `Assoc [
+    name = "keeper_voice_session_end";
+    description = "End the active voice session for this keeper and release bridge resources.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
   };
 ]
 
-let weather_tools : Cascade.tool_def list = [
+let weather_tools : Types.tool_schema list = [
   {
-    tool_name = "keeper_weather_note";
-    tool_description = "Get weather capability note and recent weather-related questions.";
-    parameters = `Assoc [
+    name = "keeper_weather_note";
+    description = "Get weather capability note and recent weather-related questions.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("location", `Assoc [("type", `String "string")]);
@@ -245,11 +245,11 @@ let weather_tools : Cascade.tool_def list = [
   };
 ]
 
-let taskboard_tools : Cascade.tool_def list = [
+let taskboard_tools : Types.tool_schema list = [
   {
-    tool_name = "keeper_tasks_list";
-    tool_description = "List tasks on the MASC backlog. Filter by status: todo, claimed, in_progress, done, cancelled.";
-    parameters = `Assoc [
+    name = "keeper_tasks_list";
+    description = "List tasks on the MASC backlog. Filter by status: todo, claimed, in_progress, done, cancelled.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("status", `Assoc [("type", `String "string"); ("description", `String "Filter by status (optional). One of: todo, claimed, in_progress, done, cancelled")]);
@@ -258,17 +258,17 @@ let taskboard_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_tasks_audit";
-    tool_description = "Audit task board health: find claimed/in_progress tasks whose assignees are no longer active agents (orphans).";
-    parameters = `Assoc [
+    name = "keeper_tasks_audit";
+    description = "Audit task board health: find claimed/in_progress tasks whose assignees are no longer active agents (orphans).";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
     ];
   };
   {
-    tool_name = "keeper_task_force_release";
-    tool_description = "Force-release a task back to Todo regardless of current assignee. Gardener privilege for orphan cleanup.";
-    parameters = `Assoc [
+    name = "keeper_task_force_release";
+    description = "Force-release a task back to Todo regardless of current assignee. Gardener privilege for orphan cleanup.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to force-release")]);
@@ -278,9 +278,9 @@ let taskboard_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_task_force_done";
-    tool_description = "Force-mark a task as Done regardless of current assignee. Use for tasks confirmed complete but not transitioned.";
-    parameters = `Assoc [
+    name = "keeper_task_force_done";
+    description = "Force-mark a task as Done regardless of current assignee. Use for tasks confirmed complete but not transitioned.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("task_id", `Assoc [("type", `String "string"); ("description", `String "Task ID to force-complete")]);
@@ -290,9 +290,9 @@ let taskboard_tools : Cascade.tool_def list = [
     ];
   };
   {
-    tool_name = "keeper_broadcast";
-    tool_description = "Broadcast a message to the MASC room. Use for status reports and announcements.";
-    parameters = `Assoc [
+    name = "keeper_broadcast";
+    description = "Broadcast a message to the MASC room. Use for status reports and announcements.";
+    input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("message", `Assoc [("type", `String "string"); ("description", `String "Message to broadcast")]);
@@ -395,7 +395,7 @@ let get_shard (name : string) : shard option =
   Hashtbl.find_opt all_shards name
 
 (** Combine tools from multiple shard names *)
-let tools_of_shards (shard_names : string list) : Cascade.tool_def list =
+let tools_of_shards (shard_names : string list) : Types.tool_schema list =
   shard_names
   |> List.filter_map (fun name -> Hashtbl.find_opt all_shards name)
   |> List.concat_map (fun (s : shard) -> s.tools)
@@ -435,7 +435,7 @@ let list_all_shards () : (string * bool * int) list =
   ) all_shards []
 
 (** Full tool set (all 11 tools) — backward compatible *)
-let keeper_llm_tools : Cascade.tool_def list =
+let keeper_llm_tools : Types.tool_schema list =
   tools_of_shards default_shard_names
 
 (** {1 MCP Schemas} *)

@@ -64,16 +64,16 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
     match canonical_policy_action_budget meta.policy_action_budget with
     | "board" -> dedupe_tool_names (keeper_board_tool_names @ with_shell)
     | _ -> dedupe_tool_names with_shell
-  else keeper_llm_tools |> List.map (fun tool -> tool.Cascade.tool_name)
+  else keeper_llm_tools |> List.map (fun tool -> tool.Types.name)
 
 let keeper_allowed_llm_tools ?(write_done = false) (meta : keeper_meta) :
-    Cascade.tool_def list =
+    Types.tool_schema list =
   let allowed = keeper_allowed_tool_names ~write_done meta in
   if allowed = [] then
     []
   else
     keeper_llm_tools
-    |> List.filter (fun tool -> List.mem tool.Cascade.tool_name allowed)
+    |> List.filter (fun tool -> List.mem tool.Types.name allowed)
 
 let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
   let voice = Voice_bridge.get_voice_for_agent agent_id in

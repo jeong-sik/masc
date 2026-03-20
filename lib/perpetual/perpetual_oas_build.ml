@@ -74,11 +74,11 @@ let build_perpetual_agent
      Tool_bridge.oas_tool_of_masc creates OAS Tool.t from name/desc/schema/handler.
      For the perpetual loop adapter, each tool delegates to a no-op handler since
      actual tool dispatch remains in MASC's perpetual_loop infrastructure. *)
-  let tools = List.map (fun (td : Cascade.tool_def) ->
+  let tools = List.map (fun (td : Types.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
-      ~name:td.tool_name
-      ~description:td.tool_description
-      ~input_schema:td.parameters
+      ~name:td.name
+      ~description:td.description
+      ~input_schema:td.input_schema
       (fun _input ->
         (true, "[perpetual_oas] Tool dispatch delegated to MASC infrastructure"))
   ) config.tools in

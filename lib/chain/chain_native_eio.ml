@@ -188,16 +188,16 @@ let llm_tool_defs_of_json = function
                                ("properties", `Assoc []);
                              ])
                  in
-                 let tool_description =
+                 let description =
                    match U.member "description" item with
                    | `String value -> value
                    | _ -> ""
                  in
                  Some
                    {
-                     Cascade.tool_name = tool_name;
-                     tool_description = tool_description;
-                     parameters = parameters;
+                     Types.name = tool_name;
+                     description;
+                     input_schema = parameters;
                    })
   | Some _ -> []
 

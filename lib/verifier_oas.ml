@@ -157,7 +157,7 @@ let verify (req : verification_request) : verdict =
     let messages : Llm_provider.Types.message list =
       [ Llm_provider.Types.user_msg prompt ]
     in
-    let defaults = Cascade.default_model_strings ~cascade_name:"verifier" in
+    let defaults = Oas_worker.default_model_strings ~cascade_name:"verifier" in
     match
       Llm_provider.Cascade_config.complete_named
         ~sw:env.sw ~net:env.net ?clock:env.clock

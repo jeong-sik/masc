@@ -5,8 +5,6 @@
     - Convenience queries (any_local_healthy, idle/busy counts)
     - Eio capability injection (set_env at server init)
 
-    No dependency on Cascade.
-
     @since 2.130.0 — renamed from Llm_discovery_cache *)
 
 (* ── Eio capability refs (set once at server init) ───────── *)

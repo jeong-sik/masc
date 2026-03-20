@@ -127,7 +127,7 @@
    cp_microarch_summary
    cp_search_fabric
    model_spec
-   cascade
+   llm_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly
    eio_context
    encryption

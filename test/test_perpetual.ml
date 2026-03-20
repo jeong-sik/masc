@@ -185,7 +185,7 @@ let test_llm_client () = group "LLM Client" (fun () ->
 
   (* 5. Token estimation *)
   let msgs = [Agent_sdk.Types.user_msg "hello world"] in
-  let tokens = Cascade.estimate_tokens msgs in
+  let tokens = Llm_utils.estimate_tokens msgs in
   assert_true "token_estimate:positive" (tokens > 0);
   assert_true "token_estimate:reasonable" (tokens < 100);
 

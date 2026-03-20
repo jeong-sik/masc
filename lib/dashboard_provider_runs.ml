@@ -517,7 +517,8 @@ let execute_single_agent_run ~sw ~provider ~model ~prompt =
               | Ok agent ->
                   Fun.protect
                     ~finally:(fun () ->
-                      try Oas.Agent.close agent with _ -> ())
+                      try Oas.Agent.close agent with close_exn ->
+                        Log.Misc.warn "agent close failed: %s" (Printexc.to_string close_exn))
                     (fun () ->
                       match Oas.Agent.run ~sw agent prompt with
                       | Ok response -> Ok (response_text_of_api_response response)

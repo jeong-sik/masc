@@ -580,7 +580,7 @@ let apply_code_change ~workdir ~target_file ~new_content =
       Unix.rename tmp_path abs_path;
       Result.ok original
     with exn ->
-      (try Sys.remove tmp_path with _ -> ());
+      (try Sys.remove tmp_path with Sys_error _ -> ());
       Result.error (Printf.sprintf "Failed to write %s: %s"
         target_file (Printexc.to_string exn)))
 

@@ -1235,6 +1235,22 @@ let test_worker_tool_count_bounds () =
   check bool "at least 5 tools" true (n >= 5);
   check bool "at most 30 tools" true (n <= 30)
 
+let test_worker_tool_names_are_resolvable () =
+  match
+    Capability_registry.local_worker_tool_schemas
+      ~names:Agent_tool_surfaces.gardener_worker_tool_names ()
+  with
+  | Error err -> failf "expected gardener worker schemas to resolve: %s" err
+  | Ok schemas ->
+      let resolved =
+        List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
+      in
+      List.iter
+        (fun name ->
+          check bool (Printf.sprintf "%s resolvable" name) true
+            (List.mem name resolved))
+        Agent_tool_surfaces.gardener_worker_tool_names
+
 let test_run_for_gap_without_eio_returns_error () =
   let dir = test_dir () in
   Fun.protect
@@ -1252,6 +1268,8 @@ let worker_suite = [
     test_worker_tools_exclude_admin;
   "worker_tool_count_bounds", `Quick,
     test_worker_tool_count_bounds;
+  "worker_tool_names_are_resolvable", `Quick,
+    test_worker_tool_names_are_resolvable;
   "run_for_gap_without_eio_returns_error", `Quick,
     test_run_for_gap_without_eio_returns_error;
 ]

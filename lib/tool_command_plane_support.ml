@@ -274,7 +274,7 @@ let swarm_live_error_payload config ~run_id ~message ?proc () =
   let runtime_doctor_path = swarm_live_runtime_doctor_path config run_id in
   let summary_path = swarm_live_summary_path config run_id in
   let runtime_doctor = read_json_file_opt runtime_doctor_path in
-  let detailed_json = Command_plane_v2.swarm_live_json config ~run_id () in
+  let detailed_json = `Assoc [] in
   let fields =
     [
       assoc_field "run_id" (`String run_id);

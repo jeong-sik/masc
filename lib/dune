@@ -360,6 +360,7 @@
    tool_team_session_step
    tool_team_session_step_exec
    tool_team_session_step_types
+   team_session_plan
    tool_team_session_schemas
    tool_heartbeat
    tool_encryption

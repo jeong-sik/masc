@@ -263,6 +263,7 @@ export interface KeeperConversationDetails {
   skillPrimary?: string | null
   skillReason?: string | null
   stateBlock?: string | null
+  replyText?: string | null
   rawPayload?: unknown
 }
 
@@ -277,6 +278,7 @@ export interface KeeperConversationEntry {
   role: KeeperConversationRole
   label: string
   text: string
+  rawText?: string | null
   timestamp?: string | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
@@ -405,4 +407,3 @@ export interface Keeper {
   inventory?: string[]
   relationships?: Record<string, string>
 }
-

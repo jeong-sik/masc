@@ -239,6 +239,7 @@ function normalizeHistoryEntry(raw: unknown, index: number): KeeperConversationE
     role,
     label: roleLabel(role),
     text,
+    rawText,
     timestamp,
     delivery: 'history',
     streamState: null,
@@ -299,7 +300,8 @@ function setAssistantStreamState(
 function appendAssistantDelta(name: string, entryId: string, delta: string): void {
   updateThreadEntry(name, entryId, entry => ({
     ...entry,
-    text: `${entry.text}${delta}`,
+    rawText: `${entry.rawText ?? entry.text}${delta}`,
+    text: formatKeeperVisibleReply(`${entry.rawText ?? entry.text}${delta}`),
     streamState: 'streaming',
     delivery: 'streaming',
   }))
@@ -393,6 +395,7 @@ export function abortKeeperThreadMessage(name: string): void {
   }
   clearActiveStream(keeperName)
   setRecordValue(keeperSending, keeperName, false)
+  setRecordValue(keeperStreamStartedAt, keeperName, null)
 }
 
 function applyKeeperStreamEvent(
@@ -419,7 +422,16 @@ function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_REPLY_DETAILS') {
         const details = normalizeKeeperConversationDetails(event.value)
         if (details) {
-          finalizeAssistantEntry(keeperName, assistantEntryId, { details })
+          updateThreadEntry(keeperName, assistantEntryId, entry => {
+            const rawText = details.replyText ?? entry.rawText ?? entry.text
+            const text = formatKeeperVisibleReply(rawText)
+            return {
+              ...entry,
+              details,
+              rawText,
+              text,
+            }
+          })
         }
       }
       return null
@@ -503,6 +515,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
     role: 'assistant',
     label: keeperName,
     text: '',
+    rawText: '',
     timestamp: null,
     delivery: 'sending',
     streamState: 'opening',
@@ -580,6 +593,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
         const reply = await sendKeeperMessageDetailed(keeperName, message)
         finalizeAssistantEntry(keeperName, assistantId, {
           text: reply.text.trim() || '(empty reply)',
+          rawText: reply.details?.replyText ?? (reply.text.trim() || '(empty reply)'),
           delivery: 'delivered',
           streamState: null,
           details: reply.details,

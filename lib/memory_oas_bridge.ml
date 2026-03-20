@@ -1,16 +1,16 @@
 (** Memory_oas_bridge — Connect MASC memory systems to OAS Memory.t 5-tier.
 
     Tier mapping:
-    - {b Long_term} — no-op stubs (Memory_stream removed)
+    - {b Long_term} — PostgreSQL via [Memory_pg] when MASC_POSTGRES_URL is set;
+                        no-op stubs otherwise
     - {b Episodic}  — no-op (Memory_stream removed)
     - {b Procedural} — [seed_procedures_as_oas] loads [Procedural_memory] entries;
                         [flush_procedures] writes back
     - {b Working/Scratchpad} — managed by OAS in-memory; no backend needed
 
-    (* TODO: Replace no-op long_term_backend with OAS Memory.t database backend *)
-
     @since 2.122.0 (long_term only)
-    @since 2.124.0 (5-tier: episodic + procedural seeding/flushing) *)
+    @since 2.124.0 (5-tier: episodic + procedural seeding/flushing)
+    @since 2.130.0 (PostgreSQL long_term_backend via Memory_pg) *)
 
 (** Default importance for memories stored via OAS Memory.store.
     Configurable via MASC_MEMORY_OAS_DEFAULT_IMPORTANCE. *)
@@ -38,31 +38,29 @@ let content_of_json (json : Yojson.Safe.t) : string =
      | _ -> Yojson.Safe.to_string json)
   | _ -> Yojson.Safe.to_string json
 
-(** Create an OAS [long_term_backend] with no-op stubs.
-
-    Memory_stream has been removed. All operations are no-ops until
-    a database-backed replacement is implemented.
-
-    (* TODO: Replace no-op long_term_backend with OAS Memory.t database backend *)
-*)
-let make_backend ~(agent_name : string) : Agent_sdk.Memory.long_term_backend =
-  ignore agent_name;
+(** No-op long_term_backend stubs for when PostgreSQL is unavailable. *)
+let noop_backend : Agent_sdk.Memory.long_term_backend =
   {
     Agent_sdk.Memory.persist = (fun ~key:_ _json -> Ok ());
-
     retrieve = (fun ~key:_ -> None);
-
     remove = (fun ~key:_ -> Ok ());
-
     batch_persist = (fun _pairs -> Ok ());
-
     query = (fun ~prefix:_ ~limit:_ -> []);
   }
 
-(** Create an OAS [Memory.t] instance with no-op long_term backend.
+(** Create an OAS [long_term_backend].
 
-    (* TODO: Replace no-op long_term_backend with OAS Memory.t database backend *)
-*)
+    If a PG pool is available (via [Board_dispatch.get_pg_pool]),
+    uses [Memory_pg] for persistent storage scoped by [agent_name].
+    Otherwise falls back to no-op stubs. *)
+let make_backend ~(agent_name : string) : Agent_sdk.Memory.long_term_backend =
+  match Board_dispatch.get_pg_pool () with
+  | Some pool -> Memory_pg.make_backend ~pool ~agent_name
+  | None -> noop_backend
+
+(** Create an OAS [Memory.t] instance.
+
+    Uses PostgreSQL long_term_backend when available, no-op stubs otherwise. *)
 let create_memory ~(agent_name : string) : Agent_sdk.Memory.t =
   let backend = make_backend ~agent_name in
   Agent_sdk.Memory.create ~long_term:backend ()
@@ -231,14 +229,12 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
 (** Create an OAS [Memory.t] with all 5 tiers populated.
 
     Seeds:
-    - Long_term: no-op backend (Memory_stream removed)
+    - Long_term: PostgreSQL via [Memory_pg] when available, no-op stubs otherwise
     - Episodic: no-op (Memory_stream removed)
     - Procedural: top [procedure_limit] crystallized procedures
     - Working/Scratchpad: empty (managed by OAS at runtime)
 
     Optionally seeds institution to Long_term if [config] is provided.
-
-    (* TODO: Replace no-op long_term_backend with OAS Memory.t database backend *)
 
     @param episode_limit default 50 (currently unused, kept for API compat)
     @param procedure_limit default 20 *)

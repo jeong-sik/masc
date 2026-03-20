@@ -63,10 +63,6 @@ let update_state config f =
     new_state
   )
 
-(** @deprecated Use [read_state (with_scope config (Named room_id))] instead. *)
-let state_path_in_room config room_id =
-  state_path (with_scope config (Named room_id))
-
 let read_state_in_room config room_id =
   read_state (with_scope config (Named room_id))
 
@@ -122,10 +118,6 @@ let write_backlog config backlog =
 
 let current_room_id config =
   read_current_room config |> Option.value ~default:"default"
-
-(** @deprecated Use [agents_dir (with_scope config (Named room_id))] instead. *)
-let agents_dir_in_room config room_id =
-  agents_dir (with_scope config (Named room_id))
 
 let tasks_dir_in_room config room_id =
   tasks_dir (with_scope config (Named room_id))
@@ -266,10 +258,6 @@ let resolve_agent_name config agent_name =
       agent_name
   end
 
-(** @deprecated Use [resolve_agent_name (with_scope config (Named room_id))] instead. *)
-let resolve_agent_name_in_room config ~room_id agent_name =
-  resolve_agent_name (with_scope config (Named room_id)) agent_name
-
 (* ============================================ *)
 (* Room Bootstrap                               *)
 (* ============================================ *)
@@ -322,34 +310,6 @@ let ensure_room_bootstrap config room_id =
 (* ============================================ *)
 (* Broadcast                                    *)
 (* ============================================ *)
-
-(** @deprecated Use [broadcast (with_scope config (Named room_id))] instead. *)
-let broadcast_in_room config ~room_id ~from_agent ~content =
-  let scoped = with_scope config (Named room_id) in
-  ensure_room_bootstrap scoped room_id;
-  let seq = next_seq scoped in
-
-  let mention = Mention.extract content in
-  let safe_content = sanitize_message content in
-  let safe_agent = sanitize_agent_name from_agent in
-  let msg = {
-    seq;
-    from_agent = safe_agent;
-    msg_type = "broadcast";
-    content = safe_content;
-    mention;
-    timestamp = now_iso ();
-  } in
-  let msg_file =
-    Filename.concat (messages_dir scoped)
-      (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
-  in
-  write_json scoped msg_file (message_to_yojson msg);
-  (match backend_publish scoped ~channel:(Printf.sprintf "broadcast:%s" room_id)
-      ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
-   | Ok _ -> ()
-   | Error e -> Log.Misc.error "broadcast_scoped publish failed for %s: %s" room_id (Backend.show_error e));
-  Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
 
 let broadcast config ~from_agent ~content =
   ensure_initialized config;

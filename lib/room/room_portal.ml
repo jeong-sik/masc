@@ -83,13 +83,6 @@ let portal_open_r config ~agent_name ~target_agent ~initial_message : string mas
     )
   end
 
-(** Backward-compatible wrapper
-    @deprecated Use portal_open_r for type-safe error handling *)
-let portal_open config ~agent_name ~target_agent ~initial_message =
-  match portal_open_r config ~agent_name ~target_agent ~initial_message with
-  | Ok msg -> msg
-  | Error e -> masc_error_to_string e
-
 (** Send through portal - send message to connected agent (Result version) *)
 let portal_send_r config ~agent_name ~message : string masc_result =
   if not (is_initialized config) then
@@ -124,13 +117,6 @@ let portal_send_r config ~agent_name ~message : string masc_result =
           | Ok _ -> Error (PortalClosed agent_name)
           | Error e -> Error (InvalidJson e)
     )
-
-(** Backward-compatible wrapper
-    @deprecated Use portal_send_r for type-safe error handling *)
-let portal_send config ~agent_name ~message =
-  match portal_send_r config ~agent_name ~message with
-  | Ok msg -> msg
-  | Error e -> masc_error_to_string e
 
 (** Get portal target agent - returns Some target_name if portal is open *)
 let get_portal_target config ~agent_name =

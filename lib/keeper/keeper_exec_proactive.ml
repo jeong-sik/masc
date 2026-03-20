@@ -267,8 +267,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                   in
                                   (try
                                      ignore
-                                       (Room.broadcast_in_room ctx.config
-                                          ~room_id:target_room
+                                       (Room.broadcast (Room.with_scope ctx.config (Named target_room))
                                           ~from_agent:meta.agent_name
                                           ~content)
                                    with
@@ -416,8 +415,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                                  else room_id
                                                in
                                                ignore
-                                                 (Room.broadcast_in_room ctx.config
-                                                    ~room_id:target_room
+                                                 (Room.broadcast (Room.with_scope ctx.config (Named target_room))
                                                     ~from_agent:meta.agent_name
                                                     ~content)
                                            | Keeper_deliberation.Broadcast { message } ->

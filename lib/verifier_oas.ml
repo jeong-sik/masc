@@ -153,27 +153,19 @@ let verify (req : verification_request) : verdict =
     Pass
   else
     let prompt = build_prompt req in
-    let env = Masc_eio_env.get () in
     let messages : Llm_provider.Types.message list =
       [ Llm_provider.Types.user_msg prompt ]
     in
-    let defaults = Oas_worker.default_model_strings ~cascade_name:"verifier" in
     match
-      Llm_provider.Cascade_config.complete_named
-        ~sw:env.sw ~net:env.net ?clock:env.clock
-        ~name:"verifier" ~defaults ~messages
+      Oas_worker.complete_single
+        ~cascade_name:"verifier" ~messages
         ~temperature:0.0 ~max_tokens:200 ()
     with
     | Ok resp ->
-      parse_verdict (Llm_provider.Cascade_config.text_of_response resp)
-    | Error (Llm_provider.Http_client.HttpError { code; body }) ->
-      let msg = sprintf "HTTP %d: %s" code
-        (if String.length body > 200 then String.sub body 0 200 else body) in
-      eprintf "[verifier] OAS call failed: %s (defaulting to WARN)\n%!" msg;
+      parse_verdict (Llm_provider.Types.text_of_response resp)
+    | Error msg ->
+      eprintf "[verifier] cascade call failed: %s (defaulting to WARN)\n%!" msg;
       Warn ("verifier_unavailable: " ^ msg)
-    | Error (Llm_provider.Http_client.NetworkError { message }) ->
-      eprintf "[verifier] OAS network error: %s (defaulting to WARN)\n%!" message;
-      Warn ("verifier_unavailable: " ^ message)
 
 (* ================================================================ *)
 (* Verdict -> Hook Decision (OAS bridge)                            *)

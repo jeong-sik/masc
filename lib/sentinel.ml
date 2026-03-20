@@ -117,7 +117,7 @@ let call_sentinel_llm ~cascade_name ~prompt_id ~vars () =
         None
     | Ok prompt ->
         let timeout = Env_config.Sentinel.llm_timeout_sec in
-        (match Cascade.complete ~cascade_name
+        (match Oas_worker.complete_single ~cascade_name
             ~messages:[Agent_sdk.Types.user_msg prompt]
             ~temperature:0.3 ~timeout_sec:timeout ~max_tokens:800 () with
         | Ok resp ->

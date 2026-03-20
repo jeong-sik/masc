@@ -118,7 +118,7 @@ let geval_response_is_valid (resp : Llm_provider.Types.api_response) : bool =
 let verify_llm ~content : (verification_result, string) result =
   let prompt = build_geval_prompt ~content in
   match
-    Cascade.complete ~cascade_name:"verifier"
+    Oas_worker.complete_single ~cascade_name:"verifier"
       ~messages:[Agent_sdk.Types.user_msg prompt]
       ~temperature:0.2 ~timeout_sec:15 ~max_tokens:150
       ~accept:geval_response_is_valid ()

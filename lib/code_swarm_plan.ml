@@ -335,7 +335,7 @@ let verify_worker ~pattern (worker : worker_plan) diff =
     let prompt = build_verify_prompt ~pattern ~allowed_files:worker.files diff in
     let verdict =
       match
-        Cascade.complete ~cascade_name:"code_swarm_verify"
+        Oas_worker.complete_single ~cascade_name:"code_swarm_verify"
           ~messages:[Agent_sdk.Types.user_msg prompt]
           ~temperature:0.0 ~max_tokens:200 ()
       with

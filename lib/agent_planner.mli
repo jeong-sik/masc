@@ -28,12 +28,13 @@ type daily_plan = {
 
 (** Get today's plan, creating one via MODEL if it doesn't exist.
     [identity] is the agent's system prompt / description.
-    [memories] are recent memory entries for context.
+    [memories] are recent memory strings for context (currently unused,
+    Memory_stream has been removed).
     [call_model] is the function to invoke MODEL for plan generation. *)
 val get_or_create_plan :
   agent_name:string ->
   identity:string ->
-  memories:Memory_stream.memory_entry list ->
+  memories:string list ->
   call_model:(prompt:string -> string) ->
   daily_plan
 

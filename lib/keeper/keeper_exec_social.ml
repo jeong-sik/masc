@@ -32,97 +32,58 @@ let generate_explicit_room_reply (ctx : _ context) ~(meta : keeper_meta) ~(room_
         | model :: _ -> model
         | [] -> Model_spec.default_local_model_spec ()
       in
-          let base_dir = session_base_dir ctx.config in
-          mkdir_p base_dir;
-          let (session, ctx_opt) =
-            load_context_from_checkpoint
-              ~trace_id:meta.trace_id
-              ~primary_model_max_tokens:primary.max_context
-              ~base_dir
+      let base_dir = session_base_dir ctx.config in
+      let prompt = explicit_room_prompt ~meta ~room_id msg in
+      let build_turn_prompt ~base_system_prompt ~messages:_ =
+        base_system_prompt
+      in
+      let (run_result, latency) = Cascade.timed (fun () ->
+        Keeper_agent_run.run_turn
+          ~config:ctx.config ~meta ~base_dir
+          ~max_context:primary.max_context
+          ~build_turn_prompt
+          ~user_message:prompt
+          ~cascade_name:"keeper_turn"
+          ~generation:meta.generation
+          ~max_turns:1
+          ~temperature:(Keeper_config.keeper_reflection_temp ())
+          ~max_tokens:(Keeper_config.keeper_explicit_reply_max_tokens ())
+          ()
+      ) in
+      match run_result with
+      | Error e -> Error e
+      | Ok result ->
+          let reply_raw = String.trim result.response_text in
+          let reply =
+            if reply_raw = "" then
+              Printf.sprintf "@%s 야, 다시 한 번만 말해봐." msg.from_agent
+            else
+              reply_raw
           in
-          let base_ctx =
-            match ctx_opt with
-            | Some current -> current
-            | None ->
-                Context_manager.create
-                  ~system_prompt:
-                    (build_keeper_system_prompt
-                       ~goal:meta.goal
-                       ~short_goal:meta.short_goal
-                       ~mid_goal:meta.mid_goal
-                       ~long_goal:meta.long_goal
-                       ~soul_profile:meta.soul_profile
-                       ~will:meta.will
-                       ~needs:meta.needs
-                       ~desires:meta.desires
-                       ~instructions:meta.instructions)
-                  ~max_tokens:primary.max_context
+          let used_model =
+            model_spec_for_used specs result.model_used
+            |> Option.value ~default:primary
           in
-          let ctx_work =
-            Context_manager.set_system_prompt base_ctx
-              ~system_prompt:
-                (build_keeper_system_prompt
-                   ~goal:meta.goal
-                   ~short_goal:meta.short_goal
-                   ~mid_goal:meta.mid_goal
-                   ~long_goal:meta.long_goal
-                   ~soul_profile:meta.soul_profile
-                   ~will:meta.will
-                   ~needs:meta.needs
-                   ~desires:meta.desires
-                   ~instructions:meta.instructions)
+          let now_ts = Time_compat.now () in
+          let updated =
+            {
+              meta with
+              updated_at = now_iso ();
+              total_turns = meta.total_turns + 1;
+              total_input_tokens = meta.total_input_tokens + result.usage.input_tokens;
+              total_output_tokens = meta.total_output_tokens + result.usage.output_tokens;
+              total_tokens = meta.total_tokens + Cascade.total_tokens result.usage;
+              total_cost_usd =
+                meta.total_cost_usd +. cost_usd_of_usage result.usage used_model;
+              last_turn_ts = now_ts;
+              last_model_used = result.model_used;
+              last_input_tokens = result.usage.input_tokens;
+              last_output_tokens = result.usage.output_tokens;
+              last_total_tokens = Cascade.total_tokens result.usage;
+              last_latency_ms = latency;
+            }
           in
-          let prompt = explicit_room_prompt ~meta ~room_id msg in
-          let user_message = Agent_sdk.Types.user_msg prompt in
-          let ctx_work = Context_manager.append ctx_work user_message in
-          Context_manager.persist_message session user_message;
-          let messages =
-            (Agent_sdk.Types.system_msg ctx_work.system_prompt) :: ctx_work.messages
-          in
-          let (cascade_result, cascade_latency) = Cascade.timed (fun () ->
-              Keeper_oas_adapter.run_cascade ~messages
-                ~temperature:(Keeper_config.keeper_reflection_temp ())
-                ~max_tokens:(Keeper_config.keeper_explicit_reply_max_tokens ()) ()) in
-          match cascade_result with
-          | Error e -> Error e
-          | Ok resp ->
-              let used_model =
-                model_spec_for_used specs resp.Llm_provider.Types.model |> Option.value ~default:primary
-              in
-              let reply_raw = String.trim (Cascade.text_of_response resp) in
-              let reply =
-                if reply_raw = "" then
-                  Printf.sprintf "@%s 야, 다시 한 번만 말해봐." msg.from_agent
-                else
-                  reply_raw
-              in
-              let assistant_message = Agent_sdk.Types.assistant_msg reply in
-              let ctx_work = Context_manager.append ctx_work assistant_message in
-              Context_manager.persist_message session assistant_message;
-              (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
-               with exn ->
-                 log_keeper_exn ~label:"save_checkpoint (explicit room reply) failed" exn);
-              let usage = Cascade.usage_of_response resp in
-              let now_ts = Time_compat.now () in
-              let updated =
-                {
-                  meta with
-                  updated_at = now_iso ();
-                  total_turns = meta.total_turns + 1;
-                  total_input_tokens = meta.total_input_tokens + usage.input_tokens;
-                  total_output_tokens = meta.total_output_tokens + usage.output_tokens;
-                  total_tokens = meta.total_tokens + Cascade.total_tokens usage;
-                  total_cost_usd =
-                    meta.total_cost_usd +. cost_usd_of_usage usage used_model;
-                  last_turn_ts = now_ts;
-                  last_model_used = resp.Llm_provider.Types.model;
-                  last_input_tokens = usage.input_tokens;
-                  last_output_tokens = usage.output_tokens;
-                  last_total_tokens = Cascade.total_tokens usage;
-                  last_latency_ms = cascade_latency;
-                }
-              in
-              Ok (updated, reply)
+          Ok (updated, reply)
 
 let social_board_event_prompt ~(meta : keeper_meta) (event : social_board_event) : string =
   let event_kind =
@@ -172,142 +133,96 @@ let run_social_board_event_turn
         | model :: _ -> model
         | [] -> Model_spec.default_local_model_spec ()
       in
-          let base_dir = session_base_dir ctx.config in
-          let session, ctx_opt =
-            load_context_from_checkpoint
-              ~trace_id:meta.trace_id
-              ~primary_model_max_tokens:primary.max_context
-              ~base_dir
+      let base_dir = session_base_dir ctx.config in
+      let prompt = social_board_event_prompt ~meta event in
+      (* Social context: L3-equivalent guardrails (read + board tools) *)
+      let social_gate =
+        Keeper_exec_autonomy.autonomous_gate_config
+          ~autonomy_level:Keeper_autonomy.L3_Guided
+      in
+      let guardrails =
+        Verifier_oas.eval_gate_to_oas_guardrails social_gate
+      in
+      let max_tool_rounds = Keeper_config.keeper_max_tool_rounds () in
+      let build_turn_prompt ~base_system_prompt ~messages:_ =
+        base_system_prompt
+      in
+      let (run_result, total_latency_ms) = Cascade.timed (fun () ->
+        Keeper_agent_run.run_turn
+          ~config:ctx.config ~meta ~base_dir
+          ~max_context:primary.max_context
+          ~build_turn_prompt
+          ~user_message:prompt
+          ~cascade_name:"keeper_social"
+          ~generation:meta.generation
+          ~max_turns:max_tool_rounds
+          ~guardrails
+          ~temperature:(Keeper_config.keeper_planning_temp ())
+          ~max_tokens:(Keeper_config.keeper_social_initial_max_tokens ())
+          ()
+      ) in
+      match run_result with
+      | Error e -> Error e
+      | Ok result ->
+          let final_tools_used = result.tools_used in
+          let final_content =
+            let trimmed = String.trim result.response_text in
+            if trimmed = "" && final_tools_used <> [] then
+              Printf.sprintf "(tools executed: %s)" (String.concat ", " final_tools_used)
+            else if trimmed = "" then trimmed
+            else trimmed
           in
-          let base_ctx =
-            match ctx_opt with
-            | Some current -> current
-            | None ->
-                Context_manager.create
-                  ~system_prompt:
-                    (build_keeper_system_prompt
-                       ~goal:meta.goal
-                       ~short_goal:meta.short_goal
-                       ~mid_goal:meta.mid_goal
-                       ~long_goal:meta.long_goal
-                       ~soul_profile:meta.soul_profile
-                       ~will:meta.will
-                       ~needs:meta.needs
-                       ~desires:meta.desires
-                       ~instructions:meta.instructions)
-                  ~max_tokens:primary.max_context
+          let final_cost_usd =
+            let used_model = model_spec_for_used specs result.model_used
+              |> Option.value ~default:primary in
+            cost_usd_of_usage result.usage used_model
           in
-          let ctx_work =
-            Context_manager.set_system_prompt base_ctx
-              ~system_prompt:
-                (build_keeper_system_prompt
-                   ~goal:meta.goal
-                   ~short_goal:meta.short_goal
-                   ~mid_goal:meta.mid_goal
-                   ~long_goal:meta.long_goal
-                   ~soul_profile:meta.soul_profile
-                   ~will:meta.will
-                   ~needs:meta.needs
-                   ~desires:meta.desires
-                   ~instructions:meta.instructions)
+          let assistant_text =
+            let trimmed = String.trim final_content in
+            if trimmed = "" && final_tools_used = [] then
+              "Inspected the board event and chose not to act."
+            else if trimmed = "" then
+              Printf.sprintf "(tools executed: %s)" (String.concat ", " final_tools_used)
+            else
+              trimmed
           in
-          let prompt = social_board_event_prompt ~meta event in
-          let user_message = Agent_sdk.Types.user_msg prompt in
-          let ctx_work = Context_manager.append ctx_work user_message in
-          Context_manager.persist_message session user_message;
-          (* Social context: L3-equivalent guardrails (read + board tools) *)
-          let social_gate =
-            Keeper_exec_autonomy.autonomous_gate_config
-              ~autonomy_level:Keeper_autonomy.L3_Guided
+          let now_ts = Time_compat.now () in
+          let action_kind = keeper_action_kind_of_tool_names final_tools_used in
+          let outcome =
+            if action_kind = "none" then `Passed else `Acted
           in
-          let guardrails =
-            Verifier_oas.eval_gate_to_oas_guardrails social_gate
+          let updated_meta =
+            {
+              meta with
+              updated_at = now_iso ();
+              total_turns = meta.total_turns + 1;
+              total_input_tokens = meta.total_input_tokens + result.usage.input_tokens;
+              total_output_tokens = meta.total_output_tokens + result.usage.output_tokens;
+              total_tokens = meta.total_tokens + Cascade.total_tokens result.usage;
+              total_cost_usd = meta.total_cost_usd +. final_cost_usd;
+              last_turn_ts = now_ts;
+              last_model_used = result.model_used;
+              last_input_tokens = result.usage.input_tokens;
+              last_output_tokens = result.usage.output_tokens;
+              last_total_tokens = Cascade.total_tokens result.usage;
+              last_latency_ms = total_latency_ms;
+              last_autonomous_action_at =
+                (if action_kind = "none" then meta.last_autonomous_action_at else now_iso ());
+              autonomous_action_count =
+                meta.autonomous_action_count + if action_kind = "none" then 0 else 1;
+            }
           in
-          let max_tool_rounds = Keeper_config.keeper_max_tool_rounds () in
-          let system_prompt = ctx_work.system_prompt in
-          let goal = prompt in
-          let (oas_result, total_latency_ms) = Cascade.timed (fun () ->
-              Keeper_oas_adapter.run_with_tools
-                ~config:ctx.config ~meta
-                ~cascade_name:"keeper_social"
-                ~system_prompt ~goal
-                ~max_turns:max_tool_rounds
-                ~temperature:(Keeper_config.keeper_planning_temp ())
-                ~max_tokens:(Keeper_config.keeper_social_initial_max_tokens ())
-                ~guardrails ())
-          in
-          match oas_result with
-          | Error e -> Error e
-          | Ok { Keeper_oas_adapter.oas_result = run_result;
-                 Keeper_oas_adapter.tools_executed = final_tools_used } ->
-              let final_resp = run_result.Oas_worker.response in
-              let final_content =
-                let trimmed = String.trim (Cascade.text_of_response final_resp) in
-                if trimmed = "" && final_tools_used <> [] then
-                  Printf.sprintf "(tools executed: %s)" (String.concat ", " final_tools_used)
-                else if trimmed = "" then trimmed
-                else trimmed
-              in
-              let final_usage = Cascade.usage_of_response final_resp in
-              let final_model_used = final_resp.Llm_provider.Types.model in
-              let final_latency_ms = total_latency_ms in
-              let final_cost_usd =
-                let used_model = model_spec_for_used specs final_model_used
-                  |> Option.value ~default:primary in
-                cost_usd_of_usage final_usage used_model
-              in
-              let assistant_text =
-                let trimmed = String.trim final_content in
-                if trimmed = "" && final_tools_used = [] then
-                  "Inspected the board event and chose not to act."
-                else if trimmed = "" then
-                  Printf.sprintf "(tools executed: %s)" (String.concat ", " final_tools_used)
-                else
-                  trimmed
-              in
-              let assistant_message = Agent_sdk.Types.assistant_msg assistant_text in
-              let ctx_work = Context_manager.append ctx_work assistant_message in
-              Context_manager.persist_message session assistant_message;
-              (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
-               with exn ->
-                 log_keeper_exn ~label:"save_checkpoint (social board turn) failed" exn);
-              let now_ts = Time_compat.now () in
-              let action_kind = keeper_action_kind_of_tool_names final_tools_used in
-              let outcome =
-                if action_kind = "none" then `Passed else `Acted
-              in
-              let updated_meta =
-                {
-                  meta with
-                  updated_at = now_iso ();
-                  total_turns = meta.total_turns + 1;
-                  total_input_tokens = meta.total_input_tokens + final_usage.input_tokens;
-                  total_output_tokens = meta.total_output_tokens + final_usage.output_tokens;
-                  total_tokens = meta.total_tokens + Cascade.total_tokens final_usage;
-                  total_cost_usd = meta.total_cost_usd +. final_cost_usd;
-                  last_turn_ts = now_ts;
-                  last_model_used = final_model_used;
-                  last_input_tokens = final_usage.input_tokens;
-                  last_output_tokens = final_usage.output_tokens;
-                  last_total_tokens = Cascade.total_tokens final_usage;
-                  last_latency_ms = final_latency_ms;
-                  last_autonomous_action_at =
-                    (if action_kind = "none" then meta.last_autonomous_action_at else now_iso ());
-                  autonomous_action_count =
-                    meta.autonomous_action_count + if action_kind = "none" then 0 else 1;
-                }
-              in
-              Ok
-                ( updated_meta,
-                  {
-                    outcome;
-                    summary = assistant_text;
-                    reason = assistant_text;
-                    action_kind;
-                    tools_used = final_tools_used;
-                    decision_reason = Some assistant_text;
-                    failure_reason = None;
-                  } )
+          Ok
+            ( updated_meta,
+              {
+                outcome;
+                summary = assistant_text;
+                reason = assistant_text;
+                action_kind;
+                tools_used = final_tools_used;
+                decision_reason = Some assistant_text;
+                failure_reason = None;
+              } )
 
 let run_learned_policy_room_event
     (ctx : _ context)

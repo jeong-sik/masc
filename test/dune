@@ -442,6 +442,10 @@
  (modules test_tool_keeper)
  (libraries masc_mcp alcotest unix))
 (test
+ (name test_keeper_tools_oas)
+ (modules test_keeper_tools_oas)
+ (libraries masc_mcp agent_sdk alcotest unix))
+(test
  (name test_tool_council)
  (modules test_tool_council)
  (libraries masc_mcp alcotest yojson unix))

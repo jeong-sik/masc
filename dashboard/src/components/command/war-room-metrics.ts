@@ -154,7 +154,7 @@ export function agentPresenceView(agent: Agent): WarRoomPresenceView {
     ].filter(Boolean).join(' · ') || '글로벌 agent roster',
     chips: [
       agent.context_ratio != null ? `ctx ${Math.round(agent.context_ratio * 100)}%` : 'ctx n/a',
-      agent.status,
+      agent.status ?? '(unknown)',
     ],
     note: agent.personalityHint ?? null,
   }

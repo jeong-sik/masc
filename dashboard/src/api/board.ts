@@ -13,9 +13,9 @@ import type {
 
 const SYSTEM_BOARD_AUTHORS = new Set(['team-session'])
 
-export function toIsoTimestamp(value: unknown): string {
+export function toIsoTimestamp(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) return value
-  if (typeof value !== 'number' || Number.isNaN(value)) return new Date().toISOString()
+  if (typeof value !== 'number' || Number.isNaN(value)) return null
   const ms = value < 1_000_000_000_000 ? value * 1000 : value
   return new Date(ms).toISOString()
 }
@@ -363,8 +363,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     votes,
     vote_balance: score,
     comment_count: commentCount,
-    created_at: createdAt,
-    updated_at: updatedAt,
+    created_at: createdAt ?? '',
+    updated_at: updatedAt ?? '',
     flair: flairValue,
     hearth: asString(raw.hearth, '').trim() || null,
     visibility: asString(raw.visibility, '').trim() || undefined,
@@ -389,7 +389,7 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     post_id: postId,
     author,
     content: asString(raw.content, ''),
-    created_at: toIsoTimestamp(raw.created_at),
+    created_at: toIsoTimestamp(raw.created_at) ?? '',
   }
 }
 

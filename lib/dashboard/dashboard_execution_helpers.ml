@@ -225,12 +225,19 @@ let tone_rank = function
   | _ -> 0
 
 let dashboard_fixture_name ?fixture () =
-  match fixture with
-  | Some value when String.trim value <> "" -> Some (String.trim value)
-  | _ -> (
-      match Sys.getenv_opt "MASC_DASHBOARD_FIXTURE" with
-      | Some value when String.trim value <> "" -> Some (String.trim value)
-      | _ -> None)
+  let fixtures_enabled =
+    match Sys.getenv_opt "MASC_DASHBOARD_FIXTURES_ENABLED" with
+    | Some v when String.lowercase_ascii (String.trim v) = "true" -> true
+    | _ -> false
+  in
+  if not fixtures_enabled then None
+  else
+    match fixture with
+    | Some value when String.trim value <> "" -> Some (String.trim value)
+    | _ -> (
+        match Sys.getenv_opt "MASC_DASHBOARD_FIXTURE" with
+        | Some value when String.trim value <> "" -> Some (String.trim value)
+        | _ -> None)
 
 let get_agent_identity (name : string) =
   let contains s sub =

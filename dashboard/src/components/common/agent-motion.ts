@@ -73,8 +73,8 @@ export function buildAgentMotion(
   ).length
 
   const recentMessage = messages
-    .filter(message => normalizeAgentKey(message.from) === agentKey)
-    .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))[0]
+    .filter(message => normalizeAgentKey(message.from ?? '') === agentKey)
+    .sort((a, b) => toEpoch(b.timestamp ?? '') - toEpoch(a.timestamp ?? ''))[0]
 
   const recentJournal = journal
     .filter(entry =>
@@ -91,7 +91,7 @@ export function buildAgentMotion(
     .filter(keeper => normalizeAgentKey(keeper.name) === agentKey && keeperSignalTimestamp(keeper) !== null)
     .sort((a, b) => toEpoch(keeperSignalTimestamp(b) ?? 0) - toEpoch(keeperSignalTimestamp(a) ?? 0))[0]
 
-  const messageTs = recentMessage ? toEpoch(recentMessage.timestamp) : 0
+  const messageTs = recentMessage ? toEpoch(recentMessage.timestamp ?? '') : 0
   const journalTs = recentJournal ? toEpoch(recentJournal.timestamp) : 0
   const boardTs = recentBoardPost ? toEpoch(recentBoardPost.updated_at || recentBoardPost.created_at) : 0
   const keeperTs = recentKeeper ? toEpoch(keeperSignalTimestamp(recentKeeper) ?? 0) : 0

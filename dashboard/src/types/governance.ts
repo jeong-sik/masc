@@ -163,8 +163,6 @@ export interface BoardMonitoring {
   last_activity_age_s?: number | null
   slo_target_age_s?: number
   slo_breached?: boolean
-  warn_age_s?: number
-  bad_age_s?: number
 }
 
 export interface GovernanceMonitoring {
@@ -180,8 +178,6 @@ export interface GovernanceMonitoring {
   slo_target_case_age_s?: number
   slo_breached?: boolean
   judge_online?: boolean
-  warn_age_s?: number
-  bad_age_s?: number
 }
 
 export interface SocialRuntimeStatus {

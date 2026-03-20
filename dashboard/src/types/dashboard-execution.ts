@@ -116,7 +116,7 @@ export interface DashboardExecutionHandoff {
 export interface DashboardExecutionQueueItem {
   id: string
   kind: DashboardExecutionQueueKind
-  severity: DashboardExecutionTone
+  severity?: DashboardExecutionTone
   status?: string
   summary: string
   target_type: string
@@ -174,7 +174,7 @@ export interface DashboardExecutionWorkerSupportBrief {
   name: string
   agent_name?: string
   status?: Agent['status'] | string
-  tone: DashboardExecutionTone
+  tone?: DashboardExecutionTone
   state: DashboardExecutionWorkerState
   note: string
   focus: string
@@ -196,7 +196,7 @@ export interface DashboardExecutionContinuityBrief {
   name: string
   agent_name?: string | null
   status?: string
-  tone: DashboardExecutionTone
+  tone?: DashboardExecutionTone
   state: DashboardExecutionContinuityState
   note: string
   focus: string

@@ -24,7 +24,7 @@ export function normalizeAgentStatus(value: unknown): Agent['status'] {
   }
   if (raw === 'in_progress' || raw === 'claimed') return 'busy'
   if (raw === 'dead' || raw === 'left') return 'offline'
-  return 'offline'
+  return undefined
 }
 
 export function normalizeTaskStatus(value: unknown): Task['status'] {
@@ -33,7 +33,7 @@ export function normalizeTaskStatus(value: unknown): Task['status'] {
     return raw
   }
   if (raw === 'inprogress') return 'in_progress'
-  return 'todo'
+  return undefined
 }
 
 export function normalizeAgent(raw: unknown): Agent | null {
@@ -77,9 +77,9 @@ export function normalizeTask(raw: unknown): Task | null {
 
 export function normalizeMessage(raw: unknown): Message | null {
   if (!isRecord(raw)) return null
-  const from = asString(raw.from) ?? asString(raw.from_agent) ?? 'system'
+  const from = asString(raw.from) ?? asString(raw.from_agent)
   const content = asString(raw.content) ?? ''
-  const timestamp = asString(raw.timestamp) ?? new Date().toISOString()
+  const timestamp = asString(raw.timestamp)
   return {
     id: asString(raw.id),
     seq: asNumber(raw.seq),
@@ -93,7 +93,7 @@ export function normalizeMessage(raw: unknown): Message | null {
 export function normalizeExecutionTone(value: unknown): DashboardExecutionQueueItem['severity'] {
   const raw = typeof value === 'string' ? value.toLowerCase() : ''
   if (raw === 'ok' || raw === 'warn' || raw === 'bad') return raw
-  return 'ok'
+  return undefined
 }
 
 export function normalizeExecutionSummary(raw: unknown): DashboardExecutionSummary | null {
@@ -337,7 +337,7 @@ export function normalizeRecommendedAction(raw: unknown): OperatorRecommendedAct
 
 export function messageSortKey(message: Message): number {
   if (typeof message.seq === 'number' && Number.isFinite(message.seq)) return message.seq
-  const parsed = Date.parse(message.timestamp)
+  const parsed = Date.parse(message.timestamp ?? '')
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
@@ -347,13 +347,13 @@ export function mergeMessages(current: Message[], incoming: Message[]): Message[
   for (const message of current) {
     const key = typeof message.seq === 'number'
       ? `seq:${message.seq}`
-      : `ts:${message.timestamp}|from:${message.from}|content:${message.content}`
+      : `ts:${message.timestamp ?? ''}|from:${message.from ?? ''}|content:${message.content}`
     byKey.set(key, message)
   }
   for (const message of incoming) {
     const key = typeof message.seq === 'number'
       ? `seq:${message.seq}`
-      : `ts:${message.timestamp}|from:${message.from}|content:${message.content}`
+      : `ts:${message.timestamp ?? ''}|from:${message.from ?? ''}|content:${message.content}`
     byKey.set(key, message)
   }
   return [...byKey.values()]

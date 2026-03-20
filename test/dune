@@ -221,25 +221,8 @@
  (name test_team_session_swarm_runner)
  (modules test_team_session_swarm_runner)
  (libraries masc_mcp agent_sdk agent_sdk.swarm alcotest yojson unix))
-(test
- (name test_agent_swarm_unit)
- (modules test_agent_swarm_unit)
- (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
-
-(test
- (name test_agent_swarm_fleet)
- (modules test_agent_swarm_fleet)
- (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
-
-(test
- (name test_swarm_e2e)
- (modules test_swarm_e2e)
- (libraries masc_mcp agent_sdk alcotest eio eio_main unix yojson))
-
-(test
- (name test_agent_swarm_runner)
- (modules test_agent_swarm_runner)
- (libraries masc_mcp agent_sdk alcotest eio eio_main yojson unix))
+;; test_agent_swarm_unit, test_agent_swarm_fleet, test_swarm_e2e,
+;; test_agent_swarm_runner — source files removed in #1899/#1903
 
 (test
  (name test_tool_mdal)

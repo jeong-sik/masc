@@ -107,7 +107,9 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
         (try
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms ()
-         with exn ->
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
            Log.Misc.error "telemetry tracking failed: %s"
              (Printexc.to_string exn))
     | None -> ()
@@ -217,7 +219,9 @@ let keeper_stream_send_raw writer mutex closed data =
           Httpun.Body.Writer.write_string writer data;
           Httpun.Body.Writer.flush writer (fun _ -> ()));
       true
-    with exn ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
       Log.Keeper.warn "keeper_stream_send_raw write failed: %s" (Printexc.to_string exn);
       closed := true;
       false
@@ -294,7 +298,9 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
              ~duration_ms ()
-         with exn ->
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
            Log.Misc.error "telemetry tracking failed: %s"
              (Printexc.to_string exn))
     | None -> ());
@@ -374,7 +380,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
     if not !closed then begin
       closed := true;
       (try Httpun.Body.Writer.close writer
-       with exn ->
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
          Log.Misc.warn "keeper_stream writer close: %s"
            (Printexc.to_string exn))
     end
@@ -439,7 +447,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                 (execute_keeper_stream_tool_streaming ~sw ~clock
                    ?auth_token:(auth_token_from_request request)
                    state ~agent_name ~arguments:args ~on_text_delta)
-            with exn ->
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
               Log.Keeper.warn
                 "keeper_stream: streaming dispatch raised: %s"
                 (Printexc.to_string exn);
@@ -449,7 +459,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                    (execute_keeper_stream_tool ~sw ~clock
                       ?auth_token:(auth_token_from_request request)
                       state ~agent_name ~arguments:args)
-               with exn2 -> Error (Printexc.to_string exn2))
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn2 -> Error (Printexc.to_string exn2))
           in
           match dispatch_result with
           | Error err ->
@@ -487,7 +499,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                  | None -> ());
                 send_keeper_stream_finish writer mutex closed ~thread_id
                   ~run_id ~message_id
-              with exn ->
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
                 send_keeper_error writer mutex closed ~thread_id ~run_id
                   (Printexc.to_string exn))))
 

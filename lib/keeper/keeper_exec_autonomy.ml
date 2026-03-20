@@ -209,6 +209,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                   | (true, _) -> ()
                   | (false, err) ->
                       Log.KeeperExec.error "%s L2 perpetual board post failed: %s" meta.name err
+                  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
                   | exception exn ->
                       log_keeper_exn ~label:(Printf.sprintf "autonomy %s L2 board post error" meta.name) exn);
                  Some { meta with
@@ -260,7 +261,9 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                       (try ignore (Goal_store.review_goal config
                         ~goal_id:req.goal_id ~outcome:"progress"
                         ~note:(Printf.sprintf "Perpetual agent started (models: %s)"
-                          (String.concat ", " req.models)) ()) with exn ->
+                          (String.concat ", " req.models)) ()) with
+                        | Eio.Cancel.Cancelled _ as e -> raise e
+                        | exn ->
                         log_keeper_exn ~label:"goal review failed" exn);
                       (* Post to Board *)
                       let board_args = `Assoc [
@@ -285,6 +288,7 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                        | (true, _) -> ()
                        | (false, err) ->
                            Log.KeeperExec.error "%s: board post failed: %s" meta.name err
+                       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
                        | exception exn ->
                            log_keeper_exn ~label:(Printf.sprintf "autonomy %s board post error" meta.name) exn);
                       Some { meta with
@@ -317,7 +321,9 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("goal_id", `String pa.goal_id);
                    ("action", `String pa.action_description);
                    ("autonomy_level", `String (Keeper_autonomy.autonomy_level_to_string level));
-                 ]) with exn ->
+                 ]) with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
                    log_keeper_exn ~label:"SSE keeper_autonomy_start broadcast failed" exn);
                  (* 5-2: Execute the approved plan *)
                  let (summary, exec_cost, tools_used) =
@@ -325,7 +331,9 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                      ~autonomy_level:level ~trajectory_acc:(Some traj_acc) in
                  (* 5-3: Finalize trajectory *)
                  (try ignore (Trajectory.finalize traj_acc Trajectory.Completed)
-                  with exn -> log_keeper_exn ~label:"trajectory finalize failed" exn);
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn -> log_keeper_exn ~label:"trajectory finalize failed" exn);
                  (* 5-3: Update goal progress *)
                  let outcome = if tools_used <> [] then "progress" else "blocked" in
                  let review_note = Printf.sprintf
@@ -335,7 +343,9 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    (String.concat ", " tools_used)
                    exec_cost in
                  (try ignore (Goal_store.review_goal config
-                   ~goal_id:pa.goal_id ~outcome ~note:review_note ()) with exn ->
+                   ~goal_id:pa.goal_id ~outcome ~note:review_note ()) with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
                    log_keeper_exn ~label:"goal review failed" exn);
                  (* 5-4: Post execution report to Board *)
                  let report_args = `Assoc [
@@ -366,7 +376,9 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("result", `String outcome);
                    ("tools_used", `List (List.map (fun t -> `String t) tools_used));
                    ("cost_usd", `Float exec_cost);
-                 ]) with exn ->
+                 ]) with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
                    log_keeper_exn ~label:"SSE keeper_autonomy_complete broadcast failed" exn);
                  Some { meta with
                    last_autonomous_action_at = now_iso ();
@@ -407,14 +419,18 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("action", `String pa.action_description);
                    ("autonomy_level", `String (Keeper_autonomy.autonomy_level_to_string level));
                    ("caution", `String warning);
-                 ]) with exn ->
+                 ]) with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
                    log_keeper_exn ~label:"SSE keeper_autonomy_start (cautioned) broadcast failed" exn);
                  (* 5-2: Execute despite caution *)
                  let (summary, exec_cost, tools_used) =
                    execute_approved_plan ~config ~meta ~specs ~plan ~pa
                      ~autonomy_level:level ~trajectory_acc:(Some traj_acc) in
                  (try ignore (Trajectory.finalize traj_acc Trajectory.Completed)
-                  with exn -> log_keeper_exn ~label:"trajectory finalize (cautioned) failed" exn);
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn -> log_keeper_exn ~label:"trajectory finalize (cautioned) failed" exn);
                  (* 5-3: Update goal progress *)
                  let outcome = if tools_used <> [] then "progress" else "blocked" in
                  let review_note = Printf.sprintf
@@ -424,7 +440,9 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    (String.concat ", " tools_used)
                    exec_cost in
                  (try ignore (Goal_store.review_goal config
-                   ~goal_id:pa.goal_id ~outcome ~note:review_note ()) with exn ->
+                   ~goal_id:pa.goal_id ~outcome ~note:review_note ()) with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
                    log_keeper_exn ~label:"goal review (cautioned) failed" exn);
                  (* 5-4: Board report + SSE complete *)
                  let report_args = `Assoc [
@@ -457,7 +475,9 @@ let run_autonomous_goal_turn ~(config : Room.config) ~(meta : keeper_meta)
                    ("tools_used", `List (List.map (fun t -> `String t) tools_used));
                    ("cost_usd", `Float exec_cost);
                    ("warning", `String warning);
-                 ]) with exn ->
+                 ]) with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
                    log_keeper_exn ~label:"SSE keeper_autonomy_complete (cautioned) broadcast failed" exn);
                  Some { meta with
                    last_autonomous_action_at = now_iso ();

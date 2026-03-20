@@ -82,7 +82,9 @@ let stream_native_chain_events_http ~deps ~request reqd =
                Eio.Time.sleep (deps.get_clock ()) Env_config_governance.Timeouts.sse_keepalive_sec;
                if not (send_raw ": keepalive\n\n") then close_stream ()
              done
-           with exn ->
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
              close_stream
                ~reason:
                  (Printf.sprintf "keepalive loop failed: %s"
@@ -90,7 +92,9 @@ let stream_native_chain_events_http ~deps ~request reqd =
                ())
      else
        close_stream ~reason:"initial stream write failed" ()
-   with exn ->
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
      close_stream
        ~reason:
          (Printf.sprintf "subscription setup failed: %s"
@@ -186,7 +190,9 @@ let stream_native_chain_events_h2 ~deps ~request h2_reqd =
                Eio.Time.sleep (deps.get_clock ()) Env_config_governance.Timeouts.sse_keepalive_sec;
                if not (send_raw ": keepalive\n\n") then close_stream ()
              done
-           with exn ->
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
              close_stream
                ~reason:
                  (Printf.sprintf "keepalive loop failed: %s"
@@ -194,7 +200,9 @@ let stream_native_chain_events_h2 ~deps ~request h2_reqd =
                ())
      else
        close_stream ~reason:"initial stream write failed" ()
-   with exn ->
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
      close_stream
        ~reason:
          (Printf.sprintf "subscription setup failed: %s"

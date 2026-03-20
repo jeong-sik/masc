@@ -657,7 +657,7 @@ let run_proactive_generation
           let cost0 = cost_usd_of_usage (usage_of_response resp0) used_model0 in
           let rec tool_loop ~round ~acc_usage ~acc_latency ~acc_cost
               ~acc_tools_used ~last_resp =
-            if not (Masc_model.has_tool_calls last_resp) || round > max_tool_rounds then
+            if not (List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) last_resp.Llm_provider.Types.content) || round > max_tool_rounds then
               let content =
                 let c = String.trim (Agent_sdk.Types.text_of_content last_resp.content) in
                 if c = "" && acc_tools_used <> [] then
@@ -672,7 +672,7 @@ let run_proactive_generation
                 acc_cost,
                 acc_tools_used )
             else
-              let last_resp_tool_calls = Masc_model.tool_calls_of_response last_resp in
+              let last_resp_tool_calls = Masc_model.tool_calls_of_content last_resp.content in
               let round_tools =
                 List.map
                   (fun (tc : Masc_model.tool_call) -> tc.call_name)

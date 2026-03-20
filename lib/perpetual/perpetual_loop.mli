@@ -67,7 +67,7 @@ type loop_state = {
   mutable started_at : float;
   mutable last_turn_ts : float;
   mutable last_model_used : string;
-  mutable last_usage : Masc_model.token_usage;
+  mutable last_usage : Agent_sdk.Types.api_usage;
   mutable last_latency_ms : int;
   mutable compaction_count : int;
   mutable compaction_tokens_saved : int;

@@ -127,7 +127,7 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
       let cost = cost_usd_of_usage usage used_model_spec in
       (* OAS handles tool dispatch internally; extract tool names from response *)
       let tools_used =
-        Masc_model.tool_calls_of_response run_result.response
+        Masc_model.tool_calls_of_content run_result.response.content
         |> List.map (fun (tc : Masc_model.tool_call) -> tc.call_name)
       in
       (content, cost, tools_used)

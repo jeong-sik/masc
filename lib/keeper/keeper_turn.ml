@@ -416,7 +416,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               Trajectory.increment_turn trajectory_acc;
               let (base_content, base_usage, base_model_used, base_latency_ms,
                    base_cost_usd, tools_used) =
-                if not (Masc_model.has_tool_calls resp0) then
+                if not (List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) resp0.content) then
                   (* No tool calls — return initial response directly *)
                   (Agent_sdk.Types.text_of_content resp0.content,
                    usage_of_response resp0,
@@ -425,7 +425,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 else begin
                   (* First round: execute tool calls from initial response *)
                   let first_tcs =
-                    Masc_model.tool_calls_of_response resp0
+                    Masc_model.tool_calls_of_content resp0.content
                   in
                   Log.Trpg.info "Tool round 1/%d: %d tool calls"
                     max_tool_rounds (List.length first_tcs);
@@ -813,13 +813,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 continuity_summary = continuity_summary_from_reply;
                 last_continuity_update_ts;
                 total_output_tokens = meta.total_output_tokens + final_usage.output_tokens;
-                total_tokens = meta.total_tokens + Masc_model.total_tokens final_usage;
+                total_tokens = meta.total_tokens + (final_usage.input_tokens + final_usage.output_tokens);
                 total_cost_usd = meta.total_cost_usd +. total_cost_usd_turn;
                 last_turn_ts = now_ts;
                 last_model_used = final_model_used;
                 last_input_tokens = final_usage.input_tokens;
                 last_output_tokens = final_usage.output_tokens;
-                last_total_tokens = Masc_model.total_tokens final_usage;
+                last_total_tokens = (final_usage.input_tokens + final_usage.output_tokens);
                 last_latency_ms = final_latency_ms;
                 compaction_count = meta.compaction_count + (if compacted then 1 else 0);
                 last_compaction_ts = (if compacted then now_ts else meta.last_compaction_ts);

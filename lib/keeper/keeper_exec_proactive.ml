@@ -493,7 +493,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                    + response_usage.output_tokens;
                                  total_tokens =
                                    meta.total_tokens
-                                   + Masc_model.total_tokens response_usage;
+                                   + (response_usage.input_tokens + response_usage.output_tokens);
                                  total_cost_usd =
                                    meta.total_cost_usd +. turn_cost;
                                  last_turn_ts = now_ts;
@@ -503,7 +503,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                  last_output_tokens =
                                    response_usage.output_tokens;
                                  last_total_tokens =
-                                   Masc_model.total_tokens response_usage;
+                                   (response_usage.input_tokens + response_usage.output_tokens);
                                  last_latency_ms = delib_latency;
                                  last_proactive_ts = now_ts;
                                  last_proactive_reason =
@@ -644,13 +644,13 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                              meta.total_input_tokens + generated.usage.input_tokens;
                            total_output_tokens =
                              meta.total_output_tokens + generated.usage.output_tokens;
-                           total_tokens = meta.total_tokens + Masc_model.total_tokens generated.usage;
+                           total_tokens = meta.total_tokens + (generated.usage.input_tokens + generated.usage.output_tokens);
                            total_cost_usd = meta.total_cost_usd +. turn_cost;
                            last_turn_ts = now_ts;
                            last_model_used = model_used;
                            last_input_tokens = generated.usage.input_tokens;
                            last_output_tokens = generated.usage.output_tokens;
-                           last_total_tokens = Masc_model.total_tokens generated.usage;
+                           last_total_tokens = (generated.usage.input_tokens + generated.usage.output_tokens);
                            last_latency_ms = generated.latency_ms;
                            compaction_count =
                              meta.compaction_count + if compacted then 1 else 0;
@@ -697,7 +697,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                     [
                                       ("input_tokens", `Int generated.usage.input_tokens);
                                       ("output_tokens", `Int generated.usage.output_tokens);
-                                      ("total_tokens", `Int (Masc_model.total_tokens generated.usage));
+                                      ("total_tokens", `Int ((generated.usage.input_tokens + generated.usage.output_tokens)));
                                     ] );
                                 ("latency_ms", `Int generated.latency_ms);
                                 ("cost_usd", `Float turn_cost);

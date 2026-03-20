@@ -1,6 +1,6 @@
 (** OAS type adapters — convert MASC model types to OAS (Agent SDK) types.
 
-    Thin wrappers bridging {!Masc_model.model_spec} and {!Masc_model.message}
+    Thin wrappers bridging {!Masc_model.model_spec} and {!Agent_sdk.Types.message}
     to their OAS counterparts.  Most conversions are structural identity
     (shared type aliases); [to_oas_provider] performs actual mapping.
 
@@ -31,9 +31,9 @@ let to_oas_provider (spec : Masc_model.model_spec) : Agent_sdk.Provider.config o
            model_id = spec.model_id;
            api_key_env = Option.value ~default:"" spec.api_key_env }
 
-let to_oas_message (m : Masc_model.message) : Agent_sdk.Types.message option =
+let to_oas_message (m : Agent_sdk.Types.message) : Agent_sdk.Types.message option =
   match m.role with System -> None | _ -> Some m
 
-let of_oas_message (m : Agent_sdk.Types.message) : Masc_model.message = m
-let of_oas_usage (u : Agent_sdk.Types.api_usage) : Masc_model.token_usage = u
-let to_oas_usage (u : Masc_model.token_usage) : Agent_sdk.Types.api_usage = u
+let of_oas_message (m : Agent_sdk.Types.message) : Agent_sdk.Types.message = m
+let of_oas_usage (u : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage = u
+let to_oas_usage (u : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage = u

@@ -304,8 +304,8 @@ let call_llm_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
           ~timeout_sec ()
       with
       | Ok resp when trim (Agent_sdk.Types.text_of_content resp.content) <> "" -> Ok (Agent_sdk.Types.text_of_content resp.content)
-      | Ok resp when Masc_model.has_tool_calls resp ->
-          Ok (Yojson.Safe.to_string (llm_tool_calls_json (Masc_model.tool_calls_of_response resp)))
+      | Ok resp when List.exists (function Agent_sdk.Types.ToolUse _ -> true | _ -> false) resp.content ->
+          Ok (Yojson.Safe.to_string (llm_tool_calls_json (Masc_model.tool_calls_of_content resp.content)))
       | Ok _ -> Error "empty completion"
       | Error msg -> Error msg)
 

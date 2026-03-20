@@ -33,6 +33,7 @@ let run_cmd base_path =
   Server_runtime_bootstrap.bootstrap_server_state state;
   Server_runtime_bootstrap.bootstrap_keepers ~sw ~clock state;
   Server_runtime_bootstrap.init_task_backend ();
+  Server_runtime_bootstrap.init_memory_pg_schema ();
   ignore (Server_runtime_bootstrap.start_background_maintenance ~sw ~clock state);
   Fun.protect
     ~finally:(fun () ->

@@ -204,6 +204,7 @@
    oas_message
    oas_response
    thompson_sampling
+   memory_pg
    memory_oas_bridge
    agent_planner
    reflection

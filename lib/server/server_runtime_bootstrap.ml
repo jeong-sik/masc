@@ -95,6 +95,16 @@ let init_task_backend () =
             (Types.show_masc_error e))
   | None -> Task_dispatch.init_jsonl ()
 
+let init_memory_pg_schema () =
+  match Board_dispatch.get_pg_pool () with
+  | Some pool -> (
+      match Memory_pg.ensure_schema pool with
+      | Ok () -> ()
+      | Error msg ->
+          Log.MemoryPg.error "Schema init failed: %s (long_term_backend will use no-op)" msg)
+  | None ->
+      Log.MemoryPg.info "No PG pool available; long_term_backend will use no-op stubs"
+
 let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
@@ -312,6 +322,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       bootstrap_server_state state;
       bootstrap_keepers ~sw ~clock state;
       init_task_backend ();
+      init_memory_pg_schema ();
       state
     in
     try

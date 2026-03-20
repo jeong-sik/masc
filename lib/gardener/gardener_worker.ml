@@ -54,6 +54,7 @@ let run_for_gap ~(config : Room.config) ~topic ~traits_str ~reason =
   let agent_name = Printf.sprintf "gardener-worker-%s" topic in
   let institution_context = Institution_eio.load_and_format_for_welcome ~fs:() config in
   let memory = Memory_oas_bridge.create_memory ~agent_name in
+  ignore (Memory_oas_bridge.seed_institution ~memory ~config);
   Oas_worker.run_named_with_masc_tools
     ~cascade_name:"gardener_spawn"
     ~system_prompt:
@@ -81,6 +82,7 @@ let run_for_backlog ~(config : Room.config) ~(backlog : Gardener_types.task_back
   let agent_name = "gardener-triage-worker" in
   let institution_context = Institution_eio.load_and_format_for_welcome ~fs:() config in
   let memory = Memory_oas_bridge.create_memory ~agent_name in
+  ignore (Memory_oas_bridge.seed_institution ~memory ~config);
   Oas_worker.run_named_with_masc_tools
     ~cascade_name:"gardener_spawn"
     ~system_prompt:

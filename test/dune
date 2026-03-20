@@ -192,6 +192,12 @@
  (modules test_oas_integration)
  (libraries masc_mcp agent_sdk alcotest eio eio_main yojson))
 
+; Memory OAS 5-tier bridge tests (episode/procedural seeding, scratchpad, working)
+(test
+ (name test_memory_oas_5tier)
+ (modules test_memory_oas_5tier)
+ (libraries masc_mcp agent_sdk alcotest yojson unix))
+
 ; Verifier_oas bridge tests (eval_gate→guardrails, verdict→hook, read-only)
 (test
  (name test_verifier_oas_bridge)

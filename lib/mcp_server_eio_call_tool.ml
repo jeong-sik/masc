@@ -168,21 +168,12 @@ let resolve_managed_agent_call ?mcp_session_id params =
   let module U = Yojson.Safe.Util in
   let requested_name = params |> U.member "name" |> U.to_string in
   let arguments = params |> U.member "arguments" in
-  match Agent_swarm_contract.sdk_binding_by_name requested_name with
-  | None -> Ok (requested_name, arguments)
-  | Some binding ->
-      let identity =
-        Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments
-      in
-      (match
-         Agent_swarm_contract.build_operation_arguments
-           ~agent_name:identity.Agent_identity.agent_name binding arguments
-       with
-      | Ok translated_arguments ->
-          Ok
-            ( binding.Agent_swarm_contract.canonical_operation,
-              translated_arguments )
-      | Error msg -> Error msg)
+  let identity =
+    Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments
+  in
+  Agent_swarm_contract.resolve_requested_tool_call
+    ~agent_name:identity.Agent_identity.agent_name
+    ~requested_name ~arguments
 
 (** Handle tools/call JSON-RPC method *)
 let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications

@@ -1,6 +1,7 @@
 (** Gardener OAS worker — 1-shot agents with real MASC tools.
 
-    Workers receive [gardener_worker_tool_names] (claim, transition, etc.)
+    Workers receive managed-agent SDK aliases from
+    [gardener_worker_tool_names] (room_status, list_tasks, complete_task, etc.)
     and terminate after completing their goal. *)
 
 (** [run_for_gap ~config ~topic ~traits_str ~reason] spawns a 1-shot OAS
@@ -18,7 +19,7 @@ val run_for_gap :
 
 (** [run_for_backlog ~config ~backlog] spawns a 1-shot OAS worker for
     backlog triage.  The worker reviews unclaimed tasks, claims high-priority
-    ones, and reports via broadcast + board. *)
+    ones, and reports via broadcast. *)
 val run_for_backlog :
   config:Room.config ->
   backlog:Gardener_types.task_backlog_summary ->

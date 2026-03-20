@@ -221,6 +221,7 @@
  (name test_team_session_swarm_runner)
  (modules test_team_session_swarm_runner)
  (libraries masc_mcp agent_sdk agent_sdk.swarm alcotest yojson unix))
+
 (test
  (name test_tool_mdal)
  (modules test_tool_mdal)

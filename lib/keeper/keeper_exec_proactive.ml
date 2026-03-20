@@ -634,6 +634,22 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
 	                           ~fallback:(proactive_fallback_reply ~meta ~idle_seconds)
 	                           raw_reply
 	                       in
+	                       (* Post proactive reply to Board so it is externally visible *)
+	                       (try
+	                         ignore
+	                           (Board_dispatch.create_post
+	                             ~author:meta.name
+	                             ~content:safe_reply
+	                             ~post_kind:Board_core.Automation_post
+	                             ~meta_json:(`Assoc [
+	                               ("source", `String "keeper_proactive");
+	                               ("soul_profile", `String meta.soul_profile);
+	                               ("idle_seconds", `Int idle_seconds);
+	                             ])
+	                             ())
+	                       with exn ->
+	                         Log.KeeperExec.warn "proactive board post failed: %s"
+	                           (Printexc.to_string exn));
 	                       let assistant_msg = Agent_sdk.Types.assistant_msg safe_reply in
 	                       let ctx_work = Context_manager.append ctx_work assistant_msg in
                        Context_manager.persist_message session assistant_msg;

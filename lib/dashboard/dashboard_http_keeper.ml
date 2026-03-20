@@ -4,10 +4,8 @@
     rendering: per-keeper metrics series, 24h buckets, conversation history,
     memory bank, and diagnostic summaries. *)
 
-[@@@warning "-32-33-69"]
 
 open Dashboard_http_helpers
-open Server_utils
 
 include Dashboard_http_keeper_detail
 

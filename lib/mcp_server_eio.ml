@@ -13,7 +13,6 @@
     - Mcp_server_eio_governance: Governance and MCP session helpers
 *)
 
-[@@@warning "-32"]
 
 (** {1 Re-exported Types} *)
 
@@ -37,9 +36,6 @@ let set_net net = Eio_context.set_net net
 let set_clock clock = Eio_context.set_clock clock
 let get_clock_opt () = Eio_context.get_clock_opt ()
 let get_clock () = Eio_context.get_clock ()
-let get_net_opt () : eio_net option = Eio_context.get_net_opt ()
-let get_net () : eio_net = Eio_context.get_net ()
-
 (** {1 State Construction} *)
 
 let create_state ?test_mode:_ ~base_path () =
@@ -60,27 +56,12 @@ let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
 
 (** {1 Re-exported Mcp_server Functions} *)
 
-let is_jsonrpc_v2 = Mcp_server.is_jsonrpc_v2
 let is_jsonrpc_response = Mcp_server.is_jsonrpc_response
-let is_notification = Mcp_server.is_notification
 let get_id = Mcp_server.get_id
 let is_valid_request_id = Mcp_server.is_valid_request_id
-let jsonrpc_request_of_yojson = Mcp_server.jsonrpc_request_of_yojson
-let protocol_version_from_params = Mcp_server.protocol_version_from_params
-let normalize_protocol_version = Mcp_server.normalize_protocol_version
-let validate_protocol_version = Mcp_server.validate_protocol_version
 let validate_initialize_params = Mcp_server.validate_initialize_params
-let make_response = Mcp_server.make_response
-let make_error = Mcp_server.make_error
 let has_field = Mcp_server.has_field
 let get_field = Mcp_server.get_field
-
-let public_tool_help_schemas () = Config.visible_tool_schemas ()
-
-(** {1 Session Adapters} *)
-
-let unregister_sync = Session.unregister_sync
-let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
 (** {1 Governance Re-exports} *)
 
@@ -90,8 +71,6 @@ type governance_config = Mcp_server_eio_governance.governance_config = {
   anomaly_detection: bool;
 }
 let governance_defaults = Mcp_server_eio_governance.governance_defaults
-let load_governance = Mcp_server_eio_governance.load_governance
-let save_governance = Mcp_server_eio_governance.save_governance
 
 type mcp_session_record = Mcp_server_eio_governance.mcp_session_record = {
   id: string;
@@ -101,14 +80,6 @@ type mcp_session_record = Mcp_server_eio_governance.mcp_session_record = {
 }
 let mcp_session_to_json = Mcp_server_eio_governance.mcp_session_to_json
 let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
-let load_mcp_sessions = Mcp_server_eio_governance.load_mcp_sessions
-let save_mcp_sessions = Mcp_server_eio_governance.save_mcp_sessions
-
-(** {1 Drift Guard Re-exports} *)
-
-let tokenize = Drift_guard.tokenize
-let jaccard_similarity = Drift_guard.jaccard_similarity
-let cosine_similarity = Drift_guard.cosine_similarity
 
 (** {1 Tool Lists} *)
 

@@ -2,7 +2,6 @@
 
     Extracted from server_dashboard_http.ml. *)
 
-[@@@warning "-32-33-69"]
 
 open Dashboard_http_helpers
 open Server_utils

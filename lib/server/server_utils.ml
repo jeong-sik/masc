@@ -1,4 +1,3 @@
-[@@@warning "-32-33-69"]
 
 (** Parse query param from request target *)
 let query_param request key =

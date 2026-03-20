@@ -1,4 +1,3 @@
-[@@@warning "-32"]
 
 (** Global Eio context for shared network/clock access.
     Set during server startup (main_eio.ml). *)

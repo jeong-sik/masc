@@ -183,7 +183,8 @@ module Pubsub_mem = struct
     | None -> Ok 0
     | Some callbacks ->
         List.iter (fun cb ->
-          try cb message with _ -> ()
+          try cb message with exn ->
+            Log.Backend.warn "subscriber callback failed: %s" (Printexc.to_string exn)
         ) callbacks;
         Ok (List.length callbacks)
 

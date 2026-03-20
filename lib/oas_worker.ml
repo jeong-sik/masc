@@ -214,7 +214,8 @@ let run
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    (try Oas.Agent.close agent with _ -> ());
+    (try Oas.Agent.close agent with close_exn ->
+      Log.Misc.warn "agent close failed during cleanup: %s" (Printexc.to_string close_exn));
     Error (Printf.sprintf "Agent execution exception: %s" (Printexc.to_string exn)))
 
 (* ================================================================ *)

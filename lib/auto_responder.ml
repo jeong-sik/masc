@@ -32,7 +32,7 @@ let activity_log_file () =
 let debug_log msg =
   let line = Printf.sprintf "[%f] %s\n" (Time_compat.now ()) msg in
   try Fs_compat.append_file "/tmp/auto_debug.log" line
-  with _ -> ()
+  with Sys_error _ | Unix.Unix_error _ -> ()
 
 let activity_log ~mode ~from_agent ~mention ~status ~detail =
   let log_file = activity_log_file () in
@@ -50,7 +50,7 @@ let activity_log ~mode ~from_agent ~mention ~status ~detail =
   let line = Printf.sprintf "[%s] [%s] %s → @%s | %s | %s\n"
     timestamp mode_str from_agent mention status detail in
   try Fs_compat.append_file log_file line
-  with _ -> ()
+  with Sys_error _ | Unix.Unix_error _ -> ()
 
 (* --- Loop prevention / throttling --- *)
 

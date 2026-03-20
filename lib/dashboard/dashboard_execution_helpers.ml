@@ -387,7 +387,8 @@ let load_neo4j_identity_cache () =
                   }
               end)
             edges
-        with _ -> ())
+        with exn ->
+          Log.Dashboard.warn "neo4j identity cache update failed: %s" (Printexc.to_string exn))
   end
 
 (** Merge two profiles: prefer non-default values from [overlay] over [base]. *)

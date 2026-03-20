@@ -103,7 +103,7 @@ let run_solo ~sw ~net ~clock ~proc_mgr config =
   let hooks = if config.verbose then
     { Hooks.empty with
       pre_tool_use = Some (fun event -> match event with
-        | Hooks.PreToolUse { tool_name; input } ->
+        | Hooks.PreToolUse { tool_name; input; _ } ->
           Format.eprintf "[tool] %s %s@." tool_name
             (Yojson.Safe.to_string input);
           Hooks.Continue

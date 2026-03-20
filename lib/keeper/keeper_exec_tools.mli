@@ -15,15 +15,6 @@ val execute_keeper_tool_call :
   input:Yojson.Safe.t ->
   string
 
-val keeper_tool_loop_system_prompt : character_context:string -> string
-
-val keeper_tool_followup_prompt :
-  user_message:string ->
-  draft_reply:string ->
-  tool_outputs:(string * Yojson.Safe.t * string) list ->
-  already_executed:string list ->
-  string
-
 val memory_correction_prompt :
   user_message:string ->
   first_reply:string ->

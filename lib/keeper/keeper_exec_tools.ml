@@ -640,67 +640,8 @@ let execute_keeper_tool_call
       Yojson.Safe.to_string
         (`Assoc [ ("error", `String "unknown_tool"); ("tool", `String other) ])
 
-let keeper_tool_loop_system_prompt ~(character_context : string) : string =
-  Printf.sprintf
-    "%s\n\n\
-     TOOL-LOOP INSTRUCTIONS:\n\
-     When you have all the information needed, produce a final text answer.\n\
-     When you still need more data or actions, call the appropriate tool.\n\
-     Never output SKILL: prefixes. Use function calling only.\n\
-     Stay in character when writing content."
-    character_context
-
-let keeper_tool_followup_prompt
-    ~(user_message : string)
-    ~(draft_reply : string)
-    ~(tool_outputs : (string * Yojson.Safe.t * string) list)
-    ~(already_executed : string list) : string =
-  let rendered =
-    tool_outputs
-    |> List.map (fun (name, input, output) ->
-           Printf.sprintf "- %s(%s)\n  => %s" name
-             (Yojson.Safe.to_string input) output)
-    |> String.concat "\n"
-  in
-  let is_write_tool (name : string) : bool =
-    List.mem name
-      [
-        "keeper_board_post";
-        "keeper_board_comment";
-        "keeper_board_vote";
-        "keeper_fs_edit";
-        "keeper_edit";
-        "keeper_task_force_release";
-        "keeper_task_force_done";
-        "keeper_broadcast";
-        "keeper_voice_speak";
-        "keeper_voice_session_start";
-        "keeper_voice_session_end";
-      ]
-  in
-  let has_write = List.exists is_write_tool already_executed in
-  let rules =
-    if has_write then
-      "RULES (follow strictly):\n\
-       You have already posted to the board. ALL required actions are DONE.\n\
-       Produce a brief final text answer confirming what you did. Do NOT call any more tools."
-    else
-      "RULES (follow strictly):\n\
-       1. If the user asked you to POST, WRITE, or UPDATE something, you MUST call \
-          the appropriate tool (e.g. keeper_board_post). Do NOT return the content as text.\n\
-       2. If you still need information, call the appropriate read/list tool.\n\
-       3. Only produce a final text answer when ALL required actions (reads AND writes) are done.\n\
-       4. Use tool outputs as source of truth.\n\
-       5. Reply in user's language and stay concise."
-  in
-  Printf.sprintf
-    "You called tools. Here are the results.\n\n\
-     User message: %s\n\
-     Draft reply: %s\n\
-     Tool results:\n%s\n\
-     Previously executed: [%s]\n\n\
-     %s\n"
-    user_message draft_reply rendered (String.concat ", " already_executed) rules
+(* keeper_tool_loop_system_prompt and keeper_tool_followup_prompt removed:
+   Agent.run() handles tool dispatch and follow-up natively. *)
 
 let memory_correction_prompt
     ~(user_message : string)

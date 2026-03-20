@@ -6,7 +6,6 @@
 
 open Alcotest
 
-module Cascade = Masc_mcp.Cascade
 module Types = Agent_sdk.Types
 module Compact = Masc_mcp.Context_compact_oas
 module Scoring = Masc_mcp.Context_scoring

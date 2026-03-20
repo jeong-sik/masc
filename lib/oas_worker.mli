@@ -1,16 +1,20 @@
 (** Oas_worker — Unified entry point for OAS-based MASC tool modules.
 
     Callers pass a [cascade_name] string; model resolution is handled
-    internally via [Cascade.default_model_strings] and
+    internally via {!default_model_strings} and
     [Llm_provider.Cascade_config].  Internal [config] / [build] / [run]
     are implementation details and not exported.
 
     Single-shot calls use {!complete_single}.  Multi-turn agent loops
     use {!run_named} or {!run_named_with_masc_tools}.
 
+    Cascade profile defaults and config path resolution are now hosted
+    directly in this module (moved from the deleted [Cascade] module).
+
     @since Phase 1 — MASC→OAS migration
     @since Phase 4 — public API restricted to named cascade functions
-    @since Phase 5 — complete_single moved here from Cascade *)
+    @since Phase 5 — complete_single moved here from Cascade
+    @since Phase 8 — Cascade module deleted, defaults moved here *)
 
 module Oas = Agent_sdk
 
@@ -21,8 +25,13 @@ type run_result = {
   turns : int;
 }
 
+(** Locate config/cascade.json via CWD or ME_ROOT. *)
+val default_config_path : unit -> string option
+
+(** Return the default model string list for a given cascade name. *)
+val default_model_strings : cascade_name:string -> string list
+
 (** Single-shot LLM call via cascade policy.
-    Drop-in replacement for the former [Cascade.complete].
     Returns OAS [api_response] directly; error formatted as string. *)
 val complete_single :
   cascade_name:string ->

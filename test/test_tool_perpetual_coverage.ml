@@ -9,7 +9,6 @@
 
 module Tool_perpetual = Masc_mcp.Tool_perpetual
 module Perpetual_loop = Masc_mcp.Perpetual_loop
-module Cascade = Masc_mcp.Cascade
 module Model_spec = Masc_mcp.Model_spec
 
 (* ============================================================

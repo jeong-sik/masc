@@ -1,6 +1,5 @@
 open Alcotest
 
-module Cascade = Masc_mcp.Cascade
 module Model_spec = Masc_mcp.Model_spec
 module Oas_worker = Masc_mcp.Oas_worker
 
@@ -62,7 +61,7 @@ let test_skips_invalid_and_missing_api_key () =
           | _ -> fail "expected one surviving spec"))
 
 let test_missing_config_uses_defaults () =
-  let defaults = Cascade.default_model_strings ~cascade_name:"heartbeat_action" in
+  let defaults = Oas_worker.default_model_strings ~cascade_name:"heartbeat_action" in
   let specs = Model_spec.available_model_specs_of_strings defaults in
   check bool "defaults available" true (List.length specs >= 1);
   match specs with
@@ -115,7 +114,7 @@ let known_cascade_names =
 let test_all_known_names_return_nonempty () =
   List.iter
     (fun name ->
-      let models = Cascade.default_model_strings ~cascade_name:name in
+      let models = Oas_worker.default_model_strings ~cascade_name:name in
       check bool
         (Printf.sprintf "%s returns non-empty" name)
         true (models <> []))
@@ -123,7 +122,7 @@ let test_all_known_names_return_nonempty () =
 
 let test_unknown_name_returns_fallback () =
   let models =
-    Cascade.default_model_strings ~cascade_name:"nonexistent_xyz"
+    Oas_worker.default_model_strings ~cascade_name:"nonexistent_xyz"
   in
   check bool "catch-all returns non-empty" true (models <> []);
   (* Always ends with glm:auto as safety net *)
@@ -131,7 +130,7 @@ let test_unknown_name_returns_fallback () =
   check string "last is glm:auto" "glm:auto" last
 
 let test_briefing_always_has_glm_auto () =
-  let models = Cascade.default_model_strings ~cascade_name:"briefing" in
+  let models = Oas_worker.default_model_strings ~cascade_name:"briefing" in
   check bool "briefing is non-empty" true (List.length models >= 1);
   (* glm:auto is always the final fallback *)
   let last = List.nth models (List.length models - 1) in
@@ -139,7 +138,7 @@ let test_briefing_always_has_glm_auto () =
 
 let test_classification_uses_llama_first () =
   let models =
-    Cascade.default_model_strings ~cascade_name:"classification"
+    Oas_worker.default_model_strings ~cascade_name:"classification"
   in
   let first = List.hd models in
   check bool "classification starts with llama:" true

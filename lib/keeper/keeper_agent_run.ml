@@ -120,6 +120,9 @@ let run_turn
   ignore (Memory_oas_bridge.seed_institution ~memory ~config);
   ignore (Memory_oas_bridge.seed_procedures ~memory ~agent_name:"_global" ~limit:5);
   ignore (Memory_oas_bridge.seed_memory_bank ~memory ~agent_name ~limit:10);
+  (* 5-tier: Episodic + Procedural seeding (in addition to Long_term above) *)
+  ignore (Memory_oas_bridge.seed_episodes ~memory ~agent_name ~limit:30);
+  ignore (Memory_oas_bridge.seed_procedures_as_oas ~memory ~agent_name ~limit:10);
   let reducer = Agent_sdk.Context_reducer.compose [
     { Agent_sdk.Context_reducer.strategy =
         Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 } };
@@ -144,6 +147,7 @@ let run_turn
   with
   | Error e -> Error e
   | Ok result ->
+    let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
     let text = Agent_sdk.Types.text_of_content result.response.content in
     let model = result.response.Llm_provider.Types.model in
     let tool_names =

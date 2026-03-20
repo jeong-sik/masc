@@ -206,7 +206,6 @@
    thompson_sampling
    memory_pg
    memory_oas_bridge
-   agent_planner
    reflection
    relation_materializer
    prometheus
@@ -239,13 +238,11 @@
    verification
    lamport
    trace
-   mind_eio
    mitosis
    mitosis_defaults
    mitosis_metrics
    mode
    nickname
-   noosphere_eio
    operator_pending_confirm
    operator_digest
    operator_digest_types
@@ -737,7 +734,6 @@
    tls-eio
    domain-name
    ca-certs
-   ;; UUID generation (for mind_eio, noosphere_eio)
    uuidm
    ;; Zstd compression
    zstd

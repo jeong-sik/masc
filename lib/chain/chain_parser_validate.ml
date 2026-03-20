@@ -184,7 +184,7 @@ let rec collect_all_nodes (acc : Chain_types.node list) (n : Chain_types.node) :
       collect_all_nodes acc generator
   | Chain_types.Cascade { tiers; _ } ->
       List.fold_left (fun acc' t -> collect_all_nodes acc' t.Chain_types.tier_node) acc tiers
-  | Chain_types.Llm _
+  | Chain_types.Model _
   | Chain_types.Tool _
   | Chain_types.ChainRef _
   | Chain_types.ChainExec _
@@ -275,7 +275,7 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
 
     (* Template refs inside prompts/args should resolve to known nodes or allowed externals *)
     (match n.node_type with
-     | Chain_types.Llm { prompt; system; _ } ->
+     | Chain_types.Model { prompt; system; _ } ->
          let vars = extract_template_vars prompt in
          let vars = match system with
            | Some s -> vars @ extract_template_vars s
@@ -316,9 +316,9 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
     ) n.input_mapping;
 
     (match n.node_type with
-    | Chain_types.Llm { model; prompt; _ } ->
-        if is_blank model then addf "%s: llm.model is empty" path;
-        if is_blank prompt then addf "%s: llm.prompt is empty" path
+    | Chain_types.Model { model; prompt; _ } ->
+        if is_blank model then addf "%s: model.model is empty" path;
+        if is_blank prompt then addf "%s: model.prompt is empty" path
     | Chain_types.Tool { name; _ } ->
         if is_blank name then addf "%s: tool.name is empty" path
     | Chain_types.Pipeline nodes ->

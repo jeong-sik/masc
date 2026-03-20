@@ -288,7 +288,7 @@ let handle_execute _ctx args =
       let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
       json_ok (`Assoc [
         ("topic", `String topic);
-        ("deliberation", `String (Llm_provider.Types.text_of_response result.response));
+        ("deliberation", `String (Oas_response.text_of_response result.response));
         ("turns", `Int result.turns);
         ("session_id", `String result.session_id);
         ("runtime", `String "oas");
@@ -313,7 +313,7 @@ let handle_execute_dry_run _ctx args =
       let _flushed = Memory_oas_bridge.flush_all ~memory ~agent_name in
       json_ok (`Assoc [
         ("topic", `String topic);
-        ("analysis", `String (Llm_provider.Types.text_of_response result.response));
+        ("analysis", `String (Oas_response.text_of_response result.response));
         ("turns", `Int result.turns);
         ("session_id", `String result.session_id);
         ("dry_run", `Bool true);

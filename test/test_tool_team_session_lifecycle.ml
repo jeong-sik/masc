@@ -47,8 +47,8 @@ let test_start_status_report_stop () =
     (Yojson.Safe.Util.member "orchestration_state" status_result <> `Null);
   Alcotest.(check bool) "cascade_metrics present" true
     (Yojson.Safe.Util.member "cascade_metrics" status_result <> `Null);
-  Alcotest.(check bool) "llm_cache_metrics present" true
-    (Yojson.Safe.Util.member "llm_cache_metrics" status_result <> `Null);
+  Alcotest.(check bool) "inference_cache_metrics present" true
+    (Yojson.Safe.Util.member "inference_cache_metrics" status_result <> `Null);
 
   let report_ok, report_body =
     dispatch_exn ctx ~name:"masc_team_session_report"
@@ -77,8 +77,8 @@ let test_start_status_report_stop () =
   in
   Alcotest.(check string) "report schema version" "1.0.0"
     report_schema_version;
-  Alcotest.(check bool) "report llm_cache_metrics present" true
-    (Yojson.Safe.Util.member "llm_cache_metrics" report_doc <> `Null);
+  Alcotest.(check bool) "report inference_cache_metrics present" true
+    (Yojson.Safe.Util.member "inference_cache_metrics" report_doc <> `Null);
 
   let stop_ok, stop_body =
     dispatch_exn ctx ~name:"masc_team_session_stop"

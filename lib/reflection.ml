@@ -1,7 +1,7 @@
 (** Reflection Engine — Higher-order insight generation for Generative Agents.
 
     When accumulated memory importance exceeds [default_threshold] (100),
-    the engine retrieves top-20 memories by importance, asks the LLM
+    the engine retrieves top-20 memories by importance, asks the MODEL
     "이 경험들에서 어떤 패턴/인사이트를 발견하는가?", and stores the
     reflection as a high-importance (8-10) Memory Stream entry.
 
@@ -78,11 +78,11 @@ let should_reflect ~agent_name =
   let sum = Memory_stream.importance_sum_since ~agent_name ~since in
   sum >= default_threshold
 
-let reflect ~agent_name ~identity ~call_llm =
+let reflect ~agent_name ~identity ~call_model =
   (* 1. Retrieve top 20 memories by importance *)
   let memories = Memory_stream.retrieve ~agent_name ~query:"" ~limit:20 in
 
-  (* 2. Format them for the LLM *)
+  (* 2. Format them for the MODEL *)
   let mem_str = Memory_stream.format_memories memories in
 
   (* 3. Build reflection prompt *)
@@ -102,8 +102,8 @@ let reflect ~agent_name ~identity ~call_llm =
     agent_name identity mem_str
   in
 
-  (* 4. Call LLM *)
-  let response = call_llm ~prompt in
+  (* 4. Call MODEL *)
+  let response = call_model ~prompt in
 
   (* 5. Store reflection as high-importance memory *)
   let is_valid = String.length response > 10 in

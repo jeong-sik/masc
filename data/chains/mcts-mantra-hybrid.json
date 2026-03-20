@@ -62,13 +62,13 @@
             "nodes": [
               {
                 "id": "fix_conservative",
-                "type": "llm",
+                "type": "model",
                 "model": "codex",
                 "prompt": "## Conservative Fixer\n\nFix this issue with MINIMAL code changes:\n\nIssue:\n{{select_issue.current_issue}}\n\nCurrent code:\n```\n{{input.code}}\n```\n\nRules:\n- Change only what's necessary\n- Preserve all existing behavior\n- Add comments explaining the fix\n\nOutput the fixed code only."
               },
               {
                 "id": "fix_thorough",
-                "type": "llm",
+                "type": "model",
                 "model": "claude",
                 "prompt": "## Thorough Fixer\n\nFix this issue AND related problems:\n\nIssue:\n{{select_issue.current_issue}}\n\nCurrent code:\n```\n{{input.code}}\n```\n\nRules:\n- Fix the main issue\n- Fix any related issues in the same area\n- Improve code quality while you're there\n- Add proper error handling\n\nOutput the fixed code only."
               }
@@ -98,7 +98,7 @@
     },
     {
       "id": "final_report",
-      "type": "llm",
+      "type": "model",
       "model": "claude",
       "prompt": "## Final Report Generator\n\nGenerate a summary report:\n\nOriginal health score: {{explore.summary.health_score}}\nFinal health score: {{fix_loop.health_score}}\nIterations: {{fix_loop.iterations}}\n\nFixed issues:\n{{fix_loop.fixed_issues}}\n\nRemaining issues:\n{{fix_loop.remaining_issues}}\n\nOutput a concise markdown report with:\n1. Executive Summary\n2. What was fixed\n3. What remains (if any)\n4. Recommendations"
     }

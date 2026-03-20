@@ -89,7 +89,7 @@ let event_run_error session ~error : Ag_ui.event =
     fixed-size chunks and emits TEXT_MESSAGE_CONTENT events.
 
     When native provider streaming is available, this adapter should be
-    replaced with direct delta forwarding from llm_client. *)
+    replaced with direct delta forwarding from the model client. *)
 
 let chunk_size = 64  (* target bytes per chunk *)
 

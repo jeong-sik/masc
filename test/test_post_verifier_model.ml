@@ -1,7 +1,7 @@
 (** Tests for Post_verifier_model module — G-Eval response parsing and scoring.
 
     All tests target pure functions (parse_geval_response, score_to_verdict).
-    No actual LLM calls — those require MASC_VERIFIER_MODE=llm at runtime. *)
+    No actual MODEL calls — those require MASC_VERIFIER_MODE=model at runtime. *)
 
 module Pvl = Masc_mcp.Post_verifier_model
 module Pv = Masc_mcp.Post_verifier

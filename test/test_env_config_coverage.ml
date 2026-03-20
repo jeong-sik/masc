@@ -262,47 +262,47 @@ let test_llama_max_tokens_positive () =
   check bool "max tokens positive" true (Env_config.Llama.max_tokens > 0)
 
 (* ============================================================
-   LLM Timeout Config Tests
+   Inference Timeout Config Tests
    ============================================================ *)
 
-let test_llm_timeout_positive () =
-  check bool "timeout positive" true (Env_config.Llm.timeout_seconds > 0.0)
+let test_inference_timeout_positive () =
+  check bool "timeout positive" true (Env_config.Inference.timeout_seconds > 0.0)
 
-let test_llm_timeout_int_positive () =
-  check bool "timeout int positive" true (Env_config.Llm.timeout_seconds_int > 0)
+let test_inference_timeout_int_positive () =
+  check bool "timeout int positive" true (Env_config.Inference.timeout_seconds_int > 0)
 
 let test_operator_judge_timeout_reasonable () =
   check bool "operator judge timeout >= 5" true
-    (Env_config.Llm.operator_judge_timeout_seconds >= 5)
+    (Env_config.Inference.operator_judge_timeout_seconds >= 5)
 
 let test_governance_judge_timeout_reasonable () =
   check bool "governance judge timeout >= 5" true
-    (Env_config.Llm.dashboard_governance_judge_timeout_seconds >= 5)
+    (Env_config.Inference.dashboard_governance_judge_timeout_seconds >= 5)
 
 (* test_gardener_spawn_timeout_reasonable removed — Gardener deleted (#1834) *)
 
 (* ============================================================
-   LLM Cache Config Tests
+   Inference Cache Config Tests
    ============================================================ *)
 
-let test_llm_cache_enabled_bool () =
+let test_inference_cache_enabled_bool () =
   check bool "cache enabled is bool" true
-    (Env_config.Llm.cache_enabled || not Env_config.Llm.cache_enabled)
+    (Env_config.Inference.cache_enabled || not Env_config.Inference.cache_enabled)
 
-let test_llm_cache_ttl_positive () =
-  check bool "cache ttl positive" true (Env_config.Llm.cache_ttl_seconds > 0)
+let test_inference_cache_ttl_positive () =
+  check bool "cache ttl positive" true (Env_config.Inference.cache_ttl_seconds > 0)
 
-let test_llm_cache_prompt_chars_positive () =
+let test_inference_cache_prompt_chars_positive () =
   check bool "max prompt chars positive" true
-    (Env_config.Llm.cache_max_prompt_chars > 0)
+    (Env_config.Inference.cache_max_prompt_chars > 0)
 
-let test_llm_cache_l1_entries_positive () =
+let test_inference_cache_l1_entries_positive () =
   check bool "l1 max entries positive" true
-    (Env_config.Llm.cache_l1_max_entries > 0)
+    (Env_config.Inference.cache_l1_max_entries > 0)
 
-let test_llm_spawn_cache_policy_supported () =
+let test_inference_spawn_cache_policy_supported () =
   check bool "spawn cache policy supported" true
-    (List.mem Env_config.Llm.spawn_cache_policy [ "safe_only"; "off" ])
+    (List.mem Env_config.Inference.spawn_cache_policy [ "safe_only"; "off" ])
 
 (* ============================================================
    KeeperBootstrap Module Tests
@@ -417,24 +417,24 @@ let () =
       test_case "server url httpish" `Quick test_llama_server_url_httpish;
       test_case "max tokens positive" `Quick test_llama_max_tokens_positive;
     ];
-    "llm_timeout", [
-      test_case "timeout positive" `Quick test_llm_timeout_positive;
-      test_case "timeout int positive" `Quick test_llm_timeout_int_positive;
+    "inference_timeout", [
+      test_case "timeout positive" `Quick test_inference_timeout_positive;
+      test_case "timeout int positive" `Quick test_inference_timeout_int_positive;
       test_case "operator judge timeout reasonable" `Quick
         test_operator_judge_timeout_reasonable;
       test_case "governance judge timeout reasonable" `Quick
         test_governance_judge_timeout_reasonable;
       (* gardener spawn timeout test removed — Gardener deleted (#1834) *)
     ];
-    "llm_cache", [
-      test_case "cache enabled bool" `Quick test_llm_cache_enabled_bool;
-      test_case "cache ttl positive" `Quick test_llm_cache_ttl_positive;
+    "inference_cache", [
+      test_case "cache enabled bool" `Quick test_inference_cache_enabled_bool;
+      test_case "cache ttl positive" `Quick test_inference_cache_ttl_positive;
       test_case "max prompt chars positive" `Quick
-        test_llm_cache_prompt_chars_positive;
+        test_inference_cache_prompt_chars_positive;
       test_case "l1 max entries positive" `Quick
-        test_llm_cache_l1_entries_positive;
+        test_inference_cache_l1_entries_positive;
       test_case "spawn cache policy supported" `Quick
-        test_llm_spawn_cache_policy_supported;
+        test_inference_spawn_cache_policy_supported;
     ];
     "keeper_bootstrap", [
       test_case "stale turn positive" `Quick test_keeper_bootstrap_stale_positive;

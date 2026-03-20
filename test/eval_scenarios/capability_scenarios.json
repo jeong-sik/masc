@@ -25,11 +25,11 @@
         "description": "Result should not contain error"
       },
       {
-        "type": "llm",
+        "type": "model",
         "prompt": "Did the agent successfully read a file and extract meaningful information from it? Answer YES or NO.",
         "rubric": "YES means the agent read the file and reported contents. NO means it failed or returned empty.",
         "weight": 1.0,
-        "description": "LLM evaluates file read success"
+        "description": "MODEL evaluates file read success"
       }
     ],
     "max_turns": 5,
@@ -62,11 +62,11 @@
         "description": "Should not error"
       },
       {
-        "type": "llm",
+        "type": "model",
         "prompt": "Did the agent successfully query and report the MASC room status including agent information? Answer YES or NO.",
         "rubric": "YES means status was retrieved and reported. NO means failure or incomplete response.",
         "weight": 1.0,
-        "description": "LLM evaluates status query success"
+        "description": "MODEL evaluates status query success"
       }
     ],
     "max_turns": 5,
@@ -97,11 +97,11 @@
     ],
     "graders": [
       {
-        "type": "llm",
+        "type": "model",
         "prompt": "Did the agent chain multiple tool calls (listing files, reading a file, summarizing) to accomplish the task? Consider: (1) Did it list files? (2) Did it read at least one file? (3) Did it provide a summary? Score 0-10.",
         "rubric": "8-10: All three steps completed. 5-7: Two steps completed. 0-4: One or zero steps completed.",
         "weight": 1.0,
-        "description": "LLM evaluates multi-step task completion"
+        "description": "MODEL evaluates multi-step task completion"
       }
     ],
     "max_turns": 8,

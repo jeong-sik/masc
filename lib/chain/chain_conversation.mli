@@ -56,10 +56,10 @@ val build_context_prompt : conversation_ctx -> string
 (** {1 Summarization} *)
 
 type exec_fn = model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> ?thinking:bool -> unit -> (string, string) result
-(** Type of LLM execution function for summarization *)
+(** Type of MODEL execution function for summarization *)
 
 val summarize_history : exec_fn:exec_fn -> conversation_ctx -> string
-(** Summarize history using LLM and compress context *)
+(** Summarize history using MODEL and compress context *)
 
 val maybe_summarize_and_rotate : exec_fn:exec_fn -> conversation_ctx -> unit
 (** Maybe summarize and rotate model if needed *)

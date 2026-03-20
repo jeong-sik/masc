@@ -7,23 +7,23 @@
 - **OAS Event_bus SSE bridge** — dashboard receives agent lifecycle events via SSE (#1581)
 - **Keeper token streaming** — real-time token streaming for keeper chat (#1577)
 - **`masc_agent_relations` tool** — proxy to Neo4j/GraphQL for agent collaboration network (#1561)
-- **`masc_llm_catalog` tool** — LLM endpoint discovery (#1535)
+- **`masc_model_catalog` tool** — MODEL endpoint discovery (#1535)
 - **Per-provider retry** — `Complete.complete_with_retry` in OAS (#1548)
 - **Provider-aware capacity** — cascade checks provider capacity before dispatch (#1541)
 - **Agent collaboration network** — dashboard shows collaboration graph and interests (#1542)
 
 ### Changed
-- **OAS-only LLM path** — eliminate custom LLM wrapper, all calls through `Llm_orchestration` (#1531, #1575)
-- **Remove global LLM semaphore** — per-provider concurrency instead (#1576)
+- **OAS-only MODEL path** — eliminate custom MODEL wrapper, all calls through `Model_orchestration` (#1531, #1575)
+- **Remove global MODEL semaphore** — per-provider concurrency instead (#1576)
 - **Remove OAS feature flags** — OAS is the only path (#1557)
 - **Remove perpetual_loop legacy** — `Perpetual_oas` is sole runtime (#1565)
 - **Centralize vendor model labels** — single resolution point (#1579)
-- **Llm_client to Agent_sdk.Types** — direct type usage (batches 1-2/4) (#1578, #1573)
+- **Model_client to Agent_sdk.Types** — direct type usage (batches 1-2/4) (#1578, #1573)
 - **Schema decomposition** — monolithic tool schemas into owning modules (-4739 LOC) (#1546)
 - **Remove 26 unreferenced modules** (-5,485 lines) (#1536)
 
 ### Fixed
-- **Keeper cascade routing** — route through `Llm_orchestration`, fix broken main build (#1582)
+- **Keeper cascade routing** — route through `Model_orchestration`, fix broken main build (#1582)
 - **C2 sentinel tag corruption** — protect from OAS `Merge_contiguous` + add `.mli` (#1540)
 - **Context scoring** — adapt to unified message type (#1554)
 - **Local-only cascade** — don't block when endpoints are down (#1563)
@@ -114,7 +114,7 @@
 
 ### Fixed
 - **HTTP session Hashtbl** — consolidate to single mutex-protected source (#1455)
-- **LLM exception in dm_intent** + done_delta nickname mismatch (#1460)
+- **MODEL exception in dm_intent** + done_delta nickname mismatch (#1460)
 
 ## [2.106.0] - 2026-03-18
 
@@ -128,7 +128,7 @@
 
 ### Changed
 - **Tool descriptions rewrite** — 300+ descriptions for agent discoverability (#1418, #1444)
-- **Delete `llm_transport.ml`** — move functions to proper homes (-159 LOC) (#1415)
+- **Delete `model_transport.ml`** — move functions to proper homes (-159 LOC) (#1415)
 - **Dashboard Final Fantasy aesthetic** — character-sheet CSS (#1419)
 - **Dashboard split** — `agents.ts` into `execution/` modules (#1420)
 - **Dashboard roster pages** + status transparency (#1403)
@@ -187,7 +187,7 @@
 - **Dashboard aggressive SWR caching** + pre-warm (#1311)
 - **Dashboard proactive cache** for `/operator`, `/mission`, `/execution` endpoints (#1369, #1374)
 - **Dashboard light mode for /execution** — 477KB/79s to ~30KB/<5s (#1365)
-- **Delete duplicate `llm_client_core`** + `llm_client_providers` (-1,316 LOC) (#1409)
+- **Delete duplicate `model_client_core`** + `model_client_providers` (-1,316 LOC) (#1409)
 
 ### Fixed
 - **Lock-free reads in FileSystemBackend** — 1000x dashboard speedup (#1332)
@@ -220,7 +220,7 @@
 ## [2.101.0] - 2026-03-17
 
 ### Added
-- **Code Swarm** — 3 MCP tools (`masc_code_swarm_plan`, `_verify`, `_merge`) for parallel code modification via team_session workers. Greedy bin-packing, LLM diff verification, auto worktree cleanup (#1292)
+- **Code Swarm** — 3 MCP tools (`masc_code_swarm_plan`, `_verify`, `_merge`) for parallel code modification via team_session workers. Greedy bin-packing, MODEL diff verification, auto worktree cleanup (#1292)
 
 ### Fixed
 - **PG connection exhaustion** — pool max_size 10→3, `MASC_PG_POOL_SIZE` env config (#1274)
@@ -232,11 +232,11 @@
 - **8 silent failures** surfaced with error logging (#1248)
 - **Dashboard stale-while-revalidate** — prevent server hang (#1251)
 - **4 flaky CI tests** — keeper audit FS fallback, TRPG bestiary data, lodge heartbeat source assertions (#1308)
-- **Lodge LLM path** — unify `smart_generate` to `Lodge_cascade.call`, remove hardcoded CLI rotation (#1308)
+- **Lodge MODEL path** — unify `smart_generate` to `Lodge_cascade.call`, remove hardcoded CLI rotation (#1308)
 
 ### Changed
 - **OAS agent_sdk** — upgrade to v0.40.0 (#1277)
-- **LLM model names** — remove hardcoded, use provider-level defaults (#1250)
+- **MODEL model names** — remove hardcoded, use provider-level defaults (#1250)
 
 ## [2.100.0] - 2026-03-16
 
@@ -247,7 +247,7 @@
 - **Build errors** — register split modules in dune, resolve type errors from mcp_server_eio split (#1229, #1239, #1243)
 - **CP cleanup** — O(n²) → Hashtbl, silent failure warning (#1218)
 - **Room syntax** — remove orphaned update_priority declaration (#1214)
-- **Deploy** — GLM-only LLM cascade config for Railway (#1232)
+- **Deploy** — GLM-only MODEL cascade config for Railway (#1232)
 
 ### Changed (God File Refactoring Phase 7-8)
 - **mcp_server_eio** — split into 11 focused sub-modules (#1213)
@@ -274,13 +274,13 @@
 
 ### Fixed
 - **Social system recovery** — sentinel auto-brief for governance deadlock, social eligibility relaxation, Standard+Consensus mode (#1179)
-- **QA AS1 critical+high bugs** — zombie detection, agent count, LLM permit, governance race condition, decision TTL, claim guard (#1196)
+- **QA AS1 critical+high bugs** — zombie detection, agent count, MODEL permit, governance race condition, decision TTL, claim guard (#1196)
 - **Cloudflare Rocket Loader** — `data-cfasync="false"` on dashboard script tags
 - **Exhaustive match** — `Provider.Custom_registered` in agent_swarm_runner
 
 ### Changed (God File Refactoring Campaign)
 - **keeper_turn** — split into 6 focused sub-modules: init, settings, handoff, context, metrics, response (#1199)
-- **keeper_execution** — split 2823 lines into keeper_exec_status, keeper_exec_tools, keeper_exec_llm, keeper_exec_social (#1200)
+- **keeper_execution** — split 2823 lines into keeper_exec_status, keeper_exec_tools, keeper_exec_model, keeper_exec_social (#1200)
 - **handle_keeper_msg** — extract internals to module-level functions (#1178)
 - **env_config** — extract 11 hardcoded values into env-configurable functions (#1197)
 - **catch-all handlers** — narrow with log_keeper_exn (#1173, #1174) and log_mcp_exn (#1177)
@@ -309,7 +309,7 @@
 - **room** — split `room.ml` into Room_state + Room_vote + Room_gc (#1124)
 - **dashboard** — split 1000+ line files into domain modules (#1117)
 - **operator** — extract pending_confirm and digest to dedicated modules (#1135)
-- **sentinel** — LLM-first governance sweep with threshold fallback (#1123)
+- **sentinel** — MODEL-first governance sweep with threshold fallback (#1123)
 - **team_session** — replace manual JSON converters with OAS SDK yojson (#1166)
 - **OAS** — bump to v0.24.0, remove oas_compat, extract magic numbers (#1116)
 - **OAS** — fix responsibility boundary violations at OAS interface (#1136)
@@ -351,19 +351,19 @@
 - `Agent_neo4j.cypher_query` type with `to_bolt_params`, `to_http_payload`, `to_shell_cmd`
 - `Json_util.require_string/int/float/bool` — `(value, string) result`-returning JSON helpers
 - `Progress.Tracker.assert_wired` — detects initialization ordering bugs at startup
-- `Env_config_runtime.Timeout` submodule (gcloud_auth, anthropic_api, openai_compat, llm_grace, graphql_query, keeper_status)
-- `Env_config_runtime.Llm_defaults` submodule (default_max_tokens, sse_retry_ms, log_truncation_len)
-- `Env_config_runtime.Neo4j/Voice/Mlx/Custom_llm/Network` submodules
+- `Env_config_runtime.Timeout` submodule (gcloud_auth, anthropic_api, openai_compat, model_grace, graphql_query, keeper_status)
+- `Env_config_runtime.Inference_defaults` submodule (default_max_tokens, sse_retry_ms, log_truncation_len)
+- `Env_config_runtime.Neo4j/Voice/Mlx/Custom_model/Network` submodules
 - 20 adversarial tests for Cypher escaping and parameter isolation
 
 ### Changed
 - `mcp_server_eio` walph context: `lazy` + `failwith` replaced with explicit `Result` type
 - `voice_bridge_eio`: 6 hardcoded URIs replaced with centralized `Voice.default_host/port`
-- `llm_client`: endpoint URLs and timeouts now env-configurable
+- `model_client`: endpoint URLs and timeouts now env-configurable
 - `thread_persist`: `is_localhost` expanded to full 127.0.0.0/8 coverage
 
 ### Fixed
-- `llm_client`: silenced exceptions now logged to stderr
+- `model_client`: silenced exceptions now logged to stderr
 - `escape_cypher_string`: handles backslash, unicode escape, null bytes (previously missed backslash)
 
 ## [2.89.0] - 2026-03-14
@@ -440,7 +440,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Generated Agent SDK Control Tools** — swarm-facing MASC control tools are now generated from shared contract metadata instead of hand-written wrappers
 - **Truthful Transport Mapping** — `tool_to_endpoint` now falls back to `/mcp` when no real REST route exists instead of advertising fake paths
 - **Keeper Core Module Split** — split keeper core modules for independent lifecycle management (#810)
-- **Default Model Alias** — LLM layer uses default model alias for simplified configuration (#813, #815)
+- **Default Model Alias** — MODEL layer uses default model alias for simplified configuration (#813, #815)
 - **Dashboard Proof Surface** — humanized proof surface in dashboard (#806)
 - **Global Local Output Budget** — llama runtime enforces global local output budget (#818)
 
@@ -453,7 +453,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.83.0] - 2026-03-11
 
 ### Added
-- **Gardener Signal Observation** — full signal-based observation with LLM-primary decision making for spawn/retire (#773)
+- **Gardener Signal Observation** — full signal-based observation with MODEL-primary decision making for spawn/retire (#773)
 - **CP Workload Templates** — `masc_operation_start` accepts workload templates and attached team sessions (#769)
 - **Voice Tools** — expose public voice tools for browser-based voice interaction (#775)
 - **Dashboard Tool Audit** — raw tool audit view in agent and keeper detail pages (#776)
@@ -464,9 +464,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Cascade Phase 3** — distributed-pattern modules (`auto_chain`, `walph`) migrated to `Lodge_cascade.call` (#772)
-- **Cascade Phase 4** — `auto_responder` LLM calls migrated to `Lodge_cascade.call` (#779)
+- **Cascade Phase 4** — `auto_responder` MODEL calls migrated to `Lodge_cascade.call` (#779)
 - **WebRTC Deduplication** — removed duplicated WebRTC code in favor of `ocaml-webrtc` library (#778)
-- **Ollama Runtime Removal** — removed Ollama runtime path, LLM calls go through `Lodge_cascade` only (#785)
+- **Ollama Runtime Removal** — removed Ollama runtime path, MODEL calls go through `Lodge_cascade` only (#785)
 - **Dashboard Utils Extraction** — deduplicated 5 utility functions from 12 files into `Dashboard_utils` module (#791)
 - **Transport Deps Injection** — Eio context passed via deps record instead of global singleton (#793)
 - **Keeper Resident Split** — split resident keepers from persistent agents for independent lifecycle (#799)
@@ -483,7 +483,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Server State Record Threading** — `net` threaded through `server_state` record, removing global references (P3a) (#768)
-- **Lodge Cascade Unification** — 8 call sites migrated to `Lodge_cascade.call` for consistent LLM dispatch (#766)
+- **Lodge Cascade Unification** — 8 call sites migrated to `Lodge_cascade.call` for consistent MODEL dispatch (#766)
 - **Mission Briefing Determinism** — briefing generation no longer depends on non-deterministic inputs (#764)
 - **Execution Surface** — session-first diagnostics with actor parameter passthrough (#757)
 
@@ -513,7 +513,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Karpathy Autoresearch Phase 2.5** — real autonomous experiment loop with expanded runtime control (#736)
 
 ### Changed
-- LLM runtime calls consolidated behind `Llm_client` abstraction (#741, #745, #746)
+- MODEL runtime calls consolidated behind `Model_client` abstraction (#741, #745, #746)
 - Contract truth and shared runtime context restored across dashboard/server flows (#743)
 - `tool_keeper.ml` and `tool_trpg.ml` split into smaller focused modules (#744)
 - Runtime singleton state collapsed into shared context (#749)
@@ -530,11 +530,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.79.0] - 2026-03-11
 
 ### Added
-- **Mission Briefing Interactive UI** — full panel with LLM cascade reorder, async SWR (#734, #720, #701)
+- **Mission Briefing Interactive UI** — full panel with MODEL cascade reorder, async SWR (#734, #720, #701)
 - **Live Monitor Tab** — 3-panel real-time swarm/agent view (#688)
 - **Command War Room** — centralized operator console (#681)
 - **Board Gardener Keeper** — force task ops + zombie cascade (#666)
-- **Sentinel Default Resident** — LLM judgment layer for board/task/keeper consumers (#699, #709)
+- **Sentinel Default Resident** — MODEL judgment layer for board/task/keeper consumers (#699, #709)
 - **Intent-Backed Predictive Control** — CPv2 intent forecast + correction loop (#668)
 - **Swarm Live Run** — `masc_swarm_live_run` MCP tool for inline benchmark (#689)
 - **64-Agent Structural Gaps** — checkpoint, goal loop, MDAL swarm (#693)
@@ -544,11 +544,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mode Tool-Category Mapping** — rewrite for effective mode filtering (#721)
 - **Swarm Role-Based Tuning** — per-role temperature and max_tokens in agent_spec (#719)
 - **Keeper Continuity Validation** — harness-level keeper handoff checks (#715)
-- **LLM-Based Semantic Scoring** — capability-match upgrade (#674)
+- **MODEL-Based Semantic Scoring** — capability-match upgrade (#674)
 - **Dashboard Semantic Layer Registry** — typed layer abstraction (#667)
 - **Dashboard Visibility and Board Hygiene** — scoped visibility + board cleanup (#690)
 - **Swarm Session Visibility** — dashboard swarm session panel (#698)
-- **Heuristic LLM Scoring** — heuristic modules enhanced with LLM layer (#687)
+- **Heuristic MODEL Scoring** — heuristic modules enhanced with MODEL layer (#687)
 
 ### Changed
 - **Command Plane Decomposition** — `command_plane_v2.ml` (6791 lines) split into 7 focused modules (#672)
@@ -557,7 +557,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Normalize Helpers** consolidated into `common/normalize.ts` shared module (#727)
 - Dashboard components consolidated, dead code removed (#722)
 - Planning tab hierarchy inverted — tasks first, empty features collapsed (#712)
-- Sentinel heuristic fallback removed in favor of LLM-driven consumers (#714)
+- Sentinel heuristic fallback removed in favor of MODEL-driven consumers (#714)
 - Ollama implicit fallback bias removed — explicit provider selection (#694)
 - Silent error cleanup and code hygiene across modules (#700)
 - Dashboard and workspace runtime config encapsulated (#673)
@@ -575,7 +575,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - P0 exception narrowing and module extraction (#665)
 - Eio.Mutex for fiber-safe SSE client registry (#683)
 - Agent.create calls adapted to options-record API (#682)
-- `json_int_opt` for LLM token parse failures (#707)
+- `json_int_opt` for MODEL token parse failures (#707)
 - Agent SDK aligned with latest pinned version (#708)
 - Dashboard visibility semantics tightened (#697)
 - Managed lane kept visible for live alerts (#671)
@@ -595,7 +595,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mission Dashboard Flow** — dashboard mission panel with visual workflow (#656)
 - **Proof Criteria Unit Tests** — shared harness framework for team session proofs (#655)
 - **Room Strategy Toggles** — room-level strategy and speculation controls (#634)
-- **Provider-Native Runtime Registry** — adapter layer for LLM runtime selection (#629, #631)
+- **Provider-Native Runtime Registry** — adapter layer for MODEL runtime selection (#629, #631)
 - **Swarm RISC ISA** — Phase 1-4 instruction set, pipeline, MESI cache, OoO execution, speculative execution with MCTS (#593, #608)
 - **Command Plane v2** — absorbed native chain plane into MASC with search fabric (#597, #594)
 - **Local64 Runtime Pool** — 64-worker runtime with smoke harness (#586)
@@ -607,7 +607,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Coding-task search brain set as CPv2 default (#658)
 - Operator digest now surfaces command-plane signals (#635)
 - Dashboard monitoring aligned with portable env defaults (#642)
-- Runtime LLM cascade helpers unified (#640)
+- Runtime MODEL cascade helpers unified (#640)
 - Tool args extraction refactored, eliminating ~120 duplicate helpers (#621)
 - Non-tool JSON helpers delegated to Safe_ops (#622)
 
@@ -701,7 +701,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Keeper Autonomy Engine** — Karpathy Autonomy Slider (L1-L5) for keeper agents with goal-driven autonomous action (#450)
 - **Generator-Verifier Loop** — Capable model generates action plan, cheap model verifies before execution (#450)
-- **Execution Engine** — Approved plans auto-execute via LLM cascade + sandboxed tool_loop with Eval Gate (#450)
+- **Execution Engine** — Approved plans auto-execute via MODEL cascade + sandboxed tool_loop with Eval Gate (#450)
 - **L2 Board Suggestions** — L2_Suggestive keepers post goal-based suggestions to Board automatically (#450)
 - **Keeper MCP Tools** — `masc_keeper_autonomy`, `masc_keeper_goals`, `masc_keeper_trajectory`, `masc_keeper_eval` (#450)
 - **Goals Dashboard Tab** — Horizon-grouped goals with priority/status filters and progress tracking (#450)
@@ -720,7 +720,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Keeper SSE Events** — Emit SSE events for heartbeat, guardrail, compaction, and handoff lifecycle (#382)
 - **Keeper Monitoring Dashboard** — Health alerts, metrics endpoint, and context sparklines (#375, #373)
 - **ElevenLabs TTS Proxy Endpoint** — `/tts/proxy` route for streaming TTS audio in TRPG sessions (#387)
-- **Eio.Semaphore Concurrency Limiter** — Rate-limit LLM cascade calls via Eio semaphore (#395)
+- **Eio.Semaphore Concurrency Limiter** — Rate-limit MODEL cascade calls via Eio semaphore (#395)
 - **200k+ GLM Spawn Cascade Policy** — Enforce minimum context window for GLM agent spawns (#388)
 - **TRPG Mid-Join Hard Gate** — Contribution-ledger and join-window gating for mid-session joins (#413)
 - **TRPG Structured Actions** — AI-driven decisive game endings via structured action schema (#414, #408)
@@ -853,7 +853,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **TRPG Actor Lease Protocol** — Actor spawn/claim/release lifecycle with lease management (#173)
 - **Social Board Interactions** — Vote and comment support for Viewer Lodge Social Board (#172)
-- **GLM Cloud Load Balancer** — Multi-model load balancer pool for GLM Cloud LLM provider (#170)
+- **GLM Cloud Load Balancer** — Multi-model load balancer pool for GLM Cloud MODEL provider (#170)
 - **TRPG Fast Keeper Cascade** — Fast keeper routing with new game flow bootstrap (#169)
 - **TRPG Dashboard Actions** — Guide dashboard with next-action flow for session management (#166)
 - **TRPG Unique Keeper Routing** — Enforce unique keeper routing and session visibility (#165)
@@ -864,7 +864,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TRPG/Viewer UX** — Fast keeper routing, clean session lifecycle, debug toggle (#171)
 
 ### Fixed
-- LLM client now distinguishes curl timeout (exit 28) from empty API response, with connection-refused detection (#174)
+- MODEL client now distinguishes curl timeout (exit 28) from empty API response, with connection-refused detection (#174)
 - Viewer narrative stream rendered as text-only to prevent HTML injection (#168)
 - Viewer TRPG DOM panel bindings restored after refactor (#167)
 - TRPG round-run UX hardened with language flow improvements (#162)
@@ -926,7 +926,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Perpetual Agent Runtime** — Infinite context system for 24h+ autonomous agent operation
-  - `llm_client.ml`: Vendor-agnostic LLM caller (Ollama, Claude, Gemini, GLM Cloud, OpenRouter) with cascade fallback
+  - `model_client.ml`: Vendor-agnostic MODEL caller (Ollama, Claude, Gemini, GLM Cloud, OpenRouter) with cascade fallback
   - `context_manager.ml`: 3-tier memory (working → session → semantic) with 4 compaction strategies
   - `verifier.ml`: Low-cost model action verification (PASS/WARN/FAIL)
   - `succession.ml`: Cross-model DNA extraction, hydration, and generation tracking
@@ -975,10 +975,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Candidates promotion flow (`masc_library_promote`)
 
 ### Changed
-- **Remove llm-mcp dependency** (#78): Direct API calls replace llm-mcp proxy
+- **Remove legacy proxy dependency** (#78): Direct API calls replace the legacy proxy
   - `Llm_direct.dispatch` for Z.ai GLM, Ollama, Claude CLI
-  - `llm_client_eio.ml` deprecated (kept for backward compatibility)
-  - `Endpoints.llm_mcp_url` deprecated, scheduled for v3.0 removal
+  - `model_client_eio.ml` deprecated (kept for backward compatibility)
+  - `Endpoints.model_mcp_url` deprecated, scheduled for v3.0 removal
 
 ## [2.58.0] - 2026-02-05
 
@@ -994,9 +994,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.57.0] - 2026-02-05
 
 ### Added
-- **A2A Worker Pattern**: Delegated LLM calls for Soul + Body architecture
-  - `MASC_DELEGATE_LLM=true` emits `heartbeat_task` events
-  - Workers subscribe and invoke local LLM (Ollama)
+- **A2A Worker Pattern**: Delegated MODEL calls for Soul + Body architecture
+  - `MASC_DELEGATE_INFERENCE=true` emits `heartbeat_task` events
+  - Workers subscribe and invoke local MODEL (Ollama)
 
 ## [2.56.3] - 2026-02-05
 
@@ -1071,7 +1071,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.48.0] - 2026-02-03
 
 ### Added
-- **Agent Trace**: Prompt tuning visibility — trace LLM calls with inputs/outputs
+- **Agent Trace**: Prompt tuning visibility — trace MODEL calls with inputs/outputs
 - **Thompson Sampling**: Bandit-based agent selection for Lodge heartbeat
   - Exploit/explore balance via Beta distribution
   - Stats persist per cluster (`base_path/lodge_agent_stats.json`)
@@ -1103,7 +1103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Eio-native process execution**: Replace `run_in_systhread` / `run_in_systhread_with_status` with `Process_eio.run` / `run_with_status` using global `proc_mgr`/`clock` refs
-  - `lodge_heartbeat`, `tool_lodge`, `auto_responder`, `lodge_memory`, `llm_direct` migrated
+  - `lodge_heartbeat`, `tool_lodge`, `auto_responder`, `lodge_memory`, `model_direct` migrated
   - Sleep calls in `tool_lodge` migrated from `Eio_unix.run_in_systhread (Unix.sleepf)` to `Eio.Time.sleep`
   - Removed: `read_fd_with_timeout`, `reap_child`, `run_in_systhread`, `run_in_systhread_with_status` (~90 lines)
   - `Process_eio.init ~proc_mgr ~clock` called from `main_eio.ml` at startup
@@ -1123,7 +1123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **CLAUDE.md Auth Pattern**: `X-API-Key` → `Authorization: Bearer` (코드와 문서 동기화)
 - **UTF-8 Truncation**: `utf8_truncate` 함수 추가 — 한국어 3바이트 문자 중간 절단 방지
-- **LLM Cascade**: Ollama(qwen3 thinking mode 버그) → GLM-4.7 Cloud로 교체
+- **MODEL Cascade**: Ollama(qwen3 thinking mode 버그) → GLM-4.7 Cloud로 교체
 - **Response Parser**: `ACTION:` 키워드를 줄 시작뿐 아니라 어디서든 탐색
 - **GraphQL Auth**: 셸 `source ~/.zshenv` 의존 제거 → `Sys.getenv_opt` 직접 사용
 - **Buffer Truncation**: `run_shell_line` 버퍼 500→4000, 개행 보존
@@ -1135,10 +1135,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.34.0] - 2026-02-02
 
 ### Changed
-- **LLM-based Wake Decision**: Replace heuristic scoring with LLM judgment
-  - `should_wake_llm()`: Ask LLM "should this agent wake?" with context
+- **MODEL-based Wake Decision**: Replace heuristic scoring with MODEL judgment
+  - `should_wake_model()`: Ask MODEL "should this agent wake?" with context
   - Removed: matching_weight (0.7), random_weight (0.1), wake_threshold (0.5)
-  - Agents now wake based on LLM's YES/NO decision
+  - Agents now wake based on MODEL's YES/NO decision
 
 - **Improved Prompts**: Prevent repetitive content
   - Explicit rules: no abstract words (패턴, 맥박, 연결, 발견)
@@ -1171,7 +1171,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Broadcast Content-Aware Routing**: Intelligent routing of broadcast messages to relevant agents
   - `agent_specialties`: Keyword mapping per agent (dreamer, skeptic, historian, pragmatist, connector)
-  - Hybrid routing: Fast keyword matching + LLM semantic analysis fallback
+  - Hybrid routing: Fast keyword matching + MODEL semantic analysis fallback
   - `handle_broadcast`: Route to relevant agents and generate contextual responses
   - `poll_and_handle_broadcasts`: Poll for new broadcasts during heartbeat loop
 
@@ -1208,11 +1208,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Non-blocking Shell Execution**: All `Unix.open_process_in` and `Unix.system` calls now wrapped in `Eio_unix.run_in_systhread`
-  - Prevents HTTP server blocking during LLM calls, Neo4j queries, and external commands
+  - Prevents HTTP server blocking during MODEL calls, Neo4j queries, and external commands
   - Affected modules: `tool_lodge.ml`, `auto_responder.ml`, `auto_recall.ml`, `room_git.ml`, `room_worktree.ml`, `notify.ml`, `mcp_server_eio.ml`, `tool_cost.ml`
 - **Sleep Non-blocking**: All `Unix.sleepf` calls wrapped to avoid blocking Eio event loop
   - Affected modules: `backend_eio.ml`, `room_utils.ml`, `session.ml`, `bounded.ml`
-- **Dashboard Performance**: Fixed intermittent 40s delays caused by blocking LLM/Neo4j calls in orchestrator
+- **Dashboard Performance**: Fixed intermittent 40s delays caused by blocking MODEL/Neo4j calls in orchestrator
 
 ### Technical Details
 - Pattern: `Eio_unix.run_in_systhread (fun () -> Unix.open_process_in ...)`
@@ -1224,12 +1224,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Shutdown Hooks**: New `shutdown_hooks.ml` module for centralized graceful shutdown
 - **Cleanup Loops**: Auto-cleanup for rate limit buckets and MCP sessions
-- **Env Config**: `MASC_LLM_TIMEOUT_SEC`, `MASC_RATE_LIMIT_*`
+- **Env Config**: timeout and rate-limit knobs
 
 ### Fixed
 - **SSE Zombie Prevention**: Snapshot-based broadcast + failed client auto-removal
 - **Atomic Race Condition**: `Atomic.fetch_and_add` in sse.ml (event/client counters)
-- **Timeout Guards**: External memory/LLM calls now have configurable timeouts
+- **Timeout Guards**: External memory/MODEL calls now have configurable timeouts
 - **Subscriptions**: O(1) Queue-based notifications (was O(n) List append)
 - **Orchestrator**: Cancellation flag support for graceful loop termination
 
@@ -1284,9 +1284,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.14.1] - 2026-02-02
 
 ### Added
-- **CLI LLM Rotation**: Gemini ↔ Claude CLI rotation (avoid Ollama overload)
-- **translate_to_korean**: English LLM response → Korean translation
-- **extract_post_content**: Clean content extraction (prevent LLM output pollution)
+- **CLI MODEL Rotation**: Gemini ↔ Claude CLI rotation (avoid Ollama overload)
+- **translate_to_korean**: English MODEL response → Korean translation
+- **extract_post_content**: Clean content extraction (prevent MODEL output pollution)
 - **English persona prompts**: Better instruction following
 
 ### Fixed
@@ -1295,9 +1295,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.14.0] - 2026-02-02
 
 ### Added
-- **LLM-MCP GLM Fallback**: Cloud GLM API via llm-mcp (200K context, no VRAM)
-  - `llm_mcp_glm`: Calls Z.ai cloud API through llm-mcp server
-  - `smart_generate`: Updated fallback chain (CLI → LLM-MCP → Cloud GLM)
+- **Legacy GLM Proxy Fallback**: Cloud GLM API via the legacy proxy server (200K context, no VRAM)
+  - `legacy_glm_proxy`: Calls Z.ai cloud API through the legacy proxy server
+  - `smart_generate`: Updated fallback chain (CLI → proxy fallback → Cloud GLM)
 - **Board Sorting**: `masc_board_list` now supports `sort_by` param
   - `hot` (default): Engagement-based ranking
   - `recent`: By creation time
@@ -1359,7 +1359,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.6.0] - 2026-01-30
 
 ### Changed
-- **Protocol Standardisation**: Updated client logic to always request standard JSON (Verbose) from llm-mcp.
+- **Protocol Standardisation**: Updated client logic to always request standard JSON (Verbose) from the legacy proxy server.
 
 ### Removed
 - **Manual Locking**: Removed `masc_lock` and `masc_unlock` tools.

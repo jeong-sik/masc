@@ -27,7 +27,7 @@ let make_tools
     Keeper_exec_tools.keeper_allowed_tool_names meta
   in
   let tool_defs =
-    Keeper_exec_tools.keeper_allowed_llm_tools meta
+    Keeper_exec_tools.keeper_allowed_model_tools meta
   in
   List.filter_map (fun (td : Types.tool_schema) ->
     if List.mem td.name allowed_names then

@@ -12,8 +12,8 @@ open Chain_types
 let dummy_node id nt =
   { id; node_type = nt; input_mapping = []; output_key = None; depends_on = None }
 
-let dummy_llm () =
-  Llm { model = "m"; system = None; prompt = "p"; timeout = None; tools = None;
+let dummy_model () =
+  Model { model = "m"; system = None; prompt = "p"; timeout = None; tools = None;
         prompt_ref = None; prompt_vars = []; thinking = false }
 
 let dummy_chain nodes =
@@ -399,13 +399,13 @@ let test_monad_laws () =
 
 let test_recoverable () =
   let open Chain_error in
-  check bool "gemini sync" true (is_recoverable (Llm (GeminiError GeminiFunctionCallSync)));
-  check bool "gemini rate" true (is_recoverable (Llm (GeminiError GeminiRateLimit)));
-  check bool "claude rate" true (is_recoverable (Llm (ClaudeError ClaudeRateLimit)));
-  check bool "codex rate" true (is_recoverable (Llm (CodexError CodexRateLimit)));
+  check bool "gemini sync" true (is_recoverable (Model (GeminiError GeminiFunctionCallSync)));
+  check bool "gemini rate" true (is_recoverable (Model (GeminiError GeminiRateLimit)));
+  check bool "claude rate" true (is_recoverable (Model (ClaudeError ClaudeRateLimit)));
+  check bool "codex rate" true (is_recoverable (Model (CodexError CodexRateLimit)));
   check bool "process timeout" true (is_recoverable (Process (ProcessTimeout 30)));
   check bool "network" true (is_recoverable (Io (NetworkError "timeout")));
-  check bool "gemini ctx" false (is_recoverable (Llm (GeminiError GeminiContextTooLong)));
+  check bool "gemini ctx" false (is_recoverable (Model (GeminiError GeminiContextTooLong)));
   check bool "internal" false (is_recoverable (Internal "bug"))
 
 (* ============================================================
@@ -415,21 +415,21 @@ let test_recoverable () =
 let test_to_string_all () =
   let open Chain_error in
   let errors = [
-    Llm (GeminiError GeminiFunctionCallSync);
-    Llm (GeminiError GeminiContextTooLong);
-    Llm (GeminiError GeminiRateLimit);
-    Llm (GeminiError GeminiAuth);
-    Llm (GeminiError (GeminiUnknown "test"));
-    Llm (ClaudeError ClaudeContextTooLong);
-    Llm (ClaudeError ClaudeRateLimit);
-    Llm (ClaudeError ClaudeAuth);
-    Llm (ClaudeError ClaudeTimeout);
-    Llm (ClaudeError (ClaudeUnknown "test"));
-    Llm (CodexError CodexRateLimit);
-    Llm (CodexError CodexAuth);
-    Llm (CodexError CodexSandboxViolation);
-    Llm (CodexError CodexTimeout);
-    Llm (CodexError (CodexUnknown "test"));
+    Model (GeminiError GeminiFunctionCallSync);
+    Model (GeminiError GeminiContextTooLong);
+    Model (GeminiError GeminiRateLimit);
+    Model (GeminiError GeminiAuth);
+    Model (GeminiError (GeminiUnknown "test"));
+    Model (ClaudeError ClaudeContextTooLong);
+    Model (ClaudeError ClaudeRateLimit);
+    Model (ClaudeError ClaudeAuth);
+    Model (ClaudeError ClaudeTimeout);
+    Model (ClaudeError (ClaudeUnknown "test"));
+    Model (CodexError CodexRateLimit);
+    Model (CodexError CodexAuth);
+    Model (CodexError CodexSandboxViolation);
+    Model (CodexError CodexTimeout);
+    Model (CodexError (CodexUnknown "test"));
     Chain (ChainParseError "test");
     Chain (ChainCompileError "test");
     Chain (ChainExecutionError "test");
@@ -465,9 +465,9 @@ let test_to_string_all () =
 let test_severity () =
   let open Chain_error in
   let cases = [
-    (Llm (GeminiError GeminiFunctionCallSync), Warning);
-    (Llm (GeminiError GeminiRateLimit), Warning);
-    (Llm (ClaudeError ClaudeAuth), Error);
+    (Model (GeminiError GeminiFunctionCallSync), Warning);
+    (Model (GeminiError GeminiRateLimit), Warning);
+    (Model (ClaudeError ClaudeAuth), Error);
     (Chain (ChainParseError "p"), Warning);
     (Chain ChainCycleDetected, Error);
     (Mcp (McpMethodNotFound "m"), Warning);
@@ -584,10 +584,10 @@ let test_context_mode_default () =
    ============================================================ *)
 
 let test_node_type_name_all () =
-  let inner = dummy_node "x" (dummy_llm ()) in
+  let inner = dummy_node "x" (dummy_model ()) in
   let chain = dummy_chain [inner] in
   let types = [
-    (dummy_llm (), "llm"); (Tool { name = "t"; args = `Null }, "tool");
+    (dummy_model (), "model"); (Tool { name = "t"; args = `Null }, "tool");
     (Pipeline [], "pipeline"); (Fanout [], "fanout");
     (Quorum { consensus = Majority; nodes = []; weights = [] }, "quorum");
     (Gate { condition = "c"; then_node = inner; else_node = None }, "gate");
@@ -628,12 +628,12 @@ let test_node_type_name_all () =
    ============================================================ *)
 
 let test_make_chain_fn () =
-  let n = dummy_node "n" (dummy_llm ()) in
+  let n = dummy_node "n" (dummy_model ()) in
   let c = make_chain ~id:"c1" ~nodes:[n] ~output:"n" () in
   check string "id" "c1" c.id
 
-let test_make_llm_node () =
-  let n = make_llm_node ~id:"l1" ~model:"gemini" ~prompt:"hi" () in
+let test_make_model_node () =
+  let n = make_model_node ~id:"l1" ~model:"gemini" ~prompt:"hi" () in
   check string "id" "l1" n.id
 
 let test_make_tool_node () =
@@ -653,12 +653,12 @@ let test_make_quorum () =
   check string "id" "q1" n.id
 
 let test_make_threshold () =
-  let inner = dummy_node "i" (dummy_llm ()) in
+  let inner = dummy_node "i" (dummy_model ()) in
   let n = make_threshold ~id:"th1" ~metric:"score" ~operator:Gte ~value:0.5 ~input_node:inner () in
   check string "id" "th1" n.id
 
 let test_make_goal_driven () =
-  let inner = dummy_node "i" (dummy_llm ()) in
+  let inner = dummy_node "i" (dummy_model ()) in
   let n = make_goal_driven ~id:"gd1" ~goal_metric:"m" ~goal_operator:Gte ~goal_value:0.9
       ~action_node:inner ~measure_func:"f" ~max_iterations:5 () in
   check string "id" "gd1" n.id
@@ -668,12 +668,12 @@ let test_make_evaluator () =
   check string "id" "ev1" n.id
 
 let test_make_retry () =
-  let inner = dummy_node "i" (dummy_llm ()) in
+  let inner = dummy_node "i" (dummy_model ()) in
   let n = make_retry ~id:"r1" ~node:inner ~max_attempts:3 () in
   check string "id" "r1" n.id
 
 let test_make_fallback () =
-  let inner = dummy_node "i" (dummy_llm ()) in
+  let inner = dummy_node "i" (dummy_model ()) in
   let n = make_fallback ~id:"fb1" ~primary:inner ~fallbacks:[] in
   check string "id" "fb1" n.id
 
@@ -682,7 +682,7 @@ let test_make_race () =
   check string "id" "rc1" n.id
 
 let test_make_feedback_loop () =
-  let inner = dummy_node "i" (dummy_llm ()) in
+  let inner = dummy_node "i" (dummy_model ()) in
   let n = make_feedback_loop ~id:"fl1" ~generator:inner
       ~evaluator_config:{ scoring_func = "f"; scoring_prompt = None; select_strategy = Best }
       ~improver_prompt:"p" ~max_iterations:3 ~score_threshold:0.7 () in
@@ -701,16 +701,16 @@ let test_make_adapter () =
    ============================================================ *)
 
 let test_count_parallel_groups_leaf () =
-  let n = dummy_node "n" (dummy_llm ()) in
+  let n = dummy_node "n" (dummy_model ()) in
   check int "leaf" 0 (count_parallel_groups n)
 
 let test_count_parallel_groups_fanout () =
-  let inner = dummy_node "i" (dummy_llm ()) in
+  let inner = dummy_node "i" (dummy_model ()) in
   let n = dummy_node "n" (Fanout [inner; inner]) in
   check int "fanout" 1 (count_parallel_groups n)
 
 let test_count_parallel_groups_chain () =
-  let inner = dummy_node "i" (dummy_llm ()) in
+  let inner = dummy_node "i" (dummy_model ()) in
   let n = dummy_node "n" (Fanout [inner; inner]) in
   let c = dummy_chain [n] in
   check int "chain" 1 (count_chain_parallel_groups c)
@@ -820,8 +820,8 @@ let test_context_mode_yojson () =
      | Error e -> fail e)
   ) [CM_None; CM_Summary; CM_Full]
 
-let test_node_type_yojson_llm () =
-  let nt = dummy_llm () in
+let test_node_type_yojson_model () =
+  let nt = dummy_model () in
   let j = node_type_to_yojson nt in
   (match node_type_of_yojson j with
    | Ok _ -> ()
@@ -835,10 +835,10 @@ let test_node_type_yojson_tool () =
    | Error e -> fail e)
 
 let test_node_type_yojson_all () =
-  let inner = dummy_node "x" (dummy_llm ()) in
+  let inner = dummy_node "x" (dummy_model ()) in
   let chain = dummy_chain [inner] in
   let types = [
-    dummy_llm ();
+    dummy_model ();
     Tool { name = "t"; args = `Null };
     Pipeline [inner]; Fanout [inner];
     Quorum { consensus = Majority; nodes = [inner]; weights = [("x", 1.0)] };
@@ -883,7 +883,7 @@ let test_node_type_yojson_all () =
   ) types
 
 let test_node_yojson () =
-  let n = { (dummy_node "n1" (dummy_llm ())) with
+  let n = { (dummy_node "n1" (dummy_model ())) with
             input_mapping = [("k", "v")]; output_key = Some "out"; depends_on = Some ["d1"] } in
   let j = node_to_yojson n in
   (match node_of_yojson j with
@@ -891,7 +891,7 @@ let test_node_yojson () =
    | Error e -> fail e)
 
 let test_chain_yojson () =
-  let n = dummy_node "n1" (dummy_llm ()) in
+  let n = dummy_node "n1" (dummy_model ()) in
   let c = { (dummy_chain [n]) with
             name = Some "test"; description = Some "desc"; version = Some "1.0";
             input_schema = Some (`Assoc []); output_schema = Some (`Assoc []);
@@ -903,7 +903,7 @@ let test_chain_yojson () =
 
 let test_trace_entry_yojson () =
   let te : trace_entry = {
-    node_id = "n1"; node_type_name = "llm";
+    node_id = "n1"; node_type_name = "model";
     start_time = 1.0; end_time = 2.0;
     status = `Success; output_preview = Some "out"; error = None
   } in
@@ -931,7 +931,7 @@ let test_chain_result_yojson () =
    | Error e -> fail e)
 
 let test_execution_plan_yojson () =
-  let n = dummy_node "n1" (dummy_llm ()) in
+  let n = dummy_node "n1" (dummy_model ()) in
   let c = dummy_chain [n] in
   let ep : execution_plan = {
     chain = c; execution_order = ["n1"]; parallel_groups = [["n1"]]; depth = 1
@@ -982,10 +982,10 @@ let test_evaluator_result_yojson () =
    ============================================================ *)
 
 let test_node_json_all_types () =
-  let inner = dummy_node "x" (dummy_llm ()) in
+  let inner = dummy_node "x" (dummy_model ()) in
   let chain = dummy_chain [inner] in
   let nodes = [
-    dummy_node "llm" (Llm { model = "m"; system = Some "sys"; prompt = "p"; timeout = Some 30;
+    dummy_node "model" (Model { model = "m"; system = Some "sys"; prompt = "p"; timeout = Some 30;
                              tools = Some (`List [`String "t"]); prompt_ref = Some "ref";
                              prompt_vars = [("k","v")]; thinking = true });
     dummy_node "tool" (Tool { name = "srv:method"; args = `Assoc [("x", `Int 1)] });
@@ -1058,21 +1058,21 @@ let test_node_json_all_types () =
 
 let test_chain_error_yojson_all () =
   let errors : Chain_error.t list = [
-    Llm (GeminiError GeminiFunctionCallSync);
-    Llm (GeminiError GeminiContextTooLong);
-    Llm (GeminiError GeminiRateLimit);
-    Llm (GeminiError GeminiAuth);
-    Llm (GeminiError (GeminiUnknown "test"));
-    Llm (ClaudeError ClaudeContextTooLong);
-    Llm (ClaudeError ClaudeRateLimit);
-    Llm (ClaudeError ClaudeAuth);
-    Llm (ClaudeError ClaudeTimeout);
-    Llm (ClaudeError (ClaudeUnknown "test"));
-    Llm (CodexError CodexRateLimit);
-    Llm (CodexError CodexAuth);
-    Llm (CodexError CodexSandboxViolation);
-    Llm (CodexError CodexTimeout);
-    Llm (CodexError (CodexUnknown "test"));
+    Model (GeminiError GeminiFunctionCallSync);
+    Model (GeminiError GeminiContextTooLong);
+    Model (GeminiError GeminiRateLimit);
+    Model (GeminiError GeminiAuth);
+    Model (GeminiError (GeminiUnknown "test"));
+    Model (ClaudeError ClaudeContextTooLong);
+    Model (ClaudeError ClaudeRateLimit);
+    Model (ClaudeError ClaudeAuth);
+    Model (ClaudeError ClaudeTimeout);
+    Model (ClaudeError (ClaudeUnknown "test"));
+    Model (CodexError CodexRateLimit);
+    Model (CodexError CodexAuth);
+    Model (CodexError CodexSandboxViolation);
+    Model (CodexError CodexTimeout);
+    Model (CodexError (CodexUnknown "test"));
     Chain (ChainParseError "test");
     Chain (ChainCompileError "test");
     Chain (ChainExecutionError "test");
@@ -1234,7 +1234,7 @@ let () =
     ];
     "Chain_types.make_helpers", [
       test_case "make_chain" `Quick test_make_chain_fn;
-      test_case "make_llm_node" `Quick test_make_llm_node;
+      test_case "make_model_node" `Quick test_make_model_node;
       test_case "make_tool_node" `Quick test_make_tool_node;
       test_case "make_pipeline" `Quick test_make_pipeline;
       test_case "make_fanout" `Quick test_make_fanout;
@@ -1266,7 +1266,7 @@ let () =
     "yojson_confidence_level", [test_case "roundtrip" `Quick test_confidence_level_yojson];
     "yojson_context_mode", [test_case "roundtrip" `Quick test_context_mode_yojson];
     "yojson_node_type", [
-      test_case "llm" `Quick test_node_type_yojson_llm;
+      test_case "model" `Quick test_node_type_yojson_model;
       test_case "tool" `Quick test_node_type_yojson_tool;
       test_case "all" `Quick test_node_type_yojson_all;
     ];

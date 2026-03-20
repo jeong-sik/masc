@@ -9,19 +9,19 @@
       "nodes": [
         {
           "id": "candidate_claude",
-          "type": "llm",
+          "type": "model",
           "model": "claude",
           "prompt": "## MANTRA Developer (Claude)\n\nRefactor this code following best practices:\n\n```\n{{input.code}}\n```\n\nReview feedback:\n{{input.feedback}}\n\nProvide:\n1. Refactored code\n2. Brief explanation of changes\n3. Confidence score (0.0-1.0)"
         },
         {
           "id": "candidate_gemini",
-          "type": "llm",
+          "type": "model",
           "model": "gemini",
           "prompt": "## MANTRA Developer (Gemini)\n\nRefactor this code with a different approach:\n\n```\n{{input.code}}\n```\n\nReview feedback:\n{{input.feedback}}\n\nFocus on:\n- Performance optimization\n- Type safety\n- Edge case handling\n\nProvide refactored code and confidence score."
         },
         {
           "id": "candidate_codex",
-          "type": "llm",
+          "type": "model",
           "model": "codex",
           "prompt": "## MANTRA Developer (Codex)\n\nRefactor with minimal changes:\n\n```\n{{input.code}}\n```\n\nReview feedback:\n{{input.feedback}}\n\nPrinciple: Smallest change that addresses all feedback.\nProvide refactored code and confidence score."
         }
@@ -64,11 +64,11 @@
       "goal_operator": "gte",
       "goal_value": 0.85,
       "max_iterations": 3,
-      "measure_func": "llm_judge",
+      "measure_func": "model_judge",
       "measure_prompt": "Score this code 0.0-1.0 for production readiness",
       "action_node": {
         "id": "repairer",
-        "type": "llm",
+        "type": "model",
         "model": "claude",
         "prompt": "## MANTRA Repairer (Iteration {{iteration}}/{{max_iterations}})\n\nCurrent score: {{progress}}\nTarget: 0.85\n\nCode to repair:\n```\n{{simulation.best.code}}\n```\n\nPrevious feedback:\n{{previous_feedback}}\n\nFix the remaining issues. Focus on:\n{{step:Critical bugs first,Code quality improvements,Edge cases and error handling}}"
       },

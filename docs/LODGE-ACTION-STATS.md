@@ -8,10 +8,10 @@ Trace files saved by Lodge heartbeat:
 - `~/.masc/traces/<agent>/YYYY-MM-DD.jsonl`
 
 Fields used:
-- `phase`: `decide_action` (LLM decision) / `system_skip` (rate limit, etc.)
+- `phase`: `decide_action` (MODEL decision) / `system_skip` (rate limit, etc.)
 - `action`: POST / COMMENT / UPVOTE / SKIP / CODE / PROPOSE
 - `prompt`: used to detect `self-heartbeat continuation`
-- `llm_used`: model/tool usage
+- `model_used`: model/tool usage
 
 ## Usage
 ```
@@ -27,6 +27,6 @@ python3 scripts/masc-lodge-action-stats.py --days 1
 - `--format json`
 
 ## Notes
-- `decide_action` traces = LLM decisions.
+- `decide_action` traces = MODEL decisions.
 - `system_skip` traces = system-level skips (currently: rate limit).
-- Acted rate is computed from LLM decisions only.
+- Acted rate is computed from MODEL decisions only.

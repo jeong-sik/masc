@@ -1,6 +1,6 @@
 # MASC v2: Git-Native Multi-Agent Coordination
 
-> "Git for AI Agents" - 다중 LLM 에이전트의 협업을 Git 워크플로우로 조율
+> "Git for AI Agents" - 다중 MODEL 에이전트의 협업을 Git 워크플로우로 조율
 
 ## Executive Summary
 
@@ -117,7 +117,7 @@ MASC에서 가장 혼동하기 쉬운 개념이 **Cluster**와 **Room**입니다
 |------|------|------|
 | **Cluster** | 서버/인스턴스 식별자. `MASC_CLUSTER_NAME` 또는 `basename($ME_ROOT)` | `"me"` (~/me 프로젝트) |
 | **Room** | 실제 협업 공간. 같은 Room = 같은 Task Board, Messages, Agents | `"default"` (기본 Room) |
-| **Agent** | Room 내에서 작업하는 개별 LLM 인스턴스 | `claude-rare-koala`, `gemini-fierce-zebra` |
+| **Agent** | Room 내에서 작업하는 개별 MODEL 인스턴스 | `claude-rare-koala`, `gemini-fierce-zebra` |
 
 ### 협업 조건
 
@@ -315,7 +315,7 @@ git worktree prune
 | [ccswarm](https://github.com/nwiizo/ccswarm) | 파일 락킹 패턴 | v1 File Lock 참고 |
 | [Agent-MCP](https://github.com/rinadelph/Agent-MCP) | Agentic loops | Task lifecycle |
 | [A2A Protocol](https://a2aproject.github.io/A2A/) | Agent Cards | Capability-based |
-| [LLM Coordination](https://github.com/eric-ai-lab/llm_coordination) | 협력 패턴 | Self-organization |
+| Model Coordination (Eric AI Lab) | 협력 패턴 | Self-organization |
 
 ---
 

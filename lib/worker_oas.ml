@@ -165,7 +165,7 @@ let gate_config_of_execution_scope
 
     This is the central adapter function. It:
     1. Converts worker_meta to agent_config
-    2. Attaches the LLM provider
+    2. Attaches the MODEL provider
     3. Wires tools, hooks, guardrails, raw_trace
     4. Adds MASC heartbeat as an OAS periodic_callback
     5. Embeds MASC metadata in the agent description *)

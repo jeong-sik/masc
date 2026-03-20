@@ -100,18 +100,18 @@ let execute_with_retry ~clock ?(policy = default_node_policy) ~node_id f =
   | Ok v -> Ok v
   | Error e -> Error (Chain_error.to_string e)
 
-(** Execute LLM call with retry.
+(** Execute MODEL call with retry.
 
-    Specialized retry for LLM provider calls with appropriate error handling.
+    Specialized retry for MODEL provider calls with appropriate error handling.
 
     @param clock Eio clock
-    @param provider LLM provider name (for logging)
-    @param f LLM execution function
+    @param provider MODEL provider name (for logging)
+    @param f MODEL execution function
 *)
-let execute_llm_with_retry ~clock ~provider f =
+let execute_model_with_retry ~clock ~provider f =
   let policy = Chain_retry.{
     max_attempts = 3;
-    base_delay_ms = 2000;  (* LLM calls need longer delays *)
+    base_delay_ms = 2000;  (* MODEL calls need longer delays *)
     max_delay_ms = 30000;
     exponential_base = 2.0;
     jitter = true;
@@ -119,7 +119,7 @@ let execute_llm_with_retry ~clock ~provider f =
   let result = Chain_retry.execute_with_retry ~clock ~policy f in
   
   if result.attempts > 1 then
-    Chain_log.info "llm_retry" "%s: %d attempts, %dms delay"
+    Chain_log.info "model_retry" "%s: %d attempts, %dms delay"
       provider result.attempts result.total_delay_ms;
 
   result

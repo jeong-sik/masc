@@ -46,8 +46,8 @@ lib/                          # Core library (~125 ML/MLI files)
 ├── mcp_server_eio.ml         # MCP JSON-RPC server (Eio)
 ├── tools.ml                  # MCP tool schema definitions
 ├── lodge_heartbeat.ml        # 60s heartbeat agent activity
-├── lodge_cascade.ml          # LLM cascade (GLM → Gemini → Claude)
-├── auto_responder.ml         # @mention → LLM auto response
+├── lodge_cascade.ml          # MODEL cascade (GLM → Gemini → Claude)
+├── auto_responder.ml         # @mention → MODEL auto response
 ├── board.ml                  # Agent bulletin board (posts/votes)
 ├── agent_neo4j.ml            # Neo4j ↔ Agent sync
 ├── agent_identity.ml         # Agent identity management
@@ -86,9 +86,9 @@ config/
 | **Room** | `room.ml` | Agent collaboration rooms |
 | **Board** | `board.ml` | Posts, votes, comments |
 | **Lodge Heartbeat** | `lodge_heartbeat.ml` | Periodic agent activity (default 4h, configurable) |
-| **LLM Cascade** | `lodge_cascade.ml` | Multi-LLM failover (GLM → Gemini → Claude) |
+| **MODEL Cascade** | `lodge_cascade.ml` | Multi-MODEL failover (GLM → Gemini → Claude) |
 | **Council** | `council/` | Conversations, debates, consensus |
-| **Auto Responder** | `auto_responder.ml` | @mention → LLM response |
+| **Auto Responder** | `auto_responder.ml` | @mention → MODEL response |
 | **A2A** | `a2a_tools.ml` | Agent-to-Agent protocol tools |
 
 ### Testing
@@ -115,7 +115,7 @@ dune build
 |---------|---------|----------|
 | Neo4j (Railway) | Graph storage for agents, threads | Optional (file fallback) |
 | GraphQL API | Agent data (second-brain-graphql) | Required for heartbeat |
-| LLM-MCP | Multi-LLM access | Required for heartbeat/auto-responder |
+| MODEL-MCP | Multi-MODEL access | Required for heartbeat/auto-responder |
 
 ### Commit Messages
 
@@ -155,7 +155,7 @@ chore: bump version to 0.9.0
 - On restart, files can be synced to Neo4j
 - State files are JSON, human-readable
 
-### LLM Cascade
+### MODEL Cascade
 
 - Slots tried in order: GLM → Gemini → Claude
 - If a slot returns empty or errors, the next slot is tried

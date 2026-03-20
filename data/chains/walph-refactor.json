@@ -6,8 +6,8 @@
   "nodes": [
     {
       "id": "analyze",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Analyze this code for refactoring:\n\n{{input.code}}\n\nIdentify: code smells, complexity, naming issues, SOLID violations.\n\nOutput JSON: {\"issues\": [{\"type\": \"...\", \"location\": \"...\", \"suggestion\": \"...\"}], \"priority\": [...]}"
       },
@@ -18,8 +18,8 @@
       "type": "feedback_loop",
       "generator": {
         "id": "refactor",
-        "type": "llm",
-        "llm": {
+        "type": "model",
+        "model": {
           "model": "claude-cli",
           "prompt": "Apply refactoring based on:\n{{analysis}}\n\nOriginal code:\n{{input.code}}\n\nOutput clean, refactored code."
         }

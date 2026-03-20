@@ -112,10 +112,10 @@ let test_substitute_step () =
 
 let test_trace_to_entry () =
   let trace = { Chain_trace_types.timestamp = 1000.0; node_id = "n1";
-                event = NodeStart { node_type = "llm"; attempt = 1 } } in
+                event = NodeStart { node_type = "model"; attempt = 1 } } in
   let entry = Chain_trace_types.trace_to_entry trace "test_node" in
   check string "node_id" "n1" entry.Chain_types.node_id;
-  check string "node_type" "llm" entry.node_type_name;
+  check string "node_type" "model" entry.node_type_name;
   check bool "success" true (entry.status = `Success)
 
 let test_trace_complete () =
@@ -127,7 +127,7 @@ let test_trace_complete () =
 
 let test_trace_error () =
   let trace = { Chain_trace_types.timestamp = 1000.0; node_id = "n3";
-                event = NodeError { message = "boom"; error_class = Some "timeout"; node_type = "llm"; attempt = 2 } } in
+                event = NodeError { message = "boom"; error_class = Some "timeout"; node_type = "model"; attempt = 2 } } in
   let entry = Chain_trace_types.trace_to_entry trace "test" in
   check bool "failure" true (entry.Chain_types.status = `Failure);
   check (option string) "error msg" (Some "boom") entry.error
@@ -147,7 +147,7 @@ let test_trace_chain_complete () =
 
 let test_traces_to_entries () =
   let traces = [
-    { Chain_trace_types.timestamp = 1.0; node_id = "a"; event = NodeStart { node_type = "llm"; attempt = 1 } };
+    { Chain_trace_types.timestamp = 1.0; node_id = "a"; event = NodeStart { node_type = "model"; attempt = 1 } };
     { timestamp = 2.0; node_id = "b"; event = NodeComplete { duration_ms = 100; success = true; node_type = "tool"; attempt = 1 } };
   ] in
   let entries = Chain_trace_types.traces_to_entries traces in

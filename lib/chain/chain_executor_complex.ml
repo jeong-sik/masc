@@ -34,14 +34,14 @@ let execute_cascade ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute
         store_node_output ctx node output;
         Ok output
       end else begin
-        (* Inject confidence prompt into tier's LLM system instruction *)
+        (* Inject confidence prompt into tier's MODEL system instruction *)
         let tier_node = match tier.tier_node.node_type with
-          | Llm llm_config ->
-            let augmented_system = match llm_config.system with
+          | Model model_config ->
+            let augmented_system = match model_config.system with
               | Some s -> Some (s ^ "\n\n" ^ confidence_system)
               | None -> Some confidence_system
             in
-            { tier.tier_node with node_type = Llm { llm_config with system = augmented_system } }
+            { tier.tier_node with node_type = Model { model_config with system = augmented_system } }
           | _ -> tier.tier_node
         in
         (* Add context from previous tier if applicable *)
@@ -50,15 +50,15 @@ let execute_cascade ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute
           | CM_Summary, Some prev ->
             let summary = summarize_for_context prev in
             (match tier_node.node_type with
-             | Llm llm_config ->
-               let new_prompt = Printf.sprintf "Previous attempt (summarized): %s\n\n%s" summary llm_config.prompt in
-               { tier_node with node_type = Llm { llm_config with prompt = new_prompt } }
+             | Model model_config ->
+               let new_prompt = Printf.sprintf "Previous attempt (summarized): %s\n\n%s" summary model_config.prompt in
+               { tier_node with node_type = Model { model_config with prompt = new_prompt } }
              | _ -> tier_node)
           | CM_Full, Some prev ->
             (match tier_node.node_type with
-             | Llm llm_config ->
-               let new_prompt = Printf.sprintf "Previous attempt (full): %s\n\n%s" prev llm_config.prompt in
-               { tier_node with node_type = Llm { llm_config with prompt = new_prompt } }
+             | Model model_config ->
+               let new_prompt = Printf.sprintf "Previous attempt (full): %s\n\n%s" prev model_config.prompt in
+               { tier_node with node_type = Model { model_config with prompt = new_prompt } }
              | _ -> tier_node)
         in
         try
@@ -148,8 +148,8 @@ let execute_goal_driven ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : exe
           let open Yojson.Safe.Util in
           Some (json |> member goal_metric |> to_float)
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
-    | "llm_judge" ->
-        (* Use LLM to assess the metric *)
+    | "model_judge" ->
+        (* Use MODEL to assess the metric *)
         let prompt = Printf.sprintf
           "Evaluate the following output for '%s' metric. Return ONLY a number between 0.0 and 1.0:\n\n%s"
           goal_metric output
@@ -197,10 +197,10 @@ let execute_goal_driven ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : exe
           record_complete ctx parent.id ~duration_ms ~success:false;
           Error (Printf.sprintf "Iteration %d failed: %s" iteration msg)
       | Ok output ->
-          (* Update conversation context with this iteration's output when not a direct LLM node *)
+          (* Update conversation context with this iteration's output when not a direct MODEL node *)
           let should_record =
             match action_node.node_type with
-            | Llm _ -> false
+            | Model _ -> false
             | _ -> true
           in
           (match ctx.conversation, should_record with
@@ -273,7 +273,7 @@ let execute_feedback_loop ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : e
   (* Helper: Score output using evaluator_config.scoring_func *)
   let score_output output =
     match evaluator_config.scoring_func with
-    | "llm_judge" ->
+    | "model_judge" ->
         let prompt = match evaluator_config.scoring_prompt with
           | Some p -> Printf.sprintf "%s\n\nOutput to evaluate:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
           | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
@@ -367,12 +367,12 @@ let execute_feedback_loop ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : e
             (* Update generator prompt with feedback *)
             let new_prompt = substitute_prompt improver_prompt ~score ~feedback ~previous_output:output in
             let updated_generator = match (!current_generator).node_type with
-              | Llm llm_config ->
+              | Model model_config ->
                   { !current_generator with
-                    node_type = Llm { llm_config with prompt = new_prompt };
+                    node_type = Model { model_config with prompt = new_prompt };
                     id = Printf.sprintf "%s_iter%d" generator.id iteration }
               | _ ->
-                  (* For non-LLM generators, we can't easily update prompt *)
+                  (* For non-MODEL generators, we can't easily update prompt *)
                   (* Just retry with same generator *)
                   !current_generator
             in

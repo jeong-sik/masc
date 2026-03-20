@@ -1,7 +1,7 @@
 (** test_verifier_oas_bridge — Pure tests for Verifier_oas bridge functions.
 
     Covers eval_gate_to_oas_guardrails, verdict_to_hook_decision,
-    and read_only_predicate without any LLM or network calls.
+    and read_only_predicate without any MODEL or network calls.
 
     @since OAS Integration Phase 2 *)
 

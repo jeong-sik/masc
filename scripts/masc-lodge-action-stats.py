@@ -134,7 +134,7 @@ def main() -> int:
     action_counts: Dict[str, int] = {}
     by_agent: Dict[str, Dict[str, int]] = {}
     self_heartbeat = 0
-    llm_counts: Dict[str, int] = {}
+    model_counts: Dict[str, int] = {}
 
     for e in decide_entries:
         action = normalize_action(str(e.get("action", "")))
@@ -148,12 +148,12 @@ def main() -> int:
         if "self-heartbeat continuation" in prompt:
             self_heartbeat += 1
 
-        llm = str(e.get("llm_used", ""))
-        if llm:
-            llm_counts[llm] = llm_counts.get(llm, 0) + 1
+        model_name = str(e.get("model_used", ""))
+        if model_name:
+            model_counts[model_name] = model_counts.get(model_name, 0) + 1
 
-    llm_skips = action_counts.get("SKIP", 0)
-    acted = decisions_total - llm_skips
+    model_skips = action_counts.get("SKIP", 0)
+    acted = decisions_total - model_skips
 
     system_skip_total = len(system_entries)
     system_skip_reasons: Dict[str, int] = {}
@@ -169,12 +169,12 @@ def main() -> int:
             "decisions_total": decisions_total,
             "acted": acted,
             "acted_rate": (acted / decisions_total) if decisions_total else 0.0,
-            "llm_skips": llm_skips,
+            "model_skips": model_skips,
             "system_skips": system_skip_total,
             "system_skip_reasons": system_skip_reasons,
             "action_counts": action_counts,
             "self_heartbeat_decisions": self_heartbeat,
-            "llm_counts": llm_counts,
+            "model_counts": model_counts,
             "by_agent": by_agent,
         }
         print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -187,9 +187,9 @@ def main() -> int:
     print(f"Period: {start_s} ~ {end_s}")
     if args.agent:
         print(f"Agent: {args.agent}")
-    print(f"Decisions (LLM): {decisions_total}")
+    print(f"Decisions (MODEL): {decisions_total}")
     print(f"Acted: {acted} ({pct(acted, decisions_total)})")
-    print(f"LLM skip: {llm_skips} ({pct(llm_skips, decisions_total)})")
+    print(f"MODEL skip: {model_skips} ({pct(model_skips, decisions_total)})")
     print(f"System skip: {system_skip_total} ({pct(system_skip_total, max(events_total, 1))})")
     if system_skip_reasons:
         print("System skip breakdown:")
@@ -202,10 +202,10 @@ def main() -> int:
             print(f"- {k}: {action_counts[k]} ({pct(action_counts[k], decisions_total)})")
     print(f"Self-heartbeat decisions: {self_heartbeat} ({pct(self_heartbeat, decisions_total)})")
 
-    if llm_counts:
-        print("LLM usage:")
-        for k in sorted(llm_counts.keys()):
-            print(f"- {k}: {llm_counts[k]} ({pct(llm_counts[k], decisions_total)})")
+    if model_counts:
+        print("MODEL usage:")
+        for k in sorted(model_counts.keys()):
+            print(f"- {k}: {model_counts[k]} ({pct(model_counts[k], decisions_total)})")
 
     if len(by_agent) > 0 and not args.agent and decisions_total > 0:
         print("Per-agent acted rate:")

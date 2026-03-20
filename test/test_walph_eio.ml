@@ -283,11 +283,11 @@ let test_eio_status_json_fields () =
 (** Test: loop cuts off after max_consecutive_errors on deterministic claim failures *)
 let test_eio_error_cutoff () =
   with_test_config "error_cutoff" @@ fun env _fs config ->
-  let _ = Masc_mcp.Room.add_task config ~title:"failing task #1" ~description:"llm fail path" ~priority:2 in
-  let _ = Masc_mcp.Room.add_task config ~title:"failing task #2" ~description:"llm fail path" ~priority:2 in
+  let _ = Masc_mcp.Room.add_task config ~title:"failing task #1" ~description:"model fail path" ~priority:2 in
+  let _ = Masc_mcp.Room.add_task config ~title:"failing task #2" ~description:"model fail path" ~priority:2 in
 
   let failing_dispatch ~tool_name:_ ~model:_ ~prompt:_ ~timeout_sec:_ ~max_chars:_ () =
-    ""  (* Forces deterministic "Empty LLM response" error path *)
+    ""  (* Forces deterministic "Empty MODEL response" error path *)
   in
   let result =
     Masc_mcp.Room_walph_eio.walph_loop config
@@ -298,7 +298,7 @@ let test_eio_error_cutoff () =
       ~max_iterations:10
       ~max_consecutive_errors:2
       ~error_backoff_sec:0
-      ~llm_dispatch:failing_dispatch
+      ~model_dispatch:failing_dispatch
       ()
   in
   check bool "stop reason includes cutoff"
@@ -313,9 +313,9 @@ let test_eio_error_cutoff () =
     (status |> member "last_stop_reason" |> to_string)
 
 let test_eio_default_dispatch_uses_shared_cascade () =
-  check bool "uses Oas_worker.complete_single" true
+  check bool "uses Oas_worker.run_named" true
     (file_contains_pattern "lib/room/room_walph_eio.ml"
-       {|Oas_worker.complete_single ~cascade_name:"walph"|});
+       {|Oas_worker.run_named ~cascade_name:"walph"|});
   check bool "legacy direct dispatch removed" false
     (file_contains_pattern "lib/room/room_walph_eio.ml" "Llm_direct.dispatch");
   check bool "no direct run_prompt_cascade" false

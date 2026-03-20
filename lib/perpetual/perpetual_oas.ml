@@ -5,7 +5,7 @@
 
     - Phase 1: Context_compact_oas (context reduction)
     - Phase 2: Succession_oas (checkpoint/DNA)
-    - Phase 3: Llm_provider_oas (LLM cascade)
+    - Phase 3: Llm_provider_oas (MODEL cascade)
     - Phase 4: Verifier_oas (guardrails/hooks)
     - Phase 5: Worker_oas (Agent.run adapter)
 

@@ -170,7 +170,7 @@ let lifecycle_to_string = function
 
 (** {1 Tool Tier System}
 
-    3-tier tool filtering to reduce the number of tools presented to LLMs.
+    3-tier tool filtering to reduce the number of tools presented to models.
     Essential (~20) < Standard (~50) < Full (all).
     Tier is an additive overlay on the existing mode/category system. *)
 

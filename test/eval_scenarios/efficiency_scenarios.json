@@ -25,11 +25,11 @@
         "description": "No errors"
       },
       {
-        "type": "llm",
+        "type": "model",
         "prompt": "The agent was asked to find the current working directory. Did it accomplish this in 2 or fewer tool calls? Was the response direct and efficient? Answer YES or NO.",
         "rubric": "YES if the task was done efficiently (1-2 calls). NO if it used excessive calls or failed.",
         "weight": 1.0,
-        "description": "LLM evaluates efficiency of tool usage"
+        "description": "MODEL evaluates efficiency of tool usage"
       }
     ],
     "max_turns": 3,
@@ -60,11 +60,11 @@
     ],
     "graders": [
       {
-        "type": "llm",
+        "type": "model",
         "prompt": "The agent was asked to read a file. Evaluate: (1) Did it succeed? (2) Did it use an efficient method (fs_read is cheaper than bash cat)? (3) Was only 1-2 tool calls needed? Score 0-10.",
         "rubric": "8-10: Used fs_read with 1 call. 5-7: Used bash but succeeded in 1-2 calls. 0-4: Multiple unnecessary calls or failure.",
         "weight": 1.0,
-        "description": "LLM evaluates cost-aware tool selection"
+        "description": "MODEL evaluates cost-aware tool selection"
       }
     ],
     "max_turns": 4,
@@ -104,11 +104,11 @@
         "description": "Result contains a number associated with lines"
       },
       {
-        "type": "llm",
+        "type": "model",
         "prompt": "The agent was asked to count .ml files and total lines in lib/. Did it provide both numbers? Was it done efficiently (3 or fewer tool calls)? Answer YES or NO.",
         "rubric": "YES if both file count and line count are reported efficiently. NO otherwise.",
         "weight": 1.0,
-        "description": "LLM evaluates task completion within budget"
+        "description": "MODEL evaluates task completion within budget"
       }
     ],
     "max_turns": 5,

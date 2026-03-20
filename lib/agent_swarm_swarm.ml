@@ -1,7 +1,7 @@
 (** Multi-agent swarm runner with MASC coordination.
 
     Runs N Agent SDK instances as Eio fibers.
-    Each agent joins a MASC room, executes its goal using LLM + tools,
+    Each agent joins a MASC room, executes its goal using the MODEL + tools,
     then leaves the room. *)
 
 module Masc_log = Log
@@ -277,7 +277,7 @@ let finalize_managed_task ~sw masc spec binding =
                         managed.done_marker spec.name binding.task_id));
               Ok ()))
 
-(** Run a single agent: join MASC, run LLM loop, leave MASC.
+(** Run a single agent: join MASC, run MODEL loop, leave MASC.
     [extra_tools] are appended after MASC tools (e.g., dev_tools from Fleet). *)
 let run_agent ~sw ~net ~clock ~masc_url ?(extra_tools=[]) spec ~goal =
   let masc =

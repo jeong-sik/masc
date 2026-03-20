@@ -11,7 +11,7 @@ include Chain_mermaid_graph
 (** Convert a node_type to Mermaid node ID suggestion *)
 let node_type_to_id (nt : node_type) (fallback : string) : string =
   match nt with
-  | Llm { model; _ } -> model
+  | Model { model; _ } -> model
   | Tool { name; _ } -> name
   | Quorum { consensus; _ } -> Printf.sprintf "quorum_%s" (Chain_types.consensus_mode_to_string consensus)
   | Gate { condition; _ } ->
@@ -75,9 +75,9 @@ let escape_for_mermaid ?(max_len=100) (text : string) : string =
 (** Convert a node_type to Mermaid node text (lossless DSL syntax) *)
 let node_type_to_text (nt : node_type) : string =
   match nt with
-  | Llm { model; prompt; tools; _ } ->
+  | Model { model; prompt; tools; _ } ->
       let prompt_escaped = escape_for_mermaid prompt in
-      let base = Printf.sprintf "LLM:%s \"%s\"" model prompt_escaped in
+      let base = Printf.sprintf "MODEL:%s \"%s\"" model prompt_escaped in
       (match tools with
        | Some (`List ts) when ts <> [] ->
            let tool_names = List.filter_map (function
@@ -193,7 +193,7 @@ let node_type_to_text (nt : node_type) : string =
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
   match nt with
-  | Llm _ | Tool _ -> ("[", "]")
+  | Model _ | Tool _ -> ("[", "]")
   | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ | GoalDriven _ | FeedbackLoop _ -> ("{", "}")
   | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | Cache _ | Batch _ | Spawn _ -> ("[[", "]]")
   | Retry _ | Fallback _ | Race _ | Cascade _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
@@ -206,7 +206,7 @@ let node_type_to_shape (nt : node_type) : string * string =
 (** Map node type to CSS class name for Mermaid styling *)
 let node_type_to_class (nt : node_type) : string =
   match nt with
-  | Llm _ -> "llm"
+  | Model _ -> "model"
   | Tool _ -> "tool"
   | Quorum _ -> "quorum"
   | Gate _ -> "gate"
@@ -235,7 +235,7 @@ let node_type_to_class (nt : node_type) : string =
   | Cascade _ -> "cascade"
 
 (** Mermaid classDef color scheme for node types *)
-let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+let mermaid_class_defs = {|    classDef model fill:#4ecdc4,stroke:#1a535c,color:#000
     classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
     classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
     classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
@@ -406,7 +406,7 @@ let chain_to_ascii (chain : chain) : string =
   (* Node display *)
   let node_str (n : node) =
     let icon = match n.node_type with
-      | Llm _ -> "🤖" | Tool _ -> "🔧" | Quorum _ -> "🗳️"
+      | Model _ -> "🤖" | Tool _ -> "🔧" | Quorum _ -> "🗳️"
       | Gate _ -> "🚦" | Merge _ -> "🔀" | Pipeline _ -> "▶️"
       | Fanout _ -> "⚡" | ChainRef _ -> "🔗" | GoalDriven _ -> "🎯"
       | Evaluator _ -> "⚖️" | Threshold _ -> "📊"

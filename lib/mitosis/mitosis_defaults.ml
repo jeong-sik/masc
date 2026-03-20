@@ -49,7 +49,7 @@ let apoptosis_delay_seconds = 5.0
 let prepare_threshold = 0.5
 
 (** Phase 2 threshold: execute handoff to child cell.
-    Rationale: 80% is the industry-standard LLM context threshold.
+    Rationale: 80% is the industry-standard MODEL context threshold.
     Higher risks overflow, lower wastes context capacity. *)
 let handoff_threshold = 0.8
 

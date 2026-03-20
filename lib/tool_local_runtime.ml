@@ -1,5 +1,5 @@
 [@@@warning "-32-33-69"]
-(** Tool_local_runtime — local LLM runtime management and benchmarking tools. *)
+(** Tool_local_runtime — local model runtime management and benchmarking tools. *)
 
 open Types [@@warning "-33"]
 include Tool_local_runtime_core
@@ -160,8 +160,8 @@ let runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_mo
            acc + runtime.max_concurrency)
          0
   in
-  let configured_max_concurrent_llm = Llm_utils.max_concurrent_llm in
-  let available_llm_permits = Llm_utils.llm_semaphore_available () in
+  let configured_max_concurrent_models = Inference_utils.max_concurrent_models in
+  let available_model_permits = Inference_utils.model_permits_available () in
   let runtime_rows, provider_reachable, slot_reachable, actual_slots_total,
       active_slots_now, actual_ctxs, actual_models =
     List.fold_left
@@ -282,8 +282,8 @@ let runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_mo
       ("active_slots_now", `Int active_slots_now);
       ("peak_hot_slots", `Int active_slots_now);
       ("configured_capacity", `Int configured_capacity);
-      ("configured_max_concurrent_llm", `Int configured_max_concurrent_llm);
-      ("available_llm_permits", `Int available_llm_permits);
+      ("configured_max_concurrent_models", `Int configured_max_concurrent_models);
+      ("available_model_permits", `Int available_model_permits);
       ("runtime_blocker", string_opt_to_json runtime_blocker);
       ("detail", string_opt_to_json detail);
       ("pass", `Bool (runtime_blocker = None));
@@ -493,9 +493,9 @@ let runtime_status_json ?(include_models = true) () =
       ("source", `String "llama.cpp runtime");
       ("models", `List (List.map (fun model -> `String model) models));
       ("model_count", `Int (List.length models));
-      ("configured_max_concurrent_llm", `Int Llm_utils.max_concurrent_llm);
-      ("available_llm_permits", `Int (Llm_utils.llm_semaphore_available ()));
-      ("llm_permits_in_use", `Int (Llm_utils.llm_permits_in_use  ()));
+      ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
+      ("available_model_permits", `Int (Inference_utils.model_permits_available ()));
+      ("model_permits_in_use", `Int (Inference_utils.model_permits_in_use  ()));
       ("target_parallelism", `Int configured_capacity);
       ("managed_gap_to_target", `Int 0);
       ("runtime_count", `Int (List.length runtime_snapshots));
@@ -654,7 +654,7 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
         ("p50_latency_ms", int_opt_to_json (pctl 0.50 latencies));
         ("p95_latency_ms", int_opt_to_json (pctl 0.95 latencies));
         ("max_latency_ms", int_opt_to_json (pctl 1.0 latencies));
-        ("configured_max_concurrent_llm", `Int Llm_utils.max_concurrent_llm);
+        ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
         ("configured_capacity", `Int (Local_runtime_pool.configured_capacity ()));
         ("measured_ceiling", int_opt_to_json (Local_runtime_pool.measured_ceiling ()));
         ("per_runtime_breakdown", `List runtime_breakdown);
@@ -782,7 +782,7 @@ let schemas : tool_schema list =
     {
       name = "masc_local_runtime_models";
       description =
-        "Read the local LLM runtime model inventory from /v1/models. Use this before spawning local workers so the leader can choose an explicit model id.";
+        "Read the local model runtime model inventory from /v1/models. Use this before spawning local workers so the leader can choose an explicit model id.";
       input_schema =
         `Assoc
           [
@@ -793,7 +793,7 @@ let schemas : tool_schema list =
     {
       name = "masc_local_runtime_status";
       description =
-        "Inspect the local LLM runtime pool used for spawned local workers. Returns runtime inventory, matched server processes, configured capacity, and current MASC LLM permit configuration.";
+        "Inspect the local model runtime pool used for spawned local workers. Returns runtime inventory, matched server processes, configured capacity, and current MASC model permit configuration.";
       input_schema =
         `Assoc
           [
@@ -826,7 +826,7 @@ let schemas : tool_schema list =
     {
       name = "masc_local_runtime_bench";
       description =
-        "Run a direct concurrency benchmark against the configured local LLM runtime pool to estimate current same-box parallel completion behavior.";
+        "Run a direct concurrency benchmark against the configured local model runtime pool to estimate current same-box parallel completion behavior.";
       input_schema =
         `Assoc
           [

@@ -15,7 +15,7 @@ Design goal: Webhook 이벤트를 MASC Room의 Task로 라우팅
 
 | 기존 (webhook-gateway) | 새 설계 (MASC 통합) |
 |------------------------|---------------------|
-| Webhook → 직접 LLM spawn | Webhook → Room Task |
+| Webhook → 직접 MODEL spawn | Webhook → Room Task |
 | 단일 실행 | 협업 가능 |
 | Hardcoded 라우팅 | Room 기반 유연한 라우팅 |
 

@@ -316,7 +316,7 @@ let format_error_entry i (e : error_entry) =
   let ctx_str = match e.context with Some c -> Printf.sprintf " (%s)" c | None -> "" in
   Printf.sprintf "%d. %s [%s] **%s**%s: %s" (i+1) status e.timestamp e.error_type ctx_str e.message
 
-(** Get full context as markdown for LLM consumption *)
+(** Get full context as markdown for MODEL consumption *)
 let get_context_markdown ctx =
   let unresolved = List.filter (fun e -> not e.resolved) ctx.errors in
   let resolved = List.filter (fun e -> e.resolved) ctx.errors in

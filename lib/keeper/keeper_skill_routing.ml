@@ -40,7 +40,7 @@ let keeper_skill_selection_mode () : keeper_skill_selection_mode =
   | None -> SkillSelectAgent
   | Some raw ->
       let v = String.lowercase_ascii (String.trim raw) in
-      if v = "" || v = "agent" || v = "llm" || v = "auto"
+      if v = "" || v = "agent" || v = "model" || v = "auto"
       then SkillSelectAgent
       else SkillSelectHeuristic
 

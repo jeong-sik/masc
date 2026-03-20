@@ -11,7 +11,7 @@
 
 (** {1 Working Context} *)
 
-(** Working context: the message window sent to the LLM. *)
+(** Working context: the message window sent to the MODEL. *)
 type working_context = {
   system_prompt : string;
   messages : Agent_sdk.Types.message list;
@@ -49,7 +49,7 @@ type compaction_strategy = Compaction_types.compaction_strategy =
   | PruneToolOutputs   (** Remove verbose tool results > 500 chars, keep first/last 100 *)
   | MergeContiguous    (** Merge consecutive same-role messages *)
   | DropLowImportance  (** Remove messages with importance < 0.3 *)
-  | SummarizeOld       (** LLM-summarize oldest 30% into 1 summary message *)
+  | SummarizeOld       (** MODEL-summarize oldest 30% into 1 summary message *)
 
 (** {1 Context Ratio Thresholds} *)
 

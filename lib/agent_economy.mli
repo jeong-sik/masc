@@ -2,7 +2,7 @@
 
     Agents earn credits by completing tasks, writing board posts,
     receiving upvotes, and responding to mentions.
-    They spend credits when consuming LLM resources.
+    They spend credits when consuming MODEL resources.
 
     Behavioral pressure: when balance drops below thresholds,
     agent deliberation priorities shift (Normal → Frugal → Hustle).
@@ -27,7 +27,7 @@ type transaction_kind =
   | Earn_board_post
   | Earn_upvote
   | Earn_mention_response
-  | Spend_llm_call
+  | Spend_model_call
   | Spend_deliberation
   | Adjustment
 

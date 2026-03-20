@@ -15,6 +15,50 @@ let with_temp_json contents f =
       close_out oc;
       f path)
 
+let with_temp_me_root_config contents f =
+  let base = Filename.temp_file "me_root_" "" in
+  let cleanup path =
+    let rec rm current =
+      if Sys.file_exists current then
+        if Sys.is_directory current then (
+          Sys.readdir current
+          |> Array.iter (fun name -> rm (Filename.concat current name));
+          Unix.rmdir current)
+        else
+          Unix.unlink current
+    in
+    rm path
+  in
+  Unix.unlink base;
+  Unix.mkdir base 0o755;
+  let config_dir =
+    Filename.concat base "workspace/yousleepwhen/masc-mcp/config"
+  in
+  let rec ensure_dir path =
+    if not (Sys.file_exists path) then (
+      ensure_dir (Filename.dirname path);
+      Unix.mkdir path 0o755)
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup base)
+    (fun () ->
+      ensure_dir config_dir;
+      let path = Filename.concat config_dir "cascade.json" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () ->
+          output_string oc contents;
+          close_out oc;
+          let previous = Sys.getenv_opt "ME_ROOT" in
+          Unix.putenv "ME_ROOT" base;
+          Fun.protect
+            ~finally:(fun () ->
+              match previous with
+              | Some value -> Unix.putenv "ME_ROOT" value
+              | None -> Unix.putenv "ME_ROOT" "")
+            (fun () -> f path)))
+
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -26,6 +70,7 @@ let with_env name value f =
     f
 
 let test_load_models_from_config () =
+  Eio_main.run @@ fun _env ->
   with_temp_json
     {|{"heartbeat_action_models":["llama:qwen-local","llama:qwen-local-fallback"]}|}
     (fun path ->
@@ -44,6 +89,7 @@ let test_load_models_from_config () =
       | _ -> fail "expected two specs")
 
 let test_skips_invalid_and_missing_api_key () =
+  Eio_main.run @@ fun _env ->
   with_env "GEMINI_API_KEY" "" (fun () ->
       with_temp_json
         {|{"heartbeat_action_models":["invalid","gemini:gemini-2.5-pro","llama:qwen-live"]}|}
@@ -73,23 +119,21 @@ let test_missing_config_uses_defaults () =
   | [] -> fail "expected default fallback models"
 
 let test_call_returns_error_when_no_models () =
-  (* Force an empty cascade by using a config with an empty list and
-     overriding so defaults also return empty via a provider that
-     requires a missing API key. *)
+  (* Force an empty cascade by overriding the cascade config under a temp
+     ME_ROOT so the runtime sees only a provider that lacks credentials. *)
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   Masc_mcp.Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ();
   with_env "ZAI_API_KEY" "" (fun () ->
     with_env "GEMINI_API_KEY" "" (fun () ->
-      with_temp_json
+      with_temp_me_root_config
         {|{"heartbeat_action_models":["gemini:fake-model"]}|}
-        (fun path ->
+        (fun _path ->
           let result =
-            Oas_worker.complete_single
+            Oas_worker.run_named
               ~cascade_name:"heartbeat_action"
-              ~messages:[Agent_sdk.Types.user_msg "test"]
-              ~timeout_sec:1
-              ~config_path:path
+              ~goal:"test"
+              ~max_turns:1
               ()
           in
           match result with

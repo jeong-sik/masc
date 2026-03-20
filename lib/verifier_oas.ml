@@ -83,7 +83,7 @@ let verdict_to_string = function
   | Warn reason -> sprintf "WARN: %s" reason
   | Fail reason -> sprintf "FAIL: %s" reason
 
-(** Parse "PASS", "WARN: reason", "FAIL: reason" from LLM output. *)
+(** Parse "PASS", "WARN: reason", "FAIL: reason" from model output. *)
 let parse_verdict (text : string) : verdict =
   let trimmed = String.trim text in
   let upper = String.uppercase_ascii trimmed in
@@ -153,19 +153,20 @@ let verify (req : verification_request) : verdict =
     Pass
   else
     let prompt = build_prompt req in
-    let messages : Llm_provider.Types.message list =
-      [ Llm_provider.Types.user_msg prompt ]
-    in
     match
-      Oas_worker.complete_single
-        ~cascade_name:"verifier" ~messages
-        ~temperature:0.0 ~max_tokens:200 ()
+      Oas_worker.run_named
+        ~cascade_name:"verifier"
+        ~goal:prompt
+        ~max_turns:1
+        ~temperature:0.0
+        ~max_tokens:200
+        ()
     with
-    | Ok resp ->
-      parse_verdict (Llm_provider.Types.text_of_response resp)
-    | Error msg ->
-      eprintf "[verifier] cascade call failed: %s (defaulting to WARN)\n%!" msg;
-      Warn ("verifier_unavailable: " ^ msg)
+    | Ok result ->
+      parse_verdict (Oas_response.text_of_response result.response)
+    | Error message ->
+      eprintf "[verifier] OAS run failed: %s (defaulting to WARN)\n%!" message;
+      Warn ("verifier_unavailable: " ^ message)
 
 (* ================================================================ *)
 (* Verdict -> Hook Decision (OAS bridge)                            *)
@@ -212,7 +213,7 @@ let make_pre_tool_hook
     match event with
     | Agent_sdk.Hooks.PreToolUse { tool_name; input; _ } ->
       let action_description = sprintf "tool:%s" tool_name in
-      (* Skip read-only tools without calling the LLM *)
+      (* Skip read-only tools without calling the MODEL *)
       if should_skip ~action_description then
         Agent_sdk.Hooks.Continue
       else
@@ -266,7 +267,7 @@ let install_hook
     internally.
 
     This function wraps the read-only signal as a Guardrails.Custom
-    predicate. Since all tools should remain visible to the LLM, it
+    predicate. Since all tools should remain visible to the MODEL, it
     always returns [true]. The predicate is provided for integration
     with custom pipelines that want to inspect read-only status. *)
 let guardrails_with_read_only_tag

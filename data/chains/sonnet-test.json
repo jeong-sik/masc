@@ -6,8 +6,8 @@
   "nodes": [
     {
       "id": "task_001",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "sonnet",
         "prompt": "Return exactly: sonnet-step1"
       },
@@ -15,8 +15,8 @@
     },
     {
       "id": "task_002",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "sonnet",
         "prompt": "Return exactly: sonnet-step2"
       },

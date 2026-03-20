@@ -6,8 +6,8 @@
   "nodes": [
     {
       "id": "analyze",
-      "type": "llm",
-      "llm": {
+      "type": "model",
+      "model": {
         "model": "gemini",
         "prompt": "Analyze this code for documentation needs:\n\n{{input.code}}\n\nIdentify: public APIs, complex logic, missing docs, usage patterns.\n\nOutput JSON: {\"needs_docs\": [{\"name\": \"...\", \"type\": \"function|class|module\", \"complexity\": \"high|medium|low\"}]}"
       },
@@ -18,14 +18,14 @@
       "type": "feedback_loop",
       "generator": {
         "id": "generate",
-        "type": "llm",
-        "llm": {
+        "type": "model",
+        "model": {
           "model": "claude-cli",
           "prompt": "Generate documentation for:\n{{analysis}}\n\nCode:\n{{input.code}}\n\nOutput comprehensive JSDoc/docstrings with:\n- Description\n- Parameters with types\n- Return values\n- Usage examples"
         }
       },
       "evaluator_config": {
-        "scoring_func": "llm_judge",
+        "scoring_func": "model_judge",
         "scoring_prompt": "Evaluate documentation quality:\n1. Complete coverage of public APIs?\n2. Clear descriptions?\n3. Accurate parameter/return types?\n4. Helpful examples?\n5. Follows project conventions?\n\nScore 0.0-1.0",
         "select_strategy": "best"
       },

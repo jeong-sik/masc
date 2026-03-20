@@ -24,8 +24,8 @@ let check_err msg = function
 let dummy_node id nt =
   { id; node_type = nt; input_mapping = []; output_key = None; depends_on = None }
 
-let dummy_llm ?(model="gemini") ?(prompt="hello") () =
-  Llm { model; system = None; prompt; timeout = None; tools = None;
+let dummy_model ?(model="gemini") ?(prompt="hello") () =
+  Model { model; system = None; prompt; timeout = None; tools = None;
         prompt_ref = None; prompt_vars = []; thinking = false }
 
 let dummy_chain nodes =
@@ -262,11 +262,11 @@ let test_diamond_mcts_bad () =
 let test_diamond_evaluator_3 () =
   check_ok_with "Eval 3" (fun nt ->
     match nt with Evaluator { scoring_func; select_strategy; min_score; _ } ->
-      check string "func" "llm" scoring_func;
+      check string "func" "model" scoring_func;
       (match select_strategy with Best -> () | _ -> fail "not Best");
       (match min_score with Some _ -> () | None -> fail "no min_score")
     | _ -> fail "not Eval"
-  ) (Chain_mermaid_node_content.parse_node_content `Diamond "Evaluator:llm:best:0.5")
+  ) (Chain_mermaid_node_content.parse_node_content `Diamond "Evaluator:model:best:0.5")
 
 let test_diamond_evaluator_strategies () =
   List.iter (fun (s, _) ->
@@ -309,26 +309,26 @@ let test_diamond_unknown () =
    4. parse_node_content Rect
    ============================================================ *)
 
-let test_rect_llm_quoted () =
-  check_ok_with "LLM quoted" (fun nt ->
-    match nt with Llm { model; prompt; _ } ->
+let test_rect_model_quoted () =
+  check_ok_with "MODEL quoted" (fun nt ->
+    match nt with Model { model; prompt; _ } ->
       check string "model" "claude" model;
       check string "prompt" "say hi" prompt
-    | _ -> fail "not Llm"
-  ) (Chain_mermaid_node_content.parse_node_content `Rect {|LLM:claude "say hi"|})
+    | _ -> fail "not Model"
+  ) (Chain_mermaid_node_content.parse_node_content `Rect {|MODEL:claude "say hi"|})
 
-let test_rect_llm_single_quoted () =
-  check_ok_with "LLM single" (fun nt ->
-    match nt with Llm { model; _ } -> check string "model" "gemini" model | _ -> fail "not Llm"
-  ) (Chain_mermaid_node_content.parse_node_content `Rect "LLM:gemini 'hello'")
+let test_rect_model_single_quoted () =
+  check_ok_with "MODEL single" (fun nt ->
+    match nt with Model { model; _ } -> check string "model" "gemini" model | _ -> fail "not Model"
+  ) (Chain_mermaid_node_content.parse_node_content `Rect "MODEL:gemini 'hello'")
 
-let test_rect_llm_model_only () =
-  check_ok_with "LLM model only" (fun nt ->
-    match nt with Llm { model; prompt; _ } ->
+let test_rect_model_model_only () =
+  check_ok_with "MODEL model only" (fun nt ->
+    match nt with Model { model; prompt; _ } ->
       check string "model" "codex" model;
       check string "prompt" "{{input}}" prompt
-    | _ -> fail "not Llm"
-  ) (Chain_mermaid_node_content.parse_node_content `Rect "LLM:codex")
+    | _ -> fail "not Model"
+  ) (Chain_mermaid_node_content.parse_node_content `Rect "MODEL:codex")
 
 let test_rect_tool_simple () =
   check_ok_with "Tool simple" (fun nt ->
@@ -348,17 +348,17 @@ let test_rect_tool_json () =
     | _ -> fail "not Tool"
   ) (Chain_mermaid_node_content.parse_node_content `Rect {|Tool:calc {"x": 1}|})
 
-let test_rect_default_llm () =
-  check_ok_with "default LLM" (fun nt ->
-    match nt with Llm { model; _ } -> check string "model" "gemini" model | _ -> fail "not Llm"
+let test_rect_default_model () =
+  check_ok_with "default MODEL" (fun nt ->
+    match nt with Model { model; _ } -> check string "model" "gemini" model | _ -> fail "not Model"
   ) (Chain_mermaid_node_content.parse_node_content `Rect "just some text")
 
 let test_rect_tools_flag () =
   check_ok_with "+tools" (fun nt ->
-    match nt with Llm { tools; _ } ->
+    match nt with Model { tools; _ } ->
       (match tools with Some _ -> () | None -> fail "no tools")
-    | _ -> fail "not Llm"
-  ) (Chain_mermaid_node_content.parse_node_content `Rect "LLM:gemini 'hello' +tools")
+    | _ -> fail "not Model"
+  ) (Chain_mermaid_node_content.parse_node_content `Rect "MODEL:gemini 'hello' +tools")
 
 (* ============================================================
    5. parse_node_content Trap (Adapter)
@@ -413,7 +413,7 @@ let test_stadium_cascade_colon () =
 
 let test_stadium_default () =
   check_ok_with "Stadium default" (fun nt ->
-    match nt with Llm _ -> () | _ -> fail "not Llm"
+    match nt with Model _ -> () | _ -> fail "not Model"
   ) (Chain_mermaid_node_content.parse_node_content `Stadium "some prompt")
 
 (* ============================================================
@@ -458,9 +458,9 @@ let test_circle_fallback_broadcast () =
    8. Chain_mermaid_parser — node_type_to_id
    ============================================================ *)
 
-let test_node_type_to_id_llm () =
-  let id = Chain_mermaid_parser.node_type_to_id (dummy_llm ~model:"claude" ()) "fb" in
-  check string "llm id" "claude" id
+let test_node_type_to_id_model () =
+  let id = Chain_mermaid_parser.node_type_to_id (dummy_model ~model:"claude" ()) "fb" in
+  check string "model id" "claude" id
 
 let test_node_type_to_id_tool () =
   let id = Chain_mermaid_parser.node_type_to_id (Tool { name = "search"; args = `Null }) "fb" in
@@ -468,10 +468,10 @@ let test_node_type_to_id_tool () =
 
 let test_node_type_to_id_all_types () =
   (* Ensure all variants produce a non-empty id *)
-  let inner = dummy_node "x" (dummy_llm ()) in
+  let inner = dummy_node "x" (dummy_model ()) in
   let chain = dummy_chain [inner] in
   let types = [
-    dummy_llm ();
+    dummy_model ();
     Tool { name = "t"; args = `Null };
     Quorum { consensus = Majority; nodes = []; weights = [] };
     Gate { condition = "c"; then_node = inner; else_node = None };
@@ -534,9 +534,9 @@ let test_escape_truncation () =
    10. node_type_to_text — all variants
    ============================================================ *)
 
-let test_node_type_to_text_llm () =
-  let t = Chain_mermaid_parser.node_type_to_text (Llm { model = "m"; system = None; prompt = "p"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false }) in
-  check bool "contains LLM" true (String.length t > 0)
+let test_node_type_to_text_model () =
+  let t = Chain_mermaid_parser.node_type_to_text (Model { model = "m"; system = None; prompt = "p"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false }) in
+  check bool "contains MODEL" true (String.length t > 0)
 
 let test_node_type_to_text_tool_empty () =
   let t = Chain_mermaid_parser.node_type_to_text (Tool { name = "t"; args = `Assoc [] }) in
@@ -546,9 +546,9 @@ let test_node_type_to_text_tool_args () =
   let t = Chain_mermaid_parser.node_type_to_text (Tool { name = "t"; args = `Assoc [("k", `String "v")] }) in
   check bool "has base64" true (String.length t > 6)
 
-let test_node_type_to_text_llm_with_tools () =
+let test_node_type_to_text_model_with_tools () =
   let tools = Some (`List [`String "tool1"; `String "tool2"]) in
-  let t = Chain_mermaid_parser.node_type_to_text (Llm { model = "m"; system = None; prompt = "p"; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false }) in
+  let t = Chain_mermaid_parser.node_type_to_text (Model { model = "m"; system = None; prompt = "p"; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false }) in
   check bool "has +tools" true (String.length t > 0)
 
 (* ============================================================
@@ -556,10 +556,10 @@ let test_node_type_to_text_llm_with_tools () =
    ============================================================ *)
 
 let test_shapes () =
-  let inner = dummy_node "x" (dummy_llm ()) in
+  let inner = dummy_node "x" (dummy_model ()) in
   let chain = dummy_chain [inner] in
   let types = [
-    dummy_llm (); Tool { name = "t"; args = `Null };
+    dummy_model (); Tool { name = "t"; args = `Null };
     Quorum { consensus = Majority; nodes = []; weights = [] };
     Pipeline []; Fanout []; ChainRef "r"; Subgraph chain;
     Retry { node = inner; max_attempts = 3; backoff = Constant 1.0; retry_on = [] };
@@ -581,10 +581,10 @@ let test_shapes () =
    ============================================================ *)
 
 let test_classes () =
-  let inner = dummy_node "x" (dummy_llm ()) in
+  let inner = dummy_node "x" (dummy_model ()) in
   let chain = dummy_chain [inner] in
   let types = [
-    dummy_llm (), "llm"; Tool { name = "t"; args = `Null }, "tool";
+    dummy_model (), "model"; Tool { name = "t"; args = `Null }, "tool";
     Quorum { consensus = Majority; nodes = []; weights = [] }, "quorum";
     Gate { condition = "c"; then_node = inner; else_node = None }, "gate";
     Merge { strategy = First; nodes = [] }, "merge";
@@ -624,25 +624,25 @@ let test_classes () =
    ============================================================ *)
 
 let test_chain_to_mermaid_basic () =
-  let n1 = dummy_node "n1" (dummy_llm ~model:"gemini" ~prompt:"say hi" ()) in
+  let n1 = dummy_node "n1" (dummy_model ~model:"gemini" ~prompt:"say hi" ()) in
   let c = dummy_chain [n1] in
   let mermaid = Chain_mermaid_parser.chain_to_mermaid c in
   check bool "starts with graph" true (String.length mermaid > 10)
 
 let test_chain_to_mermaid_unstyled () =
-  let n1 = dummy_node "n1" (dummy_llm ()) in
+  let n1 = dummy_node "n1" (dummy_model ()) in
   let c = dummy_chain [n1] in
   let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false c in
   check bool "no classDef" true (not (try let _ = Str.search_forward (Str.regexp_string "classDef") mermaid 0 in true with Not_found -> false))
 
 let test_chain_to_ascii_basic () =
-  let n1 = dummy_node "n1" (dummy_llm ()) in
+  let n1 = dummy_node "n1" (dummy_model ()) in
   let c = dummy_chain [n1] in
   let ascii = Chain_mermaid_parser.chain_to_ascii c in
   check bool "has header" true (String.length ascii > 20)
 
 let test_chain_to_ascii_directions () =
-  let n1 = dummy_node "n1" (dummy_llm ()) in
+  let n1 = dummy_node "n1" (dummy_model ()) in
   List.iter (fun dir ->
     let c = { (dummy_chain [n1]) with config = { default_config with direction = dir } } in
     let ascii = Chain_mermaid_parser.chain_to_ascii c in
@@ -714,8 +714,8 @@ let test_adapter_transform_to_json () =
    19. node_to_json — all node_type variants
    ============================================================ *)
 
-let test_node_to_json_llm () =
-  let n = dummy_node "n" (Llm { model = "m"; system = Some "sys"; prompt = "p"; timeout = Some 30;
+let test_node_to_json_model () =
+  let n = dummy_node "n" (Model { model = "m"; system = Some "sys"; prompt = "p"; timeout = Some 30;
                                  tools = Some (`List [`String "t1"]); prompt_ref = Some "ref1";
                                  prompt_vars = [("k", "v")]; thinking = true }) in
   let j = Chain_parser.node_to_json n in
@@ -727,19 +727,19 @@ let test_node_to_json_tool_namespaced () =
   (match j with `Assoc _ -> () | _ -> fail "not assoc")
 
 let test_node_to_json_pipeline () =
-  let inner = dummy_node "i" (dummy_llm ()) in
+  let inner = dummy_node "i" (dummy_model ()) in
   let n = dummy_node "n" (Pipeline [inner]) in
   let j = Chain_parser.node_to_json n in
   (match j with `Assoc _ -> () | _ -> fail "not assoc")
 
 let test_node_to_json_gate () =
-  let inner = dummy_node "i" (dummy_llm ()) in
+  let inner = dummy_node "i" (dummy_model ()) in
   let n = dummy_node "n" (Gate { condition = "c"; then_node = inner; else_node = Some inner }) in
   let j = Chain_parser.node_to_json n in
   (match j with `Assoc _ -> () | _ -> fail "not assoc")
 
 let test_node_to_json_cascade () =
-  let inner = dummy_node "i" (dummy_llm ()) in
+  let inner = dummy_node "i" (dummy_model ()) in
   let tier = { tier_node = inner; tier_index = 0; confidence_threshold = 0.7; cost_weight = 1.0; pass_context = true } in
   let n = dummy_node "n" (Cascade { tiers = [tier]; confidence_prompt = Some "p";
                                      max_escalations = 2; context_mode = CM_Full;
@@ -748,13 +748,13 @@ let test_node_to_json_cascade () =
   (match j with `Assoc _ -> () | _ -> fail "not assoc")
 
 let test_chain_to_json_string () =
-  let n = dummy_node "n1" (dummy_llm ()) in
+  let n = dummy_node "n1" (dummy_model ()) in
   let c = dummy_chain [n] in
   let s = Chain_parser.chain_to_json_string c in
   check bool "json string" true (String.length s > 10)
 
 let test_chain_to_json_string_compact () =
-  let n = dummy_node "n1" (dummy_llm ()) in
+  let n = dummy_node "n1" (dummy_model ()) in
   let c = dummy_chain [n] in
   let s = Chain_parser.chain_to_json_string ~pretty:false ~include_empty_inputs:true c in
   check bool "compact" true (String.length s > 5)
@@ -764,7 +764,7 @@ let test_chain_to_json_string_compact () =
    ============================================================ *)
 
 let test_on_error_to_json () =
-  let _inner = dummy_node "i" (dummy_llm ()) in
+  let _inner = dummy_node "i" (dummy_model ()) in
   List.iter (fun (on_error, _label) ->
     let n = dummy_node "n" (Adapter { input_ref = "i"; transform = Template "t"; on_error }) in
     let j = Chain_parser.node_to_json n in
@@ -776,14 +776,14 @@ let test_on_error_to_json () =
    ============================================================ *)
 
 let test_node_type_to_text_exhaustive () =
-  let inner = dummy_node "x" (dummy_llm ()) in
+  let inner = dummy_node "x" (dummy_model ()) in
   let chain = dummy_chain [inner] in
   let types = [
-    (* LLM with tools list containing Assoc *)
-    Llm { model = "m"; system = None; prompt = "p"; timeout = None;
+    (* MODEL with tools list containing Assoc *)
+    Model { model = "m"; system = None; prompt = "p"; timeout = None;
           tools = Some (`List [`Assoc [("name", `String "t1")]]); prompt_ref = None; prompt_vars = []; thinking = false };
-    (* LLM with empty tools list *)
-    Llm { model = "m"; system = None; prompt = "p"; timeout = None;
+    (* MODEL with empty tools list *)
+    Model { model = "m"; system = None; prompt = "p"; timeout = None;
           tools = Some (`List []); prompt_ref = None; prompt_vars = []; thinking = false };
     (* Tool with Null args *)
     Tool { name = "t"; args = `Null };
@@ -917,8 +917,8 @@ let test_node_type_to_text_exhaustive () =
    ============================================================ *)
 
 let test_chain_to_mermaid_with_edges () =
-  let n1 = dummy_node "n1" (dummy_llm ~model:"claude" ~prompt:"hello" ()) in
-  let n2 = { (dummy_node "n2" (dummy_llm ~model:"gemini" ~prompt:"world" ())) with
+  let n1 = dummy_node "n1" (dummy_model ~model:"claude" ~prompt:"hello" ()) in
+  let n2 = { (dummy_node "n2" (dummy_model ~model:"gemini" ~prompt:"world" ())) with
              input_mapping = [("input", "n1")] } in
   let gd = { (dummy_node "gd" (GoalDriven {
     goal_metric = "g"; goal_operator = Gte; goal_value = 0.9;
@@ -931,7 +931,7 @@ let test_chain_to_mermaid_with_edges () =
   check bool "has edge" true (try let _ = Str.search_forward (Str.regexp_string "-->") mermaid 0 in true with Not_found -> false)
 
 let test_chain_to_ascii_with_edges () =
-  let n1 = dummy_node "n1" (dummy_llm ()) in
+  let n1 = dummy_node "n1" (dummy_model ()) in
   let n2 = { (dummy_node "n2" (Tool { name = "search"; args = `Null })) with
              input_mapping = [("input", "n1")] } in
   let c = dummy_chain [n1; n2] in
@@ -944,10 +944,10 @@ let test_chain_to_ascii_with_edges () =
 
 let test_round_trip_simple () =
   let mermaid_text = {|graph LR
-    %% @chain_full {"id":"test","nodes":[{"id":"n1","type":"llm","model":"gemini","prompt":"hello","inputs":{}}],"output":"n1","config":{"max_depth":8,"max_concurrency":3,"timeout":300,"trace":false}}
-    %% @chain_json {"id":"test","nodes":[{"id":"n1","type":"llm","model":"gemini","prompt":"hello","inputs":{}}],"output":"n1","config":{"max_depth":8,"max_concurrency":3,"timeout":300,"trace":false}}
+    %% @chain_full {"id":"test","nodes":[{"id":"n1","type":"model","model":"gemini","prompt":"hello","inputs":{}}],"output":"n1","config":{"max_depth":8,"max_concurrency":3,"timeout":300,"trace":false}}
+    %% @chain_json {"id":"test","nodes":[{"id":"n1","type":"model","model":"gemini","prompt":"hello","inputs":{}}],"output":"n1","config":{"max_depth":8,"max_concurrency":3,"timeout":300,"trace":false}}
     %% @chain {"id":"test","output":"n1","timeout":300,"trace":false,"max_depth":8,"max_concurrency":3}
-    n1["LLM:gemini 'hello'"]
+    n1["MODEL:gemini 'hello'"]
 |} in
   (match Chain_mermaid_parser.round_trip mermaid_text with
    | Ok _ -> ()
@@ -958,19 +958,19 @@ let test_round_trip_simple () =
    ============================================================ *)
 
 let test_validate_chain_valid () =
-  let n = dummy_node "n1" (dummy_llm ()) in
+  let n = dummy_node "n1" (dummy_model ()) in
   let c = dummy_chain [n] in
   let c = { c with output = "n1" } in
   (match Chain_parser.validate_chain c with Ok () -> () | Error e -> fail e)
 
 let test_validate_chain_missing_output () =
-  let n = dummy_node "n1" (dummy_llm ()) in
+  let n = dummy_node "n1" (dummy_model ()) in
   let c = { (dummy_chain [n]) with output = "nonexistent" } in
   (match Chain_parser.validate_chain c with Error _ -> () | Ok () -> fail "should fail")
 
 let test_validate_chain_dup_ids () =
-  let n1 = dummy_node "n1" (dummy_llm ()) in
-  let n2 = dummy_node "n1" (dummy_llm ()) in  (* duplicate ID *)
+  let n1 = dummy_node "n1" (dummy_model ()) in
+  let n2 = dummy_node "n1" (dummy_model ()) in  (* duplicate ID *)
   let c = { (dummy_chain [n1; n2]) with output = "n1" } in
   (match Chain_parser.validate_chain c with Error _ -> () | Ok () -> fail "should fail")
 
@@ -987,7 +987,7 @@ let test_validate_chain_placeholder () =
    ============================================================ *)
 
 let test_validate_strict_valid () =
-  let n = dummy_node "n1" (Llm { model = "m"; system = None; prompt = "{{input}}"; timeout = None;
+  let n = dummy_node "n1" (Model { model = "m"; system = None; prompt = "{{input}}"; timeout = None;
                                    tools = None; prompt_ref = None; prompt_vars = []; thinking = false }) in
   let c = { (dummy_chain [n]) with output = "n1" } in
   (* May produce warnings for missing input sources but should not crash *)
@@ -999,7 +999,7 @@ let test_validate_strict_empty () =
   (match Chain_parser.validate_chain_strict c with Error _ -> () | Ok () -> fail "should fail")
 
 let test_validate_strict_bad_config () =
-  let n = dummy_node "n1" (dummy_llm ()) in
+  let n = dummy_node "n1" (dummy_model ()) in
   let c = { (dummy_chain [n]) with output = "n1";
              config = { default_config with max_depth = 0; max_concurrency = 0; timeout = 0 } } in
   (match Chain_parser.validate_chain_strict c with Error _ -> () | Ok () -> fail "should fail")
@@ -1009,7 +1009,7 @@ let test_validate_strict_bad_config () =
    ============================================================ *)
 
 let test_no_placeholder () =
-  let n = dummy_node "n1" (dummy_llm ()) in
+  let n = dummy_node "n1" (dummy_model ()) in
   check bool "no placeholder" false (Chain_parser.has_placeholder_node n)
 
 let test_has_placeholder () =
@@ -1047,16 +1047,16 @@ let test_strip_braces_no () =
    ============================================================ *)
 
 let test_collect_all_nodes () =
-  let n1 = dummy_node "n1" (dummy_llm ()) in
-  let n2 = dummy_node "n2" (dummy_llm ()) in
+  let n1 = dummy_node "n1" (dummy_model ()) in
+  let n2 = dummy_node "n2" (dummy_model ()) in
   let pipe = dummy_node "pipe" (Pipeline [n1; n2]) in
   let all = Chain_parser.collect_all_nodes [] pipe in
   check bool "at least 3" true (List.length all >= 3)
 
 (* Exercise collect_all_nodes for ALL node_type branches *)
 let test_collect_all_nodes_exhaustive () =
-  let leaf = dummy_node "leaf" (dummy_llm ()) in
-  let leaf2 = dummy_node "leaf2" (dummy_llm ()) in
+  let leaf = dummy_node "leaf" (dummy_model ()) in
+  let leaf2 = dummy_node "leaf2" (dummy_model ()) in
   let chain = dummy_chain [leaf] in
   let nodes_to_check = [
     dummy_node "pipe" (Pipeline [leaf; leaf2]);
@@ -1098,21 +1098,21 @@ let test_collect_all_nodes_exhaustive () =
 
 (* Validate strict with many node types to exercise all match arms *)
 let test_validate_strict_all_node_types () =
-  let n_llm = dummy_node "llm1" (Llm { model = "gemini"; system = Some "sys"; prompt = "{{input}}"; timeout = Some 30; tools = Some (`List [`String "t1"]); prompt_ref = None; prompt_vars = [("k", "v")]; thinking = false }) in
+  let n_model = dummy_node "model1" (Model { model = "gemini"; system = Some "sys"; prompt = "{{input}}"; timeout = Some 30; tools = Some (`List [`String "t1"]); prompt_ref = None; prompt_vars = [("k", "v")]; thinking = false }) in
   let n_tool = dummy_node "tool1" (Tool { name = "search"; args = `Assoc [("q", `String "{{input}}")] }) in
-  let n_gate = dummy_node "gate1" (Gate { condition = "x > 0"; then_node = n_llm; else_node = Some n_tool }) in
-  let n_adapter = dummy_node "adapt1" (Adapter { input_ref = "llm1"; transform = Template "Result: {{llm1}}"; on_error = `Fail }) in
-  let n_retry = dummy_node "retry1" (Retry { node = n_llm; max_attempts = 3; backoff = Constant 1.0; retry_on = [] }) in
-  let n_fallback = dummy_node "fb1" (Fallback { primary = n_llm; fallbacks = [n_tool] }) in
-  let n_eval = dummy_node "eval1" (Evaluator { candidates = [n_llm; n_tool]; scoring_func = "judge"; scoring_prompt = None; select_strategy = Best; min_score = Some 0.5 }) in
-  let c = { (dummy_chain [n_llm; n_tool; n_gate; n_adapter; n_retry; n_fallback; n_eval]) with output = "eval1" } in
+  let n_gate = dummy_node "gate1" (Gate { condition = "x > 0"; then_node = n_model; else_node = Some n_tool }) in
+  let n_adapter = dummy_node "adapt1" (Adapter { input_ref = "model1"; transform = Template "Result: {{model1}}"; on_error = `Fail }) in
+  let n_retry = dummy_node "retry1" (Retry { node = n_model; max_attempts = 3; backoff = Constant 1.0; retry_on = [] }) in
+  let n_fallback = dummy_node "fb1" (Fallback { primary = n_model; fallbacks = [n_tool] }) in
+  let n_eval = dummy_node "eval1" (Evaluator { candidates = [n_model; n_tool]; scoring_func = "judge"; scoring_prompt = None; select_strategy = Best; min_score = Some 0.5 }) in
+  let c = { (dummy_chain [n_model; n_tool; n_gate; n_adapter; n_retry; n_fallback; n_eval]) with output = "eval1" } in
   let _result = Chain_parser.validate_chain_strict c in
   ()
 
 (* has_placeholder for more node types *)
 let test_has_placeholder_all_types () =
   let placeholder = dummy_node "_placeholder" (ChainRef "_") in
-  let ok_node = dummy_node "ok" (dummy_llm ()) in
+  let ok_node = dummy_node "ok" (dummy_model ()) in
   let test_cases = [
     ("Fanout", dummy_node "f" (Fanout [placeholder]));
     ("Quorum", dummy_node "q" (Quorum { consensus = Majority; nodes = [placeholder]; weights = [] }));
@@ -1139,14 +1139,14 @@ let test_has_placeholder_all_types () =
 
 let test_parse_chain_simple () =
   let mermaid = {|graph LR
-    n1["LLM:gemini 'hello'"]
+    n1["MODEL:gemini 'hello'"]
 |} in
   check_ok "simple" (Chain_mermaid_parser.parse_chain mermaid)
 
 let test_parse_chain_two_nodes () =
   let mermaid = {|graph LR
-    n1["LLM:claude 'analyze'"]
-    n2["LLM:gemini 'summarize'"]
+    n1["MODEL:claude 'analyze'"]
+    n2["MODEL:gemini 'summarize'"]
     n1 --> n2
 |} in
   check_ok_with "two nodes" (fun c ->
@@ -1155,8 +1155,8 @@ let test_parse_chain_two_nodes () =
 
 let test_parse_chain_labeled_edge () =
   let mermaid = {|graph LR
-    n1["LLM:claude 'analyze'"]
-    n2["LLM:gemini 'summarize'"]
+    n1["MODEL:claude 'analyze'"]
+    n2["MODEL:gemini 'summarize'"]
     n1 -->|data| n2
 |} in
   check_ok "labeled edge" (Chain_mermaid_parser.parse_chain mermaid)
@@ -1195,9 +1195,9 @@ let test_parse_chain_trap () =
 
 let test_parse_chain_multi_edge () =
   let mermaid = {|graph LR
-    a["LLM:claude 'x'"]
-    b["LLM:gemini 'y'"]
-    c["LLM:codex 'z'"]
+    a["MODEL:claude 'x'"]
+    b["MODEL:gemini 'y'"]
+    c["MODEL:codex 'z'"]
     a --> b
     a --> c
     b --> c
@@ -1206,9 +1206,9 @@ let test_parse_chain_multi_edge () =
 
 let test_parse_chain_chained () =
   let mermaid = {|graph LR
-    a["LLM:claude 'x'"]
-    b["LLM:gemini 'y'"]
-    c["LLM:codex 'z'"]
+    a["MODEL:claude 'x'"]
+    b["MODEL:gemini 'y'"]
+    c["MODEL:codex 'z'"]
     a --> b --> c
 |} in
   check_ok "chained" (Chain_mermaid_parser.parse_chain mermaid)
@@ -1216,7 +1216,7 @@ let test_parse_chain_chained () =
 let test_parse_chain_with_meta () =
   let mermaid = {|graph LR
     %% @chain {"id":"test","output":"n1","timeout":300,"trace":false,"max_depth":8,"max_concurrency":3}
-    n1["LLM:gemini 'hello'"]
+    n1["MODEL:gemini 'hello'"]
 |} in
   check_ok_with "meta" (fun c ->
     check string "id from meta" "test" c.id
@@ -1224,7 +1224,7 @@ let test_parse_chain_with_meta () =
 
 let test_parse_chain_direction () =
   let mermaid = {|graph TB
-    n1["LLM:gemini 'hello'"]
+    n1["MODEL:gemini 'hello'"]
 |} in
   check_ok_with "direction" (fun c ->
     check bool "TB" true (c.config.direction = TB)
@@ -1300,13 +1300,13 @@ let () =
       test_case "unknown" `Quick test_diamond_unknown;
     ];
     "parse_node_content_rect", [
-      test_case "LLM quoted" `Quick test_rect_llm_quoted;
-      test_case "LLM single" `Quick test_rect_llm_single_quoted;
-      test_case "LLM model only" `Quick test_rect_llm_model_only;
+      test_case "MODEL quoted" `Quick test_rect_model_quoted;
+      test_case "MODEL single" `Quick test_rect_model_single_quoted;
+      test_case "MODEL model only" `Quick test_rect_model_model_only;
       test_case "Tool simple" `Quick test_rect_tool_simple;
       test_case "Tool quoted" `Quick test_rect_tool_quoted;
       test_case "Tool json" `Quick test_rect_tool_json;
-      test_case "default LLM" `Quick test_rect_default_llm;
+      test_case "default MODEL" `Quick test_rect_default_model;
       test_case "+tools flag" `Quick test_rect_tools_flag;
     ];
     "parse_node_content_trap", [
@@ -1332,7 +1332,7 @@ let () =
       test_case "fallback br" `Quick test_circle_fallback_broadcast;
     ];
     "node_type_to_id", [
-      test_case "llm" `Quick test_node_type_to_id_llm;
+      test_case "model" `Quick test_node_type_to_id_model;
       test_case "tool" `Quick test_node_type_to_id_tool;
       test_case "all types" `Quick test_node_type_to_id_all_types;
     ];
@@ -1342,10 +1342,10 @@ let () =
       test_case "truncation" `Quick test_escape_truncation;
     ];
     "node_type_to_text", [
-      test_case "llm" `Quick test_node_type_to_text_llm;
+      test_case "model" `Quick test_node_type_to_text_model;
       test_case "tool empty" `Quick test_node_type_to_text_tool_empty;
       test_case "tool args" `Quick test_node_type_to_text_tool_args;
-      test_case "llm with tools" `Quick test_node_type_to_text_llm_with_tools;
+      test_case "model with tools" `Quick test_node_type_to_text_model_with_tools;
     ];
     "node_type_to_shape", [
       test_case "all shapes" `Quick test_shapes;
@@ -1377,7 +1377,7 @@ let () =
       test_case "all variants" `Quick test_adapter_transform_to_json;
     ];
     "node_to_json", [
-      test_case "llm full" `Quick test_node_to_json_llm;
+      test_case "model full" `Quick test_node_to_json_model;
       test_case "tool namespaced" `Quick test_node_to_json_tool_namespaced;
       test_case "pipeline" `Quick test_node_to_json_pipeline;
       test_case "gate" `Quick test_node_to_json_gate;
@@ -1435,7 +1435,7 @@ let () =
       test_case "all node types" `Quick test_has_placeholder_all_types;
     ];
     "parse_chain_mermaid", [
-      test_case "simple LLM" `Quick test_parse_chain_simple;
+      test_case "simple MODEL" `Quick test_parse_chain_simple;
       test_case "two nodes" `Quick test_parse_chain_two_nodes;
       test_case "labeled edge" `Quick test_parse_chain_labeled_edge;
       test_case "diamond node" `Quick test_parse_chain_diamond;

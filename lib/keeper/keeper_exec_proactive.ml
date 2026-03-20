@@ -45,8 +45,8 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
     in
     if idle_seconds < idle_gate || cooldown_elapsed < cooldown_gate then meta
     else
-      (* Phase 2 Deliberation Engine: if policy_mode is Llm_deliberation AND
-         triage returned Triggered, call the LLM deliberation engine instead
+      (* Phase 2 Deliberation Engine: if policy_mode is Model_deliberation AND
+         triage returned Triggered, call the MODEL deliberation engine instead
          of the existing proactive logic. *)
       let policy_mode =
         Keeper_contract.policy_mode_of_string meta.policy_mode
@@ -200,7 +200,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                         ~max_tokens:1024 ()) in
                     match delib_result with
                     | Error msg ->
-                        Log.KeeperExec.error "%s LLM call failed: %s"
+                        Log.KeeperExec.error "%s MODEL call failed: %s"
                           meta.name msg;
                         meta
                     | Ok result ->
@@ -687,7 +687,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                                 ("trace_id", `String updated.trace_id);
                                 ("generation", `Int updated.generation);
                                 ("model_used", `String model_used);
-                                ("llm_backend", `String "oas");
+                                ("model_backend", `String "oas");
                                 ( "usage",
                                   `Assoc
                                     [

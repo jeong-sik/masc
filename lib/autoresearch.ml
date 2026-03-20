@@ -1,7 +1,7 @@
 (** Autoresearch — Autonomous experiment loop inspired by Karpathy's autoresearch.
 
     Each cycle:
-    1. LLM generates hypothesis + code change
+    1. MODEL generates hypothesis + code change
     2. git commit (tentative)
     3. Run metric_fn (shell command, bounded by cycle_timeout_s)
     4. Compare score vs baseline
@@ -85,7 +85,7 @@ let state_to_yojson (s : loop_state) : Yojson.Safe.t =
     ("loop_id", `String s.loop_id);
     ("goal", `String s.goal);
     ("metric_fn", `String s.metric_fn);
-    ("llm_model", `String s.llm_model);
+    ("model_model", `String s.model_model);
     ("target_file", `String s.target_file);
     ("status", `String (status_to_string s.status));
     ("current_cycle", `Int s.current_cycle);
@@ -130,7 +130,7 @@ let state_of_yojson (json : Yojson.Safe.t) : persisted_summary =
     total_discards = json |> member "total_discards" |> to_int;
     goal = json |> member "goal" |> to_string;
     metric_fn = json |> member "metric_fn" |> to_string;
-    llm_model = json |> member "llm_model" |> to_string;
+    model_model = json |> member "model_model" |> to_string;
     target_file = json |> member "target_file" |> to_string;
     workdir = json |> member "workdir" |> to_string;
     cycle_timeout_s = json |> member "cycle_timeout_s" |> to_float;
@@ -298,7 +298,7 @@ let stop_loop ~base_path ?reason loop_id =
               loop_id = persisted.loop_id;
               goal = persisted.goal;
               metric_fn = persisted.metric_fn;
-              llm_model = persisted.llm_model;
+              model_model = persisted.model_model;
               target_file = persisted.target_file;
               status = persisted.status;
               error_message = persisted.error_message;
@@ -518,7 +518,7 @@ let git_tag_best ~workdir ~cycle ~score =
   ignore (Sys.command cmd)
 
 (* ================================================================ *)
-(* LLM Hypothesis Generation                                        *)
+(* MODEL Hypothesis Generation                                        *)
 (* ================================================================ *)
 
 (* ================================================================ *)
@@ -585,10 +585,10 @@ let apply_code_change ~workdir ~target_file ~new_content =
         target_file (Printexc.to_string exn)))
 
 (* ================================================================ *)
-(* LLM Code Change Generation                                       *)
+(* MODEL Code Change Generation                                       *)
 (* ================================================================ *)
 
-(** Build prompt for LLM code change. Exported for testing. *)
+(** Build prompt for MODEL code change. Exported for testing. *)
 let build_code_change_prompt ~goal ~baseline ~history ~insights
     ~file_content ~target_file =
   let recent = List.filteri (fun i _ -> i < 5) history in
@@ -645,20 +645,20 @@ let extract_tag ~tag text =
   in
   find_start 0
 
-(** Parse LLM response containing <hypothesis> and <modified_code> tags.
+(** Parse MODEL response containing <hypothesis> and <modified_code> tags.
     Returns Ok (hypothesis, modified_code) or Error reason. *)
-let parse_llm_code_response response =
+let parse_model_code_response response =
   if String.trim response = "" then
-    Result.error "LLM returned empty response"
+    Result.error "MODEL returned empty response"
   else
     match extract_tag ~tag:"hypothesis" response with
-    | None -> Result.error "Missing <hypothesis> tag in LLM response"
+    | None -> Result.error "Missing <hypothesis> tag in MODEL response"
     | Some h ->
       let hypothesis = String.trim h in
       if hypothesis = "" then Result.error "Empty <hypothesis> tag"
       else
         match extract_tag ~tag:"modified_code" response with
-        | None -> Result.error "Missing <modified_code> tag in LLM response"
+        | None -> Result.error "Missing <modified_code> tag in MODEL response"
         | Some code ->
           if String.trim code = "" then Result.error "Empty <modified_code> tag"
           else
@@ -688,20 +688,20 @@ let generate_code_change ~goal ~baseline ~history ~insights
       ~goal:prompt ~max_turns:1
       ~temperature:0.7 ~max_tokens:4096 ()
   with
-  | Error e -> Result.error (Printf.sprintf "LLM call failed: %s" e)
-  | Ok result -> parse_llm_code_response (Llm_provider.Types.text_of_response result.Oas_worker.response)
+  | Error e -> Result.error (Printf.sprintf "MODEL call failed: %s" e)
+  | Ok result -> parse_model_code_response (Oas_response.text_of_response result.Oas_worker.response)
 
 (* ================================================================ *)
 (* Loop State Management                                            *)
 (* ================================================================ *)
 
-let create_state ~goal ~metric_fn ?(llm_model = "glm") ~target_file ~cycle_timeout_s ~max_cycles ~workdir () =
+let create_state ~goal ~metric_fn ?(model_model = "glm") ~target_file ~cycle_timeout_s ~max_cycles ~workdir () =
   let now = Time_compat.now () in
   {
     loop_id = generate_loop_id ();
     goal;
     metric_fn;
-    llm_model;
+    model_model;
     target_file;
     status = Running;
     error_message = None;

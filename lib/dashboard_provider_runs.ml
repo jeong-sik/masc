@@ -182,7 +182,7 @@ let default_model_for_provider provider =
   | "codex-api" -> trim_nonempty Env_config_governance.OpenAI.default_model
   | "gemini-api" -> trim_nonempty Env_config_governance.Gemini.default_model
   | "glm" ->
-      let configured = trim_nonempty Env_config_governance.Llm.default_model in
+      let configured = trim_nonempty Env_config_governance.Glm.default_model in
       Some (Option.value configured ~default:"auto")
   | _ -> None
 
@@ -202,8 +202,8 @@ let candidate_models_for_provider provider =
   | "glm" ->
       dedupe_keep_order
         [
-          Env_config_governance.Llm.default_model;
-          Env_config_governance.Llm.flash_model;
+          Env_config_governance.Glm.default_model;
+          Env_config_governance.Glm.flash_model;
           "auto";
         ]
   | _ -> []

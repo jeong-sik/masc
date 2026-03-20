@@ -1,10 +1,10 @@
 open Env_config_core
 
 module Endpoints = struct
-  (** @deprecated LLM-MCP server URL - no longer used.
-      Use {!Oas_worker.complete_single} instead. *)
-  let llm_mcp_url =
-    get_string ~default:"" "LLM_MCP_URL"  (* Default empty - not used *)
+  (** @deprecated MODEL-MCP server URL - no longer used.
+      Use {!Oas_worker.run_named} or {!Oas_worker.run_model} instead. *)
+  let model_mcp_url =
+    get_string ~default:"" "MODEL_MCP_URL"  (* Default empty - not used *)
 
   let masc_host_result () =
     match Uri.host (Uri.of_string (masc_http_base_url ())) with

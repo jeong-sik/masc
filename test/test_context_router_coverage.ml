@@ -177,7 +177,7 @@ let test_decision_to_json_skip () =
   let open Yojson.Safe.Util in
   assert (json |> member "depth" |> to_string = "skip")
 
-(* ---------- LLM Intent Classification Unit Tests ---------- *)
+(* ---------- MODEL Intent Classification Unit Tests ---------- *)
 
 let test_parse_intent_conversational () =
   assert (parse_intent_response "Conversational" = Some (Conversational, 0.90));
@@ -202,7 +202,7 @@ let test_parse_intent_coordination () =
   assert (parse_intent_response "coordination" = Some (Coordination, 0.85))
 
 let test_parse_intent_with_explanation () =
-  (* LLM might add extra text — parser should still extract the intent *)
+  (* MODEL might add extra text — parser should still extract the intent *)
   assert (parse_intent_response "The intent is Conversational because it is a greeting."
     = Some (Conversational, 0.90));
   assert (parse_intent_response "I classify this as Knowledge_query."
@@ -251,7 +251,7 @@ let test_build_intent_prompt () =
 let test_router_mode_dispatch () =
   let mode = get_router_mode () in
   match Sys.getenv_opt "MASC_CONTEXT_ROUTER_MODE" with
-  | Some "llm" -> assert (mode = Llm_mode)
+  | Some "model" -> assert (mode = Model_mode)
   | Some "hybrid" -> assert (mode = Hybrid_mode)
   | _ -> assert (mode = Heuristic)
 
@@ -300,7 +300,7 @@ let () =
     ("to_recall_config_full", test_to_recall_config_full);
     ("decision_to_json", test_decision_to_json);
     ("decision_to_json_skip", test_decision_to_json_skip);
-    (* LLM intent classification unit tests *)
+    (* MODEL intent classification unit tests *)
     ("parse_intent_conversational", test_parse_intent_conversational);
     ("parse_intent_task_command", test_parse_intent_task_command);
     ("parse_intent_status_check", test_parse_intent_status_check);

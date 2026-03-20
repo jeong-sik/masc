@@ -180,7 +180,7 @@ val context_mode_of_string : string -> context_mode
 
 (** The 23 supported node types (including Cascade) *)
 type node_type =
-  | Llm of {
+  | Model of {
       model : string;
       system : string option;
       prompt : string;
@@ -422,7 +422,7 @@ val execution_plan_of_yojson : Yojson.Safe.t -> (execution_plan, string) result
 (** {1 Helper Functions} *)
 
 val node_type_name : node_type -> string
-val make_llm_node : id:string -> model:string -> ?system:string -> prompt:string -> ?timeout:int -> ?tools:Yojson.Safe.t -> ?prompt_ref:string -> ?prompt_vars:(string * string) list -> ?thinking:bool -> unit -> node
+val make_model_node : id:string -> model:string -> ?system:string -> prompt:string -> ?timeout:int -> ?tools:Yojson.Safe.t -> ?prompt_ref:string -> ?prompt_vars:(string * string) list -> ?thinking:bool -> unit -> node
 val make_adapter : id:string -> input_ref:string -> transform:adapter_transform -> ?on_error:[ `Fail | `Passthrough | `Default of string ] -> unit -> node
 val make_tool_node : id:string -> name:string -> args:Yojson.Safe.t -> node
 val make_pipeline : id:string -> node list -> node

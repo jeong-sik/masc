@@ -272,30 +272,30 @@ let test_agent_profile_of_json_string_traits () =
   let p = Option.get profile in
   assert (List.length p.traits = 2)
 
-(* ---------- LLM Scoring Unit Tests ---------- *)
+(* ---------- MODEL Scoring Unit Tests ---------- *)
 
-let test_parse_llm_score_direct () =
-  assert (parse_llm_score "0.85" = Some 0.85);
-  assert (parse_llm_score "0.0" = Some 0.0);
-  assert (parse_llm_score "1.0" = Some 1.0)
+let test_parse_model_score_direct () =
+  assert (parse_model_score "0.85" = Some 0.85);
+  assert (parse_model_score "0.0" = Some 0.0);
+  assert (parse_model_score "1.0" = Some 1.0)
 
-let test_parse_llm_score_with_text () =
-  assert (parse_llm_score "The score is 0.72 for this match." = Some 0.72);
-  assert (parse_llm_score "Score: 0.45" = Some 0.45)
+let test_parse_model_score_with_text () =
+  assert (parse_model_score "The score is 0.72 for this match." = Some 0.72);
+  assert (parse_model_score "Score: 0.45" = Some 0.45)
 
-let test_parse_llm_score_out_of_range () =
-  assert (parse_llm_score "2.5" = None);
-  assert (parse_llm_score "1.5" = None);
+let test_parse_model_score_out_of_range () =
+  assert (parse_model_score "2.5" = None);
+  assert (parse_model_score "1.5" = None);
   (* "-0.5" extracts "0.5" since scanner looks for first valid 0-1 number *)
-  assert (parse_llm_score "-0.5" = Some 0.5)
+  assert (parse_model_score "-0.5" = Some 0.5)
 
-let test_parse_llm_score_garbage () =
-  assert (parse_llm_score "no numbers here" = None);
-  assert (parse_llm_score "" = None)
+let test_parse_model_score_garbage () =
+  assert (parse_model_score "no numbers here" = None);
+  assert (parse_model_score "" = None)
 
-let test_parse_llm_score_whitespace () =
-  assert (parse_llm_score "  0.9  " = Some 0.9);
-  assert (parse_llm_score "\n0.65\n" = Some 0.65)
+let test_parse_model_score_whitespace () =
+  assert (parse_model_score "  0.9  " = Some 0.9);
+  assert (parse_model_score "\n0.65\n" = Some 0.65)
 
 let test_build_scoring_prompt () =
   let prompt = build_scoring_prompt security_agent security_task in
@@ -328,7 +328,7 @@ let test_match_mode_dispatch () =
   (* Verify get_match_mode reads env var correctly *)
   let mode = get_match_mode () in
   match Sys.getenv_opt "MASC_CAPABILITY_MATCH_MODE" with
-  | Some "llm" -> assert (mode = Llm)
+  | Some "model" -> assert (mode = Model)
   | Some "keyword" -> assert (mode = Keyword)
   | _ -> assert (mode = Hybrid)
 
@@ -382,12 +382,12 @@ let () =
     ("ranking_to_json", test_ranking_to_json);
     ("agent_profile_of_json", test_agent_profile_of_json);
     ("agent_profile_of_json_string_traits", test_agent_profile_of_json_string_traits);
-    (* LLM scoring unit tests *)
-    ("parse_llm_score_direct", test_parse_llm_score_direct);
-    ("parse_llm_score_with_text", test_parse_llm_score_with_text);
-    ("parse_llm_score_out_of_range", test_parse_llm_score_out_of_range);
-    ("parse_llm_score_garbage", test_parse_llm_score_garbage);
-    ("parse_llm_score_whitespace", test_parse_llm_score_whitespace);
+    (* MODEL scoring unit tests *)
+    ("parse_model_score_direct", test_parse_model_score_direct);
+    ("parse_model_score_with_text", test_parse_model_score_with_text);
+    ("parse_model_score_out_of_range", test_parse_model_score_out_of_range);
+    ("parse_model_score_garbage", test_parse_model_score_garbage);
+    ("parse_model_score_whitespace", test_parse_model_score_whitespace);
     ("build_scoring_prompt", test_build_scoring_prompt);
     ("match_mode_dispatch", test_match_mode_dispatch);
     ("score_keyword_direct", test_score_keyword_direct);

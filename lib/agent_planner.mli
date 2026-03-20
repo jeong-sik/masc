@@ -1,6 +1,6 @@
 (** Agent Planner — Daily plan generation for Generative Agents.
 
-    Each agent creates a daily plan once per day via LLM.
+    Each agent creates a daily plan once per day via MODEL.
     The plan divides 24 hours into blocks with activities and priorities.
     The heartbeat tick uses [current_block] priority to decide who acts.
 
@@ -26,15 +26,15 @@ type daily_plan = {
 
 (** {1 Plan Access} *)
 
-(** Get today's plan, creating one via LLM if it doesn't exist.
+(** Get today's plan, creating one via MODEL if it doesn't exist.
     [identity] is the agent's system prompt / description.
     [memories] are recent memory entries for context.
-    [call_llm] is the function to invoke LLM for plan generation. *)
+    [call_model] is the function to invoke MODEL for plan generation. *)
 val get_or_create_plan :
   agent_name:string ->
   identity:string ->
   memories:Memory_stream.memory_entry list ->
-  call_llm:(prompt:string -> string) ->
+  call_model:(prompt:string -> string) ->
   daily_plan
 
 (** Get the block for the current KST hour from a plan. *)
@@ -48,7 +48,7 @@ val act_threshold : float
 
 (** {1 Fallback} *)
 
-(** Default plan when LLM fails. All hours get priority 0.5. *)
+(** Default plan when MODEL fails. All hours get priority 0.5. *)
 val fallback_plan : agent_name:string -> daily_plan
 
 (** {1 Formatting} *)

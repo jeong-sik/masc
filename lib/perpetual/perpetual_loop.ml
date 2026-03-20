@@ -41,7 +41,7 @@ type loop_config = {
   session_base_dir : string;
   on_event : event -> unit;
   event_bus : Agent_sdk.Event_bus.t option;
-  (* Coding mode: spawn Claude Code instead of LLM direct calls *)
+  (* Coding mode: spawn Claude Code instead of MODEL direct calls *)
   coding_mode : bool;
   coding_agent : string;
   coding_timeout_s : int;
@@ -395,7 +395,7 @@ let status ~config state : Yojson.Safe.t =
     ("last_usage", `Assoc [
       ("input_tokens", `Int state.last_usage.input_tokens);
       ("output_tokens", `Int state.last_usage.output_tokens);
-      ("total_tokens", `Int (Llm_utils.total_tokens state.last_usage));
+      ("total_tokens", `Int (Inference_utils.total_tokens state.last_usage));
     ]);
     ("last_latency_ms", `Int state.last_latency_ms);
     ("last_heartbeat_ts", `Float state.last_heartbeat);

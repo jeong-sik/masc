@@ -98,9 +98,9 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
       [("inputs", `Assoc (List.map (fun (k, v) -> (k, `String v)) filtered_mapping))]
   in
   let type_fields = match n.node_type with
-    | Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars; thinking } ->
+    | Model { model; system; prompt; timeout; tools; prompt_ref; prompt_vars; thinking } ->
         let fields = [
-          ("type", `String "llm");
+          ("type", `String "model");
           ("model", `String model);
           ("prompt", `String prompt);
         ] in

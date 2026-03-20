@@ -24,7 +24,7 @@ let test_shard_board_exists () =
   match Tool_shard.get_shard "board" with
   | Some s ->
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
-    Alcotest.(check bool) "has 4 tools" true (List.length s.Tool_shard.tools = 4)
+    Alcotest.(check bool) "has 5 tools" true (List.length s.Tool_shard.tools = 5)
   | None -> Alcotest.fail "board shard not found"
 
 let test_shard_filesystem_exists () =
@@ -89,17 +89,17 @@ let test_tools_of_shards_single () =
 
 let test_tools_of_shards_multiple () =
   let tools = Tool_shard.tools_of_shards ["base"; "board"] in
-  (* base=3, board=4 → 7 *)
-  Alcotest.(check int) "base+board = 7" 7 (List.length tools)
+  (* base=3, board=5 → 8 *)
+  Alcotest.(check int) "base+board = 8" 8 (List.length tools)
 
 let test_tools_of_shards_unknown_ignored () =
   let tools = Tool_shard.tools_of_shards ["base"; "doesnt_exist"; "board"] in
-  Alcotest.(check int) "unknown shard ignored" 7 (List.length tools)
+  Alcotest.(check int) "unknown shard ignored" 8 (List.length tools)
 
-let test_keeper_llm_tools_count () =
-  let tools = Tool_shard.keeper_llm_tools in
-  (* base=3 + board=4 + filesystem=2 + shell=3 + weather=1 + voice=5 = 18 *)
-  Alcotest.(check int) "18 total tools" 18 (List.length tools)
+let test_keeper_model_tools_count () =
+  let tools = Tool_shard.keeper_model_tools in
+  (* base=3 + board=5 + filesystem=2 + shell=3 + weather=1 + voice=5 = 19 *)
+  Alcotest.(check int) "19 total tools" 19 (List.length tools)
 
 (* ============================================================
    grant_shard tests
@@ -297,14 +297,14 @@ let test_voice_tools_names () =
   Alcotest.(check bool) "has voice_session_start" true (List.mem "keeper_voice_session_start" names);
   Alcotest.(check bool) "has voice_session_end" true (List.mem "keeper_voice_session_end" names)
 
-let test_keeper_llm_has_voice_tools () =
+let test_keeper_model_has_voice_tools () =
   let names = List.map (fun (t : Masc_mcp.Types.tool_schema) -> t.name)
-    Tool_shard.keeper_llm_tools in
-  Alcotest.(check bool) "keeper_llm has voice_speak" true (List.mem "keeper_voice_speak" names);
-  Alcotest.(check bool) "keeper_llm has voice_agent" true (List.mem "keeper_voice_agent" names);
-  Alcotest.(check bool) "keeper_llm has voice_sessions" true (List.mem "keeper_voice_sessions" names);
-  Alcotest.(check bool) "keeper_llm has voice_session_start" true (List.mem "keeper_voice_session_start" names);
-  Alcotest.(check bool) "keeper_llm has voice_session_end" true (List.mem "keeper_voice_session_end" names)
+    Tool_shard.keeper_model_tools in
+  Alcotest.(check bool) "keeper_model has voice_speak" true (List.mem "keeper_voice_speak" names);
+  Alcotest.(check bool) "keeper_model has voice_agent" true (List.mem "keeper_voice_agent" names);
+  Alcotest.(check bool) "keeper_model has voice_sessions" true (List.mem "keeper_voice_sessions" names);
+  Alcotest.(check bool) "keeper_model has voice_session_start" true (List.mem "keeper_voice_session_start" names);
+  Alcotest.(check bool) "keeper_model has voice_session_end" true (List.mem "keeper_voice_session_end" names)
 
 (* ============================================================
    Shard revoke voice (#6: revoke removes all 5 voice tools)
@@ -354,7 +354,7 @@ let () =
       Alcotest.test_case "single" `Quick test_tools_of_shards_single;
       Alcotest.test_case "multiple" `Quick test_tools_of_shards_multiple;
       Alcotest.test_case "unknown ignored" `Quick test_tools_of_shards_unknown_ignored;
-      Alcotest.test_case "keeper_llm_tools" `Quick test_keeper_llm_tools_count;
+      Alcotest.test_case "keeper_model_tools" `Quick test_keeper_model_tools_count;
     ]);
     ("grant_shard", [
       Alcotest.test_case "known" `Quick test_grant_known_shard;
@@ -388,7 +388,7 @@ let () =
       Alcotest.test_case "base tools" `Quick test_base_tools_names;
       Alcotest.test_case "board tools" `Quick test_board_tools_names;
       Alcotest.test_case "voice tools" `Quick test_voice_tools_names;
-      Alcotest.test_case "keeper_llm has voice" `Quick test_keeper_llm_has_voice_tools;
+      Alcotest.test_case "keeper_model has voice" `Quick test_keeper_model_has_voice_tools;
     ]);
     ("voice_shard_revoke", [
       Alcotest.test_case "revoke removes all voice tools" `Quick test_revoke_voice_removes_all_tools;

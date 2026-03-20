@@ -38,7 +38,7 @@ dune build --root . @check
 ```
 lib/                    # Core library (~200 .ml files)
   lodge_heartbeat.ml    # Agent autonomous activity (45min tick, Thompson Sampling)
-  lodge_cascade.ml      # LLM cascade routing (GLM → Claude → Ollama)
+  lodge_cascade.ml      # MODEL cascade routing (GLM → Claude → Ollama)
   lodge_memory.ml       # Agent experience recall (thread + stream + Neo4j)
   lodge_selection.ml    # Thompson Sampling agent selection with fairness
   board.ml              # Mastodon-style post board (crypto IDs, TTL sweeper)
@@ -52,7 +52,7 @@ lib/                    # Core library (~200 .ml files)
   gardener.ml           # Ecosystem manager (spawn/retire, circuit breaker)
   spawn_eio.ml          # Agent subprocess spawning with token tracking
   types.ml              # Domain model (Agent_id, Task_id, Post_id newtypes)
-  llm_direct.ml         # Direct LLM API calls (GLM, Claude CLI, Ollama)
+  model_direct.ml         # Direct MODEL API calls (GLM, Claude CLI, Ollama)
   bounded.ml            # Multi-agent loop with formal constraints
   env_config.ml         # Centralized env var management (12-Factor)
 bin/                    # Executable entry points

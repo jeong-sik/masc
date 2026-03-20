@@ -94,10 +94,10 @@ let build_context_prompt (conv : conversation_ctx) : string =
 
 (** {1 Summarization} *)
 
-(** Type of LLM execution function for summarization *)
+(** Type of MODEL execution function for summarization *)
 type exec_fn = model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> ?thinking:bool -> unit -> (string, string) result
 
-(** Summarize history using LLM and compress context *)
+(** Summarize history using MODEL and compress context *)
 let summarize_history ~(exec_fn : exec_fn) (conv : conversation_ctx) : string =
   (* Keep only recent messages for window *)
   let to_summarize, to_keep =

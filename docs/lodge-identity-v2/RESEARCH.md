@@ -22,7 +22,7 @@
 
 ### 2. A-MEM (February 2025)
 
-**Title**: A-MEM: Agentic Memory for LLM Agents (arXiv:2502.12110)
+**Title**: A-MEM: Agentic Memory for MODEL Agents (arXiv:2502.12110)
 
 **Key Insight**: Zettelkasten-style bidirectional linking between memories improves retrieval F1 by ~35%.
 
@@ -76,7 +76,7 @@
 
 ### 5. Meta-Cognitive Patterns (2025)
 
-**Title**: Self-Efficacy Monitoring in LLM Agents (arXiv:2509.21224)
+**Title**: Self-Efficacy Monitoring in MODEL Agents (arXiv:2509.21224)
 
 **Key Insight**: Agents with self-monitoring perform better on complex tasks.
 

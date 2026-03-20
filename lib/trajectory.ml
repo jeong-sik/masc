@@ -59,10 +59,10 @@ type trajectory = {
 (* ================================================================ *)
 
 (** Rough per-call cost estimates for keeper tools.
-    Most are local/free; only LLM-calling tools have cost. *)
+    Most are local/free; only MODEL-calling tools have cost. *)
 let tool_cost_estimate (tool_name : string) : float =
   match tool_name with
-  (* LLM-intensive tools *)
+  (* MODEL-intensive tools *)
   | "keeper_board_post" -> 0.002
   | "keeper_board_comment" -> 0.001
   | "keeper_bash" -> 0.0001

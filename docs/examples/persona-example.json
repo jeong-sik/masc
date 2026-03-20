@@ -15,7 +15,7 @@
     "models": ["glm:glm-4.7-flash", "ollama:qwen3.5-35b"],
     "allowed_models": ["glm:glm-4.7-flash", "ollama:qwen3.5-35b"],
     "active_model": "glm:glm-4.7-flash",
-    "policy_mode": "llm_deliberation",
+    "policy_mode": "model_deliberation",
     "policy_action_budget": "conversation"
   }
 }

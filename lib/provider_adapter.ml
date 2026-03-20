@@ -514,7 +514,7 @@ let default_model_label_for_family = function
       if m = "" then Error "No OpenAI model configured (MASC_OPENAI_DEFAULT_MODEL)"
       else Ok ("openai:" ^ m)
   | Glm_family ->
-      let m = Env_config.Llm.default_model in
+      let m = Env_config.Glm.default_model in
       Ok ("glm:" ^ (if m = "" then "auto" else m))
   | Llama_family ->
       explicit_llama_model_label_result ()
@@ -537,7 +537,7 @@ let preferred_execution_model_labels () =
          (* GLM: even with empty model config, include as "glm:" —
             the GLM provider selects the model at runtime. *)
          (if env_present "ZAI_API_KEY" then
-           let m = Env_config.Llm.default_model in
+           let m = Env_config.Glm.default_model in
            Some (Printf.sprintf "glm:%s" (if m = "" then "auto" else m))
          else None);
          (* Non-GLM providers: only include when model is explicitly configured.
@@ -565,7 +565,7 @@ let preferred_verifier_model_labels () =
          | Ok label -> Some label
          | Error _ -> None);
          (if env_present "ZAI_API_KEY" then
-           let m = Env_config.Llm.default_model in
+           let m = Env_config.Glm.default_model in
            Some (Printf.sprintf "glm:%s" (if m = "" then "auto" else m))
          else None);
          (if gemini_direct_available () then

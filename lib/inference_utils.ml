@@ -1,4 +1,4 @@
-(** Llm_utils — LLM utility functions.
+(** Inference_utils — inference utility functions.
 
     Usage helpers, UTF-8 sanitization, token estimation, and
     concurrency diagnostics.  Extracted from the former [Cascade]
@@ -33,7 +33,7 @@ let zero_usage : Agent_sdk.Types.api_usage = Llm_provider.Types.zero_api_usage
 
 (** Extract usage from an api_response, defaulting to zero.
     @since 2.123.0 — delegates to OAS Types.usage_of_response *)
-let usage_of_response (resp : Llm_provider.Types.api_response) : Agent_sdk.Types.api_usage =
+let usage_of_response (resp : Oas_response.api_response) : Agent_sdk.Types.api_usage =
   Llm_provider.Types.usage_of_response resp
 
 (** Measure wall-clock latency of a thunk in milliseconds.
@@ -113,14 +113,14 @@ let estimate_tokens (msgs : Agent_sdk.Types.message list) =
 (* Concurrency diagnostics (observability only, no throttling)       *)
 (* ================================================================ *)
 
-(** Maximum concurrent LLM calls — retained for diagnostics/dashboard.
+(** Maximum concurrent model calls — retained for diagnostics/dashboard.
     No longer enforced via semaphore: llama-server handles slot-based
     parallelism internally, and cloud APIs return rate-limit errors. *)
-let max_concurrent_llm =
-  int_of_env_default "MASC_MAX_CONCURRENT_LLM" ~default:8 ~min_v:1 ~max_v:128
+let max_concurrent_models =
+  int_of_env_default "MASC_MAX_CONCURRENT_MODELS" ~default:8 ~min_v:1 ~max_v:128
 
-(** Atomic counter tracking in-flight LLM calls (observability only). *)
+(** Atomic counter tracking in-flight model calls (observability only). *)
 let inflight = Atomic.make 0
 
-let llm_semaphore_available () = max_concurrent_llm - Atomic.get inflight
-let llm_permits_in_use () = Atomic.get inflight
+let model_permits_available () = max_concurrent_models - Atomic.get inflight
+let model_permits_in_use () = Atomic.get inflight

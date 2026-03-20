@@ -127,7 +127,7 @@
    cp_microarch_summary
    cp_search_fabric
    model_spec
-   llm_utils
+   inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly
    eio_context
    encryption
@@ -211,6 +211,8 @@
    chain_run_store
    chain_native_eio
    log
+   oas_message
+   oas_response
    thompson_sampling
    memory_stream
    memory_stream_sync

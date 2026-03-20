@@ -68,12 +68,11 @@ function classifyKeeperErrorKind(errorText: string): KeeperDiagnostic['quiet_rea
   if (
     lowered.includes('timeout')
     || lowered.includes('model')
-    || lowered.includes('llm')
     || lowered.includes('api key')
     || lowered.includes('api_key')
     || lowered.includes('provider')
   ) {
-    return 'llm_error'
+    return 'model_error'
   }
   return 'unknown'
 }

@@ -1,10 +1,10 @@
 (** Keeper_deliberation — typed action space, deliberation triggers,
-    world observation builder, triage logic, and LLM-driven deliberation
+    world observation builder, triage logic, and MODEL-driven deliberation
     for the keeper deliberation engine.
 
-    Phase 1: Pure heuristic triage (no LLM calls).
-    Phase 2: LLM-driven deliberation (L1 Reactive) — when triage detects
-    triggers, call an LLM to decide what action to take.
+    Phase 1: Pure heuristic triage (no MODEL calls).
+    Phase 2: MODEL-driven deliberation (L1 Reactive) — when triage detects
+    triggers, call an MODEL to decide what action to take.
 
     @since 2.90.0 *)
 
@@ -222,10 +222,10 @@ let triage_result_to_json = function
             `List (List.map deliberation_trigger_to_json triggers) );
         ]
 
-(* ---------- Triage function: cheap gate before LLM deliberation ---------- *)
+(* ---------- Triage function: cheap gate before MODEL deliberation ---------- *)
 
 (** Evaluate a world observation and return triggers that warrant deliberation.
-    This is a pure heuristic — no LLM calls, no I/O.
+    This is a pure heuristic — no MODEL calls, no I/O.
     Returns [Skip _] when nothing interesting happened,
     [Triggered triggers] when the keeper should deliberate. *)
 let triage (obs : world_observation) : triage_result =
@@ -302,7 +302,7 @@ let deterministic_baseline_action (obs : world_observation) : deliberation_actio
     Noop "no_trigger"
 
 (* ================================================================ *)
-(* Phase 2: LLM-Driven Deliberation (L1 Reactive)                  *)
+(* Phase 2: MODEL-Driven Deliberation (L1 Reactive)                  *)
 (* ================================================================ *)
 
 (* ---------- Budget check ---------- *)
@@ -352,9 +352,9 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     obs.direct_mention
     obs.has_question
 
-(** Build a prompt for the LLM to decide the keeper's next action.
+(** Build a prompt for the MODEL to decide the keeper's next action.
     The prompt describes the keeper's identity, current state, detected triggers,
-    and available actions. The LLM is asked to respond with JSON.
+    and available actions. The MODEL is asked to respond with JSON.
     When [autonomy_level] is L3+, the [multi_step] action is included. *)
 let build_deliberation_prompt
     ?(autonomy_level : string option)
@@ -421,8 +421,8 @@ Examples:
 
 (* ---------- Response parser ---------- *)
 
-(** Extract a JSON object from a raw LLM response string.
-    Handles cases where the LLM wraps JSON in markdown code fences or
+(** Extract a JSON object from a raw MODEL response string.
+    Handles cases where the MODEL wraps JSON in markdown code fences or
     adds extra text before/after the JSON. *)
 let extract_json_from_response (raw : string) : (Yojson.Safe.t, string) result =
   let trimmed = String.trim raw in
@@ -473,7 +473,7 @@ let extract_json_from_response (raw : string) : (Yojson.Safe.t, string) result =
         find_brace 0
 
 (** Parse a deliberation action from the "action" and "params" fields of the
-    LLM response JSON. Returns the typed action or an error string. *)
+    MODEL response JSON. Returns the typed action or an error string. *)
 let rec parse_action_from_json (json : Yojson.Safe.t)
     : (deliberation_action, string) result =
   let action_str = Safe_ops.json_string ~default:"" "action" json in
@@ -578,10 +578,10 @@ let rec parse_action_from_json (json : Yojson.Safe.t)
             if has_nested then
               Error "multi_step cannot contain nested multi_step actions"
             else Ok (MultiStep actions))
-  | "" -> Error "missing 'action' field in LLM response"
+  | "" -> Error "missing 'action' field in MODEL response"
   | unknown -> Error (Printf.sprintf "unknown action type: %s" unknown)
 
-(** Parse the LLM's JSON response into a deliberation_action with reasoning
+(** Parse the MODEL's JSON response into a deliberation_action with reasoning
     and confidence. Returns [(action, reasoning, confidence)] or an error string. *)
 let parse_deliberation_response (raw : string)
     : (deliberation_action * string * float, string) result =

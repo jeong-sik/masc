@@ -89,5 +89,5 @@ val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
 (** Execute tool_shard MCP tools (grant, revoke, list).
     Agent shard state is tracked in-memory via [agent_shards] hashtable. *)
 
-val keeper_llm_tools : Types.tool_schema list
+val keeper_model_tools : Types.tool_schema list
 (** Full tool set (all 11 tools) — backward compatible with existing code. *)

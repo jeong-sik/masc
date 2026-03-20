@@ -1,4 +1,4 @@
-(** MoE-style LLM Router for Jiphyeon
+(** MoE-style MODEL Router for Jiphyeon
     
     Sparse activation with 90% small / 10% large model target *)
 

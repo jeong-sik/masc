@@ -173,7 +173,7 @@ let test_source_metrics_fd_unlock () =
     true (file_contains_pattern "lib/metrics_store_eio.ml"
       {|fd unlock failed:|})
 
-let test_source_llm_token_parse () =
+let test_source_model_token_parse () =
   check bool "masc_model.ml has token count type"
     true (any_file_contains_pattern
       ["lib/masc_model.ml"]
@@ -239,8 +239,8 @@ let () =
         `Quick test_source_metrics_fd_close;
       test_case "MA-H2b: metrics fd unlock logging present"
         `Quick test_source_metrics_fd_unlock;
-      test_case "MA-H3: llm token parse logging present"
-        `Quick test_source_llm_token_parse;
+      test_case "MA-H3: model token parse logging present"
+        `Quick test_source_model_token_parse;
       test_case "MA-H4: keeper proactive logging present"
         `Quick test_source_keeper_proactive;
     ];

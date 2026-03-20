@@ -207,7 +207,7 @@ message GetPlanRequest {
 message GetPlanResponse {
   bool success = 1;
   PlanningContext context = 2;
-  string markdown = 3;  // Formatted for LLM consumption
+  string markdown = 3;  // Formatted for model consumption
 }
 
 // Streaming

@@ -8,10 +8,10 @@ open Keeper_alerting
 open Keeper_exec_tools [@@warning "-33"]
 open Keeper_exec_status
 
-let timed = Llm_utils.timed
-let zero_usage = Llm_utils.zero_usage
-let usage_of_response = Llm_utils.usage_of_response
-let total_tokens = Llm_utils.total_tokens
+let timed = Inference_utils.timed
+let zero_usage = Inference_utils.zero_usage
+let usage_of_response = Inference_utils.usage_of_response
+let total_tokens = Inference_utils.total_tokens
 
 let log_keeper_exn ~label exn =
   let tag = match exn with
@@ -619,7 +619,7 @@ let run_proactive_generation
       | Ok result ->
           let resp = result.Oas_worker.response in
           let used_model =
-            model_spec_for_used specs resp.Llm_provider.Types.model
+            model_spec_for_used specs resp.model
             |> Option.value ~default:primary
           in
           let attempt_usage = usage_of_response resp in
@@ -633,7 +633,7 @@ let run_proactive_generation
               Printf.sprintf "(tools executed: %s)" (String.concat ", " tool_names)
             else c
           in
-          let attempt_model_used = resp.Llm_provider.Types.model in
+          let attempt_model_used = resp.model in
           let attempt_tools_used = List.filter_map (function
             | Agent_sdk.Types.ToolUse { name; _ } -> Some name | _ -> None)
             resp.content in

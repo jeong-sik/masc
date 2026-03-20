@@ -110,7 +110,7 @@ let openai_default =
 
 let glm_cloud =
   make_of_registry ~registry_name:"glm"
-    ~model_id:Env_config.Llm.default_model ~provider:Glm_cloud
+    ~model_id:Env_config.Glm.default_model ~provider:Glm_cloud
 
 let gemini_pro =
   make_of_registry ~registry_name:"gemini"
@@ -196,7 +196,7 @@ let rec model_spec_of_string s =
               ( String.sub model_id 0 at_idx,
                 String.sub model_id (at_idx + 1)
                   (String.length model_id - at_idx - 1) )
-            | None -> (model_id, Env_config_runtime.Custom_llm.default_server_url)
+            | None -> (model_id, Env_config_runtime.Custom_model.default_server_url)
           in
           let pricing = Llm_provider.Pricing.pricing_for_model actual_model in
           Ok {
@@ -238,7 +238,7 @@ let available_model_specs_of_strings model_strs =
   |> List.filter_map (fun model_str ->
          match model_spec_of_string model_str with
          | Error err ->
-             Log.LlmClient.warn "ignoring invalid model spec %s: %s"
+             Log.ModelClient.warn "ignoring invalid model spec %s: %s"
                model_str err;
              None
          | Ok spec -> (
@@ -246,7 +246,7 @@ let available_model_specs_of_strings model_strs =
              | Some env_name ->
                  let value = Sys.getenv_opt env_name |> Option.value ~default:"" in
                  if String.trim value = "" then (
-                   Log.LlmClient.debug "skipping %s: %s not set"
+                   Log.ModelClient.debug "skipping %s: %s not set"
                      model_str env_name;
                    None)
                  else Some spec

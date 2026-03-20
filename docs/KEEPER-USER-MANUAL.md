@@ -26,7 +26,7 @@ MASC는 OAS 위에 멀티에이전트 협업 기능을 확장한다:
 
 - **Room 조정**: 에이전트들이 같은 Room에서 태스크를 공유하고 브로드캐스트
 - **Board**: 에이전트 커뮤니티 게시판 (포스트, 투표, 댓글)
-- **Deliberation**: 트리거 기반 의사결정 엔진 (heuristic 또는 LLM)
+- **Deliberation**: 트리거 기반 의사결정 엔진 (heuristic 또는 MODEL)
 
 3개의 어댑터 모듈이 OAS-MASC 경계를 연결:
 
@@ -100,7 +100,7 @@ stateDiagram-v2
 
     state active {
         [*] --> healthy
-        healthy --> degraded : LLM/GraphQL 에러 감지
+        healthy --> degraded : MODEL/GraphQL 에러 감지
         degraded --> healthy : 에러 해소
         healthy --> stale : heartbeat 타임아웃 (keepalive_sec * 4 초과)
         stale --> healthy : heartbeat 복구
@@ -124,7 +124,7 @@ stateDiagram-v2
 | `healthy` | 정상 |
 | `idle` | 활동 없음 |
 | `stale` | heartbeat이 오래됨 (last_seen_ago_s > keepalive_sec * 4) |
-| `degraded` | LLM/GraphQL 에러 감지됨 |
+| `degraded` | MODEL/GraphQL 에러 감지됨 |
 | `offline` | keepalive 미실행 또는 agent 미등록 |
 
 ### 2.2 Context Management (3-tier 임계값)
@@ -186,7 +186,7 @@ Keepalive는 Eio fiber로 구현되어 주기적으로 실행된다.
 Heartbeat fiber가 수행하는 작업 (매 주기):
 1. Room에서 agent 존재 갱신
 2. (snapshot 주기마다) context 상태 스냅샷을 JSONL 메트릭에 기록
-3. Deliberation triage 실행 (llm_deliberation 모드일 때)
+3. Deliberation triage 실행 (model_deliberation 모드일 때)
 4. Proactive 메시지 발신 여부 판단
 
 ---
@@ -203,7 +203,7 @@ spawn 시 인자로 직접 설정하는 필드.
 |------|------|--------|------|----------|
 | `name` | string | (필수) | keeper 고유 이름. `[A-Za-z0-9._-]`만 허용 | 재생성 필요 |
 | `goal` | string | (필수) | keeper의 현재 목표 | `masc_keeper_up` 재실행 시 `goal` 인자 |
-| `models` | string list | (필수) | LLM cascade 목록. `provider:model_id` 형식 | `masc_keeper_up`의 `models` 인자 |
+| `models` | string list | (필수) | MODEL cascade 목록. `provider:model_id` 형식 | `masc_keeper_up`의 `models` 인자 |
 | `instructions` | string | `""` | 커스텀 시스템 프롬프트 | `masc_keeper_up`의 `instructions` 인자 |
 | `presence_keepalive` | bool | `true` | keepalive fiber 활성화 여부 | `masc_keeper_up`의 `presence_keepalive` 인자 |
 | `presence_keepalive_sec` | int | `30` | heartbeat 주기 (초) | `masc_keeper_up`의 `presence_keepalive_sec` 인자 |
@@ -250,7 +250,7 @@ spawn 시 인자로 직접 설정하는 필드.
 | `trace_id` | MASC | `trace-{timestamp}-{random}` 형식 | (항상 존재) |
 | `agent_name` | MASC | `keeper-{name}-agent` 형식 | (항상 존재) |
 | `active_model` | Cascade | 현재 실행 모델 (아래 5장 참조) | models 미설정 |
-| `total_cost_usd` | MASC | 누적 LLM 호출 비용 | 아직 호출 없음 |
+| `total_cost_usd` | MASC | 누적 MODEL 호출 비용 | 아직 호출 없음 |
 | `compaction_count` | MASC | compaction 수행 횟수 | 아직 compaction 없음 |
 
 ### 3.4 Cascade 결정 필드
@@ -291,7 +291,7 @@ spawn 시 인자로 직접 설정하는 필드.
     "models": ["(필수) provider:model_id", "..."],
     "allowed_models": ["(선택) 허용 모델 목록"],
     "active_model": "(선택) 초기 활성 모델",
-    "policy_mode": "(선택) heuristic|learned_offline_v1|explicit_event_v1|llm_deliberation",
+    "policy_mode": "(선택) heuristic|learned_offline_v1|explicit_event_v1|model_deliberation",
     "policy_action_budget": "(선택) conversation|board",
     "soul_profile": "(선택) compaction 시 보존 우선순위 결정"
   }
@@ -364,7 +364,7 @@ Soul Profile은 compaction 시 어떤 정보를 우선 보존할지 결정하는
     "models": ["glm:glm-4.7-flash"],
     "allowed_models": ["glm:glm-4.7-flash", "ollama:qwen3.5-35b", "claude:sonnet"],
     "active_model": "glm:glm-4.7-flash",
-    "policy_mode": "llm_deliberation",
+    "policy_mode": "model_deliberation",
     "will": "정확한 정보를 찾아 전달하겠다",
     "needs": "충분한 탐색 시간과 다양한 소스",
     "desires": "팀이 데이터 기반으로 판단하는 문화"
@@ -483,7 +483,7 @@ Keeper의 모든 활동은 JSONL 파일에 기록된다: `{keeper_dir}/{name}.me
 
 ### 6.2 Deliberation 의사결정
 
-`policy_mode: "llm_deliberation"` 설정 시, keeper는 LLM을 호출하여 행동을 결정한다.
+`policy_mode: "model_deliberation"` 설정 시, keeper는 MODEL을 호출하여 행동을 결정한다.
 
 **트리거 (triage)**:
 
@@ -522,7 +522,7 @@ Deliberation의 매 결정은 `{keeper_dir}/{name}.decisions.jsonl`에 기록된
 - `id`: 고유 결정 ID (`dec-{timestamp}-{random}`)
 - `triggers`: 트리거 목록
 - `action_chosen`: 선택된 행동
-- `reasoning`: LLM의 추론
+- `reasoning`: MODEL의 추론
 - `confidence`: 신뢰도 (0.0~1.0)
 - `outcome`: 결과 (`pending`, `success`, `failed`)
 - `feedback_score`: 인간 피드백 (-1.0~1.0)
@@ -606,7 +606,7 @@ flowchart TD
 | 증상 | 확인 사항 |
 |------|----------|
 | 의도한 모델이 사용 안 됨 | `active_model` vs `last_model_used` 비교 |
-| cascade가 fallback으로 넘어감 | LLM provider 연결 상태 확인 (Ollama, API key 등) |
+| cascade가 fallback으로 넘어감 | MODEL provider 연결 상태 확인 (Ollama, API key 등) |
 | `active_model`이 빈 문자열 | `models` 리스트가 비어있지 않은지 확인 |
 
 **Cascade 디버깅**:
@@ -628,7 +628,7 @@ Keeper가 응답하지 않을 때, `diagnostic.quiet_reason`을 확인:
 | `min_gap` | proactive 쿨다운 중 | `next_eligible_at_s`만큼 대기 |
 | `no_recent_activity` | proactive idle_sec 미충족 | 활동 대기 또는 직접 메시지 |
 | `graphql_error` | GraphQL 연결 문제 | GraphQL 서버 상태 확인 |
-| `llm_error` | LLM 호출 실패 | 모델/API 연결 상태 확인 |
+| `model_error` | MODEL 호출 실패 | 모델/API 연결 상태 확인 |
 
 ---
 

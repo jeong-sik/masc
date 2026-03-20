@@ -215,13 +215,13 @@ let test_to_prometheus_text_has_sse_metrics () =
   check bool "has sse write failure counter" true (has "masc_sse_write_failures_total");
   check bool "has sse reject counter" true (has "masc_sse_rejects_total")
 
-let test_llm_cache_metrics_json () =
-  Prometheus.inc_counter "masc_llm_cache_hits_total" ();
-  Prometheus.inc_counter "masc_llm_cache_misses_total" ();
-  Prometheus.inc_counter "masc_llm_cache_writes_total" ();
-  Prometheus.inc_counter "masc_llm_cache_bypass_total" ();
-  Prometheus.inc_counter "masc_llm_cache_errors_total" ();
-  let json = Prometheus.llm_cache_metrics_json () in
+let test_inference_cache_metrics_json () =
+  Prometheus.inc_counter "masc_inference_cache_hits_total" ();
+  Prometheus.inc_counter "masc_inference_cache_misses_total" ();
+  Prometheus.inc_counter "masc_inference_cache_writes_total" ();
+  Prometheus.inc_counter "masc_inference_cache_bypass_total" ();
+  Prometheus.inc_counter "masc_inference_cache_errors_total" ();
+  let json = Prometheus.inference_cache_metrics_json () in
   let open Yojson.Safe.Util in
   check bool "has hits" true (json |> member "hits" <> `Null);
   check bool "has misses" true (json |> member "misses" <> `Null);
@@ -379,7 +379,7 @@ let () =
       test_case "has TYPE" `Quick test_to_prometheus_text_has_type;
       test_case "has uptime" `Quick test_to_prometheus_text_has_uptime;
       test_case "has sse metrics" `Quick test_to_prometheus_text_has_sse_metrics;
-      test_case "llm cache metrics json" `Quick test_llm_cache_metrics_json;
+      test_case "model cache metrics json" `Quick test_inference_cache_metrics_json;
     ];
     "convenience", [
       test_case "record_request" `Quick test_record_request;

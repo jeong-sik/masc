@@ -23,14 +23,14 @@ let print_summary () =
     Env_config_runtime.Tempo.min_interval_seconds
     Env_config_runtime.Tempo.max_interval_seconds
     Env_config_runtime.Tempo.default_interval_seconds;
-  Log.Env.info "Llm: timeout=%.0fs cache_enabled=%b ttl=%ds max_prompt_chars=%d max_temp=%.2f l1_max=%d spawn_policy=%s"
-    Env_config_governance.Llm.timeout_seconds
-    Env_config_governance.Llm.cache_enabled
-    Env_config_governance.Llm.cache_ttl_seconds
-    Env_config_governance.Llm.cache_max_prompt_chars
-    Env_config_governance.Llm.cache_max_temperature
-    Env_config_governance.Llm.cache_l1_max_entries
-    Env_config_governance.Llm.spawn_cache_policy;
+  Log.Env.info "Inference: timeout=%.0fs cache_enabled=%b ttl=%ds max_prompt_chars=%d max_temp=%.2f l1_max=%d spawn_policy=%s"
+    Env_config_governance.Inference.timeout_seconds
+    Env_config_governance.Inference.cache_enabled
+    Env_config_governance.Inference.cache_ttl_seconds
+    Env_config_governance.Inference.cache_max_prompt_chars
+    Env_config_governance.Inference.cache_max_temperature
+    Env_config_governance.Inference.cache_l1_max_entries
+    Env_config_governance.Inference.spawn_cache_policy;
   Log.Env.info "RateLimit: cleanup_interval=%.0fs entry_max_age=%.0fs"
     Env_config_governance.RateLimit.cleanup_interval_seconds
     Env_config_governance.RateLimit.entry_max_age_seconds;

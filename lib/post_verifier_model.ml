@@ -1,22 +1,22 @@
-(** Post Verifier LLM — G-Eval rubric scoring via LLM cascade.
+(** Post Verifier MODEL — G-Eval rubric scoring via MODEL cascade.
 
     Separated from Post_verifier to avoid dependency cycles:
     Board -> Thompson_sampling -> Post_verifier would pull in Llm_client.
 
     Modes (MASC_VERIFIER_MODE env var):
     - "heuristic" (default): delegates to Post_verifier.verify
-    - "llm": G-Eval rubric scoring via LLM cascade
-    - "hybrid": heuristic pre-filter + LLM for non-Fail content
+    - "model": G-Eval rubric scoring via MODEL cascade
+    - "hybrid": heuristic pre-filter + MODEL for non-Fail content
 
     @since 2.71.0 *)
 
 open Post_verifier
 
-type verifier_mode = Heuristic | Llm | Hybrid
+type verifier_mode = Heuristic | Model | Hybrid
 
 let get_verifier_mode () =
   match Sys.getenv_opt "MASC_VERIFIER_MODE" with
-  | Some "llm" -> Llm
+  | Some "model" -> Model
   | Some "hybrid" -> Hybrid
   | _ -> Heuristic
 
@@ -64,7 +64,7 @@ let parse_geval_response (text : string) :
     (int * int * int * string, string) result =
   let trimmed = String.trim text in
   let json_str =
-    (* Handle cases where LLM wraps JSON in markdown code blocks *)
+    (* Handle cases where MODEL wraps JSON in markdown code blocks *)
     match String.index_opt trimmed '{' with
     | None -> trimmed
     | Some start_idx -> (
@@ -107,15 +107,15 @@ let score_to_verdict ~(dim_name : string) (score : int) : verdict =
   else if score = 3 then Warn (Printf.sprintf "%s scored 3/5" dim_name)
   else Pass
 
-(** Validate that an LLM response contains parseable G-Eval scores. *)
-let geval_response_is_valid (resp : Llm_provider.Types.api_response) : bool =
-  match parse_geval_response (Llm_provider.Types.text_of_response resp) with
+(** Validate that an MODEL response contains parseable G-Eval scores. *)
+let geval_response_is_valid (resp : Oas_response.api_response) : bool =
+  match parse_geval_response (Oas_response.text_of_response resp) with
   | Ok _ -> true
   | Error _ -> false
 
-(** LLM-based G-Eval verification. Calls the LLM cascade.
+(** MODEL-based G-Eval verification. Calls the MODEL cascade.
     Returns Ok verification_result or Error string. *)
-let verify_llm ~content : (verification_result, string) result =
+let verify_model ~content : (verification_result, string) result =
   let prompt = build_geval_prompt ~content in
   match
     Oas_worker.run_named ~cascade_name:"verifier"
@@ -125,7 +125,7 @@ let verify_llm ~content : (verification_result, string) result =
   with
   | Error err -> Error err
   | Ok result -> (
-      match parse_geval_response (Llm_provider.Types.text_of_response result.Oas_worker.response) with
+      match parse_geval_response (Oas_response.text_of_response result.Oas_worker.response) with
       | Error err -> Error err
       | Ok (r, q, s, _reasoning) ->
           let relevance = score_to_verdict ~dim_name:"relevance" r in
@@ -145,19 +145,19 @@ let verify_llm ~content : (verification_result, string) result =
 
 (** Verify content using the mode from MASC_VERIFIER_MODE.
     - heuristic: pure deterministic (default)
-    - llm: G-Eval rubric scoring
-    - hybrid: heuristic pre-filter, then LLM for non-Fail content *)
+    - model: G-Eval rubric scoring
+    - hybrid: heuristic pre-filter, then MODEL for non-Fail content *)
 let verify_auto ~content : verification_result =
   match get_verifier_mode () with
   | Heuristic -> verify ~content
-  | Llm -> (
-      match verify_llm ~content with
+  | Model -> (
+      match verify_model ~content with
       | Ok result -> result
       | Error _err -> verify ~content)
   | Hybrid ->
       let heuristic = verify ~content in
       if not (is_acceptable heuristic) then heuristic
       else (
-        match verify_llm ~content with
+        match verify_model ~content with
         | Ok result -> result
         | Error _err -> heuristic)

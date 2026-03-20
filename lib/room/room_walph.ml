@@ -299,7 +299,7 @@ let walph_loop config ~agent_name ?(preset="drain") ?(max_iterations=10) ?target
 	                            ~content:(Printf.sprintf "⚠️ @walph done error on %s: %s (released)" task_id err_msg) in
 	                          loop ()
 	                    end else begin
-	                      (* Sync walph does not execute LLM chains; release safely instead of leaving claim stuck. *)
+	                      (* Sync walph does not execute MODEL chains; release safely instead of leaving claim stuck. *)
 	                      let err_msg =
 	                        Printf.sprintf "preset %s requires eio walph runner" preset
 	                      in

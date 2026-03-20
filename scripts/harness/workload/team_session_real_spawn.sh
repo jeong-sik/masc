@@ -310,16 +310,16 @@ status_raw="$(call_tool 90007 "masc_team_session_status" "$(jq -cn --arg s "$SES
 require_json "$status_raw"
 status_result="$(printf "%s" "$status_raw" | extract_result)"
 session_status="$(printf "%s" "$status_result" | jq -r '.session.status // empty')"
-llm_cache_hits="$(printf "%s" "$status_result" | jq -r '.llm_cache_metrics.hits // 0')"
-llm_cache_misses="$(printf "%s" "$status_result" | jq -r '.llm_cache_metrics.misses // 0')"
+model_cache_hits="$(printf "%s" "$status_result" | jq -r '.inference_cache_metrics.hits // 0')"
+model_cache_misses="$(printf "%s" "$status_result" | jq -r '.inference_cache_metrics.misses // 0')"
 if [ "$session_status" = "running" ]; then
   echo "FAIL: session still running after stop"
   printf "%s\n" "$status_result"
   exit 1
 fi
 
-if [ "$ASSERT_CACHE_HIT" = "1" ] && [ "$llm_cache_hits" -le 0 ]; then
-  echo "FAIL: ASSERT_CACHE_HIT=1 but llm_cache_metrics.hits=$llm_cache_hits"
+if [ "$ASSERT_CACHE_HIT" = "1" ] && [ "$model_cache_hits" -le 0 ]; then
+  echo "FAIL: ASSERT_CACHE_HIT=1 but inference_cache_metrics.hits=$model_cache_hits"
   printf "%s\n" "$status_result"
   exit 1
 fi
@@ -334,8 +334,8 @@ printf "proof_unique_turn_actors=%s\n" "$proof_unique_turn_actors"
 printf "proof_json_path=%s\n" "$proof_json_path"
 printf "proof_md_path=%s\n" "$proof_md_path"
 printf "session_status=%s\n" "$session_status"
-printf "llm_cache_hits=%s\n" "$llm_cache_hits"
-printf "llm_cache_misses=%s\n" "$llm_cache_misses"
+printf "model_cache_hits=%s\n" "$model_cache_hits"
+printf "model_cache_misses=%s\n" "$model_cache_misses"
 
 echo "[11/11] PASS"
 echo "PASS: real spawned 4-agent team session proof harness"

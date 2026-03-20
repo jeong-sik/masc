@@ -7,19 +7,19 @@
     query intent before dispatching to Auto_recall sources.
 
     Decision flow:
-    1. Intent classification (heuristic or LLM)
+    1. Intent classification (heuristic or MODEL)
     2. State-aware check (recent broadcasts contain answer?)
     3. Route: Skip | Light (broadcasts only) | Full (all sources)
 
     Mode selection via MASC_CONTEXT_ROUTER_MODE:
       - heuristic (default): pattern-matching, 0-latency
-      - llm: LLM-based semantic classification
-      - hybrid: LLM with heuristic fallback on failure
+      - model: MODEL-based semantic classification
+      - hybrid: MODEL with heuristic fallback on failure
 
     @see "Context Engineering" — 2025-2026 best practice
     @see IntentGPT (arXiv 2411.10670) — zero-shot intent classification
     @since 2.60.0
-    @since 2.65.0 — LLM/hybrid intent classification modes *)
+    @since 2.65.0 — MODEL/hybrid intent classification modes *)
 
 (** Retrieval depth — how much context to fetch *)
 type retrieval_depth =
@@ -47,12 +47,12 @@ type routing_decision = {
 
 (* ---------- Router Mode ---------- *)
 
-(** Classification mode: heuristic pattern matching, LLM semantic, or hybrid. *)
-type router_mode = Heuristic | Llm_mode | Hybrid_mode
+(** Classification mode: heuristic pattern matching, MODEL semantic, or hybrid. *)
+type router_mode = Heuristic | Model_mode | Hybrid_mode
 
 let get_router_mode () : router_mode =
   match Sys.getenv_opt "MASC_CONTEXT_ROUTER_MODE" with
-  | Some "llm" -> Llm_mode
+  | Some "model" -> Model_mode
   | Some "hybrid" -> Hybrid_mode
   | _ -> Heuristic
 
@@ -110,7 +110,7 @@ let has_pattern patterns query =
   ) patterns
 
 (** Classify query intent using heuristic pattern matching.
-    Fast (no LLM call), covers ~80%% of cases accurately. *)
+    Fast (no MODEL call), covers ~80%% of cases accurately. *)
 let classify_intent_heuristic (query : string) : query_intent * float =
   let q = String.trim query in
   let len = String.length q in
@@ -126,9 +126,9 @@ let classify_intent_heuristic (query : string) : query_intent * float =
   else if len > 50 then (Knowledge_query, 0.6)
   else (Coordination, 0.5)  (* Short ambiguous → coordination *)
 
-(* ---------- Intent Classification (LLM) ---------- *)
+(* ---------- Intent Classification (MODEL) ---------- *)
 
-(** Build the LLM prompt for intent classification. *)
+(** Build the MODEL prompt for intent classification. *)
 let build_intent_prompt (query : string) : string =
   Printf.sprintf
 {|Classify the intent of this query into exactly one category.
@@ -145,7 +145,7 @@ Query: "%s"
 
 Category:|} query
 
-(** Parse an intent category from LLM response text.
+(** Parse an intent category from MODEL response text.
     Extracts the first recognized category name. *)
 let parse_intent_response (text : string) : (query_intent * float) option =
   let s = String.lowercase_ascii (String.trim text) in
@@ -185,13 +185,13 @@ let parse_intent_response (text : string) : (query_intent * float) option =
   else
     None
 
-(** Validate that an LLM response contains a parseable intent. *)
-let intent_response_is_valid (resp : Llm_provider.Types.api_response) : bool =
-  parse_intent_response (Llm_provider.Types.text_of_response resp) <> None
+(** Validate that an MODEL response contains a parseable intent. *)
+let intent_response_is_valid (resp : Oas_response.api_response) : bool =
+  parse_intent_response (Oas_response.text_of_response resp) <> None
 
-(** Classify query intent using LLM semantic understanding.
+(** Classify query intent using MODEL semantic understanding.
     Returns (intent, confidence) or falls back to low-confidence default. *)
-let classify_intent_llm (query : string) : query_intent * float =
+let classify_intent_model (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
     Oas_worker.run_named ~cascade_name:"context_router"
@@ -200,12 +200,12 @@ let classify_intent_llm (query : string) : query_intent * float =
       ~accept:intent_response_is_valid ()
   with
   | Ok result -> (
-      match parse_intent_response (Llm_provider.Types.text_of_response result.Oas_worker.response) with
+      match parse_intent_response (Oas_response.text_of_response result.Oas_worker.response) with
       | Some r -> r
       | None -> (Coordination, 0.3))  (* unparseable → low-confidence fallback *)
-  | Error _err -> (Coordination, 0.3)  (* LLM error → low-confidence fallback *)
+  | Error _err -> (Coordination, 0.3)  (* MODEL error → low-confidence fallback *)
 
-(** Classify query intent using hybrid mode: LLM first, heuristic fallback. *)
+(** Classify query intent using hybrid mode: MODEL first, heuristic fallback. *)
 let classify_intent_hybrid (query : string) : query_intent * float =
   let prompt = build_intent_prompt query in
   match
@@ -215,7 +215,7 @@ let classify_intent_hybrid (query : string) : query_intent * float =
       ~accept:intent_response_is_valid ()
   with
   | Ok result -> (
-      match parse_intent_response (Llm_provider.Types.text_of_response result.Oas_worker.response) with
+      match parse_intent_response (Oas_response.text_of_response result.Oas_worker.response) with
       | Some r -> r
       | None -> classify_intent_heuristic query)
   | Error _err -> classify_intent_heuristic query
@@ -224,7 +224,7 @@ let classify_intent_hybrid (query : string) : query_intent * float =
 let classify_intent (query : string) : query_intent * float =
   match get_router_mode () with
   | Heuristic -> classify_intent_heuristic query
-  | Llm_mode -> classify_intent_llm query
+  | Model_mode -> classify_intent_model query
   | Hybrid_mode -> classify_intent_hybrid query
 
 (* ---------- State-Aware Check ---------- *)

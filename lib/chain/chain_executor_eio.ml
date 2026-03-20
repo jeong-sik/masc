@@ -21,7 +21,7 @@ include Chain_executor_leaf
 (** Forward declaration for recursive execution *)
 let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string, string) result =
   match node.node_type with
-  | Llm _ -> execute_llm_node ctx ~exec_fn ~node node.node_type
+  | Model _ -> execute_model_node ctx ~exec_fn ~node node.node_type
   | Tool _ -> execute_tool_node ctx ~tool_exec ~node node.node_type
   | Pipeline nodes -> execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec node nodes
   | Fanout nodes -> execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec node nodes
@@ -97,11 +97,11 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
       execute_masc_listen ctx ~clock ~tool_exec node ~filter ~timeout_sec ~room
   | Masc_claim { task_id; room } ->
       execute_masc_claim ctx ~tool_exec node ~task_id ~room
-  (* Cascade: tiered LLM execution with confidence-based escalation *)
+  (* Cascade: tiered MODEL execution with confidence-based escalation *)
   | Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold = _ } ->
       execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec node tiers ~confidence_prompt max_escalations context_mode task_hint
 
-(** Execute Cascade node: tiered LLM execution with confidence-based escalation *)
+(** Execute Cascade node: tiered MODEL execution with confidence-based escalation *)
 
 (** {1 Complex node delegations} *)
 

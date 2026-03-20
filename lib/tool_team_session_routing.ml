@@ -404,7 +404,7 @@ let parse_routing_decision_json (json : Yojson.Safe.t) =
       in
       let reason =
         member "reason" json |> to_string_option
-        |> Option.value ~default:"llm_judge"
+        |> Option.value ~default:"model_judge"
       in
       let escalate_if =
         match member "escalate_if" json with
@@ -430,7 +430,7 @@ let parse_routing_decision_json (json : Yojson.Safe.t) =
         }
   | _ -> None
 
-let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
+let model_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
   match router_judge_model () with
   | None -> None
   | Some _judge_model ->
@@ -463,7 +463,7 @@ let llm_judge_routing ~spawn_prompt ~spawn_role ~worker_class =
       with
       | Ok result -> (
           try
-            Yojson.Safe.from_string (Llm_provider.Types.text_of_response result.Oas_worker.response)
+            Yojson.Safe.from_string (Oas_response.text_of_response result.Oas_worker.response)
             |> parse_routing_decision_json
           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
       | Error _ -> None)
@@ -552,9 +552,9 @@ let resolve_routing_for_spec (spec : spawn_spec) =
           then
             decision
           else
-            (match llm_judge_routing ~spawn_prompt:spec.spawn_prompt
+            (match model_judge_routing ~spawn_prompt:spec.spawn_prompt
                      ~spawn_role:spec.spawn_role ~worker_class:spec.worker_class with
-            | Some llm -> llm
+            | Some model -> model
             | None ->
                 {
                   decision with
@@ -564,9 +564,9 @@ let resolve_routing_for_spec (spec : spawn_spec) =
                   escalated = true;
                 })
       | None -> (
-          match llm_judge_routing ~spawn_prompt:spec.spawn_prompt
+          match model_judge_routing ~spawn_prompt:spec.spawn_prompt
                    ~spawn_role:spec.spawn_role ~worker_class:spec.worker_class with
-          | Some llm -> llm
+          | Some model -> model
           | None ->
               {
                 model_tier = Option.value ~default:Team_session_types.Tier_35b explicit_tier;

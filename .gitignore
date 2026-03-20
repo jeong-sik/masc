@@ -66,3 +66,13 @@ viewer/dist-build/
 # Infrastructure secrets (launchd plist contains env vars with tokens)
 infrastructure/launchd/*.plist
 infrastructure/**/*.env
+
+# Serena MCP local state
+.serena/
+
+# Agent planning scratch
+planning/
+
+# Stale build directories
+_build_cleanup/
+_build_pr*/

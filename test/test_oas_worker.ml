@@ -316,7 +316,8 @@ let test_mitosis_dispatch_unknown () =
 (* ================================================================ *)
 
 let make_council_ctx ~base_path : Tool_council_oas.context =
-  { base_path; agent_name = "test-agent"; room_config = None }
+  { base_path; agent_name = "test-agent"; room_config = None;
+    policy = None; audit = None }
 
 let with_council_base f =
   let base_path = temp_dir "test_council_oas" in

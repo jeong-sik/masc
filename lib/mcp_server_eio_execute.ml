@@ -452,7 +452,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_social.dispatch { Tool_social.config; agent_name } ~name ~args:arguments
     | Mod_council ->
         Tool_council_oas.dispatch { base_path = config.base_path; agent_name;
-                                    room_config = Some config } ~name ~args:arguments
+                                    room_config = Some config;
+                                    policy = None; audit = None } ~name ~args:arguments
     | Mod_a2a ->
         Tool_a2a.dispatch { Tool_a2a.config; agent_name } ~name ~args:arguments
     | Mod_handover ->

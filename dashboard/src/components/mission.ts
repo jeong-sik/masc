@@ -126,9 +126,9 @@ export function Mission() {
 
       <div class="mission-stat-grid">
         <${SummaryStat}
-          label="활성 세션"
+          label="관찰 세션"
           value=${sessionRows.length}
-          detail="session card에 표시된 협업 단위"
+          detail="실행 중 또는 최근 갱신된 팀 세션"
           tone=${focusSession?.top_attention?.severity ?? focusSession?.health ?? 'ok'}
         />
         <${SummaryStat}
@@ -194,7 +194,7 @@ export function Mission() {
         <div class="mission-list-stack">
           ${sessionRows.length > 0
             ? sessionRows.map(row => html`<${SessionBriefCard} key=${row.session_id} brief=${row} selected=${activeSessionId === row.session_id} />`)
-            : html`<div class="empty-state">지금 활성 세션이 없습니다.</div>`}
+            : html`<div class="empty-state">지금 보이는 팀 세션이 없습니다.</div>`}
         </div>
       <//>
 

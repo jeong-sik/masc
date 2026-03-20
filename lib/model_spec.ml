@@ -66,12 +66,7 @@ let claude_opus = {
   cost_per_1k_output = 0.075;
 }
 
-let claude_sonnet = {
-  provider = Claude;
-  model_id = Env_config.Claude.default_model;
-  max_context = 200000;
-  api_url = "https://api.anthropic.com";
-  api_key_env = Some "ANTHROPIC_API_KEY";
+let claude_sonnet = { claude_opus with
   cost_per_1k_input = 0.003;
   cost_per_1k_output = 0.015;
 }

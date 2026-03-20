@@ -11,9 +11,21 @@ import {
   refreshCommandPlaneOrchestra,
   refreshCommandPlaneSwarm,
 } from './command-store'
-import { refreshGovernance } from './components/governance'
-import { refreshTools } from './components/tools'
-import { refreshSocial } from './components/social'
+
+async function refreshGovernanceSurface(): Promise<void> {
+  const { refreshGovernance } = await import('./components/governance')
+  await refreshGovernance()
+}
+
+async function refreshToolsSurface(): Promise<void> {
+  const { refreshTools } = await import('./components/tools')
+  await refreshTools()
+}
+
+async function refreshSocialSurface(): Promise<void> {
+  const { refreshSocial } = await import('./components/social')
+  await refreshSocial()
+}
 
 export function refreshForTab(tab: string) {
   if (tab === 'home') {
@@ -36,7 +48,7 @@ export function refreshForTab(tab: string) {
 
   if (tab === 'activity') {
     refreshExecution()
-    refreshSocial()
+    void refreshSocialSurface()
   }
 
   if (tab === 'work') {
@@ -44,7 +56,7 @@ export function refreshForTab(tab: string) {
     if (section === 'evidence') {
       refreshProofSnapshot(route.value.params.session_id, route.value.params.operation_id)
     } else if (section === 'governance') {
-      refreshGovernance()
+      void refreshGovernanceSurface()
     } else if (section === 'planning') {
       refreshGoals()
       refreshExecution()
@@ -56,7 +68,7 @@ export function refreshForTab(tab: string) {
   if (tab === 'control') {
     const section = route.value.params.section
     if (section === 'tools') {
-      refreshTools()
+      void refreshToolsSurface()
     } else {
       refreshRoomTruth()
       refreshOperatorSnapshot()

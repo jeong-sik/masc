@@ -247,7 +247,40 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               postpass_budget_ms <= 0 || postpass_remaining_ms () > 0
             in
 
-            (* Single-turn LLM call params *)
+            (* === Dual-path: Agent.run() vs manual loop === *)
+            if Keeper_agent_run.is_enabled () then begin
+              let ctx_ref = ref ctx_work in
+              let cascade_name = "keeper_turn" in
+              match
+                Keeper_agent_run.run_turn
+                  ~config:ctx.config ~meta ~session ~ctx_ref
+                  ~system_prompt:turn_system_prompt
+                  ~user_message:message
+                  ~cascade_name
+                  ~generation:meta.generation ()
+              with
+              | Error e ->
+                (try ignore (Trajectory.finalize trajectory_acc
+                   (Trajectory.Failed e))
+                 with exn -> log_keeper_exn
+                   ~label:"trajectory finalize (agent_run error)" exn);
+                (false, Printf.sprintf "❌ Agent.run failed: %s" e)
+              | Ok result ->
+                (try ignore (Trajectory.finalize trajectory_acc
+                   Trajectory.Completed)
+                 with exn -> log_keeper_exn
+                   ~label:"trajectory finalize (agent_run ok)" exn);
+                let reply_json = `Assoc [
+                  ("reply", `String result.response_text);
+                  ("model", `String result.model_used);
+                  ("turns", `Int result.turn_count);
+                  ("tool_calls", `Int result.tool_calls_made);
+                  ("via", `String "agent_run");
+                ] in
+                (true, Yojson.Safe.to_string reply_json)
+            end else
+
+            (* Single-turn LLM call params — legacy manual loop *)
             let turn_messages =
               (Agent_sdk.Types.system_msg turn_system_prompt) :: ctx_work.messages
             in

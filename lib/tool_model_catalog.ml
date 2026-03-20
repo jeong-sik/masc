@@ -1,4 +1,3 @@
-[@@@warning "-32-33-69"]
 (** Tool_model_catalog — MCP tool layer over OAS Discovery (via {!Discovery_cache}).
 
     All probing logic is in OAS Provider Discovery.

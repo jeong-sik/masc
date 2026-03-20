@@ -1,10 +1,8 @@
 (** Dashboard_http_keeper_detail — metrics window computation for keeper dashboard.
     Extracts the metrics series iteration loop from keepers_dashboard_json. *)
 
-[@@@warning "-32-33-69"]
 
 open Dashboard_http_helpers
-open Server_utils
 
 include Dashboard_http_keeper_metrics
 

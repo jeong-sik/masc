@@ -1,4 +1,3 @@
-[@@@warning "-32-33-69"]
 (** Server_mcp_transport_http protocol — version management, headers, session utils.
 
     Session state (Hashtbl tables + mutex) lives in Server_mcp_transport_http_session.

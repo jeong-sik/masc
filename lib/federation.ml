@@ -1,4 +1,3 @@
-[@@@warning "-33"]
 (** Federation — multi-org federation protocol with trust and delegation. *)
 
 open Types [@@warning "-33"]

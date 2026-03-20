@@ -294,10 +294,10 @@ let test_is_valid_request_id_invalid () =
   Alcotest.(check bool) "array is invalid" false (Mcp_eio.is_valid_request_id (`List []))
 
 let test_normalize_protocol_version_known () =
-  Alcotest.(check string) "2024-11-05" "2024-11-05" (Mcp_eio.normalize_protocol_version "2024-11-05")
+  Alcotest.(check string) "2024-11-05" "2024-11-05" (Masc_mcp.Mcp_server.normalize_protocol_version "2024-11-05")
 
 let test_normalize_protocol_version_unknown () =
-  Alcotest.(check string) "unknown defaults" "2025-11-25" (Mcp_eio.normalize_protocol_version "unknown-version")
+  Alcotest.(check string) "unknown defaults" "2025-11-25" (Masc_mcp.Mcp_server.normalize_protocol_version "unknown-version")
 
 (* ===== 9. Eio Integration Tests ===== *)
 

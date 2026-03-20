@@ -1,10 +1,8 @@
 (** Dashboard_http_keeper_metrics — keeper metrics types, 24h bucket stats,
     gen window stats, history summary, and helper utilities. *)
 
-[@@@warning "-32-33-69"]
 
 open Dashboard_http_helpers
-open Server_utils
 
 let normalize_model_name s =
   let s = String.trim s in

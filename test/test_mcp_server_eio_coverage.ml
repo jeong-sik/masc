@@ -289,7 +289,7 @@ let test_jsonrpc_request_of_yojson_valid () =
     ("method", `String "test_method");
     ("params", `Assoc []);
   ] in
-  match Mcp_server_eio.jsonrpc_request_of_yojson json with
+  match Masc_mcp.Mcp_server.jsonrpc_request_of_yojson json with
   | Ok req ->
       check string "method" "test_method" req.method_;
       check string "jsonrpc" "2.0" req.jsonrpc
@@ -300,7 +300,7 @@ let test_jsonrpc_request_of_yojson_minimal () =
     ("jsonrpc", `String "2.0");
     ("method", `String "notify");
   ] in
-  match Mcp_server_eio.jsonrpc_request_of_yojson json with
+  match Masc_mcp.Mcp_server.jsonrpc_request_of_yojson json with
   | Ok req ->
       check (option (testable Yojson.Safe.pp Yojson.Safe.equal)) "id None" None req.id;
       check (option (testable Yojson.Safe.pp Yojson.Safe.equal)) "params None" None req.params

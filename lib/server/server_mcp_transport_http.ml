@@ -1,4 +1,3 @@
-[@@@warning "-32-33-69"]
 (** Server_mcp_transport_http — SSE/POST MCP transport handler. *)
 
 include Server_mcp_transport_http_protocol

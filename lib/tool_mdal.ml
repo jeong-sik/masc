@@ -1,4 +1,3 @@
-[@@@warning "-33"]
 (** Tool_mdal — Metric-Driven Agent Loop tool implementations. *)
 
 include Tool_mdal_schemas

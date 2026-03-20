@@ -1,10 +1,7 @@
-[@@@warning "-32-33-69"]
 
 (** Command-plane and operator POST route handlers for H2 gateway.
     Returns [true] if the route was handled, [false] otherwise. *)
 
-open Types
-open Server_utils
 open Server_auth
 open Server_dashboard_http
 open Server_routes_http

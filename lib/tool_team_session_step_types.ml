@@ -1,4 +1,3 @@
-[@@@warning "-33"]
 (** Tool_team_session_step types — type definitions for step handling. *)
 
 (** Extracted handle_step logic for team session step operations.
@@ -8,7 +7,6 @@
 
     Depends on parent module via [step_deps] record to avoid circular deps. *)
 
-open Tool_args
 module Oas = Agent_sdk
 
 (** Spawn specification parsed from MCP tool arguments. *)

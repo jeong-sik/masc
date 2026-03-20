@@ -1,10 +1,8 @@
-[@@@warning "-32-33-69"]
 (** Server_dashboard_http — Dashboard HTTP handlers (facade). *)
 
 include Server_dashboard_http_core
 open Types
 open Server_utils
-open Server_auth
 
 let dashboard_tools_http_json ?actor (config : Room.config) : Yojson.Safe.t =
   let ctx : Tool_misc.context =

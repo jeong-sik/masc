@@ -1,6 +1,5 @@
 module U = Yojson.Safe.Util
 include Dashboard_utils
-[@@@warning "-32-34"]
 
 (* Types from Dashboard_mission_assembly, re-exported for backward compat. *)
 type session_context = Dashboard_mission_assembly.session_context = {
@@ -38,33 +37,6 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
   json : Yojson.Safe.t;
 }
 
-type agent_context = Dashboard_mission_assembly.agent_context = {
-  status_rank : int;
-  related_attention_count : int;
-  last_seen_ts : float;
-  json : Yojson.Safe.t;
-}
-
-type keeper_context = Dashboard_mission_assembly.keeper_context = {
-  pressure_rank : int;
-  last_seen_ts : float;
-  json : Yojson.Safe.t;
-}
-
-type operation_context = Dashboard_mission_assembly.operation_context = {
-  operation_id : string;
-  linked_session_id : string option;
-  status : string;
-  stage : string option;
-  detachment_status : string option;
-  objective : string option;
-  updated_at : string option;
-}
-
-type archived_agent_meta = Dashboard_mission_assembly.archived_agent_meta = {
-  last_event_at : string option;
-}
-
 let active_or_recent_sessions config =
   let cutoff_unix = Time_compat.now () -. 86400.0 in
   let cutoff_iso = iso_of_unix cutoff_unix in
@@ -76,65 +48,6 @@ let active_or_recent_sessions config =
   Team_session_store.list_sessions ~since_unix:cutoff_unix config
   |> List.filter is_active_or_recent
 
-
-let keeper_tool_audit_json_fields keeper agent_name =
-  let fallback_allowed =
-    Dashboard_utils.string_list_of_json (member_assoc "allowed_tool_names" keeper)
-  in
-  let fallback_latest =
-    Dashboard_utils.string_list_of_json (member_assoc "latest_tool_names" keeper)
-  in
-  let fallback_count =
-    match member_assoc "latest_tool_call_count" keeper with
-    | `Int value -> Some value
-    | `Intlit raw -> (try Some (int_of_string raw) with Failure _ -> None)
-    | _ -> None
-  in
-  let fallback_source =
-    match trim_to_option (string_field "tool_audit_source" keeper) with
-    | Some _ as value -> value
-    | None when fallback_allowed <> [] -> Some "keeper_policy"
-    | None -> None
-  in
-  let fallback_at =
-    trim_to_option (string_field "tool_audit_at" keeper)
-  in
-  let allowed_tool_names, latest_tool_names, latest_tool_call_count,
-      tool_audit_source, tool_audit_at =
-    match A2a_tools.latest_heartbeat_task agent_name,
-          A2a_tools.latest_heartbeat_result agent_name with
-    | Some task, Some result ->
-        if task.seq > result.seq then
-          ( task.allowed_tools,
-            result.tool_names,
-            Some result.tool_call_count,
-            Some "heartbeat_task_pending_result",
-            Some task.created_at )
-        else
-          ( task.allowed_tools,
-            result.tool_names,
-            Some result.tool_call_count,
-            Some "heartbeat_result",
-            Some result.updated_at )
-    | Some task, None ->
-        (task.allowed_tools, [], None, Some "heartbeat_task", Some task.created_at)
-    | None, Some result ->
-        ( fallback_allowed,
-          result.tool_names,
-          Some result.tool_call_count,
-          Some "heartbeat_result",
-          Some result.updated_at )
-    | None, None ->
-        (fallback_allowed, fallback_latest, fallback_count, fallback_source, fallback_at)
-  in
-  [
-    ("allowed_tool_names", string_list_json allowed_tool_names);
-    ("latest_tool_names", string_list_json latest_tool_names);
-    ( "latest_tool_call_count",
-      option_to_json (fun value -> `Int value) latest_tool_call_count );
-    ("tool_audit_source", json_string_option tool_audit_source);
-    ("tool_audit_at", json_string_option tool_audit_at);
-  ]
 
 let dedup_strings items =
   List.sort_uniq String.compare
@@ -373,27 +286,6 @@ let matching_action target_type target_id actions =
       | _ -> false)
     actions
 
-let action_identity action =
-  String.concat "|"
-    [
-      string_field "action_type" action;
-      string_field "target_type" action;
-      Option.value ~default:"none" (trim_to_option (string_field "target_id" action));
-      normalized_text_key (string_field "reason" action);
-    ]
-
-let incident_identity incident =
-  String.concat "|"
-    [
-      string_field "kind" incident;
-      string_field "target_type" incident;
-      Option.value ~default:"none" (trim_to_option (string_field "target_id" incident));
-      normalized_text_key (string_field "summary" incident);
-    ]
-
-let identity_digest prefix identity =
-  Printf.sprintf "%s:%s" prefix (Digest.to_hex (Digest.string identity))
-
 let incident_action_types kind =
   match kind with
   | "spawn_failure_present" -> [ "team_task_inject" ]
@@ -476,9 +368,6 @@ let rec evidence_preview_strings json =
 
 let is_internal_attention incident =
   String.equal (string_field "target_type" incident) "room"
-
-let is_internal_action action =
-  String.equal (string_field "target_type" action) "room"
 
 let related_sessions_for_attention incident sessions =
   let direct_session =

@@ -1,4 +1,3 @@
-[@@@warning "-32-33-69"]
 
 (** TTS proxy — forwards text to ElevenLabs and returns audio/mpeg bytes.
     Reads ELEVENLABS_API_KEY from environment. *)

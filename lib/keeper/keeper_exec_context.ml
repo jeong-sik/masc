@@ -627,17 +627,33 @@ let run_proactive_generation
         if String.trim retry_hint = "" then base_prompt
         else Printf.sprintf "%s\n\n%s" base_prompt retry_hint
       in
-      let messages =
-        (Agent_sdk.Types.system_msg turn_system_prompt)
-        :: (ctx_work.messages @ [ Agent_sdk.Types.user_msg prompt ])
+      let history_context =
+        List.filter_map (fun (msg : Agent_sdk.Types.message) ->
+          match msg.role with
+          | Agent_sdk.Types.User ->
+            Some (Printf.sprintf "User: %s"
+              (Agent_sdk.Types.text_of_content msg.content))
+          | Agent_sdk.Types.Assistant ->
+            Some (Printf.sprintf "Assistant: %s"
+              (Agent_sdk.Types.text_of_content msg.content))
+          | _ -> None
+        ) ctx_work.messages
+      in
+      let enriched_system =
+        if history_context = [] then turn_system_prompt
+        else Printf.sprintf "%s\n\nRecent conversation context:\n%s"
+          turn_system_prompt (String.concat "\n" history_context)
       in
       let temperature = proactive_temperature attempt in
       let max_tokens = 1024 in
       let (cascade_result0, latency0) = Cascade.timed (fun () ->
-          Keeper_oas_adapter.run_cascade ~messages ~temperature ~max_tokens ()) in
+          Oas_worker.run_named ~cascade_name:"keeper_turn"
+            ~goal:prompt ~system_prompt:enriched_system
+            ~max_turns:1 ~temperature ~max_tokens ()) in
       match cascade_result0 with
       | Error _ -> None
-      | Ok resp0 ->
+      | Ok result0 ->
+          let resp0 = result0.Oas_worker.response in
           let used_model0 =
             model_spec_for_used specs resp0.Llm_provider.Types.model
             |> Option.value ~default:primary
@@ -683,15 +699,14 @@ let run_proactive_generation
               let _next_tools =
                 keeper_allowed_llm_tools ~write_done meta
               in
-              let followup_messages = [
-                Agent_sdk.Types.system_msg
-                  (keeper_tool_loop_system_prompt
-                     ~character_context:turn_system_prompt);
-                Agent_sdk.Types.user_msg followup_prompt;
-              ] in
+              let followup_system =
+                keeper_tool_loop_system_prompt
+                  ~character_context:turn_system_prompt
+              in
               let (followup_result, round_latency) = Cascade.timed (fun () ->
-                  Keeper_oas_adapter.run_cascade
-                    ~messages:followup_messages ~temperature:0.3 ~max_tokens:1024 ()) in
+                  Oas_worker.run_named ~cascade_name:"keeper_turn"
+                    ~goal:followup_prompt ~system_prompt:followup_system
+                    ~max_turns:1 ~temperature:0.3 ~max_tokens:1024 ()) in
               match followup_result with
               | Error _ ->
                   ( Cascade.text_of_response last_resp,
@@ -700,7 +715,8 @@ let run_proactive_generation
                     acc_latency,
                     acc_cost,
                     acc_tools_used @ round_tools )
-              | Ok resp_next ->
+              | Ok result_next ->
+                  let resp_next = result_next.Oas_worker.response in
                   let used_model_next =
                     model_spec_for_used specs resp_next.Llm_provider.Types.model
                     |> Option.value ~default:primary

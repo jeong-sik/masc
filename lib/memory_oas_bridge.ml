@@ -123,3 +123,27 @@ let seed_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limi
     Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "procedures" json;
     List.length procs
   end
+
+(** Pre-seed the keeper's memory bank (recent observations and reflections)
+    into a [Memory.t] instance.
+
+    Loads the last [limit] entries from the agent's memory stream and stores
+    them as a single Long_term entry.  Returns the number of entries seeded. *)
+let seed_memory_bank ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limit : int) : int =
+  let entries = Memory_stream.retrieve ~agent_name ~query:"*" ~limit in
+  if entries = [] then 0
+  else begin
+    let json = `Assoc [
+      ("agent_name", `String agent_name);
+      ("entries", `List (List.map (fun (e : Memory_stream.memory_entry) ->
+        `Assoc [
+          ("id", `String e.id);
+          ("content", `String e.content);
+          ("importance", `Int e.importance);
+          ("timestamp", `Float e.timestamp);
+        ]) entries));
+      ("count", `Int (List.length entries));
+    ] in
+    Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Long_term "memory_bank" json;
+    List.length entries
+  end

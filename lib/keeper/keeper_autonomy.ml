@@ -238,9 +238,10 @@ Keep it concise — max 3 sentences per step.|}
 let generate_action_plan ~goal ~keeper_context =
   let prompt = build_plan_prompt goal ~keeper_context in
   match
-    Cascade.complete ~cascade_name:"keeper_autonomy"
-      ~messages:[Agent_sdk.Types.user_msg prompt]
-      ~temperature:0.3 ~max_tokens:500 ()
+    Oas_worker.run_named ~cascade_name:"keeper_autonomy"
+      ~goal:prompt
+      ~max_turns:1 ~temperature:0.3 ~max_tokens:500 ()
   with
-  | Ok resp -> Ok (Cascade.text_of_response resp)
+  | Ok result ->
+    Ok (Agent_sdk.Types.text_of_content result.Oas_worker.response.content)
   | Error e -> Error (sprintf "plan generation failed: %s" e)

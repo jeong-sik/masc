@@ -80,7 +80,7 @@ let execute_approved_plan
   ignore trajectory_acc;
   let gate_config = autonomous_gate_config ~autonomy_level in
   let primary = match specs with p :: _ -> p | [] -> Model_spec.default_local_model_spec () in
-  let system_prompt = Printf.sprintf
+  let autonomy_system_prompt = Printf.sprintf
 {|You are a keeper agent executing an approved action plan.
 Your name: %s
 Goal: %s (id=%s)
@@ -95,39 +95,36 @@ Do NOT use destructive tools (bash rm, edit, delete).|}
   in
   let max_rounds = 3 in
   let guardrails = Verifier_oas.eval_gate_to_oas_guardrails gate_config in
-  match Keeper_oas_adapter.run_with_tools
-    ~config ~meta ~cascade_name:"keeper_autonomy" ~system_prompt
-    ~goal:"Execute the first step of the plan now."
+  let base_dir = session_base_dir config in
+  let build_turn_prompt ~base_system_prompt:_ ~messages:_ =
+    autonomy_system_prompt
+  in
+  match Keeper_agent_run.run_turn
+    ~config ~meta ~base_dir
+    ~max_context:primary.max_context
+    ~build_turn_prompt
+    ~user_message:"Execute the first step of the plan now."
+    ~cascade_name:"keeper_autonomy"
+    ~generation:meta.generation
     ~max_turns:max_rounds
+    ~guardrails
     ~temperature:0.3
     ~max_tokens:1024
-    ~gate_config
-    ~guardrails
     ()
   with
   | Error e ->
       (Printf.sprintf "OAS agent failed: %s" e, 0.0, [])
-  | Ok tr ->
-      let run_result = tr.Keeper_oas_adapter.oas_result in
+  | Ok result ->
       let content =
-        let c = String.trim (Keeper_oas_adapter.text_of_run_result run_result) in
+        let c = String.trim result.response_text in
         if c = "" then "(autonomous execution completed)" else c
       in
-      let usage = Keeper_oas_adapter.usage_of_run_result run_result in
       let used_model_spec =
-        model_spec_for_used specs (Keeper_oas_adapter.model_of_run_result run_result)
+        model_spec_for_used specs result.model_used
         |> Option.value ~default:primary
       in
-      let cost = cost_usd_of_usage usage used_model_spec in
-      (* OAS handles tool dispatch internally; extract tool names from response *)
-      let tools_used =
-        List.filter_map
-          (function
-            | Agent_sdk.Types.ToolUse { name; _ } -> Some name
-            | _ -> None)
-          run_result.response.content
-      in
-      (content, cost, tools_used)
+      let cost = cost_usd_of_usage result.usage used_model_spec in
+      (content, cost, result.tools_used)
 
 (** Autonomous goal turn: evaluate goals and optionally generate/verify action plan.
     Returns Some updated_meta when an autonomous action decision was made,

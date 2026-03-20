@@ -162,7 +162,15 @@ export function navigate(tab: AnyTabId, params?: Record<string, string>): void {
     ? { ...redirect.params, ...(params ?? {}) }
     : params ?? {}
   const next = { tab: resolvedTab, params: resolvedParams, postId: null } satisfies RouteState
-  window.location.hash = toHash(next)
+  const nextHash = toHash(next)
+  // Update signal synchronously so Preact re-renders immediately.
+  // Without this, clicking the same surface twice is needed because
+  // hashchange fires asynchronously and may be skipped if the hash
+  // is identical to the current value.
+  route.value = next
+  if (window.location.hash !== nextHash) {
+    window.location.hash = nextHash
+  }
 }
 
 export function navigateToPost(postId: string): void {

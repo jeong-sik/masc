@@ -7,7 +7,209 @@ include Mitosis_spawn
 open Tool_args
 open Tool_mitosis_utils
 
-(** 2-Phase auto mitosis handoff - THE CORE TOOL (v2 with BALTHASAR feedback)
+(** {1 Phase Handlers for run_sync_handoff}
+
+    Extracted from the match arms of [run_sync_handoff] for readability.
+    Each handler corresponds to one [Mitosis.auto_mitosis_check_2phase] outcome. *)
+
+(** Shared parameters for the Handoff phase handler, bundled to
+    avoid >8 labeled arguments. *)
+type handoff_params = {
+  ctx : context;
+  full_context : string;
+  context_ratio : float;
+  target_agent : string;
+  config_mitosis : Mitosis.mitosis_config;
+  adaptive_enabled : bool;
+  room_name : string;
+  prepare_threshold : float;
+  handoff_threshold : float;
+  normalized_target_agent : string;
+  effective_agent : string;
+  attempts_json : Yojson.Safe.t;
+}
+
+(** NoAction phase: context ratio is below thresholds, nothing to do. *)
+let phase_no_action ~raw_ratio ~context_ratio ~config_mitosis
+    (cell : Mitosis.cell) : result =
+  let no_action_message =
+    match cell.Mitosis.phase with
+    | Mitosis.ReadyForHandoff _ ->
+        "Already prepared. Continue working until handoff threshold."
+    | Mitosis.Idle ->
+        "Context ratio below prepare threshold. Continue working."
+  in
+  let warning = if raw_ratio = 0.0 then
+    [("warning", `String "context_ratio is 0.0 - did you forget to provide it?")]
+  else [] in
+  let json = `Assoc ([
+    ("action", `String "none");
+    ("context_ratio", `Float context_ratio);
+    ("phase", `String (Mitosis.phase_to_string cell.Mitosis.phase));
+    ("message", `String no_action_message);
+    ("threshold_prepare", `Float config_mitosis.Mitosis.prepare_threshold);
+    ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
+  ] @ warning) in
+  (true, Yojson.Safe.pretty_to_string json)
+
+(** Prepared phase: DNA extracted, waiting for handoff threshold. *)
+let phase_prepared ~ctx ~full_context ~context_ratio ~config_mitosis
+    (prepared_cell : Mitosis.cell) : result =
+  let dna = Option.value ~default:"" prepared_cell.Mitosis.prepared_dna in
+  let continuity =
+    continuity_regression_check ~full_context ~compressed_context:dna
+  in
+  (* Validate DNA quality *)
+  let dna_status = match validate_dna dna with
+    | Ok _ -> "valid"
+    | Error msg -> Printf.sprintf "warning: %s" msg
+  in
+  Mcp_server.current_cell := prepared_cell;
+  Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:prepared_cell ~config:config_mitosis;
+  let json = `Assoc [
+    ("action", `String "prepared");
+    ("context_ratio", `Float context_ratio);
+    ("message", `String "DNA extracted and ready. Continue working until 80% threshold.");
+    ("phase", `String (Mitosis.phase_to_string prepared_cell.Mitosis.phase));
+    ("dna_length", `Int (String.length dna));
+    ("dna_quality", `String dna_status);
+    ("continuity_regression", continuity);
+    ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
+  ] in
+  (true, Yojson.Safe.pretty_to_string json)
+
+(** Handoff phase: spawn result handling, metrics, adaptive thresholds,
+    episode queue. *)
+let phase_handoff (p : handoff_params) (cell : Mitosis.cell)
+    (new_cell : Mitosis.cell) new_pool handoff_dna
+    (spawn_result : Spawn.spawn_result) : result =
+  (* P0-5: Record handoff in generational metrics *)
+  let dna_size = String.length handoff_dna in
+  (try ignore (Generational_metrics.record_handoff
+    ~from_generation:cell.Mitosis.generation
+    ~to_generation:new_cell.Mitosis.generation
+    ~dna_size
+    ~context_ratio:p.context_ratio)
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Mitosis_log.error "record_handoff failed: %s" (Printexc.to_string exn));
+  let continuity =
+    continuity_regression_check ~full_context:p.full_context ~compressed_context:handoff_dna
+  in
+
+  (* Check spawn success - BALTHASAR feedback: handle failures gracefully *)
+  if not spawn_result.Spawn.success then begin
+    (* P2-3: Record spawn failure metric *)
+    Mitosis_metrics.inc_error ~reason:"spawn_failed" ();
+    (* Spawn failed -- suggest fallback to compaction instead of losing context *)
+    Log.Mitosis_log.error "Spawn failed for %s, suggesting fallback" p.target_agent;
+    let base_path = p.ctx.config.Room_utils.base_path in
+    let session_id = get_session_id () in
+    let fallback_ep = queue_episode
+      ~base_path
+      ~session_id
+      ~agent_name:p.effective_agent
+      ~generation:new_cell.Mitosis.generation
+      ~event_type:"mitosis_handoff_fallback"
+      ~summary:(Printf.sprintf "Mitosis handoff fallback: gen %d → gen %d (target: %s, context: %.0f%%)"
+        cell.Mitosis.generation new_cell.Mitosis.generation p.target_agent (p.context_ratio *. 100.0))
+      ~dna:handoff_dna
+      () in
+    let json = `Assoc [
+      ("action", `String "fallback");
+      ("success", `Bool false);
+      ("context_ratio", `Float p.context_ratio);
+      ("message", `String "Spawn failed! Consider using compaction instead. Context preserved.");
+      ("target_agent", `String p.target_agent);
+      ("selected_agent", `String p.effective_agent);
+      ("spawn_attempts", p.attempts_json);
+      ("spawn_error", `String spawn_result.Spawn.output);
+      ("continuity_regression", continuity);
+      ("episode_queued", match fallback_ep with Some id -> `String id | None -> `Null);
+      ("suggestion", `String "Use /compact or masc_mitosis_divide with summary for graceful degradation");
+    ] in
+    (true, Yojson.Safe.pretty_to_string json)
+  end else begin
+    Mcp_server.current_cell := new_cell;
+    Mcp_server.stem_pool := new_pool;
+    Mitosis.write_status_with_backend ~room_config:p.ctx.config ~cell:new_cell ~config:p.config_mitosis;
+    (* P1-3: Update cooldown timer after successful handoff *)
+    last_handoff_time := Time_compat.now ();
+    (* P2-3: Record handoff success metrics *)
+    Mitosis_metrics.inc_handoff ();
+    Mitosis_metrics.set_generation new_cell.Mitosis.generation;
+    Mitosis_metrics.set_cooldown_remaining 0.0;
+    let duration_sec = (float_of_int spawn_result.Spawn.elapsed_ms) /. 1000.0 in
+    Mitosis_metrics.observe_handoff_duration duration_sec;
+
+    (* P2-1: Adaptive threshold learning from handoff outcome *)
+    if p.adaptive_enabled then begin
+      let was_emergency = match cell.Mitosis.phase with
+        | Mitosis.Idle -> true    (* handoff without Prepared state *)
+        | Mitosis.ReadyForHandoff _ -> false
+      in
+      let outcome : Handoff_quality.handoff_outcome = {
+        completion_rate = p.context_ratio;  (* approximate: higher ratio = more complete *)
+        error_count = 0;  (* spawn succeeded, no errors *)
+        was_emergency;
+        duration_seconds = duration_sec;
+        generation = cell.Mitosis.generation;
+      } in
+      let current_state = match Adaptive_thresholds.load_state ~room:p.room_name with
+        | Some s -> s
+        | None -> Adaptive_thresholds.initial_state ()
+      in
+      let new_state = Adaptive_thresholds.adapt current_state outcome in
+      (try Adaptive_thresholds.save_state ~room:p.room_name new_state
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+         Log.Mitosis_log.error "adaptive save failed: %s" (Printexc.to_string exn));
+      Log.Mitosis_log.info "adaptive adapted room=%s prepare=%.3f->%.3f handoff=%.3f->%.3f"
+        p.room_name
+        current_state.thresholds.prepare new_state.thresholds.prepare
+        current_state.thresholds.handoff new_state.thresholds.handoff
+    end;
+
+    (* Agent Being Protocol: Queue Episode for persistence *)
+    let base_path = p.ctx.config.Room_utils.base_path in
+    let session_id = get_session_id () in
+    let summary = Printf.sprintf "Mitosis handoff: gen %d → gen %d (target: %s, context: %.0f%%)"
+      cell.Mitosis.generation new_cell.Mitosis.generation p.target_agent (p.context_ratio *. 100.0) in
+    let ep_id = queue_episode
+      ~base_path
+      ~session_id
+      ~agent_name:p.effective_agent
+      ~generation:new_cell.Mitosis.generation
+      ~event_type:"mitosis_handoff"
+      ~summary
+      ~dna:handoff_dna
+      () in
+
+    let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
+    let adaptive_info = if p.adaptive_enabled then
+      [("adaptive_thresholds_enabled", `Bool true);
+       ("adaptive_thresholds",
+        `Assoc [("prepare", `Float p.prepare_threshold);
+                ("handoff", `Float p.handoff_threshold)])]
+    else [] in
+    let json = `Assoc ([
+      ("action", `String "handoff");
+      ("success", `Bool true);
+      ("context_ratio", `Float p.context_ratio);
+      ("message", `String "Handoff complete! Successor agent spawned.");
+      ("target_agent", `String p.target_agent);
+      ("selected_agent", `String p.effective_agent);
+      ("spawn_attempts", p.attempts_json);
+      ("previous_generation", `Int cell.Mitosis.generation);
+      ("new_generation", `Int new_cell.Mitosis.generation);
+      ("successor_output", `String output_preview);
+      ("elapsed_ms", `Int spawn_result.Spawn.elapsed_ms);
+      ("continuity_regression", continuity);
+      ("episode_queued", match ep_id with Some id -> `String id | None -> `Null);
+    ] @ adaptive_info) in
+    (true, Yojson.Safe.pretty_to_string json)
+  end
+
+(** {1 Orchestrator}
+
+    2-Phase auto mitosis handoff - THE CORE TOOL (v2 with BALTHASAR feedback)
 
     IMPROVEMENTS from v1:
     - context_ratio validation with clamping
@@ -112,179 +314,25 @@ let run_sync_handoff ctx args : result =
       in
 
       match result with
-  | Mitosis.NoAction ->
-      let no_action_message =
-        match cell.Mitosis.phase with
-        | Mitosis.ReadyForHandoff _ ->
-            "Already prepared. Continue working until handoff threshold."
-        | Mitosis.Idle ->
-            "Context ratio below prepare threshold. Continue working."
-      in
-      let warning = if raw_ratio = 0.0 then
-        [("warning", `String "context_ratio is 0.0 - did you forget to provide it?")]
-      else [] in
-      let json = `Assoc ([
-        ("action", `String "none");
-        ("context_ratio", `Float context_ratio);
-        ("phase", `String (Mitosis.phase_to_string cell.Mitosis.phase));
-        ("message", `String no_action_message);
-        ("threshold_prepare", `Float config_mitosis.Mitosis.prepare_threshold);
-        ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
-      ] @ warning) in
-      (true, Yojson.Safe.pretty_to_string json)
+      | Mitosis.NoAction ->
+          phase_no_action ~raw_ratio ~context_ratio ~config_mitosis cell
 
-  | Mitosis.Prepared prepared_cell ->
-      let dna = Option.value ~default:"" prepared_cell.Mitosis.prepared_dna in
-      let continuity =
-        continuity_regression_check ~full_context ~compressed_context:dna
-      in
-      (* Validate DNA quality *)
-      let dna_status = match validate_dna dna with
-        | Ok _ -> "valid"
-        | Error msg -> Printf.sprintf "warning: %s" msg
-      in
-      Mcp_server.current_cell := prepared_cell;
-      Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:prepared_cell ~config:config_mitosis;
-      let json = `Assoc [
-        ("action", `String "prepared");
-        ("context_ratio", `Float context_ratio);
-        ("message", `String "DNA extracted and ready. Continue working until 80% threshold.");
-        ("phase", `String (Mitosis.phase_to_string prepared_cell.Mitosis.phase));
-        ("dna_length", `Int (String.length dna));
-        ("dna_quality", `String dna_status);
-        ("continuity_regression", continuity);
-        ("threshold_handoff", `Float config_mitosis.Mitosis.handoff_threshold);
-      ] in
-      (true, Yojson.Safe.pretty_to_string json)
+      | Mitosis.Prepared prepared_cell ->
+          phase_prepared ~ctx ~full_context ~context_ratio ~config_mitosis
+            prepared_cell
 
-  | Mitosis.Handoff (spawn_result, new_cell, new_pool, handoff_dna) ->
-      (* P0-5: Record handoff in generational metrics *)
-      let dna_size = String.length handoff_dna in
-      (try ignore (Generational_metrics.record_handoff
-        ~from_generation:cell.Mitosis.generation
-        ~to_generation:new_cell.Mitosis.generation
-        ~dna_size
-        ~context_ratio)
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Mitosis_log.error "record_handoff failed: %s" (Printexc.to_string exn));
-      let effective_agent =
-        if !selected_agent = "" then normalized_target_agent else !selected_agent
-      in
-      let attempts_json = spawn_attempts_to_json !spawn_attempts in
-      let continuity =
-        continuity_regression_check ~full_context ~compressed_context:handoff_dna
-      in
-
-      (* Check spawn success - BALTHASAR feedback: handle failures gracefully *)
-      if not spawn_result.Spawn.success then begin
-        (* P2-3: Record spawn failure metric *)
-        Mitosis_metrics.inc_error ~reason:"spawn_failed" ();
-        (* Spawn failed! Suggest fallback to compaction instead of losing context *)
-        Log.Mitosis_log.error "Spawn failed for %s, suggesting fallback" target_agent;
-        let base_path = ctx.config.Room_utils.base_path in
-        let session_id = get_session_id () in
-        let fallback_ep = queue_episode
-          ~base_path
-          ~session_id
-          ~agent_name:effective_agent
-          ~generation:new_cell.Mitosis.generation
-          ~event_type:"mitosis_handoff_fallback"
-          ~summary:(Printf.sprintf "Mitosis handoff fallback: gen %d → gen %d (target: %s, context: %.0f%%)"
-            cell.Mitosis.generation new_cell.Mitosis.generation target_agent (context_ratio *. 100.0))
-          ~dna:handoff_dna
-          () in
-        let json = `Assoc [
-          ("action", `String "fallback");
-          ("success", `Bool false);
-          ("context_ratio", `Float context_ratio);
-          ("message", `String "Spawn failed! Consider using compaction instead. Context preserved.");
-          ("target_agent", `String target_agent);
-          ("selected_agent", `String effective_agent);
-          ("spawn_attempts", attempts_json);
-          ("spawn_error", `String spawn_result.Spawn.output);
-          ("continuity_regression", continuity);
-          ("episode_queued", match fallback_ep with Some id -> `String id | None -> `Null);
-          ("suggestion", `String "Use /compact or masc_mitosis_divide with summary for graceful degradation");
-        ] in
-        (true, Yojson.Safe.pretty_to_string json)
-      end else begin
-        Mcp_server.current_cell := new_cell;
-        Mcp_server.stem_pool := new_pool;
-        Mitosis.write_status_with_backend ~room_config:ctx.config ~cell:new_cell ~config:config_mitosis;
-        (* P1-3: Update cooldown timer after successful handoff *)
-        last_handoff_time := Time_compat.now ();
-        (* P2-3: Record handoff success metrics *)
-        Mitosis_metrics.inc_handoff ();
-        Mitosis_metrics.set_generation new_cell.Mitosis.generation;
-        Mitosis_metrics.set_cooldown_remaining 0.0;
-        let duration_sec = (float_of_int spawn_result.Spawn.elapsed_ms) /. 1000.0 in
-        Mitosis_metrics.observe_handoff_duration duration_sec;
-
-        (* P2-1: Adaptive threshold learning from handoff outcome *)
-        if adaptive_enabled then begin
-          let was_emergency = match cell.Mitosis.phase with
-            | Mitosis.Idle -> true    (* handoff without Prepared state *)
-            | Mitosis.ReadyForHandoff _ -> false
+      | Mitosis.Handoff (spawn_result, new_cell, new_pool, handoff_dna) ->
+          let effective_agent =
+            if !selected_agent = "" then normalized_target_agent else !selected_agent
           in
-          let outcome : Handoff_quality.handoff_outcome = {
-            completion_rate = context_ratio;  (* approximate: higher ratio = more complete *)
-            error_count = 0;  (* spawn succeeded, no errors *)
-            was_emergency;
-            duration_seconds = duration_sec;
-            generation = cell.Mitosis.generation;
+          let attempts_json = spawn_attempts_to_json !spawn_attempts in
+          let p = {
+            ctx; full_context; context_ratio; target_agent;
+            config_mitosis; adaptive_enabled; room_name;
+            prepare_threshold; handoff_threshold;
+            normalized_target_agent; effective_agent; attempts_json;
           } in
-          let current_state = match Adaptive_thresholds.load_state ~room:room_name with
-            | Some s -> s
-            | None -> Adaptive_thresholds.initial_state ()
-          in
-          let new_state = Adaptive_thresholds.adapt current_state outcome in
-          (try Adaptive_thresholds.save_state ~room:room_name new_state
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Log.Mitosis_log.error "adaptive save failed: %s" (Printexc.to_string exn));
-          Log.Mitosis_log.info "adaptive adapted room=%s prepare=%.3f->%.3f handoff=%.3f->%.3f"
-            room_name
-            current_state.thresholds.prepare new_state.thresholds.prepare
-            current_state.thresholds.handoff new_state.thresholds.handoff
-        end;
-
-        (* Agent Being Protocol: Queue Episode for persistence *)
-        let base_path = ctx.config.Room_utils.base_path in
-        let session_id = get_session_id () in
-        let summary = Printf.sprintf "Mitosis handoff: gen %d → gen %d (target: %s, context: %.0f%%)"
-          cell.Mitosis.generation new_cell.Mitosis.generation target_agent (context_ratio *. 100.0) in
-        let ep_id = queue_episode
-          ~base_path
-          ~session_id
-          ~agent_name:effective_agent
-          ~generation:new_cell.Mitosis.generation
-          ~event_type:"mitosis_handoff"
-          ~summary
-          ~dna:handoff_dna
-          () in
-
-        let output_preview = Mitosis.safe_sub spawn_result.Spawn.output 0 500 in
-        let adaptive_info = if adaptive_enabled then
-          [("adaptive_thresholds_enabled", `Bool true);
-           ("adaptive_thresholds",
-            `Assoc [("prepare", `Float prepare_threshold);
-                    ("handoff", `Float handoff_threshold)])]
-        else [] in
-        let json = `Assoc ([
-          ("action", `String "handoff");
-          ("success", `Bool true);
-          ("context_ratio", `Float context_ratio);
-          ("message", `String "Handoff complete! Successor agent spawned.");
-          ("target_agent", `String target_agent);
-          ("selected_agent", `String effective_agent);
-          ("spawn_attempts", attempts_json);
-          ("previous_generation", `Int cell.Mitosis.generation);
-          ("new_generation", `Int new_cell.Mitosis.generation);
-          ("successor_output", `String output_preview);
-          ("elapsed_ms", `Int spawn_result.Spawn.elapsed_ms);
-          ("continuity_regression", continuity);
-          ("episode_queued", match ep_id with Some id -> `String id | None -> `Null);
-        ] @ adaptive_info) in
-        (true, Yojson.Safe.pretty_to_string json)
-      end
+          phase_handoff p cell new_cell new_pool handoff_dna spawn_result
 
 let handle_mitosis_handoff ctx args : result =
   let async_mode = get_bool args "async" true in

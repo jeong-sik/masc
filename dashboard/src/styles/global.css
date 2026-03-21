@@ -1,4 +1,39 @@
+@import "tailwindcss";
+
 /* MASC Dashboard — global layout and visual language */
+
+@theme {
+  --color-bg-0: #0b1220;
+  --color-bg-1: #111a2e;
+  --color-bg-2: #16213c;
+  --color-card: rgba(19, 29, 51, 0.82);
+  --color-card-border: rgba(138, 163, 211, 0.2);
+  --color-text-strong: #eaf1ff;
+  --color-text-body: #c0d2f2;
+  --color-text-muted: #86a0cf;
+  --color-accent: #47b8ff;
+  --color-accent-soft: rgba(71, 184, 255, 0.16);
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-bad: #ef4444;
+  --color-ff-navy: #0a1628;
+  --color-ff-navy-light: #122040;
+  --color-ff-gold: #c8a84e;
+  --color-ff-gold-bright: #e8cc70;
+  --color-ff-gold-dim: rgba(200, 168, 78, 0.25);
+  --color-ff-crystal: #47b8ff;
+  --color-ff-border: rgba(200, 168, 78, 0.35);
+  --color-ff-border-subtle: rgba(200, 168, 78, 0.12);
+  --color-ff-border-hover: rgba(200, 168, 78, 0.6);
+  --color-ff-panel: rgba(10, 22, 40, 0.92);
+  --color-agent-working: #7ae09a;
+  --color-agent-idle: #b8cae8;
+  --color-agent-offline: #5a6478;
+  --color-agent-busy: #f0c060;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 10px;
+}
 
 :root {
   --bg-0: #0b1220;

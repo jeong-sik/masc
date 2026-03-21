@@ -524,6 +524,9 @@
    keeper_runtime
    keeper_turn_session
    keeper_turn_setup
+   keeper_turn_up_args
+   keeper_turn_up_create
+   keeper_turn_up_update
    keeper_turn_up
    keeper_turn_lifecycle
    keeper_turn
@@ -674,6 +677,9 @@
   keeper_exec_context
   keeper_turn_session
   keeper_turn_setup
+  keeper_turn_up_args
+  keeper_turn_up_create
+  keeper_turn_up_update
   keeper_turn_up
   keeper_turn_lifecycle
   team_session_engine_helpers

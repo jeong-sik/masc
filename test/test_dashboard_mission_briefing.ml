@@ -68,6 +68,9 @@ let iso_of_unix ts =
     tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 let test_briefing_is_model_free_and_synchronous () =
+  (* Force filesystem backend to prevent PG auto-detection in hermetic tests *)
+  let saved_storage = Sys.getenv_opt "MASC_STORAGE_TYPE" in
+  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -75,7 +78,10 @@ let test_briefing_is_model_free_and_synchronous () =
   Fun.protect
     ~finally:(fun () ->
       Briefing.reset_cache ();
-      cleanup_dir base_path)
+      cleanup_dir base_path;
+      (match saved_storage with
+       | Some v -> Unix.putenv "MASC_STORAGE_TYPE" v
+       | None -> Unix.putenv "MASC_STORAGE_TYPE" ""))
     (fun () ->
       Briefing.reset_cache ();
       let config = Room.default_config base_path in

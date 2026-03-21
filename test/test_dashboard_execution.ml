@@ -23,8 +23,15 @@ let cleanup_dir dir =
 
 let test_dashboard_execution_fixture () =
   let dir = test_dir () in
+  (* Force filesystem backend to prevent PG auto-detection in hermetic tests *)
+  let saved_storage = Sys.getenv_opt "MASC_STORAGE_TYPE" in
+  Unix.putenv "MASC_STORAGE_TYPE" "filesystem";
   Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
+    ~finally:(fun () ->
+      cleanup_dir dir;
+      (match saved_storage with
+       | Some v -> Unix.putenv "MASC_STORAGE_TYPE" v
+       | None -> Unix.putenv "MASC_STORAGE_TYPE" ""))
     (fun () ->
       let config = Lib.Room_utils.default_config dir in
       Unix.putenv "MASC_DASHBOARD_FIXTURES_ENABLED" "true";

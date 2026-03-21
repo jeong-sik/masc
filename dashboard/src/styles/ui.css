@@ -57,34 +57,6 @@
   font-size: 12px;
 }
 
-/* ── SPA Refresh: class alignment + app shell tuning ─────── */
-.main-tab-bar {
-  margin: 0;
-  padding: 8px;
-  border-radius: 12px;
-  border: 1px solid var(--card-border);
-  background: rgba(19, 24, 34, 0.82);
-  backdrop-filter: blur(8px);
-}
-
-.main-tab-btn {
-  border: 1px solid transparent;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.02);
-  font-weight: 500;
-}
-
-.main-tab-btn:hover {
-  color: var(--text-strong);
-  border-color: rgba(148, 163, 184, 0.3);
-}
-
-.main-tab-btn.active {
-  color: var(--text-strong);
-  border-color: rgba(122, 162, 255, 0.4);
-  background: var(--accent-soft);
-}
-
 .card {
   border-color: var(--card-border);
   background: var(--card);

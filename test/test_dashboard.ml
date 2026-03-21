@@ -127,37 +127,6 @@ let test_worktrees_section_empty () =
   Alcotest.(check string) "empty_msg" "(no worktrees)" section.empty_msg;
   cleanup_dir dir
 
-let test_dashboard_semantics_has_required_surfaces () =
-  let json = Lib.Dashboard_semantics.json () in
-  let open Yojson.Safe.Util in
-  let surfaces = json |> member "surfaces" |> to_list in
-  let ids =
-    surfaces
-    |> List.map (fun row -> row |> member "id" |> to_string)
-  in
-  List.iter
-    (fun expected ->
-      Alcotest.(check bool) expected true (List.mem expected ids))
-    [ "side_rail"; "mission"; "execution"; "memory"; "governance"; "planning"; "intervene"; "command"; "lab" ]
-
-let test_dashboard_semantics_panels_have_required_fields () =
-  let json = Lib.Dashboard_semantics.json () in
-  let open Yojson.Safe.Util in
-  let surfaces = json |> member "surfaces" |> to_list in
-  List.iter
-    (fun surface ->
-      let panels = surface |> member "panels" |> to_list in
-      Alcotest.(check bool) "surface has panels" true (panels <> []);
-      List.iter
-        (fun panel ->
-          Alcotest.(check bool) "panel purpose present" true (panel |> member "purpose" <> `Null);
-          Alcotest.(check bool) "panel problem present" true (panel |> member "problem_solved" <> `Null);
-          Alcotest.(check bool) "panel when present" true (panel |> member "when_active" <> `Null);
-          Alcotest.(check bool) "panel role present" true (panel |> member "agent_role" <> `Null);
-          Alcotest.(check bool) "panel ecosystem present" true (panel |> member "ecosystem_function" <> `Null))
-        panels)
-    surfaces
-
 (* ===== Test Suite ===== *)
 
 let format_tests = [
@@ -180,8 +149,6 @@ let section_tests = [
   "tasks section empty", `Quick, test_tasks_section_empty;
   "messages section empty", `Quick, test_messages_section_empty;
   "worktrees section empty", `Quick, test_worktrees_section_empty;
-  "dashboard semantics required surfaces", `Quick, test_dashboard_semantics_has_required_surfaces;
-  "dashboard semantics panel fields", `Quick, test_dashboard_semantics_panels_have_required_fields;
 ]
 
 let () =

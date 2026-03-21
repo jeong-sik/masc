@@ -2,7 +2,6 @@
 // Mounts the root <App /> component into the DOM
 
 import './styles/global.css'
-import './styles/tabs.css'
 import './styles/badge-card.css'
 import './styles/agent.css'
 import './styles/keeper.css'

@@ -64,7 +64,6 @@
    dashboard_governance
    dashboard_governance_judge
    dashboard_operator_judge
-   dashboard_semantics
    dashboard_utils
    dashboard_execution
    dashboard_execution_helpers

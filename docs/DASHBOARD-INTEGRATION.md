@@ -51,8 +51,6 @@ Experimental features such as TRPG live under `lab`.
   - `debates`, `sessions`, governance summary
 - `GET /api/v1/dashboard/planning`
   - `goals`, `rollup`, `mdal`, `task_backlog`
-- `GET /api/v1/dashboard/semantics`
-  - surface and panel semantics registry
 
 ## Raw Domain Endpoints
 - `/api/v1/board*`, `/api/v1/governance*`, `/api/v1/operator*`, `/api/v1/command-plane*`

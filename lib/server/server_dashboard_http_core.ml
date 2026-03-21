@@ -25,9 +25,6 @@ let with_dashboard_timeout ~clock compute =
         ("generated_at", `String (Types.now_iso ()));
       ]
 
-let dashboard_semantics_http_json () =
-  Dashboard_semantics.json ()
-
 let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe.t =
   let room_state = Room.read_state config in
   let tempo = Tempo.get_tempo config in
@@ -588,4 +585,3 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
           ] );
       ("providers", provider_capacity_json ());
       ])
-

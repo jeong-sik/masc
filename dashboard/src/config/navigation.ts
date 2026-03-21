@@ -33,7 +33,6 @@ const OPERATIONS_COMMAND_SURFACES = new Set([
 export interface DashboardNavGroup {
   id: SurfaceId
   label: string
-  icon: string
   description: string
   defaultTab: TabId
   defaultParams?: Record<string, string>
@@ -43,7 +42,6 @@ export interface DashboardNavGroup {
 export interface DashboardNavItem {
   id: TabId
   label: string
-  icon: string
   description: string
   defaultParams?: Record<string, string>
 }
@@ -59,7 +57,6 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'home',
     label: '개요',
-    icon: '',
     description: '지금 필요한 상황 요약과 우선순위를 보는 브리핑 화면',
     defaultTab: 'home',
     tabs: ['home'],
@@ -67,7 +64,6 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'status',
     label: '실행',
-    icon: '',
     description: '세션, 에이전트, 활동 흐름을 운영 관점에서 읽는 실행 화면',
     defaultTab: 'status',
     defaultParams: { section: 'sessions' },
@@ -76,7 +72,6 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'work',
     label: '기록',
-    icon: '',
     description: '메모리, 거버넌스, 근거, 계획을 묶어 보는 기록 화면',
     defaultTab: 'work',
     defaultParams: { section: 'board' },
@@ -85,7 +80,6 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'operations',
     label: '제어',
-    icon: '',
     description: '방, 세션, 유닛을 직접 조정하는 제어 화면',
     defaultTab: 'operations',
     defaultParams: { section: 'intervene' },
@@ -94,7 +88,6 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'lab',
     label: '실험',
-    icon: '',
     description: '실험적 화면과 TRPG 기능을 분리한 공간',
     defaultTab: 'lab',
     defaultParams: { section: 'overview' },
@@ -103,7 +96,6 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'logs',
     label: '로그',
-    icon: '',
     description: '시스템 출력과 런타임 로그 확인',
     defaultTab: 'logs',
     tabs: ['logs'],
@@ -113,7 +105,6 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
 export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(surface => ({
   id: surface.id,
   label: surface.label,
-  icon: surface.icon,
   description: surface.description,
   defaultParams: surface.defaultParams,
 }))

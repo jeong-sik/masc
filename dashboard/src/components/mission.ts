@@ -24,7 +24,6 @@ import {
 import {
   MissionContextBar,
   SummaryStat,
-  MissionBriefingCard,
   AttentionCard,
   SessionBriefCard,
   SessionDetailCard,
@@ -281,25 +280,14 @@ export function Mission() {
         <//>
       </details>
 
-      <div class="mission-human-grid">
-        <${MissionBriefingCard} />
-
-        <${Card} title="운영 보조 진단" class="mission-list-card" semanticId="mission.internal_signals">
-          <div class="mission-section-head">
-            <h3>시스템 진단</h3>
-            <p>artifact scope drift 같은 내부 신호는 사회 흐름을 읽은 뒤에만 참고하도록 아래 보조 면으로 둡니다.</p>
-            <${ProvenanceStrip} items=${[{ kind: 'derived' }]} />
+      ${internalSignals.length > 0 ? html`
+        <details class="mission-card-disclosure" style="margin-top: 12px;">
+          <summary>내부 신호 ${internalSignals.length}</summary>
+          <div class="mission-list-stack">
+            ${internalSignals.map(item => html`<${InternalSignalCard} key=${item.id} item=${item} />`)}
           </div>
-          <details class="mission-card-disclosure">
-            <summary>내부 신호 ${internalSignals.length}</summary>
-            <div class="mission-list-stack">
-              ${internalSignals.length > 0
-                ? internalSignals.map(item => html`<${InternalSignalCard} key=${item.id} item=${item} />`)
-                : html`<div class="empty-state">지금은 내부 진단 경고가 없습니다.</div>`}
-            </div>
-          </details>
-        <//>
-      </div>
+        </details>
+      ` : null}
     </section>
   `
 }

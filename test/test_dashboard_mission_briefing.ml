@@ -93,9 +93,10 @@ let test_briefing_cold_call_returns_pending () =
           ~config ~sw ~clock ~proc_mgr:None ()
       in
       let open Yojson.Safe.Util in
-      check string "cold call returns pending" "pending"
+      (* Cold call now computes synchronously instead of returning pending *)
+      check string "cold call returns ok" "ok"
         (json |> member "status" |> to_string);
-      check bool "refreshing true on cold call" true
+      check bool "refreshing false on cold call" false
         (json |> member "refreshing" |> to_bool))
 
 let test_force_refresh_without_cache_returns_pending () =

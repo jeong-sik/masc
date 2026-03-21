@@ -492,6 +492,9 @@ let test_compression_invalid_header () =
 let with_eio_backend f =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
+  let clock = Eio.Stdenv.clock env in
+  (* Ensure clock is available for atomic lock-retry sleep on Linux *)
+  Masc_mcp.Eio_context.set_clock clock;
   let tmp_dir = make_test_dir "masc_eio" in
   let config = Backend_eio.{ base_path = tmp_dir; node_id = "test"; cluster_name = "test" } in
   let backend = Backend_eio.FileSystem.create ~fs config in
@@ -563,14 +566,16 @@ let test_eio_atomic_get () =
   (* Get non-existent should be 0 *)
   (match Backend_eio.FileSystem.atomic_get backend key with
   | Ok n -> check int "initial is 0" 0 n
-  | Error _ -> fail "atomic_get failed");
+  | Error e -> fail (Printf.sprintf "atomic_get (initial): %s" ((match e with Backend_eio.IOError s | NotFound s | AlreadyExists s | InvalidKey s -> s))));
 
-  let _ = Backend_eio.FileSystem.atomic_increment backend key in
+  (match Backend_eio.FileSystem.atomic_increment backend key with
+  | Ok _ -> ()
+  | Error e -> fail (Printf.sprintf "atomic_increment: %s" ((match e with Backend_eio.IOError s | NotFound s | AlreadyExists s | InvalidKey s -> s))));
 
   (* Get after increment should be 1 *)
   match Backend_eio.FileSystem.atomic_get backend key with
   | Ok n -> check int "after increment is 1" 1 n
-  | Error _ -> fail "atomic_get failed"
+  | Error e -> fail (Printf.sprintf "atomic_get (after incr): %s" ((match e with Backend_eio.IOError s | NotFound s | AlreadyExists s | InvalidKey s -> s)))
 
 let test_eio_atomic_update () =
   with_eio_backend @@ fun backend ->

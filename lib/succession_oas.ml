@@ -24,7 +24,8 @@ let text_of_message = Agent_sdk.Types.text_of_message
 (* Types                                                            *)
 (* ================================================================ *)
 
-type succession_metrics = {
+(** Type aliases — delegate to OAS Succession module. *)
+type succession_metrics = Agent_sdk.Succession.metrics = {
   total_turns : int;
   total_tokens_used : int;
   total_cost_usd : float;
@@ -33,7 +34,7 @@ type succession_metrics = {
   elapsed_seconds : float;
 }
 
-type succession_dna = {
+type succession_dna = Agent_sdk.Succession.dna = {
   generation : int;
   trace_id : string;
   goal : string;

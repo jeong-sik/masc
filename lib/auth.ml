@@ -25,6 +25,7 @@ let auth_dir config = Filename.concat config ".masc/auth"
 let agents_dir config = Filename.concat (auth_dir config) "agents"
 let room_secret_file config = Filename.concat (auth_dir config) "room_secret.hash"
 let auth_config_file config = Filename.concat (auth_dir config) "config.json"
+let initial_admin_file config = Filename.concat (auth_dir config) "initial_admin"
 
 (** Ensure auth directories exist *)
 let ensure_auth_dirs config =
@@ -32,6 +33,24 @@ let ensure_auth_dirs config =
   let agents = agents_dir config in
   Fs_compat.mkdir_p auth;
   Fs_compat.mkdir_p agents
+
+(** Write the initial admin agent name (bootstrap grace).
+    The agent who enables auth is always granted full permission. *)
+let write_initial_admin config agent_name =
+  ensure_auth_dirs config;
+  Out_channel.with_open_text (initial_admin_file config) (fun oc ->
+    output_string oc (String.trim agent_name))
+
+(** Read the initial admin agent name, if set. *)
+let read_initial_admin config : string option =
+  let file = initial_admin_file config in
+  if Sys.file_exists file then
+    try
+      let name = String.trim (In_channel.with_open_text file In_channel.input_all) in
+      if name = "" then None else Some name
+    with Sys_error _ -> None
+  else
+    None
 
 (* ============================================ *)
 (* Auth config management                       *)
@@ -199,6 +218,11 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
   if not auth_cfg.enabled then
     (* Auth disabled - allow everything *)
     Ok ()
+  else if (match read_initial_admin config with
+           | Some admin -> String.equal agent_name admin
+           | None -> false) then
+    (* Bootstrap grace: the agent who enabled auth always has full access *)
+    (ignore permission; Ok ())
   else if not auth_cfg.require_token then
     (* Token not required - use default role *)
     if has_permission auth_cfg.default_role permission then
@@ -386,18 +410,21 @@ let enable_auth config ~require_token ~agent_name : string * string option =
   let cfg = load_auth_config config in
   save_auth_config config { cfg with enabled = true; require_token };
   let bootstrap_token =
-    if agent_name <> "" then
+    if agent_name <> "" then begin
+      write_initial_admin config agent_name;
       match create_token config ~agent_name ~role:Admin with
       | Ok (token, _cred) -> Some token
       | Error _ -> None
-    else None
+    end else None
   in
   (secret, bootstrap_token)
 
 (** Disable authentication *)
 let disable_auth config =
   let cfg = load_auth_config config in
-  save_auth_config config { cfg with enabled = false }
+  save_auth_config config { cfg with enabled = false };
+  let file = initial_admin_file config in
+  if Sys.file_exists file then Sys.remove file
 
 (** Check if auth is enabled *)
 let is_auth_enabled config : bool =

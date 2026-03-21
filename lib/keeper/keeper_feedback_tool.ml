@@ -13,7 +13,7 @@ let handle_keeper_feedback_record (_ctx : _ context) args : tool_result =
   if not (validate_name keeper_name) then
     (false, "invalid keeper name")
   else if decision_id = "" then
-    (false, "decision_id is required")
+    (false, "decision_id is required. Call masc_policy_status to find pending decisions.")
   else if score < -1.0 || score > 1.0 then
     (false,
      Printf.sprintf "score must be between -1.0 and 1.0, got %.2f" score)

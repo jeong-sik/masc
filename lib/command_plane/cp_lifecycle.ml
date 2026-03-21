@@ -278,7 +278,7 @@ let start_operation config ~(actor : string) json =
   let assigned_unit_id =
     match get_string_opt json "assigned_unit_id" with
     | Some value -> value
-    | None -> invalid_arg "assigned_unit_id is required"
+    | None -> invalid_arg "assigned_unit_id is required. Call masc_unit_define first to create a unit."
   in
   let objective =
     match get_string_opt json "objective" with
@@ -472,7 +472,7 @@ let checkpoint_operation config ~(actor : string) json =
   let operation_id =
     match get_string_opt json "operation_id" with
     | Some value -> value
-    | None -> invalid_arg "operation_id is required"
+    | None -> invalid_arg "operation_id is required. Call masc_operation_start first."
   in
   let checkpoint_ref =
     match get_string_opt json "checkpoint_ref" with
@@ -516,7 +516,7 @@ let checkpoint_operation config ~(actor : string) json =
 
 let pause_operation_json config ~(actor : string) json =
   match get_string_opt json "operation_id" with
-  | None -> Error "operation_id is required"
+  | None -> Error "operation_id is required. Call masc_operation_start first."
   | Some operation_id ->
       Result.map operation_to_json
         (update_operation_status config ~actor ~operation_id ~status:Paused
@@ -524,7 +524,7 @@ let pause_operation_json config ~(actor : string) json =
 
 let resume_operation_json config ~(actor : string) json =
   match get_string_opt json "operation_id" with
-  | None -> Error "operation_id is required"
+  | None -> Error "operation_id is required. Call masc_operation_start first."
   | Some operation_id ->
       Result.map operation_to_json
         (update_operation_status config ~actor ~operation_id ~status:Active
@@ -532,7 +532,7 @@ let resume_operation_json config ~(actor : string) json =
 
 let stop_operation_json config ~(actor : string) json =
   match get_string_opt json "operation_id" with
-  | None -> Error "operation_id is required"
+  | None -> Error "operation_id is required. Call masc_operation_start first."
   | Some operation_id ->
       Result.map operation_to_json
         (update_operation_status config ~actor ~operation_id ~status:Cancelled
@@ -540,7 +540,7 @@ let stop_operation_json config ~(actor : string) json =
 
 let finalize_operation_json config ~(actor : string) json =
   match get_string_opt json "operation_id" with
-  | None -> Error "operation_id is required"
+  | None -> Error "operation_id is required. Call masc_operation_start first."
   | Some operation_id ->
       Result.map
         (fun operation ->

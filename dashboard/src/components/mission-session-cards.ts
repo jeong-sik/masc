@@ -148,7 +148,7 @@ export function SessionDetailCard({
 
   const session = detail.session
   return html`
-    <${Card} title="세션 상세" class="mission-list-card" semanticId="mission.session_detail">
+    <${Card} title="세션 상세" class="mission-list-card">
       <div class="mission-section-head">
         <h3>${session.goal}</h3>
         <p>${session.session_id}${session.room ? ` · ${session.room}` : ''}</p>

@@ -51,7 +51,7 @@ export function Lab() {
   return html`
     <div>
       ${section === 'overview' ? html`
-        <${Card} title="실험 개요" class="section" semanticId="lab.experimental">
+        <${Card} title="실험 개요" class="section">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">실험 기능은 운영면 밖에 분리해 둡니다</h2>
             <p class="monitor-subheadline">TRPG와 시각 실험은 별도 표면에 두고, 운영과 작업 화면은 해석 경로를 단순하게 유지합니다.</p>
@@ -60,14 +60,14 @@ export function Lab() {
       ` : null}
 
       ${section === 'avatars' ? html`
-        <${Card} title="아바타 갤러리" class="section" semanticId="lab.avatars">
+        <${Card} title="아바타 갤러리" class="section">
           <${AvatarGallery} />
         <//>
       ` : null}
 
       ${section === 'trpg'
         ? html`
-            <${Card} title="TRPG 실험" class="section" semanticId="lab.trpg">
+            <${Card} title="TRPG 실험" class="section">
               <${Trpg} />
             <//>
           `

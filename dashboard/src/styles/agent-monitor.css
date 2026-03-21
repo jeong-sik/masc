@@ -12,7 +12,7 @@
     rgba(10, 22, 40, 0.85) 0%,
     rgba(16, 28, 48, 0.7) 100%
   );
-  border: 1px solid var(--ff-border-subtle);
+  border: 1px solid rgba(200, 168, 78, 0.12);
   border-radius: var(--radius-sm, 10px);
   margin-bottom: 12px;
   flex-wrap: wrap;
@@ -29,7 +29,7 @@
   font-size: 10px;
   font-weight: 600;
   font-family: var(--font-mono, monospace);
-  color: var(--ff-gold-dim, rgba(200, 168, 78, 0.5));
+  color: rgba(200, 168, 78, 0.5);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -58,17 +58,17 @@
 
 .agent-runtime-ctx-fill {
   height: 100%;
-  background: var(--ff-hp-full, #4ade80);
+  background: #4ade80;
   border-radius: 3px;
   transition: width 0.3s ease;
 }
 
 .agent-runtime-ctx-fill.warn {
-  background: var(--ff-hp-mid, #fbbf24);
+  background: #fbbf24;
 }
 
 .agent-runtime-ctx-fill.bad {
-  background: var(--ff-hp-low, #f87171);
+  background: #f87171;
 }
 
 /* ── Live Timeline ─────────────────────────────────────────── */
@@ -97,7 +97,7 @@
 .agent-live-chip {
   padding: 3px 10px;
   border-radius: 12px;
-  border: 1px solid var(--ff-border-subtle);
+  border: 1px solid rgba(200, 168, 78, 0.12);
   background: none;
   color: var(--text-muted, #86a0cf);
   font-size: 11px;
@@ -106,14 +106,14 @@
 }
 
 .agent-live-chip:hover {
-  border-color: var(--ff-border-hover, rgba(200, 168, 78, 0.6));
+  border-color: rgba(200, 168, 78, 0.6);
   color: var(--text-body, #c0d2f2);
 }
 
 .agent-live-chip--active {
-  background: var(--ff-gold-dim, rgba(200, 168, 78, 0.25));
-  border-color: var(--ff-gold, #c8a84e);
-  color: var(--ff-gold-bright, #e8cc70);
+  background: rgba(200, 168, 78, 0.25);
+  border-color: #c8a84e;
+  color: #e8cc70;
 }
 
 .agent-live-meta {
@@ -127,7 +127,7 @@
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   font-weight: 600;
-  color: var(--ff-crystal, #47b8ff);
+  color: #47b8ff;
   padding: 2px 8px;
   background: rgba(71, 184, 255, 0.1);
   border: 1px solid rgba(71, 184, 255, 0.2);
@@ -141,7 +141,7 @@
 .agent-live-autoscroll {
   padding: 2px 8px;
   border-radius: 8px;
-  border: 1px solid var(--ff-border-subtle);
+  border: 1px solid rgba(200, 168, 78, 0.12);
   background: none;
   color: var(--text-muted);
   font-size: 10px;
@@ -153,7 +153,7 @@
 .agent-live-autoscroll--on {
   background: rgba(74, 222, 128, 0.1);
   border-color: rgba(74, 222, 128, 0.25);
-  color: var(--ff-hp-full, #4ade80);
+  color: #4ade80;
 }
 
 /* Scrolling event stream */
@@ -195,22 +195,22 @@
 
 .agent-event-badge--heartbeat {
   background: rgba(74, 222, 128, 0.12);
-  color: var(--ff-hp-full, #4ade80);
+  color: #4ade80;
 }
 
 .agent-event-badge--lifecycle {
   background: rgba(71, 184, 255, 0.12);
-  color: var(--ff-crystal, #47b8ff);
+  color: #47b8ff;
 }
 
 .agent-event-badge--keeper {
   background: rgba(200, 168, 78, 0.15);
-  color: var(--ff-gold-bright, #e8cc70);
+  color: #e8cc70;
 }
 
 .agent-event-badge--error {
   background: rgba(248, 113, 113, 0.14);
-  color: var(--ff-hp-low, #f87171);
+  color: #f87171;
 }
 
 .agent-event-badge--broadcast {

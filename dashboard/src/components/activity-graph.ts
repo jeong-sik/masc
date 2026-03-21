@@ -206,7 +206,7 @@ function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
 function EmptyActivityGraph() {
   return html`
     <div class="agents-monitor">
-      <${Card} title="활동 그래프" class="section" semanticId="activity_graph.graph" testId="activity_graph.graph">
+      <${Card} title="활동 그래프" class="section" testId="activity_graph.graph">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">활동 그래프가 비어 있습니다</h2>
           <p class="monitor-subheadline">이 뷰는 런타임 실행 이벤트를 읽어 그래프를 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
@@ -254,7 +254,7 @@ export function ActivityGraphSurface() {
   return html`
     <div class="agents-monitor">
 
-      <${Card} title="활동 그래프" class="section" semanticId="activity_graph.graph" testId="activity_graph.graph">
+      <${Card} title="활동 그래프" class="section" testId="activity_graph.graph">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">실행 이벤트 관계 그래프</h2>
           <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 최근 실행 이벤트 기준으로 시각화합니다. 노드 크기는 활동 빈도를 반영합니다.</p>
@@ -269,7 +269,7 @@ export function ActivityGraphSurface() {
       <//>
 
       <div class="agents-workbench">
-        <${Card} title="활동 주체 순위" class="section" semanticId="activity_graph.leaderboard" testId="activity_graph.leaderboard">
+        <${Card} title="활동 주체 순위" class="section" testId="activity_graph.leaderboard">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">활동 주체 순위</h2>
             <p class="monitor-subheadline">그래프 이벤트 빈도(weight)를 기준으로 정렬한 최근 활동 주체 순위입니다.</p>
@@ -277,7 +277,7 @@ export function ActivityGraphSurface() {
           <${NodeLeaderboard} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="노드 종류 분포" class="section" semanticId="activity_graph.kinds" testId="activity_graph.kinds">
+        <${Card} title="노드 종류 분포" class="section" testId="activity_graph.kinds">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">노드 종류</h2>
             <p class="monitor-subheadline">그래프에 포함된 노드를 종류별로 분류합니다.</p>
@@ -285,7 +285,7 @@ export function ActivityGraphSurface() {
           <${KindBreakdown} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="최근 실행 이벤트" class="section" semanticId="activity_graph.timeline" testId="activity_graph.timeline">
+        <${Card} title="최근 실행 이벤트" class="section" testId="activity_graph.timeline">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">타임라인</h2>
             <p class="monitor-subheadline">가장 최근의 실행 이벤트를 시간순으로 보여줍니다.</p>

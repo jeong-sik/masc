@@ -38,7 +38,7 @@ export function GuardrailPane({
   const order = detail?.execution_order
   return html`
     <div class="governance-side-column">
-      <${Card} title="판정 / 집행" class="section" semanticId="governance.guardrail">
+      <${Card} title="판정 / 집행" class="section">
         ${!item || !detail
           ? html`<div class="empty-state">사건을 고르면 판정과 집행 경로가 보입니다.</div>`
           : html`
@@ -77,7 +77,7 @@ export function GuardrailPane({
                 : null}
             `}
     <//>
-      <${Card} title="심의 입력" class="section" semanticId="governance.context">
+      <${Card} title="심의 입력" class="section">
         ${!item
           ? html`<div class="empty-state">사건을 선택한 뒤 의견을 추가하세요.</div>`
           : html`

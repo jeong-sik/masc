@@ -16,7 +16,6 @@ import {
   sessionStatusTone,
   toneClass,
 } from './helpers'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import {
   SwarmBlockerCard,
   SwarmHealthBar,
@@ -83,7 +82,6 @@ export function WarRoomBodyGrid({
         <section class="card command-section">
           <div class="card-title-row">
             <div class="card-title">실행 흐름</div>
-            <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
           </div>
           ${liveLanes.length > 0
             ? html`
@@ -111,7 +109,6 @@ export function WarRoomBodyGrid({
         <section class="card command-section">
           <div class="card-title-row">
             <div class="card-title">오케스트레이션</div>
-            <${PanelSemanticDetails} panelId="command.chains" compact=${true} />
           </div>
           <${WarRoomOrchestrationRail} chainOverlay=${chainOverlay} linkedAutoresearch=${linkedAutoresearch} />
         </section>
@@ -119,7 +116,6 @@ export function WarRoomBodyGrid({
         <section class="card command-section">
           <div class="card-title-row">
             <div class="card-title">워커 현황</div>
-            <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
           </div>
           ${workers.length > 0
             ? html`<div class="command-card-stack">
@@ -133,7 +129,6 @@ export function WarRoomBodyGrid({
         <section class="card command-section">
           <div class="card-title-row">
             <div class="card-title">상황 피드</div>
-            <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
           </div>
           ${feedItems.length > 0
             ? html`<div class="command-trace-stack">
@@ -145,7 +140,6 @@ export function WarRoomBodyGrid({
         <section class="card command-section">
           <div class="card-title-row">
             <div class="card-title">트레이스 흐름</div>
-            <${PanelSemanticDetails} panelId="command.trace" compact=${true} />
           </div>
           ${swarm && swarm.recent_trace_events.length > 0
             ? html`<div class="command-trace-stack">
@@ -159,7 +153,6 @@ export function WarRoomBodyGrid({
         <section class="card command-section">
           <div class="card-title-row">
             <div class="card-title">Agents</div>
-            <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
           </div>
           ${agentViews.length > 0
             ? html`<div class="warroom-presence-grid">
@@ -171,7 +164,6 @@ export function WarRoomBodyGrid({
         <section class="card command-section">
           <div class="card-title-row">
             <div class="card-title">Keepers</div>
-            <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
           </div>
           ${keeperViews.length > 0
             ? html`<div class="warroom-presence-grid">
@@ -183,7 +175,6 @@ export function WarRoomBodyGrid({
         <section class="card command-section">
           <div class="card-title-row">
             <div class="card-title">압력</div>
-            <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
           </div>
           <div class="command-card-stack">
             ${swarmHasEvidence && swarm ? html`<${SwarmRunResolutionCard} swarm=${swarm} />` : null}

@@ -18,7 +18,6 @@ import {
   refreshOperatorSnapshot,
 } from '../../operator-store'
 import { agents, keepers } from '../../store'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import {
   currentCommandPlaneSummary,
   hasSwarmActivity,
@@ -196,7 +195,6 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
       <section class="card command-section command-warroom-empty ${wallboard ? 'wallboard' : ''}">
         <div class="card-title-row">
           <div class="card-title">실시간 워룸</div>
-          <${PanelSemanticDetails} panelId="command.warroom" compact=${true} />
         </div>
         <div class="command-warroom-empty-copy">
           <span class="command-hero-kicker">Narrative Playback</span>

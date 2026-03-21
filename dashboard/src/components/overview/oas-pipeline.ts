@@ -3,7 +3,6 @@
 
 import { html } from 'htm/preact'
 import { oasAgentEvents, oasKeeperSnapshots, oasHealthSummary } from '../../store'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 
 function formatTs(ts: number): string {
   const d = new Date(ts * 1000)
@@ -99,7 +98,6 @@ export function OasPipeline() {
       <div class="oas-pipeline__header">
         <span class="oas-pipeline__title">실행 흐름</span>
         <div class="home-section-actions">
-          <${PanelSemanticDetails} panelId="home.oas_pipeline" compact=${true} />
           <span class="oas-pipeline__count">${eventLabel}</span>
         </div>
       </div>

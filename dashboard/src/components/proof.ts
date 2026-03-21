@@ -177,7 +177,7 @@ export function Proof() {
       </details>
 
       <div class="mission-human-grid">
-        <${Card} title="3줄 근거 요약" class="mission-list-card" semanticId="proof.summary">
+        <${Card} title="3줄 근거 요약" class="mission-list-card">
           <div class="mission-section-head">
             <h3>핵심 증명</h3>
             <p>결론, 왜 아직 부족한지, 다음에 무엇을 남겨야 하는지만 먼저 봅니다.</p>
@@ -192,7 +192,7 @@ export function Proof() {
           </div>
         <//>
 
-        <${Card} title="증명 대상" class="mission-list-card" semanticId="proof.goal_binding">
+        <${Card} title="증명 대상" class="mission-list-card">
           <div class="mission-section-head">
             <h3>무엇을 증명하려는가</h3>
             <p>이 화면이 어떤 세션과 목표를 기준으로 그려졌는지 먼저 고정합니다.</p>
@@ -206,7 +206,7 @@ export function Proof() {
       </div>
 
       <div class="mission-human-grid">
-        <${Card} title="협업 타임라인" class="mission-list-card" semanticId="proof.timeline">
+        <${Card} title="협업 타임라인" class="mission-list-card">
           <div class="mission-section-head">
             <h3>협업 타임라인</h3>
             <p>team-session과 command-plane에서 같은 사건이 보이면 한 줄로 묶어 읽습니다.</p>
@@ -218,7 +218,7 @@ export function Proof() {
           </div>
         <//>
 
-        <${Card} title="참여 흔적" class="mission-list-card" semanticId="proof.contributions">
+        <${Card} title="참여 흔적" class="mission-list-card">
           <div class="mission-section-head">
             <h3>누가 무엇을 남겼는가</h3>
             <p>실제 흔적, 호출만 된 참여자, 계획만 된 참여자를 구분해서 봅니다.</p>
@@ -232,7 +232,7 @@ export function Proof() {
       </div>
 
       <div class="mission-human-grid">
-        <${Card} title="도구 근거" class="mission-list-card" semanticId="proof.tool_evidence">
+        <${Card} title="도구 근거" class="mission-list-card">
           <div class="mission-section-head">
             <h3>어떤 도구를 언제 썼는가</h3>
             <p>숫자만 보여주지 말고, 최근 도구 호출 근거를 직접 확인합니다.</p>
@@ -244,7 +244,7 @@ export function Proof() {
           </div>
         <//>
 
-        <${Card} title="실행 근거" class="mission-list-card" semanticId="proof.backing">
+        <${Card} title="실행 근거" class="mission-list-card">
           <div class="mission-section-head">
             <h3>실행 backing은 얼마나 남아 있나</h3>
             <p>작전, 분견대, 트레이스 수만 먼저 보고, 원본 CPv2 dump는 접어서 봅니다.</p>
@@ -258,7 +258,7 @@ export function Proof() {
       </div>
 
       <div class="mission-human-grid">
-        <${Card} title="산출물" class="mission-list-card" semanticId="proof.artifacts">
+        <${Card} title="산출물" class="mission-list-card">
           <div class="mission-section-head">
             <h3>어떤 파일 산출물이 남았나</h3>
             <p>proof/report/session 기록 파일의 존재 여부를 빠르게 확인합니다.</p>

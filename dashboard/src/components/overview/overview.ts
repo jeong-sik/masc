@@ -13,7 +13,6 @@ import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
 import { OasPipeline } from './oas-pipeline'
 import { AgentAvatar } from './agent-avatar'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type { DashboardMissionSessionBrief } from '../../types'
 
@@ -54,13 +53,11 @@ function isSystemSession(session: DashboardMissionSessionBrief): boolean {
 function HomeSectionHeader({
   label,
   copy,
-  semanticId,
   linkLabel,
   onLink,
 }: {
   label: string
   copy?: string
-  semanticId: string
   linkLabel?: string
   onLink?: () => void
 }) {
@@ -71,7 +68,6 @@ function HomeSectionHeader({
         ${copy ? html`<div class="home-section-copy">${copy}</div>` : null}
       </div>
       <div class="home-section-actions">
-        <${PanelSemanticDetails} panelId=${semanticId} compact=${true} />
         ${linkLabel && onLink
           ? html`<a class="home-section-link" onClick=${onLink}>${linkLabel}</a>`
           : null}
@@ -164,7 +160,7 @@ function HotSessions() {
       <${HomeSectionHeader}
         label="팀 세션"
         copy="홈에서는 사람 중심 작업과 자동 런타임을 나눠 보여줍니다."
-        semanticId="home.hot_sessions"
+       
         linkLabel="전체 보기"
         onLink=${() => navigate('status', { section: 'sessions' })}
       />
@@ -205,7 +201,7 @@ function AgentPulse() {
     <div class="agent-pulse">
       <${HomeSectionHeader}
         label="에이전트"
-        semanticId="home.agent_pulse"
+       
         linkLabel="전체 보기"
         onLink=${() => navigate('status', { section: 'agents' })}
       />
@@ -249,7 +245,7 @@ export function Overview() {
 
         <${HomeSectionHeader}
           label="최근 활동"
-          semanticId="home.narrative_timeline"
+         
         />
         <${NarrativeTimeline} entries=${journal} maxItems=${8} />
       </div>

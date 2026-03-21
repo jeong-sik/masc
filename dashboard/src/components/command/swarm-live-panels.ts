@@ -4,7 +4,6 @@ import {
   commandPlaneSwarmError,
   commandPlaneSwarmLoading,
 } from '../../command-store'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import { ProvenanceChip } from '../common/provenance-strip'
 import {
   dashboardSwarmOperationId,
@@ -39,7 +38,6 @@ export function SwarmLivePanels() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">스웜 라이브 런</div>
-          <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
         </div>
         ${commandPlaneSwarmLoading.value
           ? html`<div class="empty-state">Loading swarm live state…</div>`
@@ -86,7 +84,6 @@ export function SwarmLivePanels() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">체크리스트</div>
-          <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
         </div>
         ${swarm && swarm.checklist.length > 0
           ? html`<div class="command-card-stack">
@@ -98,7 +95,6 @@ export function SwarmLivePanels() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">워커</div>
-          <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
         </div>
         ${swarm && swarm.workers.length > 0
           ? html`<div class="command-card-stack">
@@ -110,7 +106,6 @@ export function SwarmLivePanels() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">런타임</div>
-          <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
         </div>
         ${swarm?.provider
           ? html`
@@ -156,7 +151,6 @@ export function SwarmLivePanels() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">막힘 요인</div>
-          <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
         </div>
         ${swarm && swarm.blockers.length > 0
           ? html`<div class="command-card-stack">
@@ -168,7 +162,6 @@ export function SwarmLivePanels() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">최근 메시지</div>
-          <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
         </div>
         ${swarm && swarm.recent_messages.length > 0
           ? html`<div class="command-trace-stack">
@@ -191,7 +184,6 @@ export function SwarmLivePanels() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">최근 트레이스 이벤트</div>
-          <${PanelSemanticDetails} panelId="command.trace" compact=${true} />
         </div>
         ${swarm && swarm.recent_trace_events.length > 0
           ? html`<div class="command-trace-stack">

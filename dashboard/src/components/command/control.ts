@@ -10,7 +10,6 @@ import {
   toggleCommandPlaneFreeze,
   toggleCommandPlaneKillSwitch,
 } from '../../command-store'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import { actionDisabled, fire, relativeTime, toneClass } from './helpers'
 
 function controlStatusLabel(value?: string | null): string {
@@ -111,7 +110,6 @@ export function ControlSurface() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">승인 대기</div>
-          <${PanelSemanticDetails} panelId="command.control" compact=${true} />
         </div>
         ${snapshot && snapshot.decisions.decisions.length > 0
           ? html`<div class="command-card-stack">
@@ -123,7 +121,6 @@ export function ControlSurface() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">유닛 제어</div>
-          <${PanelSemanticDetails} panelId="command.control" compact=${true} />
         </div>
         ${snapshot && snapshot.capacity.capacity.length > 0
           ? html`<div class="command-card-stack">

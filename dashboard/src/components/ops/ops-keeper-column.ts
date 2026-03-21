@@ -1,7 +1,6 @@
 // Ops — Keeper column: keeper list, keeper actions, available actions, recent action log
 
 import { html } from 'htm/preact'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { openKeeperDetail } from '../keeper-detail'
 import { findKeeper } from '../execution/shared'
@@ -49,7 +48,6 @@ export function OpsKeeperColumn() {
       <section class="card ops-panel ops-lane-panel ops-keeper-section">
         <div class="card-title-row">
           <div class="card-title">Keeper 개입</div>
-          <${PanelSemanticDetails} panelId="intervene.keeper_queue" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">장기 실행 중인 keeper를 고르고 바로 probe나 방향 수정 메시지를 보냅니다.</p>
 
@@ -118,7 +116,6 @@ export function OpsKeeperColumn() {
       <section class="card ops-panel ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">선택한 Keeper 액션</div>
-          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
 
@@ -176,7 +173,6 @@ export function OpsKeeperColumn() {
       <section class="card ops-panel">
         <div class="card-title-row">
           <div class="card-title">최근 개입 로그</div>
-          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} label="설명" />
         </div>
         <div class="ops-log-list">
           ${operatorActionLog.value.length === 0 ? html`

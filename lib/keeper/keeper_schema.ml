@@ -116,7 +116,7 @@ let resident_schemas : tool_schema list = [
       ("properties", `Assoc [
         ("name", `Assoc [
           ("type", `String "string");
-          ("description", `String "Keeper handle (stable). Example: 'lodge-helper'");
+          ("description", `String "Keeper handle (stable). Example: 'keeper-helper'");
         ]);
         ("goal", `Assoc [
           ("type", `String "string");

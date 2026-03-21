@@ -36,7 +36,6 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
   let tasks = Room.get_tasks_raw_in_room config room_id in
   let agents = Room.get_agents_raw_in_room config room_id in
   let msgs = Room.get_messages_raw_in_room config ~room_id ~since_seq:0 ~limit:20 in
-  let lodge_json = `Assoc [("status", `String "deprecated")] in
   let now_ts = Time_compat.now () in
   let (board_monitor_json, board_contract_ok) = board_monitoring_json ~now_ts in
   let (governance_monitor_json, governance_feed_ok) =
@@ -101,7 +100,6 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
         ("board", board_monitor_json);
         ("governance", governance_monitor_json);
       ]);
-      ("lodge", lodge_json);
       ("data_quality", `Assoc [
         ("board_contract_ok", `Bool board_contract_ok);
         ("governance_feed_ok", `Bool governance_feed_ok);
@@ -454,7 +452,6 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
     Room.read_current_room config |> Option.value ~default:"default"
   in
   let tempo = Tempo.get_tempo config in
-  let lodge_json = `Assoc [("status", `String "deprecated")] in
   let build = Build_identity.current () in
   `Assoc
     [
@@ -467,7 +464,6 @@ let dashboard_shell_status_json (config : Room.config) : Yojson.Safe.t =
       ("project", `String room_state.project);
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool room_state.paused);
-      ("lodge", lodge_json);
       ("version", `String build.release_version);
       ("build", Build_identity.to_yojson build);
     ]
@@ -553,4 +549,3 @@ let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
           ] );
       ("providers", provider_capacity_json ());
       ])
-

@@ -312,7 +312,7 @@ let keeper_diagnostic_summary ~health_state ~quiet_reason =
   | _ -> (
       match quiet_reason with
       | Some "quiet_hours" ->
-          "Lodge quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep."
+          "Quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep."
       | Some "min_gap" ->
           "Keeper is inside its proactive cooldown window. Direct messages work now; autonomous check-ins will wait."
       | Some "never_started" ->

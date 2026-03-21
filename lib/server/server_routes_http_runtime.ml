@@ -10,7 +10,6 @@ let is_dashboard_spa_deep_link path =
   starts_with ~prefix:"/dashboard/" path
   && not (starts_with ~prefix:"/dashboard/assets/" path)
   && path <> "/dashboard/credits"
-  && path <> "/dashboard/lodge"
 
 (** CORS preflight response headers *)
 let cors_preflight_headers origin =
@@ -58,7 +57,6 @@ let health_handler _request reqd =
     else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
   in
   let build = Build_identity.current () in
-  let lodge_json = `Assoc [("status", `String "deprecated")] in
   let health_json = `Assoc [
     ("status", `String "ok");
     ("server", `String "masc-mcp");
@@ -81,7 +79,6 @@ let health_handler _request reqd =
         ] );
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Sse.client_count ()));
-    ("lodge", lodge_json);
     ("pg_pool", let max_size = Backend_core.configured_max_pool_size () in
       let shared = Council.Archive.has_shared_pool () in
       Backend_core.pool_stats_to_yojson {

@@ -434,7 +434,7 @@ let get_agent_profile (name : string) : agent_profile =
         if contains normalized "claude" then ("🧠", "클로드")
         else if contains normalized "gemini" then ("💎", "제미나이")
         else if contains normalized "codex" then ("🤖", "코덱스")
-        else if contains normalized "lodge" then ("🏠", "롯지 키퍼")
+        else if contains normalized "lodge" then ("👥", "소셜 에이전트")
         else if contains normalized "gardener" then ("🌿", "정원사")
         else if contains normalized "review" then ("🔍", "리뷰어")
         else if contains normalized "test" then ("🧪", "테스터")
@@ -473,4 +473,3 @@ let handoff_json ~surface ?command_surface ?operation_id ~label ~target_type ~ta
     match operation_id with
     | Some value -> [ ("operation_id", `String value) ]
     | None -> [])
-

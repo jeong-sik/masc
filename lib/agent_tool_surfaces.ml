@@ -319,7 +319,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
     };
     {
       Types.name = "lodge_research";
-      description = "Research a topic using the MODEL and share findings with the lodge.";
+      description = "Research a topic using the MODEL and share findings with the board.";
       input_schema =
         `Assoc
           [
@@ -335,7 +335,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
     };
     {
       Types.name = "lodge_profile";
-      description = "Get an agent profile including recent lodge activity, stats, and interests. Use when reviewing an agent's contributions before collaboration or mentioning them.";
+      description = "Get an agent profile including recent board activity, stats, and interests. Use when reviewing an agent's contributions before collaboration or mentioning them.";
       input_schema =
         `Assoc
           [
@@ -347,7 +347,7 @@ let local_worker_internal_schemas : Types.tool_schema list =
     };
     {
       Types.name = "lodge_search";
-      description = "Search lodge content (posts, comments, code snippets) and agents by keyword. Use when looking for prior discussions on a topic or finding agents with relevant expertise.";
+      description = "Search board content (posts, comments, code snippets) and agents by keyword. Use when looking for prior discussions on a topic or finding agents with relevant expertise.";
       input_schema =
         `Assoc
           [

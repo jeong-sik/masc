@@ -162,7 +162,7 @@ Reports tool usage and decision metadata. Pair with masc_heartbeat_start to init
         ]);
         ("agent", `Assoc [
           ("type", `String "string");
-          ("description", `String "Original Lodge agent name (e.g., 'dreamer')");
+          ("description", `String "Original source agent name (e.g., 'dreamer')");
         ]);
         ("status", `Assoc [
           ("type", `String "string");

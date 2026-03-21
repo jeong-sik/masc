@@ -3,7 +3,6 @@
 
 open Keeper_types
 open Keeper_memory
-open Keeper_alerting
 open Keeper_exec_context
 open Keeper_exec_autonomy
 
@@ -560,226 +559,122 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                          Log.Keeper.error "write_meta failed after goal turn: %s" msg);
                     updated_meta
                 | None ->
+               (* Goal-driven proactive turn via OAS Agent.run with multi-turn
+                  tool use. Keeper uses tools autonomously to observe and act,
+                  instead of the old fixed-prompt 1-turn generation. *)
                let primary =
                  match specs with
                  | p :: _ -> p
                  | [] -> Model_spec.default_local_model_spec ()
                in
                let base_dir = session_base_dir ctx.config in
-               let (session, ctx_opt) =
-                 load_context_from_checkpoint
-                   ~trace_id:meta.trace_id
-                   ~primary_model_max_tokens:primary.max_context
-                   ~base_dir
+               let user_message = Printf.sprintf
+                 "Proactive turn (%d seconds idle). Goal: %s"
+                 idle_seconds meta.goal
                in
-               match ctx_opt with
-               | None ->
-                   log_proactive_failure "continuity context unavailable";
+               let build_turn_prompt ~base_system_prompt ~messages:_ =
+                 base_system_prompt
+               in
+               (* max_turns scales with autonomy level:
+                  L1-L2 = 3 (observe only), L3 = 5, L4-L5 = 15 *)
+               let max_turns =
+                 match Keeper_contract.parse_autonomy_level meta.autonomy_level with
+                 | Some Keeper_autonomy.L4_Autonomous
+                 | Some Keeper_autonomy.L5_Independent -> 15
+                 | Some Keeper_autonomy.L3_Guided -> 5
+                 | _ -> 3
+               in
+               let (run_result, latency) = Keeper_exec_context.timed (fun () ->
+                 Keeper_agent_run.run_turn
+                   ~config:ctx.config ~meta ~base_dir
+                   ~max_context:primary.max_context
+                   ~build_turn_prompt
+                   ~user_message
+                   ~cascade_name:"keeper_proactive"
+                   ~generation:meta.generation
+                   ~max_turns
+                   ~temperature:0.3
+                   ~max_tokens:2048 ()
+               ) in
+               match run_result with
+               | Error msg ->
+                   Log.KeeperExec.error "%s proactive Agent.run failed: %s"
+                     meta.name msg;
                    meta
-               | Some ctx_work ->
-                   let continuity_snapshot = latest_state_snapshot_from_messages ctx_work.messages in
-                   let continuity_summary =
-                     match continuity_snapshot with
-                     | Some s -> keeper_state_snapshot_to_summary_text s
-                     | None -> (
-                         let trimmed = String.trim meta.continuity_summary in
-                         if trimmed = "" then "No continuity snapshot available." else trimmed)
+               | Ok result ->
+                   let tools_used = result.Keeper_agent_run.tools_used in
+                   let response_text = result.Keeper_agent_run.response_text in
+                   let safe_reply =
+                     Keeper_prompt.user_visible_reply_text
+                       ~fallback:(Keeper_prompt.proactive_fallback_reply ~meta ~idle_seconds)
+                       response_text
                    in
-                   let continuity_summary = String.trim continuity_summary in
-                   let last_continuity_update_ts =
-                     if
-                       continuity_summary <> ""
-                       && String.trim meta.continuity_summary <> continuity_summary
-                     then
-                       now_ts
-                     else
-                       meta.last_continuity_update_ts
+                   (* Post to Board so proactive activity is visible *)
+                   (try
+                     ignore
+                       (Board_dispatch.create_post
+                         ~author:meta.name
+                         ~content:safe_reply
+                         ~post_kind:Board_core.Automation_post
+                         ~meta_json:(`Assoc [
+                           ("source", `String "keeper_proactive_autonomous");
+                           ("soul_profile", `String meta.soul_profile);
+                           ("idle_seconds", `Int idle_seconds);
+                           ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+                         ])
+                         ())
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
+                     Log.KeeperExec.warn "proactive board post failed: %s"
+                       (Printexc.to_string exn));
+                   let used_model_spec =
+                     model_spec_for_used specs result.Keeper_agent_run.model_used
+                     |> Option.value ~default:primary
                    in
-                   let meta_for_compaction =
+                   let turn_cost =
+                     cost_usd_of_usage result.Keeper_agent_run.usage used_model_spec
+                   in
+                   let has_autonomous_action = tools_used <> [] in
+                   let updated =
                      { meta with
-                       continuity_summary;
-                       last_continuity_update_ts
+                       updated_at = now_iso ();
+                       total_turns = meta.total_turns + 1;
+                       total_input_tokens =
+                         meta.total_input_tokens + result.Keeper_agent_run.usage.input_tokens;
+                       total_output_tokens =
+                         meta.total_output_tokens + result.Keeper_agent_run.usage.output_tokens;
+                       total_tokens =
+                         meta.total_tokens
+                         + Keeper_exec_context.total_tokens result.Keeper_agent_run.usage;
+                       total_cost_usd = meta.total_cost_usd +. turn_cost;
+                       last_turn_ts = now_ts;
+                       last_model_used = result.Keeper_agent_run.model_used;
+                       last_input_tokens = result.Keeper_agent_run.usage.input_tokens;
+                       last_output_tokens = result.Keeper_agent_run.usage.output_tokens;
+                       last_total_tokens =
+                         Keeper_exec_context.total_tokens result.Keeper_agent_run.usage;
+                       last_latency_ms = latency;
+                       proactive_count_total = meta.proactive_count_total + 1;
+                       last_proactive_ts = now_ts;
+                       last_proactive_reason =
+                         Printf.sprintf
+                           "goal_driven_agent_run; idle=%ds; tools=[%s]; turns=%d"
+                           idle_seconds (String.concat "," tools_used)
+                           result.Keeper_agent_run.turn_count;
+                       last_proactive_preview = short_preview safe_reply;
+                       autonomous_action_count =
+                         meta.autonomous_action_count
+                         + (if has_autonomous_action then 1 else 0);
+                       last_autonomous_action_at =
+                         if has_autonomous_action then now_iso ()
+                         else meta.last_autonomous_action_at;
                      }
                    in
-                   match
-                     run_proactive_generation
-                       ~specs
-                       ~primary
-                       ~config:ctx.config
-                       ~ctx_work
-                       ~meta
-                       ~continuity_snapshot
-                       ~continuity_summary
-                       ~idle_seconds
-                   with
-                       | None ->
-                           log_proactive_failure
-                             "generation returned no proactive reply";
-                           meta
-                       | Some generated ->
-	                       let model_used =
-	                         let m = String.trim generated.model_used in
-	                         if m <> "" then m else primary.model_id
-	                       in
-	                       let proactive_skill_route =
-	                         route_keeper_skill
-	                           ~soul_profile:meta.soul_profile
-	                           ~message:"proactive idle checkin"
-	                       in
-	                       let raw_reply = generated.reply in
-	                       let safe_reply =
-	                         user_visible_reply_text
-	                           ~fallback:(proactive_fallback_reply ~meta ~idle_seconds)
-	                           raw_reply
-	                       in
-	                       (* Post proactive reply to Board so it is externally visible *)
-	                       (try
-	                         ignore
-	                           (Board_dispatch.create_post
-	                             ~author:meta.name
-	                             ~content:safe_reply
-	                             ~post_kind:Board_core.Automation_post
-	                             ~meta_json:(`Assoc [
-	                               ("source", `String "keeper_proactive");
-	                               ("soul_profile", `String meta.soul_profile);
-	                               ("idle_seconds", `Int idle_seconds);
-	                             ])
-	                             ())
-	                       with exn ->
-	                         Log.KeeperExec.warn "proactive board post failed: %s"
-	                           (Printexc.to_string exn));
-	                       let assistant_msg = Agent_sdk.Types.assistant_msg safe_reply in
-	                       let ctx_work = Context_manager.append ctx_work assistant_msg in
-                       Context_manager.persist_message session assistant_msg;
-                       let before_compact_tokens = ctx_work.token_count in
-                       let (ctx_work, compaction_trigger, compaction_decision) =
-                        compact_if_needed ~meta:meta_for_compaction ~now_ts ctx_work
-                       in
-                       let after_compact_tokens = ctx_work.token_count in
-                       let compacted = after_compact_tokens < before_compact_tokens in
-                       (try ignore (save_checkpoint session ctx_work ~generation:meta.generation)
-                        with
-                        | Eio.Cancel.Cancelled _ as e -> raise e
-                        | exn -> log_keeper_exn ~label:"save_checkpoint (tool_loop) failed" exn);
-                       let turn_cost = generated.total_cost_usd in
-                       let proactive_reason =
-                         Printf.sprintf
-                           "idle=%ds>=gate=%ds; cooldown_elapsed=%ds>=gate=%ds; soul=%s; skill=%s; attempts=%d; mode=tool_loop; tool_calls=%d; fallback=%d"
-                           idle_seconds idle_gate cooldown_elapsed cooldown_gate meta.soul_profile
-                           proactive_skill_route.primary_skill
-                           generated.attempts
-                           (List.length generated.tools_used)
-                           (if generated.fallback_applied then 1 else 0)
-                       in
-                           let updated =
-                             {
-                               meta with
-                           updated_at = now_iso ();
-                           total_turns = meta.total_turns + 1;
-                           total_input_tokens =
-                             meta.total_input_tokens + generated.usage.input_tokens;
-                           total_output_tokens =
-                             meta.total_output_tokens + generated.usage.output_tokens;
-                           total_tokens = meta.total_tokens + Keeper_exec_context.total_tokens generated.usage;
-                           total_cost_usd = meta.total_cost_usd +. turn_cost;
-                           last_turn_ts = now_ts;
-                           last_model_used = model_used;
-                           last_input_tokens = generated.usage.input_tokens;
-                           last_output_tokens = generated.usage.output_tokens;
-                           last_total_tokens = Keeper_exec_context.total_tokens generated.usage;
-                           last_latency_ms = generated.latency_ms;
-                           compaction_count =
-                             meta.compaction_count + if compacted then 1 else 0;
-                           last_compaction_check_ts = now_ts;
-                           last_compaction_decision = compaction_decision;
-                           last_compaction_ts =
-                             if compacted then now_ts else meta.last_compaction_ts;
-                           last_compaction_before_tokens =
-                             if compacted
-                             then before_compact_tokens
-                             else meta.last_compaction_before_tokens;
-                           last_compaction_after_tokens =
-                             if compacted
-                             then after_compact_tokens
-                             else meta.last_compaction_after_tokens;
-                           proactive_count_total = meta.proactive_count_total + 1;
-                           last_proactive_ts = now_ts;
-                           last_proactive_reason = proactive_reason;
-                               last_proactive_preview = short_preview safe_reply;
-                               continuity_summary;
-                               last_continuity_update_ts;
-                             }
-                       in
-                       (match write_meta ctx.config updated with
-                        | Ok () -> ()
-                        | Error msg ->
-                            Log.Keeper.error "write_meta failed after proactive turn: %s" msg);
-                       (try
-                          let metrics_path = keeper_metrics_path ctx.config updated.name in
-                          let metrics_json =
-                            `Assoc
-                              [
-                                ("ts", `String (now_iso ()));
-                                ("ts_unix", `Float now_ts);
-                                ("channel", `String "proactive");
-                                ("name", `String updated.name);
-                                ("agent_name", `String updated.agent_name);
-                                ("trace_id", `String updated.trace_id);
-                                ("generation", `Int updated.generation);
-                                ("model_used", `String model_used);
-                                ("model_backend", `String "oas");
-                                ( "usage",
-                                  `Assoc
-                                    [
-                                      ("input_tokens", `Int generated.usage.input_tokens);
-                                      ("output_tokens", `Int generated.usage.output_tokens);
-                                      ("total_tokens", `Int (Keeper_exec_context.total_tokens generated.usage));
-                                    ] );
-                                ("latency_ms", `Int generated.latency_ms);
-                                ("cost_usd", `Float turn_cost);
-                                ("context_ratio", `Float (Context_manager.context_ratio ctx_work));
-                                ("context_tokens", `Int ctx_work.token_count);
-                                ("context_max", `Int ctx_work.max_tokens);
-                                ("message_count", `Int (List.length ctx_work.messages));
-                                ("compacted", `Bool compacted);
-                                ("compaction_before_tokens", `Int before_compact_tokens);
-                                ("compaction_after_tokens", `Int after_compact_tokens);
-                                  ( "compaction_trigger",
-                                    match compaction_trigger with
-                                    | Some reason -> `String reason
-                                    | None -> `Null );
-                                ("compaction_decision", `String compaction_decision);
-                                ("work_kind", `String "proactive_checkin");
-	                                ("tool_call_count", `Int (List.length generated.tools_used));
-	                                ("tools_used", `List (List.map (fun s -> `String s) generated.tools_used));
-	                                ("skill_primary", `String proactive_skill_route.primary_skill);
-	                                ("skill_secondary",
-	                                  `List
-	                                    (List.map
-	                                       (fun s -> `String s)
-	                                       proactive_skill_route.secondary_skills));
-	                                ("skill_reason", `String proactive_skill_route.reason);
-                                ("skill_selection_mode", `String "heuristic");
-                                ("skill_provenance", `String "fallback");
-	                                ("memory_check", memory_check_default_json ());
-	                                ("proactive", `Assoc [
-                                  ("performed", `Bool true);
-                                  ("attempts", `Int generated.attempts);
-                                  ("fallback_applied", `Bool generated.fallback_applied);
-                                  ("idle_seconds", `Int idle_seconds);
-                                  ("idle_gate_seconds", `Int idle_gate);
-                                  ("cooldown_elapsed_seconds", `Int cooldown_elapsed);
-                                  ("cooldown_gate_seconds", `Int cooldown_gate);
-                                  ("reason", `String proactive_reason);
-                                  ("preview", `String (short_preview safe_reply));
-                                ]);
-                                ("handoff", `Assoc [ ("performed", `Bool false) ]);
-                              ]
-                          in
-                          append_jsonl_line metrics_path metrics_json
-                       with
-                       | Eio.Cancel.Cancelled _ as e -> raise e
-                       | exn ->
-                         log_keeper_exn ~label:"metrics JSONL write failed" exn);
-                       updated))
+                   (match write_meta ctx.config updated with
+                    | Ok () -> ()
+                    | Error msg ->
+                        Log.Keeper.error "write_meta failed after proactive turn: %s" msg);
+                   updated))
+
 

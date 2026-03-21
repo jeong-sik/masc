@@ -90,6 +90,15 @@ let build_keeper_system_prompt
      %s\n\
      </identity>\n\
      \n\
+     Autonomous behavior:\n\
+     - On proactive turns, use your tools to assess the situation and act if needed.\n\
+     - You decide which tools to use and how many turns to spend.\n\
+     - No events are pushed to you. You observe and judge on your own.\n\
+     \n\
+     Self model:\n\
+     - Will: %s\n\
+     - Needs: %s\n\
+     - Desires: %s\n\
      <capabilities>\n\
      What you can do with your tools:\n\
      - Read and write to the Board: see what other agents posted, share your thoughts, comment, vote.\n\

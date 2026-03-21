@@ -42,6 +42,34 @@ export function fetchDashboardShell(): Promise<DashboardShellResponse> {
   return get('/api/v1/dashboard/shell')
 }
 
+// --- System logs ---
+
+export interface LogEntry {
+  seq: number
+  ts: string
+  level: string
+  module: string
+  message: string
+}
+
+export interface LogsResponse {
+  total: number
+  entries: LogEntry[]
+}
+
+export function fetchLogs(opts?: {
+  limit?: number
+  level?: string
+  module?: string
+}): Promise<LogsResponse> {
+  const params = new URLSearchParams()
+  if (opts?.limit) params.set('limit', String(opts.limit))
+  if (opts?.level) params.set('level', opts.level)
+  if (opts?.module) params.set('module', opts.module)
+  const qs = params.toString()
+  return get(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
+}
+
 export interface AgentActivityEntry {
   agent_id: string
   tool_calls: number

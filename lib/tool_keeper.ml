@@ -393,6 +393,9 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_persistent_agent_goals" -> Some (Policy.handle_keeper_goals ctx args)
   | "masc_persistent_agent_trajectory" -> Some (Status.handle_keeper_trajectory ctx args)
   | "masc_persistent_agent_eval" -> Some (Status.handle_keeper_eval ctx args)
+  (* Housekeeping: keepers maintain their own world *)
+  | "masc_housekeep_scan" | "masc_housekeep_delete" | "masc_housekeep_prune" ->
+      Tool_housekeep.dispatch ctx ~name ~args
   | _ -> None
 
 (** Streaming dispatch: only handles keeper_msg with text delta forwarding.

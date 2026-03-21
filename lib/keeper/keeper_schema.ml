@@ -811,5 +811,61 @@ let persistent_agent_alias_schemas =
                  description = persistent_alias_description schema;
                })
 
+let housekeep_schemas : tool_schema list = [
+  {
+    name = "masc_housekeep_scan";
+    description = "Scan .masc/ directory and list all files with size, age, and category. Use to observe the state of your world before deciding what to clean.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("category", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by category: keeper_meta, keeper_metrics_legacy, keeper_memory, keeper_policy, keeper_feedback, jsonl_data, dated_split, events, other. Omit for all.");
+        ]);
+        ("min_age_days", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Only show files older than this many days. Default: 0 (all).");
+        ]);
+      ]);
+    ];
+  };
+  {
+    name = "masc_housekeep_delete";
+    description = "Delete a specific file under .masc/. Logs the deletion with timestamp and reason. Only deletes files, not directories.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("path", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Absolute path to the file to delete. Must be under .masc/.");
+        ]);
+        ("reason", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Why this file is being deleted (logged for audit trail).");
+        ]);
+      ]);
+      ("required", `List [`String "path"; `String "reason"]);
+    ];
+  };
+  {
+    name = "masc_housekeep_prune";
+    description = "Prune old entries from a date-split JSONL store. Removes day-files older than the specified number of days.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("store", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Store to prune: 'audit', 'telemetry', or 'keeper:<name>' (e.g. 'keeper:dm-keeper').");
+        ]);
+        ("days", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Delete entries older than this many days. Default: 30.");
+        ]);
+      ]);
+      ("required", `List [`String "store"]);
+    ];
+  };
+]
+
 let schemas : tool_schema list =
-  resident_schemas @ persistent_agent_alias_schemas
+  resident_schemas @ persistent_agent_alias_schemas @ housekeep_schemas

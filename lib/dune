@@ -833,8 +833,6 @@
    dated_jsonl
    ;; Council - multi-agent governance
    council
-   ;; Jiphyeon - Episode storage for Agent Being Protocol
-   jiphyeon
    ;; Neo4j Bolt native driver (OCaml 5.x Eio)
    ;; Structured logging (extracted sub-library)
    masc_log

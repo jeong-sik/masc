@@ -77,6 +77,12 @@ let register_all () =
     "masc_code_search"; "masc_code_symbols"; "masc_code_read";
   ];
 
+  (* ── Mod_code_write: Tool_code_write ────────────────────────── *)
+  reg Mod_code_write [
+    "masc_code_write"; "masc_code_edit"; "masc_code_delete";
+    "masc_code_shell"; "masc_code_git";
+  ];
+
   (* ── Mod_vote: Tool_vote ──────────────────────────────────────── *)
   reg Mod_vote [
     "masc_vote_create"; "masc_vote_cast"; "masc_vote_status"; "masc_votes";

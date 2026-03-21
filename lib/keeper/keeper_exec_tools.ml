@@ -51,6 +51,8 @@ let keeper_autoresearch_tool_names =
   Tool_shard.autoresearch_keeper_tools
   |> List.map (fun (t : Types.tool_schema) -> t.name)
 
+let keeper_coding_tool_names = Tool_code_write.tool_names
+
 let dedupe_tool_names names =
   dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)
 
@@ -73,12 +75,22 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
         keeper_autoresearch_tool_names @ with_shell
       else with_shell
     in
-    dedupe_tool_names (keeper_board_tool_names @ with_research)
+    let with_coding =
+      if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
+        keeper_coding_tool_names @ with_research
+      else with_research
+    in
+    dedupe_tool_names (keeper_board_tool_names @ with_coding)
   else
     let base_names = keeper_model_tools |> List.map (fun tool -> tool.Types.name) in
-    if meta.soul_profile = "research" then
-      dedupe_tool_names (keeper_autoresearch_tool_names @ base_names)
-    else base_names
+    let with_research =
+      if meta.soul_profile = "research" then
+        keeper_autoresearch_tool_names @ base_names
+      else base_names
+    in
+    if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
+      dedupe_tool_names (keeper_coding_tool_names @ with_research)
+    else with_research
 
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     Types.tool_schema list =
@@ -87,10 +99,15 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     []
   else
     let base = keeper_model_tools in
-    let all_tools =
+    let with_research =
       if meta.soul_profile = "research" then
         base @ Tool_shard.autoresearch_keeper_tools
       else base
+    in
+    let all_tools =
+      if canonical_policy_shell_mode meta.policy_shell_mode = "coding" then
+        with_research @ Tool_code_write.schemas
+      else with_research
     in
     all_tools
     |> List.filter (fun tool -> List.mem tool.Types.name allowed)

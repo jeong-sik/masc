@@ -452,6 +452,7 @@
    tool_council_json
    tool_council_schemas
    tool_code
+   tool_code_write
    code_swarm_plan
    tool_code_swarm
    tool_suspend

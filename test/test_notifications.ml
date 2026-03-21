@@ -38,18 +38,8 @@ let queue_length registry ~agent_name =
     | None -> 0
   )
 
-(** Extract JSON from response body that may have "summary\n---\n{json}" format *)
-let extract_json body =
-  match String.split_on_char '-' body with
-  | _ ->
-    (* Find the first '{' and parse from there *)
-    let len = String.length body in
-    let rec find_brace i =
-      if i >= len then body
-      else if body.[i] = '{' then String.sub body i (len - i)
-      else find_brace (i + 1)
-    in
-    Yojson.Safe.from_string (find_brace 0)
+(** Parse JSON response body *)
+let extract_json body = Yojson.Safe.from_string body
 
 (* Run a test function inside Eio runtime *)
 let with_eio f () =

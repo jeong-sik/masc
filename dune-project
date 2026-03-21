@@ -1,7 +1,7 @@
 (lang dune 3.13)
 
 (name masc_mcp)
-(version 2.125.0)
+(version 2.126.0)
 
 (generate_opam_files true)
 
@@ -35,7 +35,7 @@
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (cohttp-eio (and (>= 6.0) (< 6.2)))
-  (agent_sdk (>= 0.77.0))
+  (agent_sdk (>= 0.79.0))
   (uri (>= 4.4))
   (tls (>= 0.16))
   (tls-eio (>= 0.16))

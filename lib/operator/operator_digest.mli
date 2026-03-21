@@ -129,6 +129,7 @@ val session_recommendations :
   recommended_action list
 
 val build_session_digest :
+  ?status_json:Yojson.Safe.t ->
   Room.config ->
   Team_session_types.session ->
   now:float ->

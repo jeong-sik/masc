@@ -248,7 +248,7 @@ let execute_chain_exec ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : exec
       (* Parse the chain JSON *)
       let chain_json = try
         Ok (Yojson.Safe.from_string chain_json_str)
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Error (Printf.sprintf "ChainExec: invalid JSON from '%s': %s" chain_source (Printexc.to_string exn))
       in
       match chain_json with

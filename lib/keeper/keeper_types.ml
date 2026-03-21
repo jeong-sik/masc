@@ -564,7 +564,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
           last_deliberation_ts;
           last_triage_triggers;
         }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))
 
 type resident_keeper_spec = {
@@ -668,7 +668,7 @@ let write_resident_keeper config (spec : resident_keeper_spec) :
   try
     Fs_compat.save_file path content;
     Ok ()
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error
       (Printf.sprintf "failed to write resident keeper %s: %s" path
          (Printexc.to_string exn))
@@ -682,7 +682,7 @@ let read_resident_keeper config name : (resident_keeper_spec option, string) res
       match resident_keeper_of_json json with
       | Ok spec -> Ok (Some spec)
       | Error msg -> Error msg
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Error
         (Printf.sprintf "failed to read resident keeper %s: %s" path
            (Printexc.to_string exn))
@@ -759,7 +759,7 @@ let write_meta config (m : keeper_meta) : (unit, string) result =
   try
     Fs_compat.save_file path content;
     Ok ()
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "failed to write meta %s: %s" path (Printexc.to_string exn))
 
 let read_meta config name : (keeper_meta option, string) result =

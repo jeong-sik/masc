@@ -109,7 +109,7 @@ let run_perpetual_via_oas
     Fs_compat.mkdir_p config.session_base_dir;
     Fs_compat.save_file checkpoint_path
       (Oas.Checkpoint.to_string oas_ckpt)
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Perpetual.error "Checkpoint save failed: %s"
       (Printexc.to_string exn));
   (* Save MASC-format checkpoint via Phase D bridge (to_oas_checkpoint) *)
@@ -122,7 +122,7 @@ let run_perpetual_via_oas
     let ckpt_path2 = Filename.concat config.session_base_dir
       (trace_id ^ "-masc.json") in
     Fs_compat.save_file ckpt_path2 (Oas.Checkpoint.to_string masc_oas_ckpt)
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Perpetual.error "MASC checkpoint save failed: %s"
       (Printexc.to_string exn));
   (* Handle handoff via OAS Durable step chain (crash-recoverable) *)

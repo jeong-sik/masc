@@ -287,7 +287,7 @@ let load_request base_path req_id =
     try
       let json = Safe_ops.read_json_eio path in
       request_of_yojson json
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Error (Printf.sprintf "Failed to load verification %s: %s" req_id (Printexc.to_string exn))
   else
     Error (Printf.sprintf "Verification %s not found" req_id)

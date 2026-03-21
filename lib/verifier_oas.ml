@@ -219,7 +219,7 @@ let make_pre_tool_hook
       else
         let input_str =
           try Yojson.Safe.to_string input
-          with _ -> "{}" in
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> "{}" in
         let req : verification_request = {
           action_description;
           action_result = input_str;

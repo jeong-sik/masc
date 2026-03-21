@@ -181,7 +181,7 @@ let load_latest_checkpoint config session_id : Team_session_types.checkpoint opt
         | Error e ->
             Log.Session.error "checkpoint parse error (%s): %s" latest e;
             None
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Log.Session.error "checkpoint load error (%s): %s" latest
           (Printexc.to_string exn);
         None)
@@ -196,7 +196,7 @@ let read_recent_events config session_id ~max_count :
         | Ok e -> Some e
         | Error _ -> None)
       raw
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Session.error "read_recent_events error (%s): %s"
       session_id (Printexc.to_string exn);
     []

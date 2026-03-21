@@ -387,7 +387,7 @@ let hydrate (dna : succession_dna) (spec : successor_spec) : Context_manager.wor
     else
       try Some (Context_manager.deserialize_context
                   dna.compressed_context ~max_tokens:spec.model.max_context)
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Log.Misc.warn "succession: context deserialize failed: %s" (Printexc.to_string exn);
         None
   in
@@ -484,7 +484,7 @@ let dna_of_json json =
       warnings = json |> member "warnings" |> str_list_of_json;
       metrics = json |> member "metrics" |> metrics_of_json;
     }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (sprintf "DNA parse error: %s" (Printexc.to_string exn))
 
 (* ================================================================ *)
@@ -608,7 +608,7 @@ let get_metrics ctx : succession_metrics =
         errors_encountered = json |> member "errors_encountered" |> to_int;
         elapsed_seconds = json |> member "elapsed_seconds" |> to_number;
       }
-    with _ -> empty_metrics)
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> empty_metrics)
   | _ -> empty_metrics
 
 (** Read a scoped string, returning a default if missing. *)

@@ -167,7 +167,7 @@ let record_task ~generation ~task_id ~completed ~duration_ms ~error_count
     task_records := record :: !task_records;
     (* JSONL backup — best effort, don't fail the record *)
     (try append_jsonl ~agent_name:"_global" (task_record_to_json record)
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Metrics.warn "append_jsonl task: %s" (Printexc.to_string exn));
     record)
 
@@ -183,7 +183,7 @@ let record_handoff ~from_generation ~to_generation ~dna_size ~context_ratio =
     } in
     handoff_records := record :: !handoff_records;
     (try append_jsonl ~agent_name:"_global" (handoff_record_to_json record)
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Metrics.warn "append_jsonl handoff: %s" (Printexc.to_string exn));
     record)
 
@@ -201,7 +201,7 @@ let summarize_generation_unlocked generation =
   let all_tasks =
     if !task_records = [] then
       (try load_task_records_from_jsonl ~agent_name:"_global"
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Metrics.warn "load_task_records fallback: %s" (Printexc.to_string exn);
          [])
     else !task_records

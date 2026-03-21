@@ -560,7 +560,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
                   let rec loop () =
                     if not !(info.stop) then (
                       (try Eio.Time.sleep clock sse_ping_interval_s
-                       with exn ->
+                       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                          if is_cancelled exn then raise exn;
                          Log.Server.error "ping sleep error: %s"
                            (Printexc.to_string exn));
@@ -569,14 +569,14 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
                            stop_sse_session info.session_id
                          else if not !(info.stop) then
                            ignore (send_raw info ": ping\n\n")
-                       with exn ->
+                       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                          if is_cancelled exn then raise exn;
                          Log.Server.error "ping send error: %s"
                            (Printexc.to_string exn);
                          stop_sse_session info.session_id);
                       loop ())
                   in
-                  try loop () with exn ->
+                  try loop () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                     if is_cancelled exn then ()
                     else
                       Log.Server.error "ping loop error: %s"

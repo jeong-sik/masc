@@ -183,7 +183,7 @@ module Pubsub_mem = struct
     | None -> Ok 0
     | Some callbacks ->
         List.iter (fun cb ->
-          try cb message with exn ->
+          try cb message with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             Log.Backend.warn "subscriber callback failed: %s" (Printexc.to_string exn)
         ) callbacks;
         Ok (List.length callbacks)

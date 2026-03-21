@@ -295,7 +295,7 @@ let serve ~sw ~clock ~socket ~request_handler =
                   (Printexc.to_string exn)))
       ;
       accept_loop 0.05
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       if is_cancelled exn then ()
       else begin
         Log.Misc.error "Accept error: %s" (Printexc.to_string exn);

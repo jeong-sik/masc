@@ -263,7 +263,7 @@ module FileSystemBackend : BACKEND = struct
                     Out_channel.output_string oc (Yojson.Safe.to_string json)
                   );
                   Ok true
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Error (OperationFailed (Printexc.to_string exn))
           in
           release_flock fd;

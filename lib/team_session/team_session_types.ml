@@ -638,7 +638,7 @@ let session_of_yojson json =
         created_at_iso = json |> member "created_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());
         updated_at_iso = json |> member "updated_at_iso" |> to_string_option |> Option.value ~default:(Types.now_iso ());
       }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Session.error "session_of_yojson parse failed: %s"
       (Printexc.to_string exn);
     None
@@ -669,7 +669,7 @@ let checkpoint_of_yojson (json : Yojson.Safe.t) : (checkpoint, string) result =
         active_agents =
           json |> member "active_agents" |> to_list |> List.map to_string;
       }
-  with exn -> Error (Printexc.to_string exn)
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let event_entry_of_yojson (json : Yojson.Safe.t) : (event_entry, string) result =
   try
@@ -680,7 +680,7 @@ let event_entry_of_yojson (json : Yojson.Safe.t) : (event_entry, string) result 
         event_type = json |> member "event_type" |> to_string;
         detail = json |> member "detail";
       }
-  with exn -> Error (Printexc.to_string exn)
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let checkpoint_to_yojson (c : checkpoint) =
   `Assoc

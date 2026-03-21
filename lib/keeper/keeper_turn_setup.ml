@@ -313,7 +313,7 @@ let ensure_keeper_exists
        in
        let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
        (try ignore (save_checkpoint session ctx0 ~generation:0)
-        with exn -> log_keeper_exn ~label:"save_checkpoint (ensure) failed" exn);
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn ~label:"save_checkpoint (ensure) failed" exn);
        match write_meta ctx.config meta with
        | Error e -> Error e
        | Ok () -> Ok meta)
@@ -420,6 +420,6 @@ let apply_settings_update
       updated_at = now_iso ();
     } in
     (try ignore (write_meta config updated)
-     with exn -> log_keeper_exn ~label:"write_meta (settings) failed" exn);
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn ~label:"write_meta (settings) failed" exn);
     updated
 

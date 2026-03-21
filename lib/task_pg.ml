@@ -234,7 +234,7 @@ let row_to_task (((id, title, description), (priority, status, assignee),
     match Yojson.Safe.from_string files_json with
     | `List items -> List.filter_map Yojson.Safe.Util.to_string_option items
     | _ -> []
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.warn "task_pg: files JSON parse failed: %s" (Printexc.to_string exn);
     [] in
   let required_role = Agent_identity.role_of_string required_role_str in

@@ -167,7 +167,7 @@ let load_all config =
            match of_yojson json with
            | Ok value -> Some value
            | Error _ -> None
-         with exn ->
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Governance.warn "operator judgment parse: %s" (Printexc.to_string exn);
            None)
 

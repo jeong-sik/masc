@@ -109,7 +109,7 @@ let retry ~clock ~(policy : policy) (f : unit -> ('a, string) result) : 'a retry
 let retry_exn ~clock ~(policy : policy) (f : unit -> 'a) : 'a retry_result =
   retry ~clock ~policy (fun () ->
     try Ok (f ())
-    with exn -> Error (Printexc.to_string exn))
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn))
 
 (** {1 Pure Delay Sequence (no Eio dependency)} *)
 

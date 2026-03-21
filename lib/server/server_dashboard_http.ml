@@ -54,7 +54,7 @@ let start_execution_refresh_loop ~state ~sw ~clock =
      _execution_json_ref := json;
      let dt = Time_compat.now () -. t0 in
      Log.Dashboard.info "execution warm cache done (%.1fs)" dt
-   with exn ->
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      let dt = Time_compat.now () -. t0 in
      Log.Dashboard.warn "execution warm cache failed (%.1fs): %s"
        dt (Printexc.to_string exn));
@@ -90,7 +90,7 @@ let start_execution_refresh_loop ~state ~sw ~clock =
           (Float.of_int (String.length (Yojson.Safe.to_string json)))
           dt
           (if !_executor_pool <> None then "pool" else "in-domain")
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let dt = Time_compat.now () -. t0 in
         consecutive_failures := !consecutive_failures + 1;
         (* Circuit breaker: backoff after 3 failures *)
@@ -300,7 +300,7 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
       try
         Dashboard_cache.get_or_compute "command_summary" ~ttl:3.0 (fun () ->
           Server_command_plane_http.command_plane_summary_http_json ~state)
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Log.Dashboard.warn "command_plane_summary: %s" (Printexc.to_string exn);
         `Assoc []
     else

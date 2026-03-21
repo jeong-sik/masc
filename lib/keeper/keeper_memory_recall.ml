@@ -572,7 +572,7 @@ let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
            in
            if content = "" then None else Some content
          else None
-       with _ -> None)
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
   |> take max_n
 
 (** Build recall candidates by merging checkpoint messages with history.jsonl.

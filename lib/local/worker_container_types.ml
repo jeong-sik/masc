@@ -230,7 +230,7 @@ let post_json_via_eio ~sw ~(auth_token : string option) ~session_id
         in
         if Cohttp.Code.is_success status then Ok raw_body
         else Error (sprintf "MASC HTTP %d: %s" status raw_body)
-      with exn -> Error (Printexc.to_string exn)
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : string)
     ~(params : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
@@ -285,7 +285,7 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
           Error (sprintf "curl signaled: %d" code)
       | Unix.WSTOPPED code ->
           Error (sprintf "curl stopped: %d" code)
-    with exn -> Error (Printexc.to_string exn)
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
   in
   let perform_request () =
     match Eio_context.get_net_opt () with

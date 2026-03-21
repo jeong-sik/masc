@@ -127,7 +127,7 @@ let make_backend ~base_dir ~agent_name ~session_id
       let line = encode_line ~key ~value:(Some json) in
       Fs_compat.append_file path line;
       Ok ()
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       let msg = Printf.sprintf "memory_jsonl persist(%s) failed: %s"
           key (Printexc.to_string exn) in
       Log.Memory.error "%s" msg;
@@ -147,7 +147,7 @@ let make_backend ~base_dir ~agent_name ~session_id
       | Some (Some v) -> Some v
       | Some None -> None  (* tombstone *)
       | None -> None       (* key never written *)
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Memory.error "memory_jsonl retrieve(%s) failed: %s"
         key (Printexc.to_string exn);
       None
@@ -159,7 +159,7 @@ let make_backend ~base_dir ~agent_name ~session_id
       let line = encode_line ~key ~value:None in
       Fs_compat.append_file path line;
       Ok ()
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       let msg = Printf.sprintf "memory_jsonl remove(%s) failed: %s"
           key (Printexc.to_string exn) in
       Log.Memory.error "%s" msg;
@@ -209,7 +209,7 @@ let make_backend ~base_dir ~agent_name ~session_id
         | (k, v, _ts) :: rest -> take (n - 1) ((k, v) :: acc) rest
       in
       take limit [] sorted
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Memory.error "memory_jsonl query(%s) failed: %s"
         prefix (Printexc.to_string exn);
       []

@@ -157,7 +157,7 @@ let load_state ~(room : string) : adaptive_state option =
       let content = Fs_compat.load_file path in
       let json = Yojson.Safe.from_string content in
       state_of_json json
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Misc.warn "adaptive_thresholds: state load failed: %s" (Printexc.to_string exn);
       None
   else None

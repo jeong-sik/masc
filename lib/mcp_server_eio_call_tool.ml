@@ -222,7 +222,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                   "Tool timed out after %.0fs: %s (env: MASC_TOOL_TIMEOUT_DEFAULT_SEC or MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC)"
                   timeout_sec
                   name))
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        (* Never let a tool exception crash the MCP server. *)
        let err = Printexc.to_string exn in
        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
@@ -267,7 +267,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      | Some fs ->
          (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
                 ~tool_name:name ~agent_id:agent_name ~success ~duration_ms ()
-          with exn ->
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             log_mcp_exn ~label:"telemetry tracking failed" exn)
      | None -> ());
 

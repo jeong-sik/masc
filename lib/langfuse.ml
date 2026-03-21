@@ -236,7 +236,7 @@ let send_to_langfuse ~endpoint ~body () =
       let n = try Unix.read sock buf 0 256 with Unix.Unix_error _ -> 0 in
       Log.Langfuse.info "Response (%d bytes): %s" n (Bytes.sub_string buf 0 (min n 100));
       Unix.close sock
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Langfuse.error "Error: %s" (Printexc.to_string exn)
   end
 

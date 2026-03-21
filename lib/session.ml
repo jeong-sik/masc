@@ -335,7 +335,7 @@ let wait_for_message registry ~agent_name ~timeout =
 
   let result =
     try wait_loop ()
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Misc.warn "session listen interrupted: %s" (Printexc.to_string exn);
       None
   in

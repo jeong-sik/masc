@@ -96,7 +96,7 @@ let queue_episode ~base_path ~session_id ~agent_name ~generation
     Fs_compat.save_file file (Yojson.Safe.pretty_to_string json);
     Printf.printf "[EPISODE/QUEUE] Queued episode %s (gen %d) → %s\n%!" ep_id generation file;
     Some ep_id
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.error "episode queue failed: %s" (Printexc.to_string exn);
     None
 
@@ -125,7 +125,7 @@ let write_saga_state ~base_path ~saga_id ~status ~payload : string option =
   try
     Fs_compat.save_file file (Yojson.Safe.pretty_to_string json);
     Some file
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.error "mitosis saga write failed %s: %s" file (Printexc.to_string exn);
     None
 

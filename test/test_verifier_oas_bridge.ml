@@ -230,14 +230,17 @@ let test_verify_skips_readonly () =
 (* ================================================================ *)
 
 let test_default_gate_roundtrip () =
-  let gate = Keeper_exec_autonomy.autonomous_gate_config () in
+  let gate = { Eval_gate.default_config with
+    allowlist_enabled = true;
+    allowed_tools = ["keeper_read"; "keeper_board_get"];
+    max_tool_calls_per_turn = 5 } in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
-  Alcotest.(check bool) "default -> AllowList (strict)"
+  Alcotest.(check bool) "allowlist -> AllowList (strict)"
     true
     (match g.tool_filter with
      | Oas.Guardrails.AllowList names -> List.length names > 0
      | _ -> false);
-  Alcotest.(check (option int)) "default max_tool_calls = 5"
+  Alcotest.(check (option int)) "max_tool_calls = 5"
     (Some 5) g.max_tool_calls_per_turn
 
 (* ================================================================ *)

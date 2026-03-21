@@ -2,7 +2,6 @@
 
 import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import {
   operatorActionBusy,
   operatorDigestLoading,
@@ -68,7 +67,6 @@ export function OpsRoomColumn() {
       <section class="card ops-panel">
         <div class="card-title-row">
           <div class="card-title">추천 개입</div>
-          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
         <article class="ops-guidance-card ${guidanceLayerTone(guidanceLayer)}">
@@ -115,7 +113,6 @@ export function OpsRoomColumn() {
       <section class="card ops-panel ops-pending-section">
         <div class="card-title-row">
           <div class="card-title">승인 대기</div>
-          <${PanelSemanticDetails} panelId="intervene.pending_confirmations" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">
           ${actorFilter
@@ -170,7 +167,6 @@ export function OpsRoomColumn() {
       <section class="card ops-panel ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">Room 상태</div>
-          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">평소에는 추천 개입만 보면 됩니다. room 전체를 건드릴 때만 아래 고급 제어를 여세요.</p>
 
@@ -285,7 +281,6 @@ export function OpsRoomColumn() {
       <section class="card ops-panel">
         <div class="card-title-row">
           <div class="card-title">최근 Room 메시지</div>
-          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
         ${roomFeed.length > 0 ? html`

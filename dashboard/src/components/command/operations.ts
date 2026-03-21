@@ -25,7 +25,6 @@ import {
   setCommandPlaneSurface,
 } from '../../command-store'
 import { navigate } from '../../router'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import {
   actionDisabled,
   chainStatusTone,
@@ -282,7 +281,6 @@ export function OperationsSurface() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">작전</div>
-          <${PanelSemanticDetails} panelId="command.operations" compact=${true} />
         </div>
         ${snapshot && snapshot.operations.operations.length > 0
           ? html`<div class="command-card-stack">
@@ -293,7 +291,6 @@ export function OperationsSurface() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">분견대</div>
-          <${PanelSemanticDetails} panelId="command.operations" compact=${true} />
         </div>
         ${snapshot && snapshot.detachments.detachments.length > 0
           ? html`<div class="command-card-stack">
@@ -330,7 +327,6 @@ export function ChainsSurface() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">Chains</div>
-          <${PanelSemanticDetails} panelId="command.chains" compact=${true} />
         </div>
         <article class="command-guide-card ${chainStatusTone(summary?.connection.status)}">
           <div class="command-guide-head">
@@ -385,7 +381,6 @@ export function ChainsSurface() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">체인 상세</div>
-          <${PanelSemanticDetails} panelId="command.chains" compact=${true} />
         </div>
         ${selectedOverlay
           ? html`

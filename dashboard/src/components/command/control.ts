@@ -10,7 +10,6 @@ import {
   toggleCommandPlaneFreeze,
   toggleCommandPlaneKillSwitch,
 } from '../../command-store'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import { actionDisabled, fire, relativeTime, toneClass } from './helpers'
 
 function controlStatusLabel(value?: string | null): string {
@@ -111,7 +110,6 @@ export function ControlSurface() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">승인 대기</div>
-          <${PanelSemanticDetails} panelId="command.control" compact=${true} />
         </div>
         <p class="command-section-note">승인과 거부는 즉시 정책 실행 흐름에 영향을 줍니다. 대상을 먼저 확인하세요.</p>
         ${snapshot && snapshot.decisions.decisions.length > 0
@@ -124,7 +122,6 @@ export function ControlSurface() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">유닛 제어</div>
-          <${PanelSemanticDetails} panelId="command.control" compact=${true} />
         </div>
         <p class="command-section-note">동결과 킬 스위치는 새 배정과 실행을 막습니다. 운영 중인 유닛에는 신중하게 적용하세요.</p>
         ${snapshot && snapshot.capacity.capacity.length > 0

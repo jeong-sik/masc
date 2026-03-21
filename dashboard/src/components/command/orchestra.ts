@@ -9,7 +9,6 @@ import {
   commandPlaneOrchestraError,
   commandPlaneOrchestraLoading,
 } from '../../command-store'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import { relativeTime, toneClass } from './helpers'
 import {
   orchestraCamera,
@@ -341,7 +340,6 @@ export function OrchestraSurface() {
     <section class="card command-section orchestra-surface">
       <div class="card-title-row">
         <div class="card-title">오케스트라 맵</div>
-        <${PanelSemanticDetails} panelId="command.orchestra" compact=${true} />
       </div>
       <p class="command-card-sub">
         룸 전체를 한 장의 작전판으로 읽는 시각화입니다. 확대/이동으로 밀집 구간을 읽고, 노드를 눌러 상세 신호와 연결 대상을 확인합니다.

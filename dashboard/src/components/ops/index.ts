@@ -4,7 +4,6 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { refreshRoomTruth } from '../../room-truth-store'
 import { RoomTruthStrip } from '../common/room-truth-strip'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import { route } from '../../router'
 import {
   operatorActionBusy,
@@ -160,7 +159,6 @@ export function Ops() {
         <div>
           <div class="card-title-row">
             <div class="card-title">개입</div>
-            <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
           </div>
           <h2 class="ops-heading">방, 세션, 키퍼를 바로 조정하는 화면</h2>
           <p class="ops-subheading">
@@ -270,7 +268,6 @@ export function Ops() {
       <section class="card">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">개입 우선순위</h2>
-          <${PanelSemanticDetails} panelId="intervene.priority_cards" compact=${true} label="설명" />
           <p class="monitor-subheadline">지금 가장 먼저 손댈 대상이 방인지, 세션인지, 키퍼인지 먼저 좁힙니다.</p>
         </div>
         <div class="ops-priority-grid">

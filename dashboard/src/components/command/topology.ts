@@ -5,7 +5,6 @@ import type {
   CommandPlaneTreeNode,
 } from '../../types'
 import { commandPlaneSnapshot } from '../../command-store'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import { prettyJson, relativeTime, toneClass, unitKindLabel } from './helpers'
 
 function topologySourceLabel(source?: string) {
@@ -155,7 +154,6 @@ export function TopologySurface() {
     <section class="card command-section">
       <div class="card-title-row">
         <div class="card-title">지휘 계층</div>
-        <${PanelSemanticDetails} panelId="command.topology" compact=${true} />
       </div>
       ${snapshot
         ? html`
@@ -182,7 +180,6 @@ export function AlertsSurface() {
     <section class="card command-section">
       <div class="card-title-row">
         <div class="card-title">경보</div>
-        <${PanelSemanticDetails} panelId="command.alerts" compact=${true} />
       </div>
       ${snapshot && snapshot.alerts.alerts.length > 0
         ? html`<div class="command-card-stack">
@@ -199,7 +196,6 @@ export function TraceSurface() {
     <section class="card command-section">
       <div class="card-title-row">
         <div class="card-title">최근 트레이스</div>
-        <${PanelSemanticDetails} panelId="command.trace" compact=${true} />
       </div>
       ${snapshot && snapshot.traces.events.length > 0
         ? html`<div class="command-trace-stack">

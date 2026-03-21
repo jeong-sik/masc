@@ -36,9 +36,10 @@ let handle_cache_get ctx args : result =
         ("entry", Cache_eio.entry_to_json entry);
       ]))
   | Ok None ->
-      (true, Yojson.Safe.pretty_to_string (`Assoc [
+      (false, Yojson.Safe.pretty_to_string (`Assoc [
         ("hit", `Bool false);
         ("key", `String key);
+        ("error", `String "cache entry not found");
       ]))
   | Error e ->
       (false, Printf.sprintf "❌ Cache get failed: %s" e)

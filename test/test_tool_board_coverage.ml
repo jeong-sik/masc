@@ -213,6 +213,17 @@ let test_post_create_empty_content () =
     Alcotest.(check bool) "error mentions reason" true
       (String.length body > 0)
 
+let test_post_create_empty_title_rejected () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  let ok, body = dispatch "masc_board_post"
+    (make_args
+       [ ("title", `String "   "); ("content", `String "Hello board");
+         ("author", `String "tester") ]) in
+  Alcotest.(check bool) "empty title rejected" false ok;
+  Alcotest.(check bool) "error mentions title" true
+    (contains_substring body "title is required")
+
 let test_post_list_empty () =
   Eio_main.run @@ fun _env ->
   cleanup ();
@@ -276,6 +287,17 @@ let test_post_list_sort_orders () =
     Alcotest.(check bool) (Printf.sprintf "sort %s ok" s) true ok;
     Alcotest.(check bool) (Printf.sprintf "sort %s has content" s) true (String.length body > 0)
   ) sorts
+
+let test_post_list_invalid_sort_rejected () =
+  Eio_main.run @@ fun _env ->
+  cleanup ();
+  ignore (dispatch "masc_board_post"
+    (make_args [("content", `String "sort test"); ("author", `String "a")]));
+  let ok, body = dispatch "masc_board_list"
+    (make_args [("sort", `String "invalid_xyz")]) in
+  Alcotest.(check bool) "invalid sort rejected" false ok;
+  Alcotest.(check bool) "error mentions valid sorts" true
+    (contains_substring body "invalid sort. Valid: hot, trending, recent, updated, discussed")
 
 let test_post_get_success () =
   Eio_main.run @@ fun _env ->
@@ -457,12 +479,16 @@ let () =
           Alcotest.test_case "create structured payload" `Quick
             test_post_create_structured_payload;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;
+          Alcotest.test_case "create empty title rejected" `Quick
+            test_post_create_empty_title_rejected;
           Alcotest.test_case "list empty" `Quick test_post_list_empty;
           Alcotest.test_case "cleanup clears persisted jsonl" `Quick
             test_cleanup_clears_persisted_jsonl;
           Alcotest.test_case "list with posts" `Quick test_post_list_with_posts;
           Alcotest.test_case "list limit clamping" `Quick test_post_list_limit_clamping;
           Alcotest.test_case "list sort orders" `Quick test_post_list_sort_orders;
+          Alcotest.test_case "list invalid sort rejected" `Quick
+            test_post_list_invalid_sort_rejected;
           Alcotest.test_case "get success" `Quick test_post_get_success;
           Alcotest.test_case "get not found" `Quick test_post_get_not_found;
         ] );

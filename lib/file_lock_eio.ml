@@ -11,16 +11,43 @@
     Distributed backend paths (Some key in room_utils_ops.ml) are not
     affected — this only replaces the local filesystem lock path. *)
 
-let table : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 64
+type lock = {
+  eio_mu : Eio.Mutex.t;
+  stdlib_mu : Stdlib.Mutex.t;
+}
+
+let table : (string, lock) Hashtbl.t = Hashtbl.create 64
 let table_mu = Eio.Mutex.create ()
+let table_stdlib_mu = Stdlib.Mutex.create ()
+
+let with_table_lock f =
+  try Eio.Mutex.use_rw ~protect:true table_mu f
+  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ ->
+    Stdlib.Mutex.lock table_stdlib_mu;
+    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock table_stdlib_mu) f
+
+let with_path_lock (lock : lock) f =
+  try Eio.Mutex.use_rw ~protect:true lock.eio_mu f
+  with Effect.Unhandled _ | Eio.Mutex.Poisoned _ ->
+    Stdlib.Mutex.lock lock.stdlib_mu;
+    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock lock.stdlib_mu) f
+
+let yield_lock_retry () =
+  try Eio.Fiber.yield ()
+  with Effect.Unhandled _ -> Unix.sleepf 0.01
 
 (** Get or create a mutex for the given file path. *)
 let get_lock path =
-  Eio.Mutex.use_rw ~protect:true table_mu (fun () ->
+  with_table_lock (fun () ->
     match Hashtbl.find_opt table path with
     | Some mu -> mu
     | None ->
-      let mu = Eio.Mutex.create () in
+      let mu =
+        {
+          eio_mu = Eio.Mutex.create ();
+          stdlib_mu = Stdlib.Mutex.create ();
+        }
+      in
       Hashtbl.replace table path mu;
       mu)
 
@@ -29,8 +56,8 @@ let get_lock path =
     (non-blocking) and retried with Eio.Fiber.yield to avoid blocking
     the scheduler.  Max 200 attempts (~2s with yields). *)
 let with_lock path f =
-  let mu = get_lock path in
-  Eio.Mutex.use_rw ~protect:true mu (fun () ->
+  let lock = get_lock path in
+  with_path_lock lock (fun () ->
     let lock_path = path ^ ".lock" in
     (* Ensure parent directory exists *)
     let dir = Filename.dirname lock_path in
@@ -44,7 +71,7 @@ let with_lock path f =
       else
         try Unix.lockf fd Unix.F_TLOCK 0
         with Unix.Unix_error (Unix.EAGAIN, _, _) | Unix.Unix_error (Unix.EACCES, _, _) ->
-          Eio.Fiber.yield ();
+          yield_lock_retry ();
           acquire (attempts - 1)
     in
     Common.protect ~module_name:"file_lock_eio" ~finally_label:"finalizer"

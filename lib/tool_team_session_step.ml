@@ -1,4 +1,3 @@
-[@@@warning "-33"]
 (** Tool_team_session_step — team session step handler. *)
 
 include Tool_team_session_step_types

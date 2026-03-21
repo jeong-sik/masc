@@ -2,7 +2,6 @@
 
     Extracted from server_dashboard_http.ml for sub-module reuse. *)
 
-[@@@warning "-32-33-69"]
 
 let bool_of_env name =
   match Sys.getenv_opt name with

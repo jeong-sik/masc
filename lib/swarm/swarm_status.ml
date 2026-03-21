@@ -1,4 +1,3 @@
-[@@@warning "-32"]
 
 include Swarm_status_types
 include Swarm_status_json

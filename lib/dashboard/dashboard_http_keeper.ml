@@ -4,10 +4,8 @@
     rendering: per-keeper metrics series, 24h buckets, conversation history,
     memory bank, and diagnostic summaries. *)
 
-[@@@warning "-32-33-69"]
 
 open Dashboard_http_helpers
-open Server_utils
 
 include Dashboard_http_keeper_detail
 
@@ -451,4 +449,103 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
     ("recent_alerts", `List recent_alerts);
     ("alert_count", `Int (List.length recent_alerts));
   ]
+
+(** Build a structured config JSON for a single keeper, grouped by category.
+    Returns (http_status, json). *)
+let keeper_config_json (config : Room.config) (name : string)
+    : [ `OK | `Not_found ] * Yojson.Safe.t =
+  match Keeper_types.read_meta config name with
+  | Error msg ->
+      (`Not_found, `Assoc [ ("error", `String msg) ])
+  | Ok None ->
+      (`Not_found,
+       `Assoc [ ("error", `String (Printf.sprintf "keeper %S not found" name)) ])
+  | Ok (Some (m : Keeper_types.keeper_meta)) ->
+      let active_model = Keeper_exec_status.active_model_of_meta m in
+      let prompt =
+        `Assoc [
+          ("goal", `String m.goal);
+          ("short_goal", `String m.short_goal);
+          ("mid_goal", `String m.mid_goal);
+          ("long_goal", `String m.long_goal);
+          ("soul_profile", `String m.soul_profile);
+          ("will", `String m.will);
+          ("needs", `String m.needs);
+          ("desires", `String m.desires);
+          ("instructions", `String m.instructions);
+        ]
+      in
+      let execution =
+        `Assoc [
+          ("models", `List (List.map (fun s -> `String s) m.models));
+          ("allowed_models", `List (List.map (fun s -> `String s) m.allowed_models));
+          ("active_model", `String active_model);
+          ("policy_mode", `String m.policy_mode);
+          ("policy_shell_mode", `String m.policy_shell_mode);
+          ("verify", `Bool m.verify);
+        ]
+      in
+      let compaction =
+        `Assoc [
+          ("profile", `String m.compaction_profile);
+          ("ratio_gate", `Float m.compaction_ratio_gate);
+          ("message_gate", `Int m.compaction_message_gate);
+          ("token_gate", `Int m.compaction_token_gate);
+          ("cooldown_sec", `Int m.continuity_compaction_cooldown_sec);
+        ]
+      in
+      let proactive =
+        `Assoc [
+          ("enabled", `Bool m.proactive_enabled);
+          ("idle_sec", `Int m.proactive_idle_sec);
+          ("cooldown_sec", `Int m.proactive_cooldown_sec);
+        ]
+      in
+      let drift =
+        `Assoc [
+          ("enabled", `Bool m.drift_enabled);
+          ("min_turn_gap", `Int m.drift_min_turn_gap);
+          ("count_total", `Int m.drift_count_total);
+          ("last_reason",
+           if String.trim m.last_drift_reason = "" then `Null
+           else `String m.last_drift_reason);
+        ]
+      in
+      let initiative =
+        `Assoc [
+          ("enabled", `Bool m.initiative_enabled);
+          ("scope", `String m.initiative_scope);
+          ("idle_sec", `Int m.initiative_idle_sec);
+          ("cooldown_sec", `Int m.initiative_cooldown_sec);
+          ("context_mode", `String m.initiative_context_mode);
+        ]
+      in
+      let handoff =
+        `Assoc [
+          ("auto", `Bool m.auto_handoff);
+          ("threshold", `Float m.handoff_threshold);
+          ("cooldown_sec", `Int m.handoff_cooldown_sec);
+        ]
+      in
+      let metrics =
+        `Assoc [
+          ("generation", `Int m.generation);
+          ("total_turns", `Int m.total_turns);
+          ("total_tokens", `Int m.total_tokens);
+          ("total_cost_usd", `Float m.total_cost_usd);
+          ("compaction_count", `Int m.compaction_count);
+        ]
+      in
+      (`OK,
+       `Assoc [
+         ("name", `String m.name);
+         ("prompt", prompt);
+         ("execution", execution);
+         ("compaction", compaction);
+         ("proactive", proactive);
+         ("drift", drift);
+         ("initiative", initiative);
+         ("handoff", handoff);
+         ("metrics", metrics);
+       ])
 

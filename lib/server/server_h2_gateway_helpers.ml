@@ -1,4 +1,3 @@
-[@@@warning "-32-33-69"]
 
 let h2_respond_json ?(status = `OK) ?(extra_headers = []) h2_reqd body =
   let headers = H2.Headers.of_list ([

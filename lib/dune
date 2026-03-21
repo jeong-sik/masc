@@ -343,6 +343,8 @@
    tool_tempo
    mitosis_helpers
    mitosis_spawn
+   tool_mitosis_utils
+   tool_mitosis_handoff
    tool_mitosis
    tool_mitosis_oas
    tool_portal
@@ -379,6 +381,7 @@
    workflow_guide
    tool_control
    tool_verification
+   tool_misc_snapshots
    tool_misc
    tool_agent_timeline
    tool_local_runtime
@@ -407,13 +410,18 @@
    room_checkpoint
    tool_metrics
    tool_harness_health
+   tool_inline_dispatch_types
+   tool_inline_dispatch_room
+   tool_inline_dispatch_comm
    tool_inline_dispatch
    tool_inline_dispatch_episode
    tool_inline_dispatch_extra
    tool_unified
    tool_help_registry
    tool_registry
+   tool_council_feed
    tool_council_helpers
+   tool_council_internal_schemas
    tool_council_logic
    tool_council
    tool_council_json
@@ -573,6 +581,8 @@
  dashboard_http_keeper_detail
  mitosis_helpers
  mitosis_spawn
+ tool_mitosis_utils
+ tool_mitosis_handoff
  mitosis_defaults
  board_core
  board_votes
@@ -680,7 +690,9 @@
   ;; godsplit-phase1: file split sub-modules
   tool_team_session_step_exec
   tool_schemas_room_extra
+  tool_council_feed
   tool_council_helpers
+  tool_council_internal_schemas
   tool_council_logic
   tool_council_schemas
   tool_council_json
@@ -698,7 +710,13 @@
   dashboard_proof_verdict
   dashboard_proof_helpers
   keeper_skill_routing
-  keeper_alerting_path)
+  keeper_alerting_path
+  ;; tool_misc split
+  tool_misc_snapshots
+  ;; tool_inline_dispatch sub-modules
+  tool_inline_dispatch_types
+  tool_inline_dispatch_room
+  tool_inline_dispatch_comm)
  (libraries
    yojson
    base64

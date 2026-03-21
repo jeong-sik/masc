@@ -1,4 +1,3 @@
-[@@@warning "-32"]
 
 module U = Yojson.Safe.Util
 

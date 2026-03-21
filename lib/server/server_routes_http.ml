@@ -1,4 +1,3 @@
-[@@@warning "-32-33-69"]
 
 include Server_routes_http_common
 include Server_routes_http_pages

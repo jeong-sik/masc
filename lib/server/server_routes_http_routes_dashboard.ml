@@ -1,13 +1,7 @@
-[@@@warning "-32-33-69"]
 
-open Types
-open Server_utils
 open Server_auth
-open Server_tts_proxy
 open Server_dashboard_http
 open Server_routes_http_common
-open Server_routes_http_pages
-open Server_routes_http_runtime
 open Server_routes_http_keeper_stream
 
 module Http = Http_server_eio
@@ -147,6 +141,133 @@ let add_routes ~sw ~clock router =
            | Error message ->
                respond_json_with_cors ~status:`Bad_request request reqd
                  (Yojson.Safe.to_string (keeper_chat_stream_error_json message))
+         )
+       ) request reqd)
+
+  (* Keeper config — structured read-only config view for a single keeper *)
+  |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let req_path = Http.Request.path req in
+         let prefix = "/api/v1/keepers/" in
+         let suffix = "/config" in
+         let plen = String.length prefix in
+         let slen = String.length suffix in
+         let tlen = String.length req_path in
+         if tlen > plen + slen
+            && String.sub req_path 0 plen = prefix
+            && String.sub req_path (tlen - slen) slen = suffix
+         then
+           let name =
+             String.trim
+               (String.sub req_path plen (tlen - plen - slen))
+           in
+           if String.length name = 0 then
+             Http.Response.json ~status:`Bad_request
+               {|{"error":"keeper name is required"}|} reqd
+           else
+             let config = state.Mcp_server.room_config in
+             let (st, json) =
+               Dashboard_http_keeper.keeper_config_json config name
+             in
+             let status : Httpun.Status.t =
+               match st with `OK -> `OK | `Not_found -> `Not_found
+             in
+             Http.Response.json ~status ~compress:true ~request:req
+               (Yojson.Safe.to_string json) reqd
+         else
+           Http.Response.json ~status:`Not_found
+             {|{"error":"not found"}|} reqd
+       ) request reqd)
+
+  (* Keeper config update — POST (PATCH semantic) to update prompt/drift fields *)
+  |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       with_read_auth (fun state req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           let req_path = Http.Request.path req in
+           let prefix = "/api/v1/keepers/" in
+           let suffix = "/config" in
+           let plen = String.length prefix in
+           let slen = String.length suffix in
+           let tlen = String.length req_path in
+           if tlen > plen + slen
+              && String.sub req_path 0 plen = prefix
+              && String.sub req_path (tlen - slen) slen = suffix
+           then
+             let name =
+               String.trim
+                 (String.sub req_path plen (tlen - plen - slen))
+             in
+             if String.length name = 0 then
+               Http.Response.json ~status:`Bad_request
+                 {|{"error":"keeper name is required"}|} reqd
+             else
+               let config = state.Mcp_server.room_config in
+               match Keeper_types.read_meta config name with
+               | Error msg ->
+                   Http.Response.json ~status:`Not_found
+                     (Printf.sprintf {|{"error":"%s"}|}
+                        (String.escaped msg))
+                     reqd
+               | Ok None ->
+                   Http.Response.json ~status:`Not_found
+                     (Printf.sprintf {|{"error":"keeper %S not found"}|} name)
+                     reqd
+               | Ok (Some meta0) ->
+                   (try
+                      let args = Yojson.Safe.from_string body_str in
+                      let new_soul_profile_res =
+                        Keeper_config.parse_soul_profile_opt args "new_soul_profile"
+                      in
+                      match new_soul_profile_res with
+                      | Error e ->
+                          Http.Response.json ~status:`Bad_request
+                            (Printf.sprintf {|{"error":"%s"}|} (String.escaped e))
+                            reqd
+                      | Ok new_soul_profile ->
+                          let new_short_goal =
+                            Keeper_config.parse_goal_horizon_opt args "new_short_goal"
+                          in
+                          let new_mid_goal =
+                            Keeper_config.parse_goal_horizon_opt args "new_mid_goal"
+                          in
+                          let new_long_goal =
+                            Keeper_config.parse_goal_horizon_opt args "new_long_goal"
+                          in
+                          let new_will =
+                            Keeper_config.parse_self_model_opt args "new_will"
+                          in
+                          let new_needs =
+                            Keeper_config.parse_self_model_opt args "new_needs"
+                          in
+                          let new_desires =
+                            Keeper_config.parse_self_model_opt args "new_desires"
+                          in
+                          let new_drift_enabled_opt =
+                            Tool_args.get_bool_opt args "new_drift_enabled"
+                          in
+                          let new_drift_min_turn_gap_opt =
+                            Safe_ops.json_int_opt "new_drift_min_turn_gap" args
+                          in
+                          let _updated =
+                            Keeper_turn_setup.apply_settings_update
+                              ~args ~meta0 ~new_short_goal ~new_mid_goal
+                              ~new_long_goal ~new_soul_profile ~new_will
+                              ~new_needs ~new_desires ~new_drift_enabled_opt
+                              ~new_drift_min_turn_gap_opt ~config
+                          in
+                          let (_st, json) =
+                            Dashboard_http_keeper.keeper_config_json config name
+                          in
+                          Http.Response.json ~compress:true ~request:req
+                            (Yojson.Safe.to_string json) reqd
+                    with Yojson.Json_error e ->
+                      Http.Response.json ~status:`Bad_request
+                        (Printf.sprintf {|{"error":"invalid json: %s"}|}
+                           (String.escaped e))
+                        reqd)
+           else
+             Http.Response.json ~status:`Not_found
+               {|{"error":"not found"}|} reqd
          )
        ) request reqd)
 

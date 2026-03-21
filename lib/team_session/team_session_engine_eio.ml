@@ -188,20 +188,23 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
        orchestration_mode is mapped by the bridge:
          Auto → Decentralized, Manual/Assist → Supervisor.
        The old 15-second polling engine (start_runtime_loop) is no longer
-       called for any mode. *)
-    Eio.Fiber.fork ~sw (fun () ->
-      let result =
-        Team_session_swarm_runner.run_swarm ~sw ~clock ~config
-          ~session_id ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no dispatch"))
-      in
-      match result with
-      | Ok _session ->
-        with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id)
-      | Error reason ->
-        ignore (finalize_session ~config ~session_id
-          ~final_status:Team_session_types.Failed ~reason
-          ~generate_report:true);
-        with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id));
+       called for any mode.
+       Skip swarm fork when planned_workers is empty — the session stays
+       Running and accepts manual steps via masc_team_session_step. *)
+    if session.planned_workers <> [] then
+      Eio.Fiber.fork ~sw (fun () ->
+        let result =
+          Team_session_swarm_runner.run_swarm ~sw ~clock ~config
+            ~session_id ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no dispatch"))
+        in
+        match result with
+        | Ok _session ->
+          with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id)
+        | Error reason ->
+          ignore (finalize_session ~config ~session_id
+            ~final_status:Team_session_types.Failed ~reason
+            ~generate_report:true);
+          with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id));
     Ok
       (`Assoc
         [

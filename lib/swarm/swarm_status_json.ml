@@ -1,4 +1,3 @@
-[@@@warning "-32"]
 
 open Swarm_status_types
 

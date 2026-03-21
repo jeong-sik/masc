@@ -155,6 +155,18 @@ val handle_mitosis_prepare : context -> Yojson.Safe.t -> result
     [agent_name] (string). *)
 val handle_mitosis_handoff : context -> Yojson.Safe.t -> result
 
+(** {1 Re-exported from sub-modules} *)
+
+(** [run_sync_handoff ctx args] executes a synchronous 2-phase handoff.
+    Re-exported from {!Tool_mitosis_handoff}. *)
+val run_sync_handoff : context -> Yojson.Safe.t -> result
+
+(** [continuity_regression_check ~full_context ~compressed_context]
+    checks whether compressed DNA retains key information from the
+    original context. Re-exported from {!Tool_mitosis_utils}. *)
+val continuity_regression_check :
+  full_context:string -> compressed_context:string -> Yojson.Safe.t
+
 (** {1 Dispatcher} *)
 
 (** [dispatch ctx ~name ~args] routes a tool call to the appropriate

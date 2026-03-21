@@ -1,4 +1,3 @@
-[@@@warning "-32-33-69"]
 
 (** Tool_inline_dispatch_extra — additional inline tool dispatch arms
     (self-introspect, recall, board, conversation).

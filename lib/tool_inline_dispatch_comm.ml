@@ -1,0 +1,128 @@
+(** Tool_inline_dispatch_comm — communication tool handlers.
+
+    Handles: masc_bounded_run, masc_broadcast, masc_messages,
+    masc_listen, masc_who.
+
+    Extracted from tool_inline_dispatch.ml to reduce file size. *)
+
+open Tool_inline_dispatch_types
+
+(** Argument extraction helpers bound to ctx.arguments. *)
+let arg_get_string ctx key default =
+  Safe_ops.json_string ~default key ctx.arguments
+
+let arg_get_int ctx key default =
+  Safe_ops.json_int ~default key ctx.arguments
+
+(** masc_bounded_run — run a bounded multi-agent execution *)
+let handle_bounded_run (ctx : context) : result option =
+  let module U = Yojson.Safe.Util in
+  let state = ctx.state in
+  let sw = ctx.sw in
+  let arguments = ctx.arguments in
+  let agents = match arguments |> U.member "agents" with
+    | `List l -> List.filter_map (function `String s -> Some s | _ -> None) l
+    | _ -> []
+  in
+  let prompt = arg_get_string ctx "prompt" "" in
+  let constraints_json = arguments |> U.member "constraints" in
+  let goal_json = arguments |> U.member "goal" in
+  let constraints = Bounded.constraints_of_json constraints_json in
+  let goal = Bounded.goal_of_json goal_json in
+  ignore (state, sw);
+  let spawn_fn agent_name prompt =
+    Spawn.spawn ~agent_name ~prompt
+      ~timeout_seconds:Env_config.Spawn.timeout_seconds ()
+  in
+  let result = Bounded.bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn in
+  let json = Bounded.result_to_json result in
+  Some (result.Bounded.status = `Goal_reached, Yojson.Safe.pretty_to_string json)
+
+(** masc_broadcast — broadcast a message to the room *)
+let handle_broadcast (ctx : context) : result option =
+  let config = ctx.config in
+  let agent_name = ctx.agent_name in
+  let registry = ctx.registry in
+  let state = ctx.state in
+  let sw = ctx.sw in
+  let message = arg_get_string ctx "message" "" in
+  let trimmed = String.trim message in
+  if trimmed = "" then
+    Some (false, "Broadcast message cannot be empty")
+  else
+  let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
+  if not allowed then
+    Some (false, Printf.sprintf "Rate limited. %d sec remaining." wait_secs)
+  else begin
+    let result = Room.broadcast config ~from_agent:agent_name ~content:message in
+    let mention = Mention.extract message in
+    let _ = Session.push_message registry ~from_agent:agent_name ~content:message ~mention in
+    let notification = `Assoc [
+      ("type", `String "masc/broadcast");
+      ("from", `String agent_name);
+      ("content", `String message);
+      ("mention", match mention with Some m -> `String m | None -> `Null);
+      ("timestamp", `Float (Time_compat.now ()));
+    ] in
+    Mcp_server.sse_broadcast state notification;
+    Subscriptions.push_event_to_sessions notification;
+    (match mention with
+     | Some target -> Notify.notify_mention ~from_agent:agent_name ~target_agent:target ~message ()
+     | None -> ());
+    A2a_tools.notify_event
+      ~event_type:A2a_tools.Broadcast
+      ~agent:agent_name
+      ~data:(`Assoc [
+        ("message", `String message);
+        ("mention", match mention with Some m -> `String m | None -> `Null);
+      ]);
+    let _ = Auto_responder.maybe_respond
+      ~sw
+      ~base_path:config.base_path
+      ~from_agent:agent_name
+      ~content:message
+      ~mention
+    in
+    Team_session_engine_eio.increment_broadcast_from_external config
+      ~agent_name;
+    Audit_log.log_broadcast config ~agent_id:agent_name
+      ~room_id:(Filename.basename config.base_path)
+      ~message_preview:message ();
+    Some (true, result)
+  end
+
+(** masc_messages — retrieve recent messages *)
+let handle_messages (ctx : context) : result option =
+  let config = ctx.config in
+  let since_seq = arg_get_int ctx "since_seq" 0 in
+  let limit = arg_get_int ctx "limit" 10 in
+  Some (true, Room.get_messages config ~since_seq ~limit)
+
+(** masc_listen — long-poll for a message addressed to this agent *)
+let handle_listen (ctx : context) : result option =
+  let agent_name = ctx.agent_name in
+  let registry = ctx.registry in
+  let timeout = float_of_int (arg_get_int ctx "timeout" 300) in
+  Log.Mcp.info "%s is now listening (timeout: %.0fs)..." agent_name timeout;
+  let msg_opt = ctx.wait_for_message registry ~agent_name ~timeout in
+  (match msg_opt with
+   | Some msg ->
+       let from = match Json_util.get_string msg "from" with Some v -> v | None -> raise Not_found in
+       let content = match Json_util.get_string msg "content" with Some v -> v | None -> raise Not_found in
+       let timestamp = match Json_util.get_string msg "timestamp" with Some v -> v | None -> raise Not_found in
+       Some (true, Printf.sprintf {|
+MESSAGE RECEIVED
+From: %s
+Time: %s
+
+%s
+
+Call masc_listen again to continue listening.
+|} from timestamp content)
+   | None ->
+       Some (true, Printf.sprintf "Listening timed out after %.0fs. No messages received." timeout))
+
+(** masc_who — list agents currently in the room *)
+let handle_who (ctx : context) : result option =
+  let registry = ctx.registry in
+  Some (true, Session.status_string registry)

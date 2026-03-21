@@ -1,4 +1,3 @@
-[@@@warning "-33"]
 (** Tool_team_session_step_exec — extracted helper functions for step execution.
 
     Contains event-appending helpers, runtime management, and spawn preparation

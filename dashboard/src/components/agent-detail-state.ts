@@ -1,0 +1,190 @@
+// Agent detail shared state, selectors, data fetching, and utility functions
+
+import { signal } from '@preact/signals'
+import { showToast } from './common/toast'
+import {
+  agents,
+  executionContinuityBriefs,
+  executionWorkerSupportBriefs,
+  keepers,
+  tasks,
+} from '../store'
+import { fetchRoomMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineResponse } from '../api'
+import { journal } from '../sse'
+import { route, navigate } from '../router'
+import { missionSnapshot } from '../mission-store'
+import type { JournalEntry } from '../types'
+import type {
+  Agent,
+  DashboardExecutionContinuityBrief,
+  DashboardMissionAgentBrief,
+  Keeper,
+  Task,
+} from '../types'
+
+const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
+
+export type TaskHistoryRow = {
+  taskId: string
+  text: string
+}
+
+// --- Signals ---
+
+export const selectedAgentName = signal<string | null>(null)
+export const loading = signal(false)
+export const detailError = signal('')
+export const roomActivity = signal<string[]>([])
+export const taskHistories = signal<TaskHistoryRow[]>([])
+export const agentTimeline = signal<AgentTimelineResponse | null>(null)
+export const mentionText = signal('')
+export const sendingMention = signal(false)
+
+// --- Selectors ---
+
+export function selectedAgent(): Agent | null {
+  const name = selectedAgentName.value
+  if (!name) return null
+  return agents.value.find(a => a.name === name) ?? null
+}
+
+export function assignedTasks(agentName: string | null): Task[] {
+  if (!agentName) return []
+  return tasks.value.filter(t => t.assignee === agentName)
+}
+
+export function keeperForAgent(agentName: string | null): Keeper | null {
+  if (!agentName) return null
+  return keepers.value.find(keeper => keeper.agent_name === agentName || keeper.name === agentName) ?? null
+}
+
+export function missionAgentBrief(agentName: string | null): DashboardMissionAgentBrief | null {
+  if (!agentName) return null
+  const mission = missionSnapshot.value
+  if (!mission) return null
+  return mission.agent_briefs.find(brief => brief.agent_name === agentName) ?? null
+}
+
+export function continuityBriefForAgent(agentName: string | null): DashboardExecutionContinuityBrief | null {
+  if (!agentName) return null
+  return executionContinuityBriefs.value.find(
+    brief => brief.agent_name === agentName || brief.name === agentName,
+  ) ?? null
+}
+
+export function workerBriefForAgent(agentName: string | null) {
+  if (!agentName) return null
+  return executionWorkerSupportBriefs.value.find(w => w.name === agentName) ?? null
+}
+
+export function agentJournalEntries(agentName: string | null): JournalEntry[] {
+  if (!agentName) return []
+  const nameLower = agentName.toLowerCase()
+  return journal.value
+    .filter((entry: JournalEntry) => {
+      const text = entry.text.toLowerCase()
+      const agent = entry.agent.toLowerCase()
+      return agent === nameLower || text.includes(nameLower) || text.includes(`@${nameLower}`)
+    })
+    .slice(0, 15)
+}
+
+// --- Actions ---
+
+export function openAgentDetail(agentName: string): void {
+  selectedAgentName.value = agentName
+  void refreshAgentDetail()
+}
+
+export function closeAgentDetail(): void {
+  selectedAgentName.value = null
+  detailError.value = ''
+  roomActivity.value = []
+  taskHistories.value = []
+  agentTimeline.value = null
+  mentionText.value = ''
+  if (route.value.tab === 'status' && route.value.params.agent) {
+    navigate('status', { section: 'agents' })
+  }
+}
+
+export async function refreshAgentDetail(): Promise<void> {
+  const agentName = selectedAgentName.value
+  if (!agentName) return
+
+  loading.value = true
+  detailError.value = ''
+  roomActivity.value = []
+  taskHistories.value = []
+  agentTimeline.value = null
+
+  try {
+    // Fetch room messages, task histories, and timeline in parallel
+    const [lines, timelineResult] = await Promise.all([
+      fetchRoomMessages(80),
+      fetchAgentTimeline(agentName, 4, 20).catch(() => null),
+    ])
+
+    roomActivity.value = lines
+      .filter(line => line.includes(agentName))
+      .slice(0, 20)
+
+    agentTimeline.value = timelineResult
+
+    const ownedTasks = assignedTasks(agentName).slice(0, 6)
+    if (ownedTasks.length === 0) return
+
+    const historyRows = await Promise.all(
+      ownedTasks.map(async task => {
+        try {
+          const text = await fetchTaskHistory(task.id, 25)
+          return { taskId: task.id, text: text.trim() }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'history load failed'
+          return { taskId: task.id, text: `Failed to load history: ${message}` }
+        }
+      }),
+    )
+    taskHistories.value = historyRows
+  } catch (err) {
+    detailError.value = err instanceof Error ? err.message : 'Failed to load agent detail'
+  } finally {
+    loading.value = false
+  }
+}
+
+export async function submitMention(): Promise<void> {
+  const target = selectedAgentName.value
+  const text = mentionText.value.trim()
+  if (!target || !text) return
+
+  const sender = localStorage.getItem(AGENT_NAME_KEY)?.trim() || 'dashboard'
+
+  sendingMention.value = true
+  try {
+    await sendBroadcast(sender, `@${target} ${text}`)
+    mentionText.value = ''
+    showToast(`Mention sent to ${target}`, 'success')
+    void refreshAgentDetail()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to send mention'
+    showToast(msg, 'error')
+  } finally {
+    sendingMention.value = false
+  }
+}
+
+// --- Helpers ---
+
+export function compactCopy(value: string | null | undefined, max = 160): string | null {
+  const text = (value ?? '').replace(/\s+/g, ' ').trim()
+  if (!text) return null
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+}
+
+export function journalKindIcon(entry: JournalEntry): string {
+  if (entry.kind === 'board') return 'B'
+  if (entry.kind === 'tasks') return 'T'
+  if (entry.kind === 'keepers') return 'K'
+  return 'S'
+}

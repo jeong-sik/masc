@@ -62,7 +62,7 @@ let run_turn
     ?(max_tokens : int = 4096)
     ?max_cost_usd
     ?on_event
-    ?(autonomy_filter : Keeper_autonomy.autonomy_level option)
+    ?(autonomy_filter : string option)
     ()
   : (run_result, string) result =
   (* 1. Ensure session directory *)

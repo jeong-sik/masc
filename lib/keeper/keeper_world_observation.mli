@@ -20,8 +20,8 @@ type world_observation = {
   active_goals : string list;
   (** Goal IDs currently assigned to this keeper. *)
 
-  autonomy_level : Keeper_autonomy.autonomy_level;
-  (** Parsed autonomy level for tool gating. *)
+  autonomy_level : string;
+  (** Autonomy level string for tool gating (e.g. "l3_guided"). *)
 
   continuity_summary : string;
   (** Latest continuity snapshot text (empty if unavailable). *)

@@ -33,7 +33,7 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
 (** Tools allowed at each autonomy level for the unified turn path.
     Returns None if no filtering should be applied (AllowAll). *)
 let allowed_tools_for_autonomy_level
-    (level : Keeper_autonomy.autonomy_level) : string list option =
+    (level : string) : string list option =
   let base_safe = [
     "keeper_board_get"; "keeper_board_post"; "keeper_board_comment";
     "keeper_board_vote"; "keeper_board_list";
@@ -41,12 +41,10 @@ let allowed_tools_for_autonomy_level
     "keeper_memory_search";
     "keeper_time_now"; "keeper_context_status";
   ] in
-  match level with
-  | L1_Reactive -> Some base_safe
-  | L2_Suggestive -> Some base_safe
-  | L3_Guided -> Some base_safe
-  | L4_Autonomous -> Some ("keeper_bash" :: base_safe)
-  | L5_Independent -> None  (* AllowAll *)
+  match String.lowercase_ascii (String.trim level) with
+  | "l4_autonomous" -> Some ("keeper_bash" :: base_safe)
+  | "l5_independent" -> None  (* AllowAll *)
+  | _ -> Some base_safe  (* L1/L2/L3 and unknown: safe tools only *)
 
 (** Build OAS hooks for a keeper agent.
 
@@ -69,7 +67,7 @@ let make_hooks
     ?(destructive_check : bool = true)
     ?(on_tool_executed : string -> Yojson.Safe.t -> string -> unit =
         fun _ _ _ -> ())
-    ?(autonomy_filter : Keeper_autonomy.autonomy_level option)
+    ?(autonomy_filter : string option)
     ()
   : Agent_sdk.Hooks.hooks =
   ignore config;

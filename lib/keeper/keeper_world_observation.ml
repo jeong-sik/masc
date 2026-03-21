@@ -14,7 +14,7 @@ type world_observation = {
   pending_board_events : string list;
   idle_seconds : int;
   active_goals : string list;
-  autonomy_level : Keeper_autonomy.autonomy_level;
+  autonomy_level : string;
   continuity_summary : string;
   context_ratio : float;
   economic_pressure : Agent_economy.pressure_mode;
@@ -159,8 +159,8 @@ let observe ~(config : Room.config) ~(meta : keeper_meta) : world_observation =
   let active_agent_count = count_active_agents ~config in
   let idle_seconds = compute_idle_seconds ~meta in
   let autonomy_level =
-    Keeper_contract.parse_autonomy_level meta.autonomy_level
-    |> Option.value ~default:Keeper_autonomy.L1_Reactive
+    let s = String.lowercase_ascii (String.trim meta.autonomy_level) in
+    if s = "" then "l1_reactive" else s
   in
   let context_ratio = read_context_ratio ~config ~meta in
   let continuity_summary = read_continuity_summary ~config ~meta in

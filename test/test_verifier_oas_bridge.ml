@@ -226,11 +226,11 @@ let test_verify_skips_readonly () =
     (Verifier_oas.verify req = Pass)
 
 (* ================================================================ *)
-(* Roundtrip: autonomous_gate_config -> guardrails                   *)
+(* Roundtrip: default keeper gate config -> guardrails              *)
 (* ================================================================ *)
 
 let test_default_gate_roundtrip () =
-  let gate = Keeper_exec_autonomy.autonomous_gate_config () in
+  let gate = Tool_misc.keeper_default_gate_config () in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
   Alcotest.(check bool) "default -> AllowList (strict)"
     true

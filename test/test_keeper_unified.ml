@@ -3,7 +3,7 @@ open Alcotest
 module WO = Masc_mcp.Keeper_world_observation
 module UP = Masc_mcp.Keeper_unified_prompt
 module UT = Masc_mcp.Keeper_unified_turn
-module KA = Masc_mcp.Keeper_autonomy
+(* Keeper_autonomy module removed; autonomy_level is now a plain string *)
 module AE = Masc_mcp.Agent_economy
 module KC = Masc_mcp.Keeper_config
 module HK = Masc_mcp.Keeper_hooks_oas
@@ -16,7 +16,7 @@ let base_observation : WO.world_observation =
     pending_board_events = [];
     idle_seconds = 0;
     active_goals = [];
-    autonomy_level = KA.L1_Reactive;
+    autonomy_level = "l1_reactive";
     continuity_summary = "";
     context_ratio = 0.0;
     economic_pressure = AE.Normal;
@@ -54,8 +54,8 @@ let test_observation_with_goals () =
 
 let test_observation_autonomy_levels () =
   let levels = [
-    KA.L1_Reactive; KA.L2_Suggestive; KA.L3_Guided;
-    KA.L4_Autonomous; KA.L5_Independent
+    "l1_reactive"; "l2_suggestive"; "l3_guided";
+    "l4_autonomous"; "l5_independent"
   ] in
   List.iter
     (fun level ->
@@ -218,7 +218,7 @@ let test_prompt_room_state_section () =
      in found)
 
 let test_prompt_autonomy_description () =
-  let obs = { base_observation with autonomy_level = KA.L3_Guided } in
+  let obs = { base_observation with autonomy_level = "l3_guided" } in
   let sys, _user = UP.build_prompt ~meta:minimal_meta ~observation:obs in
   check bool "has L3 description" true
     (let found =
@@ -229,7 +229,7 @@ let test_prompt_autonomy_description () =
 (* ---------- Hooks: autonomy tool filter tests ---------- *)
 
 let test_hooks_allowed_tools_l1 () =
-  let allowed = HK.allowed_tools_for_autonomy_level KA.L1_Reactive in
+  let allowed = HK.allowed_tools_for_autonomy_level "l1_reactive" in
   match allowed with
   | None -> fail "L1 should have an allow list"
   | Some tools ->
@@ -237,7 +237,7 @@ let test_hooks_allowed_tools_l1 () =
       check bool "keeper_bash NOT allowed" true (not (List.mem "keeper_bash" tools))
 
 let test_hooks_allowed_tools_l4 () =
-  let allowed = HK.allowed_tools_for_autonomy_level KA.L4_Autonomous in
+  let allowed = HK.allowed_tools_for_autonomy_level "l4_autonomous" in
   match allowed with
   | None -> fail "L4 should have an allow list"
   | Some tools ->
@@ -245,7 +245,7 @@ let test_hooks_allowed_tools_l4 () =
       check bool "keeper_board_get allowed" true (List.mem "keeper_board_get" tools)
 
 let test_hooks_allowed_tools_l5 () =
-  let allowed = HK.allowed_tools_for_autonomy_level KA.L5_Independent in
+  let allowed = HK.allowed_tools_for_autonomy_level "l5_independent" in
   check bool "L5 returns None (AllowAll)" true (allowed = None)
 
 (* ---------- Config tests ---------- *)

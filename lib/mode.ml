@@ -274,6 +274,7 @@ let tool_category tool_name =
   | "masc_tool_stats"
   | "masc_notification_count" | "masc_check_notifications"
   | "masc_consume_notifications"
+  | "masc_housekeep_scan" | "masc_housekeep_delete" | "masc_housekeep_prune"
   (* Verification tools *)
   | "masc_verify_auto" | "masc_verify_pending"
   | "masc_verify_request" | "masc_verify_status"

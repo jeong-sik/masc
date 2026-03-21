@@ -196,6 +196,9 @@ let handle_done ctx args =
 
 let handle_cancel_task ctx args =
   let task_id = get_string args "task_id" "" in
+  match validate_task_id task_id with
+  | Error e -> result_to_response (Error e)
+  | Ok task_id ->
   let reason = get_string args "reason" "" in
   let tasks = Room.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in

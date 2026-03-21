@@ -75,7 +75,9 @@ let build_prompt ~(meta : Keeper_types.keeper_meta)
      - Reply to pending mentions (use room broadcast tools)\n\
      - Work on active goals (use planning/execution tools)\n\
      - Proactive observation (post findings to board)\n\
+     - Search knowledge library (keeper_library_search/read) for research references\n\
      - Do nothing if the situation warrants it (respond with brief reasoning)\n\n\
+     When making claims or decisions, search the library first if relevant documents may exist.\n\
      Do NOT explain your decision-making process at length.\n\
      Act directly or state briefly why you chose not to act.\n";
   let system_prompt = Buffer.contents buf in

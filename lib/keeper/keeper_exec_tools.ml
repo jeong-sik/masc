@@ -26,6 +26,8 @@ let keeper_read_tool_names =
     "keeper_read";
     "keeper_fs_read";
     "keeper_memory_search";
+    "keeper_library_search";
+    "keeper_library_read";
     "keeper_time_now";
     "keeper_context_status";
   ]
@@ -188,6 +190,20 @@ let execute_keeper_tool_call
             ("note", `String "This keeper cannot fetch live weather by itself.");
             ("recent_weather_questions", `List recent_weather_questions);
           ])
+  | "keeper_library_search" ->
+      let ok, msg = Tool_library.handle_search
+        Tool_library.{ agent_name = meta.name }
+        args
+      in
+      if ok then msg
+      else Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+  | "keeper_library_read" ->
+      let ok, msg = Tool_library.handle_read
+        Tool_library.{ agent_name = meta.name }
+        args
+      in
+      if ok then msg
+      else Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
   | "keeper_board_post" ->
       let author = meta.name in
       Log.Trpg.info "keeper_board_post called by %s, raw args: %s"

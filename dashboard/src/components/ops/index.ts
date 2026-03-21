@@ -28,6 +28,7 @@ import {
   hydratedWorkflowId,
   hydrateOpsWorkflow,
   isKeeperAttention,
+  keeperPrioritySummary,
   isSessionAttention,
   keeperPriorityTone,
   normalizeStatus,
@@ -62,6 +63,7 @@ export function Ops() {
   const keeperAttention = roomAttention.filter(isKeeperAttention)
   const flaggedSessions = sessions.filter(session => sessionPriorityTone(session) !== 'ok')
   const flaggedKeepers = keepers.filter(keeper => keeperPriorityTone(keeper) !== 'ok')
+  const leadingFlaggedKeeper = flaggedKeepers[0] ?? null
   const workflowReady = workflowTargetReady(workflowContext, sessions, keepers)
 
   useEffect(() => {
@@ -142,7 +144,7 @@ export function Ops() {
       detail: keeperAttention.length > 0
         ? keeperAttention[0]?.summary ?? '직접 메시지나 상태 점검이 필요한 키퍼가 있습니다'
         : flaggedKeepers.length > 0
-          ? '오래됐거나 오프라인이거나 텔레메트리가 비는 키퍼가 보입니다'
+          ? `${leadingFlaggedKeeper?.name ?? '키퍼'} · ${leadingFlaggedKeeper ? keeperPrioritySummary(leadingFlaggedKeeper) : '점검 필요'}`
           : '지금은 키퍼 쪽이 비교적 안정적입니다',
       tone: keeperAttention.length > 0
         ? attentionTone(keeperAttention)
@@ -240,7 +242,9 @@ export function Ops() {
           const badKeepers = flaggedKeepers.filter(k => keeperPriorityTone(k) === 'bad')
           actions.push({
             label: badKeepers.length > 0 ? `오프라인 키퍼 ${badKeepers.length}개` : `점검이 필요한 키퍼 ${flaggedKeepers.length}개`,
-            desc: badKeepers.length > 0 ? '메시지를 보내거나 상태를 확인하세요' : '오래됐거나 텔레메트리가 비어 있습니다',
+            desc: badKeepers.length > 0
+              ? '메시지를 보내거나 상태를 확인하세요'
+              : `${leadingFlaggedKeeper?.name ?? '일부 키퍼'} · ${leadingFlaggedKeeper ? keeperPrioritySummary(leadingFlaggedKeeper) : '점검 필요'}`,
             tone: badKeepers.length > 0 ? 'bad' : 'warn',
             onClick: () => {
               const el = document.querySelector('.ops-keeper-section')

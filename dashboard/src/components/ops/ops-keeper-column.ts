@@ -14,6 +14,8 @@ import {
   actionTypeLabel,
   deliveryModeLabel,
   displayStatus,
+  keeperPrioritySummary,
+  keeperPriorityTone,
   relativeAge,
   selectedKeeperName,
   targetTypeLabel,
@@ -54,6 +56,10 @@ export function OpsKeeperColumn() {
 
         <div class="ops-entity-list">
           ${keepers.length === 0 ? html`<div class="ops-empty">지금 보이는 keeper가 없습니다.</div>` : keepers.map(keeper => html`
+            ${(() => {
+              const tone = keeperPriorityTone(keeper)
+              const prioritySummary = keeperPrioritySummary(keeper)
+              return html`
             <button
               key=${keeper.name}
               class="ops-entity-card ${selectedKeeper?.name === keeper.name ? 'active' : ''}"
@@ -77,12 +83,17 @@ export function OpsKeeperColumn() {
               ${keeper.short_goal || keeper.goal ? html`
                 <div class="ops-entity-goal" title=${keeper.goal ?? ''}>${truncateGoal(keeper.short_goal ?? keeper.goal ?? '')}</div>
               ` : null}
+              ${tone !== 'ok'
+                ? html`<div class="ops-context-note" style="margin-top:6px;">점검 이유: ${prioritySummary}</div>`
+                : null}
               <div class="ops-entity-stats">
                 ${typeof keeper.turn_count === 'number' ? html`<span>turns: ${keeper.turn_count}</span>` : null}
                 ${typeof keeper.autonomous_action_count === 'number' ? html`<span>actions: ${keeper.autonomous_action_count}</span>` : null}
                 ${keeper.keepalive_running ? html`<span class="keepalive-active">keepalive</span>` : null}
               </div>
             </button>
+              `
+            })()}
           `)}
         </div>
         <div class="ops-context-note" style="margin-top:12px;">Persistent agent는 resident keeper와 분리해서 참고용으로만 보여줍니다.</div>
@@ -122,6 +133,9 @@ export function OpsKeeperColumn() {
               ${typeof selectedKeeper.turn_count === 'number' ? html`<span>턴: ${selectedKeeper.turn_count}</span>` : null}
               ${selectedKeeper.last_model_used ? html`<span>모델: ${selectedKeeper.last_model_used}</span>` : null}
             </div>
+            ${keeperPriorityTone(selectedKeeper) !== 'ok'
+              ? html`<div class="ops-context-note" style="margin-top:8px;">현재 점검 이유: ${keeperPrioritySummary(selectedKeeper)}</div>`
+              : null}
             ${selectedKeeper.goal ? html`<div class="ops-detail-goal">${selectedKeeper.goal}</div>` : null}
           </div>
           <${KeeperConversationPanel}

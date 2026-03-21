@@ -105,6 +105,14 @@ let build_perpetual_agent
           Oas.Guardrails.AllowList tool_names
         else
           Oas.Guardrails.AllowAll }
+    |> Oas.Builder.with_progressive_tools
+         (Oas.Progressive_tools.Gather_act_verify {
+           gather_tools = List.filter (fun name ->
+             Verifier_oas.should_skip ~action_description:name
+           ) tool_names;
+           act_tools = tool_names;
+           verify_tools = tool_names;
+         })
     |> Oas.Builder.with_periodic_callbacks periodic_cbs
     |> Oas.Builder.with_description
          (sprintf "Perpetual agent (gen %d, trace %s)"

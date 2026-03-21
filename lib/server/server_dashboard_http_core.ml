@@ -172,11 +172,22 @@ let dashboard_batch_json ?(compact = false) (config : Room.config) : Yojson.Safe
     ("perpetual", perpetual_dashboard_json ());
   ]
 
+(** Strip non-ASCII characters from actor string.
+    Prevents IME artifacts (e.g. Korean ㅊ) from polluting cache keys. *)
+let sanitize_actor s =
+  let buf = Buffer.create (String.length s) in
+  String.iter (fun c ->
+    match c with
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> Buffer.add_char buf c
+    | _ -> ()
+  ) s;
+  Buffer.contents buf
+
 let operator_actor_hint request =
   match agent_from_request request with
   | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
+      let sanitized = sanitize_actor (String.trim raw) in
+      if sanitized = "" then None else Some sanitized
   | None -> None
 
 (* --- Operator proactive refresh ---

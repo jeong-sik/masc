@@ -310,7 +310,17 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
                   | Some id -> `String id
                   | None -> `Null );
               ])
-          ()
+          ();
+        (* Mention processing — mirror masc_broadcast pattern *)
+        let mention = Mention.extract content in
+        (match mention with
+         | Some target ->
+             Notify.notify_mention ~from_agent:author
+               ~target_agent:target ~message:content ();
+             ignore (Auto_responder.maybe_respond ~sw
+               ~base_path:config.base_path ~from_agent:author
+               ~content ~mention)
+         | None -> ())
       end;
       Some result
 
@@ -364,7 +374,17 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
                 ("post_id", `String post_id);
                 ("content", `String content);
               ])
-          ()
+          ();
+        (* Mention processing — mirror masc_broadcast pattern *)
+        let mention = Mention.extract content in
+        (match mention with
+         | Some target ->
+             Notify.notify_mention ~from_agent:author
+               ~target_agent:target ~message:content ();
+             ignore (Auto_responder.maybe_respond ~sw
+               ~base_path:config.base_path ~from_agent:author
+               ~content ~mention)
+         | None -> ())
       end;
       Some result
 

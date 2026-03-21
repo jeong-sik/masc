@@ -148,10 +148,9 @@ let run_social_board_event_turn
       in
       let base_dir = session_base_dir ctx.config in
       let prompt = social_board_event_prompt ~meta event in
-      (* Social context: L3-equivalent guardrails (read + board tools) *)
+      (* Social context: default keeper guardrails (read + board tools) *)
       let social_gate =
-        Keeper_exec_autonomy.autonomous_gate_config
-          ~autonomy_level:Keeper_autonomy.L3_Guided
+        Keeper_exec_autonomy.autonomous_gate_config ()
       in
       let guardrails =
         Verifier_oas.eval_gate_to_oas_guardrails social_gate

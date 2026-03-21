@@ -36,7 +36,7 @@ function synthesizeSituation(snap: DashboardMissionResponse | null): SituationRe
   }
 
   const sessions: SessionItem[] =
-    snap.sessions.length > 0 ? snap.sessions : snap.session_briefs
+    (snap.sessions ?? []).length > 0 ? snap.sessions : (snap.session_briefs ?? [])
   const total = sessions.length
   const blocked = sessions.filter(s => s.blocker_summary).length
   const attentionItems = snap.attention_queue ?? []

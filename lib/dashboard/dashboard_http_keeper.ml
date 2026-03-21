@@ -19,8 +19,12 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
     Keeper_types.resident_keeper_names config
   in
   let now_ts = Time_compat.now () in
-  let summaries =
-    List.filter_map (fun name ->
+  (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
+     Results are collected into a shared ref array, then filter_map'd. *)
+  let results = Array.make (List.length names) None in
+  Eio.Fiber.all
+    (List.mapi (fun idx name -> fun () ->
+      results.(idx) <- (
       match Keeper_types.read_meta config name with
       | Error _ -> None
       | Ok None -> None
@@ -442,9 +446,9 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               ("context_source", context_source);
             ] @ detail_fields)
           in
-          Some summary
-    ) names
-  in
+          Some summary)
+    ) names);
+  let summaries = Array.to_list results |> List.filter_map Fun.id in
   (* H-9 fix: include recent alerts so BAD alerts are visible on dashboard *)
   let recent_alerts =
     let alerts_path = Keeper_types.keeper_alerts_path config in

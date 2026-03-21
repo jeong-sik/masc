@@ -353,6 +353,19 @@ let shard_taskboard : shard = {
   description = "Task board management: list, audit, force-release, force-done, broadcast";
 }
 
+(** Autoresearch tools: filtered subset for keeper use (excludes swarm_start). *)
+let autoresearch_keeper_tools : Types.tool_schema list =
+  Tool_autoresearch_schemas.schemas
+  |> List.filter (fun (t : Types.tool_schema) ->
+       t.name <> "masc_autoresearch_swarm_start")
+
+let shard_autoresearch : shard = {
+  name = "autoresearch";
+  tools = autoresearch_keeper_tools;
+  removable = true;
+  description = "Autonomous experiment loop: start, cycle, status, inject, stop";
+}
+
 
 
 let agent_shards : (string, string list) Hashtbl.t = Hashtbl.create 32
@@ -387,6 +400,7 @@ let all_shards : (string, shard) Hashtbl.t =
     shard_weather;
     shard_voice;
     shard_taskboard;
+    shard_autoresearch;
   ];
   tbl
 

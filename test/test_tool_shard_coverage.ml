@@ -7,6 +7,7 @@
     Pure synchronous tests — no Eio or network required. *)
 
 module Tool_shard = Masc_mcp.Tool_shard
+module Types = Masc_mcp.Types
 
 (* ============================================================
    Predefined shard tests
@@ -61,7 +62,7 @@ let test_shard_unknown () =
 
 let test_all_shards_count () =
   let all = Tool_shard.list_all_shards () in
-  Alcotest.(check int) "7 predefined shards" 7 (List.length all)
+  Alcotest.(check int) "8 predefined shards" 8 (List.length all)
 
 (* ============================================================
    default_shard_names tests
@@ -200,7 +201,7 @@ let test_execute_tool_list () =
   let (ok, json) = Tool_shard.execute "masc_tool_list" (`Assoc []) in
   Alcotest.(check bool) "succeeds" true ok;
   let shards = Yojson.Safe.Util.(member "shards" json |> to_list) in
-  Alcotest.(check int) "7 shards in list" 7 (List.length shards)
+  Alcotest.(check int) "8 shards in list" 8 (List.length shards)
 
 let test_execute_tool_list_with_agent () =
   Hashtbl.remove Tool_shard.agent_shards "test-ex";
@@ -345,6 +346,32 @@ let () =
       Alcotest.test_case "voice" `Quick test_shard_voice_exists;
       Alcotest.test_case "unknown" `Quick test_shard_unknown;
       Alcotest.test_case "all count" `Quick test_all_shards_count;
+    ]);
+    ("autoresearch_shard", [
+      Alcotest.test_case "exists" `Quick (fun () ->
+        let s = Tool_shard.get_shard "autoresearch" in
+        Alcotest.(check bool) "found" true (s <> None));
+      Alcotest.test_case "removable" `Quick (fun () ->
+        let s = Option.get (Tool_shard.get_shard "autoresearch") in
+        Alcotest.(check bool) "removable" true s.removable);
+      Alcotest.test_case "excludes swarm_start" `Quick (fun () ->
+        let tools = Tool_shard.autoresearch_keeper_tools in
+        let has_swarm =
+          List.exists (fun (t : Types.tool_schema) ->
+            t.name = "masc_autoresearch_swarm_start") tools
+        in
+        Alcotest.(check bool) "no swarm_start" false has_swarm);
+      Alcotest.test_case "has cycle" `Quick (fun () ->
+        let tools = Tool_shard.autoresearch_keeper_tools in
+        let has_cycle =
+          List.exists (fun (t : Types.tool_schema) ->
+            t.name = "masc_autoresearch_cycle") tools
+        in
+        Alcotest.(check bool) "has cycle" true has_cycle);
+      Alcotest.test_case "not in defaults" `Quick (fun () ->
+        let defaults = Tool_shard.default_shard_names in
+        Alcotest.(check bool) "not default"
+          false (List.mem "autoresearch" defaults));
     ]);
     ("default_shard_names", [
       Alcotest.test_case "defaults" `Quick test_default_shard_names;

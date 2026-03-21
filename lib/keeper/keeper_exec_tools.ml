@@ -45,6 +45,10 @@ let keeper_voice_tool_names =
 
 let keeper_shell_readonly_tool_names = [ "keeper_shell_readonly" ]
 
+let keeper_autoresearch_tool_names =
+  Tool_shard.autoresearch_keeper_tools
+  |> List.map (fun (t : Types.tool_schema) -> t.name)
+
 let dedupe_tool_names names =
   dedupe_keep_order (List.filter (fun name -> String.trim name <> "") names)
 
@@ -62,7 +66,12 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
         keeper_shell_readonly_tool_names @ with_voice
       else with_voice
     in
-    dedupe_tool_names (keeper_board_tool_names @ with_shell)
+    let with_research =
+      if meta.soul_profile = "research" then
+        keeper_autoresearch_tool_names @ with_shell
+      else with_shell
+    in
+    dedupe_tool_names (keeper_board_tool_names @ with_research)
   else keeper_model_tools |> List.map (fun tool -> tool.Types.name)
 
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
@@ -71,7 +80,13 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
   if allowed = [] then
     []
   else
-    keeper_model_tools
+    let base = keeper_model_tools in
+    let all_tools =
+      if meta.soul_profile = "research" then
+        base @ Tool_shard.autoresearch_keeper_tools
+      else base
+    in
+    all_tools
     |> List.filter (fun tool -> List.mem tool.Types.name allowed)
 
 let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
@@ -635,6 +650,21 @@ let execute_keeper_tool_call
         let _ = Room.broadcast config ~from_agent:agent ~content:message in
         Yojson.Safe.to_string
           (`Assoc [ ("ok", `Bool true); ("broadcast", `String message) ])
+  | name when String.starts_with ~prefix:"masc_autoresearch_" name ->
+      let ctx : Tool_autoresearch.context = {
+        base_path = project_root_of_config config;
+        agent_name = Some meta.name;
+        start_operation = None;
+        start_team_session = None;
+      } in
+      (match Tool_autoresearch.dispatch ctx ~name ~args with
+      | Some (true, msg) -> msg
+      | Some (false, msg) ->
+          Yojson.Safe.to_string (`Assoc [ ("error", `String msg) ])
+      | None ->
+          Yojson.Safe.to_string
+            (`Assoc [ ("error", `String "unknown_autoresearch_tool");
+                      ("tool", `String name) ]))
   | other ->
       Yojson.Safe.to_string
         (`Assoc [ ("error", `String "unknown_tool"); ("tool", `String other) ])

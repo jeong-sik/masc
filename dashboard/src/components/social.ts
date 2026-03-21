@@ -87,7 +87,7 @@ function StatsRow({ data }: { data: SocialGraphResponse }) {
       </div>
       <div class="stat-card">
         <div class="stat-label">활성</div>
-        <div class="stat-value" style="color:#4ade80">${s.active_agents}</div>
+        <div class="stat-value" class="text-[var(--ok)]">${s.active_agents}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">작업</div>
@@ -224,7 +224,7 @@ export function Social() {
         </div>
         <${StatsRow} data=${data} />
         <${GraphView} data=${data} />
-        <div class="monitor-meta" style="margin-top:8px">
+        <div class="monitor-meta" class="mt-2">
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
           ${data.window.room_id ? html`<span>room: ${data.window.room_id}</span>` : null}

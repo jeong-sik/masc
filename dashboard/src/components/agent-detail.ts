@@ -101,21 +101,21 @@ export function AgentDetailOverlay() {
     >
       <div class="agent-detail-modal">
         <div class="agent-detail-header">
-          <div style="display:flex;flex-direction:column;gap:8px;flex:1">
-            <div style="display:flex;align-items:center;gap:12px">
-              ${agentEmoji ? html`<span style="font-size:2rem">${agentEmoji}</span>` : ''}
+          <div class="flex flex-col gap-2 flex-1">
+            <div class="flex items-center gap-3">
+              ${agentEmoji ? html`<span class="text-[2rem]">${agentEmoji}</span>` : ''}
               <div>
-                <h2 style="margin:0;display:flex;align-items:baseline;gap:8px">
+                <h2 class="m-0 flex items-baseline gap-2">
                   ${displayName}
-                  ${koreanName ? html`<span style="font-size:0.75em;color:#888">(${koreanName})</span>` : ''}
-                  ${secondaryLabel ? html`<span class="mono" style="font-size:0.75em;color:#888">${secondaryLabel}</span>` : ''}
+                  ${koreanName ? html`<span class="text-xs text-[var(--text-dim)]">(${koreanName})</span>` : ''}
+                  ${secondaryLabel ? html`<span class="mono" class="text-xs text-[var(--text-dim)]">${secondaryLabel}</span>` : ''}
                 </h2>
-                <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap">
+                <div class="flex items-center gap-2 mt-1 flex-wrap">
                   <${StatusBadge} status=${headerStatus} />
                   ${isArchivedParticipant ? html`<span class="pill">archived session participant</span>` : null}
-                  ${agent?.model ? html`<span class="mono" style="font-size:0.75rem;background:#2a2a4a;padding:2px 6px;border-radius:4px">${agent.model}</span>` : ''}
+                  ${agent?.model ? html`<span class="mono" class="text-xs bg-[#2a2a4a] px-1.5 py-0.5 rounded">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
-                    ? html`<span style="font-size:0.75rem;color:#888">${missionBrief.archived_reason}</span>`
+                    ? html`<span class="text-xs text-[var(--text-dim)]">${missionBrief.archived_reason}</span>`
                     : null}
                   ${signalTruth ? html`<span class="pill">signal · ${signalTruth}</span>` : null}
                   ${evidenceSource ? html`<span class="pill">source · ${evidenceSource}</span>` : null}

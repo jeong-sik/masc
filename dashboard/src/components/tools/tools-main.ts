@@ -39,7 +39,7 @@ export function Tools() {
           </p>
           <button
             class="control-btn ghost"
-            style="margin-top: 8px;"
+            class="mt-2"
             onClick=${() => { showFullInventory.value = !showFullInventory.value }}
           >
             ${showFullInventory.value ? '요약 보기' : '전체 인벤토리 보기'}
@@ -67,7 +67,7 @@ export function Tools() {
         <${ToolMetrics} />
       <//>
       ${data?.generated_at
-        ? html`<div class="monitor-meta" style="margin-top:8px">
+        ? html`<div class="monitor-meta" class="mt-2">
             <span>생성 시각: ${data.generated_at}</span>
             <span>metrics 기준: 최근 1시간</span>
           </div>`

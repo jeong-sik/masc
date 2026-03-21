@@ -159,7 +159,6 @@ let make_request_handler ~sw ~clock ~server_start_time =
           in
           let _state = get_server_state () in
           let build = Build_identity.current () in
-          let lodge_json = `Assoc [("status", `String "deprecated")] in
           let health_json = `Assoc [
             ("status", `String "ok");
             ("server", `String "masc-mcp");
@@ -169,7 +168,6 @@ let make_request_handler ~sw ~clock ~server_start_time =
             ("protocol", `String "h2");
             ("uptime", `String uptime_str);
             ("sse_clients", `Int (Sse.client_count ()));
-            ("lodge", lodge_json);
           ] in
           let body = Yojson.Safe.to_string health_json in
           h2_respond_json h2_reqd body ~extra_headers:cors
@@ -353,10 +351,6 @@ let make_request_handler ~sw ~clock ~server_start_time =
 
       | `GET, "/dashboard/credits" ->
           h2_respond_html h2_reqd (Credits_dashboard.html ()) ~extra_headers:cors
-
-      | `GET, "/dashboard/lodge" ->
-          let body = {|<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=/dashboard"></head><body>Redirecting to dashboard...</body></html>|} in
-          h2_respond_html h2_reqd body ~extra_headers:cors
 
       | `GET, p when is_dashboard_spa_deep_link p ->
           h2_respond_dashboard_index ()

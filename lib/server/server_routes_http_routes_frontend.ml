@@ -27,12 +27,6 @@ let add_routes ~port ~host router =
        with_public_read (fun _state _req reqd ->
          Http.Response.html (Credits_dashboard.html ()) reqd
        ) request reqd)
-  |> Http.Router.get "/dashboard/lodge" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
-         Http.Response.html
-           {|<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=/dashboard"></head><body>Redirecting to dashboard...</body></html>|}
-           reqd
-       ) request reqd)
   |> Http.Router.get "/favicon.ico" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          serve_favicon req reqd

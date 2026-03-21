@@ -20,7 +20,6 @@ let strict_action_enums =
     `String "room_pause";
     `String "room_resume";
     `String "social_sweep";
-    `String "lodge_tick";
     `String "team_note";
     `String "team_broadcast";
     `String "team_task_inject";
@@ -105,9 +104,9 @@ let action_schema ~remote =
     name = "masc_operator_action";
     description =
       if remote then
-        "Preview or run a structured operator action. Use this when you need to broadcast, steer a team session, pause a room, or message a keeper through the remote operator surface. Use social_sweep for immediate public-square social processing. lodge_tick remains a compatibility alias."
+        "Preview or run a structured operator action. Use this when you need to broadcast, steer a team session, pause a room, or message a keeper through the remote operator surface. Use social_sweep for immediate public-square social processing."
       else
-        "Run a structured operator action against the room, a team session, or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions. Use social_sweep for immediate public-square social processing. lodge_tick remains a compatibility alias.";
+        "Run a structured operator action against the room, a team session, or a keeper. Use this when you need guided control with preview-confirm safety for disruptive actions. Use social_sweep for immediate public-square social processing.";
     input_schema =
       `Assoc
         [

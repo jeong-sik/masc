@@ -100,6 +100,15 @@ let init_task_backend () =
             (Types.show_masc_error e))
   | None -> Task_dispatch.init_jsonl ()
 
+let inject_shared_pg_pool () =
+  match Board_dispatch.get_pg_pool () with
+  | Some pool ->
+      Council.Archive.set_shared_pool pool;
+      Jiphyeon.Archive.set_shared_pool pool;
+      Log.Server.info "PG shared pool injected into council/jiphyeon archive"
+  | None ->
+      Log.Server.info "No PG pool available; council/jiphyeon will create own pools"
+
 let init_memory_pg_schema () =
   match Board_dispatch.get_pg_pool () with
   | Some pool -> (
@@ -337,6 +346,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       bootstrap_server_state state;
       bootstrap_keepers ~sw ~clock state;
       init_task_backend ();
+      inject_shared_pg_pool ();
       init_memory_pg_schema ();
       state
     in

@@ -63,6 +63,28 @@ let get_status config : Yojson.Safe.t =
   ]
 
 (* ============================================ *)
+(* Pool Statistics                              *)
+(* ============================================ *)
+
+type pool_stats = {
+  max_size: int;
+  pool_count: int;
+  shared_pool_injected: bool;
+}
+
+let pool_stats_to_yojson (s : pool_stats) : Yojson.Safe.t =
+  `Assoc [
+    ("max_size", `Int s.max_size);
+    ("pool_count", `Int s.pool_count);
+    ("shared_pool_injected", `Bool s.shared_pool_injected);
+  ]
+
+let configured_max_pool_size () =
+  match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
+  | Some s -> (try int_of_string s with _ -> 10)
+  | None -> 10
+
+(* ============================================ *)
 (* Backend Interface                            *)
 (* ============================================ *)
 

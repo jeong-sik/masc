@@ -222,92 +222,10 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 
-let keeper_constitution =
-  "Continuity rules:\n\
-   - This conversation may be compacted/summarized and handed off to a successor.\n\
-   - You MUST preserve continuity by emitting a stable state block at the end of each reply.\n\
-   - The state block is used for compaction/handoff. Do not include secrets.\n\
-   - Reply in the user's language. Keep the main reply concise.\n\
-   - Do not output [GOAL_COMPLETE] unless explicitly requested.\n\
-   \n\
-   State block template (must use these exact markers):\n\
-   [STATE]\n\
-   Goal: <short>\n\
-   Progress: <short>\n\
-   Next: <0-3 items separated by ';'>\n\
-   Decisions: <0-3 items separated by ';'>\n\
-   OpenQuestions: <0-3 items separated by ';'>\n\
-   Constraints: <0-3 items separated by ';'>\n\
-   [/STATE]\n"
+(* Delegate to Keeper_prompt — single source of truth for keeper prompts. *)
+let keeper_constitution = Keeper_prompt.keeper_constitution
 
-let build_keeper_system_prompt
-    ~goal ~short_goal ~mid_goal ~long_goal ~soul_profile ~will ~needs ~desires
-    ~instructions =
-  let profile =
-    canonical_soul_profile soul_profile
-    |> Option.value ~default:default_soul_profile
-  in
-  let goal = normalize_goal_horizon_text goal in
-  let short_goal, mid_goal, long_goal =
-    resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
-      ~mid_goal_opt:(Some mid_goal) ~long_goal_opt:(Some long_goal)
-  in
-  let profile_policy = soul_profile_policy profile in
-  let will =
-    let s = normalize_self_model_text will in
-    if s = "" then "Maintain coherent identity and goal continuity." else s
-  in
-  let needs =
-    let s = normalize_self_model_text needs in
-    if s = "" then
-      "Reliable context continuity, factual grounding, and explicit next steps."
-    else s
-  in
-  let desires =
-    let s = normalize_self_model_text desires in
-    if s = "" then "Make progress that is observable and useful to the user."
-    else s
-  in
-  let custom =
-    let s = String.trim instructions in
-    if s = "" then ""
-    else Printf.sprintf "\nCustom instructions:\n%s\n" s
-  in
-  Printf.sprintf
-    "<world>\n\
-     You live in MASC (Multi-Agent Streaming Coordination).\n\
-     Multiple AI agents coexist in rooms, post on a shared Board, and coordinate tasks.\n\
-     A human operator (Vincent) runs this system. You are one of these agents.\n\
-     </world>\n\
-     \n\
-     <identity>\n\
-     Goal: %s\n\
-     - Short-term: %s\n\
-     - Mid-term: %s\n\
-     - Long-term: %s\n\
-     Will: %s\n\
-     Needs: %s\n\
-     Desires: %s\n\
-     %s\n\
-     </identity>\n\
-     \n\
-     <capabilities>\n\
-     What you can do with your tools:\n\
-     - Read and write to the Board: see what other agents posted, share your thoughts, comment, vote.\n\
-     - Read files: check project files to understand current state.\n\
-     - Search memory: look up past conversations, decisions, and context.\n\
-     - Check time and context status: know what time it is and where you are.\n\
-     Use tools on your own judgment. Do not wait for someone to ask.\n\
-     </capabilities>\n\
-     \n\
-     %s\n\
-     \n\
-     <continuity>\n\
-     This conversation may be compacted or handed off to a successor.\n\
-     Reply in the user's language. Keep replies concise.\n\
-     </continuity>"
-    goal short_goal mid_goal long_goal will needs desires custom
-    profile_policy
+let build_keeper_system_prompt = Keeper_prompt.build_keeper_system_prompt
 
 let append_trait_clause ~(base : string) ~(clause : string) : string =
   let b = String.trim base in
@@ -318,40 +236,7 @@ let append_trait_clause ~(base : string) ~(clause : string) : string =
   else Printf.sprintf "%s; %s" b c
 
 
-let proactive_prompt_for_keeper
-    ~(meta : keeper_meta)
-    ~(idle_seconds : int)
-    (snapshot : keeper_state_snapshot option)
-    (continuity_summary : string) : string =
-  let _seed = proactive_seed_for_soul_profile meta.soul_profile in
-  let _profile =
-    canonical_soul_profile meta.soul_profile
-    |> Option.value ~default:default_soul_profile
-  in
-  let last_preview =
-    if String.trim meta.last_proactive_preview = "" then "none"
-    else meta.last_proactive_preview
-  in
-  let continuity_snapshot =
-    match snapshot with
-    | None -> "No continuity snapshot available."
-    | Some s -> keeper_state_snapshot_to_summary_text s
-  in
-  let continuity_snapshot =
-    if continuity_snapshot = "No continuity snapshot available." then
-      let fallback = String.trim continuity_summary in
-      if fallback = "" then continuity_snapshot else fallback
-    else continuity_snapshot
-  in
-  Printf.sprintf
-    "%d seconds since last activity. No new messages.\n\
-     Act on your own judgment. Use tools to check what is happening, then decide what to do.\n\
-     \n\
-     Last action (do not repeat): %s\n\
-     %s"
-    idle_seconds last_preview
-    (if continuity_snapshot = "No continuity snapshot available." then ""
-     else Printf.sprintf "Context:\n%s" continuity_snapshot)
+let proactive_prompt_for_keeper = Keeper_prompt.proactive_prompt_for_keeper
 
 type proactive_generation_result = {
   reply: string;

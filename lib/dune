@@ -322,6 +322,7 @@
    spawn_registry
    sse
    streamable_http
+   subsystem_health
    subscriptions
    swarm_status
    swarm_status_types

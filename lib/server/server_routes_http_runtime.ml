@@ -90,6 +90,7 @@ let health_handler _request reqd =
         pool_count = (if shared then 3 else 5);
         shared_pool_injected = shared;
       });
+    ("subsystems", Subsystem_health.to_yojson ());
   ] in
   Http.Response.json (Yojson.Safe.to_string health_json) reqd
 

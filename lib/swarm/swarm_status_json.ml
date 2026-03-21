@@ -123,10 +123,13 @@ let list_member json key =
   | _ -> []
 
 let get_detail_string json key =
-  match U.member "detail" json |> U.member key with
-  | `String value ->
-      let trimmed = String.trim value in
-      if trimmed = "" then None else Some trimmed
+  match U.member "detail" json with
+  | `Assoc _ as detail -> (
+      match U.member key detail with
+      | `String value ->
+          let trimmed = String.trim value in
+          if trimmed = "" then None else Some trimmed
+      | _ -> None)
   | _ -> None
 
 let first_some left right =

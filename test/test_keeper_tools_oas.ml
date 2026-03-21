@@ -103,6 +103,75 @@ let test_research_model_tools_include_autoresearch () =
     t.name = "masc_autoresearch_cycle") tools in
   check bool "model tools have cycle" true has_cycle
 
+let make_learned_meta () : Keeper_types.keeper_meta =
+  match Keeper_types.meta_of_json
+    (`Assoc [("name", `String "test-learned");
+             ("agent_name", `String "test-learned");
+             ("trace_id", `String "test-trace-learned");
+             ("policy_mode", `String "learned_offline_v1")]) with
+  | Ok meta -> meta
+  | Error e -> failwith (Printf.sprintf "make_learned_meta failed: %s" e)
+
+let test_all_keepers_have_library_tools () =
+  let meta = make_learned_meta () in
+  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  check bool "has keeper_library_search" true (List.mem "keeper_library_search" allowed);
+  check bool "has keeper_library_read" true (List.mem "keeper_library_read" allowed)
+
+let test_library_search_returns_results () =
+  let fake_home = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "test_lib_home_%d" (Random.int 100000)) in
+  let lib_path = List.fold_left Filename.concat fake_home ["me"; "docs"; "library"] in
+  let rec mkdir_p path =
+    if not (Sys.file_exists path) then begin
+      mkdir_p (Filename.dirname path);
+      (try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+    end
+  in
+  mkdir_p lib_path;
+  let doc_path = Filename.concat lib_path "test-mlfq-scheduler-20260321.md" in
+  let oc = open_out doc_path in
+  output_string oc
+    "---\ntitle: MLFQ Scheduler for LLM Agents\nsource: research\n\
+     confidence: 0.85\nauthor: test\ncreated: 2026-03-21\n\
+     tags: [llm-scheduling, mlfq]\n---\n\n\
+     Multi-Level Feedback Queue scheduler for LLM request priority.\n";
+  close_out oc;
+  let orig_home = Sys.getenv_opt "HOME" in
+  Unix.putenv "HOME" fake_home;
+  Fun.protect
+    ~finally:(fun () ->
+      (match orig_home with Some h -> Unix.putenv "HOME" h | None -> ());
+      (try Sys.remove doc_path with _ -> ()))
+    (fun () ->
+      let ctx = Tool_library.{ agent_name = "test-keeper" } in
+      (* Search *)
+      let (ok, msg) = Tool_library.handle_search ctx
+        (`Assoc [("query", `String "mlfq")]) in
+      check bool "search succeeds" true ok;
+      check bool "search finds mlfq doc" true
+        (let low = String.lowercase_ascii msg in
+         String.length low > 0
+         && not (Tool_library.string_contains ~sub:"no documents" low));
+      (* Read *)
+      let (ok2, msg2) = Tool_library.handle_read ctx
+        (`Assoc [("topic", `String "test-mlfq")]) in
+      check bool "read succeeds" true ok2;
+      check bool "read contains MLFQ content" true
+        (Tool_library.string_contains ~sub:"Multi-Level Feedback Queue" msg2))
+
+let test_library_search_empty_query () =
+  let ctx = Tool_library.{ agent_name = "test-keeper" } in
+  let (ok, _msg) = Tool_library.handle_search ctx
+    (`Assoc [("query", `String "")]) in
+  check bool "empty query fails" false ok
+
+let test_library_read_missing_topic () =
+  let ctx = Tool_library.{ agent_name = "test-keeper" } in
+  let (ok, _msg) = Tool_library.handle_read ctx
+    (`Assoc [("topic", `String "nonexistent-topic-xyz-999")]) in
+  check bool "missing topic fails" false ok
+
 let () =
   run "Keeper_tools_oas" [
     "make_tools", [
@@ -114,5 +183,11 @@ let () =
       test_case "has autoresearch tools" `Quick test_research_keeper_has_autoresearch_tools;
       test_case "non-research has none" `Quick test_non_research_keeper_no_autoresearch;
       test_case "model tools include autoresearch" `Quick test_research_model_tools_include_autoresearch;
+    ];
+    "library_tools", [
+      test_case "all keepers have library tools" `Quick test_all_keepers_have_library_tools;
+      test_case "search returns results" `Quick test_library_search_returns_results;
+      test_case "empty query fails" `Quick test_library_search_empty_query;
+      test_case "missing topic fails" `Quick test_library_read_missing_topic;
     ];
   ]

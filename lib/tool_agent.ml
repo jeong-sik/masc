@@ -123,7 +123,7 @@ let handle_agent_fitness ctx args =
         try
           Room.get_agents_raw ctx.config
           |> List.map (fun (a : Types.agent) -> a.name)
-        with _ -> []
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
       in
       List.sort_uniq String.compare (metrics_agents @ room_agents)
   in

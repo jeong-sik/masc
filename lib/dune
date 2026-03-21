@@ -254,6 +254,8 @@
    operator_approval
    operator_pending_confirm
    operator_digest
+   operator_digest_event
+   operator_digest_guidance
    operator_digest_types
    operator_digest_session
    operator_control

@@ -90,7 +90,10 @@ let add_routes router =
          let status_filter = query_param req "status" in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
-         let agents = Room.get_agents_raw config in
+         let agents =
+           try Room.get_agents_raw config
+           with Invalid_argument _ -> []
+         in
          let filtered =
            match status_filter with
            | None -> agents

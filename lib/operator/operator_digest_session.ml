@@ -560,8 +560,12 @@ let normalize_team_health = function
   | "critical" -> "bad"
   | other -> other
 
-let build_session_digest config (session : Team_session_types.session) ~now =
-  let status_json = Team_session_engine_eio.session_status_json config session in
+let build_session_digest ?status_json:cached_status config (session : Team_session_types.session) ~now =
+  let status_json =
+    match cached_status with
+    | Some s -> s
+    | None -> Team_session_engine_eio.session_status_json config session
+  in
   let summary = U.member "summary" status_json in
   let team_health = U.member "team_health" status_json in
   let events = Team_session_store.read_events ~max_events:2000 config session.session_id in

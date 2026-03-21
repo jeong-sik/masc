@@ -311,7 +311,7 @@ let persistent_agents_json ?keeper_names config =
   in
   `Assoc [ ("count", `Int (List.length rows)); ("items", `List rows) ]
 
-let sessions_json config sessions =
+let sessions_json ?(status_cache : (string, Yojson.Safe.t) Hashtbl.t option) config sessions =
   let ordered_sessions =
     sessions
     |> List.sort (fun (a : Team_session_types.session) (b : Team_session_types.session) ->
@@ -324,12 +324,23 @@ let sessions_json config sessions =
           Team_session_store.read_events ~max_events:5 config session.session_id
           |> Team_session_engine_eio.take_last 5
         in
+        let status =
+          match status_cache with
+          | Some tbl -> (
+              match Hashtbl.find_opt tbl session.session_id with
+              | Some cached -> cached
+              | None ->
+                  let s = Team_session_engine_eio.session_status_json config session in
+                  Hashtbl.replace tbl session.session_id s;
+                  s)
+          | None -> Team_session_engine_eio.session_status_json config session
+        in
         `Assoc
           [
             ("session_id", `String session.session_id);
             ("command_plane_operation_id", `String ("detachment-" ^ session.session_id));
             ("command_plane_detachment_id", `String ("detachment-" ^ session.session_id));
-            ("status", Team_session_engine_eio.session_status_json config session);
+            ("status", status);
             ("recent_events", `List recent_events);
           ])
       ordered_sessions
@@ -438,6 +449,18 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     | Summary | Messages | Full -> true
     | Sessions | Keepers -> false
   in
+  (* Pre-compute session_status_json once per session. build_session_digest
+     and sessions_json both call session_status_json for each session.
+     Caching avoids the duplicate I/O + computation. *)
+  let status_cache : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 16 in
+  let cached_session_status_json (session : Team_session_types.session) =
+    match Hashtbl.find_opt status_cache session.session_id with
+    | Some cached -> cached
+    | None ->
+        let s = Team_session_engine_eio.session_status_json config session in
+        Hashtbl.replace status_cache session.session_id s;
+        s
+  in
   let command_plane_summary =
     if initialized then
       Some (Command_plane_v2.summary_json ~sessions:tracked_sessions config)
@@ -448,7 +471,9 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
       let now = Time_compat.now () in
       let session_digests =
         tracked_sessions
-        |> List.map (fun session -> build_session_digest config session ~now)
+        |> List.map (fun session ->
+          let status_json = cached_session_status_json session in
+          build_session_digest ~status_json config session ~now)
       in
       let room_attention =
         build_room_attention_items ?command_plane_summary config
@@ -467,7 +492,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
     else []
   in
   let command_plane_json =
-    if initialized then Command_plane_v2.snapshot_json config else `Assoc []
+    if initialized then Command_plane_v2.snapshot_json ~sessions:tracked_sessions config else `Assoc []
   in
   let swarm_status_json =
     if initialized then
@@ -491,7 +516,7 @@ let snapshot_json ?actor ?view ?(include_messages = true) ?(include_sessions = t
          ("provenance_summary", operator_surface_contract_json);
          ("room", room_json config);
          ( "sessions",
-           if initialized && include_sessions then sessions_json config tracked_sessions
+           if initialized && include_sessions then sessions_json ~status_cache config tracked_sessions
            else `Assoc [ ("count", `Int 0); ("items", `List []) ] );
          ( "keepers",
            if initialized && include_keepers then keepers_json ~keeper_names config

@@ -108,6 +108,7 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
       in
       (* Yield between heavy phases so SSE / health-check fibers can progress *)
       Eio.Fiber.yield ();
+      let t_start = Time_compat.now () in
       (* Load sessions once; pass to snapshot_json to avoid repeated filesystem scans.
          Only include active (Running/Paused) sessions plus recently finished ones
          (last 24h) to avoid loading all historical sessions on every poll. *)
@@ -133,6 +134,7 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
         | _ -> s.updated_at_iso >= cutoff_iso
       in
       let sessions = List.filter is_active_or_recent all_sessions in
+      let t_sessions = Time_compat.now () in
       Eio.Fiber.yield ();
       (* Compute directly without Dashboard_cache to avoid nested
          get_or_compute deadlock — the caller (dashboard_execution_http_json)
@@ -147,6 +149,7 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
           ~sessions
           ctx
       in
+      let t_snapshot = Time_compat.now () in
       Eio.Fiber.yield ();
       let session_cards =
         if light then []
@@ -280,6 +283,21 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
           ("shown", `Int (List.length limited_tasks));
         ]);
       ] in
+      let t_end = Time_compat.now () in
+      let total_ms = (t_end -. t_start) *. 1000.0 in
+      let sessions_ms = (t_sessions -. t_start) *. 1000.0 in
+      let snapshot_ms = (t_snapshot -. t_sessions) *. 1000.0 in
+      let render_ms = (t_end -. t_snapshot) *. 1000.0 in
+      if total_ms > 10000.0 then
+        Log.Dashboard.warn
+          "[dashboard_execution] slow render: total=%.0fms sessions=%.0fms snapshot=%.0fms render=%.0fms (sessions=%d keepers=%d)"
+          total_ms sessions_ms snapshot_ms render_ms
+          (List.length sessions)
+          (List.length keepers)
+      else
+        Log.Dashboard.debug
+          "[dashboard_execution] timing: total=%.0fms sessions=%.0fms snapshot=%.0fms render=%.0fms"
+          total_ms sessions_ms snapshot_ms render_ms;
       if light then
         `Assoc (base_fields @ task_fields)
       else

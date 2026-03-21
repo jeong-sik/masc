@@ -486,7 +486,7 @@ end = struct
 
   let get_all_q =
     (Caqti_type.string ->* Caqti_type.(t2 string string))
-    "SELECT key, value FROM masc_kv WHERE key LIKE $1 AND (expires_at IS NULL OR expires_at > NOW())"
+    "SELECT key, value FROM masc_kv WHERE key LIKE $1 AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY key DESC LIMIT 200"
 
   let set_if_not_exists_q =
     (Caqti_type.(t2 string string) ->. Caqti_type.unit)

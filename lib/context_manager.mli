@@ -113,11 +113,20 @@ val deserialize_context : string -> max_tokens:int -> working_context
 
 (** {1 Checkpointing} *)
 
+(** Serialize working context to JSON (for OAS Checkpoint.working_context). *)
+val context_to_json : working_context -> Yojson.Safe.t
+
 (** Create a checkpoint from current working context. *)
 val create_checkpoint : working_context -> generation:int -> checkpoint
 
 (** Restore working context from a checkpoint. *)
 val restore_checkpoint : checkpoint -> max_tokens:int -> working_context
+
+(** Convert MASC checkpoint + context to OAS Checkpoint.t format.
+    Enables interop with OAS checkpoint persistence and resumption. *)
+val to_oas_checkpoint :
+  agent_name:string -> session_id:string ->
+  working_context -> checkpoint -> Agent_sdk.Checkpoint.t
 
 (** {1 Session Persistence} *)
 

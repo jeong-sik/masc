@@ -573,6 +573,12 @@
    ;; Autoresearch — Karpathy-inspired autonomous experiment loop
    autoresearch
    autoresearch_types
+   autoresearch_serde
+   autoresearch_storage
+   autoresearch_metric
+   autoresearch_git
+   autoresearch_file
+   autoresearch_codegen
    tool_autoresearch_schemas
    tool_autoresearch
    ;; Anti-Fake Test Quality Scoring (harness P2)
@@ -732,6 +738,12 @@
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules
   autoresearch_types
+  autoresearch_serde
+  autoresearch_storage
+  autoresearch_metric
+  autoresearch_git
+  autoresearch_file
+  autoresearch_codegen
   tool_autoresearch_schemas
   backend_eio_compression
   room_multi

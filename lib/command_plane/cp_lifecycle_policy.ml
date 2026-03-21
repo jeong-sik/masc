@@ -4,7 +4,7 @@ let request_or_apply_assignment config ~(actor : string) ~requested_action json 
   let operation_id =
     match get_string_opt json "operation_id" with
     | Some value -> value
-    | None -> invalid_arg "operation_id is required"
+    | None -> invalid_arg "operation_id is required. Call masc_operation_start first."
   in
   let target_unit_id =
     match get_string_opt json "target_unit_id" with
@@ -88,7 +88,7 @@ let dispatch_escalate_json config ~(actor : string) json =
     let operation_id =
       match get_string_opt json "operation_id" with
       | Some value -> value
-      | None -> invalid_arg "operation_id is required"
+      | None -> invalid_arg "operation_id is required. Call masc_operation_start first."
     in
     with_operation config operation_id (fun _ current ->
         let _, _, units, _ = topology_units config in
@@ -112,7 +112,7 @@ let dispatch_escalate_json config ~(actor : string) json =
 
 let dispatch_recall_json config ~(actor : string) json =
   match get_string_opt json "operation_id" with
-  | None -> Error "operation_id is required"
+  | None -> Error "operation_id is required. Call masc_operation_start first."
   | Some operation_id ->
       Result.map
         (fun operation ->
@@ -434,7 +434,7 @@ let update_decision_status config ~(actor : string) ~decision_id ~status ?reason
 
 let policy_approve_json config ~(actor : string) json =
   match get_string_opt json "decision_id" with
-  | None -> Error "decision_id is required"
+  | None -> Error "decision_id is required. Call masc_policy_status to find pending decisions."
   | Some decision_id ->
       let decisions = read_policy_decisions config in
       (match
@@ -464,7 +464,7 @@ let policy_approve_json config ~(actor : string) json =
 
 let policy_deny_json config ~(actor : string) json =
   match get_string_opt json "decision_id" with
-  | None -> Error "decision_id is required"
+  | None -> Error "decision_id is required. Call masc_policy_status to find pending decisions."
   | Some decision_id ->
       let* updated =
         update_decision_status config ~actor ~decision_id ~status:"denied" ()

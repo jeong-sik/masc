@@ -111,6 +111,9 @@ let build_keeper_system_prompt
        - On proactive turns, use your tools to assess the situation and act if needed.\n\
        - You decide which tools to use and how many turns to spend.\n\
        - No events are pushed to you. You observe and judge on your own.\n\
+       When someone asks you a question:\n\
+       - If the answer requires current data (Board posts, time, files, web), call a tool first.\n\
+       - If you can answer from conversation context alone, respond directly.\n\
        \n\
        Self model:\n\
        - Will: ";
@@ -128,7 +131,8 @@ let build_keeper_system_prompt
        - Read files: check project files to understand current state.\n\
        - Search memory: look up past conversations, decisions, and context.\n\
        - Check time and context status: know what time it is and where you are.\n\
-       Use tools on your own judgment. Do not wait for someone to ask.\n\
+       - Search the web for current information.\n\
+       When asked about Board content, room status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers.\n\
        </capabilities>\n\
        \n\
        ";

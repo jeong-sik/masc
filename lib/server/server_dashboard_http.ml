@@ -31,79 +31,30 @@ let _execution_json_ref : Yojson.Safe.t ref =
     ("message", `String "Execution data is being computed. Refresh in a few seconds.");
   ])
 
-let _execution_refresh_interval_s = 60.0
-let _execution_refresh_max_backoff_s = 600.0
-
 (** Start the proactive execution refresh loop.  When an Executor_pool
     is available, each refresh runs in a pool domain with a domain-local
     Caqti pool (the main domain's Caqti pool is domain-bound due to
-    Switch capture in release).  Falls back to in-domain compute.
-
-    Circuit breaker: after 3 consecutive failures, the interval doubles
-    each time (max 600s). On success, it resets to the base interval. *)
+    Switch capture in release).  Falls back to in-domain compute. *)
 let start_execution_refresh_loop ~state ~sw ~clock =
-  let config = state.Mcp_server.room_config in
+  let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
-  (* Warm cache with 10s timeout: do not block server startup.
-     If it takes longer, the async refresh loop will populate it. *)
-  (let t0 = Time_compat.now () in
-   try
-     match Eio.Time.with_timeout clock 10.0 (fun () ->
-       Ok (Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ())) with
-     | Ok json ->
-       _execution_json_ref := json;
-       Log.Dashboard.info "execution warm cache done (%.1fs)" (Time_compat.now () -. t0)
-     | Error `Timeout ->
-       Log.Dashboard.warn "execution warm cache skipped (%.1fs timeout)" (Time_compat.now () -. t0)
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     Log.Dashboard.warn "execution warm cache failed (%.1fs): %s"
-       (Time_compat.now () -. t0) (Printexc.to_string exn));
-  Eio.Fiber.fork ~sw (fun () ->
-    Log.Dashboard.info "starting execution refresh loop";
-    let consecutive_failures = ref 0 in
-    let current_interval = ref _execution_refresh_interval_s in
-    let rec loop () =
-      let t0 = Time_compat.now () in
-      (try
-        let json =
-          match !_executor_pool with
-          | Some pool ->
-            Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
-              Eio.Switch.run @@ fun pool_sw ->
-              match Room_utils_backend_setup.with_domain_local_pg_backend ~sw:pool_sw config with
-              | Some domain_config ->
-                Dashboard_execution.json ~light:true ~config:domain_config ~sw:pool_sw ~clock ~proc_mgr ()
-              | None ->
-                failwith "domain-local PG backend creation failed; skipping pool refresh")
-          | None ->
-            Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
-        in
-        _execution_json_ref := json;
-        let dt = Time_compat.now () -. t0 in
-        (* Success: reset circuit breaker *)
-        if !consecutive_failures > 0 then
-          Log.Dashboard.info "execution refresh recovered after %d failures"
-            !consecutive_failures;
-        consecutive_failures := 0;
-        current_interval := _execution_refresh_interval_s;
-        Log.Dashboard.info "execution refreshed (%.0fB, %.1fs, %s)"
-          (Float.of_int (String.length (Yojson.Safe.to_string json)))
-          dt
-          (if !_executor_pool <> None then "pool" else "in-domain")
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        let dt = Time_compat.now () -. t0 in
-        consecutive_failures := !consecutive_failures + 1;
-        (* Circuit breaker: backoff after 3 failures *)
-        if !consecutive_failures >= 3 then
-          current_interval :=
-            min _execution_refresh_max_backoff_s
-              (!current_interval *. 2.0);
-        Log.Dashboard.warn "execution refresh failed (%d consecutive, next in %.0fs, %.1fs): %s"
-          !consecutive_failures !current_interval dt (Printexc.to_string exn));
-      Eio.Time.sleep clock !current_interval;
-      loop ()
-    in
-    loop ())
+  let compute () =
+    match !_executor_pool with
+    | Some pool ->
+      Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
+        Eio.Switch.run @@ fun pool_sw ->
+        match Room_utils_backend_setup.with_domain_local_pg_backend ~sw:pool_sw room_config with
+        | Some domain_config ->
+          Dashboard_execution.json ~light:true ~config:domain_config ~sw:pool_sw ~clock ~proc_mgr ()
+        | None ->
+          failwith "domain-local PG backend creation failed; skipping pool refresh")
+    | None ->
+      Dashboard_execution.json ~light:true ~config:room_config ~sw ~clock ~proc_mgr ()
+  in
+  Proactive_refresh.start ~sw ~clock
+    ~config:(Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0)
+    ~compute
+    ~on_result:(fun json -> _execution_json_ref := json)
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
   let fixture = query_param request "fixture" in

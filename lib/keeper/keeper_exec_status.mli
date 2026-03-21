@@ -33,3 +33,9 @@ val keeper_surface_status :
   agent_status:Yojson.Safe.t ->
   diagnostic:Yojson.Safe.t ->
   string
+
+val derive_pipeline_stage :
+  meta:keeper_meta ->
+  surface_status:string ->
+  now_ts:float ->
+  string

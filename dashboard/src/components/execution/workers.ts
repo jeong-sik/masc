@@ -60,8 +60,9 @@ export function WorkerSupportRow({
 }
 
 export function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief }) {
+  const keeper = findKeeperOrFallback(row)
   const onClick = () => {
-    openKeeperDetail(findKeeperOrFallback(row))
+    openKeeperDetail(keeper)
   }
   const runtimeLabel = keeperRuntimeLabel(row.name, row.agent_name)
   const model: CanonicalKeeperCardModel = {
@@ -74,6 +75,7 @@ export function ContinuityRow({ row }: { row: DashboardExecutionContinuityBrief 
     statusLabel: statusLabel(row.status),
     stateClass: row.state,
     stateLabel: continuityStateLabel(row.state),
+    pipelineStage: keeper.pipeline_stage ?? null,
     contextRatio: row.context_ratio ?? null,
     note: row.note,
     focus: row.focus,

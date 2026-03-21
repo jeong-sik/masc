@@ -2,6 +2,8 @@ import { html } from 'htm/preact'
 import { MitosisRing } from './mitosis-ring'
 import { StatusBadge } from './status-badge'
 import { TimeAgo } from './time-ago'
+import { PipelineStageBadge } from '../keeper-pipeline-stage'
+import type { PipelineStage } from '../../types'
 
 export type CanonicalKeeperCardModel = {
   name: string
@@ -13,6 +15,7 @@ export type CanonicalKeeperCardModel = {
   statusLabel: string
   stateClass?: string | null
   stateLabel?: string | null
+  pipelineStage?: PipelineStage | null
   contextRatio?: number | null
   note?: string | null
   focus: string
@@ -90,6 +93,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
             ? html`
                 <${MitosisRing} ratio=${model.contextRatio ?? 0} size=${34} stroke=${4} />
                 <${StatusBadge} status=${model.statusRaw ?? 'unknown'} />
+                ${model.pipelineStage ? html`<${PipelineStageBadge} stage=${model.pipelineStage} />` : null}
                 ${model.stateLabel ? html`<span class="monitor-pill ${toneClass}">${model.stateLabel}</span>` : null}
               `
             : html`<span class="command-chip ${toneClass}">${model.statusLabel}</span>`}

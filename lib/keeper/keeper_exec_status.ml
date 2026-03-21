@@ -875,3 +875,40 @@ let keeper_diagnostic_json
       ("keepalive_running", `Bool keepalive_running);
       ("next_eligible_at_s", keeper_next_eligible_at_s ~meta ~quiet_reason ~now_ts);
     ]
+
+(** Derive pipeline stage from keeper_meta timestamps.
+    Uses recency thresholds to infer what the keeper is doing.
+    Stages: "idle" | "thinking" | "tool_use" | "compacting" | "handoff"
+            | "proactive" | "offline"
+    The 30s recency window matches the typical keeper turn duration. *)
+let derive_pipeline_stage
+    ~(meta : keeper_meta)
+    ~(surface_status : string)
+    ~(now_ts : float)
+  : string =
+  if String.equal surface_status "offline" then "offline"
+  else
+    let recency_threshold = 30.0 in
+    let turn_ago =
+      if meta.last_turn_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.last_turn_ts
+    in
+    let compaction_ago =
+      if meta.last_compaction_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.last_compaction_ts
+    in
+    let handoff_ago =
+      if meta.last_handoff_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.last_handoff_ts
+    in
+    let proactive_ago =
+      if meta.last_proactive_ts <= 0.0 then Float.infinity
+      else now_ts -. meta.last_proactive_ts
+    in
+    (* Pick the most recent activity within the recency window.
+       Priority order when multiple are recent: handoff > compacting > proactive > thinking *)
+    if handoff_ago < recency_threshold then "handoff"
+    else if compaction_ago < recency_threshold then "compacting"
+    else if proactive_ago < recency_threshold then "proactive"
+    else if turn_ago < recency_threshold then "thinking"
+    else "idle"

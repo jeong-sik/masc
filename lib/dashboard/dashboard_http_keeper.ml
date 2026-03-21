@@ -291,6 +291,12 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
               in
 	            `Assoc ([
               ("name", `String m.name);
+              ("pipeline_stage", `String
+                (Keeper_exec_status.derive_pipeline_stage
+                   ~meta:m
+                   ~surface_status:(Keeper_exec_status.keeper_surface_status
+                                      ~agent_status:agent ~diagnostic)
+                   ~now_ts));
               ("runtime_class", `String "resident_keeper");
               ("desired", `Bool true);
               ("resident_registered", `Bool true);
@@ -536,9 +542,27 @@ let keeper_config_json (config : Room.config) (name : string)
           ("compaction_count", `Int m.compaction_count);
         ]
       in
+      let now_ts = Time_compat.now () in
+      let agent_status =
+        Keeper_exec_status.parse_agent_status config ~agent_name:m.agent_name
+      in
+      let pipeline_stage =
+        let diagnostic_for_stage =
+          Keeper_exec_status.keeper_diagnostic_json
+            ~meta:m ~agent_status
+            ~keepalive_running:(Keeper_keepalive.keeper_keepalive_running m.name)
+            ~history_items:[] ~now_ts
+        in
+        let surface =
+          Keeper_exec_status.keeper_surface_status
+            ~agent_status ~diagnostic:diagnostic_for_stage
+        in
+        Keeper_exec_status.derive_pipeline_stage ~meta:m ~surface_status:surface ~now_ts
+      in
       (`OK,
        `Assoc [
          ("name", `String m.name);
+         ("pipeline_stage", `String pipeline_stage);
          ("prompt", prompt);
          ("execution", execution);
          ("compaction", compaction);

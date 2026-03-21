@@ -89,7 +89,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
     <div
       class="hot-session-card ${s.blocker_summary ? 'hot-session-card--critical' : ''}"
       key=${s.session_id}
-      onClick=${() => navigate('situation', { session_id: s.session_id })}
+      onClick=${() => navigate('status', { section: 'sessions', session_id: s.session_id })}
     >
       <div class="hot-session-card__goal">${primary}</div>
       ${secondary ? html`<div class="hot-session-card__context">${secondary}</div>` : null}
@@ -166,7 +166,7 @@ function HotSessions() {
         copy="홈에서는 사람 중심 작업과 자동 런타임을 나눠 보여줍니다."
         semanticId="home.hot_sessions"
         linkLabel="전체 보기"
-        onLink=${() => navigate('situation')}
+        onLink=${() => navigate('status', { section: 'sessions' })}
       />
       <div class="hot-sessions__lanes">
         <${SessionLane}
@@ -207,14 +207,14 @@ function AgentPulse() {
         label="에이전트"
         semanticId="home.agent_pulse"
         linkLabel="전체 보기"
-        onLink=${() => navigate('agents')}
+        onLink=${() => navigate('status', { section: 'agents' })}
       />
       <div class="agent-pulse__grid">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
             class="agent-pulse-card agent-pulse-card--${a.state}"
             key=${a.name}
-            onClick=${() => navigate('agents', { agent: a.name })}
+            onClick=${() => navigate('status', { section: 'agents', agent: a.name })}
           >
             <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${28} />
             <div class="agent-pulse-card__info">

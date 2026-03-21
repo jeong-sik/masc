@@ -6,25 +6,25 @@ import { connected } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
 import { missionSnapshot } from '../mission-store'
 import { roomTruthInitializing } from '../room-truth-store'
-import { Mission } from './mission'
 import { Overview } from './overview/overview'
 import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
 import { PanelSemanticDetails } from './common/semantic-layer'
 import {
-  DASHBOARD_NAV_ITEMS,
   DASHBOARD_SURFACES,
+  DASHBOARD_NAV_ITEMS,
+  currentSectionForRoute,
+  sectionItemsForTab,
   surfaceForTab,
 } from '../config/navigation'
 import { InterveneRailCard, SnapshotCard } from './resident-runtime-rail'
 
 const buildIdentityOpen = signal(false)
 
-const LazyAgentsUnified = lazy(async () => ({ default: (await import('./agents-unified')).AgentsUnified }))
-const LazyActivity = lazy(async () => ({ default: (await import('./activity')).Activity }))
+const LazyStatus = lazy(async () => ({ default: (await import('./status')).Status }))
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
-const LazyControl = lazy(async () => ({ default: (await import('./control')).Control }))
-const LazyLabUnified = lazy(async () => ({ default: (await import('./lab-unified')).LabUnified }))
+const LazyOperations = lazy(async () => ({ default: (await import('./control')).Operations }))
+const LazyLabSurface = lazy(async () => ({ default: (await import('./lab-unified')).LabSurface }))
 
 function lazyTabFallback(label: string) {
   return html`<div class="loading-indicator">${label} 불러오는 중...</div>`
@@ -111,6 +111,8 @@ export function SideRail() {
   const current = route.value.tab
   const currentSurface = surfaceForTab(current)
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === current)
+  const currentSection = currentSectionForRoute(route.value)
+  const sectionItems = sectionItemsForTab(current)
 
   return html`
     <aside class="dashboard-rail">
@@ -128,7 +130,7 @@ export function SideRail() {
               <button
                 class="rail-tab-btn ${isActive ? 'active' : ''}"
                 key=${surface.id}
-                onClick=${() => navigate(surface.defaultTab)}
+                onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
               >
                 <span class="rail-tab-icon">${surface.icon}</span>
                 <span class="rail-tab-copy">
@@ -142,26 +144,21 @@ export function SideRail() {
 
         <!-- Sub-tabs within current surface -->
         ${(() => {
-          const activeSurface = DASHBOARD_SURFACES.find(s => s.id === currentSurface)
-          if (!activeSurface || activeSurface.tabs.length <= 1) return null
-          const subItems = DASHBOARD_NAV_ITEMS.filter(item =>
-            activeSurface.tabs.includes(item.id) && item.id !== 'home'
-          )
-          if (subItems.length === 0) return null
+          if (sectionItems.length === 0) return null
           return html`
             <div class="rail-nav-group" style="margin-top: 12px;">
-              <div class="rail-group-label">${activeSurface.label} 하위</div>
+              <div class="rail-group-label">${currentView?.label ?? currentSurface} 하위</div>
               <div class="rail-tab-list" style="margin-top: 6px;">
-                ${subItems.map(item => html`
+                ${sectionItems.map(item => html`
                   <button
-                    class="rail-tab-btn ${current === item.id ? 'active' : ''}"
+                    class="rail-tab-btn ${currentSection?.id === item.id ? 'active' : ''}"
                     key=${item.id}
-                    onClick=${() => navigate(item.id)}
+                    onClick=${() => navigate(currentSurface, item.params)}
                     style="padding: 8px 10px;"
                   >
-                    <span class="rail-tab-icon" style="font-size: 14px;">${item.icon}</span>
                     <span class="rail-tab-copy">
                       <strong style="font-size: 12px;">${item.label}</strong>
+                      <span>${item.description}</span>
                     </span>
                   </button>
                 `)}
@@ -172,8 +169,8 @@ export function SideRail() {
 
         <div class="rail-view-note">
           <div class="rail-view-note-label">현재 화면</div>
-          <strong>${currentView?.label ?? current}</strong>
-          <p>${currentView?.description ?? '운영 화면'}</p>
+          <strong>${currentSection ? `${currentView?.label ?? current} · ${currentSection.label}` : currentView?.label ?? current}</strong>
+          <p>${currentSection?.description ?? currentView?.description ?? '운영 화면'}</p>
         </div>
       </section>
 
@@ -189,18 +186,10 @@ export function TabContent() {
   switch (tab) {
     case 'home':
       return html`<${Overview} />`
-    case 'situation':
-      return html`<${Mission} />`
-    case 'agents':
+    case 'status':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('에이전트 화면')}>
-          <${LazyAgentsUnified} />
-        <//>
-      `
-    case 'activity':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('활동 화면')}>
-          <${LazyActivity} />
+        <${Suspense} fallback=${lazyTabFallback('현황 화면')}>
+          <${LazyStatus} />
         <//>
       `
     case 'work':
@@ -209,16 +198,16 @@ export function TabContent() {
           <${LazyWork} />
         <//>
       `
-    case 'control':
+    case 'operations':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('제어 화면')}>
-          <${LazyControl} />
+        <${Suspense} fallback=${lazyTabFallback('운영 화면')}>
+          <${LazyOperations} />
         <//>
       `
     case 'lab':
       return html`
         <${Suspense} fallback=${lazyTabFallback('실험실 화면')}>
-          <${LazyLabUnified} />
+          <${LazyLabSurface} />
         <//>
       `
     default:

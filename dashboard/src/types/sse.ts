@@ -156,15 +156,17 @@ export interface DashboardSemanticsResponse {
 
 export type TabId =
   | 'home'
-  | 'situation'
-  | 'agents'
-  | 'activity'
+  | 'status'
   | 'work'
-  | 'control'
+  | 'operations'
   | 'lab'
 
 /** Pre-restructure tab IDs kept for redirect aliases. */
 export type LegacyTabId =
+  | 'situation'
+  | 'agents'
+  | 'activity'
+  | 'control'
   | 'mission'
   | 'proof'
   | 'execution'
@@ -184,29 +186,31 @@ export type AnyTabId = TabId | LegacyTabId
 
 export const VALID_TABS: TabId[] = [
   'home',
-  'situation',
-  'agents',
-  'activity',
+  'status',
   'work',
-  'control',
+  'operations',
   'lab',
 ]
 
 /** Maps legacy tab IDs to new tab + optional section params. */
 export const LEGACY_TAB_REDIRECTS: Record<LegacyTabId, { tab: TabId; params?: Record<string, string> }> = {
-  'mission': { tab: 'situation' },
-  'agent-roster': { tab: 'agents' },
-  'execution': { tab: 'agents' },
-  'keeper-roster': { tab: 'agents' },
-  'live': { tab: 'activity' },
-  'social': { tab: 'activity' },
+  'situation': { tab: 'status', params: { section: 'sessions' } },
+  'agents': { tab: 'status', params: { section: 'agents' } },
+  'activity': { tab: 'status', params: { section: 'activity' } },
+  'control': { tab: 'operations', params: { section: 'intervene' } },
+  'mission': { tab: 'status', params: { section: 'sessions' } },
+  'agent-roster': { tab: 'status', params: { section: 'agents' } },
+  'execution': { tab: 'status', params: { section: 'sessions' } },
+  'keeper-roster': { tab: 'status', params: { section: 'agents' } },
+  'live': { tab: 'status', params: { section: 'activity' } },
+  'social': { tab: 'status', params: { section: 'activity' } },
   'proof': { tab: 'work', params: { section: 'evidence' } },
   'memory': { tab: 'work', params: { section: 'board' } },
   'governance': { tab: 'work', params: { section: 'governance' } },
   'planning': { tab: 'work', params: { section: 'planning' } },
-  'tools': { tab: 'control', params: { section: 'tools' } },
-  'intervene': { tab: 'control' },
-  'command': { tab: 'lab' },
+  'tools': { tab: 'operations', params: { section: 'tools' } },
+  'intervene': { tab: 'operations', params: { section: 'intervene' } },
+  'command': { tab: 'operations', params: { section: 'command' } },
 }
 
 // --- Social Graph types ---

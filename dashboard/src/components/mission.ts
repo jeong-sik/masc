@@ -228,8 +228,8 @@ export function Mission() {
               : html`<div class="empty-state">지금 보이는 키퍼가 없습니다.</div>`}
           </div>
           <div class="mission-card-actions">
-            <button class="control-btn ghost" onClick=${() => navigate('agents', { view: 'sessions' })}>세션 보기</button>
-            <button class="control-btn ghost" onClick=${() => navigate('lab')}>지휘 진단면 보기</button>
+            <button class="control-btn ghost" onClick=${() => navigate('status', { section: 'sessions' })}>세션 보기</button>
+            <button class="control-btn ghost" onClick=${() => navigate('operations', { section: 'command' })}>지휘 진단면 보기</button>
           </div>
         <//>
       </details>

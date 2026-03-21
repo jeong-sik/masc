@@ -1,12 +1,26 @@
 // MASC Dashboard — Hash-based router
 // Reads location.hash for canonical dashboard routes.
-// Legacy tab IDs (pre-restructure) are transparently redirected to new 7-tab structure.
+// Legacy tab IDs (pre-restructure) are transparently redirected to the current IA.
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { RouteState, TabId, AnyTabId, LegacyTabId } from './types'
 import { VALID_TABS, LEGACY_TAB_REDIRECTS } from './types'
+import { normalizeRouteParams } from './config/navigation'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'home', params: {}, postId: null }
+const COMMAND_SURFACE_SEGMENTS = new Set([
+  'warroom',
+  'summary',
+  'orchestra',
+  'swarm',
+  'operations',
+  'topology',
+  'alerts',
+  'trace',
+  'chains',
+  'control',
+])
+const LAB_SECTION_SEGMENTS = new Set(['overview', 'trpg', 'avatars'])
 
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
@@ -51,30 +65,125 @@ function parseSegments(
   segments: string[],
   params: Record<string, string>,
 ): RouteState {
-  // Deep-link: /chains/operation/:id -> lab tab
+  // Deep-link: /chains/operation/:id -> operations command surface
   if (segments[0] === 'chains') {
-    const nextParams: Record<string, string> = { ...params, surface: 'chains' }
+    const nextParams: Record<string, string> = {
+      ...params,
+      section: 'command',
+      surface: 'chains',
+    }
     if (segments[1] === 'operation' && segments[2]) {
       nextParams.operation = decodeSafe(segments[2])
     }
-    return { tab: 'lab', params: nextParams, postId: null }
+    return {
+      tab: 'operations',
+      params: normalizeRouteParams('operations', nextParams),
+      postId: null,
+    }
   }
 
-  // Deep-link: /lab/:surface -> lab tab
+  // Legacy deep-link: /lab/:surface
   if (segments[0] === 'lab') {
-    const nextParams = { ...params }
     if (segments[1]) {
-      nextParams.surface = decodeSafe(segments[1])
+      const section = decodeSafe(segments[1])
+      const nextParams = { ...params }
+      if (LAB_SECTION_SEGMENTS.has(section)) {
+        nextParams.section = section
+        return {
+          tab: 'lab',
+          params: normalizeRouteParams('lab', nextParams),
+          postId: null,
+        }
+      }
+      nextParams.section = 'command'
+      nextParams.surface = section
+      return {
+        tab: 'operations',
+        params: normalizeRouteParams('operations', nextParams),
+        postId: null,
+      }
     }
-    return { tab: 'lab', params: nextParams, postId: null }
+    if (params.surface) {
+      const nextParams = { ...params }
+      if (params.surface === 'trpg' || params.surface === 'avatars') {
+        nextParams.section = params.surface
+        return {
+          tab: 'lab',
+          params: normalizeRouteParams('lab', nextParams),
+          postId: null,
+        }
+      }
+      nextParams.section = 'command'
+      return {
+        tab: 'operations',
+        params: normalizeRouteParams('operations', nextParams),
+        postId: null,
+      }
+    }
+    if (!params.section && !params.surface) {
+      return {
+        tab: 'operations',
+        params: normalizeRouteParams('operations', { ...params, section: 'command' }),
+        postId: null,
+      }
+    }
+    const nextParams = { ...params }
+    return {
+      tab: 'lab',
+      params: normalizeRouteParams('lab', nextParams),
+      postId: null,
+    }
+  }
+
+  if (segments[0] === 'operations' && segments[1]) {
+    const nextParams = { ...params }
+    const second = decodeSafe(segments[1])
+    if (second === 'intervene' || second === 'command' || second === 'tools') {
+      nextParams.section = second
+    } else if (COMMAND_SURFACE_SEGMENTS.has(second)) {
+      nextParams.section = 'command'
+      nextParams.surface = second
+    }
+    return {
+      tab: 'operations',
+      params: normalizeRouteParams('operations', nextParams),
+      postId: null,
+    }
+  }
+
+  if ((segments[0] === 'status' || segments[0] === 'work') && segments[1]) {
+    const tab = segments[0] as 'status' | 'work'
+    const nextParams = { ...params, section: decodeSafe(segments[1]) }
+    return {
+      tab,
+      params: normalizeRouteParams(tab, nextParams),
+      postId: null,
+    }
   }
 
   const tabFromPath = segments[0]
   const tabFromQuery = params.tab
 
+  if ((tabFromPath === 'lab' || tabFromQuery === 'lab') && params.surface && !params.section) {
+    const nextParams = { ...params, section: 'command' }
+    if (params.surface === 'trpg' || params.surface === 'avatars') {
+      nextParams.section = params.surface
+      return {
+        tab: 'lab',
+        params: normalizeRouteParams('lab', nextParams),
+        postId: null,
+      }
+    }
+    return {
+      tab: 'operations',
+      params: normalizeRouteParams('operations', nextParams),
+      postId: null,
+    }
+  }
+
   // Resolve with legacy redirect support
   const resolved = resolveTab(tabFromPath) || resolveTab(tabFromQuery) || { tab: 'home' as TabId }
-  const mergedParams = { ...params, ...(resolved.params ?? {}) }
+  const mergedParams = normalizeRouteParams(resolved.tab, { ...params, ...(resolved.params ?? {}) })
 
   return { tab: resolved.tab, params: mergedParams, postId: null }
 }
@@ -121,12 +230,9 @@ function parsePathname(pathname: string, search: string): RouteState | null {
 }
 
 function toHash(r: RouteState): string {
-  const path = r.tab === 'lab' && r.params.surface
-    ? `lab/${encodeURIComponent(r.params.surface)}`
-    : r.tab
+  const path = r.tab
   const paramEntries = Object.entries(r.params).filter(([key]) => {
     if (key === 'tab') return false
-    if (r.tab === 'lab' && key === 'surface') return false
     return true
   })
   if (paramEntries.length === 0) return `#${path}`
@@ -158,10 +264,14 @@ window.addEventListener('hashchange', () => {
 export function navigate(tab: AnyTabId, params?: Record<string, string>): void {
   const redirect = LEGACY_TAB_REDIRECTS[tab as LegacyTabId]
   const resolvedTab: TabId = redirect ? redirect.tab : tab as TabId
-  const resolvedParams = redirect?.params
+  const baseParams = redirect?.params
     ? { ...redirect.params, ...(params ?? {}) }
     : params ?? {}
-  const next = { tab: resolvedTab, params: resolvedParams, postId: null } satisfies RouteState
+  const next = {
+    tab: resolvedTab,
+    params: normalizeRouteParams(resolvedTab, baseParams),
+    postId: null,
+  } satisfies RouteState
   const nextHash = toHash(next)
   // Update signal synchronously so Preact re-renders immediately.
   // Without this, clicking the same surface twice is needed because
@@ -179,7 +289,11 @@ export function navigateToPost(postId: string): void {
 
 export function navigateBack(): void {
   const current = route.value
-  window.location.hash = `#${current.tab}`
+  window.location.hash = toHash({
+    tab: current.tab,
+    params: normalizeRouteParams(current.tab, {}),
+    postId: null,
+  })
 }
 
 // --- Hook for components ---

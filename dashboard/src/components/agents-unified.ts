@@ -4,7 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { route } from '../router'
+import { navigate, route } from '../router'
 import { agents, keepers } from '../store'
 import { missionSnapshot } from '../mission-store'
 import { AgentRoster } from './agent-roster'
@@ -37,7 +37,7 @@ const CHIPS: { id: AgentsView; label: string }[] = [
   { id: 'all', label: '전체' },
   { id: 'agents', label: '에이전트' },
   { id: 'keepers', label: '키퍼' },
-  { id: 'sessions', label: '세션' },
+  { id: 'sessions', label: '실행' },
 ]
 
 export function AgentsUnified() {
@@ -74,7 +74,10 @@ export function AgentsUnified() {
           <button
             key=${c.id}
             class=${`agents-chip ${currentView === c.id ? 'agents-chip--active' : ''}`}
-            onClick=${() => { activeView.value = c.id }}
+            onClick=${() => {
+              activeView.value = c.id
+              navigate('status', c.id === 'all' ? { section: 'agents' } : { section: 'agents', view: c.id })
+            }}
           >
             ${c.label}
             ${c.id === 'all' ? html`<span class="agents-chip-count">${totalCount}</span>` : null}

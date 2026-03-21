@@ -52,20 +52,23 @@ export function orchestraNodeKindLabel(kind?: string | null): string {
 }
 
 function jumpTo(tab: string, surface: CommandPlaneSurface | string | null | undefined, params: Record<string, string>): void {
+  const nextParams = { ...params }
+  delete nextParams.section
+  delete nextParams.surface
   if (tab === 'command') {
     if (surface) {
       setCommandPlaneSurface(surface as CommandPlaneSurface)
-      navigate('lab', { ...surfaceRouteParams(surface as CommandPlaneSurface), ...params })
+      navigate('operations', { ...surfaceRouteParams(surface as CommandPlaneSurface), ...nextParams })
       return
     }
-    navigate('lab', params)
+    navigate('operations', { section: 'command', ...nextParams })
     return
   }
   if (tab === 'intervene') {
-    navigate('control', params)
+    navigate('operations', { section: 'intervene', ...nextParams })
     return
   }
-  navigate('lab', params)
+  navigate('operations', { section: 'command', ...nextParams })
 }
 
 // ── Node rendering helpers ──────────────────────────────

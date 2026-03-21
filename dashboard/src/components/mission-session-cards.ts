@@ -107,8 +107,8 @@ export function SessionBriefCard({
         : null}
 
       <div class="mission-card-actions">
-        <button class="control-btn ghost" onClick=${() => openSession('control', brief.session_id)}>세션 개입 열기</button>
-        <button class="control-btn ghost" onClick=${() => openSession('lab', brief.session_id)}>세션 원인 보기</button>
+        <button class="control-btn ghost" onClick=${() => openSession('intervene', brief.session_id)}>세션 개입 열기</button>
+        <button class="control-btn ghost" onClick=${() => openSession('command', brief.session_id)}>세션 원인 보기</button>
         ${action
           ? html`<button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, '상황판 세션 요약')}>추천 액션 열기</button>`
           : null}
@@ -208,7 +208,7 @@ export function SessionDetailCard({
           <div class="mission-link-list">
             ${detail.operations.length > 0
               ? detail.operations.map(operation => html`
-                  <button class="mission-link-row" onClick=${() => openSession('lab', session.session_id)}>
+                  <button class="mission-link-row" onClick=${() => openSession('command', session.session_id)}>
                     <strong>${operation.operation_id}</strong>
                     <span>${statusLabel(operation.status)}${operation.stage ? ` · ${operation.stage}` : ''}</span>
                     <small>${operation.detachment_status ?? operation.objective ?? '분견대 정보 없음'}</small>

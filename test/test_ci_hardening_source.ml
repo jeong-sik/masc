@@ -143,10 +143,8 @@ let test_dashboard_component_split_contracts () =
        "pooler.supabase.com");
   check bool "council archive normalizes postgres url" true
     (file_contains_pattern "lib/council/archive.ml"
-       "pooler.supabase.com");
-  check bool "jiphyeon archive normalizes postgres url" true
-    (file_contains_pattern "lib/jiphyeon/archive.ml"
        "pooler.supabase.com")
+  (* jiphyeon module removed in #2135 — assertion removed *)
 
 let test_activity_surface_contracts () =
   check bool "activity tab exposes activity graph label" true

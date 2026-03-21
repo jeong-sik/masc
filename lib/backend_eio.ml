@@ -405,6 +405,11 @@ module FileSystem = struct
           Error (IOError (Printf.sprintf "atomic_increment failed: %s" (Printexc.to_string exn)))
 
   (** Atomically get the current counter value without incrementing *)
+  (** Atomically get the current counter value without incrementing.
+      Reads the file without locking — the counter is a small integer
+      written atomically by [atomic_increment] (which holds an exclusive
+      lock).  A lockless read avoids EBADF on Linux where [F_TLOCK] on
+      an [O_RDONLY] fd is rejected per POSIX. *)
   let atomic_get t key =
     match key_to_path t key with
     | Error e -> Error e
@@ -415,24 +420,6 @@ module FileSystem = struct
           else
             let fd = Unix.openfile path_str [Unix.O_RDONLY] 0o644 in
             Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.close fd) @@ fun () ->
-            (* Non-blocking lock with retry to avoid blocking the Eio domain.
-               Uses F_TLOCK (exclusive try) since F_TRLOCK is not available in OCaml.
-               Read-only access still gets exclusive lock — acceptable for short reads. *)
-            let max_retries = 50 in
-            let rec try_lock retries =
-              if retries <= 0 then
-                raise (Failure "atomic_get: failed to acquire lock after max retries")
-              else
-                try Unix.lockf fd Unix.F_TLOCK 0
-                with Unix.Unix_error (Unix.EAGAIN, _, _)
-                   | Unix.Unix_error (Unix.EACCES, _, _) ->
-                  (match Process_eio.get_clock () with
-                   | Ok clk -> Eio.Time.sleep clk 0.001
-                   | Error _ -> Eio.Fiber.yield ());
-                  try_lock (retries - 1)
-            in
-            try_lock max_retries;
-            Common.protect ~module_name:"backend_eio" ~finally_label:"finalizer" ~finally:(fun () -> Unix.lockf fd Unix.F_ULOCK 0) @@ fun () ->
             let buf = Bytes.create 32 in
             let n = Unix.read fd buf 0 32 in
             if n = 0 then Ok 0

@@ -155,7 +155,7 @@ let test_resolve_base_branch_returns_result () =
   match Room_git.git_root ~base_path:"." with
   | Some root ->
       let result = Room_git.resolve_base_branch root "main" in
-      let _ : (string * string option, Masc_mcp.Types.masc_error) result = result in
+      let _ : (string * string option, Types.masc_error) result = result in
       ()
   | None -> fail "need git repo"
 

@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name masc_eio_context)
+ (public_name masc_mcp.masc_eio_context)
+ (wrapped false)
+ (modules eio_context)
+ (libraries eio uri masc_log ca-certs tls-eio))

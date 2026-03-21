@@ -1,6 +1,6 @@
 (** Tests for Backend module *)
 
-module Backend = Masc_mcp.Backend
+module Backend = Backend
 open Alcotest
 
 (* Helper to create test config *)

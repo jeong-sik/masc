@@ -145,7 +145,7 @@ let test_schemas_count () =
 
 let test_schemas_names () =
   let names =
-    List.map (fun (s : Masc_mcp.Types.tool_schema) -> s.name)
+    List.map (fun (s : Types.tool_schema) -> s.name)
       Masc_mcp.Tool_code_swarm.schemas
   in
   check bool "has plan" true (List.mem "masc_code_swarm_plan" names);
@@ -154,7 +154,7 @@ let test_schemas_names () =
 
 let test_schemas_valid_input_schema () =
   List.iter
-    (fun (s : Masc_mcp.Types.tool_schema) ->
+    (fun (s : Types.tool_schema) ->
       let typ =
         Yojson.Safe.Util.member "type" s.input_schema
         |> Yojson.Safe.Util.to_string

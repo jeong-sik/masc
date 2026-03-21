@@ -7,8 +7,8 @@
 *)
 
 open Alcotest
-module Backend = Masc_mcp.Backend
-module Backend_eio = Masc_mcp.Backend_eio
+module Backend = Backend
+module Backend_eio = Backend_eio
 
 (* ============================================================ *)
 (* Test Utilities                                                *)
@@ -494,7 +494,7 @@ let with_eio_backend f =
   let fs = Eio.Stdenv.fs env in
   let clock = Eio.Stdenv.clock env in
   (* Ensure clock is available for atomic lock-retry sleep on Linux *)
-  Masc_mcp.Eio_context.set_clock clock;
+  Eio_context.set_clock clock;
   let tmp_dir = make_test_dir "masc_eio" in
   let config = Backend_eio.{ base_path = tmp_dir; node_id = "test"; cluster_name = "test" } in
   let backend = Backend_eio.FileSystem.create ~fs config in

@@ -32,14 +32,14 @@ let make_timestamp_pair seconds_ago =
 let test_working_agent () =
   let (now, recent_iso) = make_timestamp_pair 60.0 in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Lib.Types.Active recent_iso
+    Lib.Dashboard_labels.translate_agent_status ~now Types.Active recent_iso
   in
   Alcotest.(check string) "active+recent = working" "working" result
 
 let test_stuck_agent () =
   let (now, old_iso) = make_timestamp_pair 1200.0 in (* 20 minutes ago *)
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Lib.Types.Active old_iso
+    Lib.Dashboard_labels.translate_agent_status ~now Types.Active old_iso
   in
   Alcotest.(check bool) "stuck agent contains STUCK" true
     (try
@@ -50,7 +50,7 @@ let test_stuck_agent () =
 let test_idle_agent () =
   let now = Unix.gettimeofday () in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Lib.Types.Listening
+    Lib.Dashboard_labels.translate_agent_status ~now Types.Listening
       "2026-01-01T00:00:00Z"
   in
   Alcotest.(check string) "listening = idle" "idle" result
@@ -58,7 +58,7 @@ let test_idle_agent () =
 let test_offline_agent () =
   let now = Unix.gettimeofday () in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Lib.Types.Inactive
+    Lib.Dashboard_labels.translate_agent_status ~now Types.Inactive
       "2026-01-01T00:00:00Z"
   in
   Alcotest.(check string) "inactive = offline" "offline" result
@@ -189,11 +189,11 @@ let test_health_stalled_blocked_no_double_count () =
 
 let test_classify_inactive_is_offline () =
   let now = Unix.gettimeofday () in
-  let agent : Lib.Types.agent =
+  let agent : Types.agent =
     {
       name = "test-agent";
       agent_type = "test";
-      status = Lib.Types.Inactive;
+      status = Types.Inactive;
       capabilities = [];
       current_task = None;
       joined_at = "2026-01-01T00:00:00Z";
@@ -207,11 +207,11 @@ let test_classify_inactive_is_offline () =
 
 let test_classify_listening_is_idle () =
   let now = Unix.gettimeofday () in
-  let agent : Lib.Types.agent =
+  let agent : Types.agent =
     {
       name = "test-agent";
       agent_type = "test";
-      status = Lib.Types.Listening;
+      status = Types.Listening;
       capabilities = [];
       current_task = None;
       joined_at = "2026-01-01T00:00:00Z";

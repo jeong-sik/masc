@@ -9,7 +9,7 @@
 
 open Alcotest
 
-module Types = Masc_mcp.Types
+module Types = Types
 
 (* ============================================================
    Agent_id Tests

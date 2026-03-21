@@ -13,8 +13,8 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 let init_eio env =
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  Masc_mcp.Eio_context.set_net (Eio.Stdenv.net env);
-  Masc_mcp.Eio_context.set_clock (Eio.Stdenv.clock env)
+  Eio_context.set_net (Eio.Stdenv.net env);
+  Eio_context.set_clock (Eio.Stdenv.clock env)
 
 let contains_substring s needle =
   let s_len = String.length s in

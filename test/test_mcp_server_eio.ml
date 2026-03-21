@@ -275,12 +275,12 @@ let test_eio_context_delegation () =
   let clock = Eio.Stdenv.clock env in
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
-  let delegated_net = Masc_mcp.Eio_context.get_net_opt () in
+  let delegated_net = Eio_context.get_net_opt () in
   let alias_clock = Mcp_eio.get_clock () in
   Alcotest.(check bool) "net delegated to shared Eio_context" true
     (Option.is_some delegated_net);
   Alcotest.(check bool) "clock delegated to shared Eio_context" true
-    (Masc_mcp.Eio_context.get_clock () == alias_clock)
+    (Eio_context.get_clock () == alias_clock)
 
 (* ===== Unit Tests for Protocol Helpers ===== *)
 
@@ -1555,7 +1555,7 @@ let test_execute_tool_mcp_session_ignores_term_persistence () =
     Alcotest.(check bool) "broadcast success" true ok_broadcast;
 
     let agents = Masc_mcp.Room.get_agents_raw state.room_config in
-    let names = List.map (fun (a : Masc_mcp.Types.agent) -> a.name) agents in
+    let names = List.map (fun (a : Types.agent) -> a.name) agents in
     Alcotest.(check bool)
       "mcp session must not reuse TERM_SESSION_ID persisted nickname"
       false

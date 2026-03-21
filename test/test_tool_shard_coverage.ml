@@ -7,7 +7,7 @@
     Pure synchronous tests — no Eio or network required. *)
 
 module Tool_shard = Masc_mcp.Tool_shard
-module Types = Masc_mcp.Types
+module Types = Types
 
 (* ============================================================
    Predefined shard tests
@@ -257,7 +257,7 @@ let test_schemas_count () =
   Alcotest.(check int) "3 schemas" 3 (List.length Tool_shard.schemas)
 
 let test_schemas_names () =
-  let names = List.map (fun (s : Masc_mcp.Types.tool_schema) -> s.name)
+  let names = List.map (fun (s : Types.tool_schema) -> s.name)
     Tool_shard.schemas in
   List.iter (fun expected ->
     Alcotest.(check bool) (expected ^ " present") true
@@ -269,14 +269,14 @@ let test_schemas_names () =
    ============================================================ *)
 
 let test_base_tools_names () =
-  let names = List.map (fun (t : Masc_mcp.Types.tool_schema) -> t.name)
+  let names = List.map (fun (t : Types.tool_schema) -> t.name)
     Tool_shard.base_tools in
   Alcotest.(check bool) "has time_now" true (List.mem "keeper_time_now" names);
   Alcotest.(check bool) "has context_status" true (List.mem "keeper_context_status" names);
   Alcotest.(check bool) "has memory_search" true (List.mem "keeper_memory_search" names)
 
 let test_board_tools_names () =
-  let names = List.map (fun (t : Masc_mcp.Types.tool_schema) -> t.name)
+  let names = List.map (fun (t : Types.tool_schema) -> t.name)
     Tool_shard.board_tools in
   Alcotest.(check bool) "has board_post" true (List.mem "keeper_board_post" names);
   Alcotest.(check bool) "has board_list" true (List.mem "keeper_board_list" names);
@@ -290,7 +290,7 @@ let test_board_tools_names () =
 let test_voice_tools_names () =
   let voice_shard = match Tool_shard.get_shard "voice" with
     | Some s -> s | None -> Alcotest.failf "voice shard missing" in
-  let names = List.map (fun (t : Masc_mcp.Types.tool_schema) -> t.name)
+  let names = List.map (fun (t : Types.tool_schema) -> t.name)
     voice_shard.Tool_shard.tools in
   Alcotest.(check bool) "has voice_speak" true (List.mem "keeper_voice_speak" names);
   Alcotest.(check bool) "has voice_agent" true (List.mem "keeper_voice_agent" names);
@@ -299,7 +299,7 @@ let test_voice_tools_names () =
   Alcotest.(check bool) "has voice_session_end" true (List.mem "keeper_voice_session_end" names)
 
 let test_keeper_model_has_voice_tools () =
-  let names = List.map (fun (t : Masc_mcp.Types.tool_schema) -> t.name)
+  let names = List.map (fun (t : Types.tool_schema) -> t.name)
     Tool_shard.keeper_model_tools in
   Alcotest.(check bool) "keeper_model has voice_speak" true (List.mem "keeper_voice_speak" names);
   Alcotest.(check bool) "keeper_model has voice_agent" true (List.mem "keeper_voice_agent" names);
@@ -314,14 +314,14 @@ let test_keeper_model_has_voice_tools () =
 let test_revoke_voice_removes_all_tools () =
   let all_shards = Tool_shard.default_shard_names in
   let tools_before = Tool_shard.tools_of_shards all_shards in
-  let voice_before = List.filter (fun (t : Masc_mcp.Types.tool_schema) ->
+  let voice_before = List.filter (fun (t : Types.tool_schema) ->
     let n = t.name in
     String.length n >= 13 && String.sub n 0 13 = "keeper_voice_") tools_before in
   Alcotest.(check int) "5 voice tools before revoke" 5 (List.length voice_before);
   match Tool_shard.revoke_shard all_shards "voice" with
   | Ok shards_after ->
     let tools_after = Tool_shard.tools_of_shards shards_after in
-    let voice_after = List.filter (fun (t : Masc_mcp.Types.tool_schema) ->
+    let voice_after = List.filter (fun (t : Types.tool_schema) ->
       let n = t.name in
       String.length n >= 13 && String.sub n 0 13 = "keeper_voice_") tools_after in
     Alcotest.(check int) "0 voice tools after revoke" 0 (List.length voice_after)

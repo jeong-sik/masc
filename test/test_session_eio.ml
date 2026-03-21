@@ -44,7 +44,7 @@ let test_rate_limit () =
   Alcotest.(check int) "no wait" 0 wait
 
 let test_rate_limit_burst () =
-  let config = { Masc_mcp.Types.default_rate_limit with per_minute = 2; burst_allowed = 1 } in
+  let config = { Types.default_rate_limit with per_minute = 2; burst_allowed = 1 } in
   let registry = create ~config () in
   (* First two requests *)
   let _ = check_rate_limit registry ~agent_name:"claude" in

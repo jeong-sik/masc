@@ -269,7 +269,7 @@ let test_dispatch_agent_relations () =
 
 let test_schema_agent_relations_present () =
   let schemas = Tool_agent.schemas in
-  let has_it = List.exists (fun (s : Masc_mcp.Types.tool_schema) ->
+  let has_it = List.exists (fun (s : Types.tool_schema) ->
     s.name = "masc_agent_relations") schemas in
   Alcotest.(check bool) "schema registered" true has_it
 

@@ -12,7 +12,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 open Alcotest
 
 module Auth = Masc_mcp.Auth
-module Types = Masc_mcp.Types
+module Types = Types
 
 (* ============================================================
    generate_token Tests

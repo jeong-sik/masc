@@ -49,7 +49,7 @@ let write_pending_confirm config session_id =
             ("target_id", `String session_id);
             ("payload", `Assoc [ ("reason", `String "fixture pending confirmation") ]);
             ("delegated_tool", `String "masc_team_session_stop");
-            ("created_at", `String (Lib.Types.now_iso ()));
+            ("created_at", `String (Types.now_iso ()));
             ("expires_at", `Null);
           ];
       ])
@@ -229,8 +229,8 @@ let seed_room config session_id =
       stop_reason = Some "fixture_interrupted_after_spawn_failure";
       generated_report = false;
       artifacts_dir = Filename.concat ".masc/team-sessions" session_id;
-      created_at_iso = Lib.Types.now_iso ();
-      updated_at_iso = Lib.Types.now_iso ();
+      created_at_iso = Types.now_iso ();
+      updated_at_iso = Types.now_iso ();
     }
   in
   Lib.Team_session_store.save_session config session;

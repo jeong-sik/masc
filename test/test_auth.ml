@@ -5,7 +5,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 open Alcotest
 module Auth = Masc_mcp.Auth
-module Types = Masc_mcp.Types
+module Types = Types
 
 (* Setup a temp directory for testing *)
 let setup_test_room () =

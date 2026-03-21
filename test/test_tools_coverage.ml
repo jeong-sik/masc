@@ -1,6 +1,6 @@
 (** Comprehensive Tests for Tools module - MCP Tool Definitions *)
 
-open Masc_mcp.Types
+open Types
 open Masc_mcp.Tools
 
 (* ============================================================ *)

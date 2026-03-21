@@ -444,24 +444,24 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
       let supervisor_token =
         match
           Masc_mcp.Auth.create_token config.base_path ~agent_name:supervisor_nickname
-            ~role:Masc_mcp.Types.Admin
+            ~role:Types.Admin
         with
         | Ok (token, _cred) -> token
         | Error err ->
             fail
               (Printf.sprintf "failed to create supervisor token: %s"
-                 (Masc_mcp.Types.masc_error_to_string err))
+                 (Types.masc_error_to_string err))
       in
       let create_worker_token agent_name =
         match
           Masc_mcp.Auth.create_token config.base_path ~agent_name
-            ~role:Masc_mcp.Types.Worker
+            ~role:Types.Worker
         with
         | Ok (token, _cred) -> token
         | Error err ->
             fail
               (Printf.sprintf "failed to create %s token: %s" agent_name
-                 (Masc_mcp.Types.masc_error_to_string err))
+                 (Types.masc_error_to_string err))
       in
       ( supervisor_token,
         create_worker_token planner_nickname,

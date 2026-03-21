@@ -5,7 +5,7 @@ module Keeper_execution = Masc_mcp.Keeper_execution
 module Keeper_memory = Masc_mcp.Keeper_memory
 module Keeper_memory_recall = Masc_mcp.Keeper_memory_recall
 module Keeper_types = Masc_mcp.Keeper_types
-module Types = Masc_mcp.Types
+module Types = Types
 
 let keeper_meta ~name ~mention_targets =
   let json =

@@ -96,8 +96,8 @@ let sample_session ?(min_agents = 2) ?(agent_names = [ "worker-a"; "worker-b" ])
     stop_reason = None;
     generated_report = true;
     artifacts_dir = Filename.concat ".masc/team-sessions" session_id;
-    created_at_iso = Lib.Types.now_iso ();
-    updated_at_iso = Lib.Types.now_iso ();
+    created_at_iso = Types.now_iso ();
+    updated_at_iso = Types.now_iso ();
   }
 
 let seed_session_artifacts ?(session = None) ?events config session_id =
@@ -141,7 +141,7 @@ let seed_session_artifacts ?(session = None) ?events config session_id =
   Lib.Team_session_store.write_checkpoint config session_id
     {
       Lib.Team_session_types.ts = now -. 25.0;
-      ts_iso = Lib.Types.now_iso ();
+      ts_iso = Types.now_iso ();
       status = Lib.Team_session_types.Running;
       elapsed_sec = 95;
       remaining_sec = 505;

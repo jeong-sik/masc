@@ -23,7 +23,7 @@ let tools_for_mode mode =
   Config.enabled_tool_schemas cats
 
 let tool_names_for_mode mode =
-  List.map (fun (s : Masc_mcp.Types.tool_schema) -> s.name) (tools_for_mode mode)
+  List.map (fun (s : Types.tool_schema) -> s.name) (tools_for_mode mode)
 
 (* ============================================================
    Core invariant: monotonic ordering
@@ -179,7 +179,7 @@ let test_custom_empty () =
   let schemas = Config.enabled_tool_schemas cats in
   (* Custom with no categories still gets mode management tools
      plus any Hidden tools that bypass filtering *)
-  let names = List.map (fun (s : Masc_mcp.Types.tool_schema) -> s.name) schemas in
+  let names = List.map (fun (s : Types.tool_schema) -> s.name) schemas in
   check bool "custom has masc_switch_mode" true (List.mem "masc_switch_mode" names);
   check bool "custom has masc_get_config" true (List.mem "masc_get_config" names)
 

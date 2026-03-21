@@ -243,7 +243,7 @@ let test_schemas_count () =
     (List.length Tool_notifications.schemas)
 
 let test_schemas_names () =
-  let names = List.map (fun (s : Masc_mcp.Types.tool_schema) -> s.name) Tool_notifications.schemas in
+  let names = List.map (fun (s : Types.tool_schema) -> s.name) Tool_notifications.schemas in
   Alcotest.(check bool) "has notification_count" true
     (List.mem "masc_notification_count" names);
   Alcotest.(check bool) "has check_notifications" true

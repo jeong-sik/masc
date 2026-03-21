@@ -9,7 +9,7 @@
 open Alcotest
 
 module Tempo = Masc_mcp.Tempo
-module Types = Masc_mcp.Types
+module Types = Types
 
 (* ============================================================
    state_to_json Tests
@@ -209,7 +209,7 @@ let test_calculate_adaptive_tempo_low_priority () =
    tempo_file Tests
    ============================================================ *)
 
-module Backend = Masc_mcp.Backend
+module Backend = Backend
 module Room_utils = Masc_mcp.Room_utils
 
 let make_test_config ~base_path : Room_utils.config =

@@ -8,7 +8,7 @@ module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Mcp = Masc_mcp.Mcp_server
 module Room = Masc_mcp.Room
 module Session = Masc_mcp.Session
-module Types = Masc_mcp.Types
+module Types = Types
 module Common = Common
 
 (* ===== Test Helpers ===== *)

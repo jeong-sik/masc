@@ -41,7 +41,7 @@ let with_eio_env f =
   let fs = Eio.Stdenv.fs env in
   let clock = Eio.Stdenv.clock env in
   (* Ensure clock is available for atomic lock-retry sleep on Linux *)
-  Masc_mcp.Eio_context.set_clock clock;
+  Eio_context.set_clock clock;
   let tmp_dir = make_test_dir () in
   let config = Room_eio.test_config ~fs tmp_dir in
   Fun.protect

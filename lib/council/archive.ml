@@ -237,17 +237,26 @@ module Q = struct
      FROM jiphyeon_records WHERE $1 = ANY(agents) ORDER BY timestamp DESC LIMIT 100"
 end
 
-(** PostgreSQL 연결 풀 *)
+(** PostgreSQL 연결 풀 — shared pool 주입 우선, fallback으로 자체 생성 *)
 let pg_pool_ref : (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t option ref = ref None
+let shared_pool_ref : (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t option ref = ref None
+
+let set_shared_pool pool =
+  shared_pool_ref := Some pool
+
+let has_shared_pool () = Option.is_some !shared_pool_ref
 
 let get_pg_pool ~sw ~env =
+  match !shared_pool_ref with
+  | Some pool -> Ok pool
+  | None ->
   match !pg_pool_ref with
   | Some pool -> Ok pool
   | None ->
     match get_postgres_url () with
     | None -> Error "DATABASE_URL not set"
     | Some url ->
-      let pool_config = Caqti_pool_config.create ~max_size:3 () in
+      let pool_config = Caqti_pool_config.create ~max_size:10 () in
       match Caqti_eio_unix.connect_pool ~sw ~pool_config (Uri.of_string url) ~stdenv:env with
       | Ok pool ->
         pg_pool_ref := Some pool;

@@ -82,6 +82,14 @@ let health_handler _request reqd =
     ("uptime", `String uptime_str);
     ("sse_clients", `Int (Sse.client_count ()));
     ("lodge", lodge_json);
+    ("pg_pool", let max_size = Backend_core.configured_max_pool_size () in
+      let shared = Council.Archive.has_shared_pool ()
+                   || Jiphyeon.Archive.has_shared_pool () in
+      Backend_core.pool_stats_to_yojson {
+        max_size;
+        pool_count = (if shared then 3 else 5);
+        shared_pool_injected = shared;
+      });
   ] in
   Http.Response.json (Yojson.Safe.to_string health_json) reqd
 

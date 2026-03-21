@@ -170,27 +170,27 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <span>Skill route</span>
         <strong>${skillRouteLabel}</strong>
       </div>
-      <div style="display:flex; justify-content:flex-end; margin-top:4px;">
+      <div class="flex justify-end mt-1">
         <button class="control-btn ghost" onClick=${() => { openToolsInventory(openToolsQuery) }}>
           Open tools panel
         </button>
       </div>
-      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-        <span style="font-size:12px; color:#888;">Allowed tools</span>
-        <span style="font-size:11px; color:#64748b;">Currently permitted tools for this keeper runtime.</span>
-        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+      <div class="flex flex-col gap-2 mt-2">
+        <span class="text-xs text-[var(--text-dim)]">Allowed tools</span>
+        <span class="text-[11px] text-[var(--text-slate)]">Currently permitted tools for this keeper runtime.</span>
+        <div class="flex flex-wrap gap-1.5">
           ${allowedTools.length > 0
             ? allowedTools.map(tool => html`<span class="pill">${tool}</span>`)
-            : html`<span style="font-size:12px; color:#888;">${allowlistFallback}</span>`}
+            : html`<span class="text-xs text-[var(--text-dim)]">${allowlistFallback}</span>`}
         </div>
       </div>
-      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-        <span style="font-size:12px; color:#888;">Observed tools</span>
-        <span style="font-size:11px; color:#64748b;">Recent execution evidence from heartbeat or runtime telemetry.</span>
-        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+      <div class="flex flex-col gap-2 mt-2">
+        <span class="text-xs text-[var(--text-dim)]">Observed tools</span>
+        <span class="text-[11px] text-[var(--text-slate)]">Recent execution evidence from heartbeat or runtime telemetry.</span>
+        <div class="flex flex-wrap gap-1.5">
           ${observedTools.length > 0
             ? observedTools.map(tool => html`<span class="pill">${tool}</span>`)
-            : html`<span style="font-size:12px; color:#888;">${observedFallback}</span>`}
+            : html`<span class="text-xs text-[var(--text-dim)]">${observedFallback}</span>`}
         </div>
       </div>
       <div class="keeper-signal-row">
@@ -205,38 +205,38 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <span>Observed at</span>
         <strong>${auditAt ? html`<${TimeAgo} timestamp=${auditAt} />` : metadataFallback}</strong>
       </div>
-      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-        <span style="font-size:12px; color:#888;">Keeper recent tools</span>
-        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+      <div class="flex flex-col gap-2 mt-2">
+        <span class="text-xs text-[var(--text-dim)]">Keeper recent tools</span>
+        <div class="flex flex-wrap gap-1.5">
           ${recentTools.length > 0
             ? recentTools.map(tool => html`<span class="pill">${tool}</span>`)
-            : html`<span style="font-size:12px; color:#888;">${linkedRecentFallback}</span>`}
+            : html`<span class="text-xs text-[var(--text-dim)]">${linkedRecentFallback}</span>`}
         </div>
       </div>
       ${topTools.length > 0
         ? html`
-            <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-              <span style="font-size:12px; color:#888;">Window top tools</span>
-              <div style="display:flex; flex-wrap:wrap; gap:6px;">
+            <div class="flex flex-col gap-2 mt-2">
+              <span class="text-xs text-[var(--text-dim)]">Window top tools</span>
+              <div class="flex flex-wrap gap-1.5">
                 ${topTools.map(tool => html`<span class="pill">${tool}</span>`)}
               </div>
             </div>
           `
         : null}
-      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-        <span style="font-size:12px; color:#888;">Capabilities</span>
-        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+      <div class="flex flex-col gap-2 mt-2">
+        <span class="text-xs text-[var(--text-dim)]">Capabilities</span>
+        <div class="flex flex-wrap gap-1.5">
           ${capabilities.length > 0
             ? capabilities.map(capability => html`<span class="pill">${capability}</span>`)
-            : html`<span style="font-size:12px; color:#888;">등록된 capability 없음</span>`}
+            : html`<span class="text-xs text-[var(--text-dim)]">등록된 capability 없음</span>`}
         </div>
       </div>
-      <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
-        <span style="font-size:12px; color:#888;">Available actions nearby</span>
-        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+      <div class="flex flex-col gap-2 mt-2">
+        <span class="text-xs text-[var(--text-dim)]">Available actions nearby</span>
+        <div class="flex flex-wrap gap-1.5">
           ${actions.length > 0
             ? actions.map(action => html`<span class="pill">${actionDescriptorLabel(action.action_type)}</span>`)
-            : html`<span style="font-size:12px; color:#888;">operator action 광고 없음</span>`}
+            : html`<span class="text-xs text-[var(--text-dim)]">operator action 광고 없음</span>`}
         </div>
       </div>
     </div>

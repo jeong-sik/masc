@@ -310,6 +310,8 @@ let of_json (json : Yojson.Safe.t) : (int, string) result =
             Log.Chain.error "Failed to load entry: %s" msg
       ) entries;
       Ok !count
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Error (Printexc.to_string e)
   )

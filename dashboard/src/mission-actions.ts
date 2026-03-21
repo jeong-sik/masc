@@ -22,11 +22,11 @@ import {
   normalizeMissionBriefing,
 } from './mission-normalizers'
 
-export async function refreshMissionSnapshot(mode?: 'snapshot' | 'full'): Promise<void> {
+export async function refreshMissionSnapshot(): Promise<void> {
   missionLoading.value = true
   missionError.value = null
   try {
-    const raw = await fetchDashboardMission(mode)
+    const raw = await fetchDashboardMission()
     missionSnapshot.value = normalizeMission(raw)
   } catch (err) {
     missionError.value = err instanceof Error ? err.message : 'Failed to load mission snapshot'

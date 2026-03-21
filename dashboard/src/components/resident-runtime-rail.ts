@@ -48,8 +48,8 @@ function renderResidentRuntimeCard(
 ) {
   return html`
     <div style="padding-top:12px; border-top:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; gap:6px;">
-      <div class="rail-card-head" style="margin:0;">
-        <h3 style="font-size:12px;">${title}</h3>
+      <div class="rail-card-head" class="m-0">
+        <h3 class="text-xs">${title}</h3>
         <span class="rail-section-chip ${tone}">${statusLabel}</span>
       </div>
       ${rows}

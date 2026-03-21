@@ -48,7 +48,7 @@ export function ActivityStream() {
       <${FilterBar} />
       <div class="activity-stream-list">
         ${entries.length === 0
-          ? html`<div class="activity-empty">No events matching filters</div>`
+          ? html`<div class="activity-empty">필터에 맞는 이벤트 없음</div>`
           : entries.map((entry, i) => html`
             <div
               key=${`${entry.timestamp}-${i}`}

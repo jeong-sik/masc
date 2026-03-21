@@ -277,3 +277,202 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* ── Tool Metrics (P4 Phase 4.5) ──────────────────────────── */
+.tool-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tool-metrics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tool-metrics-title {
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.tool-metrics-error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.34);
+  color: #fecaca;
+  font-size: 13px;
+}
+
+/* ── Summary stats row ──────────────────────────────────── */
+.tool-metrics-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tool-metrics-stat {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--white-8);
+  background: var(--white-3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  text-align: center;
+}
+
+.tool-metrics-stat .stat-value {
+  color: var(--text-strong);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.tool-metrics-stat .stat-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Two-column sections ────────────────────────────────── */
+.tool-metrics-sections {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 16px;
+}
+
+.tool-metrics-section h4 {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 10px;
+}
+
+/* ── Tier distribution ──────────────────────────────────── */
+.tier-dist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tier-dist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tier-dist-label {
+  display: inline-block;
+  min-width: 72px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.tier-dist-count {
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 36px;
+  text-align: right;
+}
+
+.tier-dist-pct {
+  color: var(--text-muted);
+  font-size: 12px;
+  min-width: 48px;
+  text-align: right;
+}
+
+/* ── Tier badges ────────────────────────────────────────── */
+.badge-essential {
+  background: rgba(74, 222, 128, 0.18);
+  color: var(--ok);
+}
+
+.badge-standard {
+  background: rgba(71, 184, 255, 0.18);
+  color: var(--accent);
+}
+
+.badge-full {
+  background: var(--white-8);
+  color: var(--text-muted);
+}
+
+/* ── Bar chart ──────────────────────────────────────────── */
+.tool-bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-bar-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.tool-bar-name {
+  color: var(--text-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.tool-bar-tier {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.tool-bar-track {
+  height: 14px;
+  border-radius: 3px;
+  background: var(--white-6);
+  overflow: hidden;
+}
+
+.tool-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+
+.tool-bar-count {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media (max-width: 860px) {
+  .tool-metrics-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tool-metrics-sections {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-bar-row {
+    grid-template-columns: minmax(100px, 0.6fr) 56px minmax(0, 1fr) 36px;
+  }
+}

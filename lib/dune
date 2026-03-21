@@ -112,7 +112,7 @@
    server_routes_http_routes_command_plane_read
    server_routes_http_routes_command_plane_write
    server_routes_http_routes_provider_runs
-   server_routes_http_routes_social
+   server_routes_http_routes_activity
    server_h2_gateway
    server_h2_gateway_helpers
    server_h2_gateway_routes_extra
@@ -123,7 +123,7 @@
    server_command_plane_http_stream
    server_command_plane_http_mutations
    server_command_plane_http_help
-   server_social_http
+   server_activity_http
    server_mcp_transport_http
    server_mcp_transport_http_protocol
    server_mcp_transport_http_types
@@ -147,7 +147,7 @@
    graphql_client
    graphql_endpoint
    graphql_api
-   social_motion
+   activity_graph
    handover_eio
    hat
    heartbeat
@@ -410,6 +410,10 @@
    tool_agent_timeline
    tool_local_runtime
    tool_local_runtime_core
+   tool_local_runtime_http
+   tool_local_runtime_verify
+   tool_local_runtime_bench
+   tool_local_runtime_status
    tool_model_catalog
    tool_board
    tool_command_plane
@@ -575,6 +579,12 @@
    ;; Autoresearch — Karpathy-inspired autonomous experiment loop
    autoresearch
    autoresearch_types
+   autoresearch_serde
+   autoresearch_storage
+   autoresearch_metric
+   autoresearch_git
+   autoresearch_file
+   autoresearch_codegen
    tool_autoresearch_schemas
    tool_autoresearch
    ;; Anti-Fake Test Quality Scoring (harness P2)
@@ -647,7 +657,7 @@
  server_routes_http_routes_dashboard
  server_routes_http_routes_command_plane_read
  server_routes_http_routes_command_plane_write
- server_routes_http_routes_social
+ server_routes_http_routes_activity
  swarm_status_types
  swarm_status_json
  swarm_status_parse
@@ -734,6 +744,12 @@
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules
   autoresearch_types
+  autoresearch_serde
+  autoresearch_storage
+  autoresearch_metric
+  autoresearch_git
+  autoresearch_file
+  autoresearch_codegen
   tool_autoresearch_schemas
   backend_eio_compression
   room_multi
@@ -748,6 +764,11 @@
   dashboard_proof_helpers
   keeper_skill_routing
   keeper_alerting_path
+  ;; tool_local_runtime sub-modules
+  tool_local_runtime_http
+  tool_local_runtime_verify
+  tool_local_runtime_bench
+  tool_local_runtime_status
   ;; tool_misc split
   tool_misc_snapshots
   ;; tool_inline_dispatch sub-modules

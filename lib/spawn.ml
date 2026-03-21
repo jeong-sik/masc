@@ -263,6 +263,39 @@ let parse_command cmd =
   let parts = String.split_on_char ' ' cmd in
   List.filter (fun s -> String.length s > 0) parts
 
+(** Mutex to serialize Sys.chdir + Unix.create_process.
+    Sys.chdir mutates process-global CWD; concurrent spawns without
+    serialization cause child processes to inherit the wrong directory. *)
+let chdir_mutex = Eio.Mutex.create ()
+
+(** Fork a subprocess with optional CWD change, holding [chdir_mutex]
+    only for the chdir-fork-restore window.  Returns (pid, stdout_read_fd). *)
+let fork_with_cwd ~cmd_array ~stdin_content ~working_dir ~config_working_dir =
+  Eio.Mutex.use_rw ~protect:true chdir_mutex (fun () ->
+    let original_dir = Sys.getcwd () in
+    let target_dir = match working_dir with
+      | Some dir -> Some dir
+      | None -> config_working_dir
+    in
+    Option.iter Sys.chdir target_dir;
+    let stdout_read, stdout_write = Unix.pipe () in
+    let stdin_read, stdin_write = Unix.pipe () in
+    let pid =
+      Unix.create_process (Array.get cmd_array 0) cmd_array stdin_read
+        stdout_write Unix.stderr
+    in
+    Unix.close stdout_write;
+    Unix.close stdin_read;
+    (* Write stdin before restoring CWD — data goes to pipe, not filesystem *)
+    let _ =
+      Unix.write_substring stdin_write stdin_content 0
+        (String.length stdin_content)
+    in
+    Unix.close stdin_write;
+    (* Restore CWD while still holding mutex *)
+    if Option.is_some target_dir then Sys.chdir original_dir;
+    (pid, stdout_read))
+
 let add_default_model_arg agent_name argv =
   match Provider_adapter.resolve_direct_adapter agent_name with
   | Some adapter when adapter.canonical_name = "llama" -> (
@@ -328,41 +361,17 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
     in
     let cmd_array = Array.of_list cmd_args in
 
-    (* Change to working dir if specified *)
-    let original_dir = Sys.getcwd () in
-    let () =
-      match working_dir with
-      | Some dir -> Sys.chdir dir
-      | None -> (
-          match config.working_dir with
-          | Some dir -> Sys.chdir dir
-          | None -> ())
-    in
+    (* Gemini CLI expects prompt via -p; other CLIs still read stdin. *)
+    let stdin_content = if agent_name = "gemini" then "" else augmented_prompt in
 
     try
-      (* Create pipes for stdin and stdout *)
-      let (stdout_read, stdout_write) = Unix.pipe () in
-      let (stdin_read, stdin_write) = Unix.pipe () in
-
-      (* Spawn process directly without shell *)
-      let pid =
-        Unix.create_process (Array.get cmd_array 0) cmd_array stdin_read
-          stdout_write Unix.stderr
+      (* Fork with chdir mutex to prevent CWD race between concurrent spawns *)
+      let (pid, stdout_read) =
+        fork_with_cwd ~cmd_array ~stdin_content
+          ~working_dir ~config_working_dir:config.working_dir
       in
 
-      (* Close unused ends *)
-      Unix.close stdout_write;
-      Unix.close stdin_read;
-
-      (* Gemini CLI expects prompt via -p; other CLIs still read stdin. *)
-      let stdin_content = if agent_name = "gemini" then "" else augmented_prompt in
-      let _ =
-        Unix.write_substring stdin_write stdin_content 0
-          (String.length stdin_content)
-      in
-      Unix.close stdin_write;
-
-      (* Read output *)
+      (* Read output (outside mutex — only this fiber reads this pipe) *)
       let ic = Unix.in_channel_of_descr stdout_read in
       let raw_output = In_channel.input_all ic in
       In_channel.close ic;
@@ -370,8 +379,7 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
       (* Wait for process *)
       let (_, status) = Unix.waitpid [] pid in
 
-      (* Restore directory *)
-      Sys.chdir original_dir;
+      (* CWD already restored inside fork_with_cwd *)
 
       let elapsed_ms =
         int_of_float ((Time_compat.now () -. start_time) *. 1000.0)
@@ -418,8 +426,10 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
       cache_read_tokens = cache_read;
       cost_usd;
     }
-  with e ->
-    Sys.chdir original_dir;
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
+    (* CWD already restored inside fork_with_cwd *)
     {
       success = false;
       output = Printf.sprintf "Spawn error: %s" (Printexc.to_string e);

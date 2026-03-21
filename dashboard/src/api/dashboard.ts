@@ -241,9 +241,8 @@ export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
   return get('/api/v1/dashboard/semantics')
 }
 
-export function fetchDashboardMission(mode?: 'snapshot' | 'full'): Promise<DashboardMissionResponse> {
-  const query = mode ? `?mode=${mode}` : ''
-  return get(`/api/v1/dashboard/mission${query}`)
+export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
+  return get('/api/v1/dashboard/mission')
 }
 
 export function fetchDashboardMissionSession(sessionId: string): Promise<DashboardMissionSessionDetailResponse> {

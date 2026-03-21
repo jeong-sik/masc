@@ -119,6 +119,43 @@ let write_backlog config backlog =
 let current_room_id config =
   read_current_room config |> Option.value ~default:"default"
 
+let activity_room_id config =
+  match config.scope with
+  | Default -> "default"
+  | Named id -> id
+
+let emit_message_activity config ~from_agent ~content ~mention =
+  let payload =
+    `Assoc
+      [
+        ("content", `String content);
+        ( "mention",
+          match mention with
+          | Some value -> `String value
+          | None -> `Null );
+      ]
+  in
+  let actor = Activity_graph.entity ~kind:"agent" from_agent in
+  let emit ?subject ~kind ~tags () =
+    try
+      ignore
+        (Activity_graph.emit config ~room_id:(activity_room_id config)
+           ~actor ?subject ~kind ~payload ~tags ())
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Misc.warn "message activity emit failed (%s): %s" kind
+          (Printexc.to_string exn)
+  in
+  emit ~kind:"message.broadcast" ~tags:[ "message"; "broadcast" ] ();
+  match mention with
+  | Some target when String.trim target <> "" ->
+      emit
+        ~subject:(Activity_graph.entity ~kind:"agent" target)
+        ~kind:"message.mentioned"
+        ~tags:[ "message"; "mention" ] ()
+  | _ -> ()
+
 let tasks_dir_in_room config room_id =
   tasks_dir (with_scope config (Named room_id))
 
@@ -233,7 +270,9 @@ let get_tty () =
             if String.length trimmed > 0 then Some trimmed else None
           else None
         with Unix.Unix_error _ -> None
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Log.Misc.error "get_tty failed: %s" (Printexc.to_string e);
     None
 
@@ -335,6 +374,8 @@ let broadcast config ~from_agent ~content =
       ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
    | Ok _ -> ()
    | Error e -> Log.Misc.error "broadcast publish failed for %s: %s" room_id (Backend.show_error e));
+  emit_message_activity config ~from_agent:safe_agent ~content:safe_content
+    ~mention;
   Printf.sprintf "📢 [%s@%s] %s" safe_agent room_id safe_content
 
 (* ============================================ *)

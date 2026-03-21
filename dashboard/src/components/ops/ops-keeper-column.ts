@@ -83,7 +83,7 @@ export function OpsKeeperColumn() {
                 <div class="ops-entity-goal" title=${keeper.goal ?? ''}>${truncateGoal(keeper.short_goal ?? keeper.goal ?? '')}</div>
               ` : null}
               ${tone !== 'ok'
-                ? html`<div class="ops-context-note" style="margin-top:6px;">점검 이유: ${prioritySummary}</div>`
+                ? html`<div class="ops-context-note" class="mt-1.5">점검 이유: ${prioritySummary}</div>`
                 : null}
               <div class="ops-entity-stats">
                 ${typeof keeper.turn_count === 'number' ? html`<span>turns: ${keeper.turn_count}</span>` : null}
@@ -95,7 +95,7 @@ export function OpsKeeperColumn() {
             })()}
           `)}
         </div>
-        <div class="ops-context-note" style="margin-top:12px;">Persistent agent는 resident keeper와 분리해서 참고용으로만 보여줍니다.</div>
+        <div class="ops-context-note" class="mt-3">Persistent agent는 resident keeper와 분리해서 참고용으로만 보여줍니다.</div>
         <div class="ops-entity-list">
           ${persistentAgents.length === 0
             ? html`<div class="ops-empty">분리된 persistent agent는 없습니다.</div>`
@@ -133,7 +133,7 @@ export function OpsKeeperColumn() {
               ${selectedKeeper.last_model_used ? html`<span>모델: ${selectedKeeper.last_model_used}</span>` : null}
             </div>
             ${keeperPriorityTone(selectedKeeper) !== 'ok'
-              ? html`<div class="ops-context-note" style="margin-top:8px;">현재 점검 이유: ${keeperPrioritySummary(selectedKeeper)}</div>`
+              ? html`<div class="ops-context-note" class="mt-2">현재 점검 이유: ${keeperPrioritySummary(selectedKeeper)}</div>`
               : null}
             ${selectedKeeper.goal ? html`<div class="ops-detail-goal">${selectedKeeper.goal}</div>` : null}
           </div>

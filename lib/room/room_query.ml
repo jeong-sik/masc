@@ -39,7 +39,9 @@ let update_priority config ~task_id ~priority =
             task_id old_priority priority (now_iso ()));
 
           Printf.sprintf "✅ Task %s priority: P%d → P%d" task_id old_priority priority
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 

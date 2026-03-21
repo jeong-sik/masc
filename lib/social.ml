@@ -83,7 +83,9 @@ let post_of_yojson (json : Yojson.Safe.t) : (post, string) result =
     let created_at = json |> member "created_at" |> to_float in
     let votes = json |> member "votes" |> to_int in
     Ok { id; author; content; submolt; created_at; votes }
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Failed to parse post: %s" (Printexc.to_string e))
 
 let comment_to_yojson (c : comment) : Yojson.Safe.t =
@@ -112,7 +114,9 @@ let comment_of_yojson (json : Yojson.Safe.t) : (comment, string) result =
     let created_at = json |> member "created_at" |> to_float in
     let votes = json |> member "votes" |> to_int in
     Ok { id; post_id; parent_id; author; content; created_at; votes }
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Failed to parse comment: %s" (Printexc.to_string e))
 
 let vote_record_to_yojson (v : vote_record) : Yojson.Safe.t =
@@ -132,7 +136,9 @@ let vote_record_of_yojson (json : Yojson.Safe.t) : (vote_record, string) result 
         let voted_at = json |> member "voted_at" |> to_float in
         Ok { voter; direction; voted_at }
     | Error e -> Error e
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Failed to parse vote_record: %s" (Printexc.to_string e))
 
 (** {1 Storage Operations} *)
@@ -203,7 +209,9 @@ let create_post config ~author ~content ?submolt () =
   try
     write_json path (post_to_yojson post);
     Ok post
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Failed to create post: %s" (Printexc.to_string e))
 
 let get_post config ~post_id : (post, string) result =
@@ -273,7 +281,9 @@ let add_comment config ~post_id ~author ~content ?parent_id () : (comment, strin
       try
         write_json path (comment_to_yojson comment);
         Ok comment
-      with e ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e ->
         Error (Printf.sprintf "Failed to add comment: %s" (Printexc.to_string e))
 
 let save_comment config (comment : comment) : unit =

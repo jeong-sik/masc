@@ -22,9 +22,9 @@ async function refreshToolsSurface(): Promise<void> {
   await refreshTools()
 }
 
-async function refreshSocialSurface(): Promise<void> {
-  const { refreshSocial } = await import('./components/social')
-  await refreshSocial()
+async function refreshActivityGraphSurface(): Promise<void> {
+  const { refreshActivityGraph } = await import('./components/activity-graph')
+  await refreshActivityGraph()
 }
 
 export function refreshForTab(tab: string) {
@@ -38,14 +38,14 @@ export function refreshForTab(tab: string) {
     const section = route.value.params.section
     if (section === 'activity') {
       refreshExecution()
-      void refreshSocialSurface()
+      void refreshActivityGraphSurface()
     } else if (section === 'agents') {
       refreshRoomTruth()
       refreshExecution()
       refreshMissionSnapshot()
     } else {
       refreshRoomTruth()
-      refreshMissionSnapshot('full')
+      refreshMissionSnapshot()
       refreshMissionBriefing()
     }
   }

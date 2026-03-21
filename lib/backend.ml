@@ -144,7 +144,9 @@ module FileSystemBackend : BACKEND = struct
             );
             Sys.rename tmp_path path;
             Ok ()
-          with e -> Error (OperationFailed (Printexc.to_string e))
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | e -> Error (OperationFailed (Printexc.to_string e))
     )
 
   let delete t ~key =
@@ -156,7 +158,9 @@ module FileSystemBackend : BACKEND = struct
             try
               Sys.remove path;
               Ok true
-            with e -> Error (OperationFailed (Printexc.to_string e))
+            with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | e -> Error (OperationFailed (Printexc.to_string e))
           end else
             Ok false
     )
@@ -303,7 +307,9 @@ module FileSystemBackend : BACKEND = struct
                     Ok true
                 | Some _ -> Ok false  (* Different owner *)
                 | None -> Ok false    (* No valid lock *)
-              with e ->
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | e ->
                 Log.Misc.error "Lock operation failed: %s" (Printexc.to_string e);
                 Ok false
             in
@@ -357,7 +363,9 @@ module FileSystemBackend : BACKEND = struct
                   Ok true
                 end else
                   Ok false
-              with e ->
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | e ->
                 Log.Misc.error "Lock operation failed: %s" (Printexc.to_string e);
                 Ok false
             in
@@ -385,7 +393,9 @@ module FileSystemBackend : BACKEND = struct
       );
       Sys.remove test_path;
       Ok true
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Log.Misc.error "Health check failed: %s" (Printexc.to_string e);
       Ok false
 end

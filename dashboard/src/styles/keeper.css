@@ -126,26 +126,6 @@
 /* Keeper Memory */
 .keeper-memory-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
 
-/* Keeper Conversations */
-.keeper-conversation-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-.keeper-conversation-item {
-  padding: 8px 10px;
-  background: var(--white-3);
-  border-radius: 6px;
-}
-.keeper-role-chip {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  text-transform: uppercase;
-}
-.keeper-role-chip.user { background: rgba(34,211,238,0.15); color: var(--cyan); }
-.keeper-role-chip.assistant { background: rgba(167,139,250,0.15); color: var(--purple); }
-.keeper-role-chip.warn { background: rgba(251,191,36,0.15); color: var(--warn); }
-.keeper-role-chip.bad { background: rgba(239,68,68,0.15); color: var(--bad); }
-
-.keeper-conversation-text { font-size: 13px; margin-top: 4px; }
-
 /* Keeper K2K */
 .keeper-k2k-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .keeper-k2k-route { font-family: monospace; font-size: 11px; color: var(--text-dim); }

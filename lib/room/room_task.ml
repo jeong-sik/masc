@@ -4,6 +4,28 @@ open Types
 include Room_utils
 include Room_state
 
+let activity_room_id (config : Room_utils.config) =
+  match config.scope with
+  | Default -> "default"
+  | Named id -> id
+
+let emit_task_activity config ~agent_name ~task_id ~kind ~payload =
+  try
+    ignore
+      (Activity_graph.emit config
+         ~room_id:(activity_room_id config)
+         ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
+         ~subject:(Activity_graph.entity ~kind:"task" task_id)
+         ~kind
+         ~payload
+         ~tags:[ "task"; kind ]
+         ())
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Misc.warn "task activity emit failed (%s %s): %s" kind task_id
+        (Printexc.to_string exn)
+
 (** Add task *)
 let add_task config ~title ~priority ~description =
   ensure_initialized config;
@@ -29,6 +51,14 @@ let add_task config ~title ~priority ~description =
     version = backlog.version + 1;
   } in
   write_backlog config new_backlog;
+  emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
+    ~payload:
+      (`Assoc
+        [
+          ("task_id", `String task_id);
+          ("title", `String title);
+          ("priority", `Int priority);
+        ]);
 
   let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
   Printf.sprintf "✅ Added %s: %s" task_id title
@@ -58,6 +88,16 @@ let add_task_with_role config ~title ~priority ~description ~required_role =
     version = backlog.version + 1;
   } in
   write_backlog config new_backlog;
+  emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
+    ~payload:
+      (`Assoc
+        [
+          ("task_id", `String task_id);
+          ("title", `String title);
+          ("priority", `Int priority);
+          ( "required_role",
+            `String (Agent_identity.role_to_string required_role) );
+        ]);
 
   let role_str = Agent_identity.role_to_string required_role in
   let _ = broadcast config ~from_agent:"system"
@@ -93,11 +133,25 @@ let batch_add_tasks config tasks =
         version = backlog.version + 1;
       } in
       write_backlog config new_backlog;
+      List.iter
+        (fun (task : Types.task) ->
+          emit_task_activity config ~agent_name:"system" ~task_id:task.id
+            ~kind:"task.created"
+            ~payload:
+              (`Assoc
+                [
+                  ("task_id", `String task.id);
+                  ("title", `String task.title);
+                  ("priority", `Int task.priority);
+                ]))
+        added_tasks;
       let summary = String.concat ", " (List.map (fun (t : Types.task) -> t.id) added_tasks) in
       let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
       let _ = broadcast config ~from_agent:"system" ~content:msg in
       Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Printf.sprintf "❌ Error adding batch tasks: %s" (Printexc.to_string e)
   )
 
@@ -150,11 +204,15 @@ let claim_task config ~agent_name ~task_id =
                   Log.Misc.error "agent state write failed: %s" msg
             end;
             let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
+            emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
+              ~payload:(`Assoc [ ("task_id", `String task_id) ]);
             log_event config (Printf.sprintf
               "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}"
               agent_name task_id (now_iso ()));
             Printf.sprintf "✅ %s claimed %s" agent_name task_id
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 
@@ -226,10 +284,14 @@ let claim_task_r config ~agent_name ~task_id
                         Log.Misc.error "agent state write failed: %s" msg
                   end;
                   let _ = broadcast config ~from_agent:agent_name ~content:(Printf.sprintf "📋 Claimed %s" task_id) in
+                  emit_task_activity config ~agent_name ~task_id ~kind:"task.claimed"
+                    ~payload:(`Assoc [ ("task_id", `String task_id) ]);
                   log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_claim"); ("agent", `String agent_name); ("task", `String task_id); ("ts", `String (now_iso ()))]));
                   Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
           end)
-      with e -> Error (Types.IoError (Printexc.to_string e))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Unified task transition (single entrypoint).
@@ -334,11 +396,45 @@ let transition_task_r config ~agent_name ~task_id ~action
                             (status_to_string task.task_status)
                             (status_to_string new_status)
                             now);
+                          (match action with
+                           | "claim" ->
+                               emit_task_activity config ~agent_name ~task_id
+                                 ~kind:"task.claimed"
+                                 ~payload:(`Assoc [ ("task_id", `String task_id) ])
+                           | "start" ->
+                               emit_task_activity config ~agent_name ~task_id
+                                 ~kind:"task.started"
+                                 ~payload:(`Assoc [ ("task_id", `String task_id) ])
+                           | "done" ->
+                               emit_task_activity config ~agent_name ~task_id
+                                 ~kind:"task.done"
+                                 ~payload:
+                                   (`Assoc
+                                     [
+                                       ("task_id", `String task_id);
+                                       ("notes", if notes = "" then `Null else `String notes);
+                                     ])
+                           | "cancel" ->
+                               emit_task_activity config ~agent_name ~task_id
+                                 ~kind:"task.cancelled"
+                                 ~payload:
+                                   (`Assoc
+                                     [
+                                       ("task_id", `String task_id);
+                                       ("reason", if reason = "" then `Null else `String reason);
+                                     ])
+                           | "release" ->
+                               emit_task_activity config ~agent_name ~task_id
+                                 ~kind:"task.released"
+                                 ~payload:(`Assoc [ ("task_id", `String task_id) ])
+                           | _ -> ());
                           Ok (Printf.sprintf "✅ %s %s → %s" task_id
                                 (status_to_string task.task_status)
                                 (status_to_string new_status))
                      ))
-          with e -> Error (Types.IoError (Printexc.to_string e))
+          with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Types.IoError (Printexc.to_string e))
         )
 
 (** Release task back to backlog - transition wrapper *)
@@ -401,6 +497,13 @@ let complete_task config ~agent_name ~task_id ~notes =
             let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id
                       else Printf.sprintf "✅ Completed %s - %s" task_id notes in
             let _ = broadcast config ~from_agent:agent_name ~content:msg in
+            emit_task_activity config ~agent_name ~task_id ~kind:"task.done"
+              ~payload:
+                (`Assoc
+                  [
+                    ("task_id", `String task_id);
+                    ("notes", if notes = "" then `Null else `String notes);
+                  ]);
             log_event config (Printf.sprintf
               "{\"type\":\"task_done\",\"agent\":\"%s\",\"task\":\"%s\",\"notes\":%s,\"ts\":\"%s\"}"
               agent_name task_id
@@ -415,7 +518,9 @@ let complete_task config ~agent_name ~task_id ~notes =
                  (Printexc.to_string exn));
             Printf.sprintf "✅ %s completed %s" agent_name task_id
           end
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 
@@ -476,6 +581,13 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
               end;
               let msg = if notes = "" then Printf.sprintf "✅ Completed %s" task_id else Printf.sprintf "✅ Completed %s - %s" task_id notes in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
+              emit_task_activity config ~agent_name ~task_id ~kind:"task.done"
+                ~payload:
+                  (`Assoc
+                    [
+                      ("task_id", `String task_id);
+                      ("notes", if notes = "" then `Null else `String notes);
+                    ]);
               log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_done"); ("agent", `String agent_name); ("task", `String task_id); ("notes", if notes = "" then `Null else `String notes); ("ts", `String (now_iso ()))]));
               (* Agent Economy: earn credits for task completion *)
               (match Agent_economy.earn
@@ -486,7 +598,9 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                  Log.Misc.error "task earn failed: %s" msg);
               Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
             end
-      with e -> Error (Types.IoError (Printexc.to_string e))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Cancel a task - A2A compatible *)
@@ -537,10 +651,20 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
               end;
               let msg = if reason = "" then Printf.sprintf "🚫 Cancelled %s" task_id else Printf.sprintf "🚫 Cancelled %s - %s" task_id reason in
               let _ = broadcast config ~from_agent:agent_name ~content:msg in
+              emit_task_activity config ~agent_name ~task_id
+                ~kind:"task.cancelled"
+                ~payload:
+                  (`Assoc
+                    [
+                      ("task_id", `String task_id);
+                      ("reason", if reason = "" then `Null else `String reason);
+                    ]);
               log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_cancelled"); ("agent", `String agent_name); ("task", `String task_id); ("reason", if reason = "" then `Null else `String reason); ("ts", `String (now_iso ()))]));
               Ok (Printf.sprintf "🚫 %s cancelled %s" agent_name task_id)
             end
-      with e -> Error (Types.IoError (Printexc.to_string e))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Structured result for claim_next_r (avoids brittle string parsing). *)
@@ -749,6 +873,21 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
           let _ = broadcast config ~from_agent:agent_name
             ~content:(Printf.sprintf "📋 Auto-claimed [P%d] %s: %s%s"
               task.priority task.id task.title release_note) in
+          (match released_task_id with
+           | Some rid ->
+               emit_task_activity config ~agent_name ~task_id:rid
+                 ~kind:"task.released"
+                 ~payload:(`Assoc [ ("task_id", `String rid) ])
+           | None -> ());
+          emit_task_activity config ~agent_name ~task_id:task.id
+            ~kind:"task.claimed"
+            ~payload:
+              (`Assoc
+                [
+                  ("task_id", `String task.id);
+                  ("title", `String task.title);
+                  ("priority", `Int task.priority);
+                ]);
 
           log_event config (Printf.sprintf
             "{\"type\":\"task_claim_next\",\"agent\":\"%s\",\"task\":\"%s\",\"priority\":%d,\"ts\":\"%s\"}"
@@ -769,7 +908,9 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
             released_task_id;
             message;
           }
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Claim_next_error (Printexc.to_string e)
   )
 
@@ -821,4 +962,3 @@ let release_stale_claims config ~ttl_seconds =
     end;
     List.rev !stale_tasks
   )
-

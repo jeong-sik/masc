@@ -124,7 +124,7 @@ let graph_edge_to_yojson (value : graph_edge) =
 let now_ts_ms () = int_of_float (Time_compat.now () *. 1000.0)
 
 let root_dir (config : Room_utils.config) =
-  Filename.concat (Room_utils.masc_dir config) "social-events"
+  Filename.concat (Room_utils.masc_dir config) "activity-events"
 
 let month_dir (config : Room_utils.config) =
   let tm = Unix.gmtime (Time_compat.now ()) in
@@ -161,7 +161,7 @@ let append_line path line =
 
 let format_sse_event (value : event) =
   let data = Yojson.Safe.to_string (event_to_yojson value) in
-  Printf.sprintf "id: %d\nevent: social\ndata: %s\n\n" value.seq data
+  Printf.sprintf "id: %d\nevent: activity\ndata: %s\n\n" value.seq data
 
 type client = {
   client_id : int;
@@ -237,7 +237,7 @@ let unregister_if_current session_id client_id =
 let client_count () = Atomic.get client_count_atomic
 
 let parse_event_line line =
-  match Safe_ops.parse_json_safe ~context:"social_motion:event_line" line with
+  match Safe_ops.parse_json_safe ~context:"activity_graph:event_line" line with
   | Ok json -> event_of_yojson json
   | Error _ -> None
 
@@ -388,6 +388,10 @@ let payload_string field json =
   | `String value when String.trim value <> "" -> Some value
   | _ -> None
 
+let is_generic_status = function
+  | "" | "active" | "observed" -> true
+  | _ -> false
+
 let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
     ~(kind : string) ~(label : string)
     ~(status : string) ~(ts_iso : string) ~(meta : Yojson.Safe.t) =
@@ -396,7 +400,10 @@ let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
       node.weight <- node.weight + 1;
       node.last_event_at <- ts_iso;
       if node.label = id || node.label = "" then node.label <- label;
-      if status <> "" then node.status <- status;
+      if status <> ""
+         && (not (is_generic_status status) || is_generic_status node.status)
+      then
+        node.status <- status;
       if meta <> default_meta then node.meta <- meta
   | None ->
       Hashtbl.add nodes id
@@ -521,6 +528,13 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_edge edges ~source ~target ~kind:"works_on" ~active:true
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
+  | "task.started" ->
+      set_subject_status "in_progress";
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:"works_on" ~active:true
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | _ -> ())
   | "task.released" ->
       set_subject_status "todo";
       (match (actor_id, subject_id) with
@@ -552,6 +566,26 @@ let reduce_event ~nodes ~edges (value : event) =
       (match (actor_id, subject_id) with
       | Some source, Some target ->
           ensure_edge edges ~source ~target ~kind:"mentions" ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | _ -> ())
+  | "board.posted" ->
+      set_subject_status "posted";
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:"posts" ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | _ -> ())
+  | "board.commented" ->
+      set_subject_status "discussed";
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:"comments_on" ~active:false
+            ~ts_iso:value.ts_iso ~meta:value.payload
+      | _ -> ())
+  | "board.voted" ->
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:"votes_on" ~active:false
             ~ts_iso:value.ts_iso ~meta:value.payload
       | _ -> ())
   | "decision.opened" ->
@@ -598,6 +632,18 @@ let reduce_event ~nodes ~edges (value : event) =
       set_subject_status "stopped"
   | "operation.finalized" ->
       set_subject_status "finalized"
+  | "team.turn" ->
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:"participates_in"
+            ~active:true ~ts_iso:value.ts_iso ~meta:value.payload
+      | _ -> ())
+  | "team.turn_failed" ->
+      (match (actor_id, subject_id) with
+      | Some source, Some target ->
+          ensure_edge edges ~source ~target ~kind:"participates_in"
+            ~active:false ~ts_iso:value.ts_iso ~meta:value.payload
+      | _ -> ())
   | "keeper.autonomy_started" ->
       set_actor_status "autonomy"
   | "keeper.autonomy_completed" ->

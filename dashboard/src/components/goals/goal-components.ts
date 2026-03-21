@@ -21,7 +21,7 @@ export function GoalRow({ goal }: { goal: Goal }) {
   return html`
     <div class="goal-row">
       <div class="goal-row-main">
-        <div style="display:flex; align-items:center; gap:8px;">
+        <div class="flex items-center gap-2">
           <span class="goal-horizon-badge" style="color:${horizonColor(goal.horizon)}">
             ${horizonLabel(goal.horizon)}
           </span>
@@ -102,11 +102,11 @@ export function GoalsSummary() {
         <div class="goal-summary-label">전체</div>
       </div>
       <div class="goal-summary-item">
-        <div class="goal-summary-value" style="color:#4ade80">${active}</div>
+        <div class="goal-summary-value" class="text-[var(--ok)]">${active}</div>
         <div class="goal-summary-label">진행 중</div>
       </div>
       <div class="goal-summary-item">
-        <div class="goal-summary-value" style="color:#888">${completed}</div>
+        <div class="goal-summary-value" class="text-[var(--text-dim)]">${completed}</div>
         <div class="goal-summary-label">완료</div>
       </div>
       <div class="goal-summary-item">

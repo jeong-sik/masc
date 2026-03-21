@@ -13,7 +13,9 @@
 (** Execute a function, logging exceptions and returning None on failure *)
 let try_with_log context f =
   try Some (f ())
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Log.Misc.error "%s failed: %s" context (Printexc.to_string e);
     None
 
@@ -38,7 +40,9 @@ let read_file_safe path : (string, string) result =
     Error (Printf.sprintf "File not found: %s" path)
   else
     try Ok (Fs_compat.load_file path)
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Error (Printf.sprintf "Failed to read %s: %s" path (Printexc.to_string e))
 
 (** Safe integer parsing *)
@@ -84,19 +88,25 @@ let list_dir_safe path : (string list, string) result =
     Error (Printf.sprintf "Not a directory: %s" path)
   else
     try Ok (Sys.readdir path |> Array.to_list)
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Error (Printf.sprintf "Failed to list %s: %s" path (Printexc.to_string e))
 
 (** Remove file with logging on failure (for cleanup operations) *)
 let remove_file_logged ?(context = "cleanup") path =
   try Sys.remove path
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Log.Misc.error "[%s] Failed to remove %s: %s" context path (Printexc.to_string e)
 
 (** Close channel with logging on failure *)
 let close_in_logged ic =
   try close_in ic
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Log.Misc.error "Failed to close input channel: %s" (Printexc.to_string e)
 
 (** Get environment variable with logging when invalid *)

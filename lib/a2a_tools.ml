@@ -193,7 +193,9 @@ let save_subscriptions () =
     let content = Yojson.Safe.pretty_to_string json in
     try
       Fs_compat.save_file !subscriptions_file content
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Log.Misc.error "save_subscriptions failed: %s" (Printexc.to_string e)
 
 (** Load subscriptions from file *)

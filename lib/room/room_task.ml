@@ -410,7 +410,7 @@ let complete_task config ~agent_name ~task_id ~notes =
             (try
                let active = (Room_state.read_state config).active_agents in
                Relation_materializer.on_task_done ~assignee:agent_name ~active_agents:active
-             with exn ->
+             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                Log.RoomTask.error "relation-materializer task hook error: %s"
                  (Printexc.to_string exn));
             Printf.sprintf "✅ %s completed %s" agent_name task_id

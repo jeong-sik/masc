@@ -499,7 +499,7 @@ let walph_loop config ~net:_net ~clock ~agent_name
 	                          in
 	                          if response = "" then Error "Empty MODEL response"
 	                          else Ok response
-	                        with exn -> Error (Printexc.to_string exn)
+	                        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 	                    in
 
 	                    (match chain_result with

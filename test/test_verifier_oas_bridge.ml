@@ -226,7 +226,7 @@ let test_verify_skips_readonly () =
     (Verifier_oas.verify req = Pass)
 
 (* ================================================================ *)
-(* Roundtrip: default keeper gate config -> guardrails              *)
+(* Roundtrip: keeper_default_gate_config -> guardrails               *)
 (* ================================================================ *)
 
 let test_default_gate_roundtrip () =

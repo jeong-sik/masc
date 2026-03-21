@@ -151,11 +151,7 @@ let attention_item_to_yojson (item : attention_item) =
       ("authoritative", `Bool false);
     ]
 
-let recommended_confirm_required = function
-  | "room_pause" | "team_stop" | "task_inject" | "team_task_inject"
-  | "team_worker_spawn_batch" ->
-      true
-  | _ -> false
+let recommended_confirm_required = Operator_approval.confirm_required
 
 let recommended_action_to_yojson ~actor (item : recommended_action) =
   let preview =

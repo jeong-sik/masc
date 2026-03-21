@@ -630,7 +630,7 @@ let list_org_rooms ~org_id : Yojson.Safe.t =
               ("success", `Bool false);
               ("error", `String (Printf.sprintf "Fetch stopped: %s" rooms_url));
             ]
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Log.Misc.error "federation: remote room list error: %s" (Printexc.to_string exn);
           `Assoc [
             ("success", `Bool false);

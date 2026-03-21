@@ -87,7 +87,7 @@ let handle_episode_flush ~config ~arguments ~(state : Mcp_server.server_state) ~
         Sys.rename file_path new_path;
         Printf.printf "[EPISODE/FLUSH] Processed episode %s -> %s\n%!" ep_id new_path;
         incr flushed
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Log.Misc.error "Failed to flush %s: %s" file (Printexc.to_string exn);
         incr failed
     ) pending_files;

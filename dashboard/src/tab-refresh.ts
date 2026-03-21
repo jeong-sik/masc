@@ -34,21 +34,20 @@ export function refreshForTab(tab: string) {
     refreshMissionSnapshot()
   }
 
-  if (tab === 'situation') {
-    refreshRoomTruth()
-    refreshMissionSnapshot('full')
-    refreshMissionBriefing()
-  }
-
-  if (tab === 'agents') {
-    refreshRoomTruth()
-    refreshExecution()
-    refreshMissionSnapshot()
-  }
-
-  if (tab === 'activity') {
-    refreshExecution()
-    void refreshSocialSurface()
+  if (tab === 'status') {
+    const section = route.value.params.section
+    if (section === 'activity') {
+      refreshExecution()
+      void refreshSocialSurface()
+    } else if (section === 'agents') {
+      refreshRoomTruth()
+      refreshExecution()
+      refreshMissionSnapshot()
+    } else {
+      refreshRoomTruth()
+      refreshMissionSnapshot('full')
+      refreshMissionBriefing()
+    }
   }
 
   if (tab === 'work') {
@@ -65,22 +64,9 @@ export function refreshForTab(tab: string) {
     }
   }
 
-  if (tab === 'control') {
+  if (tab === 'operations') {
     const section = route.value.params.section
-    if (section === 'tools') {
-      void refreshToolsSurface()
-    } else {
-      refreshRoomTruth()
-      refreshOperatorSnapshot()
-      refreshOperatorRoomDigest()
-    }
-  }
-
-  if (tab === 'lab') {
-    const surface = route.value.params.surface
-    if (surface === 'trpg') {
-      refreshTrpg()
-    } else {
+    if (section === 'command') {
       refreshRoomTruth()
       refreshCommandPlaneCurrentSurface()
       refreshCommandPlaneChainSummary()
@@ -97,6 +83,23 @@ export function refreshForTab(tab: string) {
       if (commandPlaneSurface.value === 'warroom') {
         refreshOperatorSnapshot()
       }
+    } else if (section === 'tools') {
+      void refreshToolsSurface()
+    } else {
+      refreshRoomTruth()
+      refreshOperatorSnapshot()
+      refreshOperatorRoomDigest()
+    }
+  }
+
+  if (tab === 'lab') {
+    const section = route.value.params.section
+    if (section === 'trpg') {
+      refreshTrpg()
+    } else if (section === 'avatars' || section === 'overview') {
+      refreshRoomTruth()
+    } else {
+      refreshRoomTruth()
     }
   }
 }

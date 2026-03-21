@@ -12,8 +12,9 @@ import {
   operatorSnapshot,
 } from '../../operator-store'
 import { ProvenanceChip } from '../common/provenance-strip'
-import { dashboardActorName, relativeTime, toneClass } from './helpers'
+import { relativeTime, toneClass } from './helpers'
 import { SwarmWorkerGrid } from './swarm-cards'
+import { actorName } from '../ops/helpers'
 
 function swarmLaneTone(lane: CommandPlaneSwarmLane): string {
   if (lane.motion_state === 'stalled') return 'bad'
@@ -220,10 +221,10 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
         || recommendation.rerun_available
         || recommendation.abandon_available),
     )
-  const actor = dashboardActorName() ?? 'dashboard'
 
   const confirmPending = async (decision: 'confirm' | 'deny') => {
     if (!pendingConfirm) return
+    const actor = actorName.value.trim() || 'dashboard'
     await confirmOperatorPendingAction(actor, pendingConfirm.confirm_token, decision)
   }
 

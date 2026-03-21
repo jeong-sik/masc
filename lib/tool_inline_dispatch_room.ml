@@ -64,7 +64,7 @@ let handle_start (ctx : context) : result option =
       try
         let _msg = Room.join active_config ~agent_name ~capabilities:[] () in
         Ok ()
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let msg = Printexc.to_string exn in
         if String.length msg > 0 then Error msg else Error "join failed"
     in

@@ -99,19 +99,24 @@ export function actionTargetLabel(action?: OperatorRecommendedAction | null): st
 }
 
 function navigateWithContext(
-  tab: 'control' | 'lab',
+  mode: 'intervene' | 'command',
   context = createMissionWorkflowContext(),
 ): void {
   persistWorkflowContext(context)
-  navigate(tab, tab === 'control' ? missionInterveneParams(context) : missionCommandParams(context))
+  navigate(
+    'operations',
+    mode === 'intervene'
+      ? { section: 'intervene', ...missionInterveneParams(context) }
+      : { section: 'command', ...missionCommandParams(context) },
+  )
 }
 
 export function openIncidentIntervene(item: OperatorAttentionItem): void {
-  navigateWithContext('control', createMissionWorkflowContext(null, item, '상황판 incident'))
+  navigateWithContext('intervene', createMissionWorkflowContext(null, item, '상황판 incident'))
 }
 
 export function openIncidentCommand(item: OperatorAttentionItem): void {
-  navigateWithContext('lab', createMissionWorkflowContext(null, item, '상황판 incident'))
+  navigateWithContext('command', createMissionWorkflowContext(null, item, '상황판 incident'))
 }
 
 export function openActionIntervene(
@@ -119,7 +124,7 @@ export function openActionIntervene(
   incident?: OperatorAttentionItem | null,
   sourceLabel = '상황판 추천 액션',
 ): void {
-  navigateWithContext('control', createMissionWorkflowContext(action, incident, sourceLabel))
+  navigateWithContext('intervene', createMissionWorkflowContext(action, incident, sourceLabel))
 }
 
 export function openActionCommand(
@@ -127,18 +132,21 @@ export function openActionCommand(
   incident?: OperatorAttentionItem | null,
   sourceLabel = '상황판 추천 액션',
 ): void {
-  navigateWithContext('lab', createMissionWorkflowContext(action, incident, sourceLabel))
+  navigateWithContext('command', createMissionWorkflowContext(action, incident, sourceLabel))
 }
 
-export function openSession(tab: 'control' | 'lab', sessionId: string): void {
+export function openSession(mode: 'intervene' | 'command', sessionId: string): void {
   const params: Record<string, string> = {
     source: 'mission',
     target_type: 'team_session',
     target_id: sessionId,
     focus_kind: 'team_session',
   }
-  if (tab === 'lab') params.surface = 'swarm'
-  navigate(tab, params)
+  if (mode === 'command') params.surface = 'swarm'
+  navigate('operations', {
+    section: mode === 'command' ? 'command' : 'intervene',
+    ...params,
+  })
 }
 
 export function attentionAsIncident(item: DashboardMissionAttentionQueueItem): OperatorAttentionItem {

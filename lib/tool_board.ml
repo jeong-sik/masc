@@ -189,7 +189,7 @@ let handle_post_create args =
       (match !board_event_hook with
        | Some cb -> (
            try cb.on_post_created post
-           with exn ->
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.BoardLog.error "on_post_created callback failed: %s"
                (Printexc.to_string exn))
        | None -> ());
@@ -320,7 +320,7 @@ let handle_comment_add args =
       (match !board_event_hook with
        | Some cb -> (
            try cb.on_comment_created comment
-           with exn ->
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.BoardLog.error "on_comment_created callback failed: %s"
                (Printexc.to_string exn))
        | None -> ());

@@ -329,7 +329,7 @@ export function AgentProfile({ name }: { name: string }) {
   return html`
     <div class="ff-profile">
       <div class="ff-profile__toolbar">
-        <button class="control-btn ghost" onClick=${() => navigate('agents')}>← 목록</button>
+        <button class="control-btn ghost" onClick=${() => navigate('status', { section: 'agents' })}>← 목록</button>
         <button class="control-btn ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
           ${loading.value ? '...' : '새로고침'}
         </button>
@@ -365,7 +365,7 @@ export function AgentProfile({ name }: { name: string }) {
                 <div class="ff-relations-list">
                   ${collabs.map(c => html`
                     <div class="ff-relation-row" key=${c.name}
-                      onClick=${() => navigate('agents', { agent: c.name })}
+                      onClick=${() => navigate('status', { section: 'agents', agent: c.name })}
                       style="cursor:pointer;"
                     >
                       <span class="ff-relation-name">${c.name}</span>

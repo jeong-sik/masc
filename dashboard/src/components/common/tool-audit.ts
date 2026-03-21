@@ -73,5 +73,5 @@ export function linkedRecentToolsEmptyState(keeper: Keeper | null | undefined): 
 
 export function openToolsInventory(search?: string | null): void {
   const q = search?.trim()
-  navigate('control', { section: 'tools', ...(q ? { q } : {}) })
+  navigate('operations', { section: 'tools', ...(q ? { q } : {}) })
 }

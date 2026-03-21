@@ -387,6 +387,23 @@ let status ~config state : Yojson.Safe.t =
     ("idle_turns", `Int state.idle_turns);
     ("total_tokens", `Int state.total_tokens);
     ("total_cost_usd", `Float state.total_cost);
+    ("cost_report", (
+      let usage : Agent_sdk.Types.usage_stats = {
+        total_input_tokens = state.total_tokens;
+        total_output_tokens = 0;
+        total_cache_creation_input_tokens = 0;
+        total_cache_read_input_tokens = 0;
+        api_calls = state.turn_count;
+        estimated_cost_usd = state.total_cost;
+      } in
+      let report = Agent_sdk.Cost_tracker.report usage in
+      `Assoc [
+        ("total_usd", `Float report.total_usd);
+        ("input_tokens", `Int report.input_tokens);
+        ("output_tokens", `Int report.output_tokens);
+        ("api_calls", `Int report.api_calls);
+        ("avg_cost_per_call", `Float report.avg_cost_per_call);
+      ]));
     ("started_at_ts", `Float state.started_at);
     ("age_s", `Float age_s);
     ("last_turn_ts", `Float state.last_turn_ts);

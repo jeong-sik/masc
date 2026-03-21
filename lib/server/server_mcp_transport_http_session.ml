@@ -36,6 +36,22 @@ let forget_mcp_session session_id =
       Hashtbl.remove protocol_version_by_session session_id;
       Hashtbl.remove mcp_profile_by_session session_id)
 
+(** Reap session entries whose session_id has no active SSE connection.
+    Call periodically from the cleanup loop. Returns number of reaped entries. *)
+let reap_stale_sessions ~is_active_session =
+  Eio.Mutex.use_rw ~protect:true session_mutex (fun () ->
+    let stale =
+      Hashtbl.fold (fun sid _ acc ->
+        if not (is_active_session sid) then sid :: acc
+        else acc
+      ) protocol_version_by_session []
+    in
+    List.iter (fun sid ->
+      Hashtbl.remove protocol_version_by_session sid;
+      Hashtbl.remove mcp_profile_by_session sid
+    ) stale;
+    List.length stale)
+
 let profile_label = function
   | Mcp_eio.Full -> "/mcp"
   | Mcp_eio.Managed_agent -> "/mcp/managed"

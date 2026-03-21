@@ -120,7 +120,21 @@ let stop_sse_session session_id =
   | None -> ()
   | Some info ->
       Hashtbl.remove sse_conn_by_session session_id;
+      Hashtbl.remove sse_connect_guard_by_session session_id;
       close_sse_conn info
+
+let is_active_sse_session session_id =
+  Hashtbl.mem sse_conn_by_session session_id
+
+let reap_stale_guards () =
+  let stale =
+    Hashtbl.fold (fun sid _ acc ->
+      if not (Hashtbl.mem sse_conn_by_session sid) then sid :: acc
+      else acc
+    ) sse_connect_guard_by_session []
+  in
+  List.iter (Hashtbl.remove sse_connect_guard_by_session) stale;
+  List.length stale
 
 let close_all_sse_connections () =
   let sessions = Hashtbl.fold (fun k _ acc -> k :: acc) sse_conn_by_session [] in

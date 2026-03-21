@@ -97,6 +97,39 @@ if [ "$REPO_ENV_ROOT" != "$SCRIPT_DIR" ]; then
     load_env_file "$SCRIPT_DIR/.env.local"
 fi
 
+raise_open_file_limit() {
+    local desired="${MASC_NOFILE_TARGET:-4096}"
+    local current hard target
+
+    if ! [[ "$desired" =~ ^[0-9]+$ ]]; then
+        echo "Warning: ignoring invalid MASC_NOFILE_TARGET=$desired" >&2
+        return 0
+    fi
+
+    current="$(ulimit -Sn 2>/dev/null || ulimit -n 2>/dev/null || echo "")"
+    hard="$(ulimit -Hn 2>/dev/null || echo "")"
+    if ! [[ "$current" =~ ^[0-9]+$ ]]; then
+        return 0
+    fi
+
+    target="$desired"
+    if [[ "$hard" =~ ^[0-9]+$ ]] && [ "$hard" -lt "$target" ]; then
+        target="$hard"
+    fi
+
+    if [ "$current" -ge "$target" ]; then
+        return 0
+    fi
+
+    if ulimit -Sn "$target" 2>/dev/null; then
+        echo "Raised open-file soft limit: $current -> $target" >&2
+    else
+        echo "Warning: failed to raise open-file soft limit (current=$current target=$target)" >&2
+    fi
+}
+
+raise_open_file_limit
+
 # Default: enable internal guardian unless explicitly disabled
 if [ -z "$MASC_GUARDIAN_ENABLED" ]; then
     export MASC_GUARDIAN_ENABLED=true

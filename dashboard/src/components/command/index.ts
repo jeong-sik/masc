@@ -212,7 +212,7 @@ export function Command() {
       if (surface === 'warroom') {
         void refreshOperatorSnapshot()
       }
-    }, 5000)
+    }, 30000)
 
     return () => {
       window.clearInterval(interval)

@@ -174,7 +174,8 @@ let test_event_to_json_agent_joined () =
     agent_id = "test";
     capabilities = ["a"; "b"];
   } in
-  let json_str = Telemetry_eio.event_to_json e in
+  let json = Telemetry_eio.event_to_json e in
+  let json_str = Yojson.Safe.to_string json in
   check bool "nonempty" true (String.length json_str > 0);
   check bool "is json" true (String.contains json_str '{')
 
@@ -184,7 +185,8 @@ let test_event_to_json_task_completed () =
     duration_ms = 100;
     success = true;
   } in
-  let json_str = Telemetry_eio.event_to_json e in
+  let json = Telemetry_eio.event_to_json e in
+  let json_str = Yojson.Safe.to_string json in
   check bool "nonempty" true (String.length json_str > 0);
   check bool "contains timestamp" true (String.length json_str > 10)
 

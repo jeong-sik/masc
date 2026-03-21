@@ -72,8 +72,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
             then (
               (try
-                 let metrics_path =
-                   keeper_metrics_path ctx.config meta_current.name
+                 let metrics_store =
+                   keeper_metrics_store ctx.config meta_current.name
                  in
                  let primary_model =
                    match Model_spec.available_model_specs_of_strings meta_current.models with
@@ -193,7 +193,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                            ("handoff", `Assoc [ ("performed", `Bool false) ]);
                          ]
                      in
-                     append_jsonl_line metrics_path snapshot;
+                     Dated_jsonl.append metrics_store snapshot;
                      (try
                         Sse.broadcast
                           (`Assoc

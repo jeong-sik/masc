@@ -36,7 +36,7 @@ function gatherSpotlightItems(snap: DashboardMissionResponse): SpotlightItem[] {
 
   // 2. Sessions with blockers (that aren't already captured in attention queue)
   const sessions: SessionItem[] =
-    snap.sessions.length > 0 ? snap.sessions : snap.session_briefs
+    (snap.sessions ?? []).length > 0 ? snap.sessions : (snap.session_briefs ?? [])
   const aqIds = new Set(items.map(i => i.id))
 
   for (const s of sessions) {

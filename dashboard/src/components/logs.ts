@@ -92,7 +92,7 @@ export function LogViewer() {
         </div>
 
         <div class="logs-actions">
-          <span class="logs-total">${logTotal.value.toLocaleString()}건</span>
+          <span class="logs-total">${(logTotal.value ?? 0).toLocaleString()}건</span>
           <label class="logs-auto-label">
             <input
               type="checkbox"

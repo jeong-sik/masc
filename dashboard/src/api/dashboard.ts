@@ -9,7 +9,7 @@ import {
   normalizeGovernanceJudgeSummary,
   normalizePendingConfirmation,
 } from './board'
-import { get, post, withRetries, ROOM_TRUTH_GET_TIMEOUT_MS } from './core'
+import { get, post, patch, withRetries, ROOM_TRUTH_GET_TIMEOUT_MS } from './core'
 import type {
   KeeperConfig,
   DashboardExecutionResponse,
@@ -429,4 +429,28 @@ export function runCommandPlaneAction(
 
 export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
   return get<KeeperConfig>(`/api/v1/keepers/${encodeURIComponent(name)}/config`)
+}
+
+export type KeeperConfigUpdatePayload = {
+  new_goal?: string
+  new_short_goal?: string
+  new_mid_goal?: string
+  new_long_goal?: string
+  new_soul_profile?: string
+  new_will?: string
+  new_needs?: string
+  new_desires?: string
+  new_instructions?: string
+  new_drift_enabled?: boolean
+  new_drift_min_turn_gap?: number
+}
+
+export function patchKeeperConfig(
+  name: string,
+  payload: KeeperConfigUpdatePayload,
+): Promise<KeeperConfig> {
+  return patch<KeeperConfig>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/config`,
+    payload,
+  )
 }

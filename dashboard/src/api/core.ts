@@ -214,6 +214,31 @@ export async function post<T>(
   return res.json() as Promise<T>
 }
 
+export async function patch<T>(
+  path: string,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+  timeoutMs = DEFAULT_POST_TIMEOUT_MS,
+): Promise<T> {
+  const res = await fetchWithTimeout(path, {
+    method: 'POST',
+    headers: {
+      ...jsonHeaders(),
+      ...(extraHeaders ?? {}),
+    },
+    body: JSON.stringify(body),
+  }, timeoutMs)
+  if (!res.ok) {
+    throw new ApiRequestError({
+      method: 'PATCH',
+      path,
+      status: res.status,
+      statusText: res.statusText,
+    })
+  }
+  return res.json() as Promise<T>
+}
+
 export async function postRaw(
   path: string,
   body: unknown,

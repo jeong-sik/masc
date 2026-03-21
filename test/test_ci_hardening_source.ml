@@ -40,7 +40,12 @@ let test_health_and_ci_runner_diagnostics () =
   check bool "ci runner captures log file" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "TEST_LOG_FILE=");
   check bool "ci runner prints failure markers" true
-    (file_contains_pattern "scripts/ci-run-tests.sh" "failure markers (latest 20)")
+    (file_contains_pattern "scripts/ci-run-tests.sh" "failure markers (latest 20)");
+  check bool "ci runner retries dune rpc lock failures in isolated build dir" true
+    (file_contains_pattern "scripts/ci-run-tests.sh"
+       "detected dune RPC/lock failure; retrying once with isolated build dir");
+  check bool "ci runner tracks active build dir for diagnostics" true
+    (file_contains_pattern "scripts/ci-run-tests.sh" "ACTIVE_TEST_BUILD_DIR")
 
 let test_route_auth_contracts () =
   check bool "http command-plane units use tool auth" true
@@ -144,7 +149,6 @@ let test_dashboard_component_split_contracts () =
   check bool "council archive normalizes postgres url" true
     (file_contains_pattern "lib/council/archive.ml"
        "pooler.supabase.com")
-  (* jiphyeon module removed in #2135 — assertion removed *)
 
 let test_activity_surface_contracts () =
   check bool "activity tab exposes activity graph label" true

@@ -164,6 +164,11 @@
  (libraries alcotest unix yojson))
 
 (test
+ (name test_ci_run_tests_script)
+ (modules test_ci_run_tests_script)
+ (libraries alcotest unix))
+
+(test
  (name test_worker_runtime)
  (modules test_worker_runtime)
  (libraries masc_mcp alcotest eio eio_main yojson unix))

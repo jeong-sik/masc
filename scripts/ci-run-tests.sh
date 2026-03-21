@@ -23,6 +23,10 @@ START_EPOCH="$(date +%s)"
 TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp_ci_log)}"
 CI_TEST_ALLOW_CLEAN_RETRY="${CI_TEST_ALLOW_CLEAN_RETRY:-1}"
 CI_TEST_CLEAN_RETRY_DONE=0
+CI_TEST_ALLOW_RPC_RETRY="${CI_TEST_ALLOW_RPC_RETRY:-1}"
+CI_TEST_RPC_RETRY_DONE=0
+CI_TEST_ISOLATED_BUILD_DIR="${CI_TEST_ISOLATED_BUILD_DIR:-.ci_build}"
+ACTIVE_TEST_BUILD_DIR="${DUNE_BUILD_DIR:-_build}"
 
 iso_now() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -48,6 +52,7 @@ diag_dump() {
   echo "[ci-diag] elapsed_sec=$(elapsed_sec)"
   echo "[ci-diag] pwd=$(pwd)"
   echo "[ci-diag] log_file=${TEST_LOG_FILE}"
+  echo "[ci-diag] build_dir=${ACTIVE_TEST_BUILD_DIR}"
 
   echo "[ci-diag] process snapshot (dune/ocaml/test):"
   ps -eo pid,ppid,etime,%cpu,%mem,comm,args \
@@ -66,7 +71,7 @@ diag_dump() {
     tail -n 120 "${TEST_LOG_FILE}" || true
   fi
 
-  local tests_root="_build/default/test/_build/_tests"
+  local tests_root="${ACTIVE_TEST_BUILD_DIR%/}/default/test/_build/_tests"
   if [[ -d "${tests_root}" ]]; then
     # Sort by file mtime so diagnostic tail follows the most recently updated test.
     local -a output_files=()
@@ -107,6 +112,10 @@ test_cmd_needs_dune_sanitization() {
   [[ "${TEST_CMD}" == *"dune "* ]] && [[ "${TEST_CMD}" != *"env -u DUNE_RPC"* ]]
 }
 
+test_cmd_has_explicit_build_dir() {
+  [[ "${TEST_CMD}" == *"--build-dir"* ]] || [[ "${TEST_CMD}" == *"DUNE_BUILD_DIR="* ]]
+}
+
 effective_test_cmd() {
   if test_cmd_needs_dune_sanitization; then
     printf 'env -u DUNE_RPC %s' "${TEST_CMD}"
@@ -115,11 +124,33 @@ effective_test_cmd() {
   fi
 }
 
+isolated_build_dir_cmd() {
+  local cmd="${1}"
+  printf 'env DUNE_BUILD_DIR=%q %s' "${CI_TEST_ISOLATED_BUILD_DIR}" "${cmd}"
+}
+
 agent_sdk_interface_mismatch_detected() {
   [[ -f "${TEST_LOG_FILE}" ]] || return 1
   grep -Eq \
     'Unbound module Agent_sdk|module Oas is an alias for module Agent_sdk|inconsistent assumptions over interface Agent_sdk' \
     "${TEST_LOG_FILE}"
+}
+
+rpc_server_not_running_detected() {
+  [[ -f "${TEST_LOG_FILE}" ]] || return 1
+  grep -Eq 'RPC server not running\.|has locked the build directory\.' "${TEST_LOG_FILE}"
+}
+
+clean_current_build_dir() {
+  if [[ "${ACTIVE_TEST_BUILD_DIR}" != "_build" ]]; then
+    env DUNE_BUILD_DIR="${ACTIVE_TEST_BUILD_DIR}" dune clean --root . \
+      > >(tee -a "${TEST_LOG_FILE}") \
+      2> >(tee -a "${TEST_LOG_FILE}" >&2)
+  else
+    dune clean --root . \
+      > >(tee -a "${TEST_LOG_FILE}") \
+      2> >(tee -a "${TEST_LOG_FILE}" >&2)
+  fi
 }
 
 run_with_timeout() {
@@ -170,11 +201,30 @@ heartbeat &
 hb_pid="$!"
 
 effective_cmd="$(effective_test_cmd)"
+run_cmd="${effective_cmd}"
 
 set +e
-run_with_timeout "${effective_cmd}"
+run_with_timeout "${run_cmd}"
 status=$?
 set -e
+
+if [[ "${status}" -ne 0 ]] \
+  && [[ "${CI_TEST_ALLOW_RPC_RETRY}" = "1" ]] \
+  && [[ "${CI_TEST_RPC_RETRY_DONE}" -eq 0 ]] \
+  && test_cmd_needs_dune_sanitization \
+  && ! test_cmd_has_explicit_build_dir \
+  && rpc_server_not_running_detected; then
+  CI_TEST_RPC_RETRY_DONE=1
+  ACTIVE_TEST_BUILD_DIR="${CI_TEST_ISOLATED_BUILD_DIR}"
+  run_cmd="$(isolated_build_dir_cmd "${effective_cmd}")"
+  echo "[ci-run] WARN: detected dune RPC/lock failure; retrying once with isolated build dir ${ACTIVE_TEST_BUILD_DIR}"
+  echo "[ci-run] isolated_command: ${run_cmd}"
+  echo "[ci-run] retry_started_at=$(iso_now)"
+  set +e
+  run_with_timeout "${run_cmd}"
+  status=$?
+  set -e
+fi
 
 if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_ALLOW_CLEAN_RETRY}" = "1" ]] \
@@ -183,12 +233,10 @@ if [[ "${status}" -ne 0 ]] \
   && agent_sdk_interface_mismatch_detected; then
   CI_TEST_CLEAN_RETRY_DONE=1
   echo "[ci-run] WARN: detected Agent_sdk interface mismatch; running dune clean and retrying once"
-  dune clean --root . \
-    > >(tee -a "${TEST_LOG_FILE}") \
-    2> >(tee -a "${TEST_LOG_FILE}" >&2)
+  clean_current_build_dir
   echo "[ci-run] retry_started_at=$(iso_now)"
   set +e
-  run_with_timeout "${effective_cmd}"
+  run_with_timeout "${run_cmd}"
   status=$?
   set -e
 fi

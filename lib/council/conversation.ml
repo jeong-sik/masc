@@ -321,7 +321,7 @@ let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "")
             with Not_found -> List.rev acc
           in
           collect 0 []
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Printf.eprintf "[Council] mention extraction failed: %s\n%!"
             (Printexc.to_string exn);
           []

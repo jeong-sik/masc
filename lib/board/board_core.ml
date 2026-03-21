@@ -288,7 +288,7 @@ let maybe_sweep store =
   let now = Time_compat.now () in
   if now -. store.last_sweep > float_of_int Limits.sweeper_interval_sec then
     (try ignore (sweep store)
-     with exn -> Log.BoardLog.warn "sweep failed: %s" (Printexc.to_string exn));
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.BoardLog.warn "sweep failed: %s" (Printexc.to_string exn));
   if now -. store.last_flush > flush_interval_sec then
     !deferred_flush_fn store
 

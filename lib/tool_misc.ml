@@ -641,7 +641,7 @@ let handle_gc ctx args =
   (* Also expire pending decisions past TTL *)
   let expired =
     try Cp_lifecycle.check_expired_decisions ctx.config
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Misc.warn "check_expired_decisions failed: %s" (Printexc.to_string exn);
       0
   in

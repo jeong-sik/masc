@@ -422,7 +422,7 @@ let add_fallback_task ctx node err =
         node.Goal_orchestrator.node_id node.Goal_orchestrator.depth err
     in
     try Some (Room.add_task ctx.config ~title ~priority:2 ~description:desc)
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Misc.error "add_fallback_task failed: %s" (Printexc.to_string exn);
       None
 

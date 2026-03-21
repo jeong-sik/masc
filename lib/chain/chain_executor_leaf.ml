@@ -262,7 +262,7 @@ let execute_masc_broadcast ctx ~tool_exec (node : node) ~message ~room ~mention 
   (* Call masc.masc_broadcast via tool_exec *)
   let result =
     try tool_exec ~name:"masc.masc_broadcast" ~args
-    with exn -> Error (Printexc.to_string exn)
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
   in
   let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   match result with
@@ -382,7 +382,7 @@ let execute_masc_claim ctx ~tool_exec (node : node) ~task_id ~room : (string, st
   in
   let result =
     try tool_exec ~name:tool_name ~args
-    with exn -> Error (Printexc.to_string exn)
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
   in
   let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   match result with
@@ -404,7 +404,7 @@ let execute_tool_node ctx ~tool_exec ~(node : node) (tool : node_type) : (string
       let resolved_args = substitute_json ctx args in
       let result =
         try tool_exec ~name ~args:resolved_args
-        with exn -> Error (Printexc.to_string exn)
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
       in
       let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       (match result with

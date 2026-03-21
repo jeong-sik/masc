@@ -384,7 +384,7 @@ let raw_completion_at ~server_url ~model_id ~prompt ~max_tokens ~timeout_sec () 
           latency_ms;
           error = Some (Printf.sprintf "curl stopped %d" sig_num);
         }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     {
       success = false;
       latency_ms =

@@ -188,7 +188,7 @@ let execute_config_change key value =
       stderr = "";
       output = msg;
       timestamp = Time_compat.now () }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     let msg = Printf.sprintf "Config error: %s" (Printexc.to_string exn) in
     { success = false;
       stdout = "";
@@ -216,7 +216,7 @@ let execute_notification target message =
       stderr = "";
       output = msg;
       timestamp = Time_compat.now () }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     let msg = Printf.sprintf "Notification error: %s" (Printexc.to_string exn) in
     { success = false;
       stdout = "";

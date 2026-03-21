@@ -225,7 +225,7 @@ let handle_code_symbols ctx args =
                 ("symbols", `List symbols_json);
               ] in
               (true, Yojson.Safe.pretty_to_string response)
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               (false, Printf.sprintf "❌ Failed to read file: %s" (Printexc.to_string exn))
           end
         end
@@ -280,7 +280,7 @@ let handle_code_read ctx args =
                 ("lines", `List (List.map (fun s -> `String s) result_lines));
               ] in
               (true, Yojson.Safe.pretty_to_string response)
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               (false, Printf.sprintf "❌ Failed to read file: %s" (Printexc.to_string exn))
           end
         end

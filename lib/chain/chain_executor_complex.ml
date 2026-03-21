@@ -426,7 +426,7 @@ let execute_stream_merge ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : ex
                  Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
                    incr completed_count);
                  safe_stream_add (Some (node.id, Error msg))
-           with exn ->
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              let err = Printexc.to_string exn in
              Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
                incr completed_count);

@@ -84,7 +84,7 @@ let init ?persist_dir () =
                    }
                | Error msg ->
                    Log.Chain.error "Failed to parse %s: %s" path msg)
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Chain.info "Exception loading %s: %s" path (Printexc.to_string exn)
           end
         ) files
@@ -149,7 +149,7 @@ let load_from_dir (dir : string) : (int * (string * string) list) =
               incr loaded
           | Error msg ->
               errors := (path, msg) :: !errors
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           errors := (path, Printexc.to_string exn) :: !errors
       end
     ) files;

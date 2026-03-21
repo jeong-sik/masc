@@ -51,7 +51,9 @@ let error_entry_of_yojson json =
     let context = json |> member "context" |> to_string_option in
     let resolved = json |> member "resolved" |> to_bool in
     Ok { timestamp; error_type; message; context; resolved }
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 let planning_context_to_yojson ctx =
   `Assoc [
@@ -83,7 +85,9 @@ let planning_context_of_yojson json =
     let created_at = json |> member "created_at" |> to_string in
     let updated_at = json |> member "updated_at" |> to_string in
     Ok { task_id; task_plan; notes; errors; deliverable; created_at; updated_at }
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (* ===== Utility Functions ===== *)
 
@@ -147,7 +151,9 @@ let init (config : Room.config) ~task_id : (planning_context, string) result =
     let json = planning_context_to_yojson ctx in
     write_file_content (Filename.concat dir "context.json") (Yojson.Safe.pretty_to_string json);
     Ok ctx
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Load planning context *)
 let load (config : Room.config) ~task_id : (planning_context, string) result =
@@ -161,7 +167,9 @@ let load (config : Room.config) ~task_id : (planning_context, string) result =
       let json = Yojson.Safe.from_string content in
       planning_context_of_yojson json
     end
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Update task plan *)
 let update_plan (config : Room.config) ~task_id ~content : (planning_context, string) result =
@@ -175,7 +183,9 @@ let update_plan (config : Room.config) ~task_id ~content : (planning_context, st
         write_file_content (Filename.concat dir "context.json")
           (Yojson.Safe.pretty_to_string (planning_context_to_yojson updated));
         Ok updated
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Add note *)
 let add_note (config : Room.config) ~task_id ~note : (planning_context, string) result =
@@ -197,7 +207,9 @@ let add_note (config : Room.config) ~task_id ~note : (planning_context, string) 
         write_file_content (Filename.concat dir "context.json")
           (Yojson.Safe.pretty_to_string (planning_context_to_yojson updated));
         Ok updated
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Add error - PDCA Check phase. Auto-creates planning context if none exists. *)
 let add_error (config : Room.config) ~task_id ~error_type ~message ?context () : (planning_context, string) result =
@@ -232,7 +244,9 @@ let add_error (config : Room.config) ~task_id ~error_type ~message ?context () :
         write_file_content (Filename.concat dir "context.json")
           (Yojson.Safe.pretty_to_string (planning_context_to_yojson updated));
         Ok updated
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Mark error as resolved *)
 let resolve_error (config : Room.config) ~task_id ~index : (planning_context, string) result =
@@ -252,7 +266,9 @@ let resolve_error (config : Room.config) ~task_id ~index : (planning_context, st
             (Yojson.Safe.pretty_to_string (planning_context_to_yojson updated));
           Ok updated
         end
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Set deliverable. Auto-creates planning context if none exists. *)
 let set_deliverable (config : Room.config) ~task_id ~content : (planning_context, string) result =
@@ -272,7 +288,9 @@ let set_deliverable (config : Room.config) ~task_id ~content : (planning_context
         write_file_content (Filename.concat dir "context.json")
           (Yojson.Safe.pretty_to_string (planning_context_to_yojson updated));
         Ok updated
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (* ===== Session-level Context ===== *)
 

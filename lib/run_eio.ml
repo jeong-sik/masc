@@ -141,7 +141,9 @@ let init config ~task_id ~agent_name : (run_record, string) result =
     end;
     write_run config run;
     Ok run
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Update plan *)
 let update_plan config ~task_id ~content : (run_record, string) result =
@@ -154,7 +156,9 @@ let update_plan config ~task_id ~content : (run_record, string) result =
         write_text_file path content;
         write_run config updated;
         Ok updated
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Append log entry *)
 let append_log config ~task_id ~note : (log_entry, string) result =
@@ -167,7 +171,9 @@ let append_log config ~task_id ~note : (log_entry, string) result =
       Fs_compat.append_jsonl file (log_entry_to_json entry)
     );
     Ok entry
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Set deliverable *)
 let set_deliverable config ~task_id ~content : (run_record, string) result =
@@ -180,7 +186,9 @@ let set_deliverable config ~task_id ~content : (run_record, string) result =
         write_text_file path content;
         write_run config updated;
         Ok updated
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Read logs (optionally tail N) *)
 let read_logs config ~task_id ?limit () : log_entry list =

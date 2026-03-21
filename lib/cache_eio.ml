@@ -201,8 +201,9 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
         try
           Fs_compat.save_file path content;
           Ok entry
-        with e ->
-          Error (Printexc.to_string e)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | e -> Error (Printexc.to_string e)
       end
     end else begin
       let now = Time_compat.now () in
@@ -214,8 +215,9 @@ let set config ~key ~value ?(ttl_seconds : int option) ?(tags : string list = []
       try
         Fs_compat.save_file path content;
         Ok entry
-      with e ->
-        Error (Printexc.to_string e)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Printexc.to_string e)
     end
   end
 
@@ -244,8 +246,9 @@ let get config ~key : (cache_entry option, string) result =
           Ok (Some entry)
         end
       | None -> Ok None
-    with e ->
-      Error (Printexc.to_string e)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e -> Error (Printexc.to_string e)
 
 (** Delete cache entry - synchronous *)
 let delete config ~key : (bool, string) result =
@@ -256,8 +259,9 @@ let delete config ~key : (bool, string) result =
     try
       Sys.remove path;
       Ok true
-    with e ->
-      Error (Printexc.to_string e)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e -> Error (Printexc.to_string e)
 
 (** List all cache entries - synchronous *)
 let list config ?(tag : string option) () : cache_entry list =
@@ -310,8 +314,9 @@ let clear config : (int, string) result =
         end else acc
       ) 0 entries in
       Ok count
-    with e ->
-      Error (Printexc.to_string e)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e -> Error (Printexc.to_string e)
 
 (** Get cache statistics - synchronous *)
 let stats config : (int * int * float, string) result =
@@ -341,8 +346,9 @@ let stats config : (int * int * float, string) result =
         else (t, e, s)
       ) (0, 0, 0.0) entries in
       Ok (total, expired, size)
-    with e ->
-      Error (Printexc.to_string e)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e -> Error (Printexc.to_string e)
 
 (** Format stats for display *)
 let format_stats (total, expired, size) =

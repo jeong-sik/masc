@@ -65,7 +65,8 @@ module FileSystem = struct
     let path = Eio.Path.(fs / config.base_path) in
     (* Ensure base directory exists *)
     (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 path
-     with e -> Eio.traceln "[WARN] mkdirs base failed: %s" (Printexc.to_string e));
+     with Eio.Cancel.Cancelled _ as e -> raise e
+        | e -> Eio.traceln "[WARN] mkdirs base failed: %s" (Printexc.to_string e));
     {
       config;
       fs = path;
@@ -152,7 +153,8 @@ module FileSystem = struct
             (match Eio.Path.split path with
              | Some (parent, _) ->
                  (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                  with e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
+                  with Eio.Cancel.Cancelled _ as e -> raise e
+                   | e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
              | None -> ());
             (* Compact Protocol v4: Compress before saving (if beneficial) *)
             let compressed = Compression.compress_with_header value in
@@ -231,7 +233,8 @@ module FileSystem = struct
                 (match Eio.Path.split path with
                  | Some (parent, _) ->
                      (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                      with e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
+                      with Eio.Cancel.Cancelled _ as e -> raise e
+                   | e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
                  | None -> ());
                 (* Write with exclusive create *)
                 Eio.Path.save ~create:(`Exclusive 0o644) path compressed;
@@ -293,7 +296,9 @@ module FileSystem = struct
       | Some owner, Some acquired_at, Some expires_at ->
           Some { owner; acquired_at; expires_at }
       | _ -> None
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Log.Misc.error "parse_lock_info failed: %s" (Printexc.to_string e);
       None
 
@@ -372,7 +377,8 @@ module FileSystem = struct
           (match Eio.Path.split path with
            | Some (parent, _) ->
                (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                with e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
+                with Eio.Cancel.Cancelled _ as e -> raise e
+                   | e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
            | None -> ());
 
           (* Get the actual filesystem path string *)
@@ -458,7 +464,8 @@ module FileSystem = struct
           (match Eio.Path.split path with
            | Some (parent, _) ->
                (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 parent
-                with e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
+                with Eio.Cancel.Cancelled _ as e -> raise e
+                   | e -> Eio.traceln "[WARN] mkdirs failed: %s" (Printexc.to_string e))
            | None -> ());
 
           let path_str = Eio.Path.native_exn path in

@@ -313,7 +313,7 @@ let tool_category tool_name =
   | "masc_encryption_status" | "masc_encryption_enable"
   | "masc_encryption_disable" | "masc_generate_key" -> Encryption
 
-  (* ── Code navigation ── *)
+  (* ── Code navigation + editing ── *)
   | "masc_code_search" | "masc_code_symbols" | "masc_code_read"
   | "masc_code_write" | "masc_code_edit" | "masc_code_delete"
   | "masc_code_shell" | "masc_code_git"

@@ -407,3 +407,81 @@ export interface Keeper {
   inventory?: string[]
   relationships?: Record<string, string>
 }
+
+// --- Keeper Config (structured read-only view) ---
+
+export interface KeeperConfigPrompt {
+  goal: string
+  short_goal: string
+  mid_goal: string
+  long_goal: string
+  soul_profile: string
+  will: string
+  needs: string
+  desires: string
+  instructions: string
+}
+
+export interface KeeperConfigExecution {
+  models: string[]
+  allowed_models: string[]
+  active_model: string
+  policy_mode: string
+  policy_shell_mode: string
+  verify: boolean
+}
+
+export interface KeeperConfigCompaction {
+  profile: string
+  ratio_gate: number
+  message_gate: number
+  token_gate: number
+  cooldown_sec: number
+}
+
+export interface KeeperConfigProactive {
+  enabled: boolean
+  idle_sec: number
+  cooldown_sec: number
+}
+
+export interface KeeperConfigDrift {
+  enabled: boolean
+  min_turn_gap: number
+  count_total: number
+  last_reason: string | null
+}
+
+export interface KeeperConfigInitiative {
+  enabled: boolean
+  scope: string
+  idle_sec: number
+  cooldown_sec: number
+  context_mode: string
+}
+
+export interface KeeperConfigHandoff {
+  auto: boolean
+  threshold: number
+  cooldown_sec: number
+}
+
+export interface KeeperConfigMetrics {
+  generation: number
+  total_turns: number
+  total_tokens: number
+  total_cost_usd: number
+  compaction_count: number
+}
+
+export interface KeeperConfig {
+  name: string
+  prompt: KeeperConfigPrompt
+  execution: KeeperConfigExecution
+  compaction: KeeperConfigCompaction
+  proactive: KeeperConfigProactive
+  drift: KeeperConfigDrift
+  initiative: KeeperConfigInitiative
+  handoff: KeeperConfigHandoff
+  metrics: KeeperConfigMetrics
+}

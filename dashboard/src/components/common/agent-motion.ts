@@ -60,7 +60,6 @@ function keeperPreview(keeper: Keeper): string {
 }
 
 export function buildAgentMotion(
-  _agentName: string,
   tasks: Task[],
   messages: Message[],
   journal: JournalEntry[],

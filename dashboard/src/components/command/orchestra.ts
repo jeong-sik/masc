@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { groupByKey } from '../common/collection'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type {
   CommandPlaneOrchestraResponse,
@@ -46,16 +47,6 @@ function spreadX(count: number, min: number, max: number): number[] {
   return Array.from({ length: count }, (_, idx) => Math.round(min + idx * step))
 }
 
-function groupBy<T>(items: T[], getKey: (item: T) => string): Map<string, T[]> {
-  const out = new Map<string, T[]>()
-  for (const item of items) {
-    const key = getKey(item)
-    const bucket = out.get(key) ?? []
-    bucket.push(item)
-    out.set(key, bucket)
-  }
-  return out
-}
 
 function layoutConfig(density: 'balanced' | 'compact') {
   if (density === 'compact') {
@@ -126,7 +117,7 @@ function layout(orchestra: CommandPlaneOrchestraResponse, density: 'balanced' | 
       .filter((entry): entry is readonly [string, number] => entry !== null),
   )
 
-  const workerBuckets = groupBy(workers, worker => {
+  const workerBuckets = groupByKey(workers, worker => {
     if (worker.lane_id) return `lane:${worker.lane_id}`
     if (worker.parent_id) return worker.parent_id
     return 'free'

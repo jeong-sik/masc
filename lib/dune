@@ -580,6 +580,7 @@
    autoresearch_git
    autoresearch_file
    autoresearch_codegen
+   autoresearch_knowledge
    tool_autoresearch_schemas
    tool_autoresearch
    ;; Anti-Fake Test Quality Scoring (harness P2)
@@ -745,6 +746,7 @@
   autoresearch_git
   autoresearch_file
   autoresearch_codegen
+  autoresearch_knowledge
   tool_autoresearch_schemas
   backend_eio_compression
   room_multi

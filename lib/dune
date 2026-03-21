@@ -410,6 +410,9 @@
    room_checkpoint
    tool_metrics
    tool_harness_health
+   tool_inline_dispatch_types
+   tool_inline_dispatch_room
+   tool_inline_dispatch_comm
    tool_inline_dispatch
    tool_inline_dispatch_episode
    tool_inline_dispatch_extra
@@ -705,7 +708,11 @@
   keeper_skill_routing
   keeper_alerting_path
   ;; tool_misc split
-  tool_misc_snapshots)
+  tool_misc_snapshots
+  ;; tool_inline_dispatch sub-modules
+  tool_inline_dispatch_types
+  tool_inline_dispatch_room
+  tool_inline_dispatch_comm)
  (libraries
    yojson
    base64

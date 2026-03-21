@@ -212,7 +212,5 @@ let () =
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;
            test_case "local review script contracts" `Quick test_local_review_script_contracts;
-           test_case "activity surface contracts" `Quick test_activity_surface_contracts;
-           test_case "local review script contracts" `Quick test_local_review_script_contracts;
          ]);
     ]

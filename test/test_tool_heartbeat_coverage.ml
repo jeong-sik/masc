@@ -60,6 +60,7 @@ let () = test "heartbeat_generate_id" (fun () ->
 )
 
 let () = test "heartbeat_start_stop" (fun () ->
+  Eio_main.run @@ fun _env ->
   let hb_id = Heartbeat.start ~agent_name:"test" ~interval:30 ~message:"ping" in
   assert (String.length hb_id > 0);
 
@@ -79,6 +80,7 @@ let () = test "heartbeat_start_stop" (fun () ->
 )
 
 let () = test "heartbeat_get" (fun () ->
+  Eio_main.run @@ fun _env ->
   let hb_id = Heartbeat.start ~agent_name:"getter" ~interval:60 ~message:"test" in
 
   match Heartbeat.get hb_id with
@@ -96,6 +98,7 @@ let () = test "heartbeat_get_missing" (fun () ->
 )
 
 let () = test "heartbeat_list_multiple" (fun () ->
+  Eio_main.run @@ fun _env ->
   let id1 = Heartbeat.start ~agent_name:"a1" ~interval:10 ~message:"m1" in
   let id2 = Heartbeat.start ~agent_name:"a2" ~interval:20 ~message:"m2" in
 

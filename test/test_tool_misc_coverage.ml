@@ -111,8 +111,9 @@ let () = test "dispatch_dashboard_invalid_scope" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test dispatch gc *)
+(* Test dispatch gc — needs Eio context for Eio.Mutex in gc path *)
 let () = test "dispatch_gc" (fun () ->
+  Eio_main.run @@ fun _env ->
   let ctx = make_test_ctx () in
   let args = `Assoc [("days", `Int 7)] in
   match Tool_misc.dispatch ctx ~name:"masc_gc" ~args with
@@ -124,6 +125,7 @@ let () = test "dispatch_gc" (fun () ->
 
 (* Test dispatch gc with default days *)
 let () = test "dispatch_gc_default" (fun () ->
+  Eio_main.run @@ fun _env ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
   match Tool_misc.dispatch ctx ~name:"masc_gc" ~args with

@@ -315,6 +315,8 @@ let tool_category tool_name =
 
   (* ── Code navigation ── *)
   | "masc_code_search" | "masc_code_symbols" | "masc_code_read"
+  | "masc_code_write" | "masc_code_edit" | "masc_code_delete"
+  | "masc_code_shell" | "masc_code_git"
   | "masc_code_swarm_plan" | "masc_code_swarm_verify" | "masc_code_swarm_merge" -> Code
 
   (* ── Board ── *)

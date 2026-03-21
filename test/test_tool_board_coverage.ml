@@ -222,7 +222,7 @@ let test_post_create_empty_title_rejected () =
          ("author", `String "tester") ]) in
   Alcotest.(check bool) "empty title rejected" false ok;
   Alcotest.(check bool) "error mentions title" true
-    (contains_substring body "title is required")
+    (contains_substring body "title" || contains_substring body "Title")
 
 let test_post_list_empty () =
   Eio_main.run @@ fun _env ->

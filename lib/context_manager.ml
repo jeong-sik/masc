@@ -300,6 +300,16 @@ let deserialize_context (s : string) ~max_tokens : working_context =
   { system_prompt; messages; token_count; max_tokens; importance_scores = [];
     oas_context = Agent_sdk.Context.create () }
 
+let context_to_json (ctx : working_context) : Yojson.Safe.t =
+  `Assoc [
+    ("system_prompt", `String (Inference_utils.sanitize_text_utf8 ctx.system_prompt));
+    ("messages", `List (List.map message_to_json ctx.messages));
+    ("token_count", `Int ctx.token_count);
+    ("max_tokens", `Int ctx.max_tokens);
+    ("importance_scores", `List (List.map (fun (i, s) ->
+      `Assoc [("index", `Int i); ("score", `Float s)]) ctx.importance_scores));
+  ]
+
 let create_checkpoint ctx ~generation =
   {
     checkpoint_id = generate_checkpoint_id ();
@@ -308,6 +318,35 @@ let create_checkpoint ctx ~generation =
     message_count = List.length ctx.messages;
     token_count = ctx.token_count;
     serialized = serialize_context ctx |> Inference_utils.sanitize_text_utf8;
+  }
+
+let to_oas_checkpoint ~(agent_name : string) ~(session_id : string)
+    (ctx : working_context) (ckpt : checkpoint) : Agent_sdk.Checkpoint.t =
+  { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+    session_id;
+    agent_name;
+    model = ""; (* populated by caller if known *)
+    system_prompt = Some ctx.system_prompt;
+    messages = ctx.messages;
+    usage = { total_input_tokens = 0; total_output_tokens = 0;
+              total_cache_creation_input_tokens = 0;
+              total_cache_read_input_tokens = 0;
+              api_calls = 0; estimated_cost_usd = 0.0 };
+    turn_count = ckpt.message_count;
+    created_at = ckpt.timestamp;
+    tools = [];
+    tool_choice = None;
+    disable_parallel_tool_use = false;
+    temperature = None; top_p = None; top_k = None; min_p = None;
+    enable_thinking = None;
+    response_format_json = false;
+    thinking_budget = None;
+    cache_system_prompt = false;
+    max_input_tokens = None;
+    max_total_tokens = None;
+    context = ctx.oas_context;
+    mcp_sessions = [];
+    working_context = Some (context_to_json ctx);
   }
 
 let restore_checkpoint ckpt ~max_tokens =

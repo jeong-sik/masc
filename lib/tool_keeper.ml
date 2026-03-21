@@ -352,7 +352,7 @@ let handle_persistent_agent_create_from_persona ctx args : tool_result =
 let dispatch ctx ~name ~args : tool_result option =
   (* Resident keepers are bootstrapped lazily on tool use as a fallback.
      Server startup also calls bootstrap_existing_keepers for always-on presence. *)
-  (try start_existing_keepalives ctx with exn ->
+  (try start_existing_keepalives ctx with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Keeper.error "start_existing_keepalives failed: %s" (Printexc.to_string exn));
   match name with
   | "masc_persona_list" -> Some (Persona.handle_persona_list ctx args)
@@ -399,7 +399,7 @@ let dispatch ctx ~name ~args : tool_result option =
     Returns None for all other tool names.
     Called from server_routes_http_keeper_stream. *)
 let dispatch_stream ~on_text_delta ctx ~name ~args : tool_result option =
-  (try start_existing_keepalives ctx with exn ->
+  (try start_existing_keepalives ctx with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Keeper.error "start_existing_keepalives failed: %s" (Printexc.to_string exn));
   match name with
   | "masc_keeper_msg" ->

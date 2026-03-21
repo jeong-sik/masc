@@ -181,7 +181,7 @@ let handle_done ctx args =
          handoff_to = None;
        } in
        (try ignore (Metrics_store_eio.record ctx.config metric)
-        with exn -> Log.Task.error "Metrics_store_eio.record(done) failed: %s" (Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(done) failed: %s" (Printexc.to_string exn));
        (* Feed success into Thompson Sampling quality signal *)
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
        (* Prometheus: record task completion *)
@@ -225,7 +225,7 @@ let handle_cancel_task ctx args =
          handoff_to = None;
        } in
        (try ignore (Metrics_store_eio.record ctx.config metric)
-        with exn -> Log.Task.error "Metrics_store_eio.record(cancel) failed: %s" (Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(cancel) failed: %s" (Printexc.to_string exn));
        (* Feed failure into Thompson Sampling quality signal *)
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        (* Prometheus: record task failure *)
@@ -358,7 +358,7 @@ let handle_transition ctx args =
          handoff_to = None;
        } in
        (try ignore (Metrics_store_eio.record ctx.config metric)
-        with exn -> Log.Task.error "Metrics_store_eio.record(transition-done) failed: %s" (Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-done) failed: %s" (Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
        Prometheus.record_task_completed ()
    | Ok _, "cancel" ->
@@ -375,7 +375,7 @@ let handle_transition ctx args =
          handoff_to = None;
        } in
        (try ignore (Metrics_store_eio.record ctx.config metric)
-        with exn -> Log.Task.error "Metrics_store_eio.record(transition-cancel) failed: %s" (Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-cancel) failed: %s" (Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        Prometheus.record_task_failed ()
    | _ -> ());

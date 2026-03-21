@@ -63,7 +63,7 @@ let handle_a2a_subscribe _ctx args =
     match A2a_tools.subscribe ?agent_filter ~events () with
     | Ok json -> (true, Yojson.Safe.pretty_to_string json)
     | Error e -> (false, Printf.sprintf "❌ Subscribe failed: %s" e)
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     (false, Printf.sprintf "❌ Subscribe exception: %s" (Printexc.to_string exn)))
 
 let handle_a2a_unsubscribe _ctx args =

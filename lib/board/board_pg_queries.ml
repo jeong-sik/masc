@@ -39,7 +39,7 @@ let post_of_row
       in
       let meta_json =
         match meta_raw with
-        | Some raw -> (try Some (Yojson.Safe.from_string raw) with exn ->
+        | Some raw -> (try Some (Yojson.Safe.from_string raw) with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             Log.BoardPg.warn "meta_json parse failed: %s (raw=%s)" (Printexc.to_string exn) raw;
             None)
         | None -> None

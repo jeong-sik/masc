@@ -413,7 +413,7 @@ let gc config ?(days=7) () =
                  Log.Misc.error "failed to archive session %s" session_id);
               incr session_archive_count
             end
-          with exn ->
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             Log.Gc.warn "session archive %s failed: %s" session_id (Printexc.to_string exn)
       end
     )

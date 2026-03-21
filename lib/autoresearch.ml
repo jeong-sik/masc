@@ -579,7 +579,7 @@ let apply_code_change ~workdir ~target_file ~new_content =
       Fs_compat.save_file tmp_path new_content;
       Unix.rename tmp_path abs_path;
       Result.ok original
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       (try Sys.remove tmp_path with Sys_error _ -> ());
       Result.error (Printf.sprintf "Failed to write %s: %s"
         target_file (Printexc.to_string exn)))

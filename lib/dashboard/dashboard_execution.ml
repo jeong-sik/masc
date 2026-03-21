@@ -118,7 +118,7 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
       let cutoff_unix = Time_compat.now () -. 86400.0 in
       let all_sessions =
         if Room.is_initialized config then
-          Team_session_store.list_sessions ~since_unix:cutoff_unix config
+          Team_session_store.list_sessions ~since_unix:cutoff_unix ~limit:100 config
         else []
       in
       let cutoff_iso =

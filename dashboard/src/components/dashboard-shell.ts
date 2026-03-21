@@ -223,10 +223,7 @@ export function TabContent() {
 }
 
 export function DashboardMain() {
-  if (roomTruthInitializing.value) {
-    return html`<div class="loading-indicator">서버가 데이터를 준비하고 있습니다. 잠시 후 자동으로 새로고침됩니다...</div>`
-  }
-  if (dashboardLoading.value && !connected.value) {
+  if (dashboardLoading.value && !connected.value && !roomTruthInitializing.value) {
     return html`<div class="loading-indicator">대시보드 불러오는 중...</div>`
   }
 
@@ -241,6 +238,9 @@ export function DashboardMain() {
     .join(':')
 
   return html`
+    ${roomTruthInitializing.value ? html`
+      <div class="loading-banner">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
+    ` : null}
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <${TabContent} />
     <//>

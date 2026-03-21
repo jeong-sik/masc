@@ -203,8 +203,19 @@ let read_recent_events config session_id ~max_count :
 
 (** List sessions, optionally filtering by mtime to avoid loading stale history.
     [~since_unix] skips directories whose mtime is older than the given Unix timestamp.
+    [~limit] caps the number of returned sessions (0 = unlimited).
     This turns a 1448-file full scan into loading only active/recent sessions. *)
-let list_sessions ?(since_unix = 0.0) config : Team_session_types.session list =
+let list_sessions ?(since_unix = 0.0) ?(limit = 0) config : Team_session_types.session list =
+  let take_limit lst =
+    if limit <= 0 then lst
+    else
+      let rec aux acc n = function
+        | [] -> List.rev acc
+        | _ when n <= 0 -> List.rev acc
+        | x :: xs -> aux (x :: acc) (n - 1) xs
+      in
+      aux [] limit lst
+  in
   match backend_get_all config ~prefix:"team-sessions:" with
   | Ok pairs ->
       pairs
@@ -217,6 +228,7 @@ let list_sessions ?(since_unix = 0.0) config : Team_session_types.session list =
                  match Safe_ops.parse_json_safe ~context:"list_sessions" trimmed with
                  | Ok json -> Team_session_types.session_of_yojson json
                  | Error _ -> None)
+      |> take_limit
   | Error _ ->
       let root = sessions_root config in
       if not (path_exists config root) then []
@@ -262,6 +274,7 @@ let list_sessions ?(since_unix = 0.0) config : Team_session_types.session list =
             ) dirs
         in
         List.filter_map (fun session_id -> load_session config session_id) filtered
+        |> take_limit
 
 let update_session config session_id f =
   let path = session_json_path config session_id in

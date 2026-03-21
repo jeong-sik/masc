@@ -134,13 +134,41 @@ let queue_depth () =
 let active_keeper_count config =
   resident_keeper_names config |> List.length
 
-let process_event ~sw:_ ~clock:_ ~config:_ (event : board_event) =
+let event_to_message (event : board_event) : string =
+  let kind_str = match event.kind with
+    | `Board_post -> "board_post"
+    | `Board_comment -> "board_comment"
+  in
+  let comment_part = match event.comment_id with
+    | Some id -> Printf.sprintf "\nComment ID: %s" id
+    | None -> ""
+  in
+  Printf.sprintf
+    "Board event: %s\nPost ID: %s%s\nAuthor: %s\nContent: %s"
+    kind_str event.post_id comment_part event.author event.content
+
+let deliver_to_keepers ~config (event : board_event) =
+  let keepers = resident_keeper_names config in
+  List.iter (fun keeper_name ->
+    if keeper_name = event.author then ()  (* don't deliver own events *)
+    else
+      match read_meta config keeper_name with
+      | Ok (Some meta) ->
+          let base_dir = session_base_dir config in
+          let session = Keeper_working_context.create_session
+            ~session_id:meta.trace_id ~base_dir in
+          let msg = Agent_sdk.Types.user_msg (event_to_message event) in
+          Keeper_working_context.persist_message session msg;
+          Log.Keeper.info "board event delivered to %s: %s" keeper_name event.key
+      | _ -> ()
+  ) keepers
+
+let process_event ~sw:_ ~clock:_ ~config (event : board_event) =
   last_event_at := Some event.created_at;
   if recent_key_seen event.key then ()
   else begin
     remember_key event.key;
-    (* Keepers discover board events via proactive turns (keeper_board_list).
-       No forced event push — keepers act on their own judgment. *)
+    deliver_to_keepers ~config event;
     processed_events := !processed_events + 1
   end
 

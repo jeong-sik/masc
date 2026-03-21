@@ -781,3 +781,44 @@ let claim_next config ~agent_name =
   | Claim_next_no_eligible _ -> "📋 No unclaimed tasks available"
   | Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
 
+(** Release stale task claims older than [ttl_seconds].
+    A Claimed or InProgress task whose assignee has no recent heartbeat
+    (per the zombie threshold) is considered stale.
+    Returns list of (task_id, assignee) pairs that were released. *)
+let release_stale_claims config ~ttl_seconds =
+  ensure_initialized config;
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock config backlog_path (fun () ->
+    let backlog = read_backlog config in
+    let now_str = now_iso () in
+    let now_f = Time_compat.now () in
+    let stale_tasks = ref [] in
+    let updated_tasks = List.map (fun (task : task) ->
+      match task.task_status with
+      | Claimed { assignee; claimed_at } ->
+          let ts = parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) claimed_at in
+          if now_f -. ts > ttl_seconds then begin
+            stale_tasks := (task.id, assignee) :: !stale_tasks;
+            log_event config (Printf.sprintf
+              "{\"type\":\"stale_claim_released\",\"task_id\":\"%s\",\"assignee\":\"%s\",\"age_s\":%.0f,\"ts\":\"%s\"}"
+              task.id assignee (now_f -. ts) now_str);
+            { task with task_status = Todo }
+          end else task
+      | InProgress { assignee; started_at } ->
+          let ts = parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) started_at in
+          if now_f -. ts > ttl_seconds then begin
+            stale_tasks := (task.id, assignee) :: !stale_tasks;
+            log_event config (Printf.sprintf
+              "{\"type\":\"stale_inprogress_released\",\"task_id\":\"%s\",\"assignee\":\"%s\",\"age_s\":%.0f,\"ts\":\"%s\"}"
+              task.id assignee (now_f -. ts) now_str);
+            { task with task_status = Todo }
+          end else task
+      | Todo | Done _ | Cancelled _ -> task
+    ) backlog.tasks in
+    if !stale_tasks <> [] then begin
+      let updated_backlog = { backlog with tasks = updated_tasks } in
+      write_backlog config updated_backlog
+    end;
+    List.rev !stale_tasks
+  )
+

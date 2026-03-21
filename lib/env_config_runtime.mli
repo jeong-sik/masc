@@ -36,6 +36,10 @@ module Cache : sig
   val max_entries : int
 end
 
+module Claim : sig
+  val ttl_seconds : float
+end
+
 module Orchestrator : sig
   val check_interval_seconds : float
   val agent_name : string

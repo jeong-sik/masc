@@ -604,6 +604,13 @@ end = struct
   let caqti_error_to_masc err =
     OperationFailed (Caqti_error.show err)
 
+  let normalize_postgres_url url =
+    let uri = Uri.of_string url in
+    match Uri.host uri, Uri.port uri with
+    | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
+        Uri.to_string (Uri.with_port uri (Some 5432))
+    | _ -> url
+
   (* WARNING: create requires an Eio.Switch context!
      This is a blocking workaround - in production, create should be called
      within an Eio.Switch.run context. *)
@@ -621,7 +628,7 @@ end = struct
     match cfg.postgres_url with
     | None -> Error (ConnectionFailed "PostgreSQL URL not configured (set MASC_POSTGRES_URL)")
     | Some url ->
-        let uri = Uri.of_string url in
+        let uri = Uri.of_string (normalize_postgres_url url) in
         let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
           | Some s -> (try int_of_string s with _ -> 10)
           | None -> 10
@@ -654,7 +661,7 @@ end = struct
     match cfg.postgres_url with
     | None -> Error (ConnectionFailed "PostgreSQL URL not configured")
     | Some url ->
-        let uri = Uri.of_string url in
+        let uri = Uri.of_string (normalize_postgres_url url) in
         let pool_config = Caqti_pool_config.create ~max_size:1 () in
         match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
         | Error err -> Error (caqti_error_to_masc err)

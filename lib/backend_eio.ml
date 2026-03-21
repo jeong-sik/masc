@@ -668,8 +668,15 @@ module Postgres = struct
   let caqti_error_to_masc err =
     IOError (Caqti_error.show err)
 
-  let create ~sw ~env ~url config =
+  let normalize_postgres_url url =
     let uri = Uri.of_string url in
+    match Uri.host uri, Uri.port uri with
+    | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
+        Uri.to_string (Uri.with_port uri (Some 5432))
+    | _ -> url
+
+  let create ~sw ~env ~url config =
+    let uri = Uri.of_string (normalize_postgres_url url) in
     let max_pool = match Sys.getenv_opt "MASC_PG_POOL_SIZE" with
       | Some s -> (try int_of_string s with _ -> 10)
       | None -> 10

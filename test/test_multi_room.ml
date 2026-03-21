@@ -206,6 +206,7 @@ let test_current_room_after_enter () =
 (* ============================================ *)
 
 let test_room_enter_moves_agent () =
+  Eio_main.run @@ fun _env ->
   let (config, test_dir) = setup_test_room () in
   Fun.protect ~finally:(fun () -> cleanup_test_room test_dir) (fun () ->
     ignore (Room.init config ~agent_name:None);

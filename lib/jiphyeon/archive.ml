@@ -73,7 +73,9 @@ let record_of_yojson json =
     let metadata = json |> member "metadata" |> to_assoc
       |> List.map (fun (k, v) -> (k, to_string v)) in
     Ok { id; type_; content; agents; timestamp; metadata }
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "JSON parse error: %s" (Printexc.to_string e))
 
 (** {1 Utilities} *)
@@ -175,7 +177,9 @@ let execute_cypher ~sw ~env bolt_url query params =
       Ok body_str
     else
       Error (Printf.sprintf "Neo4j HTTP error: %s" body_str)
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Neo4j connection error: %s" (Printexc.to_string e))
 
 (** Neo4j에 레코드 저장 (MERGE) *)

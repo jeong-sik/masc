@@ -418,7 +418,9 @@ let spawn ~agent_name ~prompt ?timeout_seconds ?working_dir () =
       cache_read_tokens = cache_read;
       cost_usd;
     }
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> Sys.chdir original_dir; raise e
+  | e ->
     Sys.chdir original_dir;
     {
       success = false;

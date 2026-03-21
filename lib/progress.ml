@@ -171,7 +171,9 @@ let notify ~task_id ~progress ?message ?estimated_remaining () =
   (* Read callback under lock, call outside to avoid deadlock *)
   let callback = State.with_lock (fun () -> State.global.sse_broadcast) in
   try callback json
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Log.Misc.error "SSE broadcast failed: %s" (Printexc.to_string e)
 
 (** Wire up the forward reference

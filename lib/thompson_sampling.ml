@@ -266,7 +266,9 @@ let load_stats () =
       ) entries;
       Printf.printf "[thompson_sampling] Loaded stats for %d agents\n%!"
         (Hashtbl.length stats_table)
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Log.Thompson.error "Error loading stats: %s"
         (Printexc.to_string e)
   end
@@ -282,7 +284,9 @@ let save_stats () =
     Fs_compat.save_file path content;
     Printf.printf "[thompson_sampling] Saved stats for %d agents\n%!"
       (Hashtbl.length stats_table)
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Log.Thompson.error "Error saving stats: %s"
       (Printexc.to_string e)
 

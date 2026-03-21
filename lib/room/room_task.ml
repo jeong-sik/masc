@@ -97,7 +97,9 @@ let batch_add_tasks config tasks =
       let msg = Printf.sprintf "📋 New batch of %d quests added: %s" (List.length added_tasks) summary in
       let _ = broadcast config ~from_agent:"system" ~content:msg in
       Printf.sprintf "✅ Added %d tasks: %s" (List.length added_tasks) summary
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Printf.sprintf "❌ Error adding batch tasks: %s" (Printexc.to_string e)
   )
 
@@ -154,7 +156,9 @@ let claim_task config ~agent_name ~task_id =
               "{\"type\":\"task_claim\",\"agent\":\"%s\",\"task\":\"%s\",\"ts\":\"%s\"}"
               agent_name task_id (now_iso ()));
             Printf.sprintf "✅ %s claimed %s" agent_name task_id
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 
@@ -229,7 +233,9 @@ let claim_task_r config ~agent_name ~task_id
                   log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_claim"); ("agent", `String agent_name); ("task", `String task_id); ("ts", `String (now_iso ()))]));
                   Ok (Printf.sprintf "✅ %s claimed %s" agent_name task_id)
           end)
-      with e -> Error (Types.IoError (Printexc.to_string e))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Unified task transition (single entrypoint).
@@ -338,7 +344,9 @@ let transition_task_r config ~agent_name ~task_id ~action
                                 (status_to_string task.task_status)
                                 (status_to_string new_status))
                      ))
-          with e -> Error (Types.IoError (Printexc.to_string e))
+          with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Types.IoError (Printexc.to_string e))
         )
 
 (** Release task back to backlog - transition wrapper *)
@@ -415,7 +423,9 @@ let complete_task config ~agent_name ~task_id ~notes =
                  (Printexc.to_string exn));
             Printf.sprintf "✅ %s completed %s" agent_name task_id
           end
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Printf.sprintf "❌ Error: %s" (Printexc.to_string e)
   )
 
@@ -486,7 +496,9 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                  Log.Misc.error "task earn failed: %s" msg);
               Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
             end
-      with e -> Error (Types.IoError (Printexc.to_string e))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Cancel a task - A2A compatible *)
@@ -540,7 +552,9 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
               log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_cancelled"); ("agent", `String agent_name); ("task", `String task_id); ("reason", if reason = "" then `Null else `String reason); ("ts", `String (now_iso ()))]));
               Ok (Printf.sprintf "🚫 %s cancelled %s" agent_name task_id)
             end
-      with e -> Error (Types.IoError (Printexc.to_string e))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e -> Error (Types.IoError (Printexc.to_string e))
     )
 
 (** Structured result for claim_next_r (avoids brittle string parsing). *)
@@ -769,7 +783,9 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
             released_task_id;
             message;
           }
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Claim_next_error (Printexc.to_string e)
   )
 

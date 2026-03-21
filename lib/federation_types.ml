@@ -146,7 +146,9 @@ let delegation_request_of_yojson json =
           status = json |> U.member "status" |> U.to_string;
           result = json |> U.member "result" |> U.to_string_option;
         }
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Federation event - variant type with inline records *)
 type federation_event =

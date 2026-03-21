@@ -176,7 +176,9 @@ end = struct
 
   let catch f =
     try Ok (f ())
-    with e -> Error (Printexc.to_string e)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e -> Error (Printexc.to_string e)
 
   let map_error f = function
     | Ok x -> Ok x

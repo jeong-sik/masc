@@ -160,6 +160,7 @@ export type TabId =
   | 'work'
   | 'operations'
   | 'lab'
+  | 'logs'
 
 /** Pre-restructure tab IDs kept for redirect aliases. */
 export type LegacyTabId =
@@ -190,6 +191,7 @@ export const VALID_TABS: TabId[] = [
   'work',
   'operations',
   'lab',
+  'logs',
 ]
 
 /** Maps legacy tab IDs to new tab + optional section params. */

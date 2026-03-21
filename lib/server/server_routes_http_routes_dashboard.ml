@@ -66,6 +66,22 @@ let add_routes ~sw ~clock router =
          let json = dashboard_shell_http_json state.Mcp_server.room_config in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/logs" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let limit = Server_utils.int_query_param req "limit" ~default:200 in
+         let min_level = match Server_utils.query_param req "level" with
+           | Some v -> Log.level_to_int (Log.level_of_string v)
+           | None -> 0
+         in
+         let module_filter = match Server_utils.query_param req "module" with
+           | Some v -> v
+           | None -> ""
+         in
+         let entries = Log.Ring.recent ~limit ~min_level ~module_filter () in
+         let json = Log.Ring.to_json entries in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/room-truth" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_room_truth_http_json ~state ~sw ~clock req in

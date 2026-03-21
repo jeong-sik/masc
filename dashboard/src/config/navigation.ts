@@ -100,6 +100,14 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     defaultParams: { section: 'overview' },
     tabs: ['lab'],
   },
+  {
+    id: 'logs',
+    label: '로그',
+    icon: '📜',
+    description: '시스템 실행 로그 (바이너리 stdout/stderr)',
+    defaultTab: 'logs',
+    tabs: ['logs'],
+  },
 ]
 
 export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(surface => ({

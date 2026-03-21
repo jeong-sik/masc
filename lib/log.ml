@@ -63,15 +63,92 @@ let timestamp () =
     tm.Unix.tm_min
     tm.Unix.tm_sec
 
+(** ISO 8601 timestamp for JSON *)
+let timestamp_iso () =
+  let t = Time_compat.now () in
+  let tm = Unix.gmtime t in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+(** In-memory ring buffer for dashboard log viewer.
+    Fixed capacity, oldest entries evicted on overflow.
+    Lock-free: single-writer (log functions), multi-reader (API). *)
+module Ring = struct
+  type entry = {
+    seq : int;
+    ts : string;
+    level : string;
+    module_name : string;
+    message : string;
+  }
+
+  let capacity = 5000
+  let buf : entry array = Array.make capacity
+    { seq = 0; ts = ""; level = ""; module_name = ""; message = "" }
+  let head = Atomic.make 0 (* next write position *)
+  let total = Atomic.make 0 (* total entries ever written *)
+
+  let push ~level_str ~module_name ~message =
+    let seq = Atomic.fetch_and_add total 1 in
+    let idx = seq mod capacity in
+    buf.(idx) <- { seq; ts = timestamp_iso (); level = level_str;
+                   module_name; message };
+    ignore (Atomic.fetch_and_add head 1)
+
+  let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")
+      () : entry list =
+    let t = Atomic.get total in
+    if t = 0 then []
+    else begin
+      let start = max 0 (t - capacity) in
+      let entries = ref [] in
+      let count = ref 0 in
+      let i = ref (t - 1) in
+      while !i >= start && !count < limit do
+        let e = buf.(!i mod capacity) in
+        let level_ok = (level_to_int (level_of_string e.level)) >= min_level in
+        let module_ok = module_filter = "" ||
+          String.lowercase_ascii e.module_name =
+          String.lowercase_ascii module_filter in
+        if level_ok && module_ok then begin
+          entries := e :: !entries;
+          incr count
+        end;
+        decr i
+      done;
+      (* Return in chronological order *)
+      !entries
+    end
+
+  let entry_to_json e =
+    `Assoc [
+      ("seq", `Int e.seq);
+      ("ts", `String e.ts);
+      ("level", `String e.level);
+      ("module", `String e.module_name);
+      ("message", `String e.message);
+    ]
+
+  let to_json entries =
+    `Assoc [
+      ("total", `Int (Atomic.get total));
+      ("entries", `List (List.map entry_to_json entries));
+    ]
+end
+
 (** Log a message at given level with optional context *)
 let log level ?(ctx : string option) fmt =
   Printf.ksprintf (fun msg ->
     if should_log level then begin
+      let level_str = level_to_string level in
+      let module_name = match ctx with Some c -> c | None -> "" in
       let prefix = match ctx with
-        | Some c -> Printf.sprintf "[%s] [%s] [%s]" (timestamp ()) (level_to_string level) c
-        | None -> Printf.sprintf "[%s] [%s]" (timestamp ()) (level_to_string level)
+        | Some c -> Printf.sprintf "[%s] [%s] [%s]" (timestamp ()) level_str c
+        | None -> Printf.sprintf "[%s] [%s]" (timestamp ()) level_str
       in
-      Printf.eprintf "%s %s\n%!" prefix msg
+      Printf.eprintf "%s %s\n%!" prefix msg;
+      Ring.push ~level_str ~module_name ~message:msg
     end
   ) fmt
 
@@ -102,9 +179,11 @@ module Make (M : sig val name : string end) = struct
   let log_module level fmt =
     Printf.ksprintf (fun msg ->
       if should_log_module level then begin
+        let level_str = level_to_string level in
         let prefix = Printf.sprintf "[%s] [%s] [%s]"
-          (timestamp ()) (level_to_string level) M.name in
-        Printf.eprintf "%s %s\n%!" prefix msg
+          (timestamp ()) level_str M.name in
+        Printf.eprintf "%s %s\n%!" prefix msg;
+        Ring.push ~level_str ~module_name:M.name ~message:msg
       end
     ) fmt
 

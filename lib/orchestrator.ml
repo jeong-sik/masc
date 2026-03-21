@@ -201,6 +201,17 @@ let make_zero_zombie_consumer ~room_config
           if has_zombie_indicator then
             Log.Orchestrator.info "[zombie] %s" status_trimmed
         end;
+        (* Stale claim release: auto-release tasks held beyond TTL *)
+        let ttl = Env_config_runtime.Claim.ttl_seconds in
+        (try
+          let released = Room_task.release_stale_claims room_config ~ttl_seconds:ttl in
+          if released <> [] then
+            Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
+              (List.length released)
+              (String.concat ", " (List.map (fun (tid, agent) ->
+                Printf.sprintf "%s(%s)" tid agent) released))
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+          Log.Orchestrator.warn "[stale-claims] error: %s" (Printexc.to_string exn));
         Ok ()
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         if Resilience.ZeroZombie.is_benign_error exn then

@@ -111,7 +111,7 @@ let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
         ~primary_model_max_tokens:primary_model.max_context ~base_dir
     in
     match ctx_opt with
-    | Some c -> Context_manager.context_ratio c
+    | Some c -> Keeper_exec_context.context_ratio c
     | None -> 0.0
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

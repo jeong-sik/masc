@@ -8,21 +8,21 @@ val load_context_from_checkpoint :
   trace_id:string ->
   primary_model_max_tokens:int ->
   base_dir:string ->
-  Context_manager.session_context * Context_manager.working_context option
+  Keeper_exec_context.session_context * Keeper_exec_context.working_context option
 
 val save_checkpoint :
-  Context_manager.session_context ->
-  Context_manager.working_context ->
+  Keeper_exec_context.session_context ->
+  Keeper_exec_context.working_context ->
   generation:int ->
-  Context_manager.checkpoint
+  Keeper_exec_context.checkpoint
 
 val compaction_policy_of_keeper : keeper_meta -> float * int * int
 
 val compact_if_needed :
   meta:keeper_meta ->
   now_ts:float ->
-  Context_manager.working_context ->
-  Context_manager.working_context * string option * string
+  Keeper_exec_context.working_context ->
+  Keeper_exec_context.working_context * string option * string
 
 val generate_trace_id : unit -> string
 

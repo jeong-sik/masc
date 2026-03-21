@@ -494,6 +494,7 @@
    keeper_exec_status_metrics
    keeper_exec_status
    keeper_exec_persona
+   keeper_working_context
    keeper_exec_context
    keeper_tools_oas
    keeper_hooks_oas
@@ -524,9 +525,6 @@
    masc_eio_env
    discovery_cache
    oas_type_adapters
-   context_scoring
-   compaction_types
-   context_manager
    context_compact_oas
    verifier_oas
    procedural_memory
@@ -661,6 +659,7 @@
   keeper_exec_status
   keeper_status_detail
   keeper_exec_persona
+  keeper_working_context
   keeper_exec_context
   keeper_turn_session
   keeper_turn_setup

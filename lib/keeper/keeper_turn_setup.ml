@@ -298,7 +298,7 @@ let ensure_keeper_exists
      | Ok () ->
        let specs = Model_spec.available_model_specs_of_strings meta.models in
        let primary = match specs with m0 :: _ -> m0 | [] -> Model_spec.default_local_model_spec () in
-       let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
+       let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
        let system_prompt =
          build_keeper_system_prompt
            ~goal
@@ -311,7 +311,7 @@ let ensure_keeper_exists
            ~desires
            ~instructions
        in
-       let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
+       let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary.max_context in
        (try ignore (save_checkpoint session ctx0 ~generation:0)
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn ~label:"save_checkpoint (ensure) failed" exn);
        match write_meta ctx.config meta with

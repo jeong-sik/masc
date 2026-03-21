@@ -12,10 +12,10 @@
     @since Phase B — Sentinel removal (roles are natively compatible) *)
 
 (* ================================================================ *)
-(* Strategy Type (shared via Compaction_types)                       *)
+(* Strategy Type                                                     *)
 (* ================================================================ *)
 
-type strategy = Compaction_types.compaction_strategy =
+type strategy =
   | PruneToolOutputs
   | MergeContiguous
   | DropLowImportance
@@ -34,13 +34,62 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
   List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
 
 (* ================================================================ *)
+(* Importance Scoring (inlined from Context_scoring)                 *)
+(* ================================================================ *)
+
+let memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
+
+let goal_prefix = "[MASC_GOAL]"
+
+let starts_with ~prefix s =
+  let lp = String.length prefix in
+  String.length s >= lp && String.sub s 0 lp = prefix
+
+(** Score a list of messages by importance.
+    Returns [(index, score)] pairs where score is in [0.0, 1.0]. *)
+let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
+  let n = List.length msgs in
+  List.mapi (fun i (m : Agent_sdk.Types.message) ->
+    let recency = if n <= 1 then 1.0
+      else let t = float_of_int i /. float_of_int (n - 1) in
+           t *. t
+    in
+    let role_w = match m.role with
+      | Agent_sdk.Types.System -> 1.0
+      | Agent_sdk.Types.Tool -> 0.7
+      | Agent_sdk.Types.User -> 0.6
+      | Agent_sdk.Types.Assistant -> 0.4
+    in
+    let msg_text = Agent_sdk.Types.text_of_message m in
+    let len = String.length msg_text in
+    let content_w = if len < 20 then 0.3
+      else if len < 100 then 0.6
+      else if len < 500 then 0.8
+      else 0.7
+    in
+    let has_tool_content = List.exists (function
+      | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
+      | _ -> false) m.content
+    in
+    let tool_w = if has_tool_content then 0.8 else 0.5 in
+    let score = 0.4 *. recency +. 0.25 *. role_w +. 0.2 *. content_w +. 0.15 *. tool_w in
+    let score =
+      if starts_with ~prefix:memory_summary_prefix msg_text
+         || starts_with ~prefix:goal_prefix msg_text then
+        Float.max score 0.95
+      else score
+    in
+    (i, Float.min 1.0 (Float.max 0.0 score))
+  ) msgs
+
+(* ================================================================ *)
 (* Strategy Mapping: Local -> OAS                                   *)
 (* ================================================================ *)
 
 (** Map a local strategy to an OAS Context_reducer strategy.
 
     - PruneToolOutputs and MergeContiguous use OAS built-in strategies directly.
-    - DropLowImportance uses OAS Custom with MASC Context_scoring (OAS has no scoring).
+    - DropLowImportance uses OAS Custom with importance scoring (OAS has no scoring).
     - SummarizeOld uses OAS Custom with extractive summarization (deterministic, no LLM). *)
 let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
@@ -50,7 +99,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
     Agent_sdk.Context_reducer.Merge_contiguous
   | DropLowImportance ->
     Agent_sdk.Context_reducer.Custom (fun msgs ->
-      let scores = Context_scoring.score_messages msgs in
+      let scores = score_messages msgs in
       let threshold = 0.3 in
       List.filteri (fun i _m ->
         match List.assoc_opt i scores with

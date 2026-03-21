@@ -60,8 +60,8 @@ let allowed_tools_for_autonomy_level
 let make_hooks
     ~(config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
-    ~(session : Context_manager.session_context)
-    ~(ctx_ref : Context_manager.working_context ref)
+    ~(session : Keeper_working_context.session_context)
+    ~(ctx_ref : Keeper_working_context.working_context ref)
     ~(generation : int)
     ?(max_cost_usd : float option)
     ?(destructive_check : bool = true)

@@ -64,7 +64,7 @@ let is_weather_text (s : string) : bool =
   has_weather
   || (try let _ = Str.search_forward (Str.regexp_string "\xeb\x82\xa0\xec\x94\xa8") s 0 in true with Not_found -> false)
 
-let extract_user_messages (ctx_work : Context_manager.working_context) : string list =
+let extract_user_messages (ctx_work : Keeper_working_context.working_context) : string list =
   ctx_work.messages
   |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
        if m.role = Agent_sdk.Types.User then

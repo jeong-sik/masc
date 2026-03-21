@@ -92,12 +92,12 @@ let run_turn
     match ctx_opt with
     | Some c -> c
     | None ->
-      Context_manager.create
+      Keeper_exec_context.create
         ~system_prompt:base_system_prompt
         ~max_tokens:max_context
   in
   let ctx_work =
-    Context_manager.set_system_prompt base_ctx
+    Keeper_exec_context.set_system_prompt base_ctx
       ~system_prompt:base_system_prompt
   in
   (* 5. Build final turn system prompt via caller callback *)
@@ -108,8 +108,8 @@ let run_turn
   in
   (* 6. Append user message and persist *)
   let user_msg = Agent_sdk.Types.user_msg user_message in
-  let ctx_work = Context_manager.append ctx_work user_msg in
-  Context_manager.persist_message session user_msg;
+  let ctx_work = Keeper_exec_context.append ctx_work user_msg in
+  Keeper_exec_context.persist_message session user_msg;
   (* 7. Set up agent *)
   let ctx_ref = ref ctx_work in
   let agent_name = Printf.sprintf "keeper-%s" meta.name in
@@ -213,8 +213,8 @@ let run_turn
     in
     let usage = Keeper_exec_context.usage_of_response result.response in
     let assistant_msg = Agent_sdk.Types.assistant_msg text in
-    Context_manager.persist_message session assistant_msg;
-    ctx_ref := Context_manager.append !ctx_ref assistant_msg;
+    Keeper_exec_context.persist_message session assistant_msg;
+    ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
     (* OAS Eval: generate turn metrics *)
     let _eval_metrics : Agent_sdk.Eval.metric list = [
       { name = "turn_count"; value = Int_val result.turns;

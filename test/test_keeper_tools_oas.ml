@@ -11,7 +11,7 @@ let make_test_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 
 let make_test_ctx () =
-  Context_manager.create ~system_prompt:"test" ~max_tokens:4000
+  Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
 
 let test_make_tools_returns_nonempty () =
   let meta = make_test_meta () in

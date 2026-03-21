@@ -1,6 +1,10 @@
-(** Keeper_exec_context — shared keeper context utilities: checkpoint management,
-    compaction, room presence, system prompts, text processing, proactive prompt
-    helpers, and proactive generation. *)
+(** Keeper_exec_context — shared keeper context utilities: working context,
+    checkpoint management, compaction, room presence, system prompts,
+    text processing, proactive prompt helpers, and proactive generation.
+
+    Pure types and context operations are provided by
+    [Keeper_working_context] (included below). This module adds
+    keeper-specific logic on top. *)
 
 open Keeper_types
 open Keeper_memory
@@ -8,10 +12,16 @@ open Keeper_alerting
 open Keeper_exec_tools [@@warning "-33"]
 open Keeper_exec_status
 
+include Keeper_working_context
+
 let timed = Inference_utils.timed
 let zero_usage = Inference_utils.zero_usage
 let usage_of_response = Inference_utils.usage_of_response
 let total_tokens = Inference_utils.total_tokens
+
+(* ================================================================ *)
+(* Keeper Context Lifecycle                                          *)
+(* ================================================================ *)
 
 let log_keeper_exn ~label exn =
   let tag = match exn with
@@ -22,9 +32,9 @@ let log_keeper_exn ~label exn =
   Log.Keeper.info "%s%s: %s" tag label (Printexc.to_string exn)
 
 let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
-  let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
+  let session = create_session ~session_id:trace_id ~base_dir in
   let latest_ckpt =
-    try Context_manager.load_latest_checkpoint session
+    try load_latest_checkpoint session
     with ex ->
       Log.Keeper.error "keeper:%s checkpoint load failed: %s"
         trace_id
@@ -36,7 +46,7 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
   | Some ckpt ->
       (try
          let ctx =
-           Context_manager.restore_checkpoint ckpt
+           restore_checkpoint ckpt
              ~max_tokens:primary_model_max_tokens
          in
          (session, Some ctx)
@@ -46,9 +56,9 @@ let load_context_from_checkpoint ~trace_id ~primary_model_max_tokens ~base_dir =
            (Printexc.to_string ex);
          (session, None))
 
-let save_checkpoint session (ctx : Context_manager.working_context) ~generation =
-  let ckpt = Context_manager.create_checkpoint ctx ~generation in
-  Context_manager.save_checkpoint session ckpt;
+let save_checkpoint session (ctx : working_context) ~generation =
+  let ckpt = create_checkpoint ctx ~generation in
+  save_session_checkpoint session ckpt;
   ckpt
 
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
@@ -57,9 +67,9 @@ let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
 let compact_if_needed
     ~(meta : keeper_meta)
     ~(now_ts : float)
-    (ctx : Context_manager.working_context) :
-    Context_manager.working_context * string option * string =
-  let ratio = Context_manager.context_ratio ctx in
+    (ctx : working_context) :
+    working_context * string option * string =
+  let ratio = context_ratio ctx in
   let message_count = List.length ctx.messages in
   let token_count = ctx.token_count in
   let ratio_gate, message_gate, token_gate = compaction_policy_of_keeper meta in
@@ -107,7 +117,7 @@ let compact_if_needed
               DropLowImportance; SummarizeOld]
         in
         let compacted_ctx =
-          Context_manager.sync_oas_context
+          sync_oas_context
             { ctx with messages; token_count; importance_scores = [] }
         in
         (compacted_ctx, Some reason, "applied:" ^ reason)
@@ -426,7 +436,7 @@ let run_proactive_generation
     ~(specs : Model_spec.model_spec list)
     ~(primary : Model_spec.model_spec)
     ~(config : Room.config)
-    ~(ctx_work : Context_manager.working_context)
+    ~(ctx_work : working_context)
     ~(meta : keeper_meta)
     ~(continuity_snapshot : keeper_state_snapshot option)
     ~(continuity_summary : string)

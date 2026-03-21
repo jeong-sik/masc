@@ -67,7 +67,7 @@ let handle_keeper_status ctx args : tool_result =
              | Some c ->
                `Assoc [
                  ("has_checkpoint", `Bool true);
-                 ("context_ratio", `Float (Context_manager.context_ratio c));
+                 ("context_ratio", `Float (Keeper_exec_context.context_ratio c));
                  ("context_tokens", `Int c.token_count);
                  ("context_max", `Int c.max_tokens);
                  ("message_count", `Int (List.length c.messages));

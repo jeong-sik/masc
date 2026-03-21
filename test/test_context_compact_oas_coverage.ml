@@ -8,7 +8,7 @@ open Alcotest
 
 module Types = Agent_sdk.Types
 module Compact = Masc_mcp.Context_compact_oas
-module Scoring = Masc_mcp.Context_scoring
+module Scoring = Masc_mcp.Context_compact_oas
 
 let msg role text : Agent_sdk.Types.message =
   { role; content = [Types.Text text]; name = None; tool_call_id = None }

@@ -10,7 +10,7 @@ val keeper_allowed_model_tools :
 val execute_keeper_tool_call :
   config:Room.config ->
   meta:keeper_meta ->
-  ctx_work:Context_manager.working_context ->
+  ctx_work:Keeper_working_context.working_context ->
   name:string ->
   input:Yojson.Safe.t ->
   string

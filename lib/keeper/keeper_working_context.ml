@@ -1,20 +1,24 @@
-(** Context_manager — 3-tier memory with progressive compaction.
+(** Keeper_working_context — Working context type and pure operations.
 
-    Implements the working memory tier (Tier 1) with in-process
-    operations and session persistence (Tier 2) via JSONL files.
-    Tier 3 (semantic/pgvector) is accessed externally.
+    Contains the [working_context] record type and basic operations
+    (create, append, context_ratio, serialization, checkpointing,
+    session persistence) with no keeper-specific dependencies.
 
-    Compaction is delegated to {!Context_compact_oas} which routes
-    through OAS [Context_reducer].
+    This module exists to break the dependency cycle: modules like
+    Keeper_alerting_path and Keeper_exec_tools need the working_context
+    type, but Keeper_exec_context depends on those modules.
 
-    @since 2.61.0 *)
+    Previously these types and functions lived in Context_manager.
+    Moved here as part of the context-manager-cleanup refactoring.
+
+    @since context-manager-cleanup *)
 
 open Printf
 
 let text_of_message = Agent_sdk.Types.text_of_message
 
 (* ================================================================ *)
-(* Types                                                            *)
+(* Working Context Types                                             *)
 (* ================================================================ *)
 
 type working_context = {
@@ -42,24 +46,14 @@ type session_context = {
   mutable checkpoints : checkpoint list;
 }
 
-(** Re-export from [Compaction_types] for backward compatibility.
-    All consumers that used [Context_manager.PruneToolOutputs] etc.
-    continue to work without changes. *)
-type compaction_strategy = Compaction_types.compaction_strategy =
-  | PruneToolOutputs
-  | MergeContiguous
-  | DropLowImportance
-  | SummarizeOld
-
 (* ================================================================ *)
-(* Memory Formats                                                  *)
+(* Memory Formats                                                    *)
 (* ================================================================ *)
 
-let goal_prefix = Context_scoring.goal_prefix
+let goal_prefix = "[MASC_GOAL]"
 
 let state_block_start = "[STATE]"
 let state_block_end = "[/STATE]"
-
 
 let find_substring ~needle haystack ~from =
   let n_len = String.length needle in
@@ -87,17 +81,16 @@ let extract_state_blocks (s : string) : string list =
   loop 0 []
 
 (* ================================================================ *)
-(* Filesystem Utilities                                             *)
+(* Filesystem Utilities                                              *)
 (* ================================================================ *)
 
 let ensure_dir path =
   Fs_compat.mkdir_p path
 
 (* ================================================================ *)
-(* Token Estimation                                                 *)
+(* Token Estimation                                                  *)
 (* ================================================================ *)
 
-(** Count tokens in a message (~4 chars/token + role overhead). *)
 let msg_tokens (m : Agent_sdk.Types.message) =
   (String.length (text_of_message m) / 4) + 4
 
@@ -106,7 +99,7 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
   List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
 
 (* ================================================================ *)
-(* Context Ratio                                                    *)
+(* Context Ratio                                                     *)
 (* ================================================================ *)
 
 let context_ratio (ctx : working_context) : float =
@@ -117,7 +110,7 @@ let exceeds_threshold ctx threshold =
   context_ratio ctx >= threshold
 
 (* ================================================================ *)
-(* Working Context Operations                                       *)
+(* Working Context Operations                                        *)
 (* ================================================================ *)
 
 let create ~system_prompt ~max_tokens =
@@ -127,8 +120,6 @@ let create ~system_prompt ~max_tokens =
     importance_scores = []; oas_context }
 
 let set_system_prompt (ctx : working_context) ~system_prompt =
-  (* Avoid leaking prior compaction summaries into the "system prompt" channel for providers
-     that treat all system-role messages as instructions (notably Claude). *)
   let messages =
     List.map (fun (m : Agent_sdk.Types.message) ->
       if m.role = Agent_sdk.Types.System then { m with role = Agent_sdk.Types.Assistant } else m
@@ -148,21 +139,9 @@ let append_many ctx msgs =
   List.fold_left append ctx msgs
 
 (* ================================================================ *)
-(* Importance Scoring                                               *)
+(* OAS Context Sync                                                  *)
 (* ================================================================ *)
 
-(** Score messages by importance using shared scoring logic.
-    Delegates to [Context_scoring.score_messages] (SSOT). *)
-let score_importance ctx =
-  let scores = Context_scoring.score_messages ctx.messages in
-  { ctx with importance_scores = scores }
-
-(* ================================================================ *)
-(* Compaction Pipeline                                              *)
-(* ================================================================ *)
-
-(** Sync working context stats into OAS Context scoped keys.
-    Called after compaction so OAS consumers see current state. *)
 let sync_oas_context (ctx : working_context) : working_context =
   let oas = ctx.oas_context in
   Agent_sdk.Context.set_scoped oas Agent_sdk.Context.Session
@@ -173,13 +152,10 @@ let sync_oas_context (ctx : working_context) : working_context =
     "context_ratio" (`Float (context_ratio ctx));
   ctx
 
-(* compact removed — callers use Context_compact_oas.compact directly. *)
-
 (* ================================================================ *)
-(* Conversation History Offload                                     *)
+(* Conversation History Offload                                      *)
 (* ================================================================ *)
 
-(** Format a single message as human-readable text: "role: content". *)
 let format_message_readable (m : Agent_sdk.Types.message) : string =
   let role_str = match m.role with
     | Agent_sdk.Types.System -> "system"
@@ -192,13 +168,11 @@ let format_message_readable (m : Agent_sdk.Types.message) : string =
       let tool_id = List.find_map (function
         | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
         | _ -> None) m.content in
-      (match tool_id with Some id -> Printf.sprintf " (%s)" id | None -> "")
+      (match tool_id with Some id -> sprintf " (%s)" id | None -> "")
     | _ -> ""
   in
   sprintf "%s%s: %s" role_str tool_suffix (text_of_message m)
 
-(** Offload messages to a markdown file for later retrieval.
-    Returns [Some path] on success, [None] on failure (fail-safe). *)
 let offload_messages
     ~(session_dir : string)
     ~(compaction_count : int)
@@ -210,7 +184,6 @@ let offload_messages
       (sprintf "%d.md" compaction_count) in
     let timestamp =
       let t = Time_compat.now () in
-      (* ISO 8601 UTC: manual formatting to avoid external dependency *)
       let open Unix in
       let tm = gmtime t in
       sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
@@ -233,11 +206,8 @@ let offload_messages
       (Printexc.to_string exn);
     None
 
-(* compact_with_offload removed — callers use Context_compact_oas.compact
-   + offload_messages separately. *)
-
 (* ================================================================ *)
-(* Checkpointing                                                    *)
+(* Checkpointing                                                     *)
 (* ================================================================ *)
 
 let generate_checkpoint_id () =
@@ -258,7 +228,6 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
     ("role", `String (role_to_string m.role));
     ("content", `String (text_of_message m));
   ] in
-  (* Preserve tool_use_id for backward compat with old "tool_call_id" JSON field *)
   let with_tool_id = match m.role with
     | Agent_sdk.Types.Tool ->
       let tool_id = List.find_map (function
@@ -318,40 +287,11 @@ let create_checkpoint ctx ~generation =
     serialized = serialize_context ctx;
   }
 
-let to_oas_checkpoint ~(agent_name : string) ~(session_id : string)
-    (ctx : working_context) (ckpt : checkpoint) : Agent_sdk.Checkpoint.t =
-  { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
-    session_id;
-    agent_name;
-    model = ""; (* populated by caller if known *)
-    system_prompt = Some ctx.system_prompt;
-    messages = ctx.messages;
-    usage = { total_input_tokens = 0; total_output_tokens = 0;
-              total_cache_creation_input_tokens = 0;
-              total_cache_read_input_tokens = 0;
-              api_calls = 0; estimated_cost_usd = 0.0 };
-    turn_count = ckpt.message_count;
-    created_at = ckpt.timestamp;
-    tools = [];
-    tool_choice = None;
-    disable_parallel_tool_use = false;
-    temperature = None; top_p = None; top_k = None; min_p = None;
-    enable_thinking = None;
-    response_format_json = false;
-    thinking_budget = None;
-    cache_system_prompt = false;
-    max_input_tokens = None;
-    max_total_tokens = None;
-    context = ctx.oas_context;
-    mcp_sessions = [];
-    working_context = Some (context_to_json ctx);
-  }
-
 let restore_checkpoint ckpt ~max_tokens =
   deserialize_context ckpt.serialized ~max_tokens
 
 (* ================================================================ *)
-(* Session Persistence                                              *)
+(* Session Persistence                                               *)
 (* ================================================================ *)
 
 let create_session ~session_id ~base_dir =
@@ -373,12 +313,10 @@ let persist_message session msg =
   let line = Yojson.Safe.to_string payload ^ "\n" in
   Fs_compat.append_file path line
 
-let save_checkpoint session ckpt =
+let save_session_checkpoint session ckpt =
   session.checkpoints <- session.checkpoints @ [ckpt];
   let path = Filename.concat session.session_dir
     (sprintf "%s.json" ckpt.checkpoint_id) in
-  (* Store context as embedded JSON object, not as escaped string.
-     This avoids JSON-in-JSON double encoding that corrupts multi-byte UTF-8. *)
   let context_json =
     try Yojson.Safe.from_string ckpt.serialized
     with Eio.Cancel.Cancelled _ as e -> raise e | _ -> `String ckpt.serialized
@@ -415,7 +353,6 @@ let load_latest_checkpoint session =
         |> Yojson.Safe.from_string
       in
       let open Yojson.Safe.Util in
-      (* Support both new "context" (JSON object) and legacy "serialized" (string) format *)
       let serialized =
         try
           let ctx = json |> member "context" in

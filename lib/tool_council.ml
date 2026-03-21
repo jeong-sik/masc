@@ -53,7 +53,9 @@ let handle_petition_submit ctx args =
                 | Error message -> (false, message)
                 | Ok bundle ->
                     let ruling = build_ruling bundle in
-                    let _ = GV2.save_ruling ctx.base_path ruling in
+                    (match GV2.save_ruling ctx.base_path ruling with
+                     | Ok _ -> ()
+                     | Error msg -> Log.Misc.warn "save_ruling failed for case %s: %s" ruling.case_id msg);
                     let json =
                       `Assoc
                         [
@@ -85,17 +87,23 @@ let handle_case_brief_submit ctx args =
             | Error message -> (false, message)
             | Ok bundle ->
                 let ruling = build_ruling bundle in
-                let _ = GV2.save_ruling ctx.base_path ruling in
+                (match GV2.save_ruling ctx.base_path ruling with
+                 | Ok _ -> ()
+                 | Error msg -> Log.Misc.warn "save_ruling failed for case %s: %s" ruling.case_id msg);
                 let order =
                   match build_execution_order bundle ruling with
                   | None -> None
                   | Some initial_order -> (
-                      let _ = GV2.save_execution_order ctx.base_path initial_order in
+                      (match GV2.save_execution_order ctx.base_path initial_order with
+                       | Ok _ -> ()
+                       | Error msg -> Log.Misc.warn "save_execution_order failed for case %s: %s" initial_order.GV2.case_id msg);
                       match initial_order.GV2.status with
                       | GV2.Queued_auto -> (
                           match execute_action ctx bundle.GV2.case_ initial_order with
                           | Ok executed_order ->
-                              let _ = GV2.update_execution_order ctx.base_path executed_order in
+                              (match GV2.update_execution_order ctx.base_path executed_order with
+                               | Ok _ -> ()
+                               | Error msg -> Log.Misc.warn "update_execution_order failed for case %s: %s" executed_order.GV2.case_id msg);
                               Some executed_order
                           | Error message ->
                               let blocked_order =
@@ -107,7 +115,9 @@ let handle_case_brief_submit ctx args =
                                   actor = Some ctx.agent_name;
                                 }
                               in
-                              let _ = GV2.update_execution_order ctx.base_path blocked_order in
+                              (match GV2.update_execution_order ctx.base_path blocked_order with
+                               | Ok _ -> ()
+                               | Error msg -> Log.Misc.warn "update_execution_order failed for blocked case %s: %s" blocked_order.GV2.case_id msg);
                               Some blocked_order)
                       | _ -> Some initial_order)
                 in

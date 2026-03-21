@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { route, navigate } from '../router'
-import { connected } from '../sse'
+import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
 import { missionSnapshot } from '../mission-store'
 import { roomTruthInitializing } from '../room-truth-store'
@@ -31,15 +31,29 @@ function lazyTabFallback(label: string) {
   return html`<div class="loading-indicator">${label} 불러오는 중...</div>`
 }
 
+function formatDisconnectDuration(): string {
+  const ts = lastDisconnectedAt.value
+  if (ts === 0) return ''
+  const sec = Math.round((Date.now() - ts) / 1000)
+  if (sec < 5) return ''
+  if (sec < 60) return ` (${sec}s)`
+  return ` (${Math.round(sec / 60)}m)`
+}
+
 export function ConnectionStatus() {
   const isConnected = connected.value
   const snap = missionSnapshot.value
   const attentionCount = snap?.attention_queue?.length ?? 0
+  const reconn = reconnectCount.value
+
+  const statusLabel = isConnected
+    ? reconn > 0 ? '재연결됨' : '연결됨'
+    : `재연결 중...${formatDisconnectDuration()}`
 
   return html`
     <div class="connection-status ${isConnected ? 'connected' : 'disconnected'}">
       <span class="status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
-      <span class="status-text">${isConnected ? '연결됨' : '재연결 중...'}</span>
+      <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
         <span
           class="event-count attention-badge"

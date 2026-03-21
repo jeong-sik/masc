@@ -14,7 +14,7 @@ interface AgentMotionOptions {
   keepers?: Keeper[]
 }
 
-function normalizeAgentKey(value: string | null | undefined): string {
+export function normalizeAgentKey(value: string | null | undefined): string {
   return (value ?? '').trim().toLowerCase()
 }
 
@@ -60,35 +60,29 @@ function keeperPreview(keeper: Keeper): string {
 }
 
 export function buildAgentMotion(
-  agentName: string,
+  _agentName: string,
   tasks: Task[],
   messages: Message[],
   journal: JournalEntry[],
   options: AgentMotionOptions = {},
 ): AgentMotionSnapshot {
-  const agentKey = normalizeAgentKey(agentName)
+  // Callers should pre-filter arrays by agent key before calling.
+  // This function only sorts and picks the most recent entries.
   const activeAssignedCount = tasks.filter(task =>
-    normalizeAgentKey(task.assignee) === agentKey
-    && (task.status === 'claimed' || task.status === 'in_progress')
+    task.status === 'claimed' || task.status === 'in_progress'
   ).length
 
   const recentMessage = messages
-    .filter(message => normalizeAgentKey(message.from ?? '') === agentKey)
-    .sort((a, b) => toEpoch(b.timestamp ?? '') - toEpoch(a.timestamp ?? ''))[0]
+    .slice().sort((a, b) => toEpoch(b.timestamp ?? '') - toEpoch(a.timestamp ?? ''))[0]
 
   const recentJournal = journal
-    .filter(entry =>
-      normalizeAgentKey(entry.agent) === agentKey
-      || normalizeAgentKey(entry.author) === agentKey
-    )
-    .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))[0]
+    .slice().sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))[0]
 
   const recentBoardPost = (options.boardPosts ?? [])
-    .filter(post => normalizeAgentKey(post.author) === agentKey)
-    .sort((a, b) => toEpoch(b.updated_at || b.created_at) - toEpoch(a.updated_at || a.created_at))[0]
+    .slice().sort((a, b) => toEpoch(b.updated_at || b.created_at) - toEpoch(a.updated_at || a.created_at))[0]
 
   const recentKeeper = (options.keepers ?? [])
-    .filter(keeper => normalizeAgentKey(keeper.name) === agentKey && keeperSignalTimestamp(keeper) !== null)
+    .filter(keeper => keeperSignalTimestamp(keeper) !== null)
     .sort((a, b) => toEpoch(keeperSignalTimestamp(b) ?? 0) - toEpoch(keeperSignalTimestamp(a) ?? 0))[0]
 
   const messageTs = recentMessage ? toEpoch(recentMessage.timestamp ?? '') : 0

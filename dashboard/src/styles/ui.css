@@ -122,25 +122,7 @@ button.agent:hover,
 button.agent-card:hover {
   background: var(--white-8);
 }
-.agent .agent-task {
-  grid-column: 1 / -1;
-  color: #89a3cf;
-  font-size: 12px;
-}
-
-.live-agent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
 /* Agents */
-
-.agent-card-header {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 10px;
-}
 .room-truth-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -200,11 +182,6 @@ button.agent-card:hover {
   gap: 8px;
 }
 
-.room-truth-actions {
-  margin-top: auto;
-  display: flex;
-  justify-content: flex-start;
-}
 
 .agent-card .agent-task {
   margin-top: 10px;
@@ -252,13 +229,6 @@ button.agent-card:hover {
   gap: 10px;
 }
 
-.monitor-nested-card {
-  border: 1px solid rgba(138, 163, 211, 0.14);
-  background: var(--white-3);
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 12px;
-}
 
 button.monitor-alert,
 button.monitor-row {
@@ -303,40 +273,6 @@ button.monitor-row.bad {
   padding: 12px 14px;
 }
 
-.execution-alert {
-  border: 1px solid rgba(138, 163, 211, 0.18);
-  background: var(--white-4);
-  border-radius: 12px;
-}
-
-.execution-alert.ok {
-  border-color: rgba(74, 222, 128, 0.18);
-}
-
-.execution-alert.warn {
-  border-color: rgba(251, 191, 36, 0.28);
-}
-
-.execution-alert.bad {
-  border-color: rgba(248, 113, 113, 0.34);
-}
-
-.execution-alert {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 12px 14px;
-}
-.monitor-alert-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #8ba2c9;
-  font-size: 12px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
 
 .monitor-row {
   padding: 14px;
@@ -399,8 +335,3 @@ button.monitor-row.bad {
   line-height: 1.45;
 }
 
-.overview-health-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}

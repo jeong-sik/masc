@@ -157,8 +157,8 @@ let build_json_from_inputs ~timeline_limit_override ~now
                ("provenance", `String "derived");
              ])
     |> List.sort (fun left right ->
-           let left_severity = left |> U.member "severity" |> U.to_string in
-           let right_severity = right |> U.member "severity" |> U.to_string in
+           let left_severity = match U.member "severity" left with `String s -> s | _ -> "unknown" in
+           let right_severity = match U.member "severity" right with `String s -> s | _ -> "unknown" in
            Int.compare (severity_sort left_severity) (severity_sort right_severity))
   in
   let present_lanes = List.filter (fun (lane : lane) -> lane.present) lanes in

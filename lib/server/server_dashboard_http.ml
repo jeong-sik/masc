@@ -35,7 +35,7 @@ let _execution_json_ref : Yojson.Safe.t ref =
     is available, each refresh runs in a pool domain with a domain-local
     Caqti pool (the main domain's Caqti pool is domain-bound due to
     Switch capture in release).  Falls back to in-domain compute. *)
-let start_execution_refresh_loop ~state ~sw ~clock =
+let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
   let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let compute () =
@@ -43,7 +43,7 @@ let start_execution_refresh_loop ~state ~sw ~clock =
     | Some pool ->
       Eio.Executor_pool.submit_exn pool ~weight:1.0 (fun () ->
         Eio.Switch.run @@ fun pool_sw ->
-        match Room_utils_backend_setup.with_domain_local_pg_backend ~sw:pool_sw room_config with
+        match Room_utils_backend_setup.with_domain_local_pg_backend ~sw:pool_sw ~net ~clock ~mono_clock room_config with
         | Some domain_config ->
           Dashboard_execution.json ~light:true ~config:domain_config ~sw:pool_sw ~clock ~proc_mgr ()
         | None ->

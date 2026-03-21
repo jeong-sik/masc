@@ -124,8 +124,13 @@ let heartbeat config ~agent_name =
   end else
     Printf.sprintf "⚠ Agent %s not found" agent_name
 
-(** Cleanup zombie agents - removes stale agents *)
-let cleanup_zombies config =
+(** Cleanup zombie agents - removes stale agents.
+    [keeper_threshold_sec] and [agent_threshold_sec] control the inactivity
+    window before an agent is considered a zombie. *)
+let cleanup_zombies
+    ?(keeper_threshold_sec = Env_config.Zombie.keeper_threshold_seconds)
+    ?(agent_threshold_sec = Env_config.Zombie.threshold_seconds)
+    config =
   ensure_initialized config;
 
   (* Single path: agents_dir derives from config.scope *)
@@ -148,8 +153,8 @@ let cleanup_zombies config =
             when (not (List.exists (fun (n, _) -> n = agent.name) !zombie_entries)) &&
                  (let threshold =
                     if Resilience.Zombie.is_keeper ~name:agent.name ~agent_type:agent.agent_type
-                    then Env_config.Zombie.keeper_threshold_seconds
-                    else Env_config.Zombie.threshold_seconds
+                    then keeper_threshold_sec
+                    else agent_threshold_sec
                   in
                   Resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
               zombie_entries := (agent.name, path) :: !zombie_entries

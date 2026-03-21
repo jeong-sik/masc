@@ -44,7 +44,7 @@ let load room_path =
 (** Save config to file *)
 let save room_path config =
   let path = config_path room_path in
-  Room_utils.mkdir_p (Filename.dirname path);
+  Fs_compat.mkdir_p (Filename.dirname path);
   let json = to_json config in
   let content = Yojson.Safe.pretty_to_string json in
   Fs_compat.save_file path content

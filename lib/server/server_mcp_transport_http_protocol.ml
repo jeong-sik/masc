@@ -22,6 +22,28 @@ type deps = {
     base_path:string -> Httpun.Request.t -> (unit, string) result;
 }
 
+let method_from_body body_str =
+  try
+    let json = Yojson.Safe.from_string body_str in
+    match json with
+    | `Assoc fields -> (
+        match List.assoc_opt "method" fields with
+        | Some (`String m) -> Some m
+        | _ -> None)
+    | _ -> None
+  with Yojson.Json_error _ -> None
+
+let validate_session_requirement ~session_was_provided body_str =
+  if session_was_provided then Ok ()
+  else
+    match method_from_body body_str with
+    | Some "initialize" | Some "notifications/initialized" | Some "ping" ->
+        Ok ()
+    | Some _ | None ->
+        Error
+          "Mcp-Session-Id header required. Call initialize first to obtain a \
+           session."
+
 let protocol_version_from_body body_str =
   try
     let json = Yojson.Safe.from_string body_str in

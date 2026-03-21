@@ -255,8 +255,10 @@ let send_raw info data =
       false
 
 let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
+  let session_id_opt = get_session_id_any request in
+  let session_was_provided = Option.is_some session_id_opt in
   let session_id =
-    match get_session_id_any request with
+    match session_id_opt with
     | Some sid -> sid
     | None -> Mcp_session.generate ()
   in
@@ -328,6 +330,25 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                 ~protocol_version msg
           | Ok () ->
               Http.Request.read_body_async reqd (fun body_str ->
+                  match
+                    validate_session_requirement ~session_was_provided body_str
+                  with
+                  | Error msg ->
+                      let body =
+                        Printf.sprintf
+                          {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
+                          (Yojson.Safe.to_string (`String msg))
+                      in
+                      let headers =
+                        Httpun.Headers.of_list
+                          (("content-length", string_of_int (String.length body))
+                          :: json_headers ~deps session_id protocol_version
+                               origin)
+                      in
+                      Httpun.Reqd.respond_with_string reqd
+                        (Httpun.Response.create ~headers `Bad_request)
+                        body
+                  | Ok () ->
                   let accept_mode =
                     Server_mcp_transport_http_headers.classify_mcp_accept_for_body
                       request body_str

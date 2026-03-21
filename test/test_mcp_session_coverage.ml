@@ -11,6 +11,7 @@
 open Alcotest
 
 module Mcp_session = Masc_mcp.Mcp_session
+module Http_transport = Masc_mcp.Server_mcp_transport_http
 
 (* ============================================================
    base62_chars Tests
@@ -179,5 +180,76 @@ let () =
       test_case "valid" `Quick test_get_or_generate_valid;
       test_case "invalid space" `Quick test_get_or_generate_invalid_space;
       test_case "empty" `Quick test_get_or_generate_empty;
+    ];
+    "method_from_body", [
+      test_case "tools/call" `Quick (fun () ->
+        check (option string) "extracts method" (Some "tools/call")
+          (Http_transport.method_from_body
+             {|{"jsonrpc":"2.0","method":"tools/call","params":{},"id":1}|}));
+      test_case "initialize" `Quick (fun () ->
+        check (option string) "extracts initialize" (Some "initialize")
+          (Http_transport.method_from_body
+             {|{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}|}));
+      test_case "invalid json" `Quick (fun () ->
+        check (option string) "returns None" None
+          (Http_transport.method_from_body "not json"));
+      test_case "no method field" `Quick (fun () ->
+        check (option string) "returns None" None
+          (Http_transport.method_from_body {|{"jsonrpc":"2.0","id":1}|}));
+    ];
+    "validate_session_requirement", [
+      test_case "session provided -> ok" `Quick (fun () ->
+        check bool "ok" true
+          (Result.is_ok
+             (Http_transport.validate_session_requirement
+                ~session_was_provided:true
+                {|{"jsonrpc":"2.0","method":"tools/call","params":{},"id":1}|})));
+      test_case "initialize without session -> ok" `Quick (fun () ->
+        check bool "ok" true
+          (Result.is_ok
+             (Http_transport.validate_session_requirement
+                ~session_was_provided:false
+                {|{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}|})));
+      test_case "ping without session -> ok" `Quick (fun () ->
+        check bool "ok" true
+          (Result.is_ok
+             (Http_transport.validate_session_requirement
+                ~session_was_provided:false
+                {|{"jsonrpc":"2.0","method":"ping","params":{},"id":1}|})));
+      test_case "notifications/initialized without session -> ok" `Quick (fun () ->
+        check bool "ok" true
+          (Result.is_ok
+             (Http_transport.validate_session_requirement
+                ~session_was_provided:false
+                {|{"jsonrpc":"2.0","method":"notifications/initialized"}|})));
+      test_case "tools/call without session -> error" `Quick (fun () ->
+        check bool "error" true
+          (Result.is_error
+             (Http_transport.validate_session_requirement
+                ~session_was_provided:false
+                {|{"jsonrpc":"2.0","method":"tools/call","params":{},"id":1}|})));
+      test_case "tools/list without session -> error" `Quick (fun () ->
+        check bool "error" true
+          (Result.is_error
+             (Http_transport.validate_session_requirement
+                ~session_was_provided:false
+                {|{"jsonrpc":"2.0","method":"tools/list","id":1}|})));
+      test_case "invalid json without session -> error" `Quick (fun () ->
+        check bool "error" true
+          (Result.is_error
+             (Http_transport.validate_session_requirement
+                ~session_was_provided:false "not json")));
+      test_case "error message content" `Quick (fun () ->
+        match
+          Http_transport.validate_session_requirement
+            ~session_was_provided:false
+            {|{"jsonrpc":"2.0","method":"tools/call","params":{},"id":1}|}
+        with
+        | Error msg ->
+            check bool "mentions session" true
+              (String.length msg > 0
+              && (try ignore (String.index msg 'S'); true
+                  with Not_found -> false))
+        | Ok () -> fail "expected error");
     ];
   ]

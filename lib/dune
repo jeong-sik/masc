@@ -141,8 +141,6 @@
    eio_context
    encryption
    file_lock_eio
-   federation
-   federation_types
    gcm_compat
    graphql_client
    graphql_endpoint
@@ -221,7 +219,6 @@
    relation_materializer
    prometheus
    rate_limit
-   masc_pb
    mdal
    mdal_swarm
    mdal_worker
@@ -467,7 +464,6 @@
    social
    tool_social
    transport
-   transport_grpc_next
    udp_socket_eio
    types
    validation
@@ -798,7 +794,7 @@
    digestif
    ocaml-protoc-plugin
    ;; grpc grpc-lwt - disabled (h2 version conflict with httpun-eio)
-   ;; grpc-direct (native Eio gRPC from lib/grpc-direct) - enabled for Transport_grpc_next
+   ;; grpc-direct (native Eio gRPC from lib/grpc-direct)
    grpc-direct
    grpc-direct-core
    h2

@@ -112,62 +112,16 @@ let run_perpetual_via_oas
   with exn ->
     Log.Perpetual.error "Checkpoint save failed: %s"
       (Printexc.to_string exn));
-  (* Also save MASC-format checkpoint for cross-compatibility
-     (inlined from deleted oas_checkpoint_bridge) *)
+  (* Save MASC-format checkpoint via Phase D bridge (to_oas_checkpoint) *)
   (try
     let ctx = !ctx_ref in
-    let oas_ctx = Oas.Context.copy ctx.Context_manager.oas_context in
-    Oas.Context.set_scoped oas_ctx Oas.Context.Session
-      "goal" (`String config.initial_goal);
-    Oas.Context.set_scoped oas_ctx Oas.Context.Session
-      "generation" (`Int pstate.generation);
-    Oas.Context.set_scoped oas_ctx Oas.Context.Session
-      "turn_count" (`Int pstate.turn_count);
-    Oas.Context.set_scoped oas_ctx Oas.Context.Session
-      "trace_id" (`String trace_id);
-    Oas.Context.set_scoped oas_ctx Oas.Context.App
-      "masc_version" (`String Version.version);
-    let messages = List.filter_map Oas_type_adapters.to_oas_message ctx.messages in
-    let masc_oas_ckpt : Oas.Checkpoint.t = {
-      version = 3;
-      session_id = trace_id;
-      agent_name = "perpetual";
-      model = "masc-perpetual";
-      system_prompt = Some ctx.system_prompt;
-      messages;
-      usage = {
-        Oas.Types.total_input_tokens = pstate.total_tokens;
-        total_output_tokens = 0;
-        total_cache_creation_input_tokens = 0;
-        total_cache_read_input_tokens = 0;
-        api_calls = pstate.turn_count;
-        estimated_cost_usd = pstate.total_cost;
-      };
-      turn_count = pstate.turn_count;
-      created_at = Time_compat.now ();
-      tools = [];
-      tool_choice = None;
-      temperature = None;
-      top_p = None;
-      top_k = None;
-      min_p = None;
-      enable_thinking = None;
-      response_format_json = false;
-      thinking_budget = None;
-      cache_system_prompt = false;
-      max_input_tokens = Some ctx.max_tokens;
-      max_total_tokens = None;
-      disable_parallel_tool_use = false;
-      context = oas_ctx;
-      mcp_sessions = [];
-      working_context = None;
-    } in
-    let ckpt_path2 =
-      Filename.concat config.session_base_dir
-        (trace_id ^ "-masc.json")
-    in
-    Fs_compat.save_file ckpt_path2
-      (Oas.Checkpoint.to_string masc_oas_ckpt)
+    let masc_ckpt = Context_manager.create_checkpoint ctx
+      ~generation:pstate.generation in
+    let masc_oas_ckpt = Context_manager.to_oas_checkpoint
+      ~agent_name:"perpetual" ~session_id:trace_id ctx masc_ckpt in
+    let ckpt_path2 = Filename.concat config.session_base_dir
+      (trace_id ^ "-masc.json") in
+    Fs_compat.save_file ckpt_path2 (Oas.Checkpoint.to_string masc_oas_ckpt)
   with exn ->
     Log.Perpetual.error "MASC checkpoint save failed: %s"
       (Printexc.to_string exn));

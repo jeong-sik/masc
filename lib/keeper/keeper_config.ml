@@ -229,7 +229,7 @@ let keeper_continuity_compaction_cooldown_sec () : int =
 let keeper_bootstrap_proactive_warmup_sec () : int =
   int_of_env_default
     "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
-    ~default:300
+    ~default:60
     ~min_v:0
     ~max_v:172800
 

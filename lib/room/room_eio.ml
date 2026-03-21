@@ -233,8 +233,9 @@ let room_state_of_json json =
       paused_at = json |> member "paused_at" |> to_float_option;
       pause_reason = json |> member "pause_reason" |> to_string_option;
     }
-  with e ->
-    Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Read room state *)
 let read_state config =
@@ -243,7 +244,7 @@ let read_state config =
       (try
         let json = Yojson.Safe.from_string json_str in
         room_state_of_json json
-      with e -> Error (Printexc.to_string e))
+      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
   | Error (Backend_eio.NotFound _) ->
       Ok (default_room_state ())
   | Error e ->
@@ -286,7 +287,7 @@ let atomic_update_state config ~f =
       (try
         let json = Yojson.Safe.from_string json_str in
         room_state_of_json json
-      with e -> Error (Printexc.to_string e))
+      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
   | Error e ->
       Error (match e with
         | Backend_eio.IOError msg -> msg
@@ -313,8 +314,9 @@ let agent_state_of_json json =
       capabilities = json |> member "capabilities" |> to_list |> List.map to_string;
       status = json |> member "status" |> to_string;
     }
-  with e ->
-    Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Register agent or update heartbeat
 
@@ -376,7 +378,7 @@ let get_agent config ~name =
       (try
         let json = Yojson.Safe.from_string json_str in
         agent_state_of_json json
-      with e -> Error (Printexc.to_string e))
+      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
   | Error (Backend_eio.NotFound _) ->
       Error "Agent not found"
   | Error e ->
@@ -448,8 +450,9 @@ let lock_info_of_json json =
     | Some resource, Some owner, Some acquired_at, Some expires_at ->
         Ok { resource; owner; acquired_at; expires_at }
     | _ -> Error "Invalid lock metadata"
-  with e ->
-    Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Acquire lock on a resource *)
 let acquire_lock config ~resource ~owner =
@@ -522,8 +525,9 @@ let message_of_json json =
       mention = json |> member "mention" |> to_string_option;
       timestamp = json |> member "timestamp" |> to_float;
     }
-  with e ->
-    Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Extract @mention from message content
     Uses Mention module for Stateless/Stateful/Broadcast parsing *)
@@ -584,7 +588,7 @@ let get_message config ~seq =
       (try
         let json = Yojson.Safe.from_string json_str in
         message_of_json json
-      with e -> Error (Printexc.to_string e))
+      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
   | Error (Backend_eio.NotFound _) ->
       Error "Message not found"
   | Error e ->
@@ -648,8 +652,9 @@ let task_of_json json =
           updated_at = json |> member "updated_at" |> to_float;
           priority = json |> member "priority" |> to_int;
         }
-  with e ->
-    Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** Create a new task *)
 let create_task config ~description ?(priority=1) () =
@@ -700,7 +705,7 @@ let claim_task config ~task_id ~agent =
                 Error "Task already completed"
             | Failed _ ->
                 Error "Task failed"
-      with e -> Error (Printexc.to_string e))
+      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
 
 (** Complete a task *)
 let complete_task config ~task_id ~agent =
@@ -731,7 +736,7 @@ let complete_task config ~task_id ~agent =
                 Error "Task already completed"
             | Failed _ ->
                 Error "Task failed"
-      with e -> Error (Printexc.to_string e))
+      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
 
 (** Get task by ID *)
 let get_task config ~task_id =
@@ -740,7 +745,7 @@ let get_task config ~task_id =
       (try
         let json = Yojson.Safe.from_string json_str in
         task_of_json json
-      with e -> Error (Printexc.to_string e))
+      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
   | Error (Backend_eio.NotFound _) ->
       Error "Task not found"
   | Error e ->

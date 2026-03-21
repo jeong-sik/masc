@@ -306,7 +306,7 @@ let test_jsonl_backend_query () =
   let result = backend.query ~prefix:"test" ~limit:10 in
   Alcotest.(check int) "query returns empty on fresh session" 0 (List.length result)
 
-let test_seed_memory_bank_noop () =
+let test_seed_memory_bank_legacy_noop () =
   let dir = setup_tmp_dir () in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-bank" () in
   let count = Memory_oas_bridge.seed_memory_bank ~memory ~agent_name:"test-bank" ~limit:10 in
@@ -442,7 +442,8 @@ let () =
       Alcotest.test_case "persist returns Ok" `Quick test_jsonl_backend_persist;
       Alcotest.test_case "retrieve returns None" `Quick test_jsonl_backend_retrieve;
       Alcotest.test_case "query returns empty" `Quick test_jsonl_backend_query;
-      Alcotest.test_case "seed_memory_bank noop" `Quick test_seed_memory_bank_noop;
+      Alcotest.test_case "seed_memory_bank legacy noop" `Quick
+        test_seed_memory_bank_legacy_noop;
       Alcotest.test_case "seed_episodes loads recent jsonl" `Quick
         test_seed_episodes_loads_recent_jsonl;
       Alcotest.test_case "seed_episodes respects limit" `Quick

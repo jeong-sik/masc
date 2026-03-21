@@ -100,6 +100,59 @@ let make_pw ?(spawn_model = None) () : Team_session_types.planned_worker =
     routing_escalated = false;
   }
 
+let make_session ?(orchestration_mode = Team_session_types.Auto)
+    ?(duration_seconds = 600) ?(planned_workers = []) () :
+    Team_session_types.session =
+  let now = Time_compat.now () in
+  {
+    Team_session_types.session_id = "test-session";
+    goal = "test goal";
+    created_by = "test-user";
+    room_id = "test-room";
+    operation_id = None;
+    origin_kind = Team_session_types.Origin_human;
+    status = Team_session_types.Running;
+    duration_seconds;
+    execution_scope = Team_session_types.Autonomous;
+    checkpoint_interval_sec = 30;
+    min_agents = 1;
+    scale_profile = Team_session_types.Scale_standard;
+    control_profile = Team_session_types.Control_flat;
+    orchestration_mode;
+    communication_mode = Team_session_types.Comm_broadcast;
+    model_cascade = [ "llama:qwen3.5" ];
+    fallback_policy = Team_session_types.Fallback_none;
+    instruction_profile = Team_session_types.Profile_standard;
+    alert_channel = Team_session_types.Alert_broadcast;
+    auto_resume = false;
+    report_formats = [ Team_session_types.Markdown ];
+    turn_count = 0;
+    agent_names = [ "agent-1" ];
+    planned_workers;
+    broadcast_count = 0;
+    portal_count = 0;
+    cascade_attempted = 0;
+    cascade_success = 0;
+    cascade_failed = 0;
+    fallback_task_created = 0;
+    min_agents_violation_streak = 0;
+    policy_violations = [];
+    baseline_done_counts = [];
+    final_done_delta_total = None;
+    final_done_delta_by_agent = None;
+    started_at = now;
+    planned_end_at = now +. float_of_int duration_seconds;
+    stopped_at = None;
+    last_checkpoint_at = Some now;
+    last_event_at = Some now;
+    last_turn_at = None;
+    stop_reason = None;
+    generated_report = false;
+    artifacts_dir = "/tmp/masc-test";
+    created_at_iso = Types.now_iso ();
+    updated_at_iso = Types.now_iso ();
+  }
+
 let test_cascade_explicit_model () =
   let pw = make_pw ~spawn_model:(Some "glm:glm-4.5") () in
   let c = Team_session_oas_bridge.cascade_of_worker
@@ -123,6 +176,51 @@ let test_cascade_empty_model_string () =
   let c = Team_session_oas_bridge.cascade_of_worker
     ~session_cascade:["llama:qwen3.5"] pw in
   Alcotest.(check string) "empty model falls through" "llama:qwen3.5" c
+
+let test_session_to_swarm_config_health_contract () =
+  let worker_a = make_pw () in
+  let worker_b =
+    { (make_pw ()) with
+      spawn_agent = "reviewer";
+      spawn_role = Some "verify";
+      max_turns = Some 4;
+    }
+  in
+  let session = make_session ~planned_workers:[ worker_a; worker_b ] () in
+  let tmp = Filename.temp_dir "masc-test" "" in
+  let config = Room.default_config tmp in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let swarm_cfg =
+    Team_session_oas_bridge.session_to_swarm_config ~config ~masc_tools:[]
+      ~dispatch:(fun ~name:_ ~args:_ -> (false, "no"))
+      session
+  in
+  Alcotest.(check bool) "convergence present" true
+    (Option.is_some swarm_cfg.convergence);
+  Alcotest.(check bool) "resource_check present" true
+    (Option.is_some swarm_cfg.resource_check);
+  Alcotest.(check (option (float 0.001))) "budget derived from duration"
+    (Some 600.0) swarm_cfg.budget.max_total_time_sec;
+  let convergence = Option.get swarm_cfg.convergence in
+  let metric_value =
+    match convergence.metric with
+    | Swarm.Swarm_types.Callback f -> f ()
+    | Swarm.Swarm_types.Shell_command cmd ->
+        Alcotest.failf "expected callback metric, got shell command %s" cmd
+  in
+  Alcotest.(check (float 0.001)) "initial success ratio" 0.0 metric_value;
+  Alcotest.(check int) "single-pass convergence iterations" 1
+    convergence.max_iterations;
+  let first_entry = List.hd swarm_cfg.entries in
+  Alcotest.(check bool) "entry telemetry present" true
+    (Option.is_some first_entry.get_telemetry);
+  let telemetry = Option.get first_entry.get_telemetry () in
+  Alcotest.(check int) "initial telemetry turn_count" 0 telemetry.turn_count;
+  Alcotest.(check bool) "initial telemetry usage empty" true
+    (Option.is_none telemetry.usage);
+  let resource_ok = Option.get swarm_cfg.resource_check () in
+  Alcotest.(check bool) "resource check passes for initialized room" true
+    resource_ok
 
 (* ================================================================ *)
 (* Supported tool runtime tests                                     *)
@@ -209,6 +307,8 @@ let () =
         test_cascade_default;
       Alcotest.test_case "empty model string" `Quick
         test_cascade_empty_model_string;
+      Alcotest.test_case "session swarm health contract" `Quick
+        test_session_to_swarm_config_health_contract;
     ];
     "supported_tools", [
       Alcotest.test_case "schemas present" `Quick

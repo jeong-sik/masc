@@ -371,63 +371,8 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
               let agent =
                 Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config ()
               in
-              let result =
-                Oas.Agent.run ~sw agent prompt
-              in
-              let raw_trace_run = Oas.Agent.last_raw_trace_run agent in
-              let next_checkpoint =
-                Oas.Agent.checkpoint ~session_id:meta.mcp_session_id agent
-              in
-              let tool_names =
-                List.rev !tool_names_ref |> unique_preserve_order
-              in
-              let* () =
-                save_worker_checkpoint ~base_path ~team_session_id ~worker_name
-                  next_checkpoint
-              in
-              let* () =
-                save_worker_meta ~base_path ~team_session_id ~worker_name
-                  { meta with last_run_at = Some (Time_compat.now ()) }
-              in
-              materialize_direct_evidence ~base_path ~worker_name
-                ~worker_run_id ~meta ~prompt ~workspace_path ~agent ~raw_trace;
-              Oas.Agent.close agent;
-              match result with
-              | Ok response ->
-                  let output =
-                    response.content
-                    |> List.filter_map (function
-                         | Oas.Types.Text text -> Some text
-                         | _ -> None)
-                    |> String.concat "\n"
-                  in
-                  let* () =
-                    append_worker_completion_log ~base_path ~team_session_id
-                      ~worker_name ~prompt ~tool_names ~status:"ok" ~output ()
-                  in
-                  Ok
-                    {
-                      output;
-                      model_used =
-                        (if String.trim response.model <> "" then response.model
-                         else meta.effective_model);
-                      input_tokens = Some next_checkpoint.usage.total_input_tokens;
-                      output_tokens = Some next_checkpoint.usage.total_output_tokens;
-                      cost_usd = Some next_checkpoint.usage.estimated_cost_usd;
-                      tool_call_count = List.length tool_names;
-                      tool_names;
-                      session_id = meta.mcp_session_id;
-                      raw_trace_run;
-                      api_response = Some response;
-                    }
-              | Error err ->
-                  let detail = Agent_sdk__Error.to_string err in
-                  let* () =
-                    append_worker_completion_log ~base_path ~team_session_id
-                      ~worker_name ~prompt ~tool_names ~status:"error"
-                      ~output:detail ~error:detail ()
-                  in
-                  Error detail)))
+              Worker_oas.run_existing_worker_agent ~sw ~base_path ~meta ~prompt
+                ~workspace_path ~raw_trace ?worker_run_id ~tool_names_ref agent)))
 
 let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope

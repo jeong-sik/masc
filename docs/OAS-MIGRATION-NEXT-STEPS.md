@@ -24,10 +24,10 @@ They do. The gap is that the bridge is still lossy.
 ### What remains
 
 - preserve more `planned_worker` metadata in swarm entries
-- add real per-agent telemetry instead of `get_telemetry = None`
-- replace `convergence = None` with an explicit swarm convergence policy
-- replace `max_concurrent_agents = None` with a deliberate concurrency setting
-- decide whether session-level budget should remain `no_budget` or derive from MASC session settings
+- extend telemetry beyond usage/turn_count so swarm outputs carry trace refs too
+- decide whether the current single-pass success-ratio convergence policy should become a richer multi-iteration strategy
+- replace the current room-init `resource_check` with a broader runtime-health probe if needed
+- decide whether session-level budget needs token/cost enforcement beyond the current `duration_seconds` wall-clock budget
 
 ### Success criteria
 
@@ -46,7 +46,7 @@ This pass reduced duplication, but one important path still remains outside the 
 
 ### Still remaining
 
-- local worker resume/continue path still directly resumes an OAS agent and manually handles run/checkpoint/output lifecycle
+- local worker resume/continue path still constructs resume-specific config locally before entering the shared execution tail
 
 ### Success criteria
 
@@ -99,5 +99,5 @@ These are not the next best use of time unless a concrete product need appears:
 ## Recommended Order
 
 1. team-session bridge fidelity and telemetry
-2. worker resume-path runtime consolidation
+2. worker resume-path config consolidation
 3. follow-up memory/documentation cleanup

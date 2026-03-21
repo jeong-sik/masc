@@ -261,7 +261,7 @@ let make_heartbeat_callbacks
     build_resume_config + Agent.create directly.
 
     Returns a run_result on success, or an error string on failure. *)
-let run_worker_via_oas
+let rec run_worker_via_oas
     ~(sw : Eio.Switch.t)
     ~(base_path : string)
     ~(meta : Worker_container_types.worker_container_meta)
@@ -323,11 +323,40 @@ let run_worker_via_oas
         | Ok _ -> ()
         | Error e -> raise (Failure ("worker join failed: " ^ e))
       in
+      let workspace_path =
+        if String.trim meta.workspace_path <> "" then meta.workspace_path
+        else base_path
+      in
+      run_existing_worker_agent ~sw ~base_path ~meta ~prompt ~workspace_path
+        ~raw_trace ?worker_run_id ~tool_names_ref agent)
+
+and run_existing_worker_agent
+    ~(sw : Eio.Switch.t)
+    ~(base_path : string)
+    ~(meta : Worker_container_types.worker_container_meta)
+    ~(prompt : string)
+    ~(workspace_path : string)
+    ~(raw_trace : Oas.Raw_trace.t)
+    ?worker_run_id
+    ~(tool_names_ref : string list ref)
+    (agent : Oas.Agent.t)
+  : (Worker_container_types.run_result, string) result =
+  let ( let* ) = Result.bind in
+  let team_session_id = meta.team_session_id in
+  let worker_name = meta.worker_name in
+  let session_id = meta.mcp_session_id in
+  Fun.protect
+    ~finally:(fun () ->
+      try Oas.Agent.close agent
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+          Log.LocalWorker.warn "agent close failed for %s: %s" worker_name
+            (Printexc.to_string exn))
+    (fun () ->
       let result = Oas.Agent.run ~sw agent prompt in
       let raw_trace_run = Oas.Agent.last_raw_trace_run agent in
-      let checkpoint =
-        Oas.Agent.checkpoint ~session_id agent
-      in
+      let checkpoint = Oas.Agent.checkpoint ~session_id agent in
       let tool_names =
         List.rev !tool_names_ref
         |> Worker_container_types.unique_preserve_order
@@ -341,51 +370,46 @@ let run_worker_via_oas
           ~team_session_id ~worker_name
           { meta with last_run_at = Some (Time_compat.now ()) }
       in
-      let workspace_path =
-        if String.trim meta.workspace_path <> "" then meta.workspace_path
-        else base_path
-      in
       Worker_container.materialize_direct_evidence
-        ~base_path ~worker_name ~worker_run_id ~meta ~prompt
-        ~workspace_path ~agent ~raw_trace;
-      Oas.Agent.close agent;
+        ~base_path ~worker_name ~worker_run_id ~meta ~prompt ~workspace_path
+        ~agent ~raw_trace;
       match result with
       | Ok response ->
-        let output =
-          response.content
-          |> List.filter_map (function
-               | Oas.Types.Text text -> Some text
-               | _ -> None)
-          |> String.concat "\n"
-        in
-        let* () =
-          Worker_container.append_worker_completion_log
-            ~base_path ~team_session_id ~worker_name ~prompt
-            ~tool_names ~status:"ok" ~output ()
-        in
-        Ok
-          {
-            Worker_container_types.output;
-            model_used =
-              (if String.trim response.model <> "" then response.model
-               else meta.effective_model);
-            input_tokens = Some checkpoint.usage.total_input_tokens;
-            output_tokens = Some checkpoint.usage.total_output_tokens;
-            cost_usd = Some checkpoint.usage.estimated_cost_usd;
-            tool_call_count = List.length tool_names;
-            tool_names;
-            session_id;
-            raw_trace_run;
-            api_response = Some response;
-          }
+          let output =
+            response.content
+            |> List.filter_map (function
+                 | Oas.Types.Text text -> Some text
+                 | _ -> None)
+            |> String.concat "\n"
+          in
+          let* () =
+            Worker_container.append_worker_completion_log
+              ~base_path ~team_session_id ~worker_name ~prompt ~tool_names
+              ~status:"ok" ~output ()
+          in
+          Ok
+            {
+              Worker_container_types.output;
+              model_used =
+                (if String.trim response.model <> "" then response.model
+                 else meta.effective_model);
+              input_tokens = Some checkpoint.usage.total_input_tokens;
+              output_tokens = Some checkpoint.usage.total_output_tokens;
+              cost_usd = Some checkpoint.usage.estimated_cost_usd;
+              tool_call_count = List.length tool_names;
+              tool_names;
+              session_id;
+              raw_trace_run;
+              api_response = Some response;
+            }
       | Error err ->
-        let detail = Oas.Error.to_string err in
-        let* () =
-          Worker_container.append_worker_completion_log
-            ~base_path ~team_session_id ~worker_name ~prompt
-            ~tool_names ~status:"error" ~output:detail ~error:detail ()
-        in
-        Error detail)
+          let detail = Oas.Error.to_string err in
+          let* () =
+            Worker_container.append_worker_completion_log
+              ~base_path ~team_session_id ~worker_name ~prompt ~tool_names
+              ~status:"error" ~output:detail ~error:detail ()
+          in
+          Error detail)
 
 (* ================================================================ *)
 (* Orchestrate Multiple Workers                                      *)

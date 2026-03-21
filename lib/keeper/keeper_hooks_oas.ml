@@ -41,6 +41,7 @@ let allowed_tools_for_autonomy_level
     "keeper_memory_search";
     "keeper_time_now"; "keeper_context_status";
     "extend_turns";
+    "keeper_voice_speak"; "keeper_voice_agent";
   ] in
   match String.lowercase_ascii (String.trim level) with
   | "l4_autonomous" -> Some ("keeper_bash" :: base_safe)

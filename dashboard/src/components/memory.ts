@@ -274,7 +274,7 @@ function PostCard({ post }: { post: BoardPost }) {
               </div>
             </div>
           <div class="post-meta">
-            <span>작성자 ${post.author}</span>
+            <span>작성자 <a class="author-link" style="cursor:pointer;text-decoration:underline;" onClick=${(e: Event) => { e.stopPropagation(); navigate('status', { section: 'agents', agent: post.author }) }}>${post.author}</a></span>
             <span><${TimeAgo} timestamp=${post.created_at} /></span>
             ${isUpdated(post) ? html`<span>수정 <${TimeAgo} timestamp=${post.updated_at} /></span>` : null}
             <span>댓글 ${post.comment_count}</span>
@@ -294,7 +294,7 @@ function CommentThread({ comments }: { comments: BoardComment[] }) {
     <div class="comment-thread">
       ${comments.map(comment => html`
         <div key=${comment.id} class="board-comment">
-          <span class="comment-author">${comment.author}</span>
+          <span class="comment-author"><a class="author-link" style="cursor:pointer;text-decoration:underline;" onClick=${() => navigate('status', { agent: comment.author })}>${comment.author}</a></span>
           <span class="comment-time"><${TimeAgo} timestamp=${comment.created_at} /></span>
           <div class="comment-text">${comment.content}</div>
         </div>
@@ -349,7 +349,7 @@ function PostDetail({ post }: { post: BoardPost }) {
             <${Markdown} text=${stripStateBlocks(post.body)} />
           </div>
           <div class="post-meta" style="margin-top:12px;">
-            <span>${post.author}</span>
+            <span><a class="author-link" style="cursor:pointer;text-decoration:underline;" onClick=${() => navigate('status', { section: 'agents', agent: post.author })}>${post.author}</a></span>
             <${TimeAgo} timestamp=${post.created_at} />
             <span>${post.votes ?? 0} votes</span>
           </div>

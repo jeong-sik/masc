@@ -150,39 +150,47 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
 
 (** {1 File Operations} *)
 
-let mutex = Eio.Mutex.create ()
-
-let get_audit_path (config : Room.config) =
+(** Legacy single-file path (for fallback reads). *)
+let legacy_audit_path (config : Room.config) =
   let masc_dir = Room_utils.masc_dir config in
   Filename.concat masc_dir "audit.jsonl"
 
-(** Read all audit entries from the JSONL file *)
-let read_entries (config : Room.config) : audit_entry list =
-  let path = get_audit_path config in
-  if not (Sys.file_exists path) then []
+(** Date-split store: [.masc/audit/YYYY-MM/DD.jsonl].
+    Cached per base_dir so all callers share the same Eio.Mutex. *)
+let audit_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
+
+let get_audit_store (config : Room.config) : Dated_jsonl.t =
+  let base = Filename.concat (Room_utils.masc_dir config) "audit" in
+  match Hashtbl.find_opt audit_store_cache base with
+  | Some store -> store
+  | None ->
+    let store = Dated_jsonl.create ~base_dir:base () in
+    Hashtbl.replace audit_store_cache base store;
+    store
+
+(** Read recent audit entries.
+    Tries date-split store first; falls back to legacy single file. *)
+let read_entries ?(n = 10_000) (config : Room.config) : audit_entry list =
+  let store = get_audit_store config in
+  let entries = Dated_jsonl.read_recent store n in
+  if entries <> [] then
+    List.filter_map entry_of_json entries
   else
-    let content = Fs_compat.load_file path in
-    String.split_on_char '\n' content
-    |> List.filter (fun line -> String.trim line <> "")
-    |> List.filter_map (fun line ->
-        try entry_of_json (Yojson.Safe.from_string line)
-        with Yojson.Json_error _ -> None)
+    (* Legacy fallback: single .masc/audit.jsonl *)
+    let path = legacy_audit_path config in
+    if not (Sys.file_exists path) then []
+    else
+      let content = Fs_compat.load_file path in
+      String.split_on_char '\n' content
+      |> List.filter (fun line -> String.trim line <> "")
+      |> List.filter_map (fun line ->
+          try entry_of_json (Yojson.Safe.from_string line)
+          with Yojson.Json_error _ -> None)
 
-(** Recursively create directory (no shell, safe) *)
-let ensure_dir_safe dir =
-  Fs_compat.mkdir_p dir
-
-let ensure_dir path =
-  let dir = Filename.dirname path in
-  ensure_dir_safe dir
-
-(** Append a single entry to the audit log (thread-safe) *)
+(** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)
 let append_entry (config : Room.config) (entry : audit_entry) =
-  Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-    let path = get_audit_path config in
-    ensure_dir path;
-    Fs_compat.append_jsonl path (entry_to_json entry)
-  )
+  let store = get_audit_store config in
+  Dated_jsonl.append store (entry_to_json entry)
 
 (** {1 Logging API} *)
 
@@ -271,28 +279,15 @@ let log_circuit_breaker config ~agent_id ~opened ~reason ?cost_estimate ?token_c
     ~details:(`Assoc [("reason", `String reason)])
     ?cost_estimate ?token_count ~outcome:Success ()
 
-(** {1 Rotation & Cleanup} *)
+(** {1 Pruning (replaces rotation)} *)
 
-let rotate_if_needed (config : Room.config) ~max_size_bytes =
-  let path = get_audit_path config in
-  if Sys.file_exists path then begin
-    let stats = Unix.stat path in
-    if stats.Unix.st_size > max_size_bytes then begin
-      (* Rotate: move current to .1, keeping only one backup *)
-      let backup_path = path ^ ".1" in
-      if Sys.file_exists backup_path then
-        Sys.remove backup_path;
-      Sys.rename path backup_path;
-      Log.Misc.info "Rotated %s (%.1f MB)" path
-        (float_of_int stats.Unix.st_size /. 1_000_000.0)
-    end
-  end
-
-(** Default max size: 10MB *)
-let default_max_size = 10_000_000
-
-let maybe_rotate config =
-  rotate_if_needed config ~max_size_bytes:default_max_size
+(** Prune audit entries older than [days] days.
+    Date-split storage makes rotation unnecessary. *)
+let prune_old (config : Room.config) ~days =
+  let store = get_audit_store config in
+  let deleted = Dated_jsonl.prune store ~days in
+  if deleted > 0 then
+    Log.Misc.info "Pruned %d old audit day-files" deleted
 
 (** {1 Statistics} *)
 
@@ -304,44 +299,25 @@ type stats = {
 }
 
 let get_stats (config : Room.config) =
-  let path = get_audit_path config in
-  if not (Sys.file_exists path) then
-    { total_entries = 0; file_size_bytes = 0; oldest_timestamp = None; newest_timestamp = None }
-  else begin
-    let size = (Unix.stat path).Unix.st_size in
-    (* Count lines and get timestamps *)
-    let content = Fs_compat.load_file path in
-    let lines = String.split_on_char '\n' content
-      |> List.filter (fun line -> String.trim line <> "") in
-    let count = ref 0 in
-    let oldest = ref None in
-    let newest = ref None in
-    List.iter (fun line ->
-      incr count;
-      (* Parse timestamp from first/last lines *)
-      if !oldest = None || !count <= 1 then begin
-        try
-          let json = Yojson.Safe.from_string line in
-          let ts = Yojson.Safe.Util.(json |> member "timestamp" |> to_float) in
-          if !oldest = None then oldest := Some ts;
-          newest := Some ts
-        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
-      end else begin
-        (* Just update newest for each line *)
-        try
-          let json = Yojson.Safe.from_string line in
-          let ts = Yojson.Safe.Util.(json |> member "timestamp" |> to_float) in
-          newest := Some ts
-        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
-      end
-    ) lines;
-    {
-      total_entries = !count;
-      file_size_bytes = size;
-      oldest_timestamp = !oldest;
-      newest_timestamp = !newest;
-    }
-  end
+  let store = get_audit_store config in
+  (* Read a large window to compute stats *)
+  let entries = Dated_jsonl.read_recent store 100_000 in
+  let count = List.length entries in
+  let oldest = ref None in
+  let newest = ref None in
+  List.iter (fun json ->
+    (try
+       let ts = Yojson.Safe.Util.(json |> member "timestamp" |> to_float) in
+       if !oldest = None then oldest := Some ts;
+       newest := Some ts
+     with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
+  ) entries;
+  {
+    total_entries = count;
+    file_size_bytes = 0; (* no longer a single file *)
+    oldest_timestamp = !oldest;
+    newest_timestamp = !newest;
+  }
 
 let stats_to_json (s : stats) : Yojson.Safe.t =
   `Assoc [

@@ -38,6 +38,7 @@
         test_tool_exposure
         test_code_swarm
         test_autonomy_liberation
+        test_keeper_unified
 )
  (modules test_room test_types test_checkpoint test_auth test_http_negotiation
           test_sse test_encryption test_backend test_cancellation test_graphql_api
@@ -57,8 +58,9 @@
           test_tool_exposure
           test_code_swarm
           test_autonomy_liberation
+          test_keeper_unified
   )
- (libraries masc_mcp alcotest str yojson mirage-crypto
+ (libraries masc_mcp agent_sdk alcotest str yojson mirage-crypto
             mirage-crypto-rng mirage-crypto-rng.unix cohttp cstruct unix eio eio_main))
 
 ; Runtime params + governance registry tests (requires Eio.Mutex)
@@ -129,6 +131,12 @@
  (name test_dashboard_governance)
  (modules test_dashboard_governance)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
+
+; Date-split JSONL storage tests
+(test
+ (name test_dated_jsonl)
+ (modules test_dated_jsonl)
+ (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
 
 (test
  (name test_dashboard_labels)
@@ -278,13 +286,8 @@
  (modules test_thompson_sampling)
  (libraries masc_mcp alcotest eio eio_main str yojson))
 
-; Autonomy Adjuster tests (feedback closure for agent selection)
-(test
- (name test_autonomy_adjuster)
- (modules test_autonomy_adjuster)
- (libraries masc_mcp alcotest eio eio_main str yojson))
-
 ; Gardener/Guardian/Sentinel test stanzas removed (#1834)
+; Autonomy Adjuster tests removed (autonomy_level system moved to OAS)
 
 ; Safe_ops module tests (safe exception handling)
 (test
@@ -320,7 +323,7 @@
 (test
  (name test_worker_container_coverage)
  (modules test_worker_container_coverage)
- (libraries masc_mcp alcotest yojson))
+ (libraries masc_mcp agent_sdk alcotest yojson))
 
 ; Resilience module tests (Time, Zombie, ZeroZombie pure functions)
 (test
@@ -416,7 +419,7 @@
 (test
  (name test_tool_keeper)
  (modules test_tool_keeper)
- (libraries masc_mcp alcotest unix))
+ (libraries masc_mcp agent_sdk alcotest unix))
 (test
  (name test_keeper_tools_oas)
  (modules test_keeper_tools_oas)
@@ -749,7 +752,7 @@
 (test
  (name test_perpetual)
  (modules test_perpetual)
- (libraries masc_mcp str yojson unix))
+ (libraries masc_mcp agent_sdk str yojson unix))
 
 ; TRPG tests moved to sublibrary (#1668)
 

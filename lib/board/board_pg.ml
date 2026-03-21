@@ -739,7 +739,7 @@ let migrate_from_store t (store : Board.store) =
     (* vote key format: "post:pid:voter" or "comment:cid:voter" *)
     match String.split_on_char ':' key with
     | target_type :: rest when List.length rest >= 2 ->
-        let voter = List.nth rest (List.length rest - 1) in
+        let voter = match List.rev rest with last :: _ -> last | [] -> "" in
         let target_id = String.concat ":" (List.filteri (fun i _ ->
           i < List.length rest - 1) rest) in
         let dir_str = vote_direction_to_string direction in

@@ -530,3 +530,39 @@ let keeper_social_followup_max_tokens () : int =
     ~default:512
     ~min_v:128
     ~max_v:4096
+
+(* ================================================================ *)
+(* Unified Keeper Turn parameters                                    *)
+(* ================================================================ *)
+
+(** Feature flag: enable unified keeper turn path.
+    Env: [MASC_KEEPER_UNIFIED_TURN]. Default: false. *)
+let keeper_unified_turn_enabled () : bool =
+  bool_of_env_default "MASC_KEEPER_UNIFIED_TURN" ~default:false
+
+(** Temperature for unified keeper turns.
+    Env: [MASC_KEEPER_UNIFIED_TEMP]. Default: 0.4. *)
+let keeper_unified_temperature () : float =
+  float_of_env_default
+    "MASC_KEEPER_UNIFIED_TEMP"
+    ~default:0.4
+    ~min_v:0.0
+    ~max_v:2.0
+
+(** Max output tokens for unified keeper turns.
+    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 2048. *)
+let keeper_unified_max_tokens () : int =
+  int_of_env_default
+    "MASC_KEEPER_UNIFIED_MAX_TOKENS"
+    ~default:2048
+    ~min_v:256
+    ~max_v:16000
+
+(** Max agent turns (tool loops) for unified keeper turns.
+    Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 10. *)
+let keeper_unified_max_turns () : int =
+  int_of_env_default
+    "MASC_KEEPER_UNIFIED_MAX_TURNS"
+    ~default:10
+    ~min_v:1
+    ~max_v:30

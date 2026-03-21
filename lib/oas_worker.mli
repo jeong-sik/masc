@@ -45,6 +45,7 @@ val run_named :
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?agent_ref:Oas.Agent.t option ref ->
   unit ->
   (run_result, string) result
 

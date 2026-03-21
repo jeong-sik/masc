@@ -355,32 +355,20 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
 (** Build a prompt for the MODEL to decide the keeper's next action.
     The prompt describes the keeper's identity, current state, detected triggers,
     and available actions. The MODEL is asked to respond with JSON.
-    When [autonomy_level] is L3+, the [multi_step] action is included. *)
+    multi_step action is always available (autonomy_level dispatch removed). *)
 let build_deliberation_prompt
     ?(autonomy_level : string option)
     ~keeper_name ~soul_profile ~goal
     ~(triggers : deliberation_trigger list)
     (obs : world_observation) : string =
-  let is_l3_plus =
-    match autonomy_level with
-    | None -> false
-    | Some raw -> (
-        match Keeper_autonomy.autonomy_level_of_string raw with
-        | Some (Keeper_autonomy.L3_Guided | L4_Autonomous | L5_Independent) ->
-            true
-        | _ -> false)
-  in
+  ignore autonomy_level;
   let multi_step_line =
-    if is_l3_plus then
-      "\n- multi_step: Execute multiple actions sequentially (max 5). \
-       Requires steps array of action objects."
-    else ""
+    "\n- multi_step: Execute multiple actions sequentially (max 5). \
+     Requires steps array of action objects."
   in
   let multi_step_example =
-    if is_l3_plus then
-      {|
+    {|
 {"action":"multi_step","params":{"steps":[{"action":"task_claim","params":{"task_id":"task-1","reason":"urgent"}},{"action":"broadcast","params":{"message":"Claimed task-1"}}]},"reasoning":"Claim and announce","confidence":0.7}|}
-    else ""
   in
   Printf.sprintf
     {|You are %s, a keeper agent in a multi-agent coordination system.

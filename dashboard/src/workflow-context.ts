@@ -387,12 +387,6 @@ export function workflowActionLabel(actionType?: string | null): string {
       return 'keeper probe'
     case 'keeper_recover':
       return 'keeper recover'
-    case 'swarm_run_continue':
-      return 'swarm run 계속'
-    case 'swarm_run_rerun':
-      return 'swarm run 재실행'
-    case 'swarm_run_abandon':
-      return 'swarm run 포기'
     default:
       return actionType?.trim() || '추천 액션'
   }

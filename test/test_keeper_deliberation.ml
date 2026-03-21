@@ -734,23 +734,22 @@ let test_parse_multi_step_invalid_substep_fails () =
   | Error _ -> () (* expected: reply with empty content fails *)
   | Ok _ -> fail "expected Error for invalid substep in multi_step"
 
-(* ---------- L3 Strategic: prompt includes multi_step for L3+ ---------- *)
+(* ---------- multi_step is always included (autonomy_level dispatch removed) ---------- *)
 
-let test_prompt_l3_includes_multi_step () =
+let test_prompt_always_includes_multi_step () =
   let prompt =
     D.build_deliberation_prompt
-      ~autonomy_level:"L3_Guided"
       ~keeper_name:"strategic-keeper"
       ~soul_profile:"strategist"
       ~goal:"Plan and execute"
       ~triggers:[ D.DirectMention ]
       base_obs
   in
-  check bool "L3 prompt contains multi_step" true
+  check bool "prompt contains multi_step" true
     (try ignore (Str.search_forward (Str.regexp_string "multi_step") prompt 0); true
      with Not_found -> false)
 
-let test_prompt_l1_excludes_multi_step () =
+let test_prompt_with_autonomy_includes_multi_step () =
   let prompt =
     D.build_deliberation_prompt
       ~autonomy_level:"L1_Reactive"
@@ -760,20 +759,7 @@ let test_prompt_l1_excludes_multi_step () =
       ~triggers:[ D.DirectMention ]
       base_obs
   in
-  check bool "L1 prompt does not contain multi_step" false
-    (try ignore (Str.search_forward (Str.regexp_string "multi_step") prompt 0); true
-     with Not_found -> false)
-
-let test_prompt_no_autonomy_excludes_multi_step () =
-  let prompt =
-    D.build_deliberation_prompt
-      ~keeper_name:"default-keeper"
-      ~soul_profile:"basic"
-      ~goal:"Default"
-      ~triggers:[ D.DirectMention ]
-      base_obs
-  in
-  check bool "no autonomy prompt does not contain multi_step" false
+  check bool "prompt with L1 still contains multi_step" true
     (try ignore (Str.search_forward (Str.regexp_string "multi_step") prompt 0); true
      with Not_found -> false)
 
@@ -883,12 +869,10 @@ let () =
             test_prompt_contains_json_instruction;
           test_case "prompt lists available actions" `Quick
             test_prompt_contains_action_list;
-          test_case "L3+ prompt includes multi_step" `Quick
-            test_prompt_l3_includes_multi_step;
-          test_case "L1 prompt excludes multi_step" `Quick
-            test_prompt_l1_excludes_multi_step;
-          test_case "no autonomy prompt excludes multi_step" `Quick
-            test_prompt_no_autonomy_excludes_multi_step;
+          test_case "prompt always includes multi_step" `Quick
+            test_prompt_always_includes_multi_step;
+          test_case "prompt with autonomy_level includes multi_step" `Quick
+            test_prompt_with_autonomy_includes_multi_step;
         ] );
       ( "parse_deliberation_response",
         [

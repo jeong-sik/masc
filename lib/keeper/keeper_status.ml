@@ -104,6 +104,7 @@ let handle_keeper_status ctx args : tool_result =
            ]
          ) specs) in
 
+         let metrics_store = keeper_metrics_store ctx.config m.name in
          let metrics_path = keeper_metrics_path ctx.config m.name in
          let memory_bank_path = keeper_memory_bank_path ctx.config m.name in
          let session_dir = keeper_session_dir ctx.config m.trace_id in
@@ -111,9 +112,10 @@ let handle_keeper_status ctx args : tool_result =
 
          let metrics_tail =
            let lines =
-             read_file_tail_lines metrics_path
-               ~max_bytes:tail_bytes
-               ~max_lines:tail_turns
+             let dated = Dated_jsonl.read_recent_lines metrics_store tail_turns in
+             if dated <> [] then dated
+             else read_file_tail_lines metrics_path
+                    ~max_bytes:tail_bytes ~max_lines:tail_turns
            in
            `List
              (List.filter_map
@@ -123,9 +125,11 @@ let handle_keeper_status ctx args : tool_result =
          in
          let metrics_window_lines =
            if include_metrics_overview then
-             read_file_tail_lines metrics_path
-               ~max_bytes:tail_bytes
-               ~max_lines:(max tail_turns 200)
+             let n = max tail_turns 200 in
+             let dated = Dated_jsonl.read_recent_lines metrics_store n in
+             if dated <> [] then dated
+             else read_file_tail_lines metrics_path
+                    ~max_bytes:tail_bytes ~max_lines:n
            else
              []
          in
@@ -295,10 +299,12 @@ let handle_keeper_status ctx args : tool_result =
            if not include_compaction_history then
              (`List [], 0)
            else
+             let n = max 200 (tail_compactions * 20) in
              let lines =
-               read_file_tail_lines metrics_path
-                 ~max_bytes:tail_bytes
-                 ~max_lines:(max 200 (tail_compactions * 20))
+               let dated = Dated_jsonl.read_recent_lines metrics_store n in
+               if dated <> [] then dated
+               else read_file_tail_lines metrics_path
+                      ~max_bytes:tail_bytes ~max_lines:n
              in
              let events_rev =
                List.fold_left

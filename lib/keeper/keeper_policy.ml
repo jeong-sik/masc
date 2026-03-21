@@ -420,28 +420,25 @@ let handle_keeper_autonomy ctx args : tool_result =
          let info = Printf.sprintf
            "Keeper: %s\nAutonomy Level: %s\nActive Goals: [%s]\nAutonomous Actions: %d\nLast Autonomous Action: %s"
            m.name
-           (match Keeper_contract.parse_autonomy_level m.autonomy_level with
-            | Some level -> Keeper_autonomy.autonomy_level_to_string level
-            | None -> m.autonomy_level)
+           m.autonomy_level
            (String.concat ", " m.active_goal_ids)
            m.autonomous_action_count
            (if m.last_autonomous_action_at = "" then "never" else m.last_autonomous_action_at)
          in
          (true, info)
        | Some level_str ->
-         (* SET mode: validate and update autonomy level *)
-         match Keeper_autonomy.autonomy_level_of_string level_str with
-         | None ->
-             (false, Printf.sprintf "invalid autonomy level: %s (use L1_Reactive..L5_Independent)" level_str)
-         | Some al ->
-             let canonical = Keeper_autonomy.autonomy_level_to_string al in
-             let updated =
-               { m with autonomy_level = Keeper_contract.autonomy_level_to_storage_string al }
-             in
-             (match write_meta ctx.config updated with
-             | Error e -> (false, "write error: " ^ e)
-             | Ok () ->
-                 (true, Printf.sprintf "Keeper %s autonomy level updated to %s" name canonical)))
+         (* SET mode: store as plain string (no level validation) *)
+         let canonical = String.lowercase_ascii (String.trim level_str) in
+         if canonical = "" then
+           (false, "autonomy level cannot be empty")
+         else
+           let updated =
+             { m with autonomy_level = canonical }
+           in
+           (match write_meta ctx.config updated with
+           | Error e -> (false, "write error: " ^ e)
+           | Ok () ->
+               (true, Printf.sprintf "Keeper %s autonomy level updated to %s" name canonical)))
 
 let handle_keeper_goals ctx args : tool_result =
   let name = get_string args "name" "" in

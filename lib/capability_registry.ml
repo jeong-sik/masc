@@ -398,9 +398,12 @@ let public_raw_tool_schemas_from (public_tool_source_schemas : Types.tool_schema
     Types.tool_schema list =
   dedupe_schemas public_tool_source_schemas
 
+(* Surface filtering removed — all registered tools are public.
+   Previous: surface_tool_schemas_from ... Public_mcp filtered ~47 tools.
+   See #1961 for context. *)
 let public_tool_schemas_from (public_tool_source_schemas : Types.tool_schema list) :
     Types.tool_schema list =
-  surface_tool_schemas_from public_tool_source_schemas Public_mcp
+  dedupe_schemas public_tool_source_schemas
   |> Tool_help_registry.canonicalize_schemas
 
 let visible_public_tool_schemas_from

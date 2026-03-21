@@ -168,6 +168,7 @@ let run
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
     ?(on_event : (Oas.Types.sse_event -> unit) option)
+    ?(agent_ref : Oas.Agent.t option ref option)
     (goal : string)
   : (run_result, string) result =
   let session_id = match config.session_id with
@@ -188,6 +189,8 @@ let run
     ) config.event_bus;
     Error (Printf.sprintf "Agent build failed: %s" e)
   | Ok agent ->
+  (* Set agent_ref for tools that need post-creation agent access (e.g. extend_turns) *)
+  (match agent_ref with Some r -> r := Some agent | None -> ());
   (* Wrap agent execution so Eio/network exceptions become Error results,
      honouring the (run_result, string) result return type promised by .mli.
      Eio.Cancel.Cancelled is re-raised for structured-concurrency safety. *)
@@ -268,77 +271,13 @@ let default_config_path () : string option =
   in
   List.find_opt Sys.file_exists candidates
 
-(** Build a provider:model label, filtering out empty models. *)
-let label provider model =
-  if model = "" then None
-  else Some (Printf.sprintf "%s:%s" provider model)
-
-(** Build a label list, discarding entries with empty models. *)
-let labels_of pairs =
-  List.filter_map (fun (p, m) -> label p m) pairs
-
-let default_model_strings ~cascade_name =
+(** Hardcoded fallback defaults — used only when cascade.json is missing
+    and the cascade name has no "{name}_models" entry.
+    All profiles are now in config/cascade.json (hot-reloadable). *)
+let default_model_strings ~cascade_name:_ =
   let llama_model = Env_config.Llama.default_model in
-  let glm_model = Env_config.Glm.default_model in
-  let glm_flash = Env_config.Glm.flash_model in
-  (* llama + glm:auto — GLM provider selects model at runtime *)
-  let llama_glm =
-    (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
-    @ [ "glm:auto" ]
-  in
-  match cascade_name with
-  (* heartbeat — llama first, glm fallback *)
-  | "heartbeat_action" | "heartbeat_wake" -> llama_glm
-  (* lodge subsystems — llama first, glm fallback *)
-  | "lodge_direct" | "lodge_context_rewrite" | "lodge_trait_gen"
-  | "lodge_comment" | "lodge_agent_match" ->
-      llama_glm
-  (* classification — local llama, glm fallback *)
-  | "classification" | "context_router" | "capability_match" -> llama_glm
-  (* theory of mind — local llama, glm fallback *)
-  | "tom" -> llama_glm
-  (* verifier — local llama, glm fallback *)
-  | "verifier" | "code_swarm_verify" | "code_swarm" -> llama_glm
-  (* keeper — local llama, glm fallback *)
-  | "keeper_autonomy" | "keeper_proactive" | "keeper_deliberation"
-  | "keeper_reply" | "keeper_social" | "keeper_turn" -> llama_glm
-  (* routing — local llama, glm fallback *)
-  | "routing_judge" | "team_router" -> llama_glm
-  (* chain — local llama, glm fallback *)
-  | "chain_model" -> llama_glm
-  (* autoresearch — local llama, glm fallback *)
-  | "autoresearch" -> llama_glm
-  (* trpg — local llama, glm fallback *)
-  | "trpg_intent" -> llama_glm
-  (* briefing — llama first, flash-tier cloud chain, glm fallback *)
-  | "briefing" ->
-      (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
-      @ labels_of [ ("glm", glm_flash); ("gemini", Env_config.Gemini.flash_model) ]
-      @ [ "glm:auto" ]
-  | "governance_judge" | "operator_judge" -> llama_glm
-  (* walph — default execution models *)
-  | "walph" -> llama_glm
-  (* auto_responder — agent_type-specific cascades *)
-  | "auto_responder_claude" ->
-      labels_of [ ("claude", Env_config.Claude.default_model) ]
-      @ [ "glm:auto" ]
-  | "auto_responder_gemini" ->
-      labels_of [ ("gemini", Env_config.Gemini.flash_model) ]
-      @ [ "glm:auto" ]
-  | "auto_responder_glm" ->
-      labels_of [ ("glm", glm_model) ]
-      @ [ "glm:auto" ]
-  | "auto_responder" -> llama_glm
-  (* spawn glm — cloud-only cascade *)
-  | "spawn_glm" ->
-      labels_of [ ("glm", glm_model); ("glm", glm_flash) ]
-      @ [ "glm:auto" ]
-  (* mitosis — cell division / handoff *)
-  | "mitosis" -> llama_glm
-  (* topic extraction — fast local model, glm fallback *)
-  | "topic_extraction" -> llama_glm
-  (* unregistered cascade: llama + glm as safety net *)
-  | _ -> llama_glm
+  (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
+  @ [ "glm:auto" ]
 
 (* ================================================================ *)
 (* Named model execution                                            *)
@@ -426,6 +365,7 @@ let run_named
     ?context_reducer
     ?memory
     ?on_event
+    ?agent_ref
     ()
   : (run_result, string) result =
   match require_eio () with
@@ -451,7 +391,7 @@ let run_named
       ()
   in
   let config = { config with named_cascade = Some named_cascade } in
-  match run ~sw ~net ~config ?on_event goal with
+  match run ~sw ~net ~config ?on_event ?agent_ref goal with
   | Ok result when accept result.response -> Ok result
   | Ok _ -> Error (Printf.sprintf "cascade %s: response rejected by accept" cascade_name)
   | Error e -> Error e

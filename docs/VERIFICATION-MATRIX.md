@@ -10,6 +10,7 @@
 
 - `dune test --root .`
   - 기본 단위/통합 테스트 묶음
+  - 실행 진입점은 `make test` 또는 `scripts/ci-run-tests.sh "opam exec -- dune test"`를 기준으로 본다
 - `./_build/default/test/test_sse_storm_e2e.exe`
   - server executable 기반 SSE reconnect e2e
 - contract harness 4종
@@ -22,7 +23,7 @@
 
 ```bash
 dune build --root .
-dune test --root .
+make test
 make test-contract
 ./_build/default/test/test_sse_storm_e2e.exe
 ```
@@ -88,7 +89,7 @@ make test-contract
 
 즉, 이번 변경에서 CI 필수로 보려는 것은:
 
-- `dune test --root .`
+- `make test`
 - `test_sse_storm_e2e.exe`
 - contract harness 4종
 

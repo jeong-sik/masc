@@ -249,7 +249,21 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
           ("continuity_briefs", `List (List.map (fun (row : continuity_context) -> row.json) continuity_rows));
           ("offline_worker_briefs", `List (List.map (fun (row : worker_context) -> row.json) offline_worker_briefs));
           ("agents", `List (List.map agent_json agents));
-          ("keepers", `List keepers);
+          ("keepers", `List (List.map (fun k ->
+            match k with
+            | `Assoc fields when not (List.mem_assoc "pipeline_stage" fields) ->
+              let name = match List.assoc_opt "name" fields with
+                | Some (`String n) -> n | _ -> "" in
+              let stage = match Keeper_types.read_meta config name with
+                | Ok (Some m) ->
+                  let agent_status = Keeper_exec_status.parse_agent_status config ~agent_name:m.agent_name in
+                  let surface = Keeper_exec_status.keeper_surface_status
+                    ~agent_status ~diagnostic:`Null in
+                  Keeper_exec_status.derive_pipeline_stage ~meta:m ~surface_status:surface ~now_ts
+                | _ -> "unknown" in
+              `Assoc (("pipeline_stage", `String stage) :: fields)
+            | other -> other
+          ) keepers));
         ]
       in
       let active_tasks = List.filter (fun (t : Types.task) ->

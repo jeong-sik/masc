@@ -140,18 +140,13 @@ let coerce_tool_timeout_sec (raw_timeout_sec : float option) : float option =
 
 (** Optional per-tool timeout to prevent long calls from starving the request loop. *)
 let tool_timeout_sec_opt ~(tool_name : string) ~(arguments : Yojson.Safe.t) : float option =
-  let default_timeout_sec =
-    float_of_int
-      (int_of_env_default
-         "MASC_TOOL_TIMEOUT_KEEPER_MSG_SEC"
-         ~default:45
-         ~min_v:10
-         ~max_v:300)
-  in
+  ignore arguments;
   match tool_name with
   | "masc_keeper_msg" ->
-      let requested_timeout_sec = coerce_tool_timeout_sec (Safe_ops.json_float_opt "timeout_sec" arguments) in
-      Some (Option.value requested_timeout_sec ~default:default_timeout_sec)
+      (* No fixed timeout for keeper_msg. Keeper has its own internal limits
+         (max_turns, max_cost_usd, max_tokens) that control call duration.
+         A fixed external timeout conflicts with multi-turn tool-use loops. *)
+      None
   | _ ->
       let global_default_sec =
         float_of_int

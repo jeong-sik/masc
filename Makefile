@@ -12,18 +12,18 @@ build:
 
 # Build dashboard SPA (Vite)
 dashboard:
-	cd dashboard && npm install --prefer-offline --no-audit && npm run build
+	cd dashboard && npm ci && npm run build
 
 # Build everything (OCaml + dashboard)
 build-all: build dashboard
 
 # Run tests (alias for test-unit)
 test:
-	dune test --root .
+	scripts/ci-run-tests.sh "opam exec -- dune test --root ."
 
 # Unit tests only (no server required)
 test-unit:
-	dune test --root .
+	scripts/ci-run-tests.sh "opam exec -- dune test --root ."
 
 # Contract harness (self-bootstrapping, hermetic local server)
 test-contract:
@@ -47,7 +47,7 @@ clean:
 coverage:
 	rm -rf _coverage
 	mkdir -p _coverage
-	BISECT_FILE=$(CURDIR)/_coverage/bisect dune test --root . --instrument-with bisect_ppx --force
+	CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 scripts/ci-run-tests.sh "BISECT_FILE=$(CURDIR)/_coverage/bisect opam exec -- dune test --root . --instrument-with bisect_ppx --force"
 
 # Print coverage summary to stdout
 coverage-summary: coverage

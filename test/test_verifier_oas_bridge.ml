@@ -229,44 +229,16 @@ let test_verify_skips_readonly () =
 (* Roundtrip: autonomous_gate_config -> guardrails                   *)
 (* ================================================================ *)
 
-let test_l3_gate_roundtrip () =
-  let gate =
-    Keeper_exec_autonomy.autonomous_gate_config
-      ~autonomy_level:Keeper_autonomy.L3_Guided
-  in
+let test_default_gate_roundtrip () =
+  let gate = Keeper_exec_autonomy.autonomous_gate_config () in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
-  Alcotest.(check bool) "L3 -> AllowList (strict)"
+  Alcotest.(check bool) "default -> AllowList (strict)"
     true
     (match g.tool_filter with
      | Oas.Guardrails.AllowList names -> List.length names > 0
      | _ -> false);
-  Alcotest.(check (option int)) "L3 max_tool_calls = 5"
+  Alcotest.(check (option int)) "default max_tool_calls = 5"
     (Some 5) g.max_tool_calls_per_turn
-
-let test_l4_gate_roundtrip () =
-  let gate =
-    Keeper_exec_autonomy.autonomous_gate_config
-      ~autonomy_level:Keeper_autonomy.L4_Autonomous
-  in
-  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
-  Alcotest.(check bool) "L4 -> AllowList (includes bash)"
-    true
-    (match g.tool_filter with
-     | Oas.Guardrails.AllowList names ->
-         List.mem "keeper_bash" names
-     | _ -> false)
-
-let test_l5_gate_roundtrip () =
-  let gate =
-    Keeper_exec_autonomy.autonomous_gate_config
-      ~autonomy_level:Keeper_autonomy.L5_Independent
-  in
-  let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
-  Alcotest.(check bool) "L5 -> AllowAll"
-    true
-    (match g.tool_filter with
-     | Oas.Guardrails.AllowAll -> true
-     | _ -> false)
 
 (* ================================================================ *)
 (* execution_scope -> gate_config -> guardrails roundtrip             *)
@@ -358,9 +330,7 @@ let () =
       Alcotest.test_case "read-only skips" `Quick test_verify_skips_readonly;
     ]);
     ("autonomous_gate roundtrip", [
-      Alcotest.test_case "L3 -> AllowList (strict)" `Quick test_l3_gate_roundtrip;
-      Alcotest.test_case "L4 -> AllowList (with bash)" `Quick test_l4_gate_roundtrip;
-      Alcotest.test_case "L5 -> AllowAll" `Quick test_l5_gate_roundtrip;
+      Alcotest.test_case "default -> AllowList (strict)" `Quick test_default_gate_roundtrip;
     ]);
     ("execution_scope roundtrip", [
       Alcotest.test_case "Observe_only -> AllowList" `Quick

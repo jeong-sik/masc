@@ -115,6 +115,7 @@ let build_keeper_system_prompt
      Reply in the user's language. Keep replies concise.\n\
      </continuity>"
     goal short_goal mid_goal long_goal will needs desires custom
+    will needs desires
     profile_policy
 
 let append_trait_clause ~(base : string) ~(clause : string) : string =

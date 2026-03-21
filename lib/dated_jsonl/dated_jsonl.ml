@@ -1,0 +1,226 @@
+(** Date-split JSONL storage.
+
+    Extracts the [YYYY-MM/DD.jsonl] pattern originally used by
+    {!Room_utils_ops.log_event} into a reusable module.
+
+    Layout:
+    {v
+      base_dir/
+        2026-03/
+          20.jsonl
+          21.jsonl
+        2026-04/
+          01.jsonl
+    v}
+*)
+
+type t = {
+  base_dir : string;
+  mutex : Eio.Mutex.t;
+}
+
+let create ~base_dir ?mutex () =
+  let mutex = match mutex with Some m -> m | None -> Eio.Mutex.create () in
+  { base_dir; mutex }
+
+let base_dir t = t.base_dir
+
+(* ── Date helpers ─────────────────────────────────────── *)
+
+(** Current UTC date decomposed into (month_dir, day_file). *)
+let today_parts () =
+  let open Unix in
+  let tm = gmtime (gettimeofday ()) in
+  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
+  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+  (month, day)
+
+(** Full path for today's JSONL file, creating dirs as needed. *)
+let today_path t =
+  let month, day = today_parts () in
+  let dir = Filename.concat t.base_dir month in
+  Fs_compat.mkdir_p dir;
+  Filename.concat dir day
+
+(** Parse ["YYYY-MM-DD"] into [("YYYY-MM", "DD")].
+    Returns [None] for malformed strings. *)
+let parse_date s =
+  if String.length s < 10 then None
+  else
+    let month = String.sub s 0 7 in
+    let day = String.sub s 8 2 in
+    Some (month, day)
+
+(* ── Directory listing (sorted descending) ────────────── *)
+
+let list_subdirs path =
+  if not (Sys.file_exists path) then []
+  else
+    try
+      Sys.readdir path
+      |> Array.to_list
+      |> List.sort (fun a b -> String.compare b a)
+    with Sys_error _ -> []
+
+(** Month directories matching [YYYY-MM] pattern, newest first. *)
+let list_month_dirs base_dir =
+  list_subdirs base_dir
+  |> List.filter (fun d ->
+    String.length d = 7
+    && d.[4] = '-'
+    && (try ignore (int_of_string (String.sub d 0 4)); true with Failure _ -> false))
+
+(** Day files matching [DD.jsonl], newest first. *)
+let list_day_files month_path =
+  list_subdirs month_path
+  |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
+
+(* ── Lines from a single file ─────────────────────────── *)
+
+let load_lines path =
+  if not (Fs_compat.file_exists path) then []
+  else
+    try
+      Fs_compat.load_file path
+      |> String.split_on_char '\n'
+      |> List.filter (fun l -> String.trim l <> "")
+    with Sys_error _ -> []
+
+(* ── Public API ───────────────────────────────────────── *)
+
+let append t json =
+  Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+    let path = today_path t in
+    Fs_compat.append_jsonl path json)
+
+let read_recent t n =
+  if n <= 0 then []
+  else begin
+    let collected = ref [] in
+    let count = ref 0 in
+    let months = list_month_dirs t.base_dir in
+    let exception Done in
+    (try
+       List.iter (fun m ->
+         let month_path = Filename.concat t.base_dir m in
+         let days = list_day_files month_path in
+         List.iter (fun d ->
+           if !count >= n then raise_notrace Done;
+           let path = Filename.concat month_path d in
+           let lines = load_lines path in
+           (* Lines are chronological in file; take from the end *)
+           let rev_lines = List.rev lines in
+           List.iter (fun line ->
+             if !count < n then begin
+               (try
+                  let json = Yojson.Safe.from_string line in
+                  collected := json :: !collected;
+                  incr count
+                with Yojson.Json_error _ -> ())
+             end
+           ) rev_lines
+         ) days
+       ) months
+     with Done -> ());
+    (* collected is already chronological:
+       we scan newest-first and prepend, so oldest ends up at the head *)
+    !collected
+  end
+
+let read_recent_lines t n =
+  if n <= 0 then []
+  else begin
+    let collected = ref [] in
+    let count = ref 0 in
+    let months = list_month_dirs t.base_dir in
+    let exception Done in
+    (try
+       List.iter (fun m ->
+         let month_path = Filename.concat t.base_dir m in
+         let days = list_day_files month_path in
+         List.iter (fun d ->
+           if !count >= n then raise_notrace Done;
+           let path = Filename.concat month_path d in
+           let lines = load_lines path in
+           let rev_lines = List.rev lines in
+           List.iter (fun line ->
+             if !count < n then begin
+               collected := line :: !collected;
+               incr count
+             end
+           ) rev_lines
+         ) days
+       ) months
+     with Done -> ());
+    !collected
+  end
+
+let read_range t ~since ~until =
+  match parse_date since, parse_date until with
+  | None, _ | _, None -> []
+  | Some (since_month, since_day), Some (until_month, until_day) ->
+    let collected = ref [] in
+    let months = list_month_dirs t.base_dir |> List.rev in (* ascending *)
+    List.iter (fun m ->
+      if String.compare m since_month >= 0
+         && String.compare m until_month <= 0 then begin
+        let month_path = Filename.concat t.base_dir m in
+        let days = list_day_files month_path |> List.rev in (* ascending *)
+        List.iter (fun d ->
+          let day_num = Filename.remove_extension d in
+          let dominated =
+            (m = since_month && String.compare day_num since_day < 0)
+            || (m = until_month && String.compare day_num until_day > 0)
+          in
+          if not dominated then begin
+            let path = Filename.concat month_path d in
+            let lines = load_lines path in
+            List.iter (fun line ->
+              (try
+                 let json = Yojson.Safe.from_string line in
+                 collected := json :: !collected
+               with Yojson.Json_error _ -> ())
+            ) lines
+          end
+        ) days
+      end
+    ) months;
+    List.rev !collected
+
+let prune t ~days =
+  if days <= 0 then 0
+  else begin
+    let now = Unix.gettimeofday () in
+    let cutoff = now -. (float_of_int days *. 86400.0) in
+    let cutoff_tm = Unix.gmtime cutoff in
+    let cutoff_month =
+      Printf.sprintf "%04d-%02d"
+        (cutoff_tm.Unix.tm_year + 1900)
+        (cutoff_tm.Unix.tm_mon + 1)
+    in
+    let cutoff_day = Printf.sprintf "%02d" cutoff_tm.Unix.tm_mday in
+    let deleted = ref 0 in
+    let months = list_month_dirs t.base_dir in
+    List.iter (fun m ->
+      let month_path = Filename.concat t.base_dir m in
+      if String.compare m cutoff_month < 0 then begin
+        (* Entire month is before cutoff — remove all files *)
+        let day_files = list_day_files month_path in
+        List.iter (fun d ->
+          (try Sys.remove (Filename.concat month_path d) with Sys_error _ -> ());
+          incr deleted
+        ) day_files;
+        (try Unix.rmdir month_path with Unix.Unix_error _ -> ())
+      end else if m = cutoff_month then begin
+        let day_files = list_day_files month_path in
+        List.iter (fun d ->
+          let day_num = Filename.remove_extension d in
+          if String.compare day_num cutoff_day < 0 then begin
+            (try Sys.remove (Filename.concat month_path d) with Sys_error _ -> ());
+            incr deleted
+          end
+        ) day_files
+      end
+    ) months;
+    !deleted
+  end

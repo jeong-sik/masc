@@ -79,8 +79,29 @@ let update_tool_usage stats_by_tool ~tool_name ~success ~timestamp =
   } in
   Hashtbl.replace stats_by_tool tool_name updated
 
+(** Legacy single-file path (for fallback reads). *)
 let telemetry_file config =
   Filename.concat (Room_utils.masc_dir config) "telemetry.jsonl"
+
+(** Date-split store: [.masc/telemetry/YYYY-MM/DD.jsonl].
+    Cached per base_dir so all callers share the same Eio.Mutex. *)
+let telemetry_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
+
+let get_telemetry_store config : Dated_jsonl.t =
+  let base = Filename.concat (Room_utils.masc_dir config) "telemetry" in
+  match Hashtbl.find_opt telemetry_store_cache base with
+  | Some store -> store
+  | None ->
+    let store = Dated_jsonl.create ~base_dir:base () in
+    Hashtbl.replace telemetry_store_cache base store;
+    store
+
+let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
+  List.filter_map (fun json ->
+    match event_record_of_yojson json with
+    | Ok record -> Some record
+    | Error _ -> None
+  ) jsons
 
 let read_all_events_from_path (file : string) : event_record list =
   if not (Sys.file_exists file) then
@@ -96,57 +117,42 @@ let read_all_events_from_path (file : string) : event_record list =
           | Error _ -> None
         with Yojson.Json_error _ -> None)
 
-let ensure_masc_dir fs config =
-  let dir = Room_utils.masc_dir config in
-  let path = Eio.Path.(fs / dir) in
-  Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 path
-
 let event_to_json event =
   let record = {
     timestamp = Time_compat.now ();
     event;
   } in
-  Yojson.Safe.to_string (event_record_to_yojson record)
+  event_record_to_yojson record
 
-(** Track an event - appends to telemetry.jsonl *)
-let track ~fs config event : unit =
-  ensure_masc_dir fs config;
-  let file = telemetry_file config in
-  let json_line = event_to_json event ^ "\n" in
+(** Track an event - appends to date-split telemetry store.
+    Thread-safe via Dated_jsonl internal mutex. *)
+let track ~fs:_ config event : unit =
+  let store = get_telemetry_store config in
+  Dated_jsonl.append store (event_to_json event)
 
-  (* Use Room_utils.with_file_lock for concurrent safety *)
-  Room_utils.with_file_lock config file (fun () ->
-    let path = Eio.Path.(fs / file) in
-    Eio.Path.save ~append:true ~create:(`If_missing 0o600) path json_line
-  )
-
-(** Read all events from telemetry file *)
-let read_all_events ~fs config : event_record list =
-  let file = telemetry_file config in
-  let path = Eio.Path.(fs / file) in
-  try
-    let content = Eio.Path.load path in
-    let lines = String.split_on_char '\n' content
-                |> List.filter (fun s -> String.trim s <> "") in
-    List.filter_map (fun line ->
-      try
-        let json = Yojson.Safe.from_string line in
-        match event_record_of_yojson json with
-        | Ok record -> Some record
-        | Error _ -> None
-      with Yojson.Json_error _ -> None
-    ) lines
-  with Sys_error _ | Eio.Io _ -> []
+(** Read all events.
+    Tries date-split store first; falls back to legacy single file. *)
+let read_all_events ~fs:_ config : event_record list =
+  let store = get_telemetry_store config in
+  let jsons = Dated_jsonl.read_recent store 100_000 in
+  if jsons <> [] then
+    parse_event_records jsons
+  else
+    read_all_events_from_path (telemetry_file config)
 
 let summarize_tool_usage ?fs config : tool_usage_summary =
   let telemetry_path = telemetry_file config in
-  let telemetry_available = Sys.file_exists telemetry_path in
+  let store = get_telemetry_store config in
+  let telemetry_available =
+    Sys.file_exists telemetry_path
+    || Sys.file_exists (Dated_jsonl.base_dir store)
+  in
   let stats_by_tool = Hashtbl.create 32 in
   let total_calls = ref 0 in
   let records =
     match fs with
-    | Some fs when telemetry_available -> read_all_events ~fs config
-    | _ -> read_all_events_from_path telemetry_path
+    | Some fs -> read_all_events ~fs config
+    | None -> read_all_events_from_path telemetry_path
   in
   List.iter (fun (record : event_record) ->
     match record.event with
@@ -225,7 +231,8 @@ let tool_usage_fields summary tool_name =
      | None -> `Null);
   ]
 
-(** Read events since a timestamp *)
+(** Read events since a timestamp.
+    With date-split storage, reads recent entries and filters by timestamp. *)
 let read_events_since ~fs config ~since : event_record list =
   let all = read_all_events ~fs config in
   List.filter (fun r -> r.timestamp >= since) all
@@ -338,20 +345,8 @@ let track_error ~fs config ~code ~message ~context =
 let track_tool_called ~fs config ~tool_name ~success ~duration_ms ?agent_id () =
   track ~fs config (Tool_called { tool_name; success; duration_ms; agent_id })
 
-(** Rotate telemetry file *)
-let rotate ~fs config ~max_age_days : unit =
-  let now = Time_compat.now () in
-  let cutoff = now -. (float_of_int max_age_days *. 86400.0) in
-  let all = read_all_events ~fs config in
-  let recent = List.filter (fun r -> r.timestamp >= cutoff) all in
-
-  let file = telemetry_file config in
-  let tmp_file = file ^ ".tmp" in
-  let content = 
-    List.map (fun record -> Yojson.Safe.to_string (event_record_to_yojson record)) recent
-    |> String.concat "\n"
-    |> (fun s -> if s = "" then "" else s ^ "\n")
-  in
-  let tmp_path = Eio.Path.(fs / tmp_file) in
-  Eio.Path.save ~create:(`Or_truncate 0o600) tmp_path content;
-  Unix.rename tmp_file file
+(** Prune telemetry entries older than [max_age_days] days.
+    Replaces the old rotate function; date-split makes rewriting unnecessary. *)
+let rotate ~fs:_ config ~max_age_days : unit =
+  let store = get_telemetry_store config in
+  ignore (Dated_jsonl.prune store ~days:max_age_days)

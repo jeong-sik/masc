@@ -361,9 +361,9 @@ let execute_spawn_pipeline
                                   ])
                        in
                        Some
-                         (if List.length accepted = 1 then
-                            List.hd accepted
-                          else
+                         (match accepted with
+                          | [single] -> single
+                          | _ ->
                             `Assoc
                               [
                                 ("mode", `String "batch");
@@ -384,9 +384,9 @@ let execute_spawn_pipeline
                          |> List.filter_map (fun item -> item)
                        in
                        Some
-                         (if List.length spawn_results = 1 then
-                            List.hd spawn_results
-                          else
+                         (match spawn_results with
+                          | [single] -> single
+                          | _ ->
                             `Assoc
                               [
                                 ("mode", `String "batch");

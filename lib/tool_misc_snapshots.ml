@@ -91,74 +91,38 @@ let mode_snapshot_json ctx =
       ("config_summary", Config.get_config_summary room_path);
     ]
 
-let keeper_gate_config_for_level
-    ~(autonomy_level : Keeper_autonomy.autonomy_level) : Eval_gate.gate_config =
-  let base_allowed = [
-    "keeper_board_get"; "keeper_board_post"; "keeper_board_comment"; "keeper_board_list";
-    "keeper_read"; "keeper_fs_read";
-    "keeper_memory_search";
-    "keeper_time_now"; "keeper_context_status";
-  ] in
-  let base_denied = [
-    "keeper_bash"; "keeper_edit"; "keeper_fs_edit"; "keeper_github";
-  ] in
-  match autonomy_level with
-  | Keeper_autonomy.L4_Autonomous ->
-      {
-        max_cost_usd = 0.10;
-        max_tool_calls_per_turn = 5;
-        entropy_threshold = 2;
-        destructive_check_enabled = true;
-        allowlist_enabled = true;
-        allowed_tools = "keeper_bash" :: base_allowed;
-        denied_tools = List.filter (fun t -> t <> "keeper_bash") base_denied;
-      }
-  | Keeper_autonomy.L5_Independent ->
-      {
-        max_cost_usd = 0.50;
-        max_tool_calls_per_turn = 10;
-        entropy_threshold = 3;
-        destructive_check_enabled = true;
-        allowlist_enabled = false;
-        allowed_tools = [];
-        denied_tools = [];
-      }
-  | _ ->
-      {
-        max_cost_usd = 0.10;
-        max_tool_calls_per_turn = 5;
-        entropy_threshold = 2;
-        destructive_check_enabled = true;
-        allowlist_enabled = true;
-        allowed_tools = base_allowed;
-        denied_tools = base_denied;
-      }
+let keeper_default_gate_config () : Eval_gate.gate_config =
+  {
+    max_cost_usd = 0.10;
+    max_tool_calls_per_turn = 5;
+    entropy_threshold = 2;
+    destructive_check_enabled = true;
+    allowlist_enabled = true;
+    allowed_tools = [
+      "keeper_board_get"; "keeper_board_post"; "keeper_board_comment"; "keeper_board_list";
+      "keeper_read"; "keeper_fs_read";
+      "keeper_memory_search";
+      "keeper_time_now"; "keeper_context_status";
+    ];
+    denied_tools = [
+      "keeper_bash"; "keeper_edit"; "keeper_fs_edit"; "keeper_github";
+    ];
+  }
 
-let keeper_tool_policy_json autonomy_level =
-  match Keeper_contract.parse_autonomy_level autonomy_level with
-  | Some level ->
-      let gate = keeper_gate_config_for_level ~autonomy_level:level in
-      `Assoc
-        [
-          ("configured_tool_policy", `String (if gate.allowlist_enabled then "allowlist" else "all"));
-          ( "configured_tool_names",
-            `List
-              (if gate.allowlist_enabled
-               then List.map (fun name -> `String name) gate.allowed_tools
-               else []) );
-          ("denied_tool_names", `List (List.map (fun name -> `String name) gate.denied_tools));
-          ("max_tool_calls_per_turn", `Int gate.max_tool_calls_per_turn);
-          ("destructive_check_enabled", `Bool gate.destructive_check_enabled);
-        ]
-  | None ->
-      `Assoc
-        [
-          ("configured_tool_policy", `String "unknown");
-          ("configured_tool_names", `List []);
-          ("denied_tool_names", `List []);
-          ("max_tool_calls_per_turn", `Null);
-          ("destructive_check_enabled", `Null);
-        ]
+let keeper_tool_policy_json _autonomy_level =
+  let gate = keeper_default_gate_config () in
+  `Assoc
+    [
+      ("configured_tool_policy", `String (if gate.allowlist_enabled then "allowlist" else "all"));
+      ( "configured_tool_names",
+        `List
+          (if gate.allowlist_enabled
+           then List.map (fun name -> `String name) gate.allowed_tools
+           else []) );
+      ("denied_tool_names", `List (List.map (fun name -> `String name) gate.denied_tools));
+      ("max_tool_calls_per_turn", `Int gate.max_tool_calls_per_turn);
+      ("destructive_check_enabled", `Bool gate.destructive_check_enabled);
+    ]
 
 let keeper_policy_row ctx ~runtime_class (meta : Keeper_types.keeper_meta) =
   let status_json =

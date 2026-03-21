@@ -7,7 +7,7 @@
 - 실사용 기준에서 **즉시 막히는 P0**는 3가지다.
 
 ## P0 차단 요소
-- hermetic required gate가 항상 초록이어야 한다. `dune test`, `test_sse_storm_e2e`, contract harness 중 하나라도 깨지면 internal ops 제품 기준으로는 불합격이다.
+- hermetic required gate가 항상 초록이어야 한다. `make test`, `test_sse_storm_e2e`, contract harness 중 하나라도 깨지면 internal ops 제품 기준으로는 불합격이다.
 - 인증/권한이 여전히 **opt-in strict mode** 중심이라서, 신뢰 네트워크 밖으로 나가는 순간 운영 기본값이 약하다.
 - swarm proof artifact와 live read model이 어긋나면 operator가 같은 run을 두 개의 진실로 보게 된다.
 

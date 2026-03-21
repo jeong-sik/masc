@@ -112,100 +112,80 @@ let run_perpetual_via_oas
   with exn ->
     Log.Perpetual.error "Checkpoint save failed: %s"
       (Printexc.to_string exn));
-  (* Also save MASC-format checkpoint for cross-compatibility
-     (inlined from deleted oas_checkpoint_bridge) *)
+  (* Save MASC-format checkpoint via Phase D bridge (to_oas_checkpoint) *)
   (try
     let ctx = !ctx_ref in
-    let oas_ctx = Oas.Context.copy ctx.Context_manager.oas_context in
-    Oas.Context.set_scoped oas_ctx Oas.Context.Session
-      "goal" (`String config.initial_goal);
-    Oas.Context.set_scoped oas_ctx Oas.Context.Session
-      "generation" (`Int pstate.generation);
-    Oas.Context.set_scoped oas_ctx Oas.Context.Session
-      "turn_count" (`Int pstate.turn_count);
-    Oas.Context.set_scoped oas_ctx Oas.Context.Session
-      "trace_id" (`String trace_id);
-    Oas.Context.set_scoped oas_ctx Oas.Context.App
-      "masc_version" (`String Version.version);
-    let messages = List.filter_map Oas_type_adapters.to_oas_message ctx.messages in
-    let masc_oas_ckpt : Oas.Checkpoint.t = {
-      version = 3;
-      session_id = trace_id;
-      agent_name = "perpetual";
-      model = "masc-perpetual";
-      system_prompt = Some ctx.system_prompt;
-      messages;
-      usage = {
-        Oas.Types.total_input_tokens = pstate.total_tokens;
-        total_output_tokens = 0;
-        total_cache_creation_input_tokens = 0;
-        total_cache_read_input_tokens = 0;
-        api_calls = pstate.turn_count;
-        estimated_cost_usd = pstate.total_cost;
-      };
-      turn_count = pstate.turn_count;
-      created_at = Time_compat.now ();
-      tools = [];
-      tool_choice = None;
-      temperature = None;
-      top_p = None;
-      top_k = None;
-      min_p = None;
-      enable_thinking = None;
-      response_format_json = false;
-      thinking_budget = None;
-      cache_system_prompt = false;
-      max_input_tokens = Some ctx.max_tokens;
-      max_total_tokens = None;
-      disable_parallel_tool_use = false;
-      context = oas_ctx;
-      mcp_sessions = [];
-      working_context = None;
-    } in
-    let ckpt_path2 =
-      Filename.concat config.session_base_dir
-        (trace_id ^ "-masc.json")
-    in
-    Fs_compat.save_file ckpt_path2
-      (Oas.Checkpoint.to_string masc_oas_ckpt)
+    let masc_ckpt = Context_manager.create_checkpoint ctx
+      ~generation:pstate.generation in
+    let masc_oas_ckpt = Context_manager.to_oas_checkpoint
+      ~agent_name:"perpetual" ~session_id:trace_id ctx masc_ckpt in
+    let ckpt_path2 = Filename.concat config.session_base_dir
+      (trace_id ^ "-masc.json") in
+    Fs_compat.save_file ckpt_path2 (Oas.Checkpoint.to_string masc_oas_ckpt)
   with exn ->
     Log.Perpetual.error "MASC checkpoint save failed: %s"
       (Printexc.to_string exn));
-  (* Handle handoff: extract DNA, increment generation *)
+  (* Handle handoff via OAS Durable step chain (crash-recoverable) *)
   if pstate.handoff_triggered then begin
     Log.Perpetual.info "Handoff triggered at gen %d, preparing DNA"
       pstate.generation;
-    let metrics : Succession_oas.succession_metrics = {
-      total_turns = pstate.turn_count;
-      total_tokens_used = pstate.total_tokens;
-      total_cost_usd = pstate.total_cost;
-      tasks_completed = 0;
-      errors_encountered = 0;
-      elapsed_seconds = Time_compat.now () -. state.started_at;
+    let step1 : Oas.Durable.step = {
+      name = "extract_dna";
+      execute = (fun _input ->
+        let metrics : Succession_oas.succession_metrics = {
+          total_turns = pstate.turn_count;
+          total_tokens_used = pstate.total_tokens;
+          total_cost_usd = pstate.total_cost;
+          tasks_completed = 0;
+          errors_encountered = 0;
+          elapsed_seconds = Time_compat.now () -. state.started_at;
+        } in
+        let _dna, dna_ckpt = Succession_oas.extract_dna_via_checkpoint
+          ~working_ctx:!ctx_ref
+          ~session_ctx:state.session
+          ~goal:config.initial_goal
+          ~generation:pstate.generation
+          ~trace_id
+          ~metrics
+        in
+        Ok (Oas.Checkpoint.to_json dna_ckpt));
+      retry_limit = 1;
     } in
-    (* Extract DNA via Phase 2 adapter *)
-    let _dna, dna_ckpt = Succession_oas.extract_dna_via_checkpoint
-      ~working_ctx:!ctx_ref
-      ~session_ctx:state.session
-      ~goal:config.initial_goal
-      ~generation:pstate.generation
-      ~trace_id
-      ~metrics
+    let step2 : Oas.Durable.step = {
+      name = "persist_dna";
+      execute = (fun dna_json ->
+        let dna_path = Filename.concat config.session_base_dir
+          (sprintf "%s-dna-gen%d.json" trace_id pstate.generation) in
+        Fs_compat.mkdir_p config.session_base_dir;
+        Fs_compat.save_file dna_path (Yojson.Safe.to_string dna_json);
+        Ok (`String dna_path));
+      retry_limit = 2;
+    } in
+    let step3 : Oas.Durable.step = {
+      name = "update_generation";
+      execute = (fun _input ->
+        state.generation <- pstate.generation + 1;
+        Ok (`Int (pstate.generation + 1)));
+      retry_limit = 1;
+    } in
+    let handoff_pipeline =
+      let p = Oas.Durable.create ~name:"perpetual_handoff" () in
+      let p = Oas.Durable.add_step p step1 in
+      let p = Oas.Durable.add_step p step2 in
+      Oas.Durable.add_step p step3
     in
-    (* Persist DNA checkpoint *)
-    (try
-      let dna_path = Filename.concat config.session_base_dir
-        (sprintf "%s-dna-gen%d.json" trace_id pstate.generation)
-      in
-      Fs_compat.save_file dna_path
-        (Oas.Checkpoint.to_string dna_ckpt)
-    with exn ->
-      Log.Perpetual.error "DNA checkpoint save failed: %s"
-        (Printexc.to_string exn));
-    (* Update MASC state for potential successor *)
-    state.generation <- pstate.generation + 1;
-    emit (Terminated (sprintf "Handoff complete, gen %d -> %d"
-      pstate.generation (pstate.generation + 1)))
+    let handoff_state = Oas.Durable.execute handoff_pipeline (`Null) in
+    (match handoff_state with
+    | Oas.Durable.Completed _ ->
+      emit (Terminated (sprintf "Handoff complete, gen %d -> %d"
+        pstate.generation (pstate.generation + 1)))
+    | Oas.Durable.Failed { at_step; error; _ } ->
+      Log.Perpetual.error "Handoff failed at step '%s': %s" at_step error;
+      emit (Error (sprintf "Handoff failed at %s: %s" at_step error))
+    | other ->
+      let state_json = Oas.Durable.execution_state_to_json other in
+      Log.Perpetual.warn "Handoff incomplete: %s"
+        (Yojson.Safe.to_string state_json))
   end;
   (* Sync mutable state back to MASC loop_state *)
   Perpetual_oas_state.update_state (fun _ps ->

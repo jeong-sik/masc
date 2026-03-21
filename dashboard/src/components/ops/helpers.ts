@@ -218,12 +218,6 @@ export function actionTypeLabel(value?: string | null): string {
       return '키퍼 메시지'
     case 'keeper_msg':
       return '키퍼 메시지'
-    case 'swarm_run_continue':
-      return '스웜 실행 계속'
-    case 'swarm_run_rerun':
-      return '스웜 실행 재실행'
-    case 'swarm_run_abandon':
-      return '스웜 실행 포기'
     default:
       return value?.trim() || '액션'
   }

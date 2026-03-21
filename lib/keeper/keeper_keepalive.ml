@@ -72,8 +72,8 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             if now_ts -. !last_snapshot_ts >= float_of_int snapshot_interval_sec
             then (
               (try
-                 let metrics_path =
-                   keeper_metrics_path ctx.config meta_current.name
+                 let metrics_store =
+                   keeper_metrics_store ctx.config meta_current.name
                  in
                  let primary_model =
                    match Model_spec.available_model_specs_of_strings meta_current.models with
@@ -193,7 +193,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                            ("handoff", `Assoc [ ("performed", `Bool false) ]);
                          ]
                      in
-                     append_jsonl_line metrics_path snapshot;
+                     Dated_jsonl.append metrics_store snapshot;
                      (try
                         Sse.broadcast
                           (`Assoc
@@ -325,16 +325,24 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             let meta_after_proactive =
               if proactive_warmup_elapsed then
                 (try
-                   if
-                     meta_after_triage.trigger_mode
-                     |> Keeper_contract.trigger_mode_of_string
-                     |> Keeper_contract.trigger_mode_is_explicit_only
-                   then maybe_emit_explicit_room_replies ctx meta_after_triage
-                   else maybe_emit_proactive ctx meta_after_triage
+                   let obs =
+                     Keeper_world_observation.observe
+                       ~config:ctx.config ~meta:meta_after_triage
+                   in
+                   match
+                     Keeper_unified_turn.run_unified_turn
+                       ~config:ctx.config ~meta:meta_after_triage
+                       ~observation:obs
+                       ~generation:meta_after_triage.generation
+                   with
+                   | Error e ->
+                       Log.Keeper.error "unified turn failed: %s" e;
+                       meta_after_triage
+                   | Ok updated -> updated
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
-                   Log.Keeper.error "proactive emission failed: %s"
+                   Log.Keeper.error "unified turn exception: %s"
                      (Printexc.to_string exn);
                    meta_after_triage)
               else meta_after_triage

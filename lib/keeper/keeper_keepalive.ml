@@ -35,6 +35,20 @@ let register_keepalive name entry =
 let unregister_keepalive name =
   Hashtbl.remove keepalives name
 
+(** Sleep in short chunks so [stop_keepalive] takes effect within ~2 s
+    instead of waiting for the full 30-300 s interval. *)
+let interruptible_sleep ~clock ~stop duration =
+  let rec wait remaining =
+    if !stop then ()
+    else if remaining <= 0.0 then ()
+    else begin
+      let chunk = Float.min 2.0 remaining in
+      Eio.Time.sleep clock chunk;
+      wait (remaining -. chunk)
+    end
+  in
+  wait duration
+
 let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
     (m : keeper_meta) (stop : bool ref) : unit =
   let keepalive_started_ts = Time_compat.now () in
@@ -352,8 +366,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                 (max 30 (min 300 meta_after_proactive.presence_keepalive_sec))
             in
             let jitter = base *. 0.2 *. Random.float 1.0 in  (* intentional: jitter *)
-            Eio.Time.sleep ctx.clock (base +. jitter);
-            loop ())
+            interruptible_sleep ~clock:ctx.clock ~stop (base +. jitter);
+            if !stop then ()
+            else loop ())
   in
   loop ()
 

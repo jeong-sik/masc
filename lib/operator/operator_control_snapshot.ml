@@ -202,12 +202,17 @@ let keepers_json ?keeper_names config =
               if not agent_exists then "offline"
               else Keeper_exec_status.keeper_surface_status ~agent_status:agent_json ~diagnostic
             in
+            let pipeline_stage =
+              Keeper_exec_status.derive_pipeline_stage ~meta
+                ~surface_status:agent_status ~now_ts
+            in
             Some
               (`Assoc
                 [
                   ("runtime_class", `String "resident_keeper");
                   ("desired", `Bool true);
                   ("resident_registered", `Bool true);
+                  ("pipeline_stage", `String pipeline_stage);
                   ("name", `String meta.name);
                   ("agent_name", `String meta.agent_name);
                   ("trace_id", `String meta.trace_id);

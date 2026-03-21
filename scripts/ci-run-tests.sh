@@ -11,6 +11,8 @@ TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-1200}"
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
 START_EPOCH="$(date +%s)"
 TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp "${TMPDIR:-/tmp}/ci-run-tests.XXXXXX.log")}"
+CI_TEST_ALLOW_CLEAN_RETRY="${CI_TEST_ALLOW_CLEAN_RETRY:-1}"
+CI_TEST_CLEAN_RETRY_DONE=0
 
 iso_now() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -87,7 +89,27 @@ heartbeat() {
   done
 }
 
+test_cmd_needs_dune_sanitization() {
+  [[ "${TEST_CMD}" == *"dune "* ]] && [[ "${TEST_CMD}" != *"env -u DUNE_RPC"* ]]
+}
+
+effective_test_cmd() {
+  if test_cmd_needs_dune_sanitization; then
+    printf 'env -u DUNE_RPC %s' "${TEST_CMD}"
+  else
+    printf '%s' "${TEST_CMD}"
+  fi
+}
+
+agent_sdk_interface_mismatch_detected() {
+  [[ -f "${TEST_LOG_FILE}" ]] || return 1
+  grep -Eq \
+    'Unbound module Agent_sdk|module Oas is an alias for module Agent_sdk|inconsistent assumptions over interface Agent_sdk' \
+    "${TEST_LOG_FILE}"
+}
+
 run_with_timeout() {
+  local cmd="${1}"
   local timeout_bin=""
   if command -v timeout >/dev/null 2>&1; then
     timeout_bin="timeout"
@@ -97,17 +119,17 @@ run_with_timeout() {
 
   if [[ -n "${timeout_bin}" ]]; then
     if "${timeout_bin}" --help 2>&1 | grep -q -- '--foreground'; then
-      "${timeout_bin}" --foreground "${TEST_TIMEOUT_SEC}" bash -lc "${TEST_CMD}" \
+      "${timeout_bin}" --foreground "${TEST_TIMEOUT_SEC}" bash -lc "${cmd}" \
         > >(tee -a "${TEST_LOG_FILE}") \
         2> >(tee -a "${TEST_LOG_FILE}" >&2)
     else
-      "${timeout_bin}" "${TEST_TIMEOUT_SEC}" bash -lc "${TEST_CMD}" \
+      "${timeout_bin}" "${TEST_TIMEOUT_SEC}" bash -lc "${cmd}" \
         > >(tee -a "${TEST_LOG_FILE}") \
         2> >(tee -a "${TEST_LOG_FILE}" >&2)
     fi
   else
     echo "[ci-run] WARN: timeout command not found (timeout/gtimeout); running without enforced timeout"
-    bash -lc "${TEST_CMD}" \
+    bash -lc "${cmd}" \
       > >(tee -a "${TEST_LOG_FILE}") \
       2> >(tee -a "${TEST_LOG_FILE}" >&2)
   fi
@@ -123,6 +145,9 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[ci-run] command: ${TEST_CMD}"
+if test_cmd_needs_dune_sanitization; then
+  echo "[ci-run] sanitized_command: $(effective_test_cmd)"
+fi
 echo "[ci-run] timeout_sec=${TEST_TIMEOUT_SEC} heartbeat_sec=${HEARTBEAT_SEC}"
 echo "[ci-run] started_at=$(iso_now)"
 echo "[ci-run] log_file=${TEST_LOG_FILE}"
@@ -130,10 +155,29 @@ echo "[ci-run] log_file=${TEST_LOG_FILE}"
 heartbeat &
 hb_pid="$!"
 
+effective_cmd="$(effective_test_cmd)"
+
 set +e
-run_with_timeout
+run_with_timeout "${effective_cmd}"
 status=$?
 set -e
+
+if [[ "${status}" -ne 0 ]] \
+  && [[ "${CI_TEST_ALLOW_CLEAN_RETRY}" = "1" ]] \
+  && [[ "${CI_TEST_CLEAN_RETRY_DONE}" -eq 0 ]] \
+  && test_cmd_needs_dune_sanitization \
+  && agent_sdk_interface_mismatch_detected; then
+  CI_TEST_CLEAN_RETRY_DONE=1
+  echo "[ci-run] WARN: detected Agent_sdk interface mismatch; running dune clean and retrying once"
+  dune clean --root . \
+    > >(tee -a "${TEST_LOG_FILE}") \
+    2> >(tee -a "${TEST_LOG_FILE}" >&2)
+  echo "[ci-run] retry_started_at=$(iso_now)"
+  set +e
+  run_with_timeout "${effective_cmd}"
+  status=$?
+  set -e
+fi
 
 if [[ "${status}" -eq 124 ]]; then
   diag_dump "timeout"

@@ -12,7 +12,7 @@ import {
   operatorSnapshot,
 } from '../../operator-store'
 import { ProvenanceChip } from '../common/provenance-strip'
-import { relativeTime, toneClass } from './helpers'
+import { dashboardActorName, relativeTime, toneClass } from './helpers'
 import { SwarmWorkerGrid } from './swarm-cards'
 
 function swarmLaneTone(lane: CommandPlaneSwarmLane): string {
@@ -208,6 +208,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
   const resolution = swarm.run_resolution
   if (!runId || (!recommendation && !resolution)) return null
 
+  const actor = dashboardActorName() ?? 'dashboard'
   const pendingConfirm =
     operatorSnapshot.value?.pending_confirms.find(item =>
       item.target_type === 'swarm_run' && item.target_id === runId,

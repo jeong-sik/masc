@@ -122,15 +122,17 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     Runs alongside existing keepalive bootstrap, scanning for
     zombie fibers and restarting them with exponential backoff.
     Called once from start_existing_keepalives after bootstrap. *)
-let supervisor_sweep : Pulse.t option ref = ref None
+let supervisor_sweeps : (string, Pulse.t) Hashtbl.t =
+  Hashtbl.create 4
 
-let supervisor_sweep_running () =
-  match !supervisor_sweep with
+let supervisor_sweep_running base_path =
+  match Hashtbl.find_opt supervisor_sweeps base_path with
   | Some pulse -> Pulse.is_alive pulse
   | None -> false
 
 let start_supervisor_sweep ctx =
-  if supervisor_sweep_running () then ()
+  let base_path = ctx.config.base_path in
+  if supervisor_sweep_running base_path then ()
   else begin
     let consumer : (module Pulse.Consumer) =
       (module struct
@@ -153,7 +155,7 @@ let start_supervisor_sweep ctx =
       ~lifecycle:Perpetual
       ~consumers:[consumer]
     in
-    supervisor_sweep := Some p;
+    Hashtbl.replace supervisor_sweeps base_path p;
     Pulse.run ~sw:ctx.sw p;
     Log.Keeper.info "resident supervisor sweep started (interval %.0fs)"
       Env_config.KeeperResidentSupervisor.sweep_interval_sec

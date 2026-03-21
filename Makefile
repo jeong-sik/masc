@@ -19,11 +19,11 @@ build-all: build dashboard
 
 # Run tests (alias for test-unit)
 test:
-	dune test --root .
+	scripts/ci-run-tests.sh "opam exec -- dune test --root ."
 
 # Unit tests only (no server required)
 test-unit:
-	dune test --root .
+	scripts/ci-run-tests.sh "opam exec -- dune test --root ."
 
 # Contract harness (self-bootstrapping, hermetic local server)
 test-contract:

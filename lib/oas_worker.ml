@@ -35,6 +35,7 @@ type config = {
   session_id : string option;
   description : string option;
   memory : Oas.Memory.t option;
+  named_cascade : Oas.Api.named_cascade option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -50,6 +51,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     session_id = None;
     description = None;
     memory = None;
+    named_cascade = None;
   }
 
 (* ================================================================ *)
@@ -148,6 +150,10 @@ let build
   in
   let builder = match config.memory with
     | Some m -> Oas.Builder.with_memory m builder
+    | None -> builder
+  in
+  let builder = match config.named_cascade with
+    | Some nc -> Oas.Builder.with_named_cascade nc builder
     | None -> builder
   in
   Oas.Builder.build_safe builder
@@ -425,36 +431,30 @@ let run_named
   match require_eio () with
   | Error e -> Error e
   | Ok (sw, net) ->
-  let specs = resolve_cascade_specs ~cascade_name in
-  let rec try_specs last_error = function
-    | [] ->
-      let err = match last_error with
-        | Some e -> e
-        | None -> Printf.sprintf "No models available for cascade '%s'" cascade_name
-      in
-      Error err
-    | (spec : Model_spec.model_spec) :: rest ->
-      let name = Printf.sprintf "oas-%s" cascade_name in
-      let config =
-        config_for_model ~name ~model_spec:spec ~system_prompt ~tools
-          ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
-          ?context_reducer ?memory
-          ~description:(Some (Printf.sprintf "cascade:%s" cascade_name))
-          ()
-      in
-      match run ~sw ~net ~config ?on_event goal with
-      | Ok result when accept result.response -> Ok result
-      | Ok _ ->
-        Log.Misc.info "[oas_worker] cascade %s: model %s response rejected by accept, trying next"
-          cascade_name spec.model_id;
-        try_specs (Some (Printf.sprintf "accept rejected response from %s" spec.model_id)) rest
-      | Error e when rest <> [] ->
-        Log.Misc.info "[oas_worker] cascade %s: model %s failed (%s), trying next"
-          cascade_name spec.model_id e;
-        try_specs (Some e) rest
-      | Error e -> Error e
+  let defaults = default_model_strings ~cascade_name in
+  let config_path = default_config_path () in
+  let named_cascade = Oas.Api.named_cascade ?config_path
+    ~name:cascade_name ~defaults () in
+  let name = Printf.sprintf "oas-%s" cascade_name in
+  (* Use first available model as primary for Builder *)
+  let primary_spec = match resolve_cascade_specs ~cascade_name with
+    | spec :: _ -> spec
+    | [] -> { Model_spec.provider = Model_spec.Glm_cloud; model_id = "auto";
+              max_context = 8192; api_url = ""; api_key_env = None;
+              cost_per_1k_input = 0.0; cost_per_1k_output = 0.0 }
   in
-  try_specs None specs
+  let config =
+    config_for_model ~name ~model_spec:primary_spec ~system_prompt ~tools
+      ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
+      ?context_reducer ?memory
+      ~description:(Some (Printf.sprintf "cascade:%s" cascade_name))
+      ()
+  in
+  let config = { config with named_cascade = Some named_cascade } in
+  match run ~sw ~net ~config ?on_event goal with
+  | Ok result when accept result.response -> Ok result
+  | Ok _ -> Error (Printf.sprintf "cascade %s: response rejected by accept" cascade_name)
+  | Error e -> Error e
 
 let run_model
     ~model_spec

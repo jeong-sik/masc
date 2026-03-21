@@ -147,44 +147,7 @@ a:hover {
   text-decoration: underline;
 }
 
-.app-shell {
-  width: calc(100% - 32px);
-  margin: 16px auto 28px;
-}
-
 /* Header */
-.dashboard-header {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-header);
-  min-height: var(--header-h);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 14px 18px;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-lg);
-  background: rgba(8, 15, 29, 0.78);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.32);
-}
-
-.header-title-wrap h1 {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-strong);
-  font-size: 28px;
-  line-height: 1.2;
-  letter-spacing: 0.01em;
-}
-
-.header-subtitle {
-  margin-top: 4px;
-  color: var(--text-muted);
-  font-size: 13px;
-}
 
 .version-badge {
   font-size: 11px;
@@ -231,38 +194,11 @@ a:hover {
   text-align: right;
 }
 
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
-}
-
 .rail-build-hint {
   margin-top: 10px;
   font-size: 12px;
   color: var(--text-muted);
 }
-.kpi-item {
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-sm);
-  background: rgba(13, 22, 40, 0.78);
-  padding: 10px 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.kpi-item.ok {
-  border-color: rgba(74, 222, 128, 0.45);
-}
-
-.kpi-item.bad {
-  border-color: rgba(239, 68, 68, 0.45);
-}
-
 .kpi-label {
   color: var(--text-muted);
   font-size: 12px;
@@ -280,22 +216,6 @@ a:hover {
 }
 
 /* Main layout */
-.dashboard-layout {
-  position: relative;
-  z-index: var(--z-layout);
-  display: grid;
-  grid-template-columns: clamp(300px, 24vw, 360px) minmax(0, 1fr);
-  gap: 20px;
-  margin-top: 14px;
-  align-items: start;
-}
-.dashboard-main {
-  min-width: 0;
-  position: relative;
-  z-index: var(--z-layout);
-  animation: fadeSlide 0.35s ease both;
-}
-
 .dashboard-rail {
   position: sticky;
   top: calc(var(--header-h) + 16px);

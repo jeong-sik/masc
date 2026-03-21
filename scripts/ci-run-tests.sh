@@ -6,11 +6,21 @@ set -euo pipefail
 # 2) explicit timeout,
 # 3) diagnostics dump on timeout/failure.
 
+mktemp_ci_log() {
+  local tmp_dir="${TMPDIR:-/tmp}"
+  local path=""
+  if path="$(mktemp "${tmp_dir%/}/ci-run-tests.XXXXXX.log" 2>/dev/null)"; then
+    printf '%s' "${path}"
+  else
+    mktemp "${tmp_dir%/}/ci-run-tests.XXXXXX"
+  fi
+}
+
 TEST_CMD="${1:-opam exec -- dune test}"
 TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-1200}"
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
 START_EPOCH="$(date +%s)"
-TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp "${TMPDIR:-/tmp}/ci-run-tests.XXXXXX.log")}"
+TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp_ci_log)}"
 CI_TEST_ALLOW_CLEAN_RETRY="${CI_TEST_ALLOW_CLEAN_RETRY:-1}"
 CI_TEST_CLEAN_RETRY_DONE=0
 
@@ -61,9 +71,13 @@ diag_dump() {
     # Sort by file mtime so diagnostic tail follows the most recently updated test.
     local -a output_files=()
     local -a latest_outputs=()
-    mapfile -t output_files < <(find "${tests_root}" -type f -name "*.output" -print 2>/dev/null || true)
+    while IFS= read -r line; do
+      output_files+=("${line}")
+    done < <(find "${tests_root}" -type f -name "*.output" -print 2>/dev/null || true)
     if [[ "${#output_files[@]}" -gt 0 ]]; then
-      mapfile -t latest_outputs < <(ls -1t "${output_files[@]}" 2>/dev/null | head -n 20 || true)
+      while IFS= read -r line; do
+        latest_outputs+=("${line}")
+      done < <(ls -1t "${output_files[@]}" 2>/dev/null | head -n 20 || true)
     fi
     echo "[ci-diag] test output files (latest 20 by mtime):"
     printf '%s\n' "${latest_outputs[@]}" || true

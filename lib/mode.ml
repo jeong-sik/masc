@@ -339,6 +339,7 @@ let tool_category tool_name =
   | "masc_walph_control" | "masc_walph_loop"
   | "masc_walph_natural" | "masc_walph_status"
   | "masc_governance_status"
+  | "masc_governance_feed" | "masc_runtime_params" | "masc_set_param"
   | "masc_convo_start" | "masc_convo_reply" | "masc_convo_get"
   | "masc_convo_list" | "masc_convo_conclude" -> Consensus
 

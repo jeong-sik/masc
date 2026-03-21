@@ -1,10 +1,7 @@
 open Alcotest
-open Yojson.Safe.Util
 
 type http_result = {
   status: int option;
-  headers: (string * string) list;
-  body: string;
   curl_exit: int;
   stderr: string;
 }
@@ -126,14 +123,10 @@ let run_curl ?(headers=[]) ?max_time ~port ~path () =
     | Unix.WSTOPPED code -> 256 + code
   in
   let header_raw = read_file header_file in
-  let body = read_file body_file in
   (try Sys.remove header_file with _ -> ());
   (try Sys.remove body_file with _ -> ());
-  let (status, parsed_headers) = parse_headers header_raw in
-  { status; headers = parsed_headers; body; curl_exit; stderr }
-
-let header_value result name =
-  List.assoc_opt (String.lowercase_ascii name) result.headers
+  let (status, _headers) = parse_headers header_raw in
+  { status; curl_exit; stderr }
 
 let find_main_eio_exe () =
   let env_override = Sys.getenv_opt "MASC_MAIN_EIO_EXE" in
@@ -312,17 +305,10 @@ let test_ag_ui_rejects_reconnect_then_recovers () =
   let first = run_curl ~headers ~max_time:0.6 ~port ~path:"/ag-ui/events?room=default" () in
   check_status "first /ag-ui/events connect accepted" 200 first;
 
+  (* AG-UI SSE now mirrors MCP transport behavior: immediate reconnects stay
+     accepted and do not emit a session cooldown response. *)
   let second = run_curl ~headers ~max_time:0.6 ~port ~path:"/ag-ui/events?room=default" () in
-  check_status "immediate /ag-ui/events reconnect rejected" 429 second;
-  check bool "retry-after header present" true (Option.is_some (header_value second "retry-after"));
-
-  let json = Yojson.Safe.from_string second.body in
-  check string "error code" "sse_connection_rate_limited" (json |> member "error" |> to_string);
-  check string "reason is session cooldown" "session_cooldown" (json |> member "reason" |> to_string);
-
-  Unix.sleepf 1.7;
-  let third = run_curl ~headers ~max_time:0.6 ~port ~path:"/ag-ui/events?room=default" () in
-  check_status "post-cooldown /ag-ui/events reconnect accepted" 200 third
+  check_status "immediate /ag-ui/events reconnect accepted" 200 second
 
 let () =
   Random.self_init ();

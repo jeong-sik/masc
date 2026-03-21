@@ -165,6 +165,13 @@ function isRetryableError(err: unknown): boolean {
 
   if (!(err instanceof Error)) return false
   if (/timeout after \d+ms/i.test(err.message)) return true
+
+  // Network-level failures (server unreachable, connection reset, DNS failure).
+  // Browser fetch() throws TypeError on these — they are transient.
+  if (err instanceof TypeError && /failed to fetch|networkerror|load failed/i.test(err.message)) {
+    return true
+  }
+
   const parsedStatus = parseStatusFromMessage(err.message)
   return parsedStatus !== null && RETRYABLE_STATUS_CODES.has(parsedStatus)
 }

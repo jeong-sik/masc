@@ -5,7 +5,7 @@
 // and named handlers for events with custom logic (conditional hydration,
 // async imports, signal-only updates).
 
-import { lastEvent, connected } from './sse'
+import { lastEvent, connected, reconnectCount, lastDisconnectedAt } from './sse'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
@@ -15,7 +15,9 @@ import {
   refreshBoard,
   refreshMdal,
 } from './store'
+import { refreshRoomTruth } from './room-truth-store'
 import { activeKeeperName, hydrateKeeperStatus } from './keeper-runtime'
+import { showToast } from './components/common/toast'
 
 // --- Refresh function registration (avoids circular imports) ---
 
@@ -149,9 +151,37 @@ async function handleGovernance(): Promise<void> {
   loadRuntimeParams()
 }
 
+// --- SSE reconnection handler ---
+
+function handleReconnect(): void {
+  const disconnectedMs = lastDisconnectedAt.value > 0
+    ? Date.now() - lastDisconnectedAt.value
+    : 0
+  const durationSec = Math.round(disconnectedMs / 1000)
+  const label = durationSec > 0 ? `${durationSec}초 단절 후 재연결됨` : '서버 연결 복구됨'
+  showToast(label, 'success', 3000)
+
+  // Refresh all data to recover events missed during disconnect
+  invalidateDashboardCache()
+  void refreshRoomTruth({ force: true })
+  refreshDashboard()
+  refreshExecution()
+  refreshBoard()
+  _refreshCommandPlaneFn?.()
+  _refreshOperatorFn?.()
+  _refreshMissionFn?.()
+}
+
 // --- SSE reaction setup ---
 
 export function setupSSEReaction(): () => void {
+  // Watch for reconnections (false -> true transitions)
+  const unsubReconnect = reconnectCount.subscribe(() => {
+    if (connected.value) {
+      handleReconnect()
+    }
+  })
+
   const unsubscribe = lastEvent.subscribe((event) => {
     if (!event) return
 
@@ -197,6 +227,7 @@ export function setupSSEReaction(): () => void {
 
   return () => {
     unsubscribe()
+    unsubReconnect()
     for (const key of Object.keys(_debounceTimers)) {
       clearTimeout(_debounceTimers[key])
       delete _debounceTimers[key]

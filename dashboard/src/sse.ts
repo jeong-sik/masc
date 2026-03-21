@@ -22,6 +22,11 @@ export const eventCount = signal(0)
 export const lastEvent = signal<SSEEvent | null>(null)
 export const journal = signal<JournalEntry[]>([])
 
+/** Increments each time SSE reconnects after a disconnect. */
+export const reconnectCount = signal(0)
+/** Timestamp of last disconnect (0 = never disconnected). */
+export const lastDisconnectedAt = signal(0)
+
 // --- Session ID ---
 
 function getOrCreateSessionId(): string {
@@ -147,12 +152,19 @@ export function connectSSE(): void {
 
   es.onopen = () => {
     if (source !== es) return
+    const wasDisconnected = reconnectAttempts > 0
     reconnectAttempts = 0
     connected.value = true
+    if (wasDisconnected) {
+      reconnectCount.value++
+    }
   }
 
   es.onerror = () => {
     if (source !== es) return
+    if (connected.value) {
+      lastDisconnectedAt.value = Date.now()
+    }
     connected.value = false
     es.close()
     source = null

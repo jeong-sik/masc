@@ -28,7 +28,7 @@
 
 .mission-context-item span {
   color: rgba(255,255,255,0.52);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -59,7 +59,7 @@
 
 .mission-stat-label {
   color: rgba(255,255,255,0.52);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -90,7 +90,7 @@
 
 .mission-card-target {
   color: rgba(255,255,255,0.52);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .mission-action-card {
@@ -165,7 +165,7 @@
 
 .proof-kv-grid > span {
   color: rgba(255,255,255,0.56);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -350,7 +350,7 @@
 .mission-card-disclosure summary {
   cursor: pointer;
   color: rgba(255,255,255,0.72);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .mission-link-list {
@@ -400,7 +400,7 @@
   border: 1px solid var(--white-8);
   background: var(--white-4);
   color: rgba(255,255,255,0.76);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.35;
 }
 
@@ -453,7 +453,7 @@
 
 .mission-fact-tile span {
   color: rgba(255,255,255,0.52);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -478,7 +478,7 @@
 .mission-crew-event span,
 .mission-io-item span {
   color: rgba(255,255,255,0.52);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -559,7 +559,7 @@
 
 .mission-activity-title span {
   color: rgba(255,255,255,0.62);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .mission-activity-meta,
@@ -568,7 +568,7 @@
   flex-wrap: wrap;
   gap: 10px;
   color: rgba(255,255,255,0.68);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
 }
 
@@ -579,7 +579,7 @@
 
 .mission-activity-focus span {
   color: rgba(255,255,255,0.52);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }

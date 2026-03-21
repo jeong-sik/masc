@@ -22,11 +22,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .agent-runtime-label {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 600;
   font-family: var(--font-mono, monospace);
   color: rgba(200, 168, 78, 0.5);
@@ -37,7 +37,7 @@
 .agent-runtime-value {
   color: var(--text-body, var(--text-body));
   font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .agent-runtime-model {
@@ -100,7 +100,7 @@
   border: 1px solid rgba(200, 168, 78, 0.12);
   background: none;
   color: var(--text-muted, var(--text-muted));
-  font-size: 11px;
+  font-size: var(--fs-xs);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -120,12 +120,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .agent-event-rate {
   font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--accent);
   padding: 2px 8px;
@@ -144,7 +144,7 @@
   border: 1px solid rgba(200, 168, 78, 0.12);
   background: none;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-family: var(--font-mono, monospace);
   cursor: pointer;
   transition: all 0.15s;
@@ -171,7 +171,7 @@
   align-items: baseline;
   gap: 6px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   border-radius: 4px;
   transition: background 0.1s;
 }
@@ -243,7 +243,7 @@
 }
 
 .agent-live-event-time {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--text-muted, var(--text-muted));
   flex-shrink: 0;
 }

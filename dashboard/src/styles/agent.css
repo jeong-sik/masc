@@ -20,7 +20,7 @@
   margin-bottom: 8px;
 }
 .agent-card .agent-emoji { font-size: 24px; }
-.agent-card .agent-name { font-size: 15px; font-weight: 600; }
+.agent-card .agent-name { font-size: var(--fs-lg); font-weight: 600; }
 /* ── Agent Journal Stream (Phase 2) ───────────────────────── */
 .agent-journal-stream {
   display: flex;
@@ -35,7 +35,7 @@
   align-items: baseline;
   gap: 6px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   border-radius: 4px;
   transition: background 0.1s;
 }
@@ -45,7 +45,7 @@
 }
 
 .agent-journal-kind {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 600;
   font-family: var(--font-mono, monospace);
   background: rgba(138, 163, 211, 0.12);
@@ -60,7 +60,7 @@
 }
 
 .agent-journal-type {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-family: var(--font-mono, monospace);
   color: rgba(71, 184, 255, 0.7);
   flex-shrink: 0;
@@ -86,11 +86,11 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .agent-worker-brief__label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   min-width: 60px;
   flex-shrink: 0;
@@ -126,7 +126,7 @@
   align-items: baseline;
   gap: 6px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   border-radius: 4px;
   transition: background 0.1s;
 }
@@ -136,7 +136,7 @@
 }
 
 .agent-timeline-type {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   color: var(--text-strong, #e8ecf1);
   flex-shrink: 0;
@@ -169,7 +169,7 @@
   border: 1px solid var(--card-border, rgba(255, 255, 255, 0.1));
   background: none;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -184,7 +184,7 @@
 }
 .agents-chip-count {
   display: inline-block;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   min-width: 18px;
   text-align: center;
   padding: 1px 5px;

@@ -15,7 +15,7 @@
   border-radius: 50%;
   border: 1px solid rgba(138, 163, 211, 0.4);
   color: #9fb8e1;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   line-height: 1;
   cursor: help;
   vertical-align: middle;
@@ -43,13 +43,13 @@
 .metric-tip-pop strong {
   display: block;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #e8f2ff;
 }
 
 .metric-tip-pop span {
   display: block;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.45;
   margin-top: 4px;
 }
@@ -74,7 +74,7 @@
   border: 1px solid rgba(251, 191, 36, 0.25);
   background: rgba(251, 191, 36, 0.06);
   color: rgba(251, 191, 36, 0.85);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
@@ -97,7 +97,7 @@
 }
 
 .governance-case-topic {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: rgba(255, 255, 255, 0.9);
   flex: 1;
@@ -119,7 +119,7 @@
   align-items: center;
   gap: 8px;
   padding: 2px 0 2px 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .governance-event-summary {
@@ -132,7 +132,7 @@
 
 .governance-event-time {
   color: rgba(255, 255, 255, 0.35);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   flex-shrink: 0;
 }
 
@@ -146,7 +146,7 @@
 }
 
 .lifecycle-step {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 1px 6px;
   border-radius: 3px;
 }
@@ -169,7 +169,7 @@
 
 .lifecycle-arrow {
   color: rgba(255, 255, 255, 0.15);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
 }
 
 .lifecycle-arrow.done {

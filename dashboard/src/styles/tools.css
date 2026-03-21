@@ -34,7 +34,7 @@
 }
 
 .tool-inventory-stat .stat-label {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-slate);
 }
 
@@ -50,7 +50,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .tool-surface-count {
@@ -61,7 +61,7 @@
   height: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 600;
   background: rgba(148, 163, 184, 0.18);
   color: var(--text-slate);
@@ -85,7 +85,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-slate-light);
 }
 
@@ -121,14 +121,14 @@
 }
 
 .tool-inventory-name {
-  font-size: 15px;
+  font-size: var(--fs-lg);
   font-weight: 700;
   color: var(--text-near-white);
 }
 
 .tool-inventory-desc {
   margin-top: 4px;
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: var(--text-slate-light);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -152,7 +152,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-slate);
 }
 
@@ -162,7 +162,7 @@
 }
 
 .tool-inventory-reason {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--warn);
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -176,7 +176,7 @@
 
 .tool-inventory-usage-hint {
   margin-bottom: 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-slate);
 }
 
@@ -237,7 +237,7 @@
 }
 
 .tool-summary-heading {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: rgba(255, 255, 255, 0.6);
   margin: 0 0 10px 0;
@@ -262,7 +262,7 @@
 }
 
 .tool-summary-name {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: #e2e8f0;
   min-width: 180px;
@@ -270,7 +270,7 @@
 }
 
 .tool-summary-desc {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: rgba(255, 255, 255, 0.4);
   flex: 1;
   overflow: hidden;
@@ -292,7 +292,7 @@
 
 .tool-metrics-title {
   color: var(--text-strong);
-  font-size: 15px;
+  font-size: var(--fs-lg);
   font-weight: 600;
   margin: 0;
 }
@@ -303,7 +303,7 @@
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.34);
   color: #fecaca;
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 
 /* ── Summary stats row ──────────────────────────────────── */
@@ -334,7 +334,7 @@
 
 .tool-metrics-stat .stat-label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -348,7 +348,7 @@
 
 .tool-metrics-section h4 {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0 0 10px;
@@ -372,14 +372,14 @@
   min-width: 72px;
   padding: 2px 8px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   text-align: center;
 }
 
 .tier-dist-count {
   color: var(--text-strong);
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
   min-width: 36px;
   text-align: right;
@@ -387,7 +387,7 @@
 
 .tier-dist-pct {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   min-width: 48px;
   text-align: right;
 }
@@ -420,7 +420,7 @@
   grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
   gap: 8px;
   align-items: center;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .tool-bar-name {
@@ -429,13 +429,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .tool-bar-tier {
   padding: 1px 6px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 600;
   text-align: center;
 }
@@ -457,7 +457,7 @@
 
 .tool-bar-count {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   text-align: right;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }

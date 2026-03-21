@@ -76,6 +76,14 @@
   --white-8: rgba(255, 255, 255, 0.08);
   --white-10: rgba(255, 255, 255, 0.1);
 
+  /* Font-size scale */
+  --fs-2xs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 15px;
+
   /* Extended text scale */
   --text-dim: #888;
   --text-slate: #94a3b8;

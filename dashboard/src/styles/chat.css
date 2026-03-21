@@ -15,7 +15,7 @@
 
 .chat-empty-copy {
   color: #8ca8d5;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.6;
 }
 
@@ -81,7 +81,7 @@
   width: 30px;
   height: 30px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.06em;
   flex: 0 0 auto;
@@ -118,7 +118,7 @@
 
 .chat-identity-title {
   color: #f3f7ff;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   line-height: 1.2;
 }
@@ -131,7 +131,7 @@
   align-items: center;
   border-radius: 999px;
   padding: 2px 8px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.03em;
   border: 1px solid var(--card-border);
   color: #d8e8ff;
@@ -169,7 +169,7 @@
   color: #a8c3eb;
   border-radius: 999px;
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   cursor: pointer;
 }
 
@@ -178,12 +178,12 @@
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.68;
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 
 .chat-bubble-error {
   color: #ffb4b4;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
@@ -197,7 +197,7 @@
   background:
     linear-gradient(180deg, rgba(7, 17, 37, 0.9), rgba(4, 12, 28, 0.82));
   color: #b8cae8;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .chat-detail-section {
@@ -209,7 +209,7 @@
 .chat-detail-section-title,
 .chat-detail-callout-label {
   color: #8ca8d5;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -235,21 +235,21 @@
 .chat-overview-label,
 .chat-state-label {
   color: #86a4d4;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .chat-overview-value {
   color: #eef5ff;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
   word-break: break-word;
 }
 
 .chat-state-value {
   color: #d9e7fa;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.55;
 }
 
@@ -265,7 +265,7 @@
 
 .chat-detail-callout-value {
   color: #e9fff4;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -281,7 +281,7 @@
   color: #9db7e2;
   border-radius: 999px;
   padding: 4px 10px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   cursor: pointer;
 }
 
@@ -290,7 +290,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   font-family: "Fira Code", monospace;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.55;
   color: #95f3bc;
 }

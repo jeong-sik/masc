@@ -8,7 +8,7 @@
 .runtime-summary {
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: 6px 0;
   list-style: none;
   user-select: none;
@@ -38,7 +38,7 @@
 
 .overview-section-collapsible > summary {
   padding: 12px 16px;
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--text-slate-light);
   cursor: pointer;
@@ -61,7 +61,7 @@
 
 .overview-section-collapsible > summary::before {
   content: '▸';
-  font-size: 11px;
+  font-size: var(--fs-xs);
   transition: transform 0.15s;
   display: inline-block;
   color: #64748b;
@@ -84,7 +84,7 @@
   align-items: center;
   border-radius: 999px;
   padding: 3px 8px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -156,7 +156,7 @@
   border: 1px solid rgba(138, 163, 211, 0.3);
   border-radius: 8px;
   padding: 7px 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #bdd8ff;
   background: var(--white-3);
   cursor: pointer;
@@ -179,7 +179,7 @@
 
 /* ── Control Dock ─────────────────────────────────────────── */
 .control-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: #8ca8d5;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -204,7 +204,7 @@
 
 .control-status-copy {
   color: #d5e5fb;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
@@ -220,7 +220,7 @@
   background: var(--white-4);
   color: #d3e3ff;
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-family: inherit;
 }
 
@@ -241,7 +241,7 @@
   background: rgba(71, 184, 255, 0.18);
   color: #c9ebff;
   padding: 8px 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -286,7 +286,7 @@
   border: 1px solid var(--card-border);
   background: rgba(2, 10, 24, 0.82);
   color: #9ad8b6;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
@@ -324,7 +324,7 @@
   border: 1px solid rgba(138, 163, 211, 0.22);
   background: var(--white-3);
   color: #9fb8e1;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   text-decoration: none;
   transition: background 0.15s;
 }
@@ -342,7 +342,7 @@
 
 .mission-collapsible-summary {
   padding: 12px 16px;
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--text-slate-light);
   cursor: pointer;
@@ -365,7 +365,7 @@
 
 .mission-collapsible-summary::before {
   content: '\25B8';
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: #64748b;
   transition: transform 0.15s;
   display: inline-block;
@@ -436,7 +436,7 @@
   border: 1px solid var(--card-border, rgba(255, 255, 255, 0.1));
   background: none;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -458,7 +458,7 @@
   padding: 8px 12px;
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }

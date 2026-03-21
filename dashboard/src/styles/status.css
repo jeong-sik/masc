@@ -3,7 +3,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -109,7 +109,7 @@
 }
 
 .pill {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid rgba(71, 184, 255, 0.36);

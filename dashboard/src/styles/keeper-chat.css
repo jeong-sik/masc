@@ -19,14 +19,14 @@
 }
 
 .keeper-chat__title {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--ff-gold-bright, var(--ff-gold-bright));
   letter-spacing: 0.3px;
 }
 
 .keeper-chat__cancel {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--ff-hp-low, #f87171);
 }
 
@@ -43,7 +43,7 @@
 
 .keeper-chat__empty {
   color: rgba(255, 255, 255, 0.2);
-  font-size: 13px;
+  font-size: var(--fs-base);
   text-align: center;
   padding: 40px 0;
 }
@@ -64,7 +64,7 @@
 }
 
 .keeper-chat__role {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: rgba(255, 255, 255, 0.35);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -75,7 +75,7 @@
 }
 
 .keeper-chat__text {
-  font-size: 13px;
+  font-size: var(--fs-base);
   line-height: 1.5;
   padding: 8px 12px;
   border-radius: 8px;
@@ -116,7 +116,7 @@
 
 .keeper-chat__error {
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--ff-hp-low, #f87171);
   background: rgba(248, 113, 113, 0.08);
   border-top: 1px solid rgba(248, 113, 113, 0.15);

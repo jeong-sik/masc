@@ -26,13 +26,13 @@
   border-radius: 10px;
   background: rgba(15, 23, 42, 0.92);
   border: 1px solid rgba(148, 163, 184, 0.2);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #e2e8f0;
   pointer-events: none;
 }
 
 .activity-graph-tooltip strong {
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: var(--text-near-white);
 }
 
@@ -40,7 +40,7 @@
   padding: 2px 7px;
   border-radius: 6px;
   background: rgba(148, 163, 184, 0.15);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-slate);
 }
 
@@ -65,7 +65,7 @@
 .activity-graph-leaderboard-rank {
   width: 22px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--text-slate);
 }
@@ -79,7 +79,7 @@
 }
 
 .activity-graph-leaderboard-name {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-near-white);
   white-space: nowrap;
@@ -102,7 +102,7 @@
 }
 
 .activity-graph-leaderboard-weight {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-slate-light);
   min-width: 32px;
@@ -110,7 +110,7 @@
 }
 
 .activity-graph-leaderboard-status {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 2px 7px;
   border-radius: 6px;
 }
@@ -144,12 +144,12 @@
 }
 
 .activity-graph-kind-label {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-slate-light);
 }
 
 .activity-graph-kind-count {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: var(--text-near-white);
 }

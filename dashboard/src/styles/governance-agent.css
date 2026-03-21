@@ -42,7 +42,7 @@
   gap: 8px;
   flex-wrap: wrap;
   color: #9ab3de;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .agent-detail-actions {
@@ -92,7 +92,7 @@
   background: var(--white-3);
   padding: 8px 10px;
   font-family: "IBM Plex Mono", "Fira Code", monospace;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #c8daf7;
   line-height: 1.4;
 }
@@ -117,7 +117,7 @@
 .agent-history-pre {
   margin: 0;
   white-space: pre-wrap;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
   color: #cfe0ff;
   font-family: "IBM Plex Mono", "Fira Code", monospace;
@@ -206,12 +206,12 @@
 }
 
 .ff-plate__sub {
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: #8ca8d5;
 }
 
 .ff-plate__level {
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 700;
   color: var(--accent);
   background: rgba(71, 184, 255, 0.1);
@@ -230,7 +230,7 @@
 
 .ff-plate__model {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: #8ca8d5;
   background: rgba(71, 184, 255, 0.08);
   border: 1px solid rgba(71, 184, 255, 0.15);
@@ -239,7 +239,7 @@
 }
 
 .ff-plate__autonomy {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--ff-gold);
   background: rgba(200, 168, 78, 0.1);
   border: 1px solid rgba(200, 168, 78, 0.2);
@@ -248,7 +248,7 @@
 }
 
 .ff-plate__signal {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 600;
   letter-spacing: 0.5px;
   border-radius: 4px;
@@ -282,7 +282,7 @@
 }
 
 .ff-plate__bar-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   color: var(--ff-gold);
   letter-spacing: 1px;
@@ -290,7 +290,7 @@
 }
 
 .ff-plate__bar-value {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   color: var(--text-strong);
   min-width: 36px;
@@ -306,7 +306,7 @@
 }
 
 .ff-plate__work {
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: #c8daf7;
 }
 
@@ -316,7 +316,7 @@
 }
 
 .ff-plate__worker-state {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--accent);
   background: rgba(71, 184, 255, 0.08);
   padding: 1px 5px;
@@ -324,7 +324,7 @@
 }
 
 .ff-plate__worker-focus {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: #9ab3de;
 }
 
@@ -332,7 +332,7 @@
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #8ca8d5;
 }
 
@@ -363,7 +363,7 @@
 }
 
 .ff-stat__label {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: var(--ff-gold);
   letter-spacing: 0.5px;
 }
@@ -383,7 +383,7 @@
 
 /* Timeline events - compact FF style */
 .ff-event-type {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--ff-gold);
   min-width: 32px;
@@ -391,7 +391,7 @@
 
 .ff-event-detail {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #c8daf7;
 }
 
@@ -407,7 +407,7 @@
 }
 
 .ff-profile__mention-label {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--ff-gold);
   white-space: nowrap;
@@ -453,19 +453,19 @@
 .ff-relation-name {
   color: var(--ff-gold);
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--fs-base);
   flex: 1;
 }
 
 .ff-relation-count {
   color: rgba(255, 255, 255, 0.5);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
 .ff-relation-time {
   color: rgba(255, 255, 255, 0.35);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .ff-interests {
@@ -474,7 +474,7 @@
 }
 
 .ff-interests-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: rgba(255, 255, 255, 0.4);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -492,7 +492,7 @@
   color: rgba(255, 255, 255, 0.7);
   padding: 2px 8px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   border: 1px solid rgba(255, 215, 0, 0.15);
 }
 

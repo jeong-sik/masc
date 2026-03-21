@@ -41,9 +41,9 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_snapshot_and_digest_expose_role_runtime_census;
-          Alcotest.test_case "task inject confirm flow" `Quick
+          Alcotest.test_case "task inject immediate flow" `Quick
             Test_operator_control_actions
-            .test_task_inject_requires_confirm_then_executes;
+            .test_task_inject_executes_immediately;
           Alcotest.test_case "team turn fallback actor" `Quick
             Test_operator_control_actions.test_team_turn_falls_back_to_session_actor;
           Alcotest.test_case "team note logs action" `Quick

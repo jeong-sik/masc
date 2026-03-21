@@ -39,6 +39,26 @@ val info : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 val warn : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 val error : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 
+(** In-memory ring buffer exposed for dashboard log viewer routes. *)
+module Ring : sig
+  type entry = {
+    seq : int;
+    ts : string;
+    level : string;
+    module_name : string;
+    message : string;
+  }
+
+  val recent :
+    ?limit:int ->
+    ?min_level:int ->
+    ?module_filter:string ->
+    unit ->
+    entry list
+
+  val to_json : entry list -> Yojson.Safe.t
+end
+
 (** Functor for creating module-specific loggers.
     [M.name] controls the env-var key MASC_LOG_{NAME}_LEVEL
     and the context prefix in log output. *)

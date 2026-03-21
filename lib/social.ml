@@ -35,15 +35,18 @@ type vote_record = {
 
 (** {1 ID Generation} *)
 
+let id_nonce = Atomic.make 0
+
+let fresh_id_suffix () =
+  Atomic.fetch_and_add id_nonce 1 land 0xFFFFFF
+
 let generate_post_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
-  Printf.sprintf "post-%d-%06x" ts hash
+  Printf.sprintf "post-%d-%06x" ts (fresh_id_suffix ())
 
 let generate_comment_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
-  Printf.sprintf "cmt-%d-%06x" ts hash
+  Printf.sprintf "cmt-%d-%06x" ts (fresh_id_suffix ())
 
 (** {1 JSON Serialization} *)
 

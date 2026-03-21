@@ -105,6 +105,16 @@ let next_cursor_of_response response =
   | Some _ -> Alcotest.fail "nextCursor not a string"
   | None -> None
 
+let tools_list_meta_exn response =
+  match List.assoc_opt "_meta" (result_fields_exn response) with
+  | Some (`Assoc fields) -> fields
+  | _ -> Alcotest.fail "_meta not an object"
+
+let int_field_exn label fields name =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> value
+  | _ -> Alcotest.failf "%s missing int field %s" label name
+
 let rec collect_tools ~clock ~sw ?profile ?cursor state acc =
   let response = tools_list_response ~clock ~sw ?profile ?cursor state in
   let tools = tools_from_response response in
@@ -487,7 +497,11 @@ let test_handle_request_tools_list () =
     false
     (List.mem "masc_vote_create" names);
   Alcotest.(check bool) "first page non-empty" true (names <> []);
-  Alcotest.(check bool) "first page exposes next cursor" true
+  let meta = tools_list_meta_exn first_page in
+  let total_count = int_field_exn "tools/list _meta" meta "totalCount" in
+  let page_size = int_field_exn "tools/list _meta" meta "pageSize" in
+  Alcotest.(check bool) "next cursor matches totalCount/pageSize"
+    (total_count > page_size)
     (Option.is_some (next_cursor_of_response first_page));
 
   cleanup_dir base_path
@@ -2013,12 +2027,12 @@ let test_handle_request_prompts_get_command_truth_filters_run_id () =
         (contains_substring text "run-beta"))
 
 let test_handle_request_resources_list_includes_tool_help () =
+  with_env "MASC_LIST_PAGE_SIZE" "10" @@ fun () ->
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let response = resources_list_response ~clock ~sw state in
   let resources = resources_list_all ~clock ~sw state [] in
   let tool_help_index_present =
     List.exists
@@ -2028,8 +2042,6 @@ let test_handle_request_resources_list_includes_tool_help () =
       resources
   in
   Alcotest.(check bool) "tool help index listed" true tool_help_index_present;
-  Alcotest.(check bool) "resource page exposes next cursor" true
-    (Option.is_some (next_cursor_of_response response));
   cleanup_dir base_path
 
 let test_handle_request_resources_list_paginates () =
@@ -2067,6 +2079,7 @@ let test_handle_request_resources_list_paginates () =
   cleanup_dir base_path
 
 let test_handle_request_tools_list_paginates () =
+  with_env "MASC_LIST_PAGE_SIZE" "10" @@ fun () ->
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -2107,7 +2120,7 @@ let test_handle_request_tools_list_paginates () =
         | _ -> Alcotest.fail "second page tool missing name")
     | _ -> Alcotest.fail "second page tool not an object"
   in
-  Alcotest.(check int) "tools first page size" 50 (List.length first_tools);
+  Alcotest.(check int) "tools first page size" 10 (List.length first_tools);
   Alcotest.(check bool) "tools second page non-empty" true
     (List.length second_tools > 0);
   Alcotest.(check bool) "pages advance" true

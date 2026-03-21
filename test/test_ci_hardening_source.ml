@@ -181,6 +181,26 @@ let test_activity_surface_contracts () =
     (file_contains_pattern "lib/team_session/team_session_store.ml"
        "Activity_graph.emit config")
 
+let test_local_review_script_contracts () =
+  check bool "local review script exists" true
+    (file_contains_pattern "scripts/review/local-review.sh"
+       "#!/usr/bin/env bash");
+  check bool "local review script caches under .masc review-cache" true
+    (file_contains_pattern "scripts/review/local-review.sh"
+       ".masc/review-cache/local-review");
+  check bool "local review script keeps pending registry" true
+    (file_contains_pattern "scripts/review/local-review.sh"
+       ".pending.json");
+  check bool "local review script chunks large diffs" true
+    (file_contains_pattern "scripts/review/local-review.sh"
+       "MASC_LOCAL_REVIEW_CHUNK_BYTES");
+  check bool "local review script bounds reviewer request time" true
+    (file_contains_pattern "scripts/review/local-review.sh"
+       "--max-time");
+  check bool "local review script exposes cache key print" true
+    (file_contains_pattern "scripts/review/local-review.sh"
+       "--print-cache-key")
+
 let () =
   run "ci_hardening_source"
     [
@@ -191,5 +211,8 @@ let () =
            test_case "input validation contracts" `Quick test_input_validation_contracts;
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;
+           test_case "local review script contracts" `Quick test_local_review_script_contracts;
+           test_case "activity surface contracts" `Quick test_activity_surface_contracts;
+           test_case "local review script contracts" `Quick test_local_review_script_contracts;
          ]);
     ]

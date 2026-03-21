@@ -393,6 +393,23 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 
+(** Load extended persona description from AGENT.md if present.
+    Truncated to [max_chars] to avoid bloating the system prompt. *)
+let load_persona_extended ?(max_chars = 4000) name : string option =
+  match personas_root_opt () with
+  | None -> None
+  | Some root ->
+    let path = Filename.concat (Filename.concat root name) "AGENT.md" in
+    if Sys.file_exists path then
+      match Safe_ops.read_file_safe path with
+      | Error _ -> None
+      | Ok content ->
+        let trimmed = String.trim content in
+        if String.length trimmed = 0 then None
+        else if String.length trimmed <= max_chars then Some trimmed
+        else Some (String.sub trimmed 0 max_chars ^ "\n[truncated]")
+    else None
+
 let load_persona_summary name : persona_summary option =
   match persona_profile_path_opt name with
   | None -> None

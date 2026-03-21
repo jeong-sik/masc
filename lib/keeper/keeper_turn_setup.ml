@@ -299,6 +299,10 @@ let ensure_keeper_exists
        let specs = Model_spec.available_model_specs_of_strings meta.models in
        let primary = match specs with m0 :: _ -> m0 | [] -> Model_spec.default_local_model_spec () in
        let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
+       let persona_extended =
+         Keeper_types_profile.load_persona_extended name
+         |> Option.value ~default:""
+       in
        let system_prompt =
          build_keeper_system_prompt
            ~goal
@@ -310,6 +314,8 @@ let ensure_keeper_exists
            ~needs
            ~desires
            ~instructions
+           ~persona_extended
+           ()
        in
        let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary.max_context in
        (try ignore (save_checkpoint session ctx0 ~generation:0)

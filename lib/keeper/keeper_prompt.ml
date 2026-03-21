@@ -40,7 +40,7 @@ let keeper_constitution =
 
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~soul_profile ~will ~needs ~desires
-    ~instructions =
+    ~instructions ?(persona_extended = "") () =
   let profile =
     canonical_soul_profile soul_profile
     |> Option.value ~default:default_soul_profile
@@ -71,8 +71,14 @@ let build_keeper_system_prompt
     if s = "" then ""
     else Printf.sprintf "\nCustom instructions:\n%s\n" s
   in
+  let persona_block =
+    let s = String.trim persona_extended in
+    if s = "" then ""
+    else Printf.sprintf "<persona>\n%s\n</persona>\n\n" s
+  in
   String.concat ""
     [
+      persona_block;
       "<world>\n\
        You live in MASC (Multi-Agent Streaming Coordination).\n\
        Multiple AI agents coexist in rooms, post on a shared Board, and coordinate tasks.\n\

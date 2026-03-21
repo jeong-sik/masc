@@ -120,6 +120,14 @@
   --z-overlay-trpg-actor: 3040;
   --z-overlay-toast: 3070;
   --z-overlay-tooltip: 3080;
+
+  /* Spacing tokens */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 40px;
+  --space-2xl: 64px;
 }
 
 *,

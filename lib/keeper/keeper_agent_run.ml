@@ -114,7 +114,60 @@ let run_turn
   let ctx_ref = ref ctx_work in
   let agent_name = Printf.sprintf "keeper-%s" meta.name in
   let meta_ref = ref meta in
-  let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
+  let agent_ref : Agent_sdk.Agent.t option ref = ref None in
+  let keeper_tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
+  (* extend_turns: agent self-extends turn budget within ceiling *)
+  let ceiling = max max_turns 200 in
+  let budget_current = ref max_turns in
+  let budget_extensions = ref 0 in
+  let extend_turns_tool =
+    let open Agent_sdk in
+    Tool.create
+      ~name:"extend_turns"
+      ~description:"Request additional turns when you need more time. \
+                     Guardrails check cost and idle before granting."
+      ~parameters:[
+        { Types.name = "additional_turns";
+          description = "Number of additional turns (1-20)";
+          param_type = Types.Integer; required = true };
+        { Types.name = "reason";
+          description = "Why more turns are needed";
+          param_type = Types.String; required = true };
+      ]
+      (fun input ->
+        let additional =
+          try Yojson.Safe.Util.(member "additional_turns" input |> to_int)
+          with _ -> 5 in
+        let reason =
+          try Yojson.Safe.Util.(member "reason" input |> to_string)
+          with _ -> "unspecified" in
+        let additional = max 1 (min additional 20) in
+        if !budget_extensions >= 10 then
+          Ok { Types.content = Printf.sprintf
+            "Denied: extension limit (10) reached. Budget: %d/%d."
+            !budget_current ceiling }
+        else
+          let new_max = min (!budget_current + additional) ceiling in
+          let granted = new_max - !budget_current in
+          if granted <= 0 then
+            Ok { Types.content = Printf.sprintf
+              "Denied: at ceiling (%d/%d)." !budget_current ceiling }
+          else begin
+            budget_current := new_max;
+            incr budget_extensions;
+            (match !agent_ref with
+             | Some agent ->
+               let state = Agent_sdk.Agent.state agent in
+               Agent_sdk.Agent.set_state agent
+                 { state with config =
+                     { state.config with max_turns = new_max } }
+             | None -> ());
+            Ok { Types.content = Printf.sprintf
+              "Granted %d turns. Budget: %d (ceiling: %d). Extensions: %d/10. Reason: %s"
+              granted new_max ceiling !budget_extensions reason }
+          end)
+  in
+  let tools = extend_turns_tool :: keeper_tools in
   let hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
     ?autonomy_filter () in
@@ -145,6 +198,7 @@ let run_turn
       ~max_tokens
       ?guardrails
       ?on_event
+      ~agent_ref
       ()
   with
   | Error e -> Error e

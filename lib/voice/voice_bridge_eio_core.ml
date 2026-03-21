@@ -175,7 +175,7 @@ let start_local_playback ~sw ~agent_id ~audio_file =
               | Unix.WEXITED 0, _ ->
                   log_info
                     (Printf.sprintf "local voice playback finished: agent=%s file=%s via=%s"
-                       agent_id audio_file (List.hd argv))
+                       agent_id audio_file (match argv with h :: _ -> h | [] -> "unknown"))
               | Unix.WEXITED code, output ->
                   log_error
                     (Printf.sprintf

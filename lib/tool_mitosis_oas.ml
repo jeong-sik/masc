@@ -344,7 +344,7 @@ let handle_metrics_record _ctx args : result =
 (* Schemas                                                           *)
 (* ================================================================ *)
 
-let schemas : Types.tool_schema list = Tool_mitosis.schemas
+let schemas : Types.tool_schema list = Tool_mitosis_schemas.schemas
 
 (* ================================================================ *)
 (* Dispatch                                                          *)

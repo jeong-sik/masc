@@ -1,0 +1,5 @@
+(include_subdirs no)
+(library
+ (name dated_jsonl)
+ (public_name masc_mcp.dated_jsonl)
+ (libraries fs_compat eio unix yojson))

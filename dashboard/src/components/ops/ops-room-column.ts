@@ -1,6 +1,7 @@
 // Ops — Room column: broadcast, pause/resume, task inject, recommended actions, pending confirmations, room feed
 
 import { html } from 'htm/preact'
+import { useRef } from 'preact/hooks'
 import { PanelSemanticDetails } from '../common/semantic-layer'
 import {
   operatorActionBusy,
@@ -34,6 +35,7 @@ import {
 import { selectPendingConfirmState } from '../../pending-confirm'
 
 export function OpsRoomColumn() {
+  const roomControlDisclosureRef = useRef<HTMLDetailsElement | null>(null)
   const snapshot = operatorSnapshot.value
   const roomDigest = operatorRoomDigest.value
   const room = snapshot?.room ?? {}
@@ -53,110 +55,16 @@ export function OpsRoomColumn() {
   const residentRuntime = roomDigest?.resident_judge_runtime ?? snapshot?.resident_judge_runtime
   const guidanceLayer = roomDigest?.active_guidance_layer ?? 'fallback'
   const roomFeed = recentMessages.slice(0, 5)
+  const openRoomControlDisclosure = () => {
+    const disclosure = roomControlDisclosureRef.current
+    if (disclosure) {
+      disclosure.open = true
+      disclosure.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
 
   return html`
     <div class="ops-column">
-      <section class="card ops-panel ops-lane-panel">
-        <div class="card-title-row">
-          <div class="card-title">Room 개입</div>
-          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
-        </div>
-        <p class="ops-context-note">전체 room에 영향 주는 액션입니다. 방송, 정지/재개, 작업 주입을 여기서 처리합니다.</p>
-
-        <div class="ops-stat-grid">
-          <div class="ops-stat">
-            <span>Room</span>
-            <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
-          </div>
-          <div class="ops-stat">
-            <span>프로젝트</span>
-            <strong>${room.project ?? '확인 없음'}</strong>
-          </div>
-          <div class="ops-stat">
-            <span>클러스터</span>
-            <strong>${room.cluster ?? '확인 없음'}</strong>
-          </div>
-          <div class="ops-stat ${room.paused ? 'warn' : 'ok'}">
-            <span>상태</span>
-            <strong>${room.paused ? '일시정지' : '진행 중'}</strong>
-          </div>
-          <div class="ops-stat ${runtimeJudgeTone(residentRuntime)}">
-            <span>Resident Judge</span>
-            <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
-          </div>
-        </div>
-
-        <label class="control-label" for="ops-broadcast">Room 방송</label>
-        <div class="control-row">
-          <input
-            id="ops-broadcast"
-            class="control-input"
-            type="text"
-            placeholder="@agent 또는 room 전체 공지"
-            value=${broadcastMessage.value}
-            onInput=${(event: Event) => { broadcastMessage.value = (event.target as HTMLInputElement).value }}
-            onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') void submitBroadcast() }}
-            disabled=${operatorActionBusy.value}
-          />
-          <button class="control-btn" onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
-            보내기
-          </button>
-        </div>
-
-        <label class="control-label" for="ops-pause-reason">일시정지 / 재개</label>
-        <div class="control-row ops-split-row">
-          <input
-            id="ops-pause-reason"
-            class="control-input"
-            type="text"
-            value=${pauseReason.value}
-            onInput=${(event: Event) => { pauseReason.value = (event.target as HTMLInputElement).value }}
-            disabled=${operatorActionBusy.value}
-          />
-          <button class="control-btn ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
-            일시정지
-          </button>
-          <button class="control-btn ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
-            재개
-          </button>
-        </div>
-
-        <div class="ops-section-head">작업 주입</div>
-        <input
-          class="control-input"
-          type="text"
-          placeholder="작업 제목"
-          value=${taskTitle.value}
-          onInput=${(event: Event) => { taskTitle.value = (event.target as HTMLInputElement).value }}
-          disabled=${operatorActionBusy.value}
-        />
-        <textarea
-          class="control-textarea"
-          rows=${3}
-          placeholder="작업 설명"
-          value=${taskDescription.value}
-          onInput=${(event: Event) => { taskDescription.value = (event.target as HTMLTextAreaElement).value }}
-          disabled=${operatorActionBusy.value}
-        ></textarea>
-        <div class="control-row ops-split-row">
-          <select
-            class="control-input ops-select"
-            value=${taskPriority.value}
-            onChange=${(event: Event) => { taskPriority.value = (event.target as HTMLSelectElement).value }}
-            disabled=${operatorActionBusy.value}
-          >
-            <option value="1">P1</option>
-            <option value="2">P2</option>
-            <option value="3">P3</option>
-            <option value="4">P4</option>
-            <option value="5">P5</option>
-          </select>
-          <button class="control-btn" onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
-            주입
-          </button>
-        </div>
-      </section>
-
       <section class="card ops-panel">
         <div class="card-title-row">
           <div class="card-title">추천 개입</div>
@@ -191,7 +99,7 @@ export function OpsRoomColumn() {
                 <div class="ops-log-body">${item.reason}</div>
                 ${item.suggested_payload ? html`
                   <div class="ops-confirmation-actions">
-                    <button class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item) }} disabled=${operatorActionBusy.value}>
+                    <button class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item); openRoomControlDisclosure() }} disabled=${operatorActionBusy.value}>
                       폼에 채우기
                     </button>
                   </div>
@@ -257,6 +165,121 @@ export function OpsRoomColumn() {
               : '지금 승인 대기는 없습니다. 위 목록의 preview-confirm 액션을 먼저 만들어야 여기에 쌓입니다.'}
           </div>
         `}
+      </section>
+
+      <section class="card ops-panel ops-lane-panel">
+        <div class="card-title-row">
+          <div class="card-title">Room 상태</div>
+          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
+        </div>
+        <p class="ops-context-note">평소에는 추천 개입만 보면 됩니다. room 전체를 건드릴 때만 아래 고급 제어를 여세요.</p>
+
+        <div class="ops-stat-grid">
+          <div class="ops-stat">
+            <span>Room</span>
+            <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
+          </div>
+          <div class="ops-stat">
+            <span>프로젝트</span>
+            <strong>${room.project ?? '확인 없음'}</strong>
+          </div>
+          <div class="ops-stat">
+            <span>클러스터</span>
+            <strong>${room.cluster ?? '확인 없음'}</strong>
+          </div>
+          <div class="ops-stat ${room.paused ? 'warn' : 'ok'}">
+            <span>상태</span>
+            <strong>${room.paused ? '일시정지' : '진행 중'}</strong>
+          </div>
+          <div class="ops-stat ${runtimeJudgeTone(residentRuntime)}">
+            <span>Resident Judge</span>
+            <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
+          </div>
+        </div>
+
+        <details
+          ref=${roomControlDisclosureRef}
+          class="ops-control-disclosure"
+          open=${room.paused ? true : undefined}
+        >
+          <summary class="ops-control-summary">
+            <span class="ops-control-kicker">고급 room 제어</span>
+            <strong>${room.paused ? '지금은 room이 멈춰 있어 재개 동선이 열려 있습니다.' : '방송 · 일시정지/재개 · 작업 주입'}</strong>
+            <span>${room.paused ? '운영 점검 후 재개하거나 공지를 보내세요.' : 'room 전체에 영향 주는 액션만 이 안에 넣었습니다.'}</span>
+          </summary>
+
+          <div class="ops-control-body">
+            <label class="control-label" for="ops-broadcast">Room 방송</label>
+            <div class="control-row">
+              <input
+                id="ops-broadcast"
+                class="control-input"
+                type="text"
+                placeholder="@agent 또는 room 전체 공지"
+                value=${broadcastMessage.value}
+                onInput=${(event: Event) => { broadcastMessage.value = (event.target as HTMLInputElement).value }}
+                onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') void submitBroadcast() }}
+                disabled=${operatorActionBusy.value}
+              />
+              <button class="control-btn" onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
+                보내기
+              </button>
+            </div>
+
+            <label class="control-label" for="ops-pause-reason">일시정지 / 재개</label>
+            <div class="control-row ops-split-row">
+              <input
+                id="ops-pause-reason"
+                class="control-input"
+                type="text"
+                value=${pauseReason.value}
+                onInput=${(event: Event) => { pauseReason.value = (event.target as HTMLInputElement).value }}
+                disabled=${operatorActionBusy.value}
+              />
+              <button class="control-btn ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
+                일시정지
+              </button>
+              <button class="control-btn ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
+                재개
+              </button>
+            </div>
+
+            <div class="ops-section-head">작업 주입</div>
+            <input
+              class="control-input"
+              type="text"
+              placeholder="작업 제목"
+              value=${taskTitle.value}
+              onInput=${(event: Event) => { taskTitle.value = (event.target as HTMLInputElement).value }}
+              disabled=${operatorActionBusy.value}
+            />
+            <textarea
+              class="control-textarea"
+              rows=${3}
+              placeholder="작업 설명"
+              value=${taskDescription.value}
+              onInput=${(event: Event) => { taskDescription.value = (event.target as HTMLTextAreaElement).value }}
+              disabled=${operatorActionBusy.value}
+            ></textarea>
+            <div class="control-row ops-split-row">
+              <select
+                class="control-input ops-select"
+                value=${taskPriority.value}
+                onChange=${(event: Event) => { taskPriority.value = (event.target as HTMLSelectElement).value }}
+                disabled=${operatorActionBusy.value}
+              >
+                <option value="1">P1</option>
+                <option value="2">P2</option>
+                <option value="3">P3</option>
+                <option value="4">P4</option>
+                <option value="5">P5</option>
+              </select>
+              <button class="control-btn" onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
+                주입
+              </button>
+            </div>
+          </div>
+        </details>
       </section>
 
       <section class="card ops-panel">

@@ -24,13 +24,13 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       return html`
-        <div class="error-card" style="margin: 12px 0;">
-          <strong>${this.props.label ?? 'Component'} render error</strong>
-          <pre style="font-size: 12px; white-space: pre-wrap; margin-top: 8px; opacity: 0.7;">${this.state.error.message}</pre>
+        <div class="error-card my-3 rounded-lg border border-[var(--bad)]/30 bg-[var(--ff-panel)] p-4">
+          <strong class="text-[var(--bad)]">${this.props.label ?? 'Component'} 렌더링 오류</strong>
+          <pre class="text-xs whitespace-pre-wrap mt-2 opacity-70">${this.state.error.message}</pre>
           <button
-            style="margin-top: 8px; padding: 4px 12px; cursor: pointer;"
+            class="mt-2 px-3 py-1 cursor-pointer rounded border border-[var(--card-border)] bg-[var(--white-6)] text-[var(--text-body)] text-sm hover:bg-[var(--white-10)]"
             onClick=${() => this.setState({ error: null })}
-          >Retry</button>
+          >다시 시도</button>
         </div>
       `
     }

@@ -79,6 +79,10 @@
    dashboard_proof_actors
    dashboard_proof_verdict
    dashboard_proof_helpers
+   briefing_json_helpers
+   briefing_compactors
+   briefing_gaps
+   briefing_sections
    dashboard_mission_briefing
    drift_guard
    server_utils
@@ -614,6 +618,10 @@
  chain_parser_parse
  chain_parser_validate
  chain_parser_serialize
+ briefing_json_helpers
+ briefing_compactors
+ briefing_gaps
+ briefing_sections
  dashboard_mission_agents
  dashboard_mission_assembly
  keeper_types_profile

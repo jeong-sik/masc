@@ -35,6 +35,7 @@ type config = {
   description : string option;
   memory : Oas.Memory.t option;
   named_cascade : Oas.Api.named_cascade option;
+  initial_messages : Oas.Types.message list;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -51,6 +52,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     description = None;
     memory = None;
     named_cascade = None;
+    initial_messages = [];
   }
 
 (* ================================================================ *)
@@ -154,6 +156,11 @@ let build
   let builder = match config.named_cascade with
     | Some nc -> Oas.Builder.with_named_cascade nc builder
     | None -> builder
+  in
+  let builder =
+    if config.initial_messages <> [] then
+      Oas.Builder.with_initial_messages config.initial_messages builder
+    else builder
   in
   Oas.Builder.build_safe builder
   |> Result.map_error Oas.Error.to_string
@@ -355,6 +362,7 @@ let run_named
     ~goal
     ?(system_prompt = "")
     ?(tools = [])
+    ?(initial_messages = [])
     ?(max_turns = 20)
     ?(temperature = 0.7)
     ?(max_tokens = 4096)
@@ -389,7 +397,7 @@ let run_named
       ~description:(Some (Printf.sprintf "cascade:%s" cascade_name))
       ()
   in
-  let config = { config with named_cascade = Some named_cascade } in
+  let config = { config with named_cascade = Some named_cascade; initial_messages } in
   match run ~sw ~net ~config ?on_event ?agent_ref goal with
   | Ok result when accept result.response -> Ok result
   | Ok _ -> Error (Printf.sprintf "cascade %s: response rejected by accept" cascade_name)

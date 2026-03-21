@@ -140,6 +140,7 @@ let run_turn
       ~goal:user_message
       ~system_prompt:turn_system_prompt
       ~tools
+      ~initial_messages:ctx_work.messages
       ~hooks
       ~context_reducer:reducer
       ~memory

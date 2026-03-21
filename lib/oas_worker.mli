@@ -36,6 +36,7 @@ val run_named :
   goal:string ->
   ?system_prompt:string ->
   ?tools:Oas.Tool.t list ->
+  ?initial_messages:Oas.Types.message list ->
   ?max_turns:int ->
   ?temperature:float ->
   ?max_tokens:int ->

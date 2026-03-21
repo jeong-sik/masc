@@ -299,7 +299,7 @@ let load_persisted_comments store =
       let lines = Fs_compat.load_jsonl path in
       List.iter (fun json ->
         match comment_of_yojson json with
-        | Some c when c.expires_at > now ->
+        | Some c when c.expires_at = 0.0 || c.expires_at > now ->
             let cid = Comment_id.to_string c.id in
             Hashtbl.replace store.comments cid c;
             (* Build comments_by_post index *)

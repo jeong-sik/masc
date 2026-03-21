@@ -91,7 +91,6 @@ curl http://127.0.0.1:8935/health
 ### 환경변수
 - `GRAPHQL_API_KEY` — GraphQL 인증
 - `SSL_CERT_FILE` — TLS 인증서 경로
-- `MASC_ORCHESTRATOR_ENABLED=0` — Orchestrator 비활성화 (EADDRINUSE 방지)
 - `ME_ROOT` — repo 루트. 미지정 시 `$HOME/me`를 우선 사용
 - `MASC_DASHBOARD_PROXY_TARGET` — dashboard dev server가 프록시할 API origin
 - `MASC_BOARD_BACKEND` — Board 백엔드 선택 (`pg` default, `jsonl` for file-based)

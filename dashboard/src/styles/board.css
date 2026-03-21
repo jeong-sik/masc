@@ -96,7 +96,7 @@
 .vote-btn {
   background: none;
   border: none;
-  color: #666;
+  color: var(--text-dim);
   cursor: pointer;
   font-size: 16px;
   padding: 2px;
@@ -183,7 +183,7 @@
 }
 .board-comment .comment-author { font-size: 12px; font-weight: 600; color: var(--purple); }
 .board-comment .comment-text { font-size: 13px; margin-top: 4px; }
-.board-comment .comment-time { font-size: 11px; color: #666; }
+.board-comment .comment-time { font-size: 11px; color: var(--text-dim); }
 
 /* ── Activity Tab ──────────────────────────────────────────── */
 .activity-line {

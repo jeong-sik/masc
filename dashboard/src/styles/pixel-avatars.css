@@ -72,7 +72,7 @@
 }
 
 .pixel-avatar.signal-ring--stale {
-  box-shadow: 0 0 0 2px var(--agent-busy, #f0c060);
+  box-shadow: 0 0 0 2px var(--agent-busy, var(--agent-busy));
 }
 
 .pixel-avatar.signal-ring--archived {
@@ -112,7 +112,7 @@
 }
 
 .activity-dot--stale {
-  background: var(--agent-busy, #f0c060);
+  background: var(--agent-busy, var(--agent-busy));
 }
 
 .activity-dot--inactive {

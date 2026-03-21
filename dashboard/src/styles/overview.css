@@ -70,7 +70,7 @@
 }
 
 .attention-spotlight__card.ok .attention-spotlight__bar { background: var(--agent-working, var(--agent-working)); }
-.attention-spotlight__card.warn .attention-spotlight__bar { background: var(--agent-busy, #f0c060); }
+.attention-spotlight__card.warn .attention-spotlight__bar { background: var(--agent-busy, var(--agent-busy)); }
 .attention-spotlight__card.bad .attention-spotlight__bar { background: var(--bad, var(--bad)); }
 
 .attention-spotlight__body {
@@ -233,7 +233,7 @@
 }
 
 .health-beacon.warn .health-beacon__dot {
-  background: var(--agent-busy, #f0c060);
+  background: var(--agent-busy, var(--agent-busy));
   box-shadow: 0 0 8px rgba(240, 192, 96, 0.5);
   animation: pulse 1.5s ease-in-out infinite;
 }
@@ -245,7 +245,7 @@
 }
 
 .health-beacon.ok { color: var(--agent-working, var(--agent-working)); }
-.health-beacon.warn { color: var(--agent-busy, #f0c060); }
+.health-beacon.warn { color: var(--agent-busy, var(--agent-busy)); }
 .health-beacon.bad { color: var(--bad, var(--bad)); }
 
 /* ── Slim header variant for Home ──────────────── */

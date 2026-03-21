@@ -173,7 +173,7 @@
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 1.5px;
-  color: #c8a84e;
+  color: var(--ff-gold);
   text-transform: uppercase;
   text-align: center;
 }
@@ -195,7 +195,7 @@
 .ff-plate__name {
   margin: 0;
   font-size: 20px;
-  color: #c8a84e;
+  color: var(--ff-gold);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -213,7 +213,7 @@
 .ff-plate__level {
   font-size: 14px;
   font-weight: 700;
-  color: #47b8ff;
+  color: var(--accent);
   background: rgba(71, 184, 255, 0.1);
   border: 1px solid rgba(71, 184, 255, 0.25);
   border-radius: 4px;
@@ -240,7 +240,7 @@
 
 .ff-plate__autonomy {
   font-size: 11px;
-  color: #c8a84e;
+  color: var(--ff-gold);
   background: rgba(200, 168, 78, 0.1);
   border: 1px solid rgba(200, 168, 78, 0.2);
   border-radius: 4px;
@@ -262,13 +262,13 @@
 }
 
 .ff-plate__signal--stale {
-  color: #c8a84e;
+  color: var(--ff-gold);
   background: rgba(200, 168, 78, 0.1);
   border: 1px solid rgba(200, 168, 78, 0.2);
 }
 
 .ff-plate__signal--archived {
-  color: #8888;
+  color: var(--text-dim)8;
   background: rgba(128, 128, 128, 0.1);
   border: 1px solid rgba(128, 128, 128, 0.15);
 }
@@ -284,7 +284,7 @@
 .ff-plate__bar-label {
   font-size: 11px;
   font-weight: 700;
-  color: #c8a84e;
+  color: var(--ff-gold);
   letter-spacing: 1px;
   width: 28px;
 }
@@ -317,7 +317,7 @@
 
 .ff-plate__worker-state {
   font-size: 11px;
-  color: #47b8ff;
+  color: var(--accent);
   background: rgba(71, 184, 255, 0.08);
   padding: 1px 5px;
   border-radius: 3px;
@@ -364,7 +364,7 @@
 
 .ff-stat__label {
   font-size: 10px;
-  color: #c8a84e;
+  color: var(--ff-gold);
   letter-spacing: 0.5px;
 }
 
@@ -385,7 +385,7 @@
 .ff-event-type {
   font-size: 11px;
   font-weight: 600;
-  color: #c8a84e;
+  color: var(--ff-gold);
   min-width: 32px;
 }
 
@@ -409,7 +409,7 @@
 .ff-profile__mention-label {
   font-size: 12px;
   font-weight: 600;
-  color: #c8a84e;
+  color: var(--ff-gold);
   white-space: nowrap;
 }
 
@@ -451,7 +451,7 @@
 }
 
 .ff-relation-name {
-  color: #c8a84e;
+  color: var(--ff-gold);
   font-weight: 600;
   font-size: 13px;
   flex: 1;

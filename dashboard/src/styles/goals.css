@@ -219,7 +219,7 @@
 
 .goal-updated {
   font-size: 11px;
-  color: #666;
+  color: var(--text-dim);
 }
 
 /* -- Planning toolbar (compact refresh) -- */

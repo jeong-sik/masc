@@ -202,7 +202,7 @@ button.agent-card:hover {
 .monitor-stat-caption {
   margin-top: 6px;
   font-size: 11px;
-  color: #8ba2c9;
+  color: var(--text-muted);
 }
 
 .monitor-section-head {
@@ -217,7 +217,7 @@ button.agent-card:hover {
 
 .monitor-subheadline {
   margin: 6px 0 0;
-  color: #8ba2c9;
+  color: var(--text-muted);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -302,7 +302,7 @@ button.monitor-row.bad {
 }
 
 .monitor-sub {
-  color: #8ba2c9;
+  color: var(--text-muted);
   font-size: 12px;
 }
 
@@ -317,7 +317,7 @@ button.monitor-row.bad {
   flex-wrap: wrap;
   gap: 8px 12px;
   margin-top: 10px;
-  color: #8ba2c9;
+  color: var(--text-muted);
   font-size: 12px;
 }
 

@@ -18,7 +18,7 @@
 .roster-title {
   font-size: 20px;
   font-weight: 600;
-  color: #e8cc70;
+  color: var(--ff-gold-bright);
   margin: 0 0 var(--space-md, 16px) 0;
   letter-spacing: 0.5px;
   text-shadow: 0 1px 4px rgba(212, 169, 75, 0.2);
@@ -50,7 +50,7 @@
 
 .roster-search:focus {
   outline: none;
-  border-color: #c8a84e;
+  border-color: var(--ff-gold);
   box-shadow: 0 0 0 2px rgba(200, 168, 78, 0.25);
 }
 
@@ -76,14 +76,14 @@
 
 .roster-filter-btn:hover {
   background: rgba(200, 168, 78, 0.25);
-  color: #e8cc70;
+  color: var(--ff-gold-bright);
   border-color: rgba(200, 168, 78, 0.35);
 }
 
 .roster-filter-btn.active {
   background: rgba(200, 168, 78, 0.25);
-  color: #e8cc70;
-  border-color: #c8a84e;
+  color: var(--ff-gold-bright);
+  border-color: var(--ff-gold);
 }
 
 /* ============================================
@@ -115,7 +115,7 @@
   position: absolute;
   width: 8px;
   height: 8px;
-  border-color: #c8a84e;
+  border-color: var(--ff-gold);
   opacity: 0.5;
   transition: opacity 0.2s;
 }
@@ -136,7 +136,7 @@
 
 .roster-card:hover {
   background: #122040;
-  border-color: #c8a84e;
+  border-color: var(--ff-gold);
   box-shadow: 0 0 12px rgba(212, 169, 75, 0.1);
 }
 
@@ -177,7 +177,7 @@
 
 .roster-card__name {
   font-size: 15px;
-  color: #e8cc70;
+  color: var(--ff-gold-bright);
   font-weight: 600;
   letter-spacing: 0.3px;
 }
@@ -231,7 +231,7 @@
 
 .roster-badge--idle {
   background: rgba(212, 169, 75, 0.1);
-  color: #c8a84e;
+  color: var(--ff-gold);
   border: 1px solid rgba(212, 169, 75, 0.2);
 }
 
@@ -333,7 +333,7 @@
 .situation-reasons-collapse__summary {
   cursor: pointer;
   font-size: 11px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--text-muted, var(--text-slate));
   padding: 4px var(--space-md, 16px);
   letter-spacing: 0.04em;
 }
@@ -362,7 +362,7 @@
 }
 
 .situation-reason--warn {
-  color: #c8a84e;
+  color: var(--ff-gold);
 }
 
 .situation-reason__tag {
@@ -389,7 +389,7 @@
 /* Attention badge — gold warning */
 .attention-badge {
   background: rgba(212, 169, 75, 0.15);
-  color: #c8a84e;
+  color: var(--ff-gold);
   border: 1px solid rgba(212, 169, 75, 0.3);
   border-radius: 3px;
   padding: 2px 8px;

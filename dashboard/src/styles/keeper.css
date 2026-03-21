@@ -44,7 +44,7 @@
 }
 .keeper-kpi-label { font-size: 10px; text-transform: uppercase; color: var(--text-dim); letter-spacing: 1px; }
 .keeper-kpi-value { font-size: 22px; font-weight: bold; color: var(--ok); margin-top: 4px; }
-.keeper-kpi-hint { font-size: 10px; color: #666; margin-top: 2px; }
+.keeper-kpi-hint { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
 
 /* Keeper Chart */
 

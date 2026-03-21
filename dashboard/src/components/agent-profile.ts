@@ -27,11 +27,9 @@ import {
   type AgentTimelineResponse,
   type AgentRelationsResponse,
 } from '../api'
-import { journal } from '../sse'
 import { missionSnapshot } from '../mission-store'
 import { navigate } from '../router'
 import { formatDuration } from './mission-utils'
-import type { JournalEntry } from '../types'
 import type {
   Agent,
   DashboardExecutionContinuityBrief,
@@ -39,6 +37,8 @@ import type {
   Keeper,
   Task,
 } from '../types'
+import { AgentRuntimeStrip } from './agent-monitor/runtime-strip'
+import { AgentLiveTimeline } from './agent-monitor/live-timeline'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
@@ -81,17 +81,6 @@ function continuityBrief(name: string): DashboardExecutionContinuityBrief | null
 
 function workerBrief(name: string) {
   return executionWorkerSupportBriefs.value.find(w => w.name === name) ?? null
-}
-
-function agentJournalEntries(name: string): JournalEntry[] {
-  const lower = name.toLowerCase()
-  return journal.value
-    .filter((e: JournalEntry) => {
-      const text = e.text.toLowerCase()
-      const agent = e.agent.toLowerCase()
-      return agent === lower || text.includes(lower) || text.includes(`@${lower}`)
-    })
-    .slice(0, 15)
 }
 
 function compactCopy(value: string | null | undefined, max = 160): string | null {
@@ -180,13 +169,6 @@ function timelineEventLabel(type: string): string {
     case 'broadcast': return '방송'
     default: return type
   }
-}
-
-function journalKindIcon(entry: JournalEntry): string {
-  if (entry.kind === 'board') return 'B'
-  if (entry.kind === 'tasks') return 'T'
-  if (entry.kind === 'keepers') return 'K'
-  return 'S'
 }
 
 // --- FF Character Plate ---
@@ -324,7 +306,6 @@ export function AgentProfile({ name }: { name: string }) {
   const owned = assignedTasks(name)
   const lines = roomActivity.value
   const timeline = agentTimeline.value
-  const journalEntries = agentJournalEntries(name)
 
   return html`
     <div class="ff-profile">
@@ -338,6 +319,8 @@ export function AgentProfile({ name }: { name: string }) {
       ${profileError.value ? html`<div class="council-error">${profileError.value}</div>` : null}
 
       <${CharacterPlate} name=${name} />
+
+      <${AgentRuntimeStrip} name=${name} />
 
       <div class="ff-profile__grid">
         <${Card} title="태스크 (${owned.length})" class="ff-card">
@@ -404,17 +387,8 @@ export function AgentProfile({ name }: { name: string }) {
               })}</div>`}
         <//>
 
-        <${Card} title="실시간 (${journalEntries.length})" class="ff-card">
-          ${journalEntries.length === 0
-            ? html`<div class="empty-state">이벤트 없음</div>`
-            : html`<div class="agent-journal-stream">${journalEntries.map((entry: JournalEntry, idx: number) => html`
-                <div class="agent-journal-entry" key=${idx}>
-                  <span class="agent-journal-kind">${journalKindIcon(entry)}</span>
-                  <span class="agent-journal-type">${entry.eventType}</span>
-                  <span class="agent-journal-text">${compactCopy(entry.text, 120) ?? ''}</span>
-                  ${entry.timestamp ? html`<${TimeAgo} timestamp=${entry.timestamp} />` : null}
-                </div>
-              `)}</div>`}
+        <${Card} title="실시간" class="ff-card">
+          <${AgentLiveTimeline} name=${name} />
         <//>
 
         <${Card} title="Room 활동" class="ff-card">

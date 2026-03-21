@@ -40,6 +40,7 @@ import type {
 import { AgentRuntimeStrip } from './agent-monitor/runtime-strip'
 import { AgentLiveTimeline } from './agent-monitor/live-timeline'
 import { AutonomyMeter } from './keeper-detail-panels'
+import { KeeperChatPanel } from './keeper-chat-panel'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
@@ -441,25 +442,29 @@ export function AgentProfile({ name }: { name: string }) {
         ` : null}
       </div>
 
-      <div class="ff-profile__mention">
-        <span class="ff-profile__mention-label">@${name}</span>
-        <input
-          class="control-input"
-          type="text"
-          placeholder="메시지 입력..."
-          value=${mentionText.value}
-          onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
-          onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention(name) }}
-          disabled=${sendingMention.value}
-        />
-        <button
-          class="control-btn"
-          onClick=${() => { void submitMention(name) }}
-          disabled=${sendingMention.value || mentionText.value.trim() === ''}
-        >
-          ${sendingMention.value ? '...' : '전송'}
-        </button>
-      </div>
+      ${isKeeper ? html`
+        <${KeeperChatPanel} name=${name} />
+      ` : html`
+        <div class="ff-profile__mention">
+          <span class="ff-profile__mention-label">@${name}</span>
+          <input
+            class="control-input"
+            type="text"
+            placeholder="메시지 입력..."
+            value=${mentionText.value}
+            onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
+            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention(name) }}
+            disabled=${sendingMention.value}
+          />
+          <button
+            class="control-btn"
+            onClick=${() => { void submitMention(name) }}
+            disabled=${sendingMention.value || mentionText.value.trim() === ''}
+          >
+            ${sendingMention.value ? '...' : '전송'}
+          </button>
+        </div>
+      `}
     </div>
   `
 }

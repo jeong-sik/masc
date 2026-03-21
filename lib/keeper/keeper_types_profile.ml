@@ -189,6 +189,7 @@ let canonical_policy_action_budget = function
 
 let canonical_policy_shell_mode = function
   | "readonly" -> "readonly"
+  | "sandboxed" -> "sandboxed"
   | _ -> "disabled"
 
 let canonical_initiative_scope = function

@@ -227,21 +227,21 @@ let with_file_lock config path f =
   | Some key ->
       let owner = config.backend_config.node_id in
       let ttl_seconds = config.lock_expiry_minutes * 60 in
-      let rec acquire attempts =
+      let rec acquire attempts delay =
         if attempts <= 0 then false
         else
           match backend_acquire_lock config ~key ~ttl_seconds ~owner with
           | Ok true -> true
           | _ ->
-              Time_compat.sleep 0.05;
-              acquire (attempts - 1)
+              Unix.sleepf delay;
+              acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
       in
-      if acquire 100 then
+      if acquire 20 0.005 then
         Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
           ~finally:(fun () -> ignore (backend_release_lock config ~key ~owner))
           f
       else
-        invalid_arg (Printf.sprintf "Failed to acquire distributed lock for key: %s (100 attempts exhausted)" key)
+        invalid_arg (Printf.sprintf "Failed to acquire distributed lock for key: %s (20 attempts exhausted)" key)
 
 let with_file_lock_r config path f : ('a, masc_error) result =
   match key_of_path config path with
@@ -251,14 +251,14 @@ let with_file_lock_r config path f : ('a, masc_error) result =
   | Some key ->
       let owner = config.backend_config.node_id in
       let ttl_seconds = config.lock_expiry_minutes * 60 in
-      let rec acquire attempts =
+      let rec acquire attempts delay =
         if attempts <= 0 then false
         else
           match backend_acquire_lock config ~key ~ttl_seconds ~owner with
           | Ok true -> true
-          | _ -> Time_compat.sleep 0.05; acquire (attempts - 1)
+          | _ -> Unix.sleepf delay; acquire (attempts - 1) (Float.min 0.05 (delay *. 2.0))
       in
-      if acquire 100 then
+      if acquire 20 0.005 then
         Common.protect ~module_name:"room_utils" ~finally_label:"finalizer"
           ~finally:(fun () -> ignore (backend_release_lock config ~key ~owner))
           (fun () -> Ok (f ()))

@@ -120,16 +120,30 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     offline: agentList.filter((a: Agent) => statusCategory(a.status) === 'offline').length,
   }
 
+  const title =
+    keeperFilter === 'keeper-only'
+      ? '키퍼 목록'
+      : keeperFilter === 'agent-only'
+        ? '에이전트 목록'
+        : '에이전트 목록'
+
+  const subtitle =
+    keeperFilter === 'keeper-only'
+      ? '지속 런타임이 붙은 키퍼만 보여줍니다.'
+      : keeperFilter === 'agent-only'
+        ? '키퍼 런타임이 없는 일반 에이전트만 보여줍니다.'
+        : '등록된 에이전트와 키퍼 런타임 상태를 함께 봅니다.'
+
   return html`
     <div class="roster-page agent-page">
       <div class="roster-header">
-        <h2 class="roster-title">${keeperFilter === 'keeper-only' ? '키퍼' : keeperFilter === 'agent-only' ? '에이전트' : '에이전트'} (${filtered.length})</h2>
-        <p class="agent-page__subtitle">${keeperFilter === 'keeper-only' ? '키퍼 런타임이 있는 에이전트' : keeperFilter === 'agent-only' ? '키퍼 런타임이 없는 에이전트' : '등록된 에이전트 — keeper 런타임이 있으면 컨텍스트 게이지 표시'}</p>
+        <h2 class="roster-title">${title} (${filtered.length})</h2>
+        <p class="agent-page__subtitle">${subtitle}</p>
         <div class="roster-controls">
           <input
             type="text"
             class="roster-search"
-            placeholder="이름 검색..."
+            placeholder="에이전트 이름 검색"
             value=${search}
             onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
           />

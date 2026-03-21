@@ -1,5 +1,5 @@
-// Agent Profile — FF Character Sheet style full-page view.
-// Layout: character plate (portrait + identity + stats) -> detail grid -> history
+// Agent Profile — operator-focused full-page view.
+// Layout: summary plate -> detail grid -> history
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -189,7 +189,7 @@ function journalKindIcon(entry: JournalEntry): string {
   return 'S'
 }
 
-// --- FF Character Plate ---
+// --- Profile Summary Plate ---
 
 function CharacterPlate({ name }: { name: string }) {
   const agent = findAgent(name)
@@ -235,7 +235,7 @@ function CharacterPlate({ name }: { name: string }) {
           activityAge=${lastActivity}
           signalTruth=${signalTruth}
         />
-        ${isKeeper ? html`<div class="ff-plate__class-tag">KEEPER</div>` : null}
+        ${isKeeper ? html`<div class="ff-plate__class-tag">키퍼</div>` : null}
       </div>
 
       <div class="ff-plate__info">
@@ -245,7 +245,7 @@ function CharacterPlate({ name }: { name: string }) {
             ${displayName}
           </h2>
           ${koreanName ? html`<span class="ff-plate__sub">(${koreanName})</span>` : ''}
-          ${generation != null ? html`<span class="ff-plate__level">Lv.${generation}</span>` : null}
+          ${generation != null ? html`<span class="ff-plate__level">G${generation}</span>` : null}
         </div>
 
         <div class="ff-plate__badges">

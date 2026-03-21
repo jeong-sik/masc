@@ -498,7 +498,7 @@ button.council-row.selected {
   gap: 8px;
 }
 
-/* ── FF Character Sheet — Agent Profile ──────────────────── */
+/* ── Agent Profile ───────────────────────────────────────── */
 
 .ff-profile {
   padding: 0 4px;
@@ -507,10 +507,10 @@ button.council-row.selected {
 .ff-profile__toolbar {
   display: flex;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
-/* --- Character Plate (top section) --- */
+/* --- Profile Summary Plate --- */
 
 .ff-plate {
   display: grid;
@@ -518,17 +518,11 @@ button.council-row.selected {
   gap: 16px;
   padding: 18px;
   margin-bottom: 16px;
-  border-radius: 10px;
+  border-radius: 16px;
   background:
-    linear-gradient(
-      135deg,
-      rgba(10, 22, 40, 0.95) 0%,
-      rgba(16, 28, 52, 0.88) 100%
-    );
-  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.15));
-  box-shadow:
-    0 0 20px rgba(200, 168, 78, 0.04),
-    inset 0 1px 0 rgba(200, 168, 78, 0.08);
+    linear-gradient(180deg, rgba(24, 31, 44, 0.96), rgba(18, 23, 33, 0.92));
+  border: 1px solid var(--card-border);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.18);
 }
 
 .ff-plate__portrait {
@@ -539,10 +533,14 @@ button.council-row.selected {
 }
 
 .ff-plate__class-tag {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 1.5px;
-  color: var(--ff-gold-bright, #c8a84e);
+  letter-spacing: 0.08em;
+  color: #d8e3ff;
+  background: var(--accent-soft);
+  border: 1px solid rgba(122, 162, 255, 0.22);
+  border-radius: 999px;
+  padding: 2px 8px;
   text-transform: uppercase;
   text-align: center;
 }
@@ -564,10 +562,11 @@ button.council-row.selected {
 .ff-plate__name {
   margin: 0;
   font-size: 20px;
-  color: var(--ff-gold-bright, #c8a84e);
+  color: var(--text-strong);
   display: flex;
   align-items: center;
   gap: 6px;
+  letter-spacing: -0.02em;
 }
 
 .ff-plate__emoji {
@@ -576,17 +575,17 @@ button.council-row.selected {
 
 .ff-plate__sub {
   font-size: 13px;
-  color: #8ca8d5;
+  color: var(--text-muted);
 }
 
 .ff-plate__level {
   font-size: 14px;
   font-weight: 700;
-  color: var(--ff-crystal, #47b8ff);
-  background: rgba(71, 184, 255, 0.1);
-  border: 1px solid rgba(71, 184, 255, 0.25);
-  border-radius: 4px;
-  padding: 1px 6px;
+  color: #d8e3ff;
+  background: var(--accent-soft);
+  border: 1px solid rgba(122, 162, 255, 0.25);
+  border-radius: 999px;
+  padding: 2px 8px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -600,20 +599,20 @@ button.council-row.selected {
 .ff-plate__model {
   font-family: "IBM Plex Mono", monospace;
   font-size: 11px;
-  color: #8ca8d5;
-  background: rgba(71, 184, 255, 0.08);
-  border: 1px solid rgba(71, 184, 255, 0.15);
-  border-radius: 4px;
-  padding: 1px 5px;
+  color: #c4d3eb;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  padding: 2px 8px;
 }
 
 .ff-plate__autonomy {
   font-size: 11px;
-  color: var(--ff-gold-bright, #c8a84e);
-  background: rgba(200, 168, 78, 0.1);
-  border: 1px solid rgba(200, 168, 78, 0.2);
-  border-radius: 4px;
-  padding: 1px 5px;
+  color: #d8c79d;
+  background: rgba(216, 168, 91, 0.1);
+  border: 1px solid rgba(216, 168, 91, 0.18);
+  border-radius: 999px;
+  padding: 2px 8px;
 }
 
 .ff-plate__signal {
@@ -625,21 +624,21 @@ button.council-row.selected {
 }
 
 .ff-plate__signal--live {
-  color: var(--ff-hp-full, var(--ok));
+  color: var(--ok);
   background: rgba(74, 222, 128, 0.1);
   border: 1px solid rgba(74, 222, 128, 0.2);
 }
 
 .ff-plate__signal--stale {
-  color: var(--ff-gold-bright, #c8a84e);
-  background: rgba(200, 168, 78, 0.1);
-  border: 1px solid rgba(200, 168, 78, 0.2);
+  color: var(--warn);
+  background: rgba(216, 168, 91, 0.1);
+  border: 1px solid rgba(216, 168, 91, 0.2);
 }
 
 .ff-plate__signal--archived {
-  color: #8888;
-  background: rgba(128, 128, 128, 0.1);
-  border: 1px solid rgba(128, 128, 128, 0.15);
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 /* CTX bar row */
@@ -653,7 +652,7 @@ button.council-row.selected {
 .ff-plate__bar-label {
   font-size: 11px;
   font-weight: 700;
-  color: var(--ff-gold-bright, #c8a84e);
+  color: var(--text-muted);
   letter-spacing: 1px;
   width: 28px;
 }
@@ -676,25 +675,26 @@ button.council-row.selected {
 
 .ff-plate__work {
   font-size: 13px;
-  color: #c8daf7;
+  color: var(--text-body);
 }
 
 .ff-plate__work--idle {
-  color: #6b7fa0;
+  color: var(--text-muted);
   font-style: italic;
 }
 
 .ff-plate__worker-state {
   font-size: 11px;
-  color: var(--ff-crystal, #47b8ff);
-  background: rgba(71, 184, 255, 0.08);
-  padding: 1px 5px;
-  border-radius: 3px;
+  color: #d8e3ff;
+  background: var(--accent-soft);
+  border: 1px solid rgba(122, 162, 255, 0.18);
+  padding: 2px 8px;
+  border-radius: 999px;
 }
 
 .ff-plate__worker-focus {
   font-size: 11px;
-  color: #9ab3de;
+  color: var(--text-muted);
 }
 
 .ff-plate__meta-line {
@@ -702,7 +702,7 @@ button.council-row.selected {
   gap: 10px;
   flex-wrap: wrap;
   font-size: 12px;
-  color: #8ca8d5;
+  color: var(--text-muted);
 }
 
 /* Stats panel (right side) */
@@ -718,10 +718,10 @@ button.council-row.selected {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(200, 168, 78, 0.05);
-  border: 1px solid rgba(200, 168, 78, 0.1);
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--card-border);
 }
 
 .ff-stat__value {
@@ -733,7 +733,7 @@ button.council-row.selected {
 
 .ff-stat__label {
   font-size: 10px;
-  color: var(--ff-gold-bright, #c8a84e);
+  color: var(--text-muted);
   letter-spacing: 0.5px;
 }
 
@@ -750,35 +750,33 @@ button.council-row.selected {
   grid-column: 1 / -1;
 }
 
-/* Timeline events - compact FF style */
 .ff-event-type {
   font-size: 11px;
   font-weight: 600;
-  color: var(--ff-gold-bright, #c8a84e);
+  color: #d8e3ff;
   min-width: 32px;
 }
 
 .ff-event-detail {
   flex: 1;
   font-size: 12px;
-  color: #c8daf7;
+  color: var(--text-body);
 }
 
-/* Mention bar */
 .ff-profile__mention {
   display: flex;
   gap: 8px;
   align-items: center;
   padding: 10px 14px;
-  border-radius: 8px;
-  background: rgba(10, 22, 40, 0.8);
-  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.15));
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
 }
 
 .ff-profile__mention-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--ff-gold-bright, #c8a84e);
+  color: var(--text-strong);
   white-space: nowrap;
 }
 
@@ -816,35 +814,35 @@ button.council-row.selected {
 }
 
 .ff-relation-row:hover {
-  background: rgba(255, 215, 0, 0.08);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .ff-relation-name {
-  color: #c8a84e;
+  color: var(--text-strong);
   font-weight: 600;
   font-size: 13px;
   flex: 1;
 }
 
 .ff-relation-count {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--text-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .ff-relation-time {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
 .ff-interests {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--card-border);
   padding-top: 8px;
 }
 
 .ff-interests-label {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -857,12 +855,12 @@ button.council-row.selected {
 }
 
 .ff-interest-tag {
-  background: rgba(255, 215, 0, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-body);
   padding: 2px 8px;
-  border-radius: 3px;
+  border-radius: 999px;
   font-size: 11px;
-  border: 1px solid rgba(255, 215, 0, 0.15);
+  border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 /* ── Keeper Rich Card (Overview) ──────────────────────────── */

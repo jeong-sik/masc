@@ -1,14 +1,9 @@
-/* MASC Dashboard — Roster Pages (FF Character Sheet Theme) */
-
-/* ============================================
-   Roster Page — Full-page entity list
-   FF-inspired: navy panels, gold borders,
-   ornamental corners, RPG stat blocks
-   ============================================ */
+/* MASC Dashboard — Roster Pages */
+/* Full-page entity list for operators. */
 
 .roster-page {
   padding: var(--space-lg, 24px);
-  max-width: 960px;
+  max-width: 1040px;
 }
 
 .roster-header {
@@ -16,18 +11,17 @@
 }
 
 .roster-title {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
-  color: var(--ff-gold-bright, var(--ff-gold-bright));
+  color: var(--text-strong);
   margin: 0 0 var(--space-md, 16px) 0;
-  letter-spacing: 0.5px;
-  text-shadow: 0 1px 4px rgba(212, 169, 75, 0.2);
+  letter-spacing: -0.02em;
 }
 
 .agent-page__subtitle {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.3);
-  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 6px;
 }
 
 .roster-controls {
@@ -38,24 +32,25 @@
 }
 
 .roster-search {
-  padding: 6px 12px;
-  border-radius: 4px;
-  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-  background: var(--ff-navy, #0a1628);
-  color: rgba(255, 255, 255, 0.9);
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--card-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-body);
   font-size: 13px;
-  width: 200px;
-  transition: border-color 0.2s;
+  width: 240px;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
 
 .roster-search:focus {
   outline: none;
-  border-color: var(--ff-gold, var(--ff-gold));
-  box-shadow: 0 0 0 2px var(--ff-gold-dim, var(--ff-gold-dim));
+  border-color: rgba(122, 162, 255, 0.42);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: 0 0 0 3px rgba(122, 162, 255, 0.12);
 }
 
 .roster-search::placeholder {
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--text-muted);
 }
 
 .roster-filters {
@@ -64,31 +59,27 @@
 }
 
 .roster-filter-btn {
-  padding: 4px 10px;
-  border-radius: 3px;
-  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-  background: transparent;
-  color: rgba(255, 255, 255, 0.45);
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--card-border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
 .roster-filter-btn:hover {
-  background: var(--ff-gold-dim, var(--ff-gold-dim));
-  color: var(--ff-gold-bright, var(--ff-gold-bright));
-  border-color: var(--ff-border, var(--ff-border));
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-strong);
+  border-color: rgba(148, 163, 184, 0.28);
 }
 
 .roster-filter-btn.active {
-  background: var(--ff-gold-dim, var(--ff-gold-dim));
-  color: var(--ff-gold-bright, var(--ff-gold-bright));
-  border-color: var(--ff-gold, var(--ff-gold));
+  background: var(--accent-soft);
+  color: #d8e3ff;
+  border-color: rgba(122, 162, 255, 0.35);
 }
-
-/* ============================================
-   Roster Cards — FF Character Sheet style
-   ============================================ */
 
 .roster-list {
   display: flex;
@@ -99,53 +90,23 @@
 .roster-card {
   display: flex;
   gap: var(--space-md, 16px);
-  padding: 16px 20px;
-  background: var(--ff-panel, rgba(10, 22, 40, 0.92));
-  border: 1px solid var(--ff-border, var(--ff-border));
-  border-radius: 6px;
+  padding: 18px 20px;
+  background:
+    linear-gradient(180deg, rgba(24, 31, 44, 0.94), rgba(18, 24, 35, 0.92));
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
   cursor: pointer;
-  transition: all 0.2s;
-  position: relative;
-}
-
-/* FF corner ornaments */
-.roster-card::before,
-.roster-card::after {
-  content: '';
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  border-color: var(--ff-gold, var(--ff-gold));
-  opacity: 0.5;
-  transition: opacity 0.2s;
-}
-
-.roster-card::before {
-  top: -1px;
-  left: -1px;
-  border-top: 2px solid;
-  border-left: 2px solid;
-}
-
-.roster-card::after {
-  bottom: -1px;
-  right: -1px;
-  border-bottom: 2px solid;
-  border-right: 2px solid;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 
 .roster-card:hover {
-  background: var(--ff-navy-light, #122040);
-  border-color: var(--ff-gold, var(--ff-gold));
-  box-shadow: 0 0 12px rgba(212, 169, 75, 0.1);
+  transform: translateY(-1px);
+  background:
+    linear-gradient(180deg, rgba(28, 36, 51, 0.96), rgba(20, 27, 38, 0.94));
+  border-color: rgba(148, 163, 184, 0.28);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.2);
 }
 
-.roster-card:hover::before,
-.roster-card:hover::after {
-  opacity: 1;
-}
-
-/* Avatar frame — pixel art portrait */
 .roster-card__avatar {
   flex-shrink: 0;
   position: relative;
@@ -155,7 +116,7 @@
   content: '';
   position: absolute;
   inset: -3px;
-  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
+  border: 1px solid rgba(148, 163, 184, 0.2);
   border-radius: 14px;
   pointer-events: none;
 }
@@ -173,25 +134,26 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm, 8px);
+  flex-wrap: wrap;
 }
 
 .roster-card__name {
   font-size: 15px;
-  color: var(--ff-gold-bright, var(--ff-gold-bright));
+  color: var(--text-strong);
   font-weight: 600;
-  letter-spacing: 0.3px;
+  letter-spacing: -0.01em;
 }
 
 .roster-card__work {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-body);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .roster-card__work--empty {
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -199,96 +161,83 @@
   display: flex;
   gap: var(--space-sm, 8px);
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-muted);
+  flex-wrap: wrap;
 }
 
 .roster-card__model {
-  padding: 1px 6px;
-  background: rgba(212, 169, 75, 0.08);
-  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-  border-radius: 3px;
-  color: rgba(212, 169, 75, 0.6);
+  padding: 2px 7px;
+  background: rgba(122, 162, 255, 0.08);
+  border: 1px solid rgba(122, 162, 255, 0.18);
+  border-radius: 999px;
+  color: #b9ceff;
 }
-
-/* ============================================
-   Status Badges — RPG class labels
-   ============================================ */
 
 .roster-badge {
   font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 3px;
+  padding: 3px 8px;
+  border-radius: 999px;
   font-weight: 600;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
 .roster-badge--active {
   background: rgba(61, 204, 94, 0.12);
-  color: var(--ff-hp-full, var(--ok));
+  color: var(--ok);
   border: 1px solid rgba(61, 204, 94, 0.25);
 }
 
 .roster-badge--idle {
-  background: rgba(212, 169, 75, 0.1);
-  color: var(--ff-xp, var(--ff-gold));
-  border: 1px solid rgba(212, 169, 75, 0.2);
+  background: rgba(148, 163, 184, 0.1);
+  color: #c7d1df;
+  border: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .roster-badge--offline {
-  background: rgba(100, 100, 120, 0.1);
-  color: #667;
-  border: 1px solid rgba(100, 100, 120, 0.15);
+  background: rgba(100, 116, 139, 0.1);
+  color: #7f8ea3;
+  border: 1px solid rgba(100, 116, 139, 0.18);
 }
 
 .roster-empty {
   padding: var(--space-xl, 32px);
   text-align: center;
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--text-muted);
   font-size: 14px;
-  border: 1px dashed var(--ff-border-subtle, var(--ff-border-subtle));
-  border-radius: 6px;
+  border: 1px dashed rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
-/* ============================================
-   Keeper inline variant — blue accent on agent card
-   Agent with keeper runtime gets visual distinction
-   ============================================ */
-
 .roster-card--keeper {
-  border-left: 3px solid #4a9ef5;
-  border-color: rgba(74, 158, 245, 0.25);
+  border-left: 3px solid var(--accent);
+  border-color: rgba(122, 162, 255, 0.28);
 }
 
 .roster-card--keeper:hover {
-  border-color: rgba(74, 158, 245, 0.4);
-  box-shadow: 0 0 12px rgba(74, 158, 245, 0.08);
-}
-
-.roster-card--keeper::before,
-.roster-card--keeper::after {
-  border-color: #4a9ef5;
+  border-color: rgba(122, 162, 255, 0.4);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.22);
 }
 
 .roster-card__keeper-tag {
-  font-size: 9px;
-  padding: 1px 6px;
-  border-radius: 2px;
-  background: rgba(74, 158, 245, 0.12);
-  color: #4a9ef5;
-  border: 1px solid rgba(74, 158, 245, 0.25);
-  text-transform: uppercase;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: #d8e3ff;
+  border: 1px solid rgba(122, 162, 255, 0.22);
   letter-spacing: 0.5px;
   font-weight: 700;
 }
 
 .roster-card__gen {
   font-size: 10px;
-  padding: 2px 7px;
-  border-radius: 3px;
-  background: rgba(74, 158, 245, 0.12);
-  color: #4a9ef5;
-  border: 1px solid rgba(74, 158, 245, 0.2);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-body);
+  border: 1px solid var(--card-border);
   font-weight: 700;
   letter-spacing: 0.5px;
 }
@@ -303,21 +252,21 @@
 .roster-card__gauge-track {
   flex: 1;
   height: 8px;
-  background: var(--white-3);
-  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
   overflow: hidden;
-  border: 1px solid rgba(74, 158, 245, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .roster-card__gauge-bar {
   height: 100%;
-  border-radius: 1px;
+  border-radius: 999px;
   transition: width 0.3s ease;
 }
 
 .roster-card__gauge-label {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-muted);
   white-space: nowrap;
   min-width: 50px;
   font-variant-numeric: tabular-nums;
@@ -338,7 +287,7 @@
   letter-spacing: 0.04em;
 }
 .situation-reasons-collapse__summary:hover {
-  color: var(--text-primary, #e2e8f0);
+  color: var(--text-strong);
 }
 
 .situation-reasons {
@@ -346,7 +295,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 6px var(--space-md, 16px);
-  border-left: 2px solid var(--ff-border, var(--ff-border));
+  border-left: 2px solid rgba(122, 162, 255, 0.2);
 }
 
 .situation-reason {
@@ -354,7 +303,7 @@
   align-items: center;
   gap: var(--space-sm, 8px);
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--text-body);
 }
 
 .situation-reason--bad {
@@ -362,15 +311,15 @@
 }
 
 .situation-reason--warn {
-  color: var(--ff-gold, var(--ff-gold));
+  color: var(--warn);
 }
 
 .situation-reason__tag {
   font-size: 9px;
   padding: 1px 6px;
-  border-radius: 2px;
-  background: rgba(212, 169, 75, 0.08);
-  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(148, 163, 184, 0.18);
   white-space: nowrap;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -386,31 +335,28 @@
 /* ============================================
    Overview Enhancements
    ============================================ */
-/* Attention badge — gold warning */
 .attention-badge {
-  background: rgba(212, 169, 75, 0.15);
-  color: var(--ff-gold, var(--ff-gold));
-  border: 1px solid rgba(212, 169, 75, 0.3);
-  border-radius: 3px;
+  background: rgba(216, 168, 91, 0.16);
+  color: #f0ca87;
+  border: 1px solid rgba(216, 168, 91, 0.28);
+  border-radius: 999px;
   padding: 2px 8px;
   font-weight: 600;
   font-size: 11px;
 }
 
-/* Session triage additions */
-/* Pressure bar colors — FF HP gradient */
 .pressure--ok {
-  background: linear-gradient(90deg, #1a9c3a, #3dcc5e);
+  background: #59c08e;
 }
 
 .pressure--amber {
-  background: linear-gradient(90deg, #c98a0a, #f5c542);
+  background: #d8a85b;
 }
 
 .pressure--orange {
-  background: linear-gradient(90deg, #c65d0a, #f97316);
+  background: #ef9f63;
 }
 
 .pressure--red {
-  background: linear-gradient(90deg, #b91c1c, var(--bad));
+  background: #e07a7a;
 }

@@ -89,11 +89,15 @@ let read_file_safe path =
         (fun () -> really_input_string ic (in_channel_length ic))
     in
     Ok content
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 let list_dir_safe dir =
   try Ok (Array.to_list (Sys.readdir dir))
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 let consensus_dir base =
   Filename.concat (Filename.concat base ".masc") "consensus"
@@ -213,7 +217,9 @@ let vote_of_yojson (json : Yojson.Safe.t) : (vote, string) result =
           | _ -> None
         in
         Ok { agent; decision; reason; timestamp; archetype; weight }
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Failed to parse vote: %s" (Printexc.to_string e))
 
 let full_session_to_yojson (s : session) : Yojson.Safe.t =
@@ -271,7 +277,9 @@ let full_session_of_yojson (json : Yojson.Safe.t) : (session, string) result =
                | _ -> empty_context_ref
              in
              Ok { id; topic; initiator; votes; quorum; threshold; state; created_at; closed_at; context })
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Failed to parse session: %s" (Printexc.to_string e))
 
 (** Save session to disk (write-through) *)

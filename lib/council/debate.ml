@@ -48,15 +48,21 @@ let read_file_safe path =
         (fun () -> really_input_string ic (in_channel_length ic))
     in
     Ok content
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 let parse_json_safe ~context:_ content =
   try Ok (Yojson.Safe.from_string content)
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 let list_dir_safe dir =
   try Ok (Array.to_list (Sys.readdir dir))
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** {1 ID Generation} *)
 
@@ -178,8 +184,9 @@ let argument_of_yojson (json : Yojson.Safe.t) : (argument, string) result =
           | _ -> None
         in
         Ok { agent; position; content; evidence; reply_to; mentions; archetype; created_at }
-  with e ->
-    Error (Printf.sprintf "Failed to parse argument: %s" (Printexc.to_string e))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printf.sprintf "Failed to parse argument: %s" (Printexc.to_string e))
 
 let debate_to_yojson (d : debate) : Yojson.Safe.t =
   let base =
@@ -234,8 +241,9 @@ let debate_of_yojson (json : Yojson.Safe.t) : (debate, string) result =
                | _ -> None
              in
              Ok { id; topic; status; arguments; context; created_at; closed_at })
-  with e ->
-    Error (Printf.sprintf "Failed to parse debate: %s" (Printexc.to_string e))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printf.sprintf "Failed to parse debate: %s" (Printexc.to_string e))
 
 (** {1 Storage Operations} *)
 
@@ -315,8 +323,9 @@ let start_debate config ~topic ?(context = empty_context_ref) ?(notify_agents=[]
       notify_fn ~agent ~message:msg
     ) notify_agents;
     Ok debate
-  with e ->
-    Error (Printf.sprintf "Failed to start debate: %s" (Printexc.to_string e))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printf.sprintf "Failed to start debate: %s" (Printexc.to_string e))
 
 (** Get a debate by ID *)
 let get_debate config ~debate_id : (debate, string) result =
@@ -378,8 +387,9 @@ let add_argument config ~debate_id ~agent ~position ~content
           (* Return with arg index for reference *)
           Printf.eprintf "[Debate] Argument #%d added by %s\n%!" arg_idx agent;
           Ok updated
-        with e ->
-          Error (Printf.sprintf "Failed to add argument: %s" (Printexc.to_string e))
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | e -> Error (Printf.sprintf "Failed to add argument: %s" (Printexc.to_string e))
       end
 
 (** Get the current status of a debate with summary *)
@@ -418,8 +428,9 @@ let close_debate config ~debate_id : (debate, string) result =
         try
           save_debate config updated;
           Ok updated
-        with e ->
-          Error (Printf.sprintf "Failed to close debate: %s" (Printexc.to_string e))
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | e -> Error (Printf.sprintf "Failed to close debate: %s" (Printexc.to_string e))
       end
 
 (** List all debates *)

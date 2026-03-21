@@ -21,15 +21,21 @@ let read_file_safe path =
         (fun () -> really_input_string ic (in_channel_length ic))
     in
     Ok content
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 let parse_json_safe ~context content =
   try Ok (Yojson.Safe.from_string content)
-  with e -> Error (Printf.sprintf "%s: %s" context (Printexc.to_string e))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printf.sprintf "%s: %s" context (Printexc.to_string e))
 
 let list_dir_safe dir =
   try Ok (Array.to_list (Sys.readdir dir))
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 let rec ensure_dir path =
   if not (Sys.file_exists path) then (

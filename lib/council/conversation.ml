@@ -67,15 +67,21 @@ let read_file_safe path =
         (fun () -> really_input_string ic (in_channel_length ic))
     in
     Ok content
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 let parse_json_safe content =
   try Ok (Yojson.Safe.from_string content)
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 let list_dir_safe dir =
   try Ok (Array.to_list (Sys.readdir dir))
-  with e -> Error (Printexc.to_string e)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** {1 Directory Management} *)
 
@@ -175,7 +181,9 @@ let turn_of_yojson (json : Yojson.Safe.t) : (turn, string) result =
     | Ok turn_type ->
         Ok { id; seq; speaker; content; turn_type; created_at; confidence; reply_to; mentions }
     | Error e -> Error e
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Failed to parse turn: %s" (Printexc.to_string e))
 
 let thread_to_yojson (th : thread) : Yojson.Safe.t =
@@ -243,7 +251,9 @@ let thread_of_yojson (json : Yojson.Safe.t) : (thread, string) result =
         | Ok turns ->
             Ok { id; topic; room; status; turns; participants; started_at;
                  concluded_at; conclusion; max_turns; current_turn; floor_holder; source_post_id }
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Failed to parse thread: %s" (Printexc.to_string e))
 
 (** {1 File I/O - Atomic writes} *)
@@ -361,7 +371,9 @@ let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "")
   try
     save_thread config th;
     Ok th
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "Failed to start thread: %s" (Printexc.to_string e))
 
 let get ~config ~thread_id : thread option =
@@ -412,7 +424,9 @@ let reply ~config ~thread_id ~speaker ~content
         try
           save_thread config updated;
           Ok updated
-        with e ->
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | e ->
           Error (Printf.sprintf "Failed to save reply: %s" (Printexc.to_string e))
       end
 
@@ -458,7 +472,9 @@ let conclude ~config ~thread_id ~concluder ~conclusion () : (thread, string) res
         try
           save_thread config updated;
           Ok updated
-        with e ->
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | e ->
           Error (Printf.sprintf "Failed to conclude thread: %s" (Printexc.to_string e))
       end
 

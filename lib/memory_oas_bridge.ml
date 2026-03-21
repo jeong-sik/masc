@@ -118,25 +118,175 @@ let seed_memory_bank ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(lim
   0
 
 (* ================================================================ *)
-(* Episodic tier: no-op (Memory_stream removed)                      *)
+(* Episodic tier: Institution_eio JSONL <-> OAS episodes            *)
 (* ================================================================ *)
+
+let default_episode_salience (episode : Institution_eio.episode) =
+  let base =
+    match episode.outcome with
+    | `Success -> 0.75
+    | `Failure -> 0.95
+    | `Partial -> 0.6
+  in
+  let learning_bonus =
+    min 0.15 (float_of_int (List.length episode.learnings) *. 0.03)
+  in
+  Float.min 1.0 (base +. learning_bonus)
+
+let oas_outcome_of_institution (episode : Institution_eio.episode) =
+  match episode.outcome with
+  | `Success -> Agent_sdk.Memory.Success episode.summary
+  | `Failure -> Agent_sdk.Memory.Failure episode.summary
+  | `Partial -> Agent_sdk.Memory.Neutral
+
+let metadata_string key metadata =
+  match List.assoc_opt key metadata with
+  | Some (`String value) when String.trim value <> "" -> Some value
+  | _ -> None
+
+let metadata_string_list key metadata =
+  match List.assoc_opt key metadata with
+  | Some (`List values) ->
+      values
+      |> List.filter_map (function
+           | `String value when String.trim value <> "" -> Some value
+           | _ -> None)
+  | _ -> []
+
+let metadata_context key metadata =
+  match List.assoc_opt key metadata with
+  | Some (`Assoc fields) ->
+      fields
+      |> List.filter_map (function
+           | k, `String value -> Some (k, value)
+           | _ -> None)
+  | _ -> []
+
+let metadata_float key metadata =
+  match List.assoc_opt key metadata with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (float_of_int value)
+  | Some (`Intlit value) -> Some (float_of_string value)
+  | _ -> None
+
+let institution_outcome_to_string = function
+  | `Success -> "success"
+  | `Failure -> "failure"
+  | `Partial -> "partial"
+
+let institution_outcome_of_string = function
+  | "success" -> Some `Success
+  | "failure" -> Some `Failure
+  | "partial" -> Some `Partial
+  | _ -> None
+
+let oas_episode_of_institution (episode : Institution_eio.episode) :
+    Agent_sdk.Memory.episode =
+  {
+    id = episode.id;
+    timestamp = episode.timestamp;
+    participants = episode.participants;
+    action = episode.summary;
+    outcome = oas_outcome_of_institution episode;
+    salience = default_episode_salience episode;
+    metadata =
+      [
+        ("event_type", `String episode.event_type);
+        ("institution_summary", `String episode.summary);
+        ( "institution_outcome",
+          `String (institution_outcome_to_string episode.outcome) );
+        ( "learnings",
+          `List (List.map (fun learning -> `String learning) episode.learnings)
+        );
+        ( "context",
+          `Assoc
+            (List.map (fun (key, value) -> (key, `String value)) episode.context)
+        );
+        ("source", `String "institution_jsonl");
+      ];
+  }
+
+let institution_episode_of_oas ~(agent_name : string)
+    (episode : Agent_sdk.Memory.episode) : Institution_eio.episode =
+  let summary =
+    metadata_string "institution_summary" episode.metadata
+    |> Option.value ~default:episode.action
+  in
+  let event_type =
+    metadata_string "event_type" episode.metadata
+    |> Option.value ~default:"oas_memory"
+  in
+  let learnings = metadata_string_list "learnings" episode.metadata in
+  let context = metadata_context "context" episode.metadata in
+  let outcome =
+    match
+      Option.bind
+        (metadata_string "institution_outcome" episode.metadata)
+        institution_outcome_of_string
+    with
+    | Some preserved -> preserved
+    | None -> (
+        match episode.outcome with
+        | Agent_sdk.Memory.Success _ -> `Success
+        | Agent_sdk.Memory.Failure _ -> `Failure
+        | Agent_sdk.Memory.Neutral -> `Partial)
+  in
+  let participants =
+    if episode.participants <> [] then episode.participants
+    else [ agent_name ]
+  in
+  {
+    Institution_eio.id = episode.id;
+    timestamp =
+      metadata_float "timestamp" episode.metadata
+      |> Option.value ~default:episode.timestamp;
+    participants;
+    event_type;
+    summary;
+    outcome;
+    learnings;
+    context;
+  }
+
+let persisted_episode_ids () =
+  Institution_eio.load_recent_episodes_jsonl ~limit:max_int
+  |> List.fold_left
+       (fun seen (episode : Institution_eio.episode) ->
+         if List.mem episode.id seen then seen else episode.id :: seen)
+       []
 
 (** Pre-seed the Episodic tier.
 
-    No-op: Memory_stream has been removed.
-    Returns 0 (no episodes seeded). *)
+    Loads recent institution episodes from JSONL and projects them into
+    OAS episodic memory. *)
 let seed_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
     ~(limit : int) : int =
-  ignore (memory, agent_name, limit);
-  0
+  ignore agent_name;
+  let episodes = Institution_eio.load_recent_episodes_jsonl ~limit in
+  List.iter
+    (fun episode ->
+      Agent_sdk.Memory.store_episode memory (oas_episode_of_institution episode))
+    episodes;
+  List.length episodes
 
 (** Flush new OAS episodes.
 
-    No-op: Memory_stream has been removed.
-    Returns 0 (no episodes flushed). *)
+    Appends newly created OAS episodes to the institution JSONL store,
+    preserving IDs and institution metadata when present. *)
 let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
-  ignore (memory, agent_name);
-  0
+  let persisted_ids = persisted_episode_ids () in
+  let path = Institution_eio.episodes_jsonl_path () in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Agent_sdk.Memory.recall_episodes memory ~limit:max_int ()
+  |> List.fold_left
+       (fun flushed (episode : Agent_sdk.Memory.episode) ->
+         if List.mem episode.id persisted_ids then flushed
+         else (
+           Fs_compat.append_jsonl path
+             (Institution_eio.episode_to_json
+                (institution_episode_of_oas ~agent_name episode));
+           flushed + 1))
+       0
 
 (* ================================================================ *)
 (* Procedural tier: Procedural_memory <-> OAS procedures            *)
@@ -236,21 +386,23 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
 
     Seeds:
     - Long_term: PostgreSQL via [Memory_pg] when available, no-op stubs otherwise
-    - Episodic: no-op (Memory_stream removed)
+    - Episodic: recent institution episodes from JSONL
     - Procedural: top [procedure_limit] crystallized procedures
     - Working/Scratchpad: empty (managed by OAS at runtime)
 
     Optionally seeds institution to Long_term if [config] is provided.
 
-    @param episode_limit default 50 (currently unused, kept for API compat)
+    @param episode_limit default 50
     @param procedure_limit default 20 *)
 let create_memory_full ~(agent_name : string)
     ?(session_id : string option)
     ?(config : Room_utils.config option)
     ?(episode_limit = 50) ?(procedure_limit = 20)
     () : Agent_sdk.Memory.t =
-  ignore episode_limit;
   let memory = create_memory ~agent_name ?session_id () in
+  let _episode_count =
+    seed_episodes ~memory ~agent_name ~limit:episode_limit
+  in
   (* Procedural tier *)
   let _proc_count =
     seed_procedures_as_oas ~memory ~agent_name ~limit:procedure_limit
@@ -266,7 +418,6 @@ let create_memory_full ~(agent_name : string)
 (** Flush all mutable tiers back to MASC persistent storage.
 
     Call after [Agent.run] completes to persist updated procedures.
-    Episodes are no longer flushed (Memory_stream removed).
     Returns [(episodes_flushed, procedures_flushed)]. *)
 let flush_all ~(memory : Agent_sdk.Memory.t) ~(agent_name : string)
     : int * int =

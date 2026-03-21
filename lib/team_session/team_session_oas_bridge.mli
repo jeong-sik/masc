@@ -4,6 +4,16 @@
 
 module Swarm = Agent_sdk_swarm
 
+val supported_local_worker_tools : unit -> Types.tool_schema list
+
+val dispatch_supported_tool :
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  config:Room.config ->
+  name:string ->
+  args:Yojson.Safe.t ->
+  bool * string
+
 val role_of_worker_class :
   Team_session_types.worker_class option -> Swarm.Swarm_types.agent_role
 

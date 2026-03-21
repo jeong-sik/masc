@@ -1,92 +1,84 @@
 # MASC-MCP OAS Utilization Audit
 
-Date: 2026-03-20
-OAS Version: v0.77.0
-MASC-MCP: main (624d9fcc5)
+Date: 2026-03-21
+Snapshot: `fix/oas-improvements` on top of `main`
 
-## OAS Adoption Score: 55/100
+## Current Read
 
-| Area | Max | Score | Evidence |
-|------|-----|-------|----------|
-| Agent.run lifecycle | 20 | 15 | 10+ files: perpetual_oas, oas_worker, worker_oas, keeper_agent_run |
-| Types/Provider/Builder | 15 | 12 | 66 files (11.8%) reference Agent_sdk/Oas |
-| Context_reducer | 10 | 8 | context_compact_oas.ml: 4 strategies mapped |
-| Event_bus | 8 | 5 | oas_events.ml: 14 event types, oas_sse_bridge subscribes |
-| Guardrails | 7 | 5 | AllowList/DenyList/AllowAll in 5+ files |
-| Memory 3-tier | 10 | 2 | long_term_backend only. Scratchpad/Working unmapped |
-| Swarm (lib_swarm) | 15 | 0 | 22 files (5,569 lines) fully independent |
-| Advanced modules | 15 | 8 | Collaboration, Sessions, Handoff adopted. 17+ unused |
+OAS adoption in `masc-mcp` is now structurally real, but still incomplete.
+The main remaining problems are no longer “missing migration” at large. They are:
 
-## Quantitative Metrics
+1. incomplete bridge fidelity,
+2. a few remaining duplicated runtime paths,
+3. stale docs that still describe already-removed or already-migrated systems.
 
-| Metric | Value |
-|--------|-------|
-| MASC lib/ .ml files | 560 |
-| MASC lib/ total lines | 190,889 |
-| OAS-referencing files | 66 (11.8%) |
-| Agent.run call sites | 14 files |
-| Cascade.call residual | 0 (archive 1) |
-| Model_spec coupled files | 39 |
-| OAS .mli modules (total) | 144 (lib/ 138 + lib_swarm/ 6) |
-| OAS modules used by MASC | ~20 |
-| OAS modules unused | 52+ |
+## Status by Area
 
-## Strengths
+| Area | Status | Evidence |
+|------|--------|----------|
+| Single-agent runtime | Strong | `oas_worker`, keeper turn path, verifier, council, mitosis, router/judge flows use `Agent.run` through OAS wrappers |
+| Context reduction | Real | `context_compact_oas.ml` delegates directly to OAS `Context_reducer` |
+| Event bus / SSE | Real | `oas_events.ml` publishes `masc:*` events and `oas_sse_bridge.ml` relays them to SSE |
+| Memory bridge | Partial but real | `memory_oas_bridge.ml` now seeds long-term, procedural, and episodic memory; Working/Scratchpad remain runtime-only |
+| Team session swarm | Partial but real | `team_session_swarm_runner.ml` runs through OAS Swarm and now receives a real supported-tool dispatch bundle |
+| Runtime dedupe | Improving | dashboard single-run and initial local worker run now reuse shared OAS execution helpers |
 
-1. **Cascade.call fully retired** — 0 in active code
-2. **Agent.run on critical path** — perpetual_oas, oas_worker, worker_oas, keeper_agent_run
-3. **Context_reducer integrated** — 4 compaction strategies mapped via context_compact_oas.ml
-4. **Event_bus connected** — 14 event types in oas_events.ml, oas_sse_bridge subscribes
-5. **Hook system structural** — perpetual_oas_hooks.ml: 4 lifecycle hooks
-6. **Clean adapter layer** — oas_type_adapters.ml (39 lines): Model_spec -> Provider.config
-7. **Perpetual architecture is sound** — Not a dual implementation; proper 3-layer separation (types/OAS adapter/MCP dispatcher)
+## What Changed In This Pass
 
-## Critical Gaps
+- `memory_oas_bridge` is no longer lying about episodic support.
+  - `seed_episodes` now loads recent institution episodes from `institution_episodes.jsonl`
+  - `flush_episodes` now writes new OAS episodes back without duplicating already-persisted IDs
+  - `create_memory_full` now honors `episode_limit`
+- `team_session` no longer launches OAS Swarm with `masc_tools=[]` and `no dispatch`.
+  - start/recovery paths now pass a real supported local-worker tool subset
+  - bridge dispatch auto-injects worker identity fields where needed
+  - heartbeat/tool dispatch can now work in background swarm workers
+- runtime duplication was reduced.
+  - dashboard provider single-run now uses `Oas_worker.run_model`
+  - initial local worker execution now uses `Worker_oas.run_worker_via_oas`
+- this work also exposed and fixed a real pre-existing bug:
+  - `Institution_eio.load_recent_episodes_jsonl` ignored `limit` when the log was larger than the requested window
 
-### Gap 1: Swarm subsystem independent — CRITICAL
+## Remaining Gaps
 
-- lib/swarm/ (11 files, 2,750 lines) + agent_swarm_*.ml (11 files, 2,819 lines) = 22 files, 5,569 lines
-- OAS lib_swarm/runner.mli provides 3-mode (Decentralized/Supervisor/Pipeline) + convergence loop
-- MASC swarm_eio.ml (617 lines), swarm_goal_loop.ml (347 lines): independent state machines
-- agent_swarm_swarm.ml uses Agent.run per-agent but not Runner for orchestration
-- MASC swarm has features beyond OAS Runner (pheromone, emergent intelligence, custom fitness)
+### 1. Team-session bridge is still lossy
 
-### Gap 2: verifier_oas.ml Provider bypass — FIXED (this PR)
+The bridge still throws away part of MASC session semantics:
 
-- Was: direct provider cascade call (lines 160-165)
-- Now: Oas_worker.run_named — OAS-only, cascade-aware, error-formatted
+- `planned_worker` metadata is only partially projected into swarm entries
+- `get_telemetry` remains `None`
+- `convergence` and `resource_check` are still unset
+- `budget` is still `no_budget`
 
-### Gap 3: Memory bridge incomplete — MEDIUM
+This means the runner is now tool-capable, but not yet fidelity-complete.
 
-- memory_oas_bridge.ml: long_term_backend only
-- Missing: Scratchpad (per-turn), Working (session), Episodic (decay/salience), Procedural (confidence)
-- MASC has all source data (memory_stream, context_manager, procedural_memory, institution_eio)
-- Only the OAS integration glue is missing
+### 2. Resume path still has its own direct OAS run logic
 
-### Gap 4: 52+ OAS modules unused — LOW-MEDIUM
+Direct OAS build/run sites now remain primarily in:
 
-Key unused modules with potential value:
-- progressive_tools.mli — 371-tool progressive disclosure
-- durable.mli — crash-recovery persistent workflows
-- plan.mli — goal decomposition/replanning
-- verified_output.mli — phantom-type compile-time output verification
-- trajectory.mli — structured Think/Act/Observe/Respond
-- cost_tracker.mli — model cost accounting
-- otel_tracer.mli — OpenTelemetry tracing
+- `oas_worker.ml`
+- `worker_oas.ml`
+- `local/worker_container_runners.ml` resume/continue path
 
-## Migration Priorities
+That is a much smaller surface than before, but the resume path still needs the same consolidation treatment as the initial run path.
 
-| Priority | Target | Effort | Status |
-|----------|--------|--------|--------|
-| P1 | verifier_oas.ml -> Oas_worker.run_named | 1 day | DONE (this PR) |
-| P2 | Memory 3-tier completion | 3-5 days | Planned |
-| P3 | Model_spec gradual retirement | 2-3 weeks | Incremental |
-| P4 | Swarm -> OAS lib_swarm bridge | 3-4 weeks | Needs design |
-| P5 | Advanced module selective adoption | Ongoing | Optional |
+### 3. Memory bridge scope is now honest, but not universal
 
-## Corrected Findings (vs initial plan)
+The episodic source of truth is `Institution_eio` JSONL.
+That is enough for current keeper/council/mitosis usage, but it does not mean every historical MASC memory source has been unified into OAS memory.
 
-1. **Perpetual Loop**: NOT a dual implementation. Proper 3-layer: Perpetual_loop (types) -> Perpetual_oas (OAS adapter) -> Tool_perpetual (MCP dispatcher). No code duplication.
-2. **Swarm lines**: 5,569 (not 8,149 as initially estimated)
-3. **OAS reference ratio**: 11.8% (66 files, not 62)
-4. **Score**: 55/100 (up from 52, corrected for perpetual loop proper architecture)
+### 4. Some older docs are still stale by implication
+
+The worst offenders were fixed in this pass, but any document still prioritizing:
+
+- Gardener migration
+- “Event_bus bridge planned”
+- “team_session is still pre-OAS”
+
+should be treated as outdated until refreshed.
+
+## Recommended Priorities
+
+1. Finish team-session bridge fidelity: telemetry, convergence/resource settings, and less-lossy worker/session projection.
+2. Collapse the local worker resume path onto the same shared OAS execution template used by initial runs.
+3. Keep docs synced to code after each OAS migration step; the documentation drift is currently more dangerous than the remaining missing code.

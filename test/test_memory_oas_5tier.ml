@@ -18,6 +18,9 @@ module Oas = Agent_sdk
 let setup_tmp_dir () =
   let dir = Filename.temp_dir "masc_mem_test" "" in
   Unix.putenv "MASC_DATA_DIR" dir;
+  Unix.putenv "MASC_WORKSPACE_ROOT" dir;
+  Unix.putenv "ME_ROOT" dir;
+  Fs_compat.mkdir_p (Filename.concat dir ".masc");
   dir
 
 let cleanup_tmp_dir dir =
@@ -88,6 +91,23 @@ let test_create_memory_full_empty () =
   Alcotest.(check int) "working empty" 0 wk;
   Alcotest.(check int) "episodic empty (no data)" 0 ep;
   Alcotest.(check int) "procedural empty (no data)" 0 pr;
+  cleanup_tmp_dir dir
+
+let test_create_memory_full_seeds_recent_episodes () =
+  let dir = setup_tmp_dir () in
+  ignore
+    (Institution_eio.record_episode_jsonl
+       ~event_type:"team_session"
+       ~summary:"worker completed setup"
+       ~participants:["worker-a"]
+       ~outcome:`Success
+       ~learnings:["seeded into memory"]);
+  let memory =
+    Memory_oas_bridge.create_memory_full ~agent_name:"test-seeded"
+      ~episode_limit:5 ~procedure_limit:5 ()
+  in
+  let (_, _, ep, _, _) = Oas.Memory.stats memory in
+  Alcotest.(check int) "episodic seeded from jsonl" 1 ep;
   cleanup_tmp_dir dir
 
 let test_memory_scratchpad_lifecycle () =
@@ -265,7 +285,7 @@ let test_stats_all_tiers () =
   cleanup_tmp_dir dir
 
 (* ================================================================ *)
-(* No-op backend verification                                        *)
+(* JSONL backend + bridge verification                                *)
 (* ================================================================ *)
 
 let test_jsonl_backend_persist () =
@@ -293,18 +313,98 @@ let test_seed_memory_bank_noop () =
   Alcotest.(check int) "seed_memory_bank returns 0" 0 count;
   cleanup_tmp_dir dir
 
-let test_seed_episodes_noop () =
+let test_seed_episodes_loads_recent_jsonl () =
   let dir = setup_tmp_dir () in
+  let first =
+    Institution_eio.record_episode_jsonl
+      ~event_type:"keeper_turn"
+      ~summary:"keeper observed drift"
+      ~participants:["keeper-a"]
+      ~outcome:`Partial
+      ~learnings:["watch alert frequency"]
+  in
+  let second =
+    Institution_eio.record_episode_jsonl
+      ~event_type:"incident"
+      ~summary:"rollback completed"
+      ~participants:["keeper-b"; "operator"]
+      ~outcome:`Success
+      ~learnings:["rollback path healthy"]
+  in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-seed" () in
   let count = Memory_oas_bridge.seed_episodes ~memory ~agent_name:"test-ep-seed" ~limit:10 in
-  Alcotest.(check int) "seed_episodes returns 0" 0 count;
+  Alcotest.(check int) "seed_episodes loads both records" 2 count;
+  let recalled = Oas.Memory.recall_episodes memory ~limit:10 () in
+  let ids = List.map (fun (episode : Oas.Memory.episode) -> episode.id) recalled in
+  Alcotest.(check bool) "first episode present" true (List.mem first.id ids);
+  Alcotest.(check bool) "second episode present" true (List.mem second.id ids);
   cleanup_tmp_dir dir
 
-let test_flush_episodes_noop () =
+let test_seed_episodes_respects_limit () =
   let dir = setup_tmp_dir () in
+  ignore
+    (Institution_eio.record_episode_jsonl
+       ~event_type:"a"
+       ~summary:"episode-a"
+       ~participants:["agent-a"]
+       ~outcome:`Partial
+       ~learnings:[]);
+  ignore
+    (Institution_eio.record_episode_jsonl
+       ~event_type:"b"
+       ~summary:"episode-b"
+       ~participants:["agent-b"]
+       ~outcome:`Success
+       ~learnings:[]);
+  ignore
+    (Institution_eio.record_episode_jsonl
+       ~event_type:"c"
+       ~summary:"episode-c"
+       ~participants:["agent-c"]
+       ~outcome:`Failure
+       ~learnings:["inspect retry budget"]);
+  let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-limit" () in
+  let count = Memory_oas_bridge.seed_episodes ~memory ~agent_name:"test-ep-limit" ~limit:2 in
+  Alcotest.(check int) "seed_episodes limit applied" 2 count;
+  let recalled = Oas.Memory.recall_episodes memory ~limit:10 () in
+  Alcotest.(check int) "only 2 episodes recalled" 2 (List.length recalled);
+  cleanup_tmp_dir dir
+
+let test_flush_episodes_appends_only_new_records () =
+  let dir = setup_tmp_dir () in
+  let existing =
+    Institution_eio.record_episode_jsonl
+      ~event_type:"existing"
+      ~summary:"already persisted"
+      ~participants:["keeper-existing"]
+      ~outcome:`Success
+      ~learnings:["persist once"]
+  in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-flush" () in
-  let count = Memory_oas_bridge.flush_episodes ~memory ~agent_name:"test-ep-flush" in
-  Alcotest.(check int) "flush_episodes returns 0" 0 count;
+  ignore (Memory_oas_bridge.seed_episodes ~memory ~agent_name:"test-ep-flush" ~limit:10);
+  Oas.Memory.store_episode memory
+    {
+      Oas.Memory.id = "new-episode-id";
+      timestamp = Unix.gettimeofday ();
+      participants = [];
+      action = "new episode from oas";
+      outcome = Oas.Memory.Success "completed";
+      salience = 0.88;
+      metadata =
+        [
+          ("event_type", `String "oas_memory");
+          ("institution_summary", `String "new episode from oas");
+          ("institution_outcome", `String "success");
+          ("learnings", `List [`String "written back to jsonl"]);
+          ("context", `Assoc [("source", `String "unit-test")]);
+        ];
+    };
+  let flushed = Memory_oas_bridge.flush_episodes ~memory ~agent_name:"test-ep-flush" in
+  Alcotest.(check int) "only new episodes flushed" 1 flushed;
+  let persisted = Institution_eio.load_recent_episodes_jsonl ~limit:10 in
+  let ids = List.map (fun (episode : Institution_eio.episode) -> episode.id) persisted in
+  Alcotest.(check bool) "existing record preserved" true (List.mem existing.id ids);
+  Alcotest.(check bool) "new record appended" true (List.mem "new-episode-id" ids);
   cleanup_tmp_dir dir
 
 (* ================================================================ *)
@@ -319,6 +419,8 @@ let () =
     ]);
     ("create_memory_full", [
       Alcotest.test_case "empty agent" `Quick test_create_memory_full_empty;
+      Alcotest.test_case "seeds recent episodes" `Quick
+        test_create_memory_full_seeds_recent_episodes;
     ]);
     ("scratchpad_working", [
       Alcotest.test_case "scratchpad lifecycle" `Quick test_memory_scratchpad_lifecycle;
@@ -341,7 +443,11 @@ let () =
       Alcotest.test_case "retrieve returns None" `Quick test_jsonl_backend_retrieve;
       Alcotest.test_case "query returns empty" `Quick test_jsonl_backend_query;
       Alcotest.test_case "seed_memory_bank noop" `Quick test_seed_memory_bank_noop;
-      Alcotest.test_case "seed_episodes noop" `Quick test_seed_episodes_noop;
-      Alcotest.test_case "flush_episodes noop" `Quick test_flush_episodes_noop;
+      Alcotest.test_case "seed_episodes loads recent jsonl" `Quick
+        test_seed_episodes_loads_recent_jsonl;
+      Alcotest.test_case "seed_episodes respects limit" `Quick
+        test_seed_episodes_respects_limit;
+      Alcotest.test_case "flush_episodes appends only new" `Quick
+        test_flush_episodes_appends_only_new_records;
     ]);
   ]

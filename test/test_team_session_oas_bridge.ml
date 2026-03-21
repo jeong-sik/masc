@@ -125,6 +125,54 @@ let test_cascade_empty_model_string () =
   Alcotest.(check string) "empty model falls through" "llama:qwen3.5" c
 
 (* ================================================================ *)
+(* Supported tool runtime tests                                     *)
+(* ================================================================ *)
+
+let test_supported_local_worker_tools_present () =
+  let schemas = Team_session_oas_bridge.supported_local_worker_tools () in
+  let names =
+    List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
+  in
+  Alcotest.(check bool) "masc_status present" true
+    (List.mem "masc_status" names);
+  Alcotest.(check bool) "masc_code_read present" true
+    (List.mem "masc_code_read" names);
+  Alcotest.(check bool) "masc_run_init present" true
+    (List.mem "masc_run_init" names)
+
+let test_dispatch_supported_tool_status () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let tmp = Filename.temp_dir "masc-test" "" in
+  let config = Room.default_config tmp in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let ok, message =
+    Team_session_oas_bridge.dispatch_supported_tool
+      ~sw ~clock:(Eio.Stdenv.clock env) ~config
+      ~name:"masc_status"
+      ~args:(`Assoc [("agent_name", `String "worker-status")])
+  in
+  Alcotest.(check bool) "status dispatch succeeded" true ok;
+  Alcotest.(check bool) "status payload non-empty" true
+    (String.length message > 0)
+
+let test_dispatch_supported_tool_heartbeat_autojoin () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let tmp = Filename.temp_dir "masc-test" "" in
+  let config = Room.default_config tmp in
+  ignore (Room.init config ~agent_name:(Some "tester"));
+  let ok, _message =
+    Team_session_oas_bridge.dispatch_supported_tool
+      ~sw ~clock:(Eio.Stdenv.clock env) ~config
+      ~name:"masc_heartbeat"
+      ~args:(`Assoc [("agent_name", `String "worker-heartbeat")])
+  in
+  Alcotest.(check bool) "heartbeat dispatch succeeded" true ok;
+  Alcotest.(check bool) "worker auto-joined" true
+    (Room.is_agent_joined config ~agent_name:"worker-heartbeat")
+
+(* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
 
@@ -161,5 +209,13 @@ let () =
         test_cascade_default;
       Alcotest.test_case "empty model string" `Quick
         test_cascade_empty_model_string;
+    ];
+    "supported_tools", [
+      Alcotest.test_case "schemas present" `Quick
+        test_supported_local_worker_tools_present;
+      Alcotest.test_case "status dispatch" `Quick
+        test_dispatch_supported_tool_status;
+      Alcotest.test_case "heartbeat autojoin" `Quick
+        test_dispatch_supported_tool_heartbeat_autojoin;
     ];
   ]

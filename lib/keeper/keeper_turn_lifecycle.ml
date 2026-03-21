@@ -94,6 +94,9 @@ let handle_keeper_down ctx args : tool_result =
               err
       in
       Option.iter stop_linked_session m.active_team_session_id;
+      ignore
+        (Operator_pending_confirm.remove_pending_confirms_by_target ctx.config
+           ~target_type:"keeper" ~target_id:(Some name));
       (if remove_meta then
          Safe_ops.remove_file_logged ~context:"keeper_down"
            (keeper_meta_path ctx.config name)

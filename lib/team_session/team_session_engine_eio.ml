@@ -284,6 +284,10 @@ let stop_session ~(config : Room.config) ~(session_id : string) ~(reason : strin
                 ~final_status ~reason
                 ~generate_report
         in
+        let _gc_count =
+          Operator_pending_confirm.remove_pending_confirms_by_target config
+            ~target_type:"team_session" ~target_id:(Some session_id)
+        in
         (match updated with
         | Some s -> Ok (session_status_json config s)
         | None ->

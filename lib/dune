@@ -489,7 +489,9 @@
    keeper_alerting
    keeper_alerting_path
    keeper_exec_tools
+   keeper_exec_tools_recall
    keeper_voice_local
+   keeper_exec_status_metrics
    keeper_exec_status
    keeper_exec_persona
    keeper_exec_context
@@ -514,6 +516,7 @@
    keeper_turn_up
    keeper_turn_lifecycle
    keeper_turn
+   keeper_status_detail
    keeper_status
    keeper_status_bridge
    keeper_policy
@@ -661,7 +664,10 @@
  env_config_governance
  env_config_keeper
   keeper_exec_tools
+  keeper_exec_tools_recall
+  keeper_exec_status_metrics
   keeper_exec_status
+  keeper_status_detail
   keeper_exec_persona
   keeper_exec_context
   keeper_exec_social

@@ -5,6 +5,7 @@ import type {
   DashboardProofToolEvidence,
   DashboardProofVerdict,
 } from '../types'
+import { asString, asNumber, isRecord } from './common/normalize'
 
 export type DedupedTimelineItem = DashboardProofTimelineItem & {
   sources: string[]
@@ -21,17 +22,7 @@ export function safeArray<T>(value: T[] | null | undefined): T[] {
 }
 
 export function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {}
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value : null
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+  return isRecord(value) ? value : {}
 }
 
 export function compactPath(path: string): string {

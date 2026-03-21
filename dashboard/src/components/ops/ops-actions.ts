@@ -4,7 +4,7 @@ import {
   dispatchOperatorAction,
   operatorSnapshot,
 } from '../../operator-store'
-import { pickPreferredSession } from './ops-format'
+import { pickPreferredSession } from './helpers'
 import {
   actorName,
   broadcastMessage,

@@ -54,7 +54,6 @@ val upsert_pending_confirm : Room.config -> pending_confirm -> unit
 val remove_pending_confirm : Room.config -> string -> unit
 val remove_pending_confirms_by_target :
   Room.config -> target_type:string -> target_id:string option -> int
-val gc_expired_confirms : Room.config -> int
 val normalize_pending_confirm_actor_filter : string option -> string option
 val pending_confirm_scope_of_entries : ?actor:string -> pending_confirm list -> pending_confirm_scope
 val pending_confirm_scope : ?actor:string -> Room.config -> pending_confirm_scope

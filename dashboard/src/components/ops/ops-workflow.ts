@@ -5,7 +5,7 @@ import type {
   OperatorSessionSnapshot,
 } from '../../types'
 import type { DashboardWorkflowContext } from '../../workflow-context'
-import { prettyJson } from './ops-format'
+import { prettyJson } from './helpers'
 import {
   broadcastMessage,
   keeperMessage,

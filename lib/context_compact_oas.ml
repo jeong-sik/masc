@@ -39,7 +39,7 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
 
 let memory_summary_prefix = "[MASC_MEMORY_SUMMARY v1]"
 
-let goal_prefix = "[MASC_GOAL]"
+let goal_prefix = Keeper_working_context.goal_prefix
 
 let starts_with ~prefix s =
   let lp = String.length prefix in

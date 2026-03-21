@@ -114,7 +114,18 @@ let handle_agent_fitness ctx args =
   let agents =
     match agent_opt with
     | Some a -> [a]
-    | None -> Metrics_store_eio.get_all_agents ctx.config
+    | None ->
+      (* Merge agents from metrics store AND room state.
+         Without this, agents active on the board but without task metrics
+         are invisible to fitness queries (Issue #1861). *)
+      let metrics_agents = Metrics_store_eio.get_all_agents ctx.config in
+      let room_agents =
+        try
+          Room.get_agents_raw ctx.config
+          |> List.map (fun (a : Types.agent) -> a.name)
+        with _ -> []
+      in
+      List.sort_uniq String.compare (metrics_agents @ room_agents)
   in
   if agents = [] then
     (true, Yojson.Safe.pretty_to_string (`Assoc [("count", `Int 0); ("agents", `List [])]))

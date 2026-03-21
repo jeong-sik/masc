@@ -38,6 +38,19 @@ let queue_length registry ~agent_name =
     | None -> 0
   )
 
+(** Extract JSON from response body that may have "summary\n---\n{json}" format *)
+let extract_json body =
+  match String.split_on_char '-' body with
+  | _ ->
+    (* Find the first '{' and parse from there *)
+    let len = String.length body in
+    let rec find_brace i =
+      if i >= len then body
+      else if body.[i] = '{' then String.sub body i (len - i)
+      else find_brace (i + 1)
+    in
+    Yojson.Safe.from_string (find_brace 0)
+
 (* Run a test function inside Eio runtime *)
 let with_eio f () =
   Eio_main.run @@ fun _env -> f ()
@@ -62,7 +75,7 @@ let test_count_empty () =
   | Some (true, body) ->
       check bool "contains count 0" true
         (String.length body > 0);
-      let json = Yojson.Safe.from_string body in
+      let json = extract_json body in
       let count = Yojson.Safe.Util.(json |> member "count" |> to_int) in
       check int "count is 0" 0 count
   | _ -> fail "expected Some (true, _)"
@@ -77,7 +90,7 @@ let test_count_with_events () =
     ~agent_name:"agent-b" ~name:"masc_notification_count" (`Assoc []) in
   match result with
   | Some (true, body) ->
-      let json = Yojson.Safe.from_string body in
+      let json = extract_json body in
       let count = Yojson.Safe.Util.(json |> member "count" |> to_int) in
       check int "count is 2" 2 count
   | _ -> fail "expected Some (true, _)"
@@ -89,7 +102,7 @@ let test_count_unregistered () =
     ~agent_name:"ghost" ~name:"masc_notification_count" (`Assoc []) in
   match result with
   | Some (true, body) ->
-      let json = Yojson.Safe.from_string body in
+      let json = extract_json body in
       let count = Yojson.Safe.Util.(json |> member "count" |> to_int) in
       check int "unregistered agent count 0" 0 count
   | _ -> fail "expected Some (true, _)"
@@ -106,7 +119,7 @@ let test_check_peek () =
     (`Assoc [("limit", `Int 10)]) in
   (match result with
    | Some (true, body) ->
-       let json = Yojson.Safe.from_string body in
+       let json = extract_json body in
        let count = Yojson.Safe.Util.(json |> member "count" |> to_int) in
        check int "peek returns 3" 3 count
    | _ -> fail "expected Some (true, _)");
@@ -125,7 +138,7 @@ let test_check_with_limit () =
     (`Assoc [("limit", `Int 2)]) in
   match result with
   | Some (true, body) ->
-      let json = Yojson.Safe.from_string body in
+      let json = extract_json body in
       let count = Yojson.Safe.Util.(json |> member "count" |> to_int) in
       check int "limited to 2" 2 count;
       (* Queue still has all 4 *)
@@ -144,7 +157,7 @@ let test_consume_basic () =
     (`Assoc [("limit", `Int 2)]) in
   (match result with
    | Some (true, body) ->
-       let json = Yojson.Safe.from_string body in
+       let json = extract_json body in
        let consumed = Yojson.Safe.Util.(json |> member "consumed" |> to_int) in
        let remaining = Yojson.Safe.Util.(json |> member "remaining" |> to_int) in
        check int "consumed 2" 2 consumed;
@@ -165,7 +178,7 @@ let test_consume_all () =
     (`Assoc [("limit", `Int 100)]) in
   (match result with
    | Some (true, body) ->
-       let json = Yojson.Safe.from_string body in
+       let json = extract_json body in
        let consumed = Yojson.Safe.Util.(json |> member "consumed" |> to_int) in
        let remaining = Yojson.Safe.Util.(json |> member "remaining" |> to_int) in
        check int "consumed all 2" 2 consumed;
@@ -183,7 +196,7 @@ let test_consume_empty () =
     (`Assoc [("limit", `Int 5)]) in
   match result with
   | Some (true, body) ->
-      let json = Yojson.Safe.from_string body in
+      let json = extract_json body in
       let consumed = Yojson.Safe.Util.(json |> member "consumed" |> to_int) in
       check int "consumed 0 from empty" 0 consumed
   | _ -> fail "expected Some (true, _)"
@@ -224,7 +237,7 @@ let test_consume_partial () =
     (`Assoc [("limit", `Int 3)]) in
   (match result with
    | Some (true, body) ->
-       let json = Yojson.Safe.from_string body in
+       let json = extract_json body in
        let consumed = Yojson.Safe.Util.(json |> member "consumed" |> to_int) in
        let remaining = Yojson.Safe.Util.(json |> member "remaining" |> to_int) in
        check int "consumed 3" 3 consumed;
@@ -244,7 +257,7 @@ let test_consume_negative_limit () =
     (`Assoc [("limit", `Int (-5))]) in
   (match result with
    | Some (true, body) ->
-       let json = Yojson.Safe.from_string body in
+       let json = extract_json body in
        let consumed = Yojson.Safe.Util.(json |> member "consumed" |> to_int) in
        let remaining = Yojson.Safe.Util.(json |> member "remaining" |> to_int) in
        check int "consumed 0 with negative limit" 0 consumed;
@@ -265,7 +278,7 @@ let test_count_yojson_format () =
   match result with
   | Some (true, body) ->
       (* Must parse as valid JSON *)
-      let json = Yojson.Safe.from_string body in
+      let json = extract_json body in
       let count = Yojson.Safe.Util.(json |> member "count" |> to_int) in
       check int "count is 1" 1 count;
       (* Verify structure: must have "count" key *)

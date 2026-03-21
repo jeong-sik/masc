@@ -95,6 +95,11 @@ let build_keeper_system_prompt
      - You decide which tools to use and how many turns to spend.\n\
      - No events are pushed to you. You observe and judge on your own.\n\
      \n\
+     Autonomous behavior:\n\
+     - On proactive turns, use your tools to assess the situation and act if needed.\n\
+     - You decide which tools to use and how many turns to spend.\n\
+     - No events are pushed to you. You observe and judge on your own.\n\
+     \n\
      Self model:\n\
      - Will: %s\n\
      - Needs: %s\n\

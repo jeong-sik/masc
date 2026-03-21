@@ -32,6 +32,7 @@ import {
   RuntimeSignals,
 } from './keeper-detail-runtime'
 import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
+import { PipelineStageBar } from './keeper-pipeline-stage'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -137,6 +138,9 @@ export function KeeperDetailOverlay() {
             style="background:none; border:none; color:#888; cursor:pointer; font-size:20px; padding:4px 8px;"
           >✕</button>
         </div>
+
+        ${'' /* Pipeline stage indicator */}
+        <${PipelineStageBar} stage=${keeper.pipeline_stage} />
 
         ${'' /* KPIs */}
         <${KpiGrid} keeper=${keeper} />

@@ -295,8 +295,18 @@ export interface KeeperStatusDetail {
   loadedAt: string
 }
 
+export type PipelineStage =
+  | 'idle'
+  | 'thinking'
+  | 'tool_use'
+  | 'compacting'
+  | 'handoff'
+  | 'proactive'
+  | 'offline'
+
 export interface Keeper {
   name: string
+  pipeline_stage?: PipelineStage
   runtime_class?: 'resident_keeper' | 'persistent_agent'
   desired?: boolean
   resident_registered?: boolean

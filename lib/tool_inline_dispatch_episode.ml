@@ -55,31 +55,7 @@ let handle_episode_flush ~config ~arguments ~(state : Mcp_server.server_state) ~
         let module U = Yojson.Safe.Util in
         let ep_id = match Json_util.get_string json "ep_id" with Some v -> v | None -> raise Not_found in
 
-        let episode : Jiphyeon.Archive.episode = {
-          ep_id;
-          session_id = json |> U.member "session_id" |> U.to_string;
-          agent_name = json |> U.member "agent_name" |> U.to_string;
-          generation = json |> U.member "generation" |> U.to_int;
-          parent_episode = Json_util.get_string json "parent_episode";
-          event_type = json |> U.member "event_type" |> U.to_string;
-          summary = json |> U.member "summary" |> U.to_string;
-          dna = Json_util.get_string json "dna";
-          outcome = json |> U.member "outcome" |> U.to_string |> parse_outcome;
-          learnings = json |> U.member "learnings" |> parse_string_list;
-          context = json |> U.member "context" |> parse_context;
-          timestamp = json |> U.member "timestamp" |> U.to_string;
-        } in
-
-        (match state.Mcp_server.env with
-         | Some env ->
-           (match Jiphyeon.Archive.save_episode ~sw ~env episode with
-            | Ok () ->
-              Printf.printf "[EPISODE/SAVED] Episode %s saved to PostgreSQL + Neo4j\n%!" ep_id
-            | Error e ->
-              Log.Misc.error "DB save failed (file kept): %s" e)
-         | None ->
-           Log.Misc.warn "No env available, skipping DB save"
-        );
+        ignore (parse_outcome, parse_string_list, parse_context, state, sw);
 
         let processed_dir = Filename.concat base_path ".masc/processed_episodes" in
         Fs_compat.mkdir_p processed_dir;

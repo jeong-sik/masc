@@ -83,18 +83,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       let siblings = List.filter (fun (_, _, _) -> true) all_statuses in
 
       let cell_id = cell.Mitosis.id in
-      let episode_count, recent_episode =
-        match state.Mcp_server.env with
-        | Some env ->
-          (try
-            (match Jiphyeon.Archive.get_agent_episodes ~sw ~env cell_id 5 with
-             | Ok episodes -> (List.length episodes, List.nth_opt episodes 0)
-             | Error _ -> (0, None))
-          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            Log.Inline.warn "%s: %s" __FUNCTION__ (Printexc.to_string exn);
-            (0, None))
-        | None -> (0, None)
-      in
+      let episode_count, recent_episode = (0, None) in
+      ignore (cell_id, state, sw);
 
       let mortality_msg =
         if estimated_ratio >= 0.8 then

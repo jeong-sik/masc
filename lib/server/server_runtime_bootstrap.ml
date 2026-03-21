@@ -104,10 +104,9 @@ let inject_shared_pg_pool () =
   match Board_dispatch.get_pg_pool () with
   | Some pool ->
       Council.Archive.set_shared_pool pool;
-      Jiphyeon.Archive.set_shared_pool pool;
-      Log.Server.info "PG shared pool injected into council/jiphyeon archive"
+      Log.Server.info "PG shared pool injected into council archive"
   | None ->
-      Log.Server.info "No PG pool available; council/jiphyeon will create own pools"
+      Log.Server.info "No PG pool available; council will create own pools"
 
 let init_memory_pg_schema () =
   match Board_dispatch.get_pg_pool () with

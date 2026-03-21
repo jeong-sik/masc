@@ -68,10 +68,10 @@ let test_route_auth_contracts () =
 let test_input_validation_contracts () =
   (* Bug #1602: broadcast must reject empty messages *)
   check bool "broadcast validates empty message" true
-    (file_contains_pattern "lib/tool_inline_dispatch.ml"
+    (file_contains_pattern "lib/tool_inline_dispatch_comm.ml"
        {|"Broadcast message cannot be empty"|});
   check bool "broadcast trims whitespace before check" true
-    (file_contains_pattern "lib/tool_inline_dispatch.ml"
+    (file_contains_pattern "lib/tool_inline_dispatch_comm.ml"
        {|String.trim message|});
   (* Bug #1609: cache must have automatic eviction *)
   check bool "cache has maybe_evict_expired function" true

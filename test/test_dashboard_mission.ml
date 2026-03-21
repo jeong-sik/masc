@@ -367,16 +367,10 @@ let test_dashboard_mission_projection () =
           (summary |> member "paused" = `Null);
         check bool "mission summary trims active_agents" true
           (summary |> member "active_agents" = `Null);
-        check string "session card id" session_id
-          (sessions |> List.hd |> member "session_id" |> to_string);
-        check bool "session blocker summary comes from attention" true
-          (contains
-             (sessions |> List.hd |> member "blocker_summary" |> to_string)
-             "failed spawn");
-        check bool "session card keeps member previews" true
-          ((sessions |> List.hd |> member "member_previews" |> to_list) <> []);
-        check bool "session card keeps operation badge" true
-          ((sessions |> List.hd |> member "operation_badges" |> to_list) <> []);
+        check bool "full session cards omitted from mission payload" true
+          (sessions = []);
+        check bool "session brief keeps member previews" true
+          ((session_briefs |> List.hd |> member "member_names" |> to_list) <> []);
         check bool "session brief keeps summary-only participant" true
           (session_briefs
            |> List.exists (fun row ->

@@ -95,7 +95,9 @@ let test_merge_contiguous () =
     check int "2 messages after merge" 2 after
 
 let test_summarize_old () =
-  let messages = List.init 10 (fun i ->
+  (* Summarize_old operates on turn groups, not raw message count.
+     Use 6 user-led turns so keep_recent=5 compacts one old turn. *)
+  let messages = List.init 12 (fun i ->
     if i mod 2 = 0 then ("user", Printf.sprintf "Question %d about a topic" i)
     else ("assistant", Printf.sprintf "Answer %d that is quite detailed" i)
   ) in

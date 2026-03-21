@@ -69,23 +69,6 @@ module Make (_ : sig val name : string end) : sig
   val error : ('a, unit, string, unit) format4 -> 'a
 end
 
-(** {1 In-memory ring buffer for recent log entries} *)
-module Ring : sig
-  type entry = {
-    seq : int;
-    ts : string;
-    level : string;
-    module_name : string;
-    message : string;
-  }
-
-  val recent : ?limit:int -> ?min_level:int -> ?module_filter:string -> unit -> entry list
-  (** Return recent log entries in chronological order. *)
-
-  val to_json : entry list -> Yojson.Safe.t
-  (** Serialize entries to JSON with total count. *)
-end
-
 (** {1 Pre-defined module loggers} *)
 
 module Room : sig val debug : ('a, unit, string, unit) format4 -> 'a val info : ('a, unit, string, unit) format4 -> 'a val warn : ('a, unit, string, unit) format4 -> 'a val error : ('a, unit, string, unit) format4 -> 'a end

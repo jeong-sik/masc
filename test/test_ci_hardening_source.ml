@@ -101,7 +101,19 @@ let test_dashboard_component_split_contracts () =
        "export function SelectionCard");
   check bool "proof sections export actor contribution row" true
     (file_contains_pattern "dashboard/src/components/proof-sections.ts"
-       "export function ActorContributionRow")
+       "export function ActorContributionRow");
+  check bool "mission cards re-export briefing card" true
+    (file_contains_pattern "dashboard/src/components/mission-cards.ts"
+       "export { MissionBriefingCard } from './mission-briefing-card'");
+  check bool "mission cards re-export attention card" true
+    (file_contains_pattern "dashboard/src/components/mission-cards.ts"
+       "export { AttentionCard } from './mission-attention-card'");
+  check bool "mission briefing card exported from split file" true
+    (file_contains_pattern "dashboard/src/components/mission-briefing-card.ts"
+       "export function MissionBriefingCard");
+  check bool "mission attention card exported from split file" true
+    (file_contains_pattern "dashboard/src/components/mission-attention-card.ts"
+       "export function AttentionCard")
 
 let () =
   run "ci_hardening_source"

@@ -258,7 +258,7 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
                 | Ok (Some m) ->
                   let agent_status = Keeper_exec_status.parse_agent_status config ~agent_name:m.agent_name in
                   let surface = Keeper_exec_status.keeper_surface_status
-                    ~agent_status ~diagnostic:`Null in
+                    ~agent_status ~diagnostic:(`Assoc []) in
                   Keeper_exec_status.derive_pipeline_stage ~meta:m ~surface_status:surface ~now_ts
                 | _ -> "unknown" in
               `Assoc (("pipeline_stage", `String stage) :: fields)

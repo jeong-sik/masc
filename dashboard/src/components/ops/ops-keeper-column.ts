@@ -12,7 +12,6 @@ import {
 import type { Keeper, OperatorKeeperSnapshot } from '../../types'
 import {
   actionTypeLabel,
-  deliveryModeLabel,
   displayStatus,
   keeperPrioritySummary,
   keeperPriorityTone,
@@ -147,24 +146,31 @@ export function OpsKeeperColumn() {
 
       <section class="card ops-panel">
         <div class="card-title-row">
-          <div class="card-title">가능한 액션 목록</div>
-          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
+          <div class="card-title">액션</div>
+          <span style="font-size:0.75rem;opacity:0.5">${availableActions.length}개</span>
         </div>
-        <p class="ops-context-note">백엔드가 현재 허용한다고 광고하는 액션입니다. 일부는 이 화면의 폼과 1:1로 연결됩니다.</p>
-        <div class="ops-log-list">
-          ${availableActions.length
-            ? availableActions.map(action => html`
-                <article key=${`${action.action_type}:${action.target_type}`} class="ops-log-entry">
-                  <div class="ops-log-head">
-                    <strong>${actionTypeLabel(action.action_type)}</strong>
-                    <span>${targetTypeLabel(action.target_type)}</span>
-                    <span>${deliveryModeLabel(action.confirm_required)}</span>
+        ${availableActions.length
+          ? html`<div style="display:flex;flex-direction:column;gap:0.5rem">
+              ${['room', 'keeper', 'team_session'].map(targetType => {
+                const group = availableActions.filter((a: any) => a.target_type === targetType)
+                if (group.length === 0) return null
+                return html`
+                  <div key=${targetType}>
+                    <div style="font-size:0.7rem;opacity:0.4;margin-bottom:0.25rem">${targetTypeLabel(targetType)}</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:0.25rem">
+                      ${group.map((action: any) => html`
+                        <span key=${action.action_type}
+                          title=${action.description ?? ''}
+                          style="font-size:0.75rem;padding:0.15rem 0.5rem;border-radius:4px;background:${action.confirm_required ? 'rgba(255,180,50,0.15)' : 'rgba(100,200,255,0.1)'};border:1px solid ${action.confirm_required ? 'rgba(255,180,50,0.3)' : 'rgba(100,200,255,0.2)'};cursor:default">
+                          ${actionTypeLabel(action.action_type)}
+                        </span>
+                      `)}
+                    </div>
                   </div>
-                  <div class="ops-log-body">${action.description ?? '설명이 아직 없습니다.'}</div>
-                </article>
-              `)
-            : html`<div class="ops-empty">노출된 액션 설명이 없습니다.</div>`}
-        </div>
+                `
+              })}
+            </div>`
+          : html`<div class="ops-empty">액션 없음</div>`}
       </section>
 
       <section class="card ops-panel">

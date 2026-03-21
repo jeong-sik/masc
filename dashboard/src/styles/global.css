@@ -572,6 +572,16 @@ a:hover {
   color: var(--text-muted);
 }
 
+.loading-banner {
+  text-align: center;
+  padding: 6px 16px;
+  background: rgba(230, 167, 0, 0.12);
+  border-bottom: 1px solid rgba(230, 167, 0, 0.3);
+  color: #e6a700;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
 @keyframes fadeSlide {
   from {
     opacity: 0;

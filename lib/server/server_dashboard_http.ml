@@ -44,11 +44,11 @@ let _execution_refresh_max_backoff_s = 600.0
 let start_execution_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
-  (* Warm cache with 30s timeout: do not block server startup.
+  (* Warm cache with 10s timeout: do not block server startup.
      If it takes longer, the async refresh loop will populate it. *)
   (let t0 = Time_compat.now () in
    try
-     match Eio.Time.with_timeout clock 30.0 (fun () ->
+     match Eio.Time.with_timeout clock 10.0 (fun () ->
        Ok (Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ())) with
      | Ok json ->
        _execution_json_ref := json;
@@ -292,6 +292,7 @@ let dashboard_room_truth_focus_json ~initialized ~agent_count ~operator_digest_j
                 ]))
 
 let dashboard_room_truth_http_json ~state ~sw ~clock request =
+  with_dashboard_timeout ~clock (fun () ->
   let config = state.Mcp_server.room_config in
   let shell_json = dashboard_shell_http_json config in
   let execution_json = dashboard_execution_http_json ~state ~sw ~clock request in
@@ -463,7 +464,7 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
             ("provenance", `String "derived");
           ] );
       ("focus", focus_json);
-    ]
+    ])
 
 let dashboard_memory_http_json request : Yojson.Safe.t =
   let hearth = query_param request "hearth" in

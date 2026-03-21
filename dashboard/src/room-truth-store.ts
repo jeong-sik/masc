@@ -22,7 +22,7 @@ export const roomTruthError = signal<string | null>(null)
 
 let inflightRoomTruthRefresh: Promise<void> | null = null
 let lastRoomTruthRefreshAt = 0
-const ROOM_TRUTH_TTL_MS = 15_000
+const ROOM_TRUTH_TTL_MS = 60_000
 
 function normalizeServerStatus(raw: unknown): ServerStatus | null {
   if (!isRecord(raw)) return null

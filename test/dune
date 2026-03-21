@@ -278,13 +278,8 @@
  (modules test_thompson_sampling)
  (libraries masc_mcp alcotest eio eio_main str yojson))
 
-; Autonomy Adjuster tests (feedback closure for agent selection)
-(test
- (name test_autonomy_adjuster)
- (modules test_autonomy_adjuster)
- (libraries masc_mcp alcotest eio eio_main str yojson))
-
 ; Gardener/Guardian/Sentinel test stanzas removed (#1834)
+; Autonomy Adjuster tests removed (autonomy_level system moved to OAS)
 
 ; Safe_ops module tests (safe exception handling)
 (test

@@ -463,8 +463,7 @@
    trajectory
    eval_gate
    eval_harness
-   ;; Keeper Autonomy Engine (Phase 2: autonomy slider + verifier)
-   keeper_autonomy
+   ;; Keeper verifier + contract
    keeper_verifier
    keeper_schema
    keeper_config
@@ -509,8 +508,6 @@
    keeper_status_bridge
    keeper_policy
    keeper_persona
-   ;; Autonomy Adjuster — Feedback Closure (Phase 4)
-   autonomy_adjuster
    ;; Perpetual Agent Runtime (infinite context system)
    masc_eio_env
    discovery_cache

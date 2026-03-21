@@ -23,8 +23,6 @@ type trigger_mode =
   | Legacy
   | Explicit_only
 
-type autonomy_level = Keeper_autonomy.autonomy_level
-
 let policy_mode_of_string = function
   | "learned_offline_v1" -> Learned_offline_v1
   | "explicit_event_v1" -> Explicit_event_v1
@@ -108,9 +106,11 @@ let trigger_mode_is_explicit_only = function
   | Explicit_only -> true
   | Legacy -> false
 
-let parse_autonomy_level raw =
-  Keeper_autonomy.autonomy_level_of_string raw
+(** Parse autonomy_level is now a no-op: returns the string as-is for backward compat. *)
+let parse_autonomy_level (raw : string) : string option =
+  let s = String.lowercase_ascii (String.trim raw) in
+  if s = "" then None else Some s
 
-let autonomy_level_to_storage_string level =
-  Keeper_autonomy.autonomy_level_to_string level
-  |> String.lowercase_ascii
+(** Store autonomy_level as lowercase string for backward compat. *)
+let autonomy_level_to_storage_string (level : string) : string =
+  String.lowercase_ascii (String.trim level)

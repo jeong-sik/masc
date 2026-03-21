@@ -110,7 +110,8 @@ val deliberation_budget_check :
 (** Build a prompt for the MODEL to decide the keeper's next action.
     Describes the keeper's identity, current state, detected triggers,
     and available actions. Asks the MODEL to respond with structured JSON.
-    When [~autonomy_level] is L3+, the [multi_step] action is included. *)
+    multi_step action is always available (autonomy_level dispatch removed).
+    [~autonomy_level] is kept for backward compat but ignored. *)
 val build_deliberation_prompt :
   ?autonomy_level:string ->
   keeper_name:string ->

@@ -575,15 +575,7 @@ let maybe_emit_proactive (ctx : _ context) (meta : keeper_meta) : keeper_meta =
                let build_turn_prompt ~base_system_prompt ~messages:_ =
                  base_system_prompt
                in
-               (* max_turns scales with autonomy level:
-                  L1-L2 = 3 (observe only), L3 = 5, L4-L5 = 15 *)
-               let max_turns =
-                 match Keeper_contract.parse_autonomy_level meta.autonomy_level with
-                 | Some Keeper_autonomy.L4_Autonomous
-                 | Some Keeper_autonomy.L5_Independent -> 15
-                 | Some Keeper_autonomy.L3_Guided -> 5
-                 | _ -> 3
-               in
+               let max_turns = 5 in
                let (run_result, latency) = Keeper_exec_context.timed (fun () ->
                  Keeper_agent_run.run_turn
                    ~config:ctx.config ~meta ~base_dir

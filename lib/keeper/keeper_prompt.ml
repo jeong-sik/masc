@@ -116,6 +116,7 @@ let build_keeper_system_prompt
      </continuity>"
     goal short_goal mid_goal long_goal will needs desires custom
     profile_policy
+    will needs desires
 
 let append_trait_clause ~(base : string) ~(clause : string) : string =
   let b = String.trim base in

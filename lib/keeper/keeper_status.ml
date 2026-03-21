@@ -63,9 +63,12 @@ let handle_keeper_list ctx args : tool_result =
             let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
               compaction_policy_of_keeper m
             in
+	            let metrics_store = keeper_metrics_store ctx.config m.name in
 	            let metrics_path = keeper_metrics_path ctx.config m.name in
 	            let metrics_window_lines =
-	              read_file_tail_lines metrics_path ~max_bytes:120000 ~max_lines:120
+	              let dated = Dated_jsonl.read_recent_lines metrics_store 120 in
+	              if dated <> [] then dated
+	              else read_file_tail_lines metrics_path ~max_bytes:120000 ~max_lines:120
 	            in
 	            let last_metrics =
 	              match List.rev metrics_window_lines with
@@ -259,7 +262,8 @@ let handle_keeper_list ctx args : tool_result =
 	              ("memory_bank", memory_summary_to_json memory_bank_summary);
               ("storage_paths", `Assoc [
                 ("meta", `String (keeper_meta_path ctx.config m.name));
-                ("metrics", `String metrics_path);
+                ("metrics", `String (Dated_jsonl.base_dir metrics_store));
+                ("metrics_legacy", `String metrics_path);
                 ("memory_bank", `String (keeper_memory_bank_path ctx.config m.name));
                 ("policy", `String (keeper_policy_log_path ctx.config m.name));
                 ("feedback", `String (keeper_feedback_log_path ctx.config m.name));

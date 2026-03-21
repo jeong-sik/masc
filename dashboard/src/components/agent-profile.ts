@@ -224,8 +224,8 @@ function CharacterPlate({ name }: { name: string }) {
   const summary = timeline?.summary
 
   return html`
-    <div class="ff-plate">
-      <div class="ff-plate__portrait">
+    <div class="agent-summary">
+      <div class="agent-summary__portrait">
         <${AgentAvatar}
           name=${name}
           status=${headerStatus}
@@ -235,54 +235,54 @@ function CharacterPlate({ name }: { name: string }) {
           activityAge=${lastActivity}
           signalTruth=${signalTruth}
         />
-        ${isKeeper ? html`<div class="ff-plate__class-tag">키퍼</div>` : null}
+        ${isKeeper ? html`<div class="agent-summary__class-tag">키퍼</div>` : null}
       </div>
 
-      <div class="ff-plate__info">
-        <div class="ff-plate__name-row">
-          <h2 class="ff-plate__name">
-            ${agentEmoji ? html`<span class="ff-plate__emoji">${agentEmoji}</span>` : ''}
+      <div class="agent-summary__info">
+        <div class="agent-summary__name-row">
+          <h2 class="agent-summary__name">
+            ${agentEmoji ? html`<span class="agent-summary__emoji">${agentEmoji}</span>` : ''}
             ${displayName}
           </h2>
-          ${koreanName ? html`<span class="ff-plate__sub">(${koreanName})</span>` : ''}
-          ${generation != null ? html`<span class="ff-plate__level">G${generation}</span>` : null}
+          ${koreanName ? html`<span class="agent-summary__sub">(${koreanName})</span>` : ''}
+          ${generation != null ? html`<span class="agent-summary__level">G${generation}</span>` : null}
         </div>
 
-        <div class="ff-plate__badges">
+        <div class="agent-summary__badges">
           <${StatusBadge} status=${headerStatus} />
-          ${model ? html`<span class="ff-plate__model">${model}</span>` : null}
-          ${autonomy ? html`<span class="ff-plate__autonomy">${autonomy}</span>` : null}
-          ${signalTruth ? html`<span class="ff-plate__signal ff-plate__signal--${signalTruth}">${signalTruth}</span>` : null}
+          ${model ? html`<span class="agent-summary__model">${model}</span>` : null}
+          ${autonomy ? html`<span class="agent-summary__autonomy">${autonomy}</span>` : null}
+          ${signalTruth ? html`<span class="agent-summary__signal agent-summary__signal--${signalTruth}">${signalTruth}</span>` : null}
         </div>
 
         ${ctxPct != null ? html`
-          <div class="ff-plate__bar-row">
-            <span class="ff-plate__bar-label">CTX</span>
+          <div class="agent-summary__bar-row">
+            <span class="agent-summary__bar-label">CTX</span>
             <div class="ctx-bar" style="flex:1">
               <div class="ctx-fill ${ctxBarClass(ctxRatio)}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
-            <span class="ff-plate__bar-value">${ctxPct}%</span>
+            <span class="agent-summary__bar-value">${ctxPct}%</span>
           </div>
         ` : null}
 
-        <div class="ff-plate__status-line">
+        <div class="agent-summary__status-line">
           ${currentWork
-            ? html`<span class="ff-plate__work">${currentWork}</span>`
-            : html`<span class="ff-plate__work ff-plate__work--idle">대기 중</span>`
+            ? html`<span class="agent-summary__work">${currentWork}</span>`
+            : html`<span class="agent-summary__work agent-summary__work--idle">대기 중</span>`
           }
-          ${workerState ? html`<span class="ff-plate__worker-state">${workerState}</span>` : null}
-          ${workerFocus ? html`<span class="ff-plate__worker-focus">${workerFocus}</span>` : null}
+          ${workerState ? html`<span class="agent-summary__worker-state">${workerState}</span>` : null}
+          ${workerFocus ? html`<span class="agent-summary__worker-focus">${workerFocus}</span>` : null}
         </div>
 
         ${lastSeenAt || lastActivity != null ? html`
-          <div class="ff-plate__meta-line">
+          <div class="agent-summary__meta-line">
             ${lastSeenAt ? html`<span>마지막 확인: <${TimeAgo} timestamp=${lastSeenAt} /></span>` : null}
             ${lastActivity != null ? html`<span>${formatDuration(lastActivity)} 전 활동</span>` : null}
           </div>
         ` : null}
 
         ${keeperIdent || continuitySummary || brief?.related_session_id ? html`
-          <div class="ff-plate__meta-line">
+          <div class="agent-summary__meta-line">
             ${keeperIdent ? html`<span>${keeperIdent}</span>` : null}
             ${brief?.related_session_id ? html`<span>세션 ${brief.related_session_id}</span>` : null}
             ${continuitySummary ? html`<span>${continuitySummary}</span>` : null}
@@ -291,22 +291,22 @@ function CharacterPlate({ name }: { name: string }) {
       </div>
 
       ${summary ? html`
-        <div class="ff-plate__stats">
-          <div class="ff-stat">
-            <span class="ff-stat__value">${summary.tasks_completed}</span>
-            <span class="ff-stat__label">완료</span>
+        <div class="agent-summary__stats">
+          <div class="agent-summary-stat">
+            <span class="agent-summary-stat__value">${summary.tasks_completed}</span>
+            <span class="agent-summary-stat__label">완료</span>
           </div>
-          <div class="ff-stat">
-            <span class="ff-stat__value">${summary.tasks_claimed}</span>
-            <span class="ff-stat__label">수임</span>
+          <div class="agent-summary-stat">
+            <span class="agent-summary-stat__value">${summary.tasks_claimed}</span>
+            <span class="agent-summary-stat__label">수임</span>
           </div>
-          <div class="ff-stat">
-            <span class="ff-stat__value">${summary.messages_sent}</span>
-            <span class="ff-stat__label">메시지</span>
+          <div class="agent-summary-stat">
+            <span class="agent-summary-stat__value">${summary.messages_sent}</span>
+            <span class="agent-summary-stat__label">메시지</span>
           </div>
-          <div class="ff-stat">
-            <span class="ff-stat__value">${summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : '0m'}</span>
-            <span class="ff-stat__label">활동</span>
+          <div class="agent-summary-stat">
+            <span class="agent-summary-stat__value">${summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : '0m'}</span>
+            <span class="agent-summary-stat__label">활동</span>
           </div>
         </div>
       ` : null}
@@ -327,8 +327,8 @@ export function AgentProfile({ name }: { name: string }) {
   const journalEntries = agentJournalEntries(name)
 
   return html`
-    <div class="ff-profile">
-      <div class="ff-profile__toolbar">
+    <div class="agent-profile">
+      <div class="agent-profile__toolbar">
         <button class="control-btn ghost" onClick=${() => navigate('status', { section: 'agents' })}>← 목록</button>
         <button class="control-btn ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
           ${loading.value ? '...' : '새로고침'}
@@ -339,8 +339,8 @@ export function AgentProfile({ name }: { name: string }) {
 
       <${CharacterPlate} name=${name} />
 
-      <div class="ff-profile__grid">
-        <${Card} title="태스크 (${owned.length})" class="ff-card">
+      <div class="agent-profile__grid">
+        <${Card} title="태스크 (${owned.length})" class="agent-profile-card">
           ${owned.length === 0
             ? html`<div class="empty-state">할당된 태스크 없음</div>`
             : html`<div class="agent-detail-task-list">${owned.map(t => html`
@@ -360,27 +360,27 @@ export function AgentProfile({ name }: { name: string }) {
           const hasData = collabs.length > 0 || interests.length > 0
           if (!hasData) return null
           return html`
-            <${Card} title="관계 (${collabs.length})" class="ff-card">
+            <${Card} title="관계 (${collabs.length})" class="agent-profile-card">
               ${collabs.length > 0 ? html`
-                <div class="ff-relations-list">
+                <div class="agent-profile-relations-list">
                   ${collabs.map(c => html`
-                    <div class="ff-relation-row" key=${c.name}
+                    <div class="agent-profile-relation-row" key=${c.name}
                       onClick=${() => navigate('status', { section: 'agents', agent: c.name })}
                       style="cursor:pointer;"
                     >
-                      <span class="ff-relation-name">${c.name}</span>
-                      <span class="ff-relation-count">${c.collaborations}회</span>
-                      ${c.last_collab ? html`<span class="ff-relation-time"><${TimeAgo} timestamp=${c.last_collab} /></span>` : null}
+                      <span class="agent-profile-relation-name">${c.name}</span>
+                      <span class="agent-profile-relation-count">${c.collaborations}회</span>
+                      ${c.last_collab ? html`<span class="agent-profile-relation-time"><${TimeAgo} timestamp=${c.last_collab} /></span>` : null}
                     </div>
                   `)}
                 </div>
               ` : null}
               ${interests.length > 0 ? html`
-                <div class="ff-interests" style="margin-top:8px;">
-                  <span class="ff-interests-label">관심사</span>
-                  <div class="ff-interests-tags">
-                    ${interests.slice(0, 12).map(t => html`<span class="ff-interest-tag" key=${t}>${t}</span>`)}
-                    ${interests.length > 12 ? html`<span class="ff-interest-tag">+${interests.length - 12}</span>` : null}
+                <div class="agent-profile-interests" style="margin-top:8px;">
+                  <span class="agent-profile-interests-label">관심사</span>
+                  <div class="agent-profile-interests-tags">
+                    ${interests.slice(0, 12).map(t => html`<span class="agent-profile-interest-tag" key=${t}>${t}</span>`)}
+                    ${interests.length > 12 ? html`<span class="agent-profile-interest-tag">+${interests.length - 12}</span>` : null}
                   </div>
                 </div>
               ` : null}
@@ -388,7 +388,7 @@ export function AgentProfile({ name }: { name: string }) {
           `
         })()}
 
-        <${Card} title="타임라인" class="ff-card">
+        <${Card} title="타임라인" class="agent-profile-card">
           ${!timeline || (timeline.events ?? []).length === 0
             ? html`<div class="empty-state">이벤트 없음</div>`
             : html`<div class="agent-timeline-list">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
@@ -396,15 +396,15 @@ export function AgentProfile({ name }: { name: string }) {
                 const title = detail.title ?? detail.content ?? ''
                 return html`
                   <div class="agent-timeline-event" key=${idx}>
-                    <span class="ff-event-type">${timelineEventLabel(evt.type)}</span>
-                    ${title ? html`<span class="ff-event-detail">${compactCopy(title, 80)}</span>` : null}
+                    <span class="agent-profile-event-type">${timelineEventLabel(evt.type)}</span>
+                    ${title ? html`<span class="agent-profile-event-detail">${compactCopy(title, 80)}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
                   </div>
                 `
               })}</div>`}
         <//>
 
-        <${Card} title="실시간 (${journalEntries.length})" class="ff-card">
+        <${Card} title="실시간 (${journalEntries.length})" class="agent-profile-card">
           ${journalEntries.length === 0
             ? html`<div class="empty-state">이벤트 없음</div>`
             : html`<div class="agent-journal-stream">${journalEntries.map((entry: JournalEntry, idx: number) => html`
@@ -417,7 +417,7 @@ export function AgentProfile({ name }: { name: string }) {
               `)}</div>`}
         <//>
 
-        <${Card} title="Room 활동" class="ff-card">
+        <${Card} title="Room 활동" class="agent-profile-card">
           ${lines.length === 0
             ? html`<div class="empty-state">관련 활동 없음</div>`
             : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) =>
@@ -425,7 +425,7 @@ export function AgentProfile({ name }: { name: string }) {
         <//>
 
         ${taskHistories.value.length > 0 ? html`
-          <${Card} title="태스크 이력" class="ff-card ff-card--wide">
+          <${Card} title="태스크 이력" class="agent-profile-card agent-profile-card--wide">
             <div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`
               <div class="agent-history-row" key=${row.taskId}>
                 <div class="agent-history-head"><span class="pill">${row.taskId}</span></div>
@@ -436,8 +436,8 @@ export function AgentProfile({ name }: { name: string }) {
         ` : null}
       </div>
 
-      <div class="ff-profile__mention">
-        <span class="ff-profile__mention-label">@${name}</span>
+      <div class="agent-profile__mention">
+        <span class="agent-profile__mention-label">@${name}</span>
         <input
           class="control-input"
           type="text"

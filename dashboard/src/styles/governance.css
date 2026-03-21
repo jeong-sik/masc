@@ -500,11 +500,11 @@ button.council-row.selected {
 
 /* ── Agent Profile ───────────────────────────────────────── */
 
-.ff-profile {
+.agent-profile {
   padding: 0 4px;
 }
 
-.ff-profile__toolbar {
+.agent-profile__toolbar {
   display: flex;
   gap: 8px;
   margin-bottom: 14px;
@@ -512,7 +512,7 @@ button.council-row.selected {
 
 /* --- Profile Summary Plate --- */
 
-.ff-plate {
+.agent-summary {
   display: grid;
   grid-template-columns: auto 1fr auto;
   gap: 16px;
@@ -525,14 +525,14 @@ button.council-row.selected {
   box-shadow: 0 18px 34px rgba(0, 0, 0, 0.18);
 }
 
-.ff-plate__portrait {
+.agent-summary__portrait {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
 }
 
-.ff-plate__class-tag {
+.agent-summary__class-tag {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -545,21 +545,21 @@ button.council-row.selected {
   text-align: center;
 }
 
-.ff-plate__info {
+.agent-summary__info {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
 }
 
-.ff-plate__name-row {
+.agent-summary__name-row {
   display: flex;
   align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.ff-plate__name {
+.agent-summary__name {
   margin: 0;
   font-size: 20px;
   color: var(--text-strong);
@@ -569,16 +569,16 @@ button.council-row.selected {
   letter-spacing: -0.02em;
 }
 
-.ff-plate__emoji {
+.agent-summary__emoji {
   font-size: 1.4em;
 }
 
-.ff-plate__sub {
+.agent-summary__sub {
   font-size: 13px;
   color: var(--text-muted);
 }
 
-.ff-plate__level {
+.agent-summary__level {
   font-size: 14px;
   font-weight: 700;
   color: #d8e3ff;
@@ -589,14 +589,14 @@ button.council-row.selected {
   font-variant-numeric: tabular-nums;
 }
 
-.ff-plate__badges {
+.agent-summary__badges {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
 }
 
-.ff-plate__model {
+.agent-summary__model {
   font-family: "IBM Plex Mono", monospace;
   font-size: 11px;
   color: #c4d3eb;
@@ -606,7 +606,7 @@ button.council-row.selected {
   padding: 2px 8px;
 }
 
-.ff-plate__autonomy {
+.agent-summary__autonomy {
   font-size: 11px;
   color: #d8c79d;
   background: rgba(216, 168, 91, 0.1);
@@ -615,7 +615,7 @@ button.council-row.selected {
   padding: 2px 8px;
 }
 
-.ff-plate__signal {
+.agent-summary__signal {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.5px;
@@ -623,33 +623,33 @@ button.council-row.selected {
   padding: 1px 5px;
 }
 
-.ff-plate__signal--live {
+.agent-summary__signal--live {
   color: var(--ok);
   background: rgba(74, 222, 128, 0.1);
   border: 1px solid rgba(74, 222, 128, 0.2);
 }
 
-.ff-plate__signal--stale {
+.agent-summary__signal--stale {
   color: var(--warn);
   background: rgba(216, 168, 91, 0.1);
   border: 1px solid rgba(216, 168, 91, 0.2);
 }
 
-.ff-plate__signal--archived {
+.agent-summary__signal--archived {
   color: var(--text-muted);
   background: rgba(148, 163, 184, 0.08);
   border: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 /* CTX bar row */
-.ff-plate__bar-row {
+.agent-summary__bar-row {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-top: 2px;
 }
 
-.ff-plate__bar-label {
+.agent-summary__bar-label {
   font-size: 11px;
   font-weight: 700;
   color: var(--text-muted);
@@ -657,7 +657,7 @@ button.council-row.selected {
   width: 28px;
 }
 
-.ff-plate__bar-value {
+.agent-summary__bar-value {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-strong);
@@ -666,24 +666,24 @@ button.council-row.selected {
 }
 
 /* Status line */
-.ff-plate__status-line {
+.agent-summary__status-line {
   display: flex;
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
 }
 
-.ff-plate__work {
+.agent-summary__work {
   font-size: 13px;
   color: var(--text-body);
 }
 
-.ff-plate__work--idle {
+.agent-summary__work--idle {
   color: var(--text-muted);
   font-style: italic;
 }
 
-.ff-plate__worker-state {
+.agent-summary__worker-state {
   font-size: 11px;
   color: #d8e3ff;
   background: var(--accent-soft);
@@ -692,12 +692,12 @@ button.council-row.selected {
   border-radius: 999px;
 }
 
-.ff-plate__worker-focus {
+.agent-summary__worker-focus {
   font-size: 11px;
   color: var(--text-muted);
 }
 
-.ff-plate__meta-line {
+.agent-summary__meta-line {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
@@ -706,7 +706,7 @@ button.council-row.selected {
 }
 
 /* Stats panel (right side) */
-.ff-plate__stats {
+.agent-summary__stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
@@ -714,7 +714,7 @@ button.council-row.selected {
   min-width: 100px;
 }
 
-.ff-stat {
+.agent-summary-stat {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -724,14 +724,14 @@ button.council-row.selected {
   border: 1px solid var(--card-border);
 }
 
-.ff-stat__value {
+.agent-summary-stat__value {
   font-size: 16px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text-strong);
 }
 
-.ff-stat__label {
+.agent-summary-stat__label {
   font-size: 10px;
   color: var(--text-muted);
   letter-spacing: 0.5px;
@@ -739,31 +739,31 @@ button.council-row.selected {
 
 /* --- Grid and Cards --- */
 
-.ff-profile__grid {
+.agent-profile__grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   margin-bottom: 14px;
 }
 
-.ff-card--wide {
+.agent-profile-card--wide {
   grid-column: 1 / -1;
 }
 
-.ff-event-type {
+.agent-profile-event-type {
   font-size: 11px;
   font-weight: 600;
   color: #d8e3ff;
   min-width: 32px;
 }
 
-.ff-event-detail {
+.agent-profile-event-detail {
   flex: 1;
   font-size: 12px;
   color: var(--text-body);
 }
 
-.ff-profile__mention {
+.agent-profile__mention {
   display: flex;
   gap: 8px;
   align-items: center;
@@ -773,38 +773,38 @@ button.council-row.selected {
   border: 1px solid var(--card-border);
 }
 
-.ff-profile__mention-label {
+.agent-profile__mention-label {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-strong);
   white-space: nowrap;
 }
 
-.ff-profile__mention .control-input {
+.agent-profile__mention .control-input {
   flex: 1;
 }
 
 @media (max-width: 800px) {
-  .ff-plate {
+  .agent-summary {
     grid-template-columns: 1fr;
     text-align: center;
   }
-  .ff-plate__portrait { justify-self: center; }
-  .ff-plate__stats { grid-template-columns: repeat(4, 1fr); justify-self: stretch; }
-  .ff-plate__name-row { justify-content: center; }
-  .ff-plate__badges { justify-content: center; }
-  .ff-profile__grid { grid-template-columns: 1fr; }
+  .agent-summary__portrait { justify-self: center; }
+  .agent-summary__stats { grid-template-columns: repeat(4, 1fr); justify-self: stretch; }
+  .agent-summary__name-row { justify-content: center; }
+  .agent-summary__badges { justify-content: center; }
+  .agent-profile__grid { grid-template-columns: 1fr; }
 }
 
 /* --- Agent Relations Card --- */
 
-.ff-relations-list {
+.agent-profile-relations-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.ff-relation-row {
+.agent-profile-relation-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -813,48 +813,48 @@ button.council-row.selected {
   transition: background 0.15s;
 }
 
-.ff-relation-row:hover {
+.agent-profile-relation-row:hover {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.ff-relation-name {
+.agent-profile-relation-name {
   color: var(--text-strong);
   font-weight: 600;
   font-size: 13px;
   flex: 1;
 }
 
-.ff-relation-count {
+.agent-profile-relation-count {
   color: var(--text-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
-.ff-relation-time {
+.agent-profile-relation-time {
   color: var(--text-muted);
   font-size: 11px;
 }
 
-.ff-interests {
+.agent-profile-interests {
   border-top: 1px solid var(--card-border);
   padding-top: 8px;
 }
 
-.ff-interests-label {
+.agent-profile-interests-label {
   font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
-.ff-interests-tags {
+.agent-profile-interests-tags {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 6px;
 }
 
-.ff-interest-tag {
+.agent-profile-interest-tag {
   background: rgba(255, 255, 255, 0.03);
   color: var(--text-body);
   padding: 2px 8px;

@@ -85,6 +85,16 @@ let task_records : task_record list ref = ref []
 let handoff_records : handoff_record list ref = ref []
 let retention_tests : retention_test list ref = ref []
 
+let max_in_memory = 1000
+
+(** Keep at most [max_in_memory] entries by dropping the oldest (tail).
+    Amortized: only prunes when size exceeds 2x the cap. *)
+let prune_list r =
+  let lst = !r in
+  let len = List.length lst in
+  if len > max_in_memory * 2 then
+    r := List.filteri (fun i _ -> i < max_in_memory) lst
+
 (** {1 JSONL Persistence}
 
     Append-only JSONL backup under .masc/metrics/{agent}/
@@ -165,6 +175,7 @@ let record_task ~generation ~task_id ~completed ~duration_ms ~error_count
       timestamp = Time_compat.now ();
     } in
     task_records := record :: !task_records;
+    prune_list task_records;
     (* JSONL backup — best effort, don't fail the record *)
     (try append_jsonl ~agent_name:"_global" (task_record_to_json record)
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -182,6 +193,7 @@ let record_handoff ~from_generation ~to_generation ~dna_size ~context_ratio =
       timestamp = Time_compat.now ();
     } in
     handoff_records := record :: !handoff_records;
+    prune_list handoff_records;
     (try append_jsonl ~agent_name:"_global" (handoff_record_to_json record)
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Metrics.warn "append_jsonl handoff: %s" (Printexc.to_string exn));
@@ -193,6 +205,7 @@ let record_retention_test ~generation ~question ~expected ~actual ~confidence =
     let correct = String.lowercase_ascii expected = String.lowercase_ascii actual in
     let record = { generation; question; expected; actual; correct; confidence } in
     retention_tests := record :: !retention_tests;
+    prune_list retention_tests;
     record)
 
 (** Internal: summarize without acquiring lock (caller must hold lock) *)

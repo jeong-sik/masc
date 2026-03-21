@@ -23,10 +23,10 @@ let parse_json s =
   try Yojson.Safe.from_string s
   with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
 
-(* Test helper *)
+(* Test helper — runs inside Eio context for code paths that use Eio.Mutex *)
 let test name f =
   try
-    f ();
+    Eio_main.run (fun _env -> f ());
     Printf.printf "✓ %s passed\n" name
   with e ->
     Printf.printf "✗ %s FAILED: %s\n" name (Printexc.to_string e);

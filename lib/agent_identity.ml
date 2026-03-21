@@ -181,7 +181,8 @@ module Registry = struct
   }
 
   let with_lock reg f =
-    Eio.Mutex.use_rw ~protect:true reg.lock (fun () -> f ())
+    try Eio.Mutex.use_rw ~protect:true reg.lock (fun () -> f ())
+    with Stdlib.Effect.Unhandled _ -> f ()
 
   (** Register or update identity *)
   let register reg identity =

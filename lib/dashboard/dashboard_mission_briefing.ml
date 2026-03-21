@@ -299,6 +299,18 @@ let json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
           start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr ();
         pending_json ~now:now_iso ~last_error)
       else (
-        if not refresh_in_flight then
-          start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr ();
-        pending_json ~now:now_iso ~last_error)
+        (* Synchronous cold-start: compute the first briefing inline so the
+           caller gets an immediate "ok" result instead of "pending".
+           Subsequent calls hit the cache or the async refresh path. *)
+        match compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () with
+        | Ok result_json ->
+            with_cache_lock (fun () ->
+                cache.cached_json <- Some result_json;
+                cache.cached_at <- Unix.gettimeofday ();
+                cache.last_error <- None);
+            result_json
+        | Error _reason ->
+            (* Sync attempt failed; fall back to async + pending *)
+            if not refresh_in_flight then
+              start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr ();
+            pending_json ~now:now_iso ~last_error)

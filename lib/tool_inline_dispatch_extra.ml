@@ -230,6 +230,26 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       if success then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
+        (* Record board activity as a fitness metric so board-active agents
+           appear in agent_fitness queries (Issue #1861). *)
+        (try
+           let now = Time_compat.now () in
+           let metric : Metrics_store_eio.task_metric = {
+             id = Metrics_store_eio.generate_id ();
+             agent_id = author;
+             task_id = "board_post";
+             started_at = now;
+             completed_at = Some now;
+             success = true;
+             error_message = None;
+             collaborators = [];
+             handoff_from = None;
+             handoff_to = None;
+           } in
+           Metrics_store_eio.record config metric
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+           Log.Misc.error "board_post fitness record failed: %s"
+             (Printexc.to_string exn));
         let notification = `Assoc [
           ("type", `String "masc/board_post");
           ("author", `String author);
@@ -263,6 +283,25 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
+        (* Record board comment as a fitness metric (Issue #1861). *)
+        (try
+           let now = Time_compat.now () in
+           let metric : Metrics_store_eio.task_metric = {
+             id = Metrics_store_eio.generate_id ();
+             agent_id = author;
+             task_id = "board_comment:" ^ post_id;
+             started_at = now;
+             completed_at = Some now;
+             success = true;
+             error_message = None;
+             collaborators = [];
+             handoff_from = None;
+             handoff_to = None;
+           } in
+           Metrics_store_eio.record config metric
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+           Log.Misc.error "board_comment fitness record failed: %s"
+             (Printexc.to_string exn));
         let notification = `Assoc [
           ("type", `String "board_comment");
           ("author", `String author);
@@ -282,9 +321,41 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       end;
       Some result
 
+  | "masc_board_vote" | "masc_board_comment_vote" ->
+      let (success, _message) as result = Tool_board.handle_tool name arguments in
+      (* Record vote activity as a fitness metric (Issue #1861). *)
+      if success then begin
+        let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
+        (try
+           let now = Time_compat.now () in
+           let target_id =
+             if name = "masc_board_vote" then
+               Safe_ops.json_string ~default:"unknown" "post_id" arguments
+             else
+               Safe_ops.json_string ~default:"unknown" "comment_id" arguments
+           in
+           let metric : Metrics_store_eio.task_metric = {
+             id = Metrics_store_eio.generate_id ();
+             agent_id = voter;
+             task_id = "board_vote:" ^ target_id;
+             started_at = now;
+             completed_at = Some now;
+             success = true;
+             error_message = None;
+             collaborators = [];
+             handoff_from = None;
+             handoff_to = None;
+           } in
+           Metrics_store_eio.record config metric
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+           Log.Misc.error "board_vote fitness record failed: %s"
+             (Printexc.to_string exn))
+      end;
+      Some result
+
   | "masc_board_list" | "masc_board_get"
-  | "masc_board_vote" | "masc_board_stats"
-  | "masc_board_search" | "masc_board_comment_vote" | "masc_board_profile"
+  | "masc_board_stats"
+  | "masc_board_search" | "masc_board_profile"
   | "masc_board_hearths" | "masc_board_migrate" ->
       Some (Tool_board.handle_tool name arguments)
 

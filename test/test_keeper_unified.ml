@@ -250,9 +250,7 @@ let test_hooks_allowed_tools_l5 () =
 
 (* ---------- Config tests ---------- *)
 
-let test_unified_turn_config_defaults () =
-  check bool "unified disabled by default" false
-    (KC.keeper_unified_turn_enabled ());
+let test_unified_turn_runtime_defaults () =
   check (float 0.01) "unified temp default" 0.4
     (KC.keeper_unified_temperature ());
   check int "unified max_tokens default" 2048
@@ -372,7 +370,8 @@ let () =
         ] );
       ( "config",
         [
-          test_case "unified defaults" `Quick test_unified_turn_config_defaults;
+          test_case "unified runtime defaults" `Quick
+            test_unified_turn_runtime_defaults;
         ] );
       ( "metrics_observation",
         [

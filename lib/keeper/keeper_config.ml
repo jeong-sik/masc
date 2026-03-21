@@ -532,13 +532,8 @@ let keeper_social_followup_max_tokens () : int =
     ~max_v:4096
 
 (* ================================================================ *)
-(* Unified Keeper Turn parameters                                    *)
+(* Unified Keeper Turn parameters                                   *)
 (* ================================================================ *)
-
-(** Feature flag: enable unified keeper turn path.
-    Env: [MASC_KEEPER_UNIFIED_TURN]. Default: false. *)
-let keeper_unified_turn_enabled () : bool =
-  bool_of_env_default "MASC_KEEPER_UNIFIED_TURN" ~default:false
 
 (** Temperature for unified keeper turns.
     Env: [MASC_KEEPER_UNIFIED_TEMP]. Default: 0.4. *)

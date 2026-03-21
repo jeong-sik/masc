@@ -1,5 +1,6 @@
 open Operator_pending_confirm
 include Operator_digest_types
+open Operator_digest_event
 
 let build_worker_cards ~(session : Team_session_types.session) ~(events : Yojson.Safe.t list)
     ~now =

@@ -317,52 +317,24 @@ let spawn_batch_stub_of_cards (cards : worker_card list) =
   in
   `Assoc [ ("spawn_batch", `List items) ]
 
-let aggregate_worker_class_counts (sessions : Team_session_types.session list) =
-  sessions
-  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
-  |> Team_session_types.worker_class_counts
-  |> Team_session_types.counts_to_json
+let all_planned_workers (sessions : Team_session_types.session list) =
+  List.concat_map
+    (fun (session : Team_session_types.session) -> session.planned_workers)
+    sessions
 
-let aggregate_runtime_pool_counts (sessions : Team_session_types.session list) =
-  sessions
-  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
-  |> Team_session_types.runtime_pool_counts
-  |> Team_session_types.counts_to_json
+let aggregate_worker_counts sessions count_fn =
+  all_planned_workers sessions |> count_fn |> Team_session_types.counts_to_json
 
-let aggregate_lane_counts (sessions : Team_session_types.session list) =
-  sessions
-  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
-  |> Team_session_types.lane_counts
-  |> Team_session_types.counts_to_json
+let aggregate_worker_class_counts s   = aggregate_worker_counts s Team_session_types.worker_class_counts
+let aggregate_runtime_pool_counts s   = aggregate_worker_counts s Team_session_types.runtime_pool_counts
+let aggregate_lane_counts s           = aggregate_worker_counts s Team_session_types.lane_counts
+let aggregate_controller_counts s     = aggregate_worker_counts s Team_session_types.controller_level_counts
+let aggregate_control_domain_counts s = aggregate_worker_counts s Team_session_types.control_domain_counts
+let aggregate_tier_counts s           = aggregate_worker_counts s Team_session_types.model_tier_counts
+let aggregate_task_profile_counts s   = aggregate_worker_counts s Team_session_types.task_profile_counts
 
-let aggregate_controller_counts (sessions : Team_session_types.session list) =
-  sessions
-  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
-  |> Team_session_types.controller_level_counts
-  |> Team_session_types.counts_to_json
-
-let aggregate_control_domain_counts (sessions : Team_session_types.session list) =
-  sessions
-  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
-  |> Team_session_types.control_domain_counts
-  |> Team_session_types.counts_to_json
-
-let aggregate_tier_counts (sessions : Team_session_types.session list) =
-  sessions
-  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
-  |> Team_session_types.model_tier_counts
-  |> Team_session_types.counts_to_json
-
-let aggregate_task_profile_counts (sessions : Team_session_types.session list) =
-  sessions
-  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
-  |> Team_session_types.task_profile_counts
-  |> Team_session_types.counts_to_json
-
-let aggregate_escalation_count (sessions : Team_session_types.session list) =
-  sessions
-  |> List.concat_map (fun (session : Team_session_types.session) -> session.planned_workers)
-  |> Team_session_types.escalation_count
+let aggregate_escalation_count s =
+  all_planned_workers s |> Team_session_types.escalation_count
 
 let aggregated_local_runtime_json (sessions : Team_session_types.session list) =
   if
@@ -476,183 +448,6 @@ let summary_of_recommendations ~actor (items : recommended_action list) =
       ("provenance", `String "fallback");
       ("authoritative", `Bool false);
     ]
-
-let judgment_surface_for_target_type = function
-  | "room" -> "command.warroom"
-  | "team_session" -> "command.swarm"
-  | _ -> "command.warroom"
-
-let judgment_target_type_of_string = function
-  | "room" -> Operator_judgment.Room
-  | "team_session" -> Operator_judgment.Team_session
-  | _ -> Operator_judgment.Room
-
-let fresh_operator_judgment config ~target_type ~target_id =
-  let judgment_target_type = judgment_target_type_of_string target_type in
-  let surface = judgment_surface_for_target_type target_type in
-  match
-    Operator_judgment.latest_active config ~surface
-      ~target_type:judgment_target_type ~target_id
-  with
-  | Some value when Operator_judgment.is_fresh value ->
-      Some (Operator_judgment.to_yojson value)
-  | _ -> None
-
-let judgment_summary_json judgment_json =
-  `Assoc
-    [
-      ("summary", judgment_json |> U.member "summary");
-      ("confidence", judgment_json |> U.member "confidence");
-      ("provenance", `String "judgment");
-      ("authoritative", `Bool true);
-      ("surface", judgment_json |> U.member "surface");
-      ("fresh_until", judgment_json |> U.member "fresh_until");
-      ("keeper_name", judgment_json |> U.member "keeper_name");
-      ("fallback_used", judgment_json |> U.member "fallback_used");
-      ("disagreement_with_truth", judgment_json |> U.member "disagreement_with_truth");
-    ]
-
-let active_guidance_fields ~config ~actor ~target_type ~target_id
-    ~fallback_recommendations ~fallback_summary =
-  let fallback_recommendation_json =
-    `List
-      (List.map (recommended_action_to_yojson ~actor) fallback_recommendations)
-  in
-  match fresh_operator_judgment config ~target_type ~target_id with
-  | Some judgment_json ->
-      let judgment_actions =
-        match judgment_json |> U.member "recommended_action" with
-        | `Assoc _ as value -> `List [ value ]
-        | _ -> fallback_recommendation_json
-      in
-      let recommendation_source =
-        match judgment_json |> U.member "recommended_action" with
-        | `Assoc _ -> "judgment"
-        | _ -> "fallback"
-      in
-      [
-        ("judgment_owner", `String "resident_operator_keeper");
-        ("authoritative_judgment_available", `Bool true);
-        ("judgment", judgment_json);
-        ("active_guidance_layer", `String "judgment");
-        ("active_summary", judgment_summary_json judgment_json);
-        ("active_recommended_actions", judgment_actions);
-        ("active_recommendation_source", `String recommendation_source);
-        ("active_recommendation_summary", judgment_summary_json judgment_json);
-        ("fallback_recommended_actions", fallback_recommendation_json);
-      ]
-  | None ->
-      [
-        ("judgment_owner", `String "fallback_read_model");
-        ("authoritative_judgment_available", `Bool false);
-        ("judgment", `Null);
-        ("active_guidance_layer", `String "fallback");
-        ("active_summary", fallback_summary);
-        ("active_recommended_actions", fallback_recommendation_json);
-        ("active_recommendation_source", `String "fallback");
-        ("active_recommendation_summary", fallback_summary);
-        ("fallback_recommended_actions", fallback_recommendation_json);
-      ]
-
-let event_ts_iso json =
-  match U.member "ts_iso" json with `String value -> Some value | _ -> None
-
-let event_ts_unix json =
-  match U.member "ts" json with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | `Intlit raw -> float_of_string_opt raw
-  | _ -> (
-      match event_ts_iso json with
-      | Some iso -> Resilience.Time.parse_iso8601_opt iso
-      | None -> None)
-
-let event_type json =
-  match U.member "event_type" json with `String value -> Some value | _ -> None
-
-let event_detail_actor json =
-  match U.member "detail" json |> U.member "actor" with
-  | `String actor ->
-      let trimmed = String.trim actor in
-      if trimmed = "" then None else Some trimmed
-  | _ -> None
-
-let event_detail_kind json =
-  match U.member "detail" json |> U.member "kind" with
-  | `String kind ->
-      let trimmed = String.trim kind in
-      if trimmed = "" then None else Some trimmed
-  | _ -> None
-
-let event_detail_message json =
-  match U.member "detail" json |> U.member "message" with
-  | `String message ->
-      let trimmed = String.trim message in
-      if trimmed = "" then None else Some trimmed
-  | _ -> None
-
-let count_spawn_failures events =
-  List.fold_left
-    (fun acc json ->
-      match (event_type json, U.member "detail" json |> U.member "success") with
-      | Some "team_step_spawn", `Bool false -> acc + 1
-      | _ -> acc)
-    0 events
-
-let count_detached_actors events =
-  List.fold_left
-    (fun acc json ->
-      match event_type json with
-      | Some "session_agent_detached" -> acc + 1
-      | _ -> acc)
-    0 events
-
-let empty_note_turn_actors events =
-  events
-  |> List.filter_map (fun json ->
-         match (event_type json, event_detail_kind json, event_detail_actor json) with
-         | Some "team_turn", Some "note", Some actor -> (
-             match event_detail_message json with None -> Some actor | Some _ -> None)
-         | _ -> None)
-  |> Team_session_types.dedup_strings
-
-let turn_count_by_actor events actor_name =
-  List.fold_left
-    (fun acc json ->
-      match (event_type json, event_detail_actor json) with
-      | Some "team_turn", Some actor when String.equal actor actor_name -> acc + 1
-      | _ -> acc)
-    0 events
-
-let empty_note_turn_count_for_actor events actor_name =
-  List.fold_left
-    (fun acc json ->
-      match (event_type json, event_detail_kind json, event_detail_actor json) with
-      | Some "team_turn", Some "note", Some actor when String.equal actor actor_name -> (
-          match event_detail_message json with None -> acc + 1 | Some _ -> acc)
-      | _ -> acc)
-    0 events
-
-let last_turn_ts_iso_for_actor events actor_name =
-  events
-  |> List.filter_map (fun json ->
-         match (event_type json, event_detail_actor json) with
-         | Some "team_turn", Some actor when String.equal actor actor_name ->
-             event_ts_iso json
-         | _ -> None)
-  |> List.rev |> function value :: _ -> Some value | [] -> None
-
-let last_turn_age_sec_for_actor events actor_name ~now =
-  events
-  |> List.filter_map (fun json ->
-         match (event_type json, event_detail_actor json) with
-         | Some "team_turn", Some actor when String.equal actor actor_name ->
-             event_ts_unix json
-         | _ -> None)
-  |> List.rev
-  |> function
-  | ts :: _ -> Some (max 0 (int_of_float (now -. ts)))
-  | [] -> None
 
 let normalize_digest_target_type value =
   match value with

@@ -2,6 +2,7 @@ open Operator_pending_confirm
 
 include Operator_digest_types
 include Operator_digest_session
+open Operator_digest_guidance
 
 let build_room_attention_items ?command_plane_summary config =
   let command_plane_summary =

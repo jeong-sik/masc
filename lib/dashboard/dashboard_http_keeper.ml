@@ -128,16 +128,16 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           let metrics_series = `List metrics_series_items in
 
           let models_resolved =
-            match Keeper_types.model_specs_of_strings m.models with
-            | Error _ -> `List []
-            | Ok specs ->
-                `List (List.map (fun (s : Model_spec.model_spec) ->
-                  `Assoc [
-                    ("provider", `String (Model_spec.string_of_provider s.provider));
-                    ("model_id", `String s.model_id);
-                    ("max_context", `Int s.max_context);
-                  ]
-                ) specs)
+            `List (List.filter_map (fun label ->
+              match String.split_on_char ':' label with
+              | [provider; model_id] ->
+                  Some (`Assoc [
+                    ("provider", `String provider);
+                    ("model_id", `String model_id);
+                    ("max_context", `Int 0);
+                  ])
+              | _ -> None
+            ) m.models)
           in
 
           let memory_bank_summary =

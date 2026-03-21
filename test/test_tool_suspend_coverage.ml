@@ -246,7 +246,7 @@ let test_handle_suspend_valid () =
    | _ -> fail "expected JSON assoc");
   cleanup_blacklist agent_id;
   (* Also clean up circuit breaker *)
-  Masc_mcp.Circuit_breaker.force_close_global ~agent_id
+  Circuit_breaker.force_close_global ~agent_id
 
 let test_handle_suspend_self () =
   let agent_id = "suspend-self-test" in
@@ -265,7 +265,7 @@ let test_handle_suspend_self () =
          (List.assoc_opt "is_self_suspend" fields = Some (`Bool true))
    | _ -> fail "expected JSON assoc");
   cleanup_blacklist agent_id;
-  Masc_mcp.Circuit_breaker.force_close_global ~agent_id
+  Circuit_breaker.force_close_global ~agent_id
 
 let test_handle_suspend_default_reason () =
   let agent_id = "suspend-default-reason" in
@@ -282,7 +282,7 @@ let test_handle_suspend_default_reason () =
          (List.assoc_opt "reason" fields = Some (`String "No reason provided"))
    | _ -> fail "expected JSON assoc");
   cleanup_blacklist agent_id;
-  Masc_mcp.Circuit_breaker.force_close_global ~agent_id
+  Circuit_breaker.force_close_global ~agent_id
 
 (* ============================================================
    handle_circuit_status Tests

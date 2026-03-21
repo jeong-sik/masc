@@ -2,6 +2,7 @@
 
 open Alcotest
 open Masc_mcp
+open Types_core
 
 let test_generate_session_key () =
   let key1 = Agent_identity.generate_session_key () in

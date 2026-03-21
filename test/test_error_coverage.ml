@@ -10,7 +10,7 @@
 
 open Alcotest
 
-module Error = Masc_mcp.Error
+module Error = Error
 
 (* ============================================================
    is_recoverable Tests

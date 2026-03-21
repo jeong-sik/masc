@@ -1,6 +1,6 @@
 (** Tests for Lamport clock *)
 
-module L = Masc_mcp.Lamport
+module L = Lamport
 
 let test_create () =
   let clock = L.create () in

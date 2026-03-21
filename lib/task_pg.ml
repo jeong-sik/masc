@@ -237,7 +237,7 @@ let row_to_task (((id, title, description), (priority, status, assignee),
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.warn "task_pg: files JSON parse failed: %s" (Printexc.to_string exn);
     [] in
-  let required_role = Agent_identity.role_of_string required_role_str in
+  let required_role = Types_core.role_of_string required_role_str in
   {
     id; title; description; priority; files; created_at;
     worktree = None;  (* Worktree loaded separately if needed *)
@@ -247,10 +247,10 @@ let row_to_task (((id, title, description), (priority, status, assignee),
   }
 
 let add_task t ~id ~title ~description ~priority ~created_at
-    ?(required_role = Agent_identity.Unassigned) () =
+    ?(required_role = Types_core.Unassigned) () =
   let status_str, assignee, claimed_at, started_at, completed_at, _, _, _ =
     status_to_db Todo in
-  let required_role_str = Agent_identity.role_to_string required_role in
+  let required_role_str = Types_core.role_to_string required_role in
   let params = (
     ((id, title, description),
      (priority, status_str, assignee),
@@ -317,7 +317,7 @@ let migrate_from_backlog t (backlog : backlog) =
   let results = List.map (fun (task : task) ->
     let status_str, assignee, claimed_at, started_at, completed_at, _, _, _ =
       status_to_db task.task_status in
-    let required_role_str = Agent_identity.role_to_string task.required_role in
+    let required_role_str = Types_core.role_to_string task.required_role in
     let params = (
       ((task.id, task.title, task.description),
        (task.priority, status_str, assignee),

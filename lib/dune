@@ -25,7 +25,6 @@
    board_dispatch
    board_listener
    capability_registry
-   error
    backend_core
    backend
    backend_pg
@@ -39,7 +38,6 @@
    capability_match
    cancellation
    checkpoint_types
-   common
    command_plane_v2
    command_plane_orchestra
    cp_types
@@ -244,7 +242,6 @@
    mention
    message_schema
    verification
-   lamport
    trace
    mitosis
    mitosis_continuity
@@ -321,7 +318,6 @@
    team_session_swarm_callbacks
    team_session_swarm_runner
    ;; sctp/sctp_eio/sctp_transport removed — in ocaml-webrtc
-   safe_ops
    ;; sdp removed — in ocaml-webrtc
    session
    shutdown_hooks
@@ -467,9 +463,6 @@
    transport
    udp_socket_eio
    types
-   validation
-   circuit_breaker
-   backoff
    shutdown
    supervisor
    keeper_chat_ag_ui
@@ -571,7 +564,6 @@
    tool_compact
    tool_shard
    tool_keeper
-   json_util
    ;; Autoresearch — Karpathy-inspired autonomous experiment loop
    autoresearch
    autoresearch_types
@@ -587,8 +579,6 @@
    ;; Anti-Fake Test Quality Scoring (harness P2)
    anti_fake
    ;; godsplit-phase1: type/schema sub-modules
-   types_core
-   types_auth
    team_session_types_enums
    tool_schemas_room_core
    tool_schemas_room_extra
@@ -721,8 +711,6 @@
   team_session_report_proof_helpers
   team_session_report_proof
   ;; godsplit-phase1: type/schema sub-modules
-  types_core
-  types_auth
   team_session_types_enums
   tool_schemas_room_core
   ;; godsplit-phase1: chain_executor sub-modules
@@ -835,6 +823,10 @@
    ;; Neo4j Bolt native driver (OCaml 5.x Eio)
    ;; Structured logging (extracted sub-library)
    masc_log
+   ;; Core types (extracted sub-library)
+   masc_types
+   ;; Core utilities (extracted sub-library)
+   masc_core
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

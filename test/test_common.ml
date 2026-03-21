@@ -18,7 +18,7 @@ let with_env name value f =
 let test_protect_finally_runs () =
   let called = ref false in
   let value =
-    Masc_mcp.Common.protect
+    Common.protect
       ~module_name:"test_common"
       ~finally_label:"finally"
       ~finally:(fun () -> called := true)
@@ -31,7 +31,7 @@ let test_protect_finally_error_no_raise () =
   with_env "MASC_MCP_STRICT_FINALIZERS" (Some "0") (fun () ->
     let called = ref false in
     let value =
-      Masc_mcp.Common.protect
+      Common.protect
         ~module_name:"test_common"
         ~finally_label:"finally"
         ~finally:(fun () -> called := true; failwith "boom")
@@ -45,7 +45,7 @@ let test_protect_finally_error_raise () =
     let raised =
       try
         let _ =
-          Masc_mcp.Common.protect
+          Common.protect
             ~module_name:"test_common"
             ~finally_label:"finally"
             ~finally:(fun () -> failwith "boom")
@@ -60,7 +60,7 @@ let test_protect_preserves_exception () =
   let raised =
     try
       let _ =
-        Masc_mcp.Common.protect
+        Common.protect
           ~module_name:"test_common"
           ~finally_label:"finally"
           ~finally:(fun () -> failwith "finalizer")
@@ -72,7 +72,7 @@ let test_protect_preserves_exception () =
   check (option string) "main exception preserved" (Some "main") raised
 
 let () =
-  run "Masc_mcp.Common" [
+  run "Common" [
     "finalizer_guard", [
       test_case "runs finally" `Quick test_protect_finally_runs;
       test_case "finalizer error no raise" `Quick test_protect_finally_error_no_raise;

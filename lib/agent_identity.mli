@@ -71,37 +71,11 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 
 (** {1 Role System} *)
 
-(** Agent role in task workflows *)
-type role =
-  | Writer     (** Produces artifacts: code, docs, designs *)
-  | Reviewer   (** Reviews artifacts: code review, QA, ethics *)
-  | Admin      (** Administrative: orchestration, assignment *)
-  | Unassigned (** No specific role (legacy/default) *)
+(** Agent role - canonical definition in Types_core (masc_types sub-library).
+    Use Types_core.role, Types_core.role_satisfies, etc. directly. *)
 
-val pp_role : Format.formatter -> role -> unit
-val equal_role : role -> role -> bool
-val show_role : role -> string
-
-val role_to_string : role -> string
-
-(** Parse a role string, returning [None] for unrecognized values.
-    "unassigned" maps to [Some Unassigned]; truly unknown strings return [None]. *)
-val role_of_string_opt : string -> role option
-
-(** Parse a role string, defaulting to [Unassigned] for unrecognized values.
-    Prefer [role_of_string_opt] when the caller can surface parse errors. *)
-val role_of_string : string -> role
-
-val role_to_yojson : role -> Yojson.Safe.t
-val role_of_yojson : Yojson.Safe.t -> (role, string) result
-
-val get_role : t -> role
-val set_role : t -> role -> t
-
-(** [role_satisfies ~required ~agent_role] returns true when the agent's role
-    is compatible with the task's required role.
-    Admin satisfies any requirement. Unassigned requirement accepts any role. *)
-val role_satisfies : required:role -> agent_role:role -> bool
+val get_role : t -> Types_core.role
+val set_role : t -> Types_core.role -> t
 
 (** {1 MAGI Archetype System} *)
 

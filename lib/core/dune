@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name masc_core)
+ (public_name masc_mcp.masc_core)
+ (wrapped false)
+ (modules lamport json_util safe_ops common backoff validation circuit_breaker)
+ (libraries yojson unix str eio time_compat fs_compat masc_log))

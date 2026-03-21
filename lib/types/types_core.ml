@@ -109,11 +109,91 @@ let now_iso () =
     (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
     tm.tm_hour tm.tm_min tm.tm_sec
 
+(** Parse ISO8601 "YYYY-MM-DDTHH:MM:SSZ" to Unix float (UTC). *)
+let parse_iso8601_opt_internal s =
+  try
+    Scanf.sscanf s "%04d-%02d-%02dT%02d:%02d:%02dZ"
+      (fun year mon day hour min sec ->
+        let tm = {
+          Unix.tm_sec = sec; tm_min = min; tm_hour = hour;
+          tm_mday = day; tm_mon = mon - 1; tm_year = year - 1900;
+          tm_wday = 0; tm_yday = 0; tm_isdst = false;
+        } in
+        let local_epoch, _ = Unix.mktime tm in
+        let utc_of_local = Unix.gmtime local_epoch in
+        let utc_as_local, _ = Unix.mktime utc_of_local in
+        let tz_offset = local_epoch -. utc_as_local in
+        Some (local_epoch +. tz_offset))
+  with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
+
 (** Parse ISO8601 timestamp to Unix float. Returns default_time on parse failure. *)
 let parse_iso8601 ?(default_time = Time_compat.now () -. 60.0) timestamp =
-  match Resilience.Time.parse_iso8601_opt timestamp with
+  match parse_iso8601_opt_internal timestamp with
   | Some unix_ts -> unix_ts
   | None -> default_time
+
+(* ============================================ *)
+(* Agent Role - task assignment roles           *)
+(* ============================================ *)
+
+(** Agent role for task assignment. *)
+type role =
+  | Writer     (** Produces artifacts: code, docs, designs *)
+  | Reviewer   (** Reviews artifacts: code review, QA, ethics *)
+  | Admin      (** Administrative: orchestration, assignment *)
+  | Unassigned (** No specific role (legacy/default) *)
+
+let pp_role fmt r =
+  Format.fprintf fmt "%s"
+    (match r with
+     | Writer -> "Writer"
+     | Reviewer -> "Reviewer"
+     | Admin -> "Admin"
+     | Unassigned -> "Unassigned")
+
+let equal_role a b =
+  match a, b with
+  | Writer, Writer | Reviewer, Reviewer | Admin, Admin | Unassigned, Unassigned -> true
+  | _ -> false
+
+let show_role r =
+  Format.asprintf "%a" pp_role r
+
+let role_to_string = function
+  | Writer -> "writer"
+  | Reviewer -> "reviewer"
+  | Admin -> "admin"
+  | Unassigned -> "unassigned"
+
+let role_of_string_opt = function
+  | "writer" | "write" | "author" | "implementer" -> Some Writer
+  | "reviewer" | "review" | "qa" | "auditor" -> Some Reviewer
+  | "admin" | "administrator" | "orchestrator" -> Some Admin
+  | "unassigned" -> Some Unassigned
+  | _ -> None
+
+let role_of_string s =
+  role_of_string_opt s |> Option.value ~default:Unassigned
+
+let role_to_yojson r = `String (role_to_string r)
+
+let role_of_yojson = function
+  | `String s ->
+    (match role_of_string_opt s with
+     | Some r -> Ok r
+     | None -> Error (Printf.sprintf "role_of_yojson: unknown role %S" s))
+  | _ -> Error "role_of_yojson: expected string"
+
+(** Check if agent role satisfies a required role.
+    Admin can satisfy any requirement. Unassigned requirement is satisfied by any role. *)
+let role_satisfies ~(required : role) ~(agent_role : role) : bool =
+  match required, agent_role with
+  | Unassigned, _ -> true
+  | _, Admin -> true
+  | Writer, Writer -> true
+  | Reviewer, Reviewer -> true
+  | Admin, _ -> false
+  | _ -> false
 
 (** Agent status - compile-time state machine *)
 type agent_status =
@@ -311,7 +391,7 @@ type task = {
   files: string list; [@default []]
   created_at: string;
   worktree: worktree_info option; [@default None]  (* linked worktree info *)
-  required_role: Agent_identity.role; [@default Agent_identity.Unassigned]  (** Role required to claim this task *)
+  required_role: role; [@default Unassigned]  (** Role required to claim this task *)
 } [@@deriving show]
 
 (* Manual yojson for task *)
@@ -332,8 +412,8 @@ let task_to_yojson t =
   in
   (* Add required_role if not Unassigned *)
   let with_role = match t.required_role with
-    | Agent_identity.Unassigned -> with_worktree
-    | role -> with_worktree @ [("required_role", Agent_identity.role_to_yojson role)]
+    | Unassigned -> with_worktree
+    | role -> with_worktree @ [("required_role", role_to_yojson role)]
   in
   (* Merge status fields into task *)
   match status_json with
@@ -359,8 +439,8 @@ let task_of_yojson json =
     in
     (* Parse optional required_role field — defaults to Unassigned for backward compat *)
     let required_role = match json |> member "required_role" |> to_string_option with
-      | Some s -> Agent_identity.role_of_string s
-      | None -> Agent_identity.Unassigned
+      | Some s -> role_of_string s
+      | None -> Unassigned
     in
     match task_status_of_yojson json with
     | Ok task_status -> Ok { id; title; description; task_status; priority; files; created_at; worktree; required_role }

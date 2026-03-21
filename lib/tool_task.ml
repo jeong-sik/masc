@@ -74,8 +74,8 @@ let handle_claim ctx args =
   | Error e -> result_to_response (Error e)
   | Ok task_id ->
   let agent_role = match get_string args "agent_role" "" with
-    | "" -> Agent_identity.Unassigned
-    | s -> Agent_identity.role_of_string s
+    | "" -> Types_core.Unassigned
+    | s -> Types_core.role_of_string s
   in
   let result = Room.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~agent_role () in
   (* Notification harness: push claim event to all active sessions *)

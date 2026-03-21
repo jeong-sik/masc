@@ -2,7 +2,7 @@
     Track token usage and costs per agent/task *)
 
 open Printf
-open Masc_mcp.Json_util
+open Json_util
 
 (** Cost entry type *)
 type cost_entry = {

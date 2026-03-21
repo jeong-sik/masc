@@ -123,7 +123,7 @@ let make_task ~id ~status : Types.task = {
   files = [];
   created_at = "2024-01-01T00:00:00Z";
   worktree = None;
-  required_role = Masc_mcp.Agent_identity.Unassigned;
+  required_role = Types_core.Unassigned;
 }
 
 let test_is_pending_task_todo () =
@@ -159,7 +159,7 @@ let make_task_with_priority ~id ~priority : Types.task = {
   files = [];
   created_at = "2024-01-01T00:00:00Z";
   worktree = None;
-  required_role = Masc_mcp.Agent_identity.Unassigned;
+  required_role = Types_core.Unassigned;
 }
 
 let test_calculate_adaptive_tempo_empty () =

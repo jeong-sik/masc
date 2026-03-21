@@ -1,7 +1,6 @@
 (** Json_util Module Tests — comprehensive coverage for all functions *)
 
 open Alcotest
-open Masc_mcp
 
 (* ================================================================
    Test data

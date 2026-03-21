@@ -138,38 +138,41 @@ let sync_to_graphql (f : finding) : (bool, string) result =
   let mutation = {|
     mutation CreateFinding(
       $id: String!
-      $loopId: String!
-      $keeperName: String!
       $goal: String!
       $hypothesis: String!
       $evidence: String!
       $conclusion: String!
-      $confidence: String!
-      $tags: [String!]!
+      $loopId: String
+      $keeperName: String
+      $confidence: String
+      $tags: [String!]
     ) {
-      createFindings(input: [{
+      createFinding(
         id: $id
-        loopId: $loopId
-        keeperName: $keeperName
         goal: $goal
         hypothesis: $hypothesis
         evidence: $evidence
         conclusion: $conclusion
+        loopId: $loopId
+        keeperName: $keeperName
         confidence: $confidence
         tags: $tags
-      }]) {
-        findings { id }
+      ) {
+        success
+        message
+        finding { findingId }
       }
     }
   |} in
+  let opt_string s = if s = "" then `Null else `String s in
   let variables = `Assoc [
     ("id", `String f.id);
-    ("loopId", `String f.loop_id);
-    ("keeperName", `String f.keeper_name);
     ("goal", `String f.goal);
     ("hypothesis", `String f.hypothesis);
     ("evidence", `String f.evidence);
     ("conclusion", `String f.conclusion);
+    ("loopId", opt_string f.loop_id);
+    ("keeperName", opt_string f.keeper_name);
     ("confidence", `String (confidence_to_string f.confidence));
     ("tags", `List (List.map (fun t -> `String t) f.tags));
   ] in

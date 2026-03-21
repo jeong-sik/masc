@@ -341,13 +341,12 @@
    tool_bridge
    tool_cache
    tool_tempo
-   mitosis_continuity
-   mitosis_handoff
    mitosis_helpers
    mitosis_spawn
+   tool_mitosis_utils
+   tool_mitosis_handoff
    tool_mitosis
    tool_mitosis_oas
-   tool_mitosis_schemas
    tool_portal
    tool_worktree
    tool_vote
@@ -382,6 +381,7 @@
    workflow_guide
    tool_control
    tool_verification
+   tool_misc_snapshots
    tool_misc
    tool_agent_timeline
    tool_local_runtime
@@ -410,6 +410,9 @@
    room_checkpoint
    tool_metrics
    tool_harness_health
+   tool_inline_dispatch_types
+   tool_inline_dispatch_room
+   tool_inline_dispatch_comm
    tool_inline_dispatch
    tool_inline_dispatch_episode
    tool_inline_dispatch_extra
@@ -576,10 +579,10 @@
 (private_modules
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
- mitosis_continuity
- mitosis_handoff
  mitosis_helpers
  mitosis_spawn
+ tool_mitosis_utils
+ tool_mitosis_handoff
  mitosis_defaults
  board_core
  board_votes
@@ -693,7 +696,6 @@
   tool_council_logic
   tool_council_schemas
   tool_council_json
-  tool_mitosis_schemas
   keeper_status_bridge
   ;; godsplit-phase2: additional sub-modules
   autoresearch_types
@@ -708,7 +710,13 @@
   dashboard_proof_verdict
   dashboard_proof_helpers
   keeper_skill_routing
-  keeper_alerting_path)
+  keeper_alerting_path
+  ;; tool_misc split
+  tool_misc_snapshots
+  ;; tool_inline_dispatch sub-modules
+  tool_inline_dispatch_types
+  tool_inline_dispatch_room
+  tool_inline_dispatch_comm)
  (libraries
    yojson
    base64

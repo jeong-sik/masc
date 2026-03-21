@@ -1,4 +1,4 @@
-(** Tool_mitosis -- Mitosis MCP tool handlers and dispatch.
+(** Tool_mitosis — Mitosis MCP tool handlers and dispatch.
 
     8 tools: mitosis_status, mitosis_all, mitosis_pool, mitosis_divide,
              mitosis_check, mitosis_record, mitosis_prepare, mitosis_handoff
@@ -7,18 +7,21 @@
     Context types, helpers, and spawn cascade are in:
     - Mitosis_helpers: types, verifier, episode/saga management
     - Mitosis_spawn: agent spawn cascade with circuit breaker
-    - Mitosis_continuity: DNA validation and continuity regression
-    - Mitosis_handoff: run_sync_handoff and handle_mitosis_handoff
 
-    Include chain: Mitosis_helpers -> Mitosis_spawn -> Mitosis_handoff -> Tool_mitosis
+    Include chain: Mitosis_helpers -> Mitosis_spawn -> Tool_mitosis
 
-    @since 0.3.0 *)
+    Split modules:
+    - Tool_mitosis_utils: string matching, DNA validation, overlap analysis
+    - Tool_mitosis_handoff: run_sync_handoff, handle_mitosis_handoff, metrics handlers *)
 
-include Mitosis_handoff
+include Mitosis_spawn
 open Tool_args
 
-(** Re-export from {!Mitosis_continuity} for .mli compatibility. *)
-let validate_dna = Mitosis_continuity.validate_dna
+(** Re-export for external callers and .mli contract *)
+let validate_dna = Tool_mitosis_utils.validate_dna
+let handle_mitosis_handoff = Tool_mitosis_handoff.handle_mitosis_handoff
+let run_sync_handoff = Tool_mitosis_handoff.run_sync_handoff
+let continuity_regression_check = Tool_mitosis_utils.continuity_regression_check
 
 let handle_mitosis_status _ctx _args : result =
   let cell = !(Mcp_server.current_cell) in
@@ -108,7 +111,7 @@ let handle_mitosis_divide ctx args : result =
           ~agent_name:effective_agent
           ~generation:new_cell.Mitosis.generation
           ~event_type:"mitosis_divide"
-          ~summary:(Printf.sprintf "Manual mitosis divide: gen %d -> gen %d"
+          ~summary:(Printf.sprintf "Manual mitosis divide: gen %d → gen %d"
             cell.Mitosis.generation new_cell.Mitosis.generation)
           ~dna:handoff_dna
           () in
@@ -210,67 +213,269 @@ let handle_mitosis_prepare ctx args : result =
   ] in
   (true, Yojson.Safe.pretty_to_string json)
 
-(** {1 Metrics Handlers} *)
+let schemas : Types.tool_schema list = [
+  {
+    name = "masc_mitosis_status";
+    description = "Get current agent cell status and stem pool state. Shows generation, task count, tool calls, and available reserve cells. Use to monitor lifecycle state.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
 
-(** P1-4: Compare generational metrics *)
-let handle_metrics_compare _ctx args : result =
-  let gen_a = int_of_float (get_float args "gen_a" 0.0) in
-  let gen_b = int_of_float (get_float args "gen_b" 1.0) in
-  match Generational_metrics.compare_generations gen_a gen_b with
-  | None ->
-      let json = `Assoc [
-        ("error", `String "Not enough data for comparison");
-        ("gen_a", `Int gen_a);
-        ("gen_b", `Int gen_b);
-        ("hint", `String "Need task records for both generations");
-      ] in
-      (false, Yojson.Safe.pretty_to_string json)
-  | Some comp ->
-      let json = `Assoc [
-        ("gen_a", `Int comp.gen_a);
-        ("gen_b", `Int comp.gen_b);
-        ("completion_delta", `Float comp.completion_delta);
-        ("error_delta", `Float comp.error_delta);
-        ("duration_delta", `Float comp.duration_delta);
-        ("token_delta", `Float comp.token_delta);
-        ("retention_b", match comp.retention_b with Some r -> `Float r | None -> `Null);
-        ("verdict", `String comp.verdict);
-        ("formatted", `String (Generational_metrics.format_comparison comp));
-      ] in
-      (true, Yojson.Safe.pretty_to_string json)
+  (* masc_mitosis_all *)
+  {
+    name = "masc_mitosis_all";
+    description = "Get mitosis status of ALL agents in the cluster (cross-machine). \
+Use when checking if any agent is under context pressure and needs handoff help. \
+Pair with masc_mitosis_divide to assist an agent approaching threshold.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
 
-(** P1-4: Record task completion *)
-let handle_metrics_record _ctx args : result =
-  let task_id = get_string args "task_id" (Printf.sprintf "task-%d" (int_of_float (Time_compat.now () *. 1000.0) mod 100000)) in
-  let completed = match args with
-    | `Assoc pairs -> (
-        match List.assoc_opt "completed" pairs with
-        | Some (`Bool b) -> b
-        | _ -> true
-      )
-    | _ -> true
-  in
-  let duration_ms = int_of_float (get_float args "duration_ms" 0.0) in
-  let error_count = int_of_float (get_float args "error_count" 0.0) in
-  let input_tokens = int_of_float (get_float args "input_tokens" 0.0) in
-  let output_tokens = int_of_float (get_float args "output_tokens" 0.0) in
-  let cell = !(Mcp_server.current_cell) in
-  let generation = cell.Mitosis.generation in
-  let record = Generational_metrics.record_task
-    ~generation ~task_id ~completed ~duration_ms ~error_count
-    ~input_tokens ~output_tokens
-  in
-  let json = `Assoc [
-    ("action", `String "task_recorded");
-    ("generation", `Int record.generation);
-    ("task_id", `String record.task_id);
-    ("completed", `Bool record.completed);
-  ] in
-  (true, Yojson.Safe.pretty_to_string json)
+  (* masc_mitosis_pool *)
+  {
+    name = "masc_mitosis_pool";
+    description = "View the stem cell pool: reserve agents ready for instant handoff. \
+Use when checking if warm cells are available before triggering mitosis. \
+Pair with masc_mitosis_divide for manual division, or masc_memento_mori for auto-lifecycle.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc []);
+    ];
+  };
 
-(** {1 Schemas and Dispatcher} *)
+  (* masc_mitosis_divide *)
+  {
+    name = "masc_mitosis_divide";
+    description = "Manually trigger cell division (mitosis): parent cell dies, child inherits compressed context DNA. \
+Use when you decide to hand off proactively rather than waiting for auto-threshold. \
+Pair with masc_mitosis_prepare to extract DNA first, or use masc_memento_mori for auto mode.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("summary", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Current context summary to compress into DNA");
+        ]);
+        ("current_task", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The task to continue after division");
+        ]);
+      ]);
+      ("required", `List [`String "summary"]);
+    ];
+  };
 
-let schemas = Tool_mitosis_schemas.schemas
+  (* masc_mitosis_check *)
+  {
+    name = "masc_mitosis_check";
+    description = "2-phase mitosis check: Phase 1 (50%) should_prepare, Phase 2 (80%) should_handoff. \
+Use when periodically checking context health. Returns current phase and thresholds. \
+After should_prepare: call masc_mitosis_prepare. After should_handoff: call masc_mitosis_divide.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("context_ratio", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Current context usage ratio (0.0-1.0)");
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_mitosis_record *)
+  {
+    name = "masc_mitosis_record";
+    description = "Record an activity event (task completion or tool call) to update mitosis trigger counters. \
+Use when completing a task or making a significant tool call to keep lifecycle tracking accurate. \
+Pair with masc_mitosis_check to see if the counters have triggered a threshold.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_done", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Whether a task was completed");
+        ]);
+        ("tool_called", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Whether a tool was called");
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_mitosis_prepare *)
+  {
+    name = "masc_mitosis_prepare";
+    description = "Phase 1: Extract DNA from current context and mark cell as ready for division. Does NOT hand off yet. \
+Use when masc_mitosis_check returns should_prepare=true (context ~50%). \
+Actual handoff happens at 80% via masc_mitosis_divide or masc_memento_mori.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("full_context", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Full context to extract DNA from (will be compressed)");
+        ]);
+      ]);
+      ("required", `List [`String "full_context"]);
+    ];
+  };
+
+  (* masc_mitosis_handoff *)
+  {
+    name = "masc_mitosis_handoff";
+    description = "Automated 2-phase context lifecycle manager. Call periodically with your estimated context_ratio. \
+<50%: continue, 50-80%: DNA extracted (prepared), >80%: spawns successor (handoff). \
+Use when you want automatic lifecycle management instead of manual masc_mitosis_check + prepare + divide. \
+Pair with masc_memento_mori for the all-in-one convenience wrapper.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("context_ratio", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Estimated context usage (0.0-1.0). E.g., 0.5 = 50%");
+        ]);
+        ("full_context", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Current context/summary to pass to successor (required for prepare/handoff)");
+        ]);
+        ("target_agent", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Agent to spawn: 'claude'|'gemini'|'codex'|'llama' (default: claude). Prefer 'default' in model fields for adapter-managed selection; explicit provider:model labels remain available as overrides.");
+        ]);
+        ("async", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true (default), return immediately and run handoff as background saga.");
+          ("default", `Bool true);
+        ]);
+        ("verify", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "If true (default), run MODEL verifier on handoff result and store it in saga payload.");
+          ("default", `Bool true);
+        ]);
+        ("verifier_models", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Verifier model list. Prefer 'default' or 'default:<model>' for normal use; explicit provider:model labels remain valid as overrides.");
+        ]);
+        ("verifier_perspectives", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Optional perspective labels matched by index to verifier_models.");
+        ]);
+        ("verifier_profile", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "abc_neutral"; `String "abc_strict"; `String "abc_lenient"]);
+          ("description", `String "Use fixed A/B/C perspective templates when verifier_perspectives is omitted.");
+          ("default", `String "abc_neutral");
+        ]);
+        ("verifier_goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional verifier goal prompt override.");
+        ]);
+        ("verification_policy", `Assoc [
+          ("type", `String "string");
+          ("enum", `List [`String "advisory"; `String "gate"]);
+          ("description", `String "advisory: never block handoff result. gate: require verifier consensus.");
+          ("default", `String "advisory");
+        ]);
+        ("verification_min_judges", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Minimum number of verifier checks required for gate pass (default: 3, clamped to available verifier_models count).");
+          ("default", `Int 3);
+        ]);
+        ("verification_pass_ratio", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Required pass ratio for consensus (default: 2/3 ~= 0.6667).");
+          ("default", `Float 0.6666666666666666);
+        ]);
+        ("verification_min_agreement", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Required inter-judge agreement ratio for consensus (default: 2/3 ~= 0.6667).");
+          ("default", `Float 0.6666666666666666);
+        ]);
+        ("verification_judge_timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Per-judge verifier timeout in seconds (default: 60). Timeout verdict becomes WARN.");
+          ("default", `Float 60.0);
+        ]);
+        ("verification_saga_timeout_sec", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Async handoff saga max wall-time in seconds (default: 180). On timeout saga fails.");
+          ("default", `Float 180.0);
+        ]);
+      ]);
+      ("required", `List [`String "context_ratio"]);
+    ];
+  };
+
+  (* masc_metrics_compare *)
+  {
+    name = "masc_metrics_compare";
+    description = "Compare performance metrics between two agent generations (completion rate, errors, speed, tokens). \
+Use when evaluating whether successor agents are improving over predecessors. \
+Returns verdict: improved/degraded/neutral. Pair with masc_metrics_record to collect data first.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("gen_a", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "First generation to compare (older)");
+        ]);
+        ("gen_b", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Second generation to compare (newer)");
+        ]);
+      ]);
+      ("required", `List [`String "gen_a"; `String "gen_b"]);
+    ];
+  };
+
+  (* masc_metrics_record *)
+  {
+    name = "masc_metrics_record";
+    description = "Record a task completion event (duration, errors, tokens) for generational performance tracking. \
+Use when finishing a task to feed data into the metrics system. \
+Pair with masc_metrics_compare to evaluate generational improvement.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Unique task identifier");
+        ]);
+        ("completed", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Whether task was completed successfully");
+        ]);
+        ("duration_ms", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Task duration in milliseconds");
+        ]);
+        ("error_count", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Number of errors encountered");
+        ]);
+        ("input_tokens", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Input tokens used");
+        ]);
+        ("output_tokens", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Output tokens generated");
+        ]);
+      ]);
+      ("required", `List [`String "task_id"; `String "completed"]);
+    ];
+  };
+
+]
+
+(** {1 Dispatcher} *)
 
 let dispatch ctx ~name ~args : result option =
   match name with
@@ -281,7 +486,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_mitosis_check" -> Some (handle_mitosis_check ctx args)
   | "masc_mitosis_record" -> Some (handle_mitosis_record ctx args)
   | "masc_mitosis_prepare" -> Some (handle_mitosis_prepare ctx args)
-  | "masc_mitosis_handoff" -> Some (handle_mitosis_handoff ctx args)
-  | "masc_metrics_compare" -> Some (handle_metrics_compare ctx args)
-  | "masc_metrics_record" -> Some (handle_metrics_record ctx args)
+  | "masc_mitosis_handoff" -> Some (Tool_mitosis_handoff.handle_mitosis_handoff ctx args)
+  | "masc_metrics_compare" -> Some (Tool_mitosis_handoff.handle_metrics_compare ctx args)
+  | "masc_metrics_record" -> Some (Tool_mitosis_handoff.handle_metrics_record ctx args)
   | _ -> None

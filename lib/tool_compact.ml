@@ -1,6 +1,6 @@
 (** Tool_compact — Standalone MCP tool for context compaction.
 
-    Exposes Context_manager's compaction pipeline as a general-purpose
+    Exposes the OAS-backed compaction pipeline as a general-purpose
     MCP tool. Any agent can send text + strategy and receive compacted
     text back with token savings statistics.
 

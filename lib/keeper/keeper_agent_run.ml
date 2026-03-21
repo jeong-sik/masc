@@ -8,7 +8,7 @@
     Uses {!Keeper_tools_oas} for tool wrapping and
     {!Keeper_hooks_oas} for lifecycle hooks (checkpoint, metrics, social).
 
-    @since Phase 5 — Context_manager encapsulation *)
+    @since Phase 5 — Keeper Agent.run encapsulation *)
 
 (** Result of a single Agent.run() keeper turn. *)
 type run_result = {

@@ -8,8 +8,8 @@
     Keeper_alerting_path and Keeper_exec_tools need the working_context
     type, but Keeper_exec_context depends on those modules.
 
-    Previously these types and functions lived in Context_manager.
-    Moved here as part of the context-manager-cleanup refactoring.
+    Previously these types and functions lived in the legacy keeper context
+    module. Moved here as part of the context-manager-cleanup refactoring.
 
     @since context-manager-cleanup *)
 

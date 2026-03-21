@@ -201,6 +201,19 @@ let test_local_review_script_contracts () =
     (file_contains_pattern "scripts/review/local-review.sh"
        "--print-cache-key")
 
+let test_keeper_oas_cleanup_contracts () =
+  check bool "keeper config no longer exposes stale unified turn flag" true
+    (not
+       (file_contains_pattern "lib/keeper/keeper_config.ml"
+          "MASC_KEEPER_UNIFIED_TURN"));
+  check bool "keeper turn comment no longer mentions context manager" true
+    (not
+       (file_contains_pattern "lib/keeper/keeper_turn.ml"
+          "Context_manager"));
+  check bool "tool compact comment now references OAS-backed pipeline" true
+    (file_contains_pattern "lib/tool_compact.ml"
+       "OAS-backed compaction pipeline")
+
 let () =
   run "ci_hardening_source"
     [
@@ -212,5 +225,6 @@ let () =
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;
            test_case "local review script contracts" `Quick test_local_review_script_contracts;
+           test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;
          ]);
     ]

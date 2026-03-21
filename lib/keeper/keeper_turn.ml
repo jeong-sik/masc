@@ -2,7 +2,8 @@
 
     Orchestrates keeper turns by building domain-specific system prompt
     configuration and delegating to {!Keeper_agent_run.run_turn} which
-    owns the full context lifecycle (checkpoint, Context_manager, Agent.run).
+    owns the full OAS-backed context lifecycle (checkpoint, prompt state,
+    Agent.run).
 
     Sub-modules:
     - Keeper_turn_up: start/reconfigure

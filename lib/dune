@@ -381,6 +381,7 @@
    workflow_guide
    tool_control
    tool_verification
+   tool_misc_snapshots
    tool_misc
    tool_agent_timeline
    tool_local_runtime
@@ -702,7 +703,9 @@
   dashboard_proof_verdict
   dashboard_proof_helpers
   keeper_skill_routing
-  keeper_alerting_path)
+  keeper_alerting_path
+  ;; tool_misc split
+  tool_misc_snapshots)
  (libraries
    yojson
    base64

@@ -135,7 +135,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'activity',
       label: '활동',
-      description: '실시간 이벤트 흐름과 소셜 그래프를 봅니다.',
+      description: '실시간 이벤트 흐름과 활동 그래프를 봅니다.',
       params: { section: 'activity' },
     },
   ],

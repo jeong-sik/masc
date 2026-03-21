@@ -1,15 +1,15 @@
-// 소셜 표면 — 에이전트 관계 그래프와 활동 흐름
+// Activity graph surface — runtime event graph + timeline
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
-import { GraphView } from './social/graph-view'
-import { fetchSocialGraph } from '../api'
-import type { SocialGraphResponse, SocialGraphNode, SocialGraphTimelineEvent } from '../types'
+import { GraphView } from './activity-graph-view'
+import { fetchActivityGraph } from '../api'
+import type { ActivityGraphResponse, ActivityGraphNode, ActivityGraphTimelineEvent } from '../types'
 
-const graphData = signal<SocialGraphResponse | null>(null)
+const graphData = signal<ActivityGraphResponse | null>(null)
 const graphError = signal<string | null>(null)
 const graphLoading = signal(false)
 
@@ -18,7 +18,7 @@ async function loadGraph() {
   graphLoading.value = true
   graphError.value = null
   try {
-    graphData.value = await fetchSocialGraph()
+    graphData.value = await fetchActivityGraph()
   } catch (err) {
     graphError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -34,42 +34,55 @@ function kindLabel(kind: string): string {
     case 'operation': return '작전'
     case 'debate': return '토론'
     case 'post': return '게시글'
+    case 'comment': return '댓글'
     default: return kind
   }
 }
 
 function eventKindLabel(kind: string): string {
   switch (kind) {
-    case 'agent_joined': return '입장'
-    case 'agent_left': return '퇴장'
-    case 'broadcast': return '방송'
-    case 'task_update': return '작업 변경'
-    case 'board_post': return '게시'
-    case 'board_comment': return '댓글'
-    case 'board_vote': return '투표'
-    case 'keeper_heartbeat': return '하트비트'
-    case 'keeper_handoff': return '세대 교체'
-    case 'mention': return '멘션'
+    case 'agent.joined': return '입장'
+    case 'agent.left': return '퇴장'
+    case 'message.broadcast': return '브로드캐스트'
+    case 'message.mentioned': return '멘션'
+    case 'task.created': return '작업 생성'
+    case 'task.claimed': return '작업 점유'
+    case 'task.started': return '작업 시작'
+    case 'task.done': return '작업 완료'
+    case 'task.released': return '작업 반환'
+    case 'task.cancelled': return '작업 취소'
+    case 'board.posted': return '게시'
+    case 'board.commented': return '댓글'
+    case 'board.voted': return '투표'
+    case 'operation.started': return '세션 시작'
+    case 'operation.resumed': return '세션 재개'
+    case 'operation.finalized': return '세션 종료'
+    case 'team.turn': return '팀 턴'
+    case 'team.turn_failed': return '팀 턴 실패'
     default: return kind
   }
 }
 
-function eventActor(event: SocialGraphTimelineEvent): string {
+function eventActor(event: ActivityGraphTimelineEvent): string {
   const actor = event.actor as Record<string, unknown>
   if (actor?.id) return actor.id as string
   const payload = event.payload as Record<string, unknown>
   return (payload.agent as string) ?? (payload.author as string) ?? (payload.from as string) ?? ''
 }
 
-function eventSummary(event: SocialGraphTimelineEvent): string {
+function eventSummary(event: ActivityGraphTimelineEvent): string {
   const payload = event.payload as Record<string, unknown>
   const message = (payload.message as string) ?? (payload.content as string) ?? ''
-  if (message) return message.length > 80 ? message.slice(0, 77) + '...' : message
+  if (message) return message.length > 80 ? `${message.slice(0, 77)}...` : message
+  const taskTitle = payload.task_title as string | undefined
+  if (taskTitle) return taskTitle
+  const reason = payload.reason as string | undefined
+  if (reason) return reason
   if (event.subject?.id) return `-> ${event.subject.id}`
   return event.kind
 }
 
-function StatsRow({ data }: { data: SocialGraphResponse }) {
+function StatsRow({ data }: { data: ActivityGraphResponse }) {
   const s = data.stats
   return html`
     <div class="stats-grid">
@@ -101,9 +114,9 @@ function StatsRow({ data }: { data: SocialGraphResponse }) {
   `
 }
 
-function ActivityFeed({ events }: { events: SocialGraphTimelineEvent[] }) {
+function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
   if (events.length === 0) {
-    return html`<div class="empty-state">최근 활동 이벤트가 없습니다.</div>`
+    return html`<div class="empty-state">최근 실행 이벤트가 없습니다.</div>`
   }
   return html`
     <div class="monitor-list">
@@ -133,33 +146,33 @@ function ActivityFeed({ events }: { events: SocialGraphTimelineEvent[] }) {
   `
 }
 
-function NodeLeaderboard({ nodes }: { nodes: SocialGraphNode[] }) {
+function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
   const agentNodes = nodes
     .filter(n => n.kind === 'agent')
     .sort((a, b) => b.weight - a.weight)
     .slice(0, 15)
 
   if (agentNodes.length === 0) {
-    return html`<div class="empty-state">에이전트 노드가 없습니다.</div>`
+    return html`<div class="empty-state">활동 집계에 포함된 에이전트가 없습니다.</div>`
   }
 
   const maxWeight = agentNodes[0]?.weight ?? 1
 
   return html`
-    <div class="social-leaderboard">
+    <div class="activity-graph-leaderboard">
       ${agentNodes.map((node, i) => {
         const pct = maxWeight > 0 ? (node.weight / maxWeight) * 100 : 0
         return html`
-          <div class="social-leaderboard-row" key=${node.id}>
-            <span class="social-leaderboard-rank">${i + 1}</span>
-            <div class="social-leaderboard-info">
-              <span class="social-leaderboard-name">${node.label}</span>
-              <div class="social-leaderboard-bar-wrap">
-                <div class="social-leaderboard-bar" style="width:${pct}%"></div>
+          <div class="activity-graph-leaderboard-row" key=${node.id}>
+            <span class="activity-graph-leaderboard-rank">${i + 1}</span>
+            <div class="activity-graph-leaderboard-info">
+              <span class="activity-graph-leaderboard-name">${node.label}</span>
+              <div class="activity-graph-leaderboard-bar-wrap">
+                <div class="activity-graph-leaderboard-bar" style="width:${pct}%"></div>
               </div>
             </div>
-            <span class="social-leaderboard-weight">${node.weight}</span>
-            <span class="social-leaderboard-status ${node.status === 'offline' || node.status === 'retired' ? 'inactive' : 'active'}">${node.status}</span>
+            <span class="activity-graph-leaderboard-weight">${node.weight}</span>
+            <span class="activity-graph-leaderboard-status ${node.status === 'offline' || node.status === 'retired' ? 'inactive' : 'active'}">${node.status}</span>
           </div>
         `
       })}
@@ -167,28 +180,48 @@ function NodeLeaderboard({ nodes }: { nodes: SocialGraphNode[] }) {
   `
 }
 
-function KindBreakdown({ nodes }: { nodes: SocialGraphNode[] }) {
+function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
   const counts = new Map<string, number>()
   for (const node of nodes) {
     counts.set(node.kind, (counts.get(node.kind) ?? 0) + 1)
   }
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1])
 
+  if (sorted.length === 0) {
+    return html`<div class="empty-state">분석할 노드 종류가 없습니다.</div>`
+  }
+
   return html`
-    <div class="social-kind-breakdown">
+    <div class="activity-graph-kind-breakdown">
       ${sorted.map(([kind, count]) => html`
-        <div class="social-kind-chip" key=${kind}>
-          <span class="social-kind-label">${kindLabel(kind)}</span>
-          <span class="social-kind-count">${count}</span>
+        <div class="activity-graph-kind-chip" key=${kind}>
+          <span class="activity-graph-kind-label">${kindLabel(kind)}</span>
+          <span class="activity-graph-kind-count">${count}</span>
         </div>
       `)}
     </div>
   `
 }
 
-export { loadGraph as refreshSocial }
+function EmptyActivityGraph() {
+  return html`
+    <div class="agents-monitor">
+      <${Card} title="활동 그래프" class="section" semanticId="activity_graph.graph" testId="activity_graph.graph">
+        <div class="monitor-section-head">
+          <h2 class="monitor-headline">활동 그래프가 비어 있습니다</h2>
+          <p class="monitor-subheadline">이 뷰는 런타임 실행 이벤트를 읽어 그래프를 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
+        </div>
+        <div class="empty-state">
+          아직 claim, broadcast, team-session, board 같은 실행 이벤트가 activity feed에 기록되지 않았습니다.
+        </div>
+      <//>
+    </div>
+  `
+}
 
-export function Social() {
+export { loadGraph as refreshActivityGraph }
+
+export function ActivityGraphSurface() {
   useEffect(() => { loadGraph() }, [])
 
   const data = graphData.value
@@ -196,14 +229,14 @@ export function Social() {
   const loading = graphLoading.value
 
   if (loading && !data) {
-    return html`<div class="loading-indicator">소셜 그래프 불러오는 중...</div>`
+    return html`<div class="loading-indicator">활동 그래프 불러오는 중...</div>`
   }
 
   if (error && !data) {
     return html`
       <div class="agents-monitor">
-        <${Card} title="오류" class="section" testId="social.error">
-          <div class="empty-state">소셜 그래프를 불러올 수 없습니다: ${error}</div>
+        <${Card} title="오류" class="section" testId="activity_graph.error">
+          <div class="empty-state">활동 그래프를 불러올 수 없습니다: ${error}</div>
           <button class="control-btn ghost" onClick=${loadGraph}>다시 시도</button>
         <//>
       </div>
@@ -211,16 +244,20 @@ export function Social() {
   }
 
   if (!data) {
-    return html`<div class="empty-state">데이터가 없습니다.</div>`
+    return html`<div class="empty-state">활동 데이터가 없습니다.</div>`
+  }
+
+  if ((data.stats.event_count ?? 0) === 0) {
+    return html`<${EmptyActivityGraph} />`
   }
 
   return html`
     <div class="agents-monitor">
 
-      <${Card} title="소셜 그래프" class="section" semanticId="social.graph" testId="social.graph">
+      <${Card} title="활동 그래프" class="section" semanticId="activity_graph.graph" testId="activity_graph.graph">
         <div class="monitor-section-head">
-          <h2 class="monitor-headline">에이전트 관계 그래프</h2>
-          <p class="monitor-subheadline">에이전트, 작업, 결정 간의 상호작용을 시각화합니다. 노드 크기는 활동 빈도를 반영합니다.</p>
+          <h2 class="monitor-headline">실행 이벤트 관계 그래프</h2>
+          <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 최근 실행 이벤트 기준으로 시각화합니다. 노드 크기는 활동 빈도를 반영합니다.</p>
         </div>
         <${StatsRow} data=${data} />
         <${GraphView} data=${data} />
@@ -232,15 +269,15 @@ export function Social() {
       <//>
 
       <div class="agents-workbench">
-        <${Card} title="에이전트 활동 순위" class="section" semanticId="social.leaderboard" testId="social.leaderboard">
+        <${Card} title="활동 주체 순위" class="section" semanticId="activity_graph.leaderboard" testId="activity_graph.leaderboard">
           <div class="monitor-section-head">
-            <h2 class="monitor-headline">에이전트 활동 순위</h2>
-            <p class="monitor-subheadline">그래프 이벤트 빈도(weight)를 기준으로 정렬한 에이전트 순위입니다.</p>
+            <h2 class="monitor-headline">활동 주체 순위</h2>
+            <p class="monitor-subheadline">그래프 이벤트 빈도(weight)를 기준으로 정렬한 최근 활동 주체 순위입니다.</p>
           </div>
           <${NodeLeaderboard} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="노드 종류 분포" class="section" semanticId="social.kinds" testId="social.kinds">
+        <${Card} title="노드 종류 분포" class="section" semanticId="activity_graph.kinds" testId="activity_graph.kinds">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">노드 종류</h2>
             <p class="monitor-subheadline">그래프에 포함된 노드를 종류별로 분류합니다.</p>
@@ -248,10 +285,10 @@ export function Social() {
           <${KindBreakdown} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="최근 활동" class="section" semanticId="social.timeline" testId="social.timeline">
+        <${Card} title="최근 실행 이벤트" class="section" semanticId="activity_graph.timeline" testId="activity_graph.timeline">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">타임라인</h2>
-            <p class="monitor-subheadline">가장 최근의 소셜 이벤트를 시간순으로 보여줍니다.</p>
+            <p class="monitor-subheadline">가장 최근의 실행 이벤트를 시간순으로 보여줍니다.</p>
           </div>
           <${ActivityFeed} events=${[...data.timeline].reverse().slice(0, 30)} />
         <//>

@@ -215,9 +215,9 @@ export const LEGACY_TAB_REDIRECTS: Record<LegacyTabId, { tab: TabId; params?: Re
   'command': { tab: 'operations', params: { section: 'command' } },
 }
 
-// --- Social Graph types ---
+// --- Activity Graph types ---
 
-export interface SocialGraphNode {
+export interface ActivityGraphNode {
   id: string
   label: string
   type: string
@@ -226,7 +226,7 @@ export interface SocialGraphNode {
   status: string
 }
 
-export interface SocialGraphEdge {
+export interface ActivityGraphEdge {
   source: string
   target: string
   type: string
@@ -235,7 +235,7 @@ export interface SocialGraphEdge {
   active: boolean
 }
 
-export interface SocialGraphTimelineEvent {
+export interface ActivityGraphTimelineEvent {
   kind: string
   actor: Record<string, unknown>
   summary: string
@@ -248,15 +248,15 @@ export interface SocialGraphTimelineEvent {
   payload: Record<string, unknown>
 }
 
-export interface SocialGraphStats {
+export interface ActivityGraphStats {
   [key: string]: number
 }
 
-export interface SocialGraphResponse {
-  nodes: SocialGraphNode[]
-  edges: SocialGraphEdge[]
-  stats: SocialGraphStats
-  timeline: SocialGraphTimelineEvent[]
+export interface ActivityGraphResponse {
+  nodes: ActivityGraphNode[]
+  edges: ActivityGraphEdge[]
+  stats: ActivityGraphStats
+  timeline: ActivityGraphTimelineEvent[]
   generated_at: string
   window: { start: number; end: number; limit: number; room_id: string }
 }

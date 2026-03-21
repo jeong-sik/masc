@@ -1,11 +1,11 @@
-// Social graph visualization — Canvas 2D force-directed graph
-// Fetches from /api/v1/social-graph, renders nodes as circles and edges as lines
+// Activity graph visualization — Canvas 2D force-directed graph
+// Fetches from /api/v1/activity/graph, renders nodes as circles and edges as lines
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
-import { layoutGraph } from './graph-layout'
-import type { SocialGraphResponse } from '../../types'
+import { layoutGraph } from './activity-graph-layout'
+import type { ActivityGraphResponse } from '../types'
 
 const hoveredNodeId = signal<string | null>(null)
 
@@ -41,7 +41,7 @@ function nodeRadius(weight: number): number {
 }
 
 interface GraphViewProps {
-  data: SocialGraphResponse
+  data: ActivityGraphResponse
 }
 
 export function GraphView({ data }: GraphViewProps) {
@@ -173,12 +173,12 @@ export function GraphView({ data }: GraphViewProps) {
     : null
 
   return html`
-    <div ref=${containerRef} class="social-graph-container">
-      <canvas ref=${canvasRef} class="social-graph-canvas" />
+    <div ref=${containerRef} class="activity-graph-container">
+      <canvas ref=${canvasRef} class="activity-graph-canvas" />
       ${hoveredNode ? html`
-        <div class="social-graph-tooltip">
+        <div class="activity-graph-tooltip">
           <strong>${hoveredNode.label}</strong>
-          <span class="social-graph-tooltip-kind">${hoveredNode.kind}</span>
+          <span class="activity-graph-tooltip-kind">${hoveredNode.kind}</span>
           <span>weight ${hoveredNode.weight}</span>
           <span>status ${hoveredNode.status}</span>
         </div>

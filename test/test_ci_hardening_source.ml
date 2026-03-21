@@ -138,11 +138,8 @@ let test_dashboard_component_split_contracts () =
   check bool "war room body exported from split file" true
     (file_contains_pattern "dashboard/src/components/command/war-room-body.ts"
        "export function WarRoomBodyGrid");
-  check bool "backend normalizes postgres pooler url before connect" true
-    (file_contains_pattern "lib/backend.ml"
-       "pooler.supabase.com");
-  check bool "backend_eio normalizes postgres pooler url before connect" true
-    (file_contains_pattern "lib/backend_eio.ml"
+  check bool "room backend setup normalizes postgres pooler url before connect" true
+    (file_contains_pattern "lib/room/room_utils_backend_setup.ml"
        "pooler.supabase.com");
   check bool "council archive normalizes postgres url" true
     (file_contains_pattern "lib/council/archive.ml"
@@ -150,6 +147,39 @@ let test_dashboard_component_split_contracts () =
   check bool "jiphyeon archive normalizes postgres url" true
     (file_contains_pattern "lib/jiphyeon/archive.ml"
        "pooler.supabase.com")
+
+let test_activity_surface_contracts () =
+  check bool "activity tab exposes activity graph label" true
+    (file_contains_pattern "dashboard/src/components/activity.ts"
+       "활동 그래프");
+  check bool "dashboard fetches canonical activity graph route" true
+    (file_contains_pattern "dashboard/src/api/actions.ts"
+       "/api/v1/activity/graph");
+  check bool "server exposes canonical activity events route" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
+       {|"/api/v1/activity/events"|});
+  check bool "server exposes canonical activity graph route" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
+       {|"/api/v1/activity/graph"|});
+  check bool "server drops legacy social graph alias" true
+    (not
+       (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
+          {|"/api/v1/social-graph"|}));
+  check bool "dashboard semantics use activity graph surface id" true
+    (file_contains_pattern "lib/dashboard/dashboard_semantics.ml"
+       {|surface ~id:"activity_graph"|});
+  check bool "room task lifecycle emits activity events" true
+    (file_contains_pattern "lib/room/room_task.ml"
+       "Activity_graph.emit config");
+  check bool "room broadcast emits activity events" true
+    (file_contains_pattern "lib/room/room_state.ml"
+       "Activity_graph.emit config");
+  check bool "board success paths emit activity events" true
+    (file_contains_pattern "lib/tool_inline_dispatch_extra.ml"
+       "Activity_graph.emit config");
+  check bool "team session store emits activity events" true
+    (file_contains_pattern "lib/team_session/team_session_store.ml"
+       "Activity_graph.emit config")
 
 let () =
   run "ci_hardening_source"
@@ -160,5 +190,6 @@ let () =
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "input validation contracts" `Quick test_input_validation_contracts;
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
+           test_case "activity surface contracts" `Quick test_activity_surface_contracts;
          ]);
     ]

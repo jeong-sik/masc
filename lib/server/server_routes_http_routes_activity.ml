@@ -6,13 +6,13 @@ open Server_routes_http_runtime
 
 module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio
-module Server_social_http = Server_social_http
+module Server_activity_http = Server_activity_http
 module Common = Server_routes_http_common
 module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
-let social_http_deps : Server_social_http.deps =
+let activity_http_deps : Server_activity_http.deps =
   {
     query_param;
     int_query_param;
@@ -23,29 +23,22 @@ let social_http_deps : Server_social_http.deps =
     get_session_id_any = Server_mcp_transport_http.get_session_id_any;
   }
 
-let social_events_http_json ~state request =
-  Server_social_http.events_http_json ~deps:social_http_deps ~state request
+let activity_events_http_json ~state request =
+  Server_activity_http.events_http_json ~deps:activity_http_deps ~state request
 
-let social_graph_http_json ~state request =
-  Server_social_http.graph_http_json ~deps:social_http_deps ~state request
-
-let social_events_stream_http ~state request reqd =
-  Server_social_http.handle_stream ~deps:social_http_deps ~state request reqd
+let activity_graph_http_json ~state request =
+  Server_activity_http.graph_http_json ~deps:activity_http_deps ~state request
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/events" (fun request reqd ->
+  |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = social_events_http_json ~state req in
+         let json = activity_events_http_json ~state req in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/events/stream" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
-         social_events_stream_http ~state request reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/social-graph" (fun request reqd ->
+  |> Http.Router.get "/api/v1/activity/graph" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = social_graph_http_json ~state req in
+         let json = activity_graph_http_json ~state req in
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/governance/cases" (fun request reqd ->

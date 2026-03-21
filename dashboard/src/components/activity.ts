@@ -1,12 +1,12 @@
 // MASC Dashboard — Activity Tab
-// Absorbs: live + social into one view. Live stream default, social graph collapsible.
+// Absorbs: live + activity graph into one view. Live stream default, activity graph collapsible.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Live } from './live'
-import { Social } from './social'
+import { ActivityGraphSurface } from './activity-graph'
 
-const socialExpanded = signal(false)
+const activityGraphExpanded = signal(false)
 
 export function Activity() {
   return html`
@@ -14,11 +14,11 @@ export function Activity() {
       <${Live} />
       <details
         class="tab-collapsible"
-        open=${socialExpanded.value}
-        onToggle=${(e: Event) => { socialExpanded.value = (e.target as HTMLDetailsElement).open }}
+        open=${activityGraphExpanded.value}
+        onToggle=${(e: Event) => { activityGraphExpanded.value = (e.target as HTMLDetailsElement).open }}
       >
-        <summary class="tab-collapsible__summary">소셜 그래프</summary>
-        <${Social} />
+        <summary class="tab-collapsible__summary">활동 그래프</summary>
+        <${ActivityGraphSurface} />
       </details>
     </div>
   `

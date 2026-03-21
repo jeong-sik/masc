@@ -93,12 +93,20 @@ let get_neo4j_url () =
   Sys.getenv_opt "RAILWAY_NEO4J_URL"
 
 let get_postgres_url () =
+  let normalize_postgres_url url =
+    let uri = Uri.of_string url in
+    match Uri.host uri, Uri.port uri with
+    | Some host, Some 6543 when String.ends_with ~suffix:".pooler.supabase.com" host ->
+        Uri.to_string (Uri.with_port uri (Some 5432))
+    | _ -> url
+  in
   (* Try multiple env vars: DATABASE_URL, SUPABASE_DB_URL, SB_PG_URL *)
   match Sys.getenv_opt "DATABASE_URL" with
-  | Some url -> Some url
+  | Some url -> Some (normalize_postgres_url url)
   | None -> match Sys.getenv_opt "SUPABASE_DB_URL" with
-    | Some url -> Some url
-    | None -> Sys.getenv_opt "SB_PG_URL"
+    | Some url -> Some (normalize_postgres_url url)
+    | None ->
+        Option.map normalize_postgres_url (Sys.getenv_opt "SB_PG_URL")
 
 (** {1 Neo4j Operations} *)
 

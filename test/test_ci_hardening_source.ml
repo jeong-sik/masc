@@ -114,12 +114,12 @@ let test_dashboard_component_split_contracts () =
   check bool "mission attention card exported from split file" true
     (file_contains_pattern "dashboard/src/components/mission-attention-card.ts"
        "export function AttentionCard");
-  check bool "swarm surface imports overview panel" true
+  check bool "swarm surface re-exports overview panel" true
     (file_contains_pattern "dashboard/src/components/command/swarm.ts"
-       "import { SwarmOverviewPanel } from './swarm-overview-panel'");
-  check bool "swarm surface imports live panels" true
+       "export { SwarmOverviewPanel } from './swarm-overview-panel'");
+  check bool "swarm surface re-exports live panels" true
     (file_contains_pattern "dashboard/src/components/command/swarm.ts"
-       "import { SwarmLivePanels } from './swarm-live-panels'");
+       "export { SwarmLivePanels } from './swarm-live-panels'");
   check bool "swarm overview panel exported from split file" true
     (file_contains_pattern "dashboard/src/components/command/swarm-overview-panel.ts"
        "export function SwarmOverviewPanel");
@@ -137,7 +137,19 @@ let test_dashboard_component_split_contracts () =
        "export function WarRoomHeroStrip");
   check bool "war room body exported from split file" true
     (file_contains_pattern "dashboard/src/components/command/war-room-body.ts"
-       "export function WarRoomBodyGrid")
+       "export function WarRoomBodyGrid");
+  check bool "backend normalizes postgres pooler url before connect" true
+    (file_contains_pattern "lib/backend.ml"
+       "pooler.supabase.com");
+  check bool "backend_eio normalizes postgres pooler url before connect" true
+    (file_contains_pattern "lib/backend_eio.ml"
+       "pooler.supabase.com");
+  check bool "council archive normalizes postgres url" true
+    (file_contains_pattern "lib/council/archive.ml"
+       "pooler.supabase.com");
+  check bool "jiphyeon archive normalizes postgres url" true
+    (file_contains_pattern "lib/jiphyeon/archive.ml"
+       "pooler.supabase.com")
 
 let () =
   run "ci_hardening_source"

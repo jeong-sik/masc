@@ -33,6 +33,7 @@ import './styles/roster.css'
 import './styles/ff-theme.css'
 import './styles/oas-pipeline.css'
 import './styles/pipeline-stage.css'
+import './styles/agent-monitor.css'
 import './styles/logs.css'
 
 import { render } from 'preact'

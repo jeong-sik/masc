@@ -410,6 +410,10 @@
    tool_agent_timeline
    tool_local_runtime
    tool_local_runtime_core
+   tool_local_runtime_http
+   tool_local_runtime_verify
+   tool_local_runtime_bench
+   tool_local_runtime_status
    tool_model_catalog
    tool_board
    tool_command_plane
@@ -748,6 +752,11 @@
   dashboard_proof_helpers
   keeper_skill_routing
   keeper_alerting_path
+  ;; tool_local_runtime sub-modules
+  tool_local_runtime_http
+  tool_local_runtime_verify
+  tool_local_runtime_bench
+  tool_local_runtime_status
   ;; tool_misc split
   tool_misc_snapshots
   ;; tool_inline_dispatch sub-modules

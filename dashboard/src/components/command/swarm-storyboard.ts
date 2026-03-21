@@ -208,7 +208,6 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
   const resolution = swarm.run_resolution
   if (!runId || (!recommendation && !resolution)) return null
 
-  const actor = dashboardActorName() ?? 'dashboard'
   const pendingConfirm =
     operatorSnapshot.value?.pending_confirms.find(item =>
       item.target_type === 'swarm_run' && item.target_id === runId,
@@ -221,6 +220,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
         || recommendation.rerun_available
         || recommendation.abandon_available),
     )
+  const actor = dashboardActorName() ?? 'dashboard'
 
   const confirmPending = async (decision: 'confirm' | 'deny') => {
     if (!pendingConfirm) return

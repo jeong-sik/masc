@@ -2,12 +2,25 @@
 
 open Alcotest
 
+let rec find_source_root dir =
+  let dune_project = Filename.concat dir "dune-project" in
+  let git_dir = Filename.concat dir ".git" in
+  if Sys.file_exists dune_project || Sys.file_exists git_dir then
+    dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then
+      Sys.getcwd ()
+    else
+      find_source_root parent
+
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> find_source_root (Sys.getcwd ())
+
 let file_contains_pattern file_rel pattern =
-  let source_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> root
-    | None -> Sys.getcwd ()
-  in
+  let source_root = source_root () in
   let path = Filename.concat source_root file_rel in
   if not (Sys.file_exists path) then false
   else

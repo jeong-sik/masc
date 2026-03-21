@@ -31,10 +31,18 @@ let governance_dir base_path =
 let judgments_path base_path =
   Filename.concat (governance_dir base_path) "judgments.jsonl"
 
-(** Date-split store: [.masc/governance/judgments/YYYY-MM/DD.jsonl]. *)
+(** Date-split store: [.masc/governance/judgments/YYYY-MM/DD.jsonl].
+    Cached per base_dir so all callers share the same Eio.Mutex. *)
+let judgments_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
+
 let get_judgments_store base_path : Dated_jsonl.t =
   let dir = Filename.concat (governance_dir base_path) "judgments" in
-  Dated_jsonl.create ~base_dir:dir ()
+  match Hashtbl.find_opt judgments_store_cache dir with
+  | Some store -> store
+  | None ->
+    let store = Dated_jsonl.create ~base_dir:dir () in
+    Hashtbl.replace judgments_store_cache dir store;
+    store
 
 let states : (string, state) Hashtbl.t = Hashtbl.create 4
 

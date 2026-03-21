@@ -83,10 +83,18 @@ let update_tool_usage stats_by_tool ~tool_name ~success ~timestamp =
 let telemetry_file config =
   Filename.concat (Room_utils.masc_dir config) "telemetry.jsonl"
 
-(** Date-split store: [.masc/telemetry/YYYY-MM/DD.jsonl]. *)
+(** Date-split store: [.masc/telemetry/YYYY-MM/DD.jsonl].
+    Cached per base_dir so all callers share the same Eio.Mutex. *)
+let telemetry_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
+
 let get_telemetry_store config : Dated_jsonl.t =
   let base = Filename.concat (Room_utils.masc_dir config) "telemetry" in
-  Dated_jsonl.create ~base_dir:base ()
+  match Hashtbl.find_opt telemetry_store_cache base with
+  | Some store -> store
+  | None ->
+    let store = Dated_jsonl.create ~base_dir:base () in
+    Hashtbl.replace telemetry_store_cache base store;
+    store
 
 let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
   List.filter_map (fun json ->

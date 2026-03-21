@@ -126,10 +126,18 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
 let keeper_metrics_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".metrics.jsonl")
 
-(** Date-split metrics store: [.masc/perpetual-keepers/<name>/metrics/YYYY-MM/DD.jsonl]. *)
+(** Date-split metrics store: [.masc/perpetual-keepers/<name>/metrics/YYYY-MM/DD.jsonl].
+    Cached per keeper name so all callers share the same Eio.Mutex. *)
+let metrics_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
+
 let keeper_metrics_store config name : Dated_jsonl.t =
   let dir = Filename.concat (keeper_dir_ config) (name ^ "/metrics") in
-  Dated_jsonl.create ~base_dir:dir ()
+  match Hashtbl.find_opt metrics_store_cache dir with
+  | Some store -> store
+  | None ->
+    let store = Dated_jsonl.create ~base_dir:dir () in
+    Hashtbl.replace metrics_store_cache dir store;
+    store
 
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")

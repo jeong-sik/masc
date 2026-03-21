@@ -155,10 +155,18 @@ let legacy_audit_path (config : Room.config) =
   let masc_dir = Room_utils.masc_dir config in
   Filename.concat masc_dir "audit.jsonl"
 
-(** Date-split store: [.masc/audit/YYYY-MM/DD.jsonl]. *)
+(** Date-split store: [.masc/audit/YYYY-MM/DD.jsonl].
+    Cached per base_dir so all callers share the same Eio.Mutex. *)
+let audit_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
+
 let get_audit_store (config : Room.config) : Dated_jsonl.t =
   let base = Filename.concat (Room_utils.masc_dir config) "audit" in
-  Dated_jsonl.create ~base_dir:base ()
+  match Hashtbl.find_opt audit_store_cache base with
+  | Some store -> store
+  | None ->
+    let store = Dated_jsonl.create ~base_dir:base () in
+    Hashtbl.replace audit_store_cache base store;
+    store
 
 (** Read recent audit entries.
     Tries date-split store first; falls back to legacy single file. *)

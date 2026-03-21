@@ -285,7 +285,12 @@
    room_eio
    room_agent
    room_gc
+   room_init
+   room_lifecycle
    room_query
+   room_rooms
+   room_status
+   room_tempo
    room_walph
    room_walph_eio
    room_git
@@ -716,6 +721,11 @@
   tool_autoresearch_schemas
   backend_eio_compression
   room_multi
+  room_init
+  room_lifecycle
+  room_rooms
+  room_status
+  room_tempo
   dashboard_proof_events
   dashboard_proof_actors
   dashboard_proof_verdict

@@ -1,0 +1,317 @@
+(** Room Lifecycle - Agent join/leave operations.
+
+    Extracted from Room module. Handles agent entry, re-entry, and departure
+    including nickname resolution, dedup, metadata, and relation materialization. *)
+
+open Types
+open Room_utils [@@warning "-33"]
+open Room_state [@@warning "-33"]
+
+(** Join room - with auto-generated nickname and metadata *)
+let join config ~agent_name ?(agent_type_override=None) ~capabilities
+    ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
+  ensure_initialized config;
+
+  (* Determine if this is a legacy call (agent_name = type) or new style *)
+  let agent_type = match agent_type_override with
+    | Some t -> t
+    | None ->
+        (* Check if agent_name looks like a nickname (has dashes) *)
+        if Nickname.is_generated_nickname agent_name then
+          Option.value (Nickname.extract_agent_type agent_name) ~default:agent_name
+        else
+          agent_name  (* Legacy: agent_name is the type *)
+  in
+
+  (* Reuse existing nickname for same agent_type if already joined,
+     otherwise generate a new one. This prevents identity drift when
+     the same agent_name joins multiple times within a session. *)
+  let nickname =
+    if Nickname.is_generated_nickname agent_name then
+      agent_name  (* Already a nickname, use as-is *)
+    else begin
+      let dir = agents_dir config in
+      let prefix = safe_filename agent_type ^ "-" in
+      let existing =
+        if Sys.file_exists dir && Sys.is_directory dir then
+          Array.to_list (Sys.readdir dir)
+          |> List.find_opt (fun f ->
+               Filename.check_suffix f ".json"
+               && String.length f > String.length prefix
+               && String.sub f 0 (String.length prefix) = prefix)
+          |> Option.map (fun f -> Filename.chop_suffix f ".json")
+        else None
+      in
+      match existing with
+      | Some nick -> nick  (* Reuse existing nickname for this agent_type *)
+      | None -> Nickname.generate agent_type
+    end
+  in
+
+  (* Dedup: if agent already joined, update last_seen and return early *)
+  let agent_file_dedup = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
+  let already_joined =
+    if is_pg_backend config then
+      let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
+      backend_exists config ~key:agent_key || Sys.file_exists agent_file_dedup
+    else
+      Sys.file_exists agent_file_dedup
+  in
+  if already_joined then begin
+    let existing_json = read_json config agent_file_dedup in
+    (match agent_of_yojson existing_json with
+     | Ok existing_agent ->
+       let is_inactive = existing_agent.status = Inactive in
+       let new_session_id = if is_inactive then generate_session_id () else
+         match existing_agent.meta with Some m -> m.session_id | None -> generate_session_id ()
+       in
+       let new_meta : agent_meta = {
+         session_id = new_session_id;
+         agent_type;
+         pid;
+         hostname = (match hostname with Some h -> Some h | None -> get_hostname ());
+         tty = (match tty with Some t -> Some t | None -> get_tty ());
+         worktree;
+         parent_task;
+       } in
+       let updated = { existing_agent with
+         status = Active;
+         last_seen = now_iso ();
+         capabilities;
+         meta = Some new_meta;
+       } in
+       write_json config agent_file_dedup (agent_to_yojson updated);
+       if is_pg_backend config then begin
+         let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
+         let _ = backend_set config ~key:agent_key
+                   ~value:(Yojson.Safe.to_string (agent_to_yojson updated)) in ()
+       end;
+       if is_inactive then begin
+         (* Restore to active_agents on rejoin *)
+         let _ = update_state config (fun s ->
+           let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
+           { s with active_agents = agents }
+         ) in
+         let _ = broadcast config ~from_agent:nickname
+                   ~content:(Printf.sprintf "👋 %s rejoined the room" nickname) in
+         log_event config (Printf.sprintf
+           "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
+           nickname agent_type new_session_id (now_iso ()))
+       end
+     | Error _ -> ());
+    Printf.sprintf "✅ %s already in room (last_seen updated)" nickname
+  end else begin
+    (* Collect metadata *)
+  let session_id = generate_session_id () in
+  let meta : agent_meta = {
+    session_id;
+    agent_type;
+    pid;
+    hostname = (match hostname with Some h -> Some h | None -> get_hostname ());
+    tty = (match tty with Some t -> Some t | None -> get_tty ());
+    worktree;
+    parent_task;
+  } in
+
+  let agent_file = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
+  let agent = {
+    name = nickname;
+    agent_type;
+    status = Active;
+    capabilities;
+    current_task = None;
+    joined_at = now_iso ();
+    last_seen = now_iso ();
+    meta = Some meta;
+  } in
+  let agent_json = agent_to_yojson agent in
+  (* Write to filesystem (for backward compatibility) *)
+  write_json config agent_file agent_json;
+  (* Also persist to PostgreSQL backend for HTTP state persistence (stateless requests) *)
+  if is_pg_backend config then begin
+    let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
+    let _ = backend_set config ~key:agent_key ~value:(Yojson.Safe.to_string agent_json) in
+    ()
+  end;
+
+  (* Update state *)
+  let _ = update_state config (fun s ->
+    let agents = nickname :: (List.filter ((<>) nickname) s.active_agents) in
+    { s with active_agents = agents }
+  ) in
+
+  (* Broadcast join *)
+  let _ = broadcast config ~from_agent:nickname ~content:(Printf.sprintf "👋 %s joined the room" nickname) in
+
+  (* Log event with metadata *)
+  log_event config (Printf.sprintf
+    "{\"type\":\"agent_join\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
+    nickname
+    agent_type
+    session_id
+    (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
+    (now_iso ()));
+
+  Printf.sprintf "✅ %s joined\n  Nickname: %s\n  Type: %s\n  Session: %s"
+    nickname nickname agent_type session_id
+  end
+
+(** @deprecated Use [join (with_scope config (Named room_id))] instead. *)
+let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabilities
+    ?(pid=None) ?(hostname=None) ?(tty=None) ?(worktree=None) ?(parent_task=None) () =
+  let scoped = with_scope config (Named room_id) in
+  ensure_room_bootstrap scoped room_id;
+
+  let agent_type = match agent_type_override with
+    | Some t -> t
+    | None ->
+        if Nickname.is_generated_nickname agent_name then
+          Option.value (Nickname.extract_agent_type agent_name) ~default:agent_name
+        else
+          agent_name
+  in
+  let nickname =
+    if Nickname.is_generated_nickname agent_name then agent_name
+    else
+      let resolved = resolve_agent_name (with_scope config (Named room_id)) agent_name in
+      if resolved <> agent_name && Nickname.is_generated_nickname resolved then
+        resolved
+      else
+        Nickname.generate agent_type
+  in
+  let agent_file_dedup =
+    Filename.concat (agents_dir scoped) (safe_filename nickname ^ ".json")
+  in
+  if Sys.file_exists agent_file_dedup then begin
+    let existing_json = read_json scoped agent_file_dedup in
+    (match agent_of_yojson existing_json with
+     | Ok existing_agent ->
+         let is_inactive = existing_agent.status = Inactive in
+         let updated = { existing_agent with
+           status = Active;
+           last_seen = now_iso ();
+           capabilities;
+         } in
+         write_json scoped agent_file_dedup (agent_to_yojson updated);
+         if is_inactive then begin
+           let _ = update_state scoped (fun s ->
+             let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
+             { s with active_agents = agents }
+           ) in
+           let _ = broadcast scoped ~from_agent:nickname
+                     ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname room_id) in
+           log_event scoped (Printf.sprintf
+             "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
+             room_id nickname (now_iso ()))
+         end
+     | Error _ -> ());
+    Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname room_id
+  end else begin
+    let session_id = generate_session_id () in
+    let meta : agent_meta = {
+      session_id;
+      agent_type;
+      pid;
+      hostname = (match hostname with Some h -> Some h | None -> get_hostname ());
+      tty = (match tty with Some t -> Some t | None -> get_tty ());
+      worktree;
+      parent_task;
+    } in
+    let agent_file =
+      Filename.concat (agents_dir scoped) (safe_filename nickname ^ ".json")
+    in
+    let agent = {
+      name = nickname;
+      agent_type;
+      status = Active;
+      capabilities;
+      current_task = None;
+      joined_at = now_iso ();
+      last_seen = now_iso ();
+      meta = Some meta;
+    } in
+    write_json scoped agent_file (agent_to_yojson agent);
+    let _ = update_state scoped (fun s ->
+      let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
+      { s with active_agents = agents }
+    ) in
+    let _ =
+      broadcast scoped ~from_agent:nickname
+        ~content:(Printf.sprintf "👋 %s joined the room" nickname)
+    in
+    log_event scoped (Printf.sprintf
+      "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"agent_type\":\"%s\",\"session_id\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
+      room_id
+      nickname
+      agent_type
+      session_id
+      (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
+      (now_iso ()));
+    Printf.sprintf "✅ %s joined room %s" nickname room_id
+  end
+
+(** Leave room *)
+let leave config ~agent_name =
+  ensure_initialized config;
+
+  (* Support both exact nickname match and agent_type prefix match *)
+  let actual_name = resolve_agent_name config agent_name in
+
+  (* Stop any heartbeats owned by this agent *)
+  let _stopped = Heartbeat.stop_by_agent ~agent_name:actual_name in
+
+  let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
+  let in_fs = Sys.file_exists agent_file in
+  (* For PostgreSQL backend: also check masc_kv for HTTP state persistence *)
+  let in_backend =
+    if is_pg_backend config then
+      let agent_key = Printf.sprintf "agents:%s" (safe_filename actual_name) in
+      backend_exists config ~key:agent_key
+    else
+      false
+  in
+  if in_fs || in_backend then begin
+    (* Mark agent as Inactive instead of deleting, so re-join can restore identity.
+       This prevents orphan state when the same agent_type re-joins later. *)
+    (if in_fs then
+      let existing_json = read_json config agent_file in
+      match agent_of_yojson existing_json with
+      | Ok existing_agent ->
+        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
+        write_json config agent_file (agent_to_yojson updated)
+      | Error _ -> ());
+    if is_pg_backend config then begin
+      let agent_key = Printf.sprintf "agents:%s" (safe_filename actual_name) in
+      (* Update backend entry to Inactive as well *)
+      (if in_fs then
+        let updated_json = read_json config agent_file in
+        let _ = backend_set config ~key:agent_key
+                  ~value:(Yojson.Safe.to_string updated_json) in ()
+      else
+        let _ = backend_delete config ~key:agent_key in ())
+    end;
+
+    (* Capture active agents before removal for relationship materialization *)
+    let peers_before_leave = (read_state config).active_agents in
+
+    let _ = update_state config (fun s ->
+      { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
+    ) in
+
+    let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "👋 %s left the room" actual_name) in
+
+    (* Log event *)
+    log_event config (Printf.sprintf
+      "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
+      actual_name (now_iso ()));
+
+    (* Record co-presence relationships to Neo4j (async, non-blocking) *)
+    (try Relation_materializer.on_agent_leave
+           ~leaving_agent:actual_name ~active_agents:peers_before_leave
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       Log.Room.error "relation-materializer leave hook error: %s"
+         (Printexc.to_string exn));
+
+    Printf.sprintf "✅ %s left the room" actual_name
+  end else
+    Printf.sprintf "⚠ %s was not in the room" actual_name

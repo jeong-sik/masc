@@ -358,7 +358,9 @@ let execute_cypher_raw ~cypher : (Yojson.Safe.t, string) result =
                   |> String.concat "; "
                 in
                 Error (Printf.sprintf "Neo4j error: %s" err_msg)
-            with e ->
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | e ->
               Error
                 (Printf.sprintf "Neo4j response parse error: %s"
                    (Printexc.to_string e)))
@@ -391,7 +393,9 @@ let save_to_file ~config ~(thread : Conversation.thread) : (unit, string) result
   try
     Conversation.save_thread config thread;
     Ok ()
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Error (Printf.sprintf "File write failed: %s" (Printexc.to_string e))
 
 (** Save thread to Neo4j (fire-and-forget, best-effort) *)
@@ -473,7 +477,9 @@ let search_by_topic ~(query : string) ?(room : string option) ?(limit = 10) ()
                   with Yojson.Safe.Util.Type_error _ -> None)
         in
         Ok ids
-      with e ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e ->
         Error (Printf.sprintf "Failed to parse search results: %s" (Printexc.to_string e)))
 
 (** {1 Sync Operations} *)

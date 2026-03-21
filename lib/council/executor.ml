@@ -138,7 +138,9 @@ let execute_argv argv =
         let success = match status with Unix.WEXITED 0 -> true | _ -> false in
         let output = combine_output ~stdout ~stderr in
         { success; stdout; stderr; output; timestamp = timestamp () }
-      with e ->
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e ->
         let err = Printexc.to_string e in
         { success = false;
           stdout = "";

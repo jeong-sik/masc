@@ -28,8 +28,11 @@
    error
    backend_core
    backend
+   backend_pg
    backend_eio
    backend_eio_compression
+   backend_eio_pg
+   backend_eio_types
    bounded
    cache_eio
    env_config

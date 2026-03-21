@@ -26,7 +26,10 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
   const keeper = findKeeper(name)
   if (!keeper) return null
 
-  const stage = keeper.pipeline_stage
+  // Derive stage: prefer explicit pipeline_stage, fallback to heartbeat-based inference
+  const rawStage = keeper.pipeline_stage
+  const stage = rawStage
+    ?? (keeper.last_turn_ago_s != null && keeper.last_turn_ago_s < 600 ? 'idle' : rawStage)
   const ctxRatio = keeper.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
   const generation = keeper.generation

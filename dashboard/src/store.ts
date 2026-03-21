@@ -43,6 +43,7 @@ import {
   normalizeKeepers,
 } from './keeper-store-normalize'
 import { buildAgentMotion, normalizeAgentKey, type AgentMotionSnapshot } from './components/common/agent-motion'
+import { groupByKey } from './components/common/collection'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
@@ -211,18 +212,6 @@ export const tasksByStatus = computed(() => {
   }
 })
 
-function groupByKey<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
-  const map = new Map<string, T[]>()
-  for (const item of items) {
-    const key = keyFn(item)
-    if (!key) continue
-    const arr = map.get(key)
-    if (arr) arr.push(item)
-    else map.set(key, [item])
-  }
-  return map
-}
-
 export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = computed(() => {
   const map = new Map<string, AgentMotionSnapshot>()
   const taskList = tasks.value
@@ -248,12 +237,11 @@ export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = 
       ? authorJournal
       : authorJournal.length === 0
         ? agentJournal
-        : [...new Set([...agentJournal, ...authorJournal])]
+        : agentJournal.concat(authorJournal)
 
     map.set(
       key,
       buildAgentMotion(
-        agent.name,
         tasksByAgent.get(key) ?? [],
         messagesByAgent.get(key) ?? [],
         mergedJournal,

@@ -698,6 +698,58 @@ let wrap_result json =
   in
   (not is_error, s)
 
+(** Handle record_finding — persist a structured research finding. *)
+let handle_record_finding ctx args =
+  let keeper_name = match ctx.agent_name with Some n -> n | None -> "unknown" in
+  let goal = Safe_ops.json_string ~default:"" "goal" args in
+  let hypothesis = Safe_ops.json_string ~default:"" "hypothesis" args in
+  let evidence = Safe_ops.json_string ~default:"" "evidence" args in
+  let conclusion = Safe_ops.json_string ~default:"" "conclusion" args in
+  if goal = "" || hypothesis = "" || evidence = "" || conclusion = "" then
+    `Assoc [("error", `String "goal, hypothesis, evidence, conclusion are required")]
+  else
+    let loop_id = Safe_ops.json_string ~default:"" "loop_id" args in
+    let confidence = Safe_ops.json_string ~default:"medium" "confidence" args in
+    let tags = match Yojson.Safe.Util.member "tags" args with
+      | `List items -> List.filter_map Yojson.Safe.Util.to_string_option items
+      | _ -> []
+    in
+    let cycle_start = Safe_ops.json_int_opt "cycle_start" args in
+    let cycle_end = Safe_ops.json_int_opt "cycle_end" args in
+    let cycle_range = match cycle_start, cycle_end with
+      | Some a, Some b -> Some (a, b)
+      | _ -> None
+    in
+    let finding : Autoresearch_knowledge.finding = {
+      id = Autoresearch_knowledge.generate_finding_id ();
+      loop_id;
+      keeper_name;
+      goal;
+      hypothesis;
+      evidence;
+      conclusion;
+      confidence = Autoresearch_knowledge.confidence_of_string confidence;
+      tags;
+      related_findings = [];
+      cycle_range;
+      timestamp = Unix.gettimeofday ();
+    } in
+    Autoresearch_knowledge.record_finding ~finding
+
+(** Handle search_findings — search previous research findings by keyword. *)
+let handle_search_findings _ctx args =
+  let query = Safe_ops.json_string ~default:"" "query" args in
+  if query = "" then
+    `Assoc [("error", `String "query is required")]
+  else
+    let limit = Safe_ops.json_int ~default:10 "limit" args in
+    let findings = Autoresearch_knowledge.search_findings ~query ~limit () in
+    `Assoc [
+      ("ok", `Bool true);
+      ("count", `Int (List.length findings));
+      ("findings", `List (List.map Autoresearch_knowledge.finding_to_yojson findings));
+    ]
+
 (** Dispatch an autoresearch tool call (standard MCP pattern). *)
 let dispatch ctx ~name ~args : result option =
   match name with
@@ -708,4 +760,8 @@ let dispatch ctx ~name ~args : result option =
   | "masc_autoresearch_stop" -> Some (wrap_result (handle_stop ctx args))
   | "masc_autoresearch_inject" -> Some (wrap_result (handle_inject ctx args))
   | "masc_autoresearch_cycle" -> Some (wrap_result (handle_cycle ctx args))
+  | "masc_autoresearch_record_finding" ->
+      Some (wrap_result (handle_record_finding ctx args))
+  | "masc_autoresearch_search_findings" ->
+      Some (wrap_result (handle_search_findings ctx args))
   | _ -> None

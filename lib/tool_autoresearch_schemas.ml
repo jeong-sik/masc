@@ -178,4 +178,74 @@ Call this repeatedly to drive the autonomous loop.";
       ]);
     ];
   };
+
+  {
+    name = "masc_autoresearch_record_finding";
+    description = "Record a structured research finding from an autoresearch loop. \
+Findings are persisted to JSONL locally and synced to Neo4j (best-effort). \
+Use after synthesizing insights from multiple experiment cycles.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("loop_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Loop ID this finding belongs to (optional)");
+        ]);
+        ("goal", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Research goal or question being investigated");
+        ]);
+        ("hypothesis", `Assoc [
+          ("type", `String "string");
+          ("description", `String "The hypothesis that was tested");
+        ]);
+        ("evidence", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Observable evidence supporting or refuting the hypothesis");
+        ]);
+        ("conclusion", `Assoc [
+          ("type", `String "string");
+          ("description", `String "What was learned (1-3 sentences)");
+        ]);
+        ("confidence", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Confidence level: high, medium, low");
+        ]);
+        ("tags", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [("type", `String "string")]);
+          ("description", `String "Topic tags for retrieval (e.g. 'attention', 'learning-rate')");
+        ]);
+        ("cycle_start", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "First cycle number this finding covers (optional)");
+        ]);
+        ("cycle_end", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Last cycle number this finding covers (optional)");
+        ]);
+      ]);
+      ("required", `List [`String "goal"; `String "hypothesis"; `String "evidence"; `String "conclusion"]);
+    ];
+  };
+
+  {
+    name = "masc_autoresearch_search_findings";
+    description = "Search previous research findings by keyword. \
+Returns findings from all loops matching the query, most recent first.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("query", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Search query (matches against goal, hypothesis, evidence, conclusion, tags)");
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum results to return (default: 10)");
+        ]);
+      ]);
+      ("required", `List [`String "query"]);
+    ];
+  };
 ]

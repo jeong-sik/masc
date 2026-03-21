@@ -385,7 +385,7 @@ let add_argument config ~debate_id ~agent ~position ~content
                 fn ~agent:target_arg.agent ~message:msg
               | Some _ -> ()));
           (* Return with arg index for reference *)
-          Printf.eprintf "[Debate] Argument #%d added by %s\n%!" arg_idx agent;
+          Log.Misc.info "Debate: argument #%d added by %s" arg_idx agent;
           Ok updated
         with
         | Eio.Cancel.Cancelled _ as e -> raise e

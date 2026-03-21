@@ -289,6 +289,51 @@
   line-height: 1.45;
 }
 
+.ops-control-disclosure {
+  margin-top: 2px;
+  border: 1px solid var(--white-8);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ops-control-summary {
+  list-style: none;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.ops-control-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ops-control-kicker {
+  color: #9fe6b5;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ops-control-summary strong {
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.ops-control-summary span:last-child {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ops-control-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 14px 14px 14px;
+  border-top: 1px solid var(--white-8);
+}
+
 .ops-feed-list,
 .ops-entity-list,
 .ops-confirmation-list,

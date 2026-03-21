@@ -142,8 +142,9 @@ let write_json_root config path json =
   match root_key_of_path config path with
   | Some key ->
       let content = Yojson.Safe.pretty_to_string json in
-      let _ = backend_set config ~key ~value:content in
-      ()
+      (match backend_set config ~key ~value:content with
+       | Ok () -> ()
+       | Error e -> Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend.show_error e))
   | None -> write_json_local path json
 
 let delete_path_root config path =
@@ -178,8 +179,9 @@ let write_json config path json =
   match key_of_path config path with
   | Some key ->
       let content = Yojson.Safe.pretty_to_string json in
-      let _ = backend_set config ~key ~value:content in
-      ()
+      (match backend_set config ~key ~value:content with
+       | Ok () -> ()
+       | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend.show_error e))
   | None -> write_json_local path json
 
 let delete_path config path =

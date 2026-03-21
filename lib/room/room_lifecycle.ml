@@ -83,8 +83,10 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
        write_json config agent_file_dedup (agent_to_yojson updated);
        if is_pg_backend config then begin
          let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
-         let _ = backend_set config ~key:agent_key
-                   ~value:(Yojson.Safe.to_string (agent_to_yojson updated)) in ()
+         (match backend_set config ~key:agent_key
+                   ~value:(Yojson.Safe.to_string (agent_to_yojson updated)) with
+          | Ok () -> ()
+          | Error e -> Log.Room.warn "rejoin backend_set failed for %s: %s" agent_key (Backend.show_error e))
        end;
        if is_inactive then begin
          (* Restore to active_agents on rejoin *)
@@ -130,8 +132,9 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
   (* Also persist to PostgreSQL backend for HTTP state persistence (stateless requests) *)
   if is_pg_backend config then begin
     let agent_key = Printf.sprintf "agents:%s" (safe_filename nickname) in
-    let _ = backend_set config ~key:agent_key ~value:(Yojson.Safe.to_string agent_json) in
-    ()
+    (match backend_set config ~key:agent_key ~value:(Yojson.Safe.to_string agent_json) with
+     | Ok () -> ()
+     | Error e -> Log.Room.warn "join backend_set failed for %s: %s" agent_key (Backend.show_error e))
   end;
 
   (* Update state *)
@@ -285,10 +288,14 @@ let leave config ~agent_name =
       (* Update backend entry to Inactive as well *)
       (if in_fs then
         let updated_json = read_json config agent_file in
-        let _ = backend_set config ~key:agent_key
-                  ~value:(Yojson.Safe.to_string updated_json) in ()
+        (match backend_set config ~key:agent_key
+                  ~value:(Yojson.Safe.to_string updated_json) with
+         | Ok () -> ()
+         | Error e -> Log.Room.warn "leave backend_set failed for %s: %s" agent_key (Backend.show_error e))
       else
-        let _ = backend_delete config ~key:agent_key in ())
+        (match backend_delete config ~key:agent_key with
+         | Ok _ -> ()
+         | Error e -> Log.Room.warn "leave backend_delete failed for %s: %s" agent_key (Backend.show_error e)))
     end;
 
     (* Capture active agents before removal for relationship materialization *)

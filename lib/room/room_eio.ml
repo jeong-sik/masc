@@ -160,7 +160,13 @@ let log_event config ~event_type ~agent ~payload =
     timestamp = Time_compat.now ();
   } in
   let json_str = Yojson.Safe.to_string (event_to_json event) in
-  let _ = Backend_eio.FileSystem.set config.backend (event_key seq) json_str in
+  (match Backend_eio.FileSystem.set config.backend (event_key seq) json_str with
+   | Ok () -> ()
+   | Error e ->
+       let msg = match e with
+         | Backend_eio.IOError m -> m | Backend_eio.NotFound k -> "not found: " ^ k
+         | Backend_eio.AlreadyExists k -> "already exists: " ^ k | Backend_eio.InvalidKey k -> "invalid key: " ^ k in
+       Log.Room.warn "append_event set failed for seq %d: %s" seq msg);
   event
 
 (** Get event by sequence *)

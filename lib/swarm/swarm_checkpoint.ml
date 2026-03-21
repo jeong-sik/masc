@@ -140,8 +140,9 @@ let save config =
   (* Dual persistence: also write to PostgreSQL backend if available *)
   if Room_utils.is_pg_backend config then begin
     let json_str = Yojson.Safe.to_string json in
-    let _ = Room_utils.backend_set config ~key:"swarm:checkpoint" ~value:json_str in
-    ()
+    (match Room_utils.backend_set config ~key:"swarm:checkpoint" ~value:json_str with
+     | Ok () -> ()
+     | Error e -> Log.Misc.warn "swarm checkpoint backend_set failed: %s" (Backend.show_error e))
   end;
   Ok snapshot
 

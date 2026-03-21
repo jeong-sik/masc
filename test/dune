@@ -130,6 +130,12 @@
  (modules test_dashboard_governance)
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
+; Date-split JSONL storage tests
+(test
+ (name test_dated_jsonl)
+ (modules test_dated_jsonl)
+ (libraries dated_jsonl fs_compat alcotest eio eio_main yojson unix))
+
 (test
  (name test_dashboard_labels)
  (modules test_dashboard_labels)

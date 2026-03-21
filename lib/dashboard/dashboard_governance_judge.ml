@@ -27,8 +27,14 @@ type state = {
 let governance_dir base_path =
   Filename.concat (Filename.concat base_path ".masc") "governance"
 
+(** Legacy single-file path (for fallback reads). *)
 let judgments_path base_path =
   Filename.concat (governance_dir base_path) "judgments.jsonl"
+
+(** Date-split store: [.masc/governance/judgments/YYYY-MM/DD.jsonl]. *)
+let get_judgments_store base_path : Dated_jsonl.t =
+  let dir = Filename.concat (governance_dir base_path) "judgments" in
+  Dated_jsonl.create ~base_dir:dir ()
 
 let states : (string, state) Hashtbl.t = Hashtbl.create 4
 
@@ -95,29 +101,44 @@ let judgment_generated_at json =
   json |> member "generated_at" |> to_string_option |> parse_iso_opt
   |> Option.value ~default:0.0
 
+let load_judgments_into_table jsons =
+  let table = Hashtbl.create 32 in
+  List.iter (fun json ->
+    try
+      let status = json |> member "status" |> to_string_option in
+      if status = Some "active" then
+        let key = judgment_key json in
+        match Hashtbl.find_opt table key with
+        | Some current
+          when judgment_generated_at current >= judgment_generated_at json -> ()
+        | _ -> Hashtbl.replace table key json
+    with
+    | Yojson.Safe.Util.Type_error _ -> ()
+    | exn -> Log.Governance.warn "load_latest_from_disk parse: %s" (Printexc.to_string exn)
+  ) jsons;
+  table
+
+(** Load latest judgments.
+    Tries date-split store first; falls back to legacy single file. *)
 let load_latest_from_disk base_path =
-  let path = judgments_path base_path in
-  if not (Sys.file_exists path) then Hashtbl.create 32
+  let store = get_judgments_store base_path in
+  let jsons = Dated_jsonl.read_recent store 10_000 in
+  if jsons <> [] then
+    load_judgments_into_table jsons
   else
-    let table = Hashtbl.create 32 in
-    let content = Fs_compat.load_file path in
-    String.split_on_char '\n' content
-    |> List.iter (fun line ->
-           let trimmed = String.trim line in
-           if trimmed <> "" then
-             try
-               let json = Yojson.Safe.from_string trimmed in
-               let status = json |> member "status" |> to_string_option in
-               if status = Some "active" then
-                 let key = judgment_key json in
-                 match Hashtbl.find_opt table key with
-                 | Some current
-                   when judgment_generated_at current >= judgment_generated_at json -> ()
-                 | _ -> Hashtbl.replace table key json
-             with
-             | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
-             | exn -> Log.Governance.warn "load_latest_from_disk parse: %s" (Printexc.to_string exn));
-    table
+    (* Legacy fallback *)
+    let path = judgments_path base_path in
+    if not (Sys.file_exists path) then Hashtbl.create 32
+    else
+      let content = Fs_compat.load_file path in
+      let legacy_jsons =
+        String.split_on_char '\n' content
+        |> List.filter (fun line -> String.trim line <> "")
+        |> List.filter_map (fun line ->
+            try Some (Yojson.Safe.from_string line)
+            with Yojson.Json_error _ -> None)
+      in
+      load_judgments_into_table legacy_jsons
 
 let latest_judgments base_path =
   let st = get_state base_path in
@@ -313,12 +334,11 @@ let compute_judgments ~base_path:_ ~factual_json =
       | exn ->
           Error (Printf.sprintf "Governance judge parse error: %s" (Printexc.to_string exn)))
 
+(** Append judgments to date-split store.
+    Thread-safe via Dated_jsonl internal mutex. *)
 let append_judgments base_path judgments =
-  ensure_dir (governance_dir base_path);
-  let path = judgments_path base_path in
-  List.iter
-    (fun json -> Fs_compat.append_jsonl path json)
-    judgments
+  let store = get_judgments_store base_path in
+  List.iter (fun json -> Dated_jsonl.append store json) judgments
 
 let refresh_once ~base_path ~build_facts =
   let st = get_state base_path in

@@ -772,6 +772,8 @@
    time_compat
    ;; Filesystem compatibility (Eio-native with Unix fallback)
    fs_compat
+   ;; Date-split JSONL storage (YYYY-MM/DD.jsonl)
+   dated_jsonl
    ;; Council - multi-agent governance
    council
    ;; Jiphyeon - Episode storage for Agent Being Protocol

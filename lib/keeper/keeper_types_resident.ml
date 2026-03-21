@@ -122,8 +122,14 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
   else
     ensure_api_keys specs
 
+(** Legacy single-file metrics path (for fallback reads). *)
 let keeper_metrics_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".metrics.jsonl")
+
+(** Date-split metrics store: [.masc/perpetual-keepers/<name>/metrics/YYYY-MM/DD.jsonl]. *)
+let keeper_metrics_store config name : Dated_jsonl.t =
+  let dir = Filename.concat (keeper_dir_ config) (name ^ "/metrics") in
+  Dated_jsonl.create ~base_dir:dir ()
 
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")

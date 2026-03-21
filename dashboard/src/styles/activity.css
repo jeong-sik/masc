@@ -1,5 +1,0 @@
-/* ── Activity Panel (global slide-out) ────────────────────── */
-@keyframes activitySlideIn {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
-}

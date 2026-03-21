@@ -114,7 +114,7 @@ export function KeeperDetailOverlay() {
     <div
       class="keeper-detail-overlay"
       data-testid="keeper-detail-overlay"
-      style="display:flex; align-items:center; justify-content:center; padding:20px;"
+      class="flex items-center justify-center p-5"
       onClick=${(e: Event) => {
         if ((e.target as HTMLElement).classList.contains('keeper-detail-overlay')) {
           closeKeeperDetail()
@@ -123,12 +123,12 @@ export function KeeperDetailOverlay() {
     >
       <div style="max-width:1100px; width:100%; max-height:90vh; overflow-y:auto; background:#1a1a2e; border-radius:16px; border:1px solid rgba(255,255,255,0.08); padding:24px;">
         ${'' /* Header */}
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
-          <div style="display:flex; align-items:center; gap:12px;">
-            <span style="font-size:32px;">${keeper.emoji}</span>
+        <div class="flex items-center justify-between mb-5">
+          <div class="flex items-center gap-3">
+            <span class="text-[32px]">${keeper.emoji}</span>
             <div>
-              <h2 style="margin:0; font-size:20px; color:#e0e0e0;">${keeper.name}</h2>
-              ${keeper.koreanName ? html`<div style="font-size:13px; color:#888;">${keeper.koreanName}</div>` : null}
+              <h2 class="m-0 text-xl text-[#e0e0e0]">${keeper.name}</h2>
+              ${keeper.koreanName ? html`<div class="text-[13px] text-[var(--text-dim)]">${keeper.koreanName}</div>` : null}
             </div>
             <${StatusBadge} status=${keeper.status} />
             ${keeper.model ? html`<span class="pill">${keeper.model}</span>` : null}
@@ -152,7 +152,7 @@ export function KeeperDetailOverlay() {
         <${KeeperCommsPanel} keeper=${keeper} />
 
         ${'' /* Two-column grid for sections */}
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px;">
+        <div class="grid grid-cols-2 gap-4 mt-4">
 
           ${'' /* Left: Field Dictionary */}
           <${Card} title="필드 사전">
@@ -164,18 +164,18 @@ export function KeeperDetailOverlay() {
             <${TraitsList} traits=${keeper.traits ?? []} label="특성" />
             <${TraitsList} traits=${keeper.interests ?? []} label="관심사" />
             ${keeper.primaryValue
-              ? html`<div style="font-size:12px; color:#888;">핵심 가치: <span style="color:#4ade80;">${keeper.primaryValue}</span></div>`
+              ? html`<div class="text-xs text-[var(--text-dim)]">핵심 가치: <span class="text-[var(--ok)]">${keeper.primaryValue}</span></div>`
               : null}
             ${keeper.skill_primary
-              ? html`<div style="font-size:12px; color:#888; margin-top:6px;">
-                  스킬 경로: <span style="color:#22d3ee;">${keeper.skill_primary}</span>
+              ? html`<div class="text-xs text-[var(--text-dim)] mt-1.5">
+                  스킬 경로: <span class="text-[var(--cyan)]">${keeper.skill_primary}</span>
                 </div>`
               : null}
             ${keeper.skill_reason
-              ? html`<div style="font-size:12px; color:#888; margin-top:4px;">${keeper.skill_reason}</div>`
+              ? html`<div class="text-xs text-[var(--text-dim)] mt-1">${keeper.skill_reason}</div>`
               : null}
             ${keeper.last_heartbeat
-              ? html`<div style="font-size:12px; color:#888; margin-top:6px;">
+              ? html`<div class="text-xs text-[var(--text-dim)] mt-1.5">
                   마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} />
                 </div>`
               : null}
@@ -249,7 +249,7 @@ export function KeeperDetailOverlay() {
                     ${keeper.memory_recent_note}
                   </div>
                 `
-                : html`<div class="empty-state" style="font-size:12px;">No recent memory note</div>`}
+                : html`<div class="empty-state" class="text-xs">No recent memory note</div>`}
             </div>
           <//>
         </div>

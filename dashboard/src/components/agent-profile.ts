@@ -359,7 +359,7 @@ export function AgentProfile({ name }: { name: string }) {
                 </div>
               ` : null}
               ${interests.length > 0 ? html`
-                <div class="ff-interests" style="margin-top:8px;">
+                <div class="ff-interests" class="mt-2">
                   <span class="ff-interests-label">관심사</span>
                   <div class="ff-interests-tags">
                     ${interests.slice(0, 12).map(t => html`<span class="ff-interest-tag" key=${t}>${t}</span>`)}

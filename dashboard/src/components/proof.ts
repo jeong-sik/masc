@@ -135,9 +135,9 @@ export function Proof() {
           <small>도구 ${(toolEvidence?.length ?? 0)} / 산출물 ${presentArtifacts}/${artifacts.length} / CP ${traceCount}</small>
         </div>
       </div>
-      <details style="margin-bottom: 12px;">
+      <details class="mb-3">
         <summary style="cursor: pointer; color: rgba(255,255,255,0.5); font-size: 13px; padding: 6px 0;">상세 지표 (${7}개)</summary>
-        <div class="mission-stat-grid" style="margin-top: 8px;">
+        <div class="mission-stat-grid" class="mt-2">
           <div class="summary-stat-card ${verdictTone(liveVerdict)}">
             <span>Live 판정</span>
             <strong>${liveVerdict}</strong>

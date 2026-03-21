@@ -42,15 +42,15 @@ export function Planning() {
         </div>
         <div class="stat-card">
           <div class="stat-label">할 일</div>
-          <div class="stat-value" style="color:#e0e0e0">${todo.length}</div>
+          <div class="stat-value" class="text-[#e0e0e0]">${todo.length}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">진행 중</div>
-          <div class="stat-value" style="color:#fbbf24">${inProgress.length}</div>
+          <div class="stat-value" class="text-[var(--warn)]">${inProgress.length}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">완료</div>
-          <div class="stat-value" style="color:#4ade80">${done.length}</div>
+          <div class="stat-value" class="text-[var(--ok)]">${done.length}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">높은 우선순위</div>

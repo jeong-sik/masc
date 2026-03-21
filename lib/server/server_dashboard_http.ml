@@ -44,20 +44,20 @@ let _execution_refresh_max_backoff_s = 600.0
 let start_execution_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
-  (* Warm cache: compute once synchronously so the first browser request
-     sees real data instead of the "initializing" placeholder. *)
+  (* Warm cache with 30s timeout: do not block server startup.
+     If it takes longer, the async refresh loop will populate it. *)
   (let t0 = Time_compat.now () in
    try
-     let json =
-       Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
-     in
-     _execution_json_ref := json;
-     let dt = Time_compat.now () -. t0 in
-     Log.Dashboard.info "execution warm cache done (%.1fs)" dt
+     match Eio.Time.with_timeout clock 30.0 (fun () ->
+       Ok (Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ())) with
+     | Ok json ->
+       _execution_json_ref := json;
+       Log.Dashboard.info "execution warm cache done (%.1fs)" (Time_compat.now () -. t0)
+     | Error `Timeout ->
+       Log.Dashboard.warn "execution warm cache skipped (%.1fs timeout)" (Time_compat.now () -. t0)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     let dt = Time_compat.now () -. t0 in
      Log.Dashboard.warn "execution warm cache failed (%.1fs): %s"
-       dt (Printexc.to_string exn));
+       (Time_compat.now () -. t0) (Printexc.to_string exn));
   Eio.Fiber.fork ~sw (fun () ->
     Log.Dashboard.info "starting execution refresh loop";
     let consecutive_failures = ref 0 in

@@ -318,20 +318,19 @@ let _mission_refresh_max_backoff_s = 600.0
 let start_mission_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
-  (* Warm cache: compute once synchronously so the first browser request
-     sees real data instead of the empty placeholder. *)
+  (* Warm cache with 30s timeout: do not block server startup. *)
   (let t0 = Time_compat.now () in
    try
-     let json =
-       Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ()
-     in
-     _mission_json_ref := json;
-     let dt = Time_compat.now () -. t0 in
-     Log.Dashboard.info "mission warm cache done (%.1fs)" dt
+     match Eio.Time.with_timeout clock 30.0 (fun () ->
+       Ok (Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ())) with
+     | Ok json ->
+       _mission_json_ref := json;
+       Log.Dashboard.info "mission warm cache done (%.1fs)" (Time_compat.now () -. t0)
+     | Error `Timeout ->
+       Log.Dashboard.warn "mission warm cache skipped (%.1fs timeout)" (Time_compat.now () -. t0)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     let dt = Time_compat.now () -. t0 in
      Log.Dashboard.warn "mission warm cache failed (%.1fs): %s"
-       dt (Printexc.to_string exn));
+       (Time_compat.now () -. t0) (Printexc.to_string exn));
   Eio.Fiber.fork ~sw (fun () ->
     Log.Dashboard.info "starting mission proactive refresh loop";
     let consecutive_failures = ref 0 in

@@ -41,7 +41,7 @@ import {
   keeperFreshnessTs,
   normalizeKeepers,
 } from './keeper-store-normalize'
-import { buildAgentMotion, type AgentMotionSnapshot } from './components/common/agent-motion'
+import { buildAgentMotion, normalizeAgentKey, type AgentMotionSnapshot } from './components/common/agent-motion'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
@@ -210,6 +210,18 @@ export const tasksByStatus = computed(() => {
   }
 })
 
+function groupByKey<T>(items: T[], keyFn: (item: T) => string): Map<string, T[]> {
+  const map = new Map<string, T[]>()
+  for (const item of items) {
+    const key = keyFn(item)
+    if (!key) continue
+    const arr = map.get(key)
+    if (arr) arr.push(item)
+    else map.set(key, [item])
+  }
+  return map
+}
+
 export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = computed(() => {
   const map = new Map<string, AgentMotionSnapshot>()
   const taskList = tasks.value
@@ -217,15 +229,40 @@ export const agentMotionMap: ReadonlySignal<Map<string, AgentMotionSnapshot>> = 
   const journalList = journal.value
   const boardPostList = boardPosts.value
   const keeperList = keepers.value
+
+  // Pre-index: one pass per array — O(N) total instead of O(N * agents)
+  const tasksByAgent = groupByKey(taskList, t => normalizeAgentKey(t.assignee))
+  const messagesByAgent = groupByKey(messageList, m => normalizeAgentKey(m.from ?? ''))
+  const journalByAgent = groupByKey(journalList, e => normalizeAgentKey(e.agent))
+  const journalByAuthor = groupByKey(journalList, e => normalizeAgentKey(e.author))
+  const boardByAgent = groupByKey(boardPostList, p => normalizeAgentKey(p.author))
+  const keepersByAgent = groupByKey(keeperList, k => normalizeAgentKey(k.name))
+
   for (const agent of agents.value) {
+    const key = normalizeAgentKey(agent.name)
+    // Merge journal entries matched by agent OR author (deduplicate)
+    const agentJournal = journalByAgent.get(key) ?? []
+    const authorJournal = journalByAuthor.get(key) ?? []
+    const mergedJournal = agentJournal.length === 0
+      ? authorJournal
+      : authorJournal.length === 0
+        ? agentJournal
+        : [...new Set([...agentJournal, ...authorJournal])]
+
     map.set(
-      agent.name.trim().toLowerCase(),
-      buildAgentMotion(agent.name, taskList, messageList, journalList, {
-        currentTask: agent.current_task,
-        lastSeen: agent.last_seen,
-        boardPosts: boardPostList,
-        keepers: keeperList,
-      }),
+      key,
+      buildAgentMotion(
+        agent.name,
+        tasksByAgent.get(key) ?? [],
+        messagesByAgent.get(key) ?? [],
+        mergedJournal,
+        {
+          currentTask: agent.current_task,
+          lastSeen: agent.last_seen,
+          boardPosts: boardByAgent.get(key) ?? [],
+          keepers: keepersByAgent.get(key) ?? [],
+        },
+      ),
     )
   }
   return map

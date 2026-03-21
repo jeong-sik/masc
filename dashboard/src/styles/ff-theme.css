@@ -2,10 +2,15 @@
    Additive overrides using higher-specificity selectors.
    Does not modify base styles; layers on top.
    Color palette: navy #0a1628, gold var(--ff-gold), crystal var(--accent)
+
+   Design reference: Final Fantasy character information screens.
+   Panels use double-border frames with gold corner ornaments.
+   Status bars mimic HP/MP gauges. KO'd entities are desaturated.
    ─────────────────────────────────────────────────────────── */
 
 /* ============================================
    1. Section Headers — gold accent underline
+      with diamond ornament separator
    ============================================ */
 
 .agents-monitor .monitor-headline,
@@ -39,6 +44,17 @@
 .section h2,
 .overview-section-collapsible > summary {
   color: var(--ff-gold-bright, var(--ff-gold-bright));
+}
+
+/* Diamond separator for section headers */
+.section h2::before,
+.roster-title::before {
+  content: '\25C6';
+  margin-right: 8px;
+  font-size: 0.6em;
+  color: var(--ff-gold, var(--ff-gold));
+  opacity: 0.6;
+  vertical-align: middle;
 }
 
 /* ============================================
@@ -154,9 +170,63 @@ button.monitor-row:hover {
 }
 
 /* ============================================
-   4. Context Ratio Bars — HP-style gradient
+   4. Context Ratio Bars — HP/MP-style gauge
    ============================================ */
-/* Keeper roster pressure bar — same HP treatment */
+
+/* Gauge track — inset shadow for depth */
+.roster-card__gauge-track {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(200, 168, 78, 0.15);
+  border-radius: 3px;
+  height: 10px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+/* Gauge bar — segmented look via repeating gradient */
+.roster-card__gauge-bar {
+  border-radius: 2px;
+  background-image:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0px,
+      transparent 5px,
+      rgba(0, 0, 0, 0.2) 5px,
+      rgba(0, 0, 0, 0.2) 6px
+    );
+  box-shadow: 0 0 4px rgba(74, 222, 128, 0.3);
+}
+
+/* HP bar colors by pressure level */
+.roster-card__gauge-bar.pressure--ok {
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.25);
+}
+
+.roster-card__gauge-bar.pressure--amber {
+  box-shadow: 0 0 6px rgba(245, 197, 66, 0.25);
+}
+
+.roster-card__gauge-bar.pressure--orange {
+  box-shadow: 0 0 6px rgba(249, 115, 22, 0.3);
+}
+
+.roster-card__gauge-bar.pressure--red {
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.35);
+  animation: ff-hp-critical 1.5s ease-in-out infinite;
+}
+
+@keyframes ff-hp-critical {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Gauge label — FF stat readout */
+.roster-card__gauge-label {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: rgba(200, 168, 78, 0.7);
+}
+
 /* ============================================
    5. Terminated Cards — KO'd look
    ============================================ */
@@ -185,16 +255,54 @@ button.monitor-row.state-offline:hover {
 }
 
 /* ============================================
-   6. Dashboard Header — FF accent
+   6. Dashboard Header — FF menu frame
    ============================================ */
 
 .dashboard-header {
-  border-color: var(--ff-border-subtle, var(--ff-border-subtle));
-  background: rgba(10, 22, 40, 0.88);
+  border: 2px solid var(--ff-border, var(--ff-border));
+  background:
+    linear-gradient(
+      180deg,
+      rgba(10, 22, 40, 0.95) 0%,
+      rgba(8, 16, 32, 0.92) 100%
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(200, 168, 78, 0.08),
+    0 4px 24px rgba(0, 0, 0, 0.4);
+  position: relative;
+}
+
+/* Header corner ornaments */
+.dashboard-header::before,
+.dashboard-header::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--ff-gold, var(--ff-gold));
+  opacity: 0.6;
+  z-index: 1;
+}
+
+.dashboard-header::before {
+  top: -2px;
+  left: -2px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+  border-radius: 2px 0 0 0;
+}
+
+.dashboard-header::after {
+  top: -2px;
+  right: -2px;
+  border-top: 2px solid;
+  border-right: 2px solid;
+  border-radius: 0 2px 0 0;
 }
 
 .header-title-wrap h1 {
   color: var(--ff-gold-bright, var(--ff-gold-bright));
+  text-shadow: 0 0 12px rgba(200, 168, 78, 0.12);
 }
 
 /* Version badge — crystal blue */
@@ -202,6 +310,7 @@ button.monitor-row.state-offline:hover {
   border-color: rgba(71, 184, 255, 0.3);
   background: rgba(71, 184, 255, 0.12);
   color: var(--ff-crystal, var(--accent));
+  box-shadow: 0 0 8px rgba(71, 184, 255, 0.08);
 }
 
 /* ============================================
@@ -242,10 +351,32 @@ button.monitor-row.state-watching {
 .stat-card {
   background: var(--ff-panel, rgba(10, 22, 40, 0.92));
   border-color: var(--ff-border-subtle, var(--ff-border-subtle));
+  position: relative;
+}
+
+/* Stat card inner highlight line */
+.stat-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(200, 168, 78, 0.12) 30%,
+    rgba(200, 168, 78, 0.12) 70%,
+    transparent 100%
+  );
 }
 
 .stat-label {
   color: rgba(200, 168, 78, 0.6);
+}
+
+.stat-value {
+  text-shadow: 0 0 8px rgba(234, 241, 255, 0.08);
 }
 
 /* ============================================
@@ -253,5 +384,127 @@ button.monitor-row.state-watching {
    ============================================ */
 
 body {
-  background: var(--ff-navy, #0a1628);
+  background:
+    radial-gradient(
+      ellipse at 50% 0%,
+      rgba(16, 32, 64, 0.4) 0%,
+      transparent 60%
+    ),
+    var(--ff-navy, #0a1628);
+}
+
+/* ============================================
+   11. Rail Cards — FF window frame
+   ============================================ */
+
+.rail-card {
+  position: relative;
+  border: 1px solid var(--ff-border, var(--ff-border));
+  box-shadow: inset 0 1px 0 rgba(200, 168, 78, 0.06);
+}
+
+/* Rail card corner marks */
+.rail-card::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 6px;
+  height: 6px;
+  border-top: 1.5px solid var(--ff-gold, var(--ff-gold));
+  border-left: 1.5px solid var(--ff-gold, var(--ff-gold));
+  opacity: 0.4;
+}
+
+.rail-card::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 6px;
+  height: 6px;
+  border-bottom: 1.5px solid var(--ff-gold, var(--ff-gold));
+  border-right: 1.5px solid var(--ff-gold, var(--ff-gold));
+  opacity: 0.4;
+}
+
+/* Rail card h3 — gold label */
+.rail-card h3 {
+  color: var(--ff-gold-bright, var(--ff-gold-bright));
+}
+
+/* ============================================
+   12. Keeper Card — crystal blue frame
+   ============================================ */
+
+.roster-card--keeper {
+  border: 1px solid rgba(74, 158, 245, 0.3);
+  border-left: 3px solid var(--ff-mp, #4a9ef5);
+  box-shadow:
+    inset 0 0 20px rgba(74, 158, 245, 0.03),
+    0 0 8px rgba(74, 158, 245, 0.05);
+}
+
+.roster-card--keeper:hover {
+  border-color: rgba(74, 158, 245, 0.5);
+  box-shadow:
+    inset 0 0 20px rgba(74, 158, 245, 0.05),
+    0 0 16px rgba(74, 158, 245, 0.08);
+}
+
+/* ============================================
+   13. Working Agent — pulse glow
+   ============================================ */
+
+button.monitor-row.state-working {
+  animation: ff-working-pulse 3s ease-in-out infinite;
+}
+
+@keyframes ff-working-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(74, 222, 128, 0);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(74, 222, 128, 0.08);
+  }
+}
+
+/* ============================================
+   14. Active Tab — FF selection highlight
+   ============================================ */
+
+.rail-tab-btn.active {
+  border-color: var(--ff-gold, var(--ff-gold));
+  background: rgba(200, 168, 78, 0.08);
+  color: var(--ff-gold-bright, var(--ff-gold-bright));
+  box-shadow: inset 0 0 12px rgba(200, 168, 78, 0.04);
+}
+
+.rail-tab-btn.active .rail-tab-copy strong {
+  color: var(--ff-gold-bright, var(--ff-gold-bright));
+}
+
+.rail-tab-btn.active .rail-tab-copy span {
+  color: rgba(200, 168, 78, 0.6);
+}
+
+/* ============================================
+   15. Scrollbar — FF minimal
+   ============================================ */
+
+.dashboard-rail::-webkit-scrollbar {
+  width: 4px;
+}
+
+.dashboard-rail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dashboard-rail::-webkit-scrollbar-thumb {
+  background: rgba(200, 168, 78, 0.2);
+  border-radius: 2px;
+}
+
+.dashboard-rail::-webkit-scrollbar-thumb:hover {
+  background: rgba(200, 168, 78, 0.35);
 }

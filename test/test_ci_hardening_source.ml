@@ -83,6 +83,26 @@ let test_input_validation_contracts () =
   (* guardian GC cache eviction check removed — Guardian deleted (#1834) *)
   ignore (fun () -> ())
 
+let test_dashboard_component_split_contracts () =
+  check bool "proof view imports proof helpers" true
+    (file_contains_pattern "dashboard/src/components/proof.ts"
+       {|from './proof-helpers'|});
+  check bool "proof view imports proof sections" true
+    (file_contains_pattern "dashboard/src/components/proof.ts"
+       {|from './proof-sections'|});
+  check bool "proof helpers export verdict reasons" true
+    (file_contains_pattern "dashboard/src/components/proof-helpers.ts"
+       "export function verdictReasonLines");
+  check bool "proof helpers export timeline dedupe" true
+    (file_contains_pattern "dashboard/src/components/proof-helpers.ts"
+       "export function dedupeTimeline");
+  check bool "proof sections export selection card" true
+    (file_contains_pattern "dashboard/src/components/proof-sections.ts"
+       "export function SelectionCard");
+  check bool "proof sections export actor contribution row" true
+    (file_contains_pattern "dashboard/src/components/proof-sections.ts"
+       "export function ActorContributionRow")
+
 let () =
   run "ci_hardening_source"
     [
@@ -91,5 +111,6 @@ let () =
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
            test_case "input validation contracts" `Quick test_input_validation_contracts;
+           test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
          ]);
     ]

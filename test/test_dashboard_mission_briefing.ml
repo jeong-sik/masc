@@ -67,7 +67,9 @@ let iso_of_unix ts =
     (tm.Unix.tm_mon + 1)
     tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
-let test_briefing_is_model_free_and_synchronous () =
+let test_briefing_cold_call_returns_pending () =
+  (* After #2094, cold calls (no cache) return "pending" and trigger async refresh.
+     This avoids blocking the dashboard on cold-start computation. *)
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
@@ -85,18 +87,10 @@ let test_briefing_is_model_free_and_synchronous () =
           ~config ~sw ~clock ~proc_mgr:None ()
       in
       let open Yojson.Safe.Util in
-      check string "status" "ok"
+      check string "cold call returns pending" "pending"
         (json |> member "status" |> to_string);
-      check bool "refreshing false" false
-        (json |> member "refreshing" |> to_bool);
-      check string "model" "deterministic"
-        (json |> member "model" |> to_string);
-      check string "provenance" "narrative"
-        (json |> member "provenance" |> to_string);
-      check bool "not authoritative" false
-        (json |> member "authoritative" |> to_bool);
-      check int "section count" 3
-        (json |> member "sections" |> to_list |> List.length))
+      check bool "refreshing true on cold call" true
+        (json |> member "refreshing" |> to_bool))
 
 let test_force_refresh_without_cache_returns_pending () =
   Eio_main.run @@ fun env ->
@@ -455,8 +449,8 @@ let () =
     [
       ( "deterministic",
         [
-          test_case "briefing is model-free and synchronous" `Quick
-            test_briefing_is_model_free_and_synchronous;
+          test_case "cold call returns pending" `Quick
+            test_briefing_cold_call_returns_pending;
           test_case "force refresh without cache returns pending" `Quick
             test_force_refresh_without_cache_returns_pending;
           test_case "force refresh with cache returns stale cached payload" `Quick

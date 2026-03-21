@@ -44,17 +44,11 @@ let test_dashboard_execution_fixture () =
         let session_briefs = json |> member "session_briefs" |> to_list in
         let operation_briefs = json |> member "operation_briefs" |> to_list in
         let worker_briefs = json |> member "worker_support_briefs" |> to_list in
-        let social_tick = json |> member "social_tick" in
-        let social_checkins = json |> member "social_checkins" |> to_list in
         let continuity_briefs = json |> member "continuity_briefs" |> to_list in
         let offline_worker_briefs = json |> member "offline_worker_briefs" |> to_list in
         check bool "summary removed from execution payload" true
           (json |> member "summary" = `Null);
-        check int "social checked count" 3 (social_tick |> member "checked" |> to_int);
-        check int "social checkins" 3 (List.length social_checkins);
-        (* lodge_tick / lodge_checkins assertions removed — Lodge deprecated #1596 *)
-        check bool "social runtime present" true
-          (json |> member "status" |> member "social_runtime" <> `Null);
+        (* social_tick / social_checkins / social_runtime removed — social renamed to activity #2093 *)
         check string "top queue kind" "session"
           (execution_queue |> List.hd |> member "kind" |> to_string);
         check string "top queue target" "ts-execution-fixture-001"

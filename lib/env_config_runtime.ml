@@ -121,8 +121,7 @@ module Spawn = struct
   let timeout_seconds =
     int_of_float (get_float ~default:600.0 "MASC_SPAWN_TIMEOUT_SEC")
 
-  (** Extended timeout for perpetual coding mode (seconds).
-      Used when perpetual_loop spawns coding agents. Default 2 hours. *)
+  (** Extended timeout for coding mode (seconds). Default 2 hours. *)
   let coding_timeout_seconds =
     int_of_float (get_float ~default:7200.0 "MASC_SPAWN_CODING_TIMEOUT_SEC")
 

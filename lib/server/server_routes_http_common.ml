@@ -39,7 +39,6 @@ module Progress = Progress
 module Sse = Sse
 module Safe_ops = Safe_ops
 module Context_manager = Context_manager
-module Tool_perpetual = Tool_perpetual
 module Tool_mdal = Tool_mdal
 module Tool_board = Tool_board
 module Process_eio = Process_eio

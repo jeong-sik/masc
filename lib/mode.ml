@@ -27,7 +27,7 @@ type category =
   | Board       (* board_post, board_list, board_get, board_comment, board_vote, ... *)
   | Plan        (* plan_*, goal_*, intent_* *)
   | Consensus   (* debate_*, consensus_*, walph_*, convo_*, decision_*, council_status *)
-  | Ecosystem   (* keeper_*, perpetual_*, mdal_*, handover_*, library_* *)
+  | Ecosystem   (* keeper_*, mdal_*, handover_*, library_* *)
   | Voice       (* masc_voice_*: TTS, STT, sessions, conferences *)
   | TRPG        (* masc_trpg_*, trpg_* *)
   | Unknown     (* unmapped namespace/tool *)
@@ -343,7 +343,7 @@ let tool_category tool_name =
   | "masc_convo_start" | "masc_convo_reply" | "masc_convo_get"
   | "masc_convo_list" | "masc_convo_conclude" -> Consensus
 
-  (* ── Ecosystem: keeper, perpetual, MDAL, autoresearch, handover, library ── *)
+  (* ── Ecosystem: keeper, MDAL, autoresearch, handover, library ── *)
   (* Keeper read-only status surfaces *)
   | "masc_keeper_status" | "masc_keeper_list"
   | "masc_persistent_agent_status" | "masc_persistent_agent_list"
@@ -368,9 +368,6 @@ let tool_category tool_name =
   | "masc_keeper_autonomy"
   | "masc_persistent_agent_goals"
   | "masc_persistent_agent_autonomy"
-  (* Perpetual *)
-  | "masc_perpetual_start" | "masc_perpetual_status"
-  | "masc_perpetual_stop" | "masc_perpetual_inject"
   (* MDAL *)
   | "masc_mdal_start" | "masc_mdal_iterate"
   | "masc_mdal_status" | "masc_mdal_stop"
@@ -490,7 +487,7 @@ let category_description = function
   | Board -> "Agent board: posts, comments, votes, search"
   | Plan -> "Plan and goal management: plan_*, goal_*, intent_*"
   | Consensus -> "Multi-agent consensus: debate, WALPH, convo, decision"
-  | Ecosystem -> "Agent lifecycle: keeper, perpetual, MDAL, handover, library"
+  | Ecosystem -> "Agent lifecycle: keeper, MDAL, handover, library"
   | Voice -> "Voice bridge: TTS, STT, sessions, conferences (8 tools)"
   | TRPG -> "Tabletop RPG engine: sessions, actors, dice, quests"
   | Unknown -> "Unmapped tool (excluded from all presets)"

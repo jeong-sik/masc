@@ -195,50 +195,7 @@ export MASC_POSTGRES_URL="postgresql://user:pass@host:5432/db"
 MASC_POSTGRES_URL="..." dune exec _build/default/test/test_board_pg.exe
 ```
 
-## Perpetual Agent Runtime — Infinite Context System
+## Perpetual Agent Runtime (Removed)
 
-자율 에이전트가 무한 컨텍스트로 24시간+ 연속 실행.
-
-### Architecture
-
-```
-think → act → observe → verify → compact → heartbeat → loop (or handoff)
-```
-
-| 모듈 | 역할 |
-|------|------|
-| `model_client.ml` | 벤더 무관 LLM 호출, cascade fallback |
-| `context_manager.ml` | 3-tier 메모리, compaction 전략 |
-| `verifier.ml` | 저비용 모델로 action 검증 |
-| `succession.ml` | DNA 추출/수화, generation tracking |
-| `perpetual_loop.ml` | 자율 루프, 3-threshold context management |
-| `tool_perpetual.ml` | MCP 도구 4개 |
-
-### 3-Threshold Context Management
-
-| Threshold | 기본값 | 동작 |
-|-----------|--------|------|
-| **Compact** | 50% | 오래된 메시지 요약, tool output 정리 |
-| **Prepare** | 70% | 후속 에이전트용 DNA 추출, checkpoint 저장 |
-| **Handoff** | 85% | 후속 에이전트에게 압축된 컨텍스트 전달 |
-
-### MCP 도구
-
-| 도구 | 설명 |
-|------|------|
-| `masc_perpetual_start` | 자율 에이전트 시작 (goal + model cascade 필수) |
-| `masc_perpetual_status` | 상태 조회 (turn, context%, generation, cost) |
-| `masc_perpetual_stop` | 정상 종료 (checkpoint + DNA 추출) |
-| `masc_perpetual_inject` | 실행 중 메시지/목표 주입 |
-
-### 사용 예시
-
-```
-masc_perpetual_start(goal: "Monitor CI failures", models: ["glm:glm-4.7", "claude:opus"])
-masc_perpetual_status()
-masc_perpetual_inject(message: "Also check deployment logs")
-masc_perpetual_stop(reason: "Task complete")
-```
-
-Model spec 포맷은 `provider:model_id` (예: `glm:glm-4.7`, `claude:opus`).
-CLI 옵션은 `perpetual_cli.exe --help` 참조.
+Perpetual agent system was removed. Use OAS Agent.run for autonomous agent loops.
+Context management (`context_manager.ml`) and compaction are retained for keeper agents.

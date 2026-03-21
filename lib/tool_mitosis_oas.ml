@@ -5,7 +5,7 @@
 
     Key changes from legacy:
     - Divide/Handoff use [Oas_worker.run_with_masc_tools] to spawn real agents
-    - DNA extraction reuses [Succession_oas]
+    - DNA extraction reuses [Mitosis]
     - Child agents receive MASC tools via dispatch adapter
 
     MASC L3 state ([Mcp_server.current_cell], [stem_pool]) is preserved.

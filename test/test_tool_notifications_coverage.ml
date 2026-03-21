@@ -26,8 +26,27 @@ let make_registry_with_messages agent msgs =
   );
   registry
 
-let json_member key json =
-  Yojson.Safe.Util.member key (Yojson.Safe.from_string json)
+(** Extract JSON portion from tool response body.
+    Format: "summary text\n---\n{json}" — parse everything after "---\n". *)
+let extract_json body =
+  match String.split_on_char '-' body with
+  | _ ->
+    (* Find "---\n" separator and parse JSON after it *)
+    let sep = "\n---\n" in
+    let sep_len = String.length sep in
+    let body_len = String.length body in
+    let rec find_sep i =
+      if i > body_len - sep_len then
+        (* No separator found — try parsing the whole body as JSON (backward compat) *)
+        Yojson.Safe.from_string body
+      else if String.sub body i sep_len = sep then
+        Yojson.Safe.from_string (String.sub body (i + sep_len) (body_len - i - sep_len))
+      else find_sep (i + 1)
+    in
+    find_sep 0
+
+let json_member key body =
+  Yojson.Safe.Util.member key (extract_json body)
 
 let json_to_int json = Yojson.Safe.Util.to_int json
 (* ============================================================
@@ -117,7 +136,7 @@ let test_check_empty () =
   ignore (Session.register registry ~agent_name:"test");
   let (ok, body) = Tool_notifications.handle_check_notifications registry ~agent_name:"test" (`Assoc []) in
   Alcotest.(check bool) "success" true ok;
-  let json = Yojson.Safe.from_string body in
+  let json = extract_json body in
   Alcotest.(check int) "count=0" 0
     (Yojson.Safe.Util.member "count" json |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "notifications empty" 0
@@ -128,7 +147,7 @@ let test_check_with_limit () =
   let registry = make_registry_with_messages "test" msgs in
   let (ok, body) = Tool_notifications.handle_check_notifications registry ~agent_name:"test" (`Assoc [("limit", `Int 3)]) in
   Alcotest.(check bool) "success" true ok;
-  let json = Yojson.Safe.from_string body in
+  let json = extract_json body in
   Alcotest.(check int) "returns 3" 3
     (Yojson.Safe.Util.member "count" json |> Yojson.Safe.Util.to_int)
 
@@ -138,7 +157,7 @@ let test_check_default_limit () =
   let registry = make_registry_with_messages "test" msgs in
   let (ok, body) = Tool_notifications.handle_check_notifications registry ~agent_name:"test" (`Assoc []) in
   Alcotest.(check bool) "success" true ok;
-  let json = Yojson.Safe.from_string body in
+  let json = extract_json body in
   Alcotest.(check int) "returns all 5" 5
     (Yojson.Safe.Util.member "count" json |> Yojson.Safe.Util.to_int)
 
@@ -148,7 +167,7 @@ let test_check_does_not_consume () =
   (* Check twice — queue should remain unchanged *)
   ignore (Tool_notifications.handle_check_notifications registry ~agent_name:"test" (`Assoc []));
   let (_, body) = Tool_notifications.handle_check_notifications registry ~agent_name:"test" (`Assoc []) in
-  let json = Yojson.Safe.from_string body in
+  let json = extract_json body in
   Alcotest.(check int) "still 2 after double check" 2
     (Yojson.Safe.Util.member "count" json |> Yojson.Safe.Util.to_int)
 
@@ -157,7 +176,7 @@ let test_check_negative_limit () =
   let registry = make_registry_with_messages "test" msgs in
   let (ok, body) = Tool_notifications.handle_check_notifications registry ~agent_name:"test" (`Assoc [("limit", `Int (-5))]) in
   Alcotest.(check bool) "success" true ok;
-  let json = Yojson.Safe.from_string body in
+  let json = extract_json body in
   Alcotest.(check int) "negative limit → 0 results" 0
     (Yojson.Safe.Util.member "count" json |> Yojson.Safe.Util.to_int)
 
@@ -170,7 +189,7 @@ let test_consume_empty () =
   ignore (Session.register registry ~agent_name:"test");
   let (ok, body) = Tool_notifications.handle_consume_notifications registry ~agent_name:"test" (`Assoc []) in
   Alcotest.(check bool) "success" true ok;
-  let json = Yojson.Safe.from_string body in
+  let json = extract_json body in
   Alcotest.(check int) "consumed=0" 0
     (Yojson.Safe.Util.member "consumed" json |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "remaining=0" 0
@@ -181,7 +200,7 @@ let test_consume_partial () =
   let registry = make_registry_with_messages "test" msgs in
   let (ok, body) = Tool_notifications.handle_consume_notifications registry ~agent_name:"test" (`Assoc [("limit", `Int 2)]) in
   Alcotest.(check bool) "success" true ok;
-  let json = Yojson.Safe.from_string body in
+  let json = extract_json body in
   Alcotest.(check int) "consumed=2" 2
     (Yojson.Safe.Util.member "consumed" json |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "remaining=2" 2
@@ -201,7 +220,7 @@ let test_consume_all () =
   let registry = make_registry_with_messages "test" msgs in
   let (ok, body) = Tool_notifications.handle_consume_notifications registry ~agent_name:"test" (`Assoc [("limit", `Int 100)]) in
   Alcotest.(check bool) "success" true ok;
-  let json = Yojson.Safe.from_string body in
+  let json = extract_json body in
   Alcotest.(check int) "consumed=2" 2
     (Yojson.Safe.Util.member "consumed" json |> Yojson.Safe.Util.to_int);
   Alcotest.(check int) "remaining=0" 0
@@ -211,7 +230,7 @@ let test_consume_unknown_agent () =
   let registry = Session.create () in
   let (ok, body) = Tool_notifications.handle_consume_notifications registry ~agent_name:"nobody" (`Assoc []) in
   Alcotest.(check bool) "success even for unknown" true ok;
-  let json = Yojson.Safe.from_string body in
+  let json = extract_json body in
   Alcotest.(check int) "consumed=0" 0
     (Yojson.Safe.Util.member "consumed" json |> Yojson.Safe.Util.to_int)
 

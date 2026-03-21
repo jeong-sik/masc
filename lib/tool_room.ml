@@ -61,7 +61,24 @@ let handle_reset ctx args =
 
 let handle_rooms_list ctx _args =
   let result = Room.rooms_list ctx.config in
-  (true, Yojson.Safe.pretty_to_string result)
+  let open Yojson.Safe.Util in
+  let rooms = result |> member "rooms" |> to_list in
+  let current = result |> member "current_room" |> to_string_option in
+  let count = List.length rooms in
+  let buf = Buffer.create 256 in
+  Buffer.add_string buf (Printf.sprintf "Rooms: %d found" count);
+  (match current with
+   | Some r -> Buffer.add_string buf (Printf.sprintf " (current: %s)" r)
+   | None -> ());
+  Buffer.add_char buf '\n';
+  List.iter (fun room ->
+    let name = room |> member "name" |> to_string_option |> Option.value ~default:"?" in
+    let id = room |> member "id" |> to_string_option |> Option.value ~default:"?" in
+    Buffer.add_string buf (Printf.sprintf "  - %s (id: %s)\n" name id)
+  ) rooms;
+  Buffer.add_string buf "\n---\n";
+  Buffer.add_string buf (Yojson.Safe.pretty_to_string result);
+  (true, Buffer.contents buf)
 
 let handle_room_create ctx args =
   let name = get_string args "name" "" in

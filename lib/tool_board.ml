@@ -143,6 +143,11 @@ let format_comment_tree ?(max_depth=5) (comments : Board.comment list) =
 
 let handle_post_create args =
   let title = get_string_opt args "title" in
+  (* Reject empty or whitespace-only titles *)
+  match title with
+  | Some t when String.trim t = "" ->
+      (false, "Title must not be empty or whitespace-only")
+  | _ ->
   let body = get_string_opt args "body" |> Option.map strip_state_blocks_text in
   let raw_content = match body with Some value -> value | None -> get_string args "content" "" in
   let content = strip_state_blocks_text raw_content in

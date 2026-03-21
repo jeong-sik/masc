@@ -46,14 +46,20 @@ let handle_start (ctx : context) : result option =
       in
       if not (Sys.file_exists expanded && Sys.is_directory expanded) then
         Error (Printf.sprintf "Directory not found: %s" expanded)
-      else
+      else begin
         let masc_dir = Filename.concat expanded ".masc" in
-        if not (Sys.file_exists masc_dir && Sys.is_directory masc_dir) then
-          Error (Printf.sprintf "No .masc/ directory in %s. Use masc_init first." expanded)
-        else begin
+        if not (Sys.file_exists masc_dir && Sys.is_directory masc_dir) then begin
+          (* Auto-create .masc/ and initialize room structure *)
+          (try Unix.mkdir masc_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+          let tmp_config = Room.default_config expanded in
+          let _msg = Room.init tmp_config ~agent_name:(Some agent_name) in
+          state.Mcp_server.room_config <- tmp_config;
+          Ok tmp_config
+        end else begin
           state.Mcp_server.room_config <- Room.default_config expanded;
           Ok state.Mcp_server.room_config
         end
+      end
     end
   in
   match room_result with

@@ -327,7 +327,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
   in
   Proactive_refresh.start ~sw ~clock
     ~config:{ (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0)
-              with timeout_s = 30.0 }
+              with timeout_s = 120.0 }
     ~compute
     ~on_result:(fun json -> _mission_json_ref := json)
 
@@ -395,7 +395,7 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
         Printf.sprintf "mission:%s" (Option.value ~default:"" actor)
       in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-        ~clock ~timeout_sec:30.0 (fun () ->
+        ~clock ~timeout_sec:120.0 (fun () ->
         Dashboard_mission.json ?actor
           ~config:state.Mcp_server.room_config ~sw ~clock
           ~proc_mgr:state.Mcp_server.proc_mgr ())
@@ -438,7 +438,7 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
       Printf.sprintf "mission_briefing:%s" (Option.value ~default:"" actor)
     in
     Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:5.0
-      ~clock ~timeout_sec:30.0 compute
+      ~clock ~timeout_sec:60.0 compute
 
 let dashboard_proof_http_json ~state request =
   let session_id = query_param request "session_id" in

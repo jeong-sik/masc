@@ -34,11 +34,6 @@ let run_worker_oas ~sw ~base_path ~worker_name
     match worker_auth_token ~base_path ~worker_name with
     | Error e -> Error e
     | Ok auth_token ->
-        let* net =
-          match Eio_context.get_net_opt () with
-          | Some net -> Ok net
-          | None -> Error "Eio net not initialized"
-        in
         let evidence_session_id =
           evidence_session_id_of_worker_run worker_run_id
         in
@@ -124,147 +119,48 @@ let run_worker_oas ~sw ~base_path ~worker_name
         let* () =
           save_worker_meta ~base_path ~team_session_id ~worker_name meta
         in
-        let heartbeat_cbs =
-          let interval = local_worker_heartbeat_interval_sec () in
-          if interval > 0 then
-            [ { Oas.Agent_types.interval_sec = float_of_int interval;
-                callback = (fun () ->
-                  match
-                    call_masc_tool ~sw ~auth_token ~session_id:mcp_session_id
-                      ~tool_name:"masc_heartbeat" ~args:(`Assoc [])
-                  with
-                  | Ok _ -> ()
-                  | Error e ->
-                      Log.LocalWorker.warn "heartbeat error for %s: %s"
-                        worker_name e) } ]
-          else []
+        let* mcp_tools =
+          build_oas_mcp_tools ~sw ~auth_token ~session_id:mcp_session_id
+            ~worker_name ~prompt ~allowed_tools
         in
-        Fun.protect
-          ~finally:(fun () ->
-            ignore
-              (leave_worker ~sw ~auth_token ~session_id:mcp_session_id
-                 ~worker_name))
-          (fun () ->
-          let _ =
-            match join_worker ~sw ~auth_token ~session_id:mcp_session_id
-                    ~worker_name with
-            | Ok _ -> ()
-            | Error e -> raise (Failure ("worker join failed: " ^ e))
-          in
-          let* mcp_tools =
-            build_oas_mcp_tools ~sw ~auth_token ~session_id:mcp_session_id
-              ~worker_name ~prompt ~allowed_tools
-          in
-          let mcp_tools =
-            List.map (Oas.Tool.with_defaults
-              [("agent_name", `String worker_name)]) mcp_tools
-          in
-          let* shell_tools =
-            build_local_shell_tools ~room_config ~worker_name ~execution_scope
-              ~workdir:workspace_path
-          in
-          let tools = mcp_tools @ shell_tools in
-          let* raw_trace =
-            match evidence_session_id with
-            | Some trace_session_id ->
-                Oas.Raw_trace.create_for_session
-                  ~session_root:(oas_trace_session_root ~base_path)
-                  ~session_id:trace_session_id ~agent_name:worker_name ()
-                |> Result.map_error Oas.Error.to_string
-            | None -> (
-                match team_session_id with
-                | Some trace_session_id ->
-                    Oas.Raw_trace.create_for_session
-                      ~session_root:(oas_trace_session_root ~base_path)
-                      ~session_id:trace_session_id ~agent_name:worker_name ()
-                    |> Result.map_error Oas.Error.to_string
-                | None ->
-                    Oas.Raw_trace.create ~session_id:mcp_session_id
-                      ~path:
-                        (worker_raw_trace_path ~base_path
-                           ~team_session_id
-                           ~worker_name)
-                      ()
-                    |> Result.map_error Oas.Error.to_string)
-          in
-          let tool_names_ref = ref [] in
-          let hooks =
-            {
-              Oas.Hooks.empty with
-              pre_tool_use =
-                Some
-                  (function
-                    | Oas.Hooks.PreToolUse { tool_name; _ } ->
-                        tool_names_ref := tool_name :: !tool_names_ref;
-                        Oas.Hooks.Continue
-                    | _ -> Oas.Hooks.Continue);
-            }
-          in
-          let gate_config =
-            Worker_oas.gate_config_of_execution_scope meta.execution_scope
-          in
-          let* agent =
-            Worker_oas.build_agent ~net ~meta ~model ~system_prompt ~tools
-              ~hooks ~raw_trace ~heartbeat_callbacks:heartbeat_cbs
-              ~gate_config ()
-          in
-          let result =
-            Oas.Agent.run ~sw agent prompt
-          in
-          let raw_trace_run = Oas.Agent.last_raw_trace_run agent in
-          let checkpoint =
-            Oas.Agent.checkpoint ~session_id:mcp_session_id agent
-          in
-          let tool_names =
-            List.rev !tool_names_ref |> unique_preserve_order
-          in
-          let* () =
-            save_worker_checkpoint ~base_path ~team_session_id ~worker_name
-              checkpoint
-          in
-          let* () =
-            save_worker_meta ~base_path ~team_session_id ~worker_name
-              { meta with last_run_at = Some (Time_compat.now ()) }
-          in
-          materialize_direct_evidence ~base_path ~worker_name ~worker_run_id
-            ~meta ~prompt ~workspace_path ~agent ~raw_trace;
-          Oas.Agent.close agent;
-          match result with
-          | Ok response ->
-              let output =
-                response.content
-                |> List.filter_map (function
-                     | Oas.Types.Text text -> Some text
-                     | _ -> None)
-                |> String.concat "\n"
-              in
-              let* () =
-                append_worker_completion_log ~base_path ~team_session_id
-                  ~worker_name ~prompt ~tool_names ~status:"ok" ~output ()
-              in
-              Ok
-                {
-                  output;
-                  model_used =
-                    (if String.trim response.model <> "" then response.model
-                     else model.model_id);
-                  input_tokens = Some checkpoint.usage.total_input_tokens;
-                  output_tokens = Some checkpoint.usage.total_output_tokens;
-                  cost_usd = Some checkpoint.usage.estimated_cost_usd;
-                  tool_call_count = List.length tool_names;
-                  tool_names;
-                  session_id = mcp_session_id;
-                  raw_trace_run;
-                  api_response = Some response;
-                }
-          | Error err ->
-              let detail = Agent_sdk__Error.to_string err in
-              let* () =
-                append_worker_completion_log ~base_path ~team_session_id
-                  ~worker_name ~prompt ~tool_names ~status:"error"
-                  ~output:detail ~error:detail ()
-              in
-              Error detail)
+        let mcp_tools =
+          List.map (Oas.Tool.with_defaults
+            [("agent_name", `String worker_name)]) mcp_tools
+        in
+        let* shell_tools =
+          build_local_shell_tools ~room_config ~worker_name ~execution_scope
+            ~workdir:workspace_path
+        in
+        let tools = mcp_tools @ shell_tools in
+        let* raw_trace =
+          match evidence_session_id with
+          | Some trace_session_id ->
+              Oas.Raw_trace.create_for_session
+                ~session_root:(oas_trace_session_root ~base_path)
+                ~session_id:trace_session_id ~agent_name:worker_name ()
+              |> Result.map_error Oas.Error.to_string
+          | None -> (
+              match team_session_id with
+              | Some trace_session_id ->
+                  Oas.Raw_trace.create_for_session
+                    ~session_root:(oas_trace_session_root ~base_path)
+                    ~session_id:trace_session_id ~agent_name:worker_name ()
+                  |> Result.map_error Oas.Error.to_string
+              | None ->
+                  Oas.Raw_trace.create ~session_id:mcp_session_id
+                    ~path:
+                      (worker_raw_trace_path ~base_path
+                         ~team_session_id
+                         ~worker_name)
+                    ()
+                  |> Result.map_error Oas.Error.to_string)
+        in
+        let gate_config =
+          Worker_oas.gate_config_of_execution_scope meta.execution_scope
+        in
+        Worker_oas.run_worker_via_oas ~sw ~base_path ~meta ~model
+          ~system_prompt ~prompt ~tools ~raw_trace ~gate_config
+          ?worker_run_id ()
 
 let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
     ~(team_session_id : string) ~(prompt : string) :

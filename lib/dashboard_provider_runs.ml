@@ -484,7 +484,7 @@ let run_system_prompt provider =
     "You are a single MASC dashboard run using provider %s. Answer directly, keep tool use disabled, and return only the final answer."
     provider
 
-let execute_single_agent_run ~sw ~provider ~model ~prompt =
+let execute_single_agent_run ~sw:_ ~provider ~model ~prompt =
   let label_result = provider_label_for_model provider model in
   match label_result with
   | Error _ as error -> error
@@ -498,30 +498,15 @@ let execute_single_agent_run ~sw ~provider ~model ~prompt =
                 (Printf.sprintf
                    "Provider '%s' is not runnable in dashboard single-agent mode"
                    provider)
-          | Some provider_cfg -> (
-              let net = Eio_context.get_net () in
-              let builder =
-                Oas.Builder.create ~net ~model:provider_cfg.model_id
-                |> Oas.Builder.with_name "dashboard-single-run"
-                |> Oas.Builder.with_description
-                     "Dashboard-triggered single-agent execution"
-                |> Oas.Builder.with_system_prompt (run_system_prompt provider)
-                |> Oas.Builder.with_max_turns 4
-                |> Oas.Builder.with_max_tokens 2048
-                |> Oas.Builder.with_temperature 0.2
-                |> Oas.Builder.with_provider provider_cfg
-              in
-              match Oas.Builder.build_safe builder with
-              | Error error -> Error (Oas.Error.to_string error)
-              | Ok agent ->
-                  Fun.protect
-                    ~finally:(fun () ->
-                      try Oas.Agent.close agent with close_exn ->
-                        Log.Misc.warn "agent close failed: %s" (Printexc.to_string close_exn))
-                    (fun () ->
-                      match Oas.Agent.run ~sw agent prompt with
-                      | Ok response -> Ok (response_text_of_api_response response)
-                      | Error error -> Error (Oas.Error.to_string error)) )))
+          | Some _provider_cfg -> (
+              match
+                Oas_worker.run_model ~model_spec:spec ~goal:prompt
+                  ~system_prompt:(run_system_prompt provider)
+                  ~max_turns:4 ~max_tokens:2048 ~temperature:0.2 ()
+              with
+              | Ok result ->
+                  Ok (response_text_of_api_response result.response)
+              | Error error -> Error error )))
 
 let start_run ~sw ~provider ~model_opt ~prompt =
   match resolve_provider_run_request ~provider ~model_opt ~prompt with

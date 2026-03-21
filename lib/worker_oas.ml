@@ -270,6 +270,7 @@ let run_worker_via_oas
     ~(prompt : string)
     ~(tools : Oas.Tool.t list)
     ~(raw_trace : Oas.Raw_trace.t)
+    ?(gate_config : Eval_gate.gate_config option)
     ?worker_run_id
     () : (Worker_container_types.run_result, string) result =
   let ( let* ) = Result.bind in
@@ -302,7 +303,7 @@ let run_worker_via_oas
   in
   let* agent =
     build_agent ~net ~meta ~model ~system_prompt ~tools ~hooks
-      ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ()
+      ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ?gate_config ()
   in
   let* () =
     Worker_container.save_worker_meta ~base_path

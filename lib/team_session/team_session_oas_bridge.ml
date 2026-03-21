@@ -10,6 +10,162 @@
 module Swarm = Agent_sdk_swarm
 module Oas = Agent_sdk
 
+let supported_local_worker_tool_names =
+  [
+    "masc_status";
+    "masc_tasks";
+    "masc_claim_next";
+    "masc_transition";
+    "masc_add_task";
+    "masc_heartbeat";
+    "masc_board_post";
+    "masc_board_list";
+    "masc_board_get";
+    "masc_board_comment";
+    "masc_board_vote";
+    "masc_board_search";
+    "masc_code_search";
+    "masc_code_symbols";
+    "masc_code_read";
+    "masc_worktree_create";
+    "masc_worktree_remove";
+    "masc_worktree_list";
+    "masc_run_init";
+    "masc_run_plan";
+    "masc_run_log";
+    "masc_run_deliverable";
+    "masc_run_get";
+    "masc_run_list";
+  ]
+
+let supported_local_worker_tools () =
+  match
+    Agent_tool_surfaces.local_worker_tool_schemas
+      ~names:supported_local_worker_tool_names ()
+  with
+  | Ok schemas -> schemas
+  | Error msg ->
+      failwith
+        (Printf.sprintf
+           "team_session_oas_bridge: failed to resolve worker tool schemas: %s"
+           msg)
+
+let add_string_field_if_missing key value fields =
+  if String.trim value = "" || List.mem_assoc key fields then fields
+  else (key, `String value) :: fields
+
+let normalize_tool_args ~tool_name ~(agent_name : string) (args : Yojson.Safe.t)
+    : Yojson.Safe.t =
+  match args with
+  | `Assoc fields ->
+      let fields = add_string_field_if_missing "agent_name" agent_name fields in
+      let fields =
+        match tool_name with
+        | "masc_board_post" | "masc_board_comment" ->
+            add_string_field_if_missing "author" agent_name fields
+        | "masc_board_vote" ->
+            add_string_field_if_missing "voter" agent_name fields
+        | _ -> fields
+      in
+      `Assoc fields
+  | _ -> args
+
+let string_field key (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`String value) when String.trim value <> "" -> Some value
+      | _ -> None)
+  | _ -> None
+
+let result_of_option ~tool_name = function
+  | Some result -> result
+  | None ->
+      ( false,
+        Printf.sprintf "team-session OAS runtime does not support tool '%s'"
+          tool_name )
+
+let tool_requires_presence = function
+  | "masc_claim_next"
+  | "masc_transition"
+  | "masc_heartbeat"
+  | "masc_worktree_create"
+  | "masc_worktree_remove" ->
+      true
+  | _ -> false
+
+let ensure_agent_joined ~(config : Room.config) ~(agent_name : string) =
+  try
+    if not (Room.is_initialized config) then ignore (Room.init config ~agent_name:None);
+    let joined =
+      try Room.is_agent_joined config ~agent_name
+      with Sys_error _ | Not_found | Yojson.Json_error _ -> false
+    in
+    if not joined then ignore (Room.join config ~agent_name ~capabilities:[] ());
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)
+
+let dispatch_supported_tool ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
+    ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
+  let agent_name =
+    match string_field "agent_name" args with
+    | Some agent_name -> agent_name
+    | None ->
+        (match string_field "author" args with
+         | Some author -> author
+         | None -> "team-session-worker")
+  in
+  let dispatch_impl () =
+    match name with
+    | "masc_status" ->
+        result_of_option ~tool_name:name
+          (Tool_room.dispatch { Tool_room.config = config; agent_name } ~name
+             ~args)
+    | "masc_tasks" | "masc_claim_next" | "masc_transition" | "masc_add_task"
+      ->
+        result_of_option ~tool_name:name
+          (Tool_task.dispatch { Tool_task.config = config; agent_name } ~name
+             ~args)
+    | "masc_code_search" | "masc_code_symbols" | "masc_code_read" ->
+        result_of_option ~tool_name:name
+          (Tool_code.dispatch { Tool_code.config = config; agent_name } ~name
+             ~args)
+    | "masc_worktree_create" | "masc_worktree_remove" | "masc_worktree_list"
+      ->
+        result_of_option ~tool_name:name
+          (Tool_worktree.dispatch
+             { Tool_worktree.config = config; agent_name }
+             ~name
+             ~args)
+    | "masc_run_init" | "masc_run_plan" | "masc_run_log"
+    | "masc_run_deliverable" | "masc_run_get" | "masc_run_list" ->
+        result_of_option ~tool_name:name
+          (Tool_run.dispatch { Tool_run.config = config } ~name ~args)
+    | "masc_heartbeat" ->
+        result_of_option ~tool_name:name
+          (Tool_heartbeat.dispatch
+             { Tool_heartbeat.config = config; agent_name; sw; clock }
+             ~name ~args)
+    | "masc_board_post" | "masc_board_list" | "masc_board_get"
+    | "masc_board_comment" | "masc_board_vote" | "masc_board_search" ->
+        Tool_board.handle_tool name args
+    | _ ->
+        ( false,
+          Printf.sprintf "team-session OAS runtime does not support tool '%s'"
+            name )
+  in
+  if tool_requires_presence name then
+    match ensure_agent_joined ~config ~agent_name with
+    | Ok () -> dispatch_impl ()
+    | Error msg ->
+        ( false,
+          Printf.sprintf "failed to prepare room presence for %s: %s" agent_name
+            msg )
+  else
+    dispatch_impl ()
+
 (* ── Role mapping ──────────────────────────────────────────────── *)
 
 let role_of_worker_class : Team_session_types.worker_class option -> Swarm.Swarm_types.agent_role =
@@ -75,10 +231,15 @@ let planned_worker_to_entry
       (match pw.spawn_role with Some r -> r | None -> "execute")
   in
   let run ~sw:_ prompt =
+    let dispatch_with_defaults ~name:(tool_name : string) ~(args : Yojson.Safe.t)
+      =
+      dispatch ~name:tool_name
+        ~args:(normalize_tool_args ~tool_name ~agent_name:name args)
+    in
     match
       Oas_worker.run_named_with_masc_tools
         ~cascade_name ~goal:prompt ~system_prompt
-        ~masc_tools ~dispatch ~max_turns
+        ~masc_tools ~dispatch:dispatch_with_defaults ~max_turns
         ~temperature:0.3 ~max_tokens:4096 ()
     with
     | Ok result -> Ok result.response
@@ -119,7 +280,7 @@ let session_to_swarm_config
     max_agent_retries = 1;
     collaboration = Some collaboration;
     resource_check = None;
-    max_concurrent_agents = None }
+    max_concurrent_agents = Some (max 1 (List.length entries)) }
 
 (* ── Inverse: swarm result -> session update ───────────────────── *)
 

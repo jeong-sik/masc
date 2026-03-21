@@ -668,6 +668,8 @@ let load_recent_episodes_jsonl ~limit : episode list =
   if total <= limit then all
   else
     let rec drop n = function
-      | [] -> [] | _ when n <= 0 -> all | _ :: rest -> drop (n-1) rest
+      | [] -> []
+      | remaining when n <= 0 -> remaining
+      | _ :: rest -> drop (n - 1) rest
     in
     drop (total - limit) all

@@ -193,9 +193,12 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
        Running and accepts manual steps via masc_team_session_step. *)
     if session.planned_workers <> [] then
       Eio.Fiber.fork ~sw (fun () ->
+        let masc_tools = Team_session_oas_bridge.supported_local_worker_tools () in
         let result =
           Team_session_swarm_runner.run_swarm ~sw ~clock ~config
-            ~session_id ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no dispatch"))
+            ~session_id ~masc_tools
+            ~dispatch:(Team_session_oas_bridge.dispatch_supported_tool
+              ~sw ~clock ~config)
         in
         match result with
         | Ok _session ->
@@ -677,10 +680,14 @@ let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
                     @ checkpoint_detail @ event_context));
               (* Phase C-2c: reconnect also uses swarm runner *)
               Eio.Fiber.fork ~sw (fun () ->
+                let masc_tools =
+                  Team_session_oas_bridge.supported_local_worker_tools ()
+                in
                 let result =
                   Team_session_swarm_runner.run_swarm ~sw ~clock ~config
-                    ~session_id:session.session_id ~masc_tools:[]
-                    ~dispatch:(fun ~name:_ ~args:_ -> (false, "no dispatch"))
+                    ~session_id:session.session_id ~masc_tools
+                    ~dispatch:(Team_session_oas_bridge.dispatch_supported_tool
+                      ~sw ~clock ~config)
                 in
                 match result with
                 | Ok _s ->

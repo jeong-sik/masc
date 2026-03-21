@@ -19,7 +19,7 @@ export function PulseStrip() {
   if (pulses.length === 0) {
     return html`
       <div class="pulse-strip">
-        <span class="pulse-strip-empty">No agents connected</span>
+        <span class="pulse-strip-empty">연결된 에이전트 없음</span>
       </div>
     `
   }

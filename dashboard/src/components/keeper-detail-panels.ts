@@ -216,7 +216,7 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
       <input
         class="keeper-field-search"
         type="text"
-        placeholder="Search fields..."
+        placeholder="필드 검색..."
         value=${fieldSearch.value}
         onInput=${(e: Event) => { fieldSearch.value = (e.target as HTMLInputElement).value }}
       />
@@ -295,7 +295,7 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
 }
 
 export function EquipmentList({ items }: { items: string[] }) {
-  if (items.length === 0) return html`<div class="empty-state" class="text-[13px]">No equipment</div>`
+  if (items.length === 0) return html`<div class="empty-state" class="text-[13px]">장비 없음</div>`
 
   return html`
     <div class="keeper-equipment-list">
@@ -311,7 +311,7 @@ export function EquipmentList({ items }: { items: string[] }) {
 
 export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   const entries = Object.entries(rels)
-  if (entries.length === 0) return html`<div class="empty-state" class="text-[13px]">No relationships</div>`
+  if (entries.length === 0) return html`<div class="empty-state" class="text-[13px]">관계 없음</div>`
 
   return html`
     <div class="keeper-k2k-list">

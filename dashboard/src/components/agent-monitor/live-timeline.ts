@@ -153,7 +153,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
 
       <div class="agent-live-stream" ref=${scrollRef}>
         ${filtered.length === 0
-          ? html`<div class="empty-state">No events matching filter</div>`
+          ? html`<div class="empty-state">필터에 맞는 이벤트 없음</div>`
           : filtered.map((entry: JournalEntry, idx: number) => html`
               <div class="agent-live-event" key=${idx}>
                 <span class="agent-event-badge ${eventKindBadgeClass(entry.eventType)}">

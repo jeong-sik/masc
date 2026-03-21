@@ -355,7 +355,7 @@ button.council-row.selected {
   gap: 8px;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1200px) {
 
   .governance-layout {
     grid-template-columns: 1fr;

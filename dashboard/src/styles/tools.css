@@ -213,7 +213,7 @@
 }
 
 /* --- Responsive --- */
-@media (max-width: 900px) {
+@media (max-width: 880px) {
   .tool-inventory-head {
     flex-direction: column;
   }
@@ -463,7 +463,7 @@
 }
 
 /* ── Responsive ─────────────────────────────────────────── */
-@media (max-width: 860px) {
+@media (max-width: 880px) {
   .tool-metrics-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

@@ -417,7 +417,7 @@
   flex: 1;
 }
 
-@media (max-width: 800px) {
+@media (max-width: 768px) {
   .ff-plate {
     grid-template-columns: 1fr;
     text-align: center;

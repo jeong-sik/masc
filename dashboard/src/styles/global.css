@@ -112,6 +112,15 @@
   --z-overlay-toast: 3070;
   --z-overlay-tooltip: 3080;
 
+  /* Breakpoint scale (used in @media max-width) */
+  /* 1450px: command warroom only */
+  /* 1200px: layout collapse (sidebar → stacked) */
+  /* 1100px: grid collapse (2-col → 1-col) */
+  /* 960px: compact cards */
+  /* 880px: mobile-first adaptations */
+  /* 768px: tablet/mobile */
+  /* 600px: small mobile */
+
   /* Spacing tokens */
   --space-xs: 4px;
   --space-sm: 8px;
@@ -559,7 +568,7 @@ a:hover {
   }
 }
 
-@media (max-width: 1250px) {
+@media (max-width: 1200px) {
 
   .dashboard-layout {
     grid-template-columns: 1fr;
@@ -581,7 +590,7 @@ a:hover {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 880px) {
 
   :root {
     --header-h: 86px;
@@ -596,7 +605,7 @@ a:hover {
 
 }
 
-@media (max-width: 700px) {
+@media (max-width: 768px) {
 
   .dashboard-rail {
     grid-template-columns: 1fr;

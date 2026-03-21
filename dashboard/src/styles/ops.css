@@ -586,7 +586,7 @@
   font-size: var(--fs-base);
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1200px) {
 
   .command-entry-strip,
   .ops-priority-grid {
@@ -599,7 +599,7 @@
 
 }
 
-@media (max-width: 860px) {
+@media (max-width: 880px) {
 
   .ops-header {
     flex-direction: column;

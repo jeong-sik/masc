@@ -244,8 +244,10 @@
    lamport
    trace
    mitosis
+   mitosis_continuity
    mitosis_defaults
    mitosis_dna
+   mitosis_handoff
    mitosis_metrics
    mode
    nickname

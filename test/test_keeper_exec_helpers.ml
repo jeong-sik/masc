@@ -274,13 +274,13 @@ let test_execute_keeper_tool_call_readonly_branches () =
   in
   let ctx_work =
     let ctx =
-      Masc_mcp.Context_manager.create ~system_prompt:"system" ~max_tokens:1024
+      Masc_mcp.Keeper_exec_context.create ~system_prompt:"system" ~max_tokens:1024
     in
     let ctx =
-      Masc_mcp.Context_manager.append ctx
+      Masc_mcp.Keeper_exec_context.append ctx
         (Agent_sdk.Types.user_msg "how is the weather today?")
     in
-    Masc_mcp.Context_manager.append ctx
+    Masc_mcp.Keeper_exec_context.append ctx
       (Agent_sdk.Types.user_msg "where are we meeting?")
   in
   let config = Masc_mcp.Room.default_config (Filename.get_temp_dir_name ()) in
@@ -373,13 +373,13 @@ let test_keeper_execution_compaction_helpers () =
   check (triple (float 0.0001) int int) "policy tuple" (0.1, 2, 10)
     (Keeper_execution.compaction_policy_of_keeper meta);
   let ctx =
-    let ctx = Masc_mcp.Context_manager.create ~system_prompt:"system" ~max_tokens:40 in
+    let ctx = Masc_mcp.Keeper_exec_context.create ~system_prompt:"system" ~max_tokens:40 in
     let ctx =
-      Masc_mcp.Context_manager.append ctx
+      Masc_mcp.Keeper_exec_context.append ctx
         (Agent_sdk.Types.user_msg
            "This is a deliberately long message that pushes the context ratio upward.")
     in
-    Masc_mcp.Context_manager.append ctx
+    Masc_mcp.Keeper_exec_context.append ctx
       (Agent_sdk.Types.assistant_msg
          "This is another verbose response that keeps the working set large.")
   in

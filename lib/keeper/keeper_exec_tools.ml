@@ -101,7 +101,7 @@ let lines_to_json ?(limit = max_int) (text : string) : Yojson.Safe.t =
 let execute_keeper_tool_call
     ~(config : Room.config)
     ~(meta : keeper_meta)
-    ~(ctx_work : Context_manager.working_context)
+    ~(ctx_work : Keeper_working_context.working_context)
     ~(name : string) ~(input : Yojson.Safe.t) : string =
   let args = input in
   let now_ts = Time_compat.now () in
@@ -125,7 +125,7 @@ let execute_keeper_tool_call
             ("name", `String meta.name);
             ("trace_id", `String meta.trace_id);
             ("generation", `Int meta.generation);
-            ("context_ratio", `Float (Context_manager.context_ratio ctx_work));
+            ("context_ratio", `Float (Keeper_working_context.context_ratio ctx_work));
             ("context_tokens", `Int ctx_work.token_count);
             ("context_max", `Int ctx_work.max_tokens);
             ("message_count", `Int (List.length ctx_work.messages));

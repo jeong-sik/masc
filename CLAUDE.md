@@ -198,4 +198,6 @@ MASC_POSTGRES_URL="..." dune exec _build/default/test/test_board_pg.exe
 ## Perpetual Agent Runtime (Removed)
 
 Perpetual agent system was removed. Use OAS Agent.run for autonomous agent loops.
-Context management (`context_manager.ml`) and compaction are retained for keeper agents.
+Context management types and operations live in `lib/keeper/keeper_working_context.ml`
+(pure types) and `lib/keeper/keeper_exec_context.ml` (keeper-specific lifecycle).
+Compaction delegates to OAS Context_reducer via `lib/context_compact_oas.ml`.

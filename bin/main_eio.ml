@@ -44,7 +44,6 @@ module Http_negotiation = Masc_mcp.Mcp_protocol.Http_negotiation
 module Progress = Masc_mcp.Progress
 module Sse = Masc_mcp.Sse
 module Safe_ops = Masc_mcp.Safe_ops
-module Context_manager = Masc_mcp.Context_manager
 module Tool_mdal = Masc_mcp.Tool_mdal
 module Tool_board = Masc_mcp.Tool_board
 module Process_eio = Masc_mcp.Process_eio

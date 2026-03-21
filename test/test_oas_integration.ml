@@ -91,10 +91,10 @@ let test_restore_messages () =
 (* ================================================================ *)
 
 let test_oas_context_sync () =
-  let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:1000 in
-  let ctx = Context_manager.append ctx
+  let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:1000 in
+  let ctx = Keeper_exec_context.append ctx
     (Agent_sdk.Types.user_msg "hello") in
-  let ctx = Context_manager.sync_oas_context ctx in
+  let ctx = Keeper_exec_context.sync_oas_context ctx in
   let msg_count =
     Context.get_scoped ctx.oas_context Context.Session "message_count" in
   (match msg_count with
@@ -102,14 +102,14 @@ let test_oas_context_sync () =
    | _ -> Alcotest.fail "expected message_count in oas_context")
 
 let test_compact_syncs_oas_context () =
-  let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:1000 in
-  let ctx = Context_manager.append ctx (Agent_sdk.Types.user_msg "msg1") in
-  let ctx = Context_manager.append ctx (Agent_sdk.Types.assistant_msg "msg2") in
+  let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:1000 in
+  let ctx = Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "msg1") in
+  let ctx = Keeper_exec_context.append ctx (Agent_sdk.Types.assistant_msg "msg2") in
   let messages, token_count =
     Context_compact_oas.compact
       ~system_prompt:ctx.system_prompt ~messages:ctx.messages
       ~strategies:[Context_compact_oas.MergeContiguous] in
-  let ctx = Context_manager.sync_oas_context
+  let ctx = Keeper_exec_context.sync_oas_context
     { ctx with messages; token_count; importance_scores = [] } in
   let ratio =
     Context.get_scoped ctx.oas_context Context.Session "context_ratio" in

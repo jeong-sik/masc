@@ -129,7 +129,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                      in
                      let auto_rules =
                        evaluate_keeper_auto_rules ~meta:meta_current
-                         ~context_ratio:(Context_manager.context_ratio c)
+                         ~context_ratio:(Keeper_exec_context.context_ratio c)
                          ~message_count:(List.length c.messages)
                          ~token_count:c.token_count ~repetition_risk
                          ~goal_alignment ~response_alignment
@@ -155,7 +155,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                            ("latency_ms", `Int 0);
                            ("cost_usd", `Float 0.0);
                            ( "context_ratio",
-                             `Float (Context_manager.context_ratio c) );
+                             `Float (Keeper_exec_context.context_ratio c) );
                            ("context_tokens", `Int c.token_count);
                            ("context_max", `Int c.max_tokens);
                            ("message_count", `Int (List.length c.messages));
@@ -202,7 +202,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                               ("name", `String meta_current.name);
                               ("generation", `Int meta_current.generation);
                               ( "context_ratio",
-                                `Float (Context_manager.context_ratio c) );
+                                `Float (Keeper_exec_context.context_ratio c) );
                               ("ts_unix", `Float now_ts);
                             ])
                       with
@@ -216,7 +216,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                           Oas_events.publish_keeper_snapshot bus
                             ~keeper_name:meta_current.name
                             ~generation:meta_current.generation
-                            ~context_ratio:(Context_manager.context_ratio c)
+                            ~context_ratio:(Keeper_exec_context.context_ratio c)
                             ~message_count:(List.length c.messages)
                       | None -> ()))
                with

@@ -1,4 +1,4 @@
-(** Tests for OAS adapter modules: Context_manager.compact (which routes
+(** Tests for OAS adapter modules: Keeper_exec_context.compact (which routes
     through Context_compact_oas), message roundtrip, and compaction strategies.
 
     Note: Context_compact_oas is an internal module not directly accessible
@@ -71,16 +71,16 @@ let test_roundtrip_tool_msg () =
 (* ================================================================ *)
 (* Compaction tests (via Context_compact_oas directly) *)
 
-let compact_ctx (ctx : Context_manager.working_context) strategies =
+let compact_ctx (ctx : Keeper_exec_context.working_context) strategies =
   let messages, token_count =
     Context_compact_oas.compact
       ~system_prompt:ctx.system_prompt ~messages:ctx.messages ~strategies in
-  { ctx with Context_manager.messages; token_count; importance_scores = [] }
+  { ctx with Keeper_exec_context.messages; token_count; importance_scores = [] }
 (* ================================================================ *)
 
 let test_compact_prune_tool_outputs () =
-  let ctx = Context_manager.create ~system_prompt:"test system" ~max_tokens:4000 in
-  let ctx = List.fold_left Context_manager.append ctx (make_test_messages ()) in
+  let ctx = Keeper_exec_context.create ~system_prompt:"test system" ~max_tokens:4000 in
+  let ctx = List.fold_left Keeper_exec_context.append ctx (make_test_messages ()) in
   let compacted = compact_ctx ctx [Context_compact_oas.PruneToolOutputs] in
   (* PruneToolOutputs on short tool output should not drop messages *)
   Alcotest.(check bool) "messages preserved"
@@ -92,13 +92,13 @@ let test_compact_prune_tool_outputs () =
     (List.length (make_test_messages ())) (List.length compacted.messages)
 
 let test_compact_merge_contiguous () =
-  let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:4000 in
+  let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000 in
   let msgs = [
     Agent_sdk.Types.user_msg "part 1";
     Agent_sdk.Types.user_msg "part 2";
     Agent_sdk.Types.assistant_msg "response";
   ] in
-  let ctx = List.fold_left Context_manager.append ctx msgs in
+  let ctx = List.fold_left Keeper_exec_context.append ctx msgs in
   let compacted = compact_ctx ctx [Context_compact_oas.MergeContiguous] in
   (* MergeContiguous should merge the two consecutive user messages *)
   Alcotest.(check bool) "merged reduces count"
@@ -106,14 +106,14 @@ let test_compact_merge_contiguous () =
 
 let test_compact_summarize_old () =
   (* Create enough messages to trigger keep-first-and-last behavior *)
-  let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:8000 in
+  let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:8000 in
   let msgs = List.init 12 (fun i ->
     if i mod 2 = 0 then
       Agent_sdk.Types.user_msg (Printf.sprintf "user message %d with content" i)
     else
       Agent_sdk.Types.assistant_msg (Printf.sprintf "assistant response %d" i)
   ) in
-  let ctx = List.fold_left Context_manager.append ctx msgs in
+  let ctx = List.fold_left Keeper_exec_context.append ctx msgs in
   let compacted = compact_ctx ctx [Context_compact_oas.SummarizeOld] in
   (* SummarizeOld with keep-first-and-last should reduce message count *)
   Alcotest.(check bool) "summarize_old reduces messages"
@@ -122,12 +122,12 @@ let test_compact_summarize_old () =
     true (compacted.token_count > 0)
 
 let test_compact_small_list_unchanged () =
-  let ctx = Context_manager.create ~system_prompt:"test" ~max_tokens:4000 in
+  let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000 in
   let msgs = [
     Agent_sdk.Types.user_msg "hello";
     Agent_sdk.Types.assistant_msg "world";
   ] in
-  let ctx = List.fold_left Context_manager.append ctx msgs in
+  let ctx = List.fold_left Keeper_exec_context.append ctx msgs in
   let compacted = compact_ctx ctx [Context_compact_oas.SummarizeOld] in
   (* Small list (< first_n + last_n = 7) should be unchanged *)
   Alcotest.(check int) "small list unchanged"

@@ -96,15 +96,15 @@ let string_of_role = function
   | Agent_sdk.Types.Tool -> "tool"
 
 let strategies_of_string = function
-  | "prune_tool_outputs" -> Ok [Context_manager.PruneToolOutputs]
-  | "merge_contiguous" -> Ok [Context_manager.MergeContiguous]
-  | "drop_low_importance" -> Ok [Context_manager.DropLowImportance]
-  | "summarize_old" -> Ok [Context_manager.SummarizeOld]
+  | "prune_tool_outputs" -> Ok [Context_compact_oas.PruneToolOutputs]
+  | "merge_contiguous" -> Ok [Context_compact_oas.MergeContiguous]
+  | "drop_low_importance" -> Ok [Context_compact_oas.DropLowImportance]
+  | "summarize_old" -> Ok [Context_compact_oas.SummarizeOld]
   | "all" -> Ok [
-      Context_manager.PruneToolOutputs;
-      Context_manager.MergeContiguous;
-      Context_manager.DropLowImportance;
-      Context_manager.SummarizeOld;
+      Context_compact_oas.PruneToolOutputs;
+      Context_compact_oas.MergeContiguous;
+      Context_compact_oas.DropLowImportance;
+      Context_compact_oas.SummarizeOld;
     ]
   | s -> Error (Printf.sprintf "Unknown strategy: %s. Valid: prune_tool_outputs, merge_contiguous, drop_low_importance, summarize_old, all" s)
 
@@ -147,8 +147,8 @@ let handle_compact args : result =
     in
     let messages = List.map parse_message messages_json in
     (* Build a working_context from the input *)
-    let ctx = Context_manager.create ~system_prompt ~max_tokens in
-    let ctx = Context_manager.append_many ctx messages in
+    let ctx = Keeper_exec_context.create ~system_prompt ~max_tokens in
+    let ctx = Keeper_exec_context.append_many ctx messages in
     let tokens_before = ctx.token_count in
     let msg_count_before = List.length ctx.messages in
     (* Apply compaction *)
@@ -168,7 +168,7 @@ let handle_compact args : result =
       ("tokens_saved", `Int (tokens_before - tokens_after));
       ("messages_before", `Int msg_count_before);
       ("messages_after", `Int msg_count_after);
-      ("context_ratio", `Float (Context_manager.context_ratio compacted));
+      ("context_ratio", `Float (Keeper_exec_context.context_ratio compacted));
       ("strategy", `String strategy_str);
       ("messages", `List (List.map message_to_json compacted.messages));
     ] in

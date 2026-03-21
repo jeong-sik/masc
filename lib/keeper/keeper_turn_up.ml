@@ -376,7 +376,7 @@ let handle_keeper_up ctx args : tool_result =
            in
              let base_dir = session_base_dir ctx.config in
              mkdir_p base_dir;
-             let session = Context_manager.create_session ~session_id:trace_id ~base_dir in
+             let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
                let system_prompt =
                  build_keeper_system_prompt
                    ~goal
@@ -389,7 +389,7 @@ let handle_keeper_up ctx args : tool_result =
                    ~desires
                    ~instructions
              in
-             let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
+             let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary.max_context in
              (try ignore (save_checkpoint session ctx0 ~generation:0)
               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn ~label:"save_checkpoint (init) failed" exn);
              let meta = {

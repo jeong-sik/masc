@@ -1,0 +1,170 @@
+import { html } from 'htm/preact'
+import type {
+  CommandPlaneChainOverlay,
+  CommandPlaneSwarmLane,
+  CommandPlaneSwarmResponse,
+  OperatorGuidanceSummary,
+  OperatorResidentJudgeRuntime,
+  OperatorSessionSnapshot,
+} from '../../types'
+import { navigate } from '../../router'
+import { setCommandPlaneSurface } from '../../command-store'
+import {
+  displayStatus,
+  relativeTime,
+  surfaceRouteParams,
+  toneClass,
+} from './helpers'
+import {
+  guidanceFreshnessLabel,
+  guidanceLayerLabel,
+  guidanceLayerTone,
+  runtimeJudgeLabel,
+} from '../ops/helpers'
+import { WarRoomJumpButton } from './war-room-metrics'
+
+type WarRoomHeroProps = {
+  wallboard: boolean
+  stickyTone: 'ok' | 'warn' | 'bad'
+  heroTitle: string
+  heroSummary: string
+  swarmHasEvidence: boolean
+  swarm?: CommandPlaneSwarmResponse | null
+  selectedSession: OperatorSessionSnapshot | null
+  activeLane: CommandPlaneSwarmLane | null
+  activeSummary?: OperatorGuidanceSummary | null
+  guidanceLayer: string
+  fullscreenActive: boolean
+  workerJoined?: number | null
+  workerExpected?: number | null
+  workerCardCount: number
+  blockersCount: number
+  pendingApprovals: number
+  pendingConfirmTotal: number
+  pendingConfirmVisible: number
+  pendingConfirmHidden: number
+  residentRuntime?: OperatorResidentJudgeRuntime | null
+  latestSignal?: string | null
+  latestMessage?: string | null
+  latestTrace?: string | null
+  chainOverlay: CommandPlaneChainOverlay | null
+  onRefresh: () => void
+  onToggleFullscreen: () => void
+}
+
+function standardView() {
+  if (document.fullscreenElement) {
+    void document.exitFullscreen?.()
+  }
+  setCommandPlaneSurface('warroom')
+  navigate('operations', surfaceRouteParams('warroom'))
+}
+
+export function WarRoomHeroStrip({
+  wallboard,
+  stickyTone,
+  heroTitle,
+  heroSummary,
+  swarmHasEvidence,
+  swarm,
+  selectedSession,
+  activeLane,
+  activeSummary,
+  guidanceLayer,
+  fullscreenActive,
+  workerJoined,
+  workerExpected,
+  workerCardCount,
+  blockersCount,
+  pendingApprovals,
+  pendingConfirmTotal,
+  pendingConfirmVisible,
+  pendingConfirmHidden,
+  residentRuntime,
+  latestSignal,
+  latestMessage,
+  latestTrace,
+  chainOverlay,
+  onRefresh,
+  onToggleFullscreen,
+}: WarRoomHeroProps) {
+  return html`
+    <section class="command-warroom-strip ${toneClass(stickyTone)} ${wallboard ? 'wallboard' : ''}">
+      <div class="command-warroom-strip-head">
+        <div>
+          <span class="command-hero-kicker">${wallboard ? 'War Room Wallboard' : '실시간 워룸'}</span>
+          <strong>${heroTitle}</strong>
+          <div class="command-card-sub">
+            ${swarmHasEvidence ? (swarm?.operation?.operation_id ?? '작전 정보 없음') : '세션 기준값'}
+            ${selectedSession?.session_id ? ` · 세션 ${selectedSession.session_id}` : ''}
+            ${swarmHasEvidence && swarm?.detachment?.detachment_id ? ` · 분견대 ${swarm.detachment.detachment_id}` : ''}
+            ${activeLane ? ` · 대표 레인 ${activeLane.label}` : ''}
+          </div>
+          <div class="command-warroom-summary">${heroSummary}</div>
+          ${activeSummary?.summary
+            ? html`<div class="command-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
+                <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
+                <span>${activeSummary.summary}</span>
+              </div>`
+            : null}
+        </div>
+        <div class="command-warroom-hero-actions">
+          <button class="control-btn ghost" onClick=${onRefresh}>새로고침</button>
+          ${wallboard
+            ? html`
+                <button class="control-btn ghost" onClick=${onToggleFullscreen}>
+                  ${fullscreenActive ? '전체 화면 해제' : '전체 화면'}
+                </button>
+                <button class="control-btn ghost" onClick=${standardView}>
+                  표준 보기
+                </button>
+              `
+            : null}
+          <${WarRoomJumpButton}
+            label="스웜 상세"
+            surface="swarm"
+            params=${{
+              ...(swarmHasEvidence && swarm?.operation?.operation_id ? { operation_id: swarm.operation.operation_id } : {}),
+              ...(swarmHasEvidence && swarm?.run_id ? { run_id: swarm.run_id } : {}),
+            }}
+          />
+          ${chainOverlay
+            ? html`<${WarRoomJumpButton}
+                label="체인"
+                surface="chains"
+                params=${{ operation: chainOverlay.operation.operation_id }}
+              />`
+            : null}
+          <${WarRoomJumpButton} label="개입" />
+        </div>
+      </div>
+      <div class="command-warroom-strip-stats">
+        <div class="monitor-stat-card">
+          <span>워커</span>
+          <strong>${workerJoined ?? 0}/${workerExpected ?? 0}</strong>
+          <small>${swarmHasEvidence ? (swarm?.summary?.completed_workers ?? 0) : 0} 완료 · ${workerCardCount} 카드</small>
+        </div>
+        <div class="monitor-stat-card">
+          <span>런타임</span>
+          <strong>${swarmHasEvidence ? (swarm?.provider?.runtime_blocker ? '막힘' : swarm?.provider?.provider_reachable ? '준비됨' : selectedSession ? displayStatus(selectedSession.status) : '확인 필요') : (selectedSession ? displayStatus(selectedSession.status) : '확인 필요')}</strong>
+          <small>${swarmHasEvidence ? `설정 ${swarm?.provider?.configured_capacity ?? 'n/a'} · 실제 ${swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0} · hot ${swarm?.summary?.peak_hot_slots ?? swarm?.provider?.peak_active_slots ?? 0}` : `세션 워커 ${workerCardCount}`}</small>
+        </div>
+        <div class="monitor-stat-card ${toneClass(blockersCount > 0 || pendingApprovals > 0 || pendingConfirmTotal > 0 ? 'warn' : 'ok')}">
+          <span>압력</span>
+          <strong>${blockersCount + pendingApprovals + pendingConfirmTotal}</strong>
+          <small>막힘 ${blockersCount} · 승인 ${pendingApprovals} · 확인 ${pendingConfirmVisible}${pendingConfirmHidden > 0 ? `/${pendingConfirmTotal}` : ''}</small>
+        </div>
+        <div class="monitor-stat-card ${toneClass(guidanceLayerTone(guidanceLayer))}">
+          <span>상주 판정기</span>
+          <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
+          <small>${guidanceFreshnessLabel(activeSummary)}${residentRuntime?.model_used ? ` · ${residentRuntime.model_used}` : ''}</small>
+        </div>
+        <div class="monitor-stat-card">
+          <span>마지막 신호</span>
+          <strong>${relativeTime(latestSignal)}</strong>
+          <small>${latestMessage ? '메시지' : latestTrace ? '트레이스' : '대기 중'}</small>
+        </div>
+      </div>
+    </section>
+  `
+}

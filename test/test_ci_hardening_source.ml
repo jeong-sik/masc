@@ -125,7 +125,19 @@ let test_dashboard_component_split_contracts () =
        "export function SwarmOverviewPanel");
   check bool "swarm live panels exported from split file" true
     (file_contains_pattern "dashboard/src/components/command/swarm-live-panels.ts"
-       "export function SwarmLivePanels")
+       "export function SwarmLivePanels");
+  check bool "war room surface imports hero strip" true
+    (file_contains_pattern "dashboard/src/components/command/war-room.ts"
+       "import { WarRoomHeroStrip } from './war-room-hero'");
+  check bool "war room surface imports body grid" true
+    (file_contains_pattern "dashboard/src/components/command/war-room.ts"
+       "import { WarRoomBodyGrid } from './war-room-body'");
+  check bool "war room hero exported from split file" true
+    (file_contains_pattern "dashboard/src/components/command/war-room-hero.ts"
+       "export function WarRoomHeroStrip");
+  check bool "war room body exported from split file" true
+    (file_contains_pattern "dashboard/src/components/command/war-room-body.ts"
+       "export function WarRoomBodyGrid")
 
 let () =
   run "ci_hardening_source"

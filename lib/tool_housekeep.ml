@@ -3,7 +3,6 @@
     Gives keepers the ability to observe and maintain their own world (.masc/).
     The keeper decides what to clean; these tools provide the means. *)
 
-open Keeper_types
 
 let masc_dir config = Room_utils.masc_dir config
 
@@ -68,7 +67,7 @@ let entry_to_json e =
     ("category", `String e.category);
   ]
 
-let handle_housekeep_scan ctx args =
+let handle_housekeep_scan config args =
   let category_filter =
     match Yojson.Safe.Util.member "category" args with
     | `String s when s <> "" -> Some s
@@ -80,7 +79,7 @@ let handle_housekeep_scan ctx args =
     | `Float f -> f
     | _ -> 0.0
   in
-  let base = masc_dir ctx.config in
+  let base = masc_dir config in
   let entries = scan_dir_recursive base in
   let filtered = entries
     |> List.filter (fun e ->
@@ -108,7 +107,7 @@ let log_deletion config ~path ~reason =
   let log_path = housekeep_log_path config in
   Fs_compat.append_file log_path line
 
-let handle_housekeep_delete ctx args =
+let handle_housekeep_delete config args =
   let path =
     match Yojson.Safe.Util.member "path" args with
     | `String s -> s
@@ -122,7 +121,7 @@ let handle_housekeep_delete ctx args =
   if path = "" then
     (false, "path is required")
   else
-    let base = masc_dir ctx.config in
+    let base = masc_dir config in
     (* Safety: only allow deletion under .masc/ *)
     if not (String.length path > String.length base
             && String.sub path 0 (String.length base) = base) then
@@ -138,7 +137,7 @@ let handle_housekeep_delete ctx args =
         | None -> 0
       in
       (try Sys.remove path with Sys_error _ -> ());
-      log_deletion ctx.config ~path ~reason;
+      log_deletion config ~path ~reason;
       let json = `Assoc [
         ("deleted", `String path);
         ("size_bytes", `Int size);
@@ -149,7 +148,7 @@ let handle_housekeep_delete ctx args =
 
 (* ── Prune ────────────────────────────────────────────── *)
 
-let handle_housekeep_prune ctx args =
+let handle_housekeep_prune config args =
   let store_name =
     match Yojson.Safe.Util.member "store" args with
     | `String s -> s
@@ -163,7 +162,7 @@ let handle_housekeep_prune ctx args =
   if store_name = "" then
     (false, "store is required (audit, telemetry, or keeper:<name>)")
   else
-    let base = masc_dir ctx.config in
+    let base = masc_dir config in
     let store_dir =
       if store_name = "audit" then Filename.concat base "audit"
       else if store_name = "telemetry" then Filename.concat base "telemetry"
@@ -180,7 +179,7 @@ let handle_housekeep_prune ctx args =
     else begin
       let store = Dated_jsonl.create ~base_dir:store_dir () in
       let deleted = Dated_jsonl.prune store ~days in
-      log_deletion ctx.config
+      log_deletion config
         ~path:store_dir
         ~reason:(Printf.sprintf "prune days=%d deleted=%d" days deleted);
       let json = `Assoc [
@@ -194,9 +193,9 @@ let handle_housekeep_prune ctx args =
 
 (* ── Dispatch ─────────────────────────────────────────── *)
 
-let dispatch ctx ~name ~args : (bool * string) option =
+let dispatch config ~name ~args : (bool * string) option =
   match name with
-  | "masc_housekeep_scan" -> Some (handle_housekeep_scan ctx args)
-  | "masc_housekeep_delete" -> Some (handle_housekeep_delete ctx args)
-  | "masc_housekeep_prune" -> Some (handle_housekeep_prune ctx args)
+  | "masc_housekeep_scan" -> Some (handle_housekeep_scan config args)
+  | "masc_housekeep_delete" -> Some (handle_housekeep_delete config args)
+  | "masc_housekeep_prune" -> Some (handle_housekeep_prune config args)
   | _ -> None

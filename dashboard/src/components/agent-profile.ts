@@ -39,6 +39,7 @@ import type {
 } from '../types'
 import { AgentRuntimeStrip } from './agent-monitor/runtime-strip'
 import { AgentLiveTimeline } from './agent-monitor/live-timeline'
+import { AutonomyMeter } from './keeper-detail-panels'
 
 const AGENT_NAME_KEY = 'masc_dashboard_agent_name'
 
@@ -182,7 +183,8 @@ function CharacterPlate({ name }: { name: string }) {
 
   const displayName = brief?.display_name ?? keeper?.name ?? name
   const koreanName = agent?.koreanName ?? keeper?.koreanName
-  const headerStatus = agent?.status ?? brief?.status ?? 'unknown'
+  // Keeper heartbeat status takes priority over agent store status
+  const headerStatus = keeper?.status ?? agent?.status ?? brief?.status ?? 'unknown'
   const agentEmoji = agent?.emoji ?? keeper?.emoji
   const currentWork = brief?.current_work ?? agent?.current_task ?? null
   const lastSeenAt = agent?.last_seen ?? brief?.last_activity_at ?? null
@@ -272,7 +274,26 @@ function CharacterPlate({ name }: { name: string }) {
         ` : null}
       </div>
 
-      ${summary ? html`
+      ${isKeeper ? html`
+        <div class="ff-plate__stats ff-plate__stats--keeper">
+          <div class="ff-stat">
+            <span class="ff-stat__value">${ctxPct != null ? `${ctxPct}%` : '—'}</span>
+            <span class="ff-stat__label">CTX</span>
+          </div>
+          <div class="ff-stat">
+            <span class="ff-stat__value">${generation ?? 0}</span>
+            <span class="ff-stat__label">세대</span>
+          </div>
+          <div class="ff-stat">
+            <span class="ff-stat__value">${keeper.turn_count ?? 0}</span>
+            <span class="ff-stat__label">턴</span>
+          </div>
+          <div class="ff-stat">
+            <span class="ff-stat__value">${keeper.autonomous_action_count ?? 0}</span>
+            <span class="ff-stat__label">행동</span>
+          </div>
+        </div>
+      ` : summary ? html`
         <div class="ff-plate__stats">
           <div class="ff-stat">
             <span class="ff-stat__value">${summary.tasks_completed}</span>
@@ -306,9 +327,11 @@ export function AgentProfile({ name }: { name: string }) {
   const owned = assignedTasks(name)
   const lines = roomActivity.value
   const timeline = agentTimeline.value
+  const keeper = findKeeper(name)
+  const isKeeper = keeper != null
 
   return html`
-    <div class="ff-profile">
+    <div class="ff-profile ${isKeeper ? 'ff-profile--keeper' : ''}">
       <div class="ff-profile__toolbar">
         <button class="control-btn ghost" onClick=${() => navigate('status', { section: 'agents' })}>← 목록</button>
         <button class="control-btn ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
@@ -322,7 +345,14 @@ export function AgentProfile({ name }: { name: string }) {
 
       <${AgentRuntimeStrip} name=${name} />
 
+      ${isKeeper && keeper ? html`
+        <div class="ff-profile__keeper-panels">
+          <${AutonomyMeter} keeper=${keeper} />
+        </div>
+      ` : null}
+
       <div class="ff-profile__grid">
+        ${!isKeeper ? html`
         <${Card} title="태스크 (${owned.length})" class="ff-card">
           ${owned.length === 0
             ? html`<div class="empty-state">할당된 태스크 없음</div>`
@@ -334,6 +364,7 @@ export function AgentProfile({ name }: { name: string }) {
                 </div>
               `)}</div>`}
         <//>
+        ` : null}
 
         ${(() => {
           const rel = agentRelations.value

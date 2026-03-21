@@ -30,7 +30,8 @@
   overflow-y: auto;
 }
 
-.agent-journal-entry {
+.agent-journal-entry,
+.agent-timeline-event {
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -40,7 +41,8 @@
   transition: background 0.1s;
 }
 
-.agent-journal-entry:hover {
+.agent-journal-entry:hover,
+.agent-timeline-event:hover {
   background: var(--white-4);
 }
 
@@ -66,8 +68,9 @@
   flex-shrink: 0;
 }
 
-.agent-journal-text {
-  color: var(--text-body, #b0bec5);
+.agent-journal-text,
+.agent-timeline-detail {
+  color: var(--text-body);
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
@@ -97,7 +100,7 @@
 }
 
 .agent-worker-brief__preview {
-  color: var(--text-body, #b0bec5);
+  color: var(--text-body);
   font-style: italic;
   white-space: nowrap;
   overflow: hidden;
@@ -121,35 +124,13 @@
   overflow-y: auto;
 }
 
-.agent-timeline-event {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 4px 8px;
-  font-size: var(--fs-sm);
-  border-radius: 4px;
-  transition: background 0.1s;
-}
-
-.agent-timeline-event:hover {
-  background: var(--white-4);
-}
 
 .agent-timeline-type {
   font-size: var(--fs-xs);
   font-weight: 500;
-  color: var(--text-strong, #e8ecf1);
+  color: var(--text-strong);
   flex-shrink: 0;
   min-width: 80px;
-}
-
-.agent-timeline-detail {
-  color: var(--text-body, #b0bec5);
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
 }
 
 /* ── Agents Unified Tab (chip toggle) ────────── */
@@ -174,12 +155,12 @@
   transition: all 0.15s;
 }
 .agents-chip:hover {
-  border-color: var(--accent, #60a5fa);
-  color: var(--text-strong, #e2e8f0);
+  border-color: var(--accent);
+  color: var(--text-strong);
 }
 .agents-chip--active {
-  background: var(--accent, #60a5fa);
-  border-color: var(--accent, #60a5fa);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 .agents-chip-count {

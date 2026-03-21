@@ -97,7 +97,7 @@
 }
 
 .badge--post { background: #1a3a2a; color: var(--ok); }
-.badge--comment { background: #1a2a3a; color: #60a5fa; }
+.badge--comment { background: #1a2a3a; color: var(--accent); }
 .badge--upvote { background: #3a3a1a; color: #facc15; }
 .badge--skip { background: #2a2a2a; color: var(--text-dim); }
 

@@ -173,7 +173,7 @@
   cursor: pointer;
   padding: 10px 14px;
   font-size: var(--fs-sm);
-  color: #8ca8d5;
+  color: var(--text-muted);
   letter-spacing: 0.03em;
   list-style: none;
   user-select: none;

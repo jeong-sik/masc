@@ -132,7 +132,7 @@
   background: var(--white-6);
 }
 
-.activity-filter-btn.live-event-broadcast.active { border-color: rgba(96,165,250,0.4); color: #60a5fa; }
+.activity-filter-btn.live-event-broadcast.active { border-color: rgba(96,165,250,0.4); color: var(--accent); }
 .activity-filter-btn.live-event-task.active { border-color: rgba(74,222,128,0.4); color: var(--ok); }
 .activity-filter-btn.live-event-keeper.active { border-color: rgba(168,85,247,0.4); color: #a855f7; }
 .activity-filter-btn.live-event-system.active { border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7); }
@@ -195,7 +195,7 @@
   letter-spacing: 0.03em;
 }
 
-.activity-kind-chip.live-event-broadcast { background: rgba(96,165,250,0.15); color: #60a5fa; }
+.activity-kind-chip.live-event-broadcast { background: rgba(96,165,250,0.15); color: var(--accent); }
 .activity-kind-chip.live-event-task { background: rgba(74,222,128,0.15); color: var(--ok); }
 .activity-kind-chip.live-event-keeper { background: rgba(168,85,247,0.15); color: #a855f7; }
 .activity-kind-chip.live-event-system { background: var(--white-6); color: rgba(255,255,255,0.5); }

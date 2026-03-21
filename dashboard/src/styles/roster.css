@@ -338,7 +338,7 @@
   letter-spacing: 0.04em;
 }
 .situation-reasons-collapse__summary:hover {
-  color: var(--text-strong, #e2e8f0);
+  color: var(--text-strong);
 }
 
 .situation-reasons {

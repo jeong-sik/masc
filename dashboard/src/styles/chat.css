@@ -14,7 +14,7 @@
 }
 
 .chat-empty-copy {
-  color: #8ca8d5;
+  color: var(--text-muted);
   font-size: var(--fs-sm);
   line-height: 1.6;
 }
@@ -208,7 +208,7 @@
 
 .chat-detail-section-title,
 .chat-detail-callout-label {
-  color: #8ca8d5;
+  color: var(--text-muted);
   font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;

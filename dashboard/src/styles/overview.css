@@ -197,8 +197,8 @@
   text-align: center;
 }
 .narrative-timeline__load-more:hover {
-  border-color: var(--accent, #60a5fa);
-  color: var(--accent, #60a5fa);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* ── Keeper Cards v2 ─────────────────────────── */
@@ -302,7 +302,7 @@
 
 .home-section-link {
   font-size: var(--fs-xs);
-  color: var(--accent, #60a5fa);
+  color: var(--accent);
   cursor: pointer;
   text-decoration: none;
 }
@@ -403,7 +403,7 @@
   transition: border-color 0.15s;
 }
 .hot-session-card:hover {
-  border-color: var(--accent, #60a5fa);
+  border-color: var(--accent);
 }
 .hot-session-card--critical {
   border-color: var(--bad);
@@ -412,7 +412,7 @@
 .hot-session-card__goal {
   font-size: var(--fs-base);
   font-weight: 600;
-  color: var(--text-strong, #e2e8f0);
+  color: var(--text-strong);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -496,7 +496,7 @@
   border-left: 2px solid var(--ok);
 }
 .agent-pulse-card--watching {
-  border-left: 2px solid var(--accent, #60a5fa);
+  border-left: 2px solid var(--accent);
 }
 .agent-pulse-card--quiet {
   border-left: 2px solid var(--text-muted, #64748b);
@@ -514,7 +514,7 @@
 .agent-pulse-card__name {
   font-size: var(--fs-sm);
   font-weight: 600;
-  color: var(--text-strong, #e2e8f0);
+  color: var(--text-strong);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

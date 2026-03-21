@@ -180,7 +180,7 @@
 /* ── Control Dock ─────────────────────────────────────────── */
 .control-label {
   font-size: var(--fs-xs);
-  color: #8ca8d5;
+  color: var(--text-muted);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -441,12 +441,12 @@
   transition: all 0.15s;
 }
 .tab-pill:hover {
-  border-color: var(--accent, #60a5fa);
-  color: var(--text-strong, #e2e8f0);
+  border-color: var(--accent);
+  color: var(--text-strong);
 }
 .tab-pill--active {
-  background: var(--accent, #60a5fa);
-  border-color: var(--accent, #60a5fa);
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 
@@ -463,6 +463,6 @@
   text-transform: uppercase;
 }
 .tab-collapsible__summary:hover {
-  color: var(--text-strong, #e2e8f0);
+  color: var(--text-strong);
 }
 

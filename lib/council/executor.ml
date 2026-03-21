@@ -179,11 +179,9 @@ let execute_config_change key value =
     (* Ensure directory exists *)
     ensure_dir config_dir;
     (* Write JSON config *)
-    let json = `Assoc [("key", `String key); ("value", `String value); 
+    let json = `Assoc [("key", `String key); ("value", `String value);
                        ("updated_at", `Float (Time_compat.now ()))] in
-    let oc = open_out config_file in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc (Yojson.Safe.pretty_to_string json));
+    Fs_compat.save_file config_file (Yojson.Safe.pretty_to_string json);
     let msg = Printf.sprintf "Config written: %s = %s → %s" key value config_file in
     { success = true;
       stdout = msg;
@@ -207,9 +205,7 @@ let execute_notification target message =
       ("message", `String message);
       ("timestamp", `Float (Time_compat.now ()))
     ] in
-    let oc = open_out_gen [Open_append; Open_creat] 0o644 notify_file in
-    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-      output_string oc (Yojson.Safe.to_string json ^ "\n"));
+    Fs_compat.append_file notify_file (Yojson.Safe.to_string json ^ "\n");
     (* Also log to stderr for visibility *)
     Log.Misc.info "[Council] %s: %s" target message;
     let msg = Printf.sprintf "Notified %s: %s" target message in

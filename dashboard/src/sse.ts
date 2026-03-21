@@ -369,7 +369,10 @@ function handleEvent(event: SSEEvent): void {
       break
     }
     case 'oas:masc:keeper:tick': {
-      oasLastKeeperTick.value = Date.now()
+      const now = Date.now()
+      if (oasLastKeeperTick.value === null || now - oasLastKeeperTick.value > 100) {
+        oasLastKeeperTick.value = now
+      }
       oasTotalEvents.value++
       break
     }

@@ -112,8 +112,11 @@ const KEEPER_LIFECYCLE_EVENTS = new Set([
 
 function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void {
   if (!event.name) return
+  const newTs = event.ts_unix ? event.ts_unix * 1000 : Date.now()
+  const existingTs = keeperHeartbeats.value.get(event.name)
+  if (existingTs === newTs) return
   const next = new Map(keeperHeartbeats.value)
-  next.set(event.name, event.ts_unix ? event.ts_unix * 1000 : Date.now())
+  next.set(event.name, newTs)
   keeperHeartbeats.value = next
 }
 

@@ -44,6 +44,7 @@ import {
 } from './keeper-store-normalize'
 import { buildAgentMotion, normalizeAgentKey, type AgentMotionSnapshot } from './components/common/agent-motion'
 import { groupByKey } from './components/common/collection'
+import { setArrayByKeyIfChanged } from './signal-utils'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import {
   normalizeAgent, normalizeTask, normalizeMessage,
@@ -129,6 +130,10 @@ export const oasLastKeeperTick = signal<number | null>(null)
 export const oasTotalEvents = signal(0)
 
 export function pushOasAgentEvent(event: OasAgentEvent): void {
+  const head = oasAgentEvents.value[0]
+  if (head && head.type === event.type && head.agent_name === event.agent_name && head.timestamp === event.timestamp) {
+    return
+  }
   oasAgentEvents.value = [event, ...oasAgentEvents.value].slice(0, OAS_AGENT_EVENT_BUFFER)
   oasTotalEvents.value++
 }
@@ -426,36 +431,44 @@ export async function refreshExecution(opts?: { force?: boolean }): Promise<void
       serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
     }
     const roomChanged = previousRoom != null && normalizedStatus?.room != null && previousRoom !== normalizedStatus.room
-    agents.value = (Array.isArray(data.agents) ? data.agents : [])
+    const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
       .map(normalizeAgent)
       .filter((row): row is Agent => row !== null)
-    tasks.value = (Array.isArray(data.tasks) ? data.tasks : [])
+    setArrayByKeyIfChanged(agents, normalizedAgents, a => a.name)
+    const normalizedTasks = (Array.isArray(data.tasks) ? data.tasks : [])
       .map(normalizeTask)
       .filter((row): row is Task => row !== null)
+    setArrayByKeyIfChanged(tasks, normalizedTasks, t => t.id)
     const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
       .map(normalizeMessage)
       .filter((row): row is Message => row !== null)
     messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
     keepers.value = normalizeKeepers(data.keepers)
     executionSummary.value = normalizeExecutionSummary(data.summary)
-    executionQueue.value = (Array.isArray(data.execution_queue) ? data.execution_queue : Array.isArray(data.priority_queue) ? data.priority_queue : [])
+    const normalizedQueue = (Array.isArray(data.execution_queue) ? data.execution_queue : Array.isArray(data.priority_queue) ? data.priority_queue : [])
       .map(normalizeExecutionQueueItem)
       .filter((row): row is DashboardExecutionQueueItem => row !== null)
-    executionSessionBriefs.value = (Array.isArray(data.session_briefs) ? data.session_briefs : [])
+    setArrayByKeyIfChanged(executionQueue, normalizedQueue, q => q.id)
+    const normalizedSessionBriefs = (Array.isArray(data.session_briefs) ? data.session_briefs : [])
       .map(normalizeExecutionSessionBrief)
       .filter((row): row is DashboardExecutionSessionBrief => row !== null)
-    executionOperationBriefs.value = (Array.isArray(data.operation_briefs) ? data.operation_briefs : [])
+    setArrayByKeyIfChanged(executionSessionBriefs, normalizedSessionBriefs, s => s.session_id)
+    const normalizedOpBriefs = (Array.isArray(data.operation_briefs) ? data.operation_briefs : [])
       .map(normalizeExecutionOperationBrief)
       .filter((row): row is DashboardExecutionOperationBrief => row !== null)
-    executionWorkerSupportBriefs.value = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
+    setArrayByKeyIfChanged(executionOperationBriefs, normalizedOpBriefs, o => o.operation_id)
+    const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
       .map(normalizeExecutionWorkerSupportBrief)
       .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
-    executionContinuityBriefs.value = (Array.isArray(data.continuity_briefs) ? data.continuity_briefs : [])
+    setArrayByKeyIfChanged(executionWorkerSupportBriefs, normalizedWorkerBriefs, w => w.name)
+    const normalizedContinuityBriefs = (Array.isArray(data.continuity_briefs) ? data.continuity_briefs : [])
       .map(normalizeExecutionContinuityBrief)
       .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
-    executionOfflineWorkerBriefs.value = (Array.isArray(data.offline_worker_briefs) ? data.offline_worker_briefs : [])
+    setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name)
+    const normalizedOfflineBriefs = (Array.isArray(data.offline_worker_briefs) ? data.offline_worker_briefs : [])
       .map(normalizeExecutionWorkerSupportBrief)
       .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
+    setArrayByKeyIfChanged(executionOfflineWorkerBriefs, normalizedOfflineBriefs, w => w.name)
     perpetualStatus.value = null
     executionLoaded.value = true
     lastExecutionRefreshAt.value = Date.now()

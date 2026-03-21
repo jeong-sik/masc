@@ -113,7 +113,19 @@ let test_dashboard_component_split_contracts () =
        "export function MissionBriefingCard");
   check bool "mission attention card exported from split file" true
     (file_contains_pattern "dashboard/src/components/mission-attention-card.ts"
-       "export function AttentionCard")
+       "export function AttentionCard");
+  check bool "swarm surface imports overview panel" true
+    (file_contains_pattern "dashboard/src/components/command/swarm.ts"
+       "import { SwarmOverviewPanel } from './swarm-overview-panel'");
+  check bool "swarm surface imports live panels" true
+    (file_contains_pattern "dashboard/src/components/command/swarm.ts"
+       "import { SwarmLivePanels } from './swarm-live-panels'");
+  check bool "swarm overview panel exported from split file" true
+    (file_contains_pattern "dashboard/src/components/command/swarm-overview-panel.ts"
+       "export function SwarmOverviewPanel");
+  check bool "swarm live panels exported from split file" true
+    (file_contains_pattern "dashboard/src/components/command/swarm-live-panels.ts"
+       "export function SwarmLivePanels")
 
 let () =
   run "ci_hardening_source"

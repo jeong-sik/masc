@@ -482,6 +482,15 @@ let execute_delegate_pipeline
                     ~prompt:delegate_prompt ()
                 with
                 | Ok run_result ->
+                    (* OAS Verified_output: cross-agent verification *)
+                    let verification_outcome =
+                      let goal = match session_opt with
+                        | Some s -> s.Team_session_types.goal
+                        | None -> "unknown"
+                      in
+                      Worker_verification.verify_worker_result ~goal run_result
+                    in
+                    let _is_verified = Worker_verification.is_verified verification_outcome in
                     let output_preview =
                       deps.truncate_for_event run_result.output
                     in

@@ -205,6 +205,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'avatars' },
     },
   ],
+  logs: [],
 }
 
 function validSectionIds(tab: NonHomeTabId): SurfaceSectionId[] {

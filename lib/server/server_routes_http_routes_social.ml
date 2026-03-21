@@ -146,6 +146,21 @@ let add_routes router =
        let json = `Assoc [("flairs", `List flairs)] in
        Http.Response.json (Yojson.Safe.to_string json) reqd)
 
+  |> Http.Router.prefix_get "/api/v1/board/" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let path = Http.Request.path request in
+         (match extract_path_param ~prefix:"/api/v1/board/" path with
+          | None ->
+              Http.Response.json
+                (Yojson.Safe.to_string (`Assoc [("error", `String "post_id is required")]))
+                ~status:`Bad_request reqd
+          | Some post_id ->
+              let format =
+                query_param req "format" |> Option.value ~default:"nested"
+              in
+              let (status, body) = board_post_detail_json ~response_format:format ~post_id in
+              respond_json_with_cors ~status request reqd body)
+       ) request reqd)
 
   (* Board write APIs — used by Bevy Viewer *)
   |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->

@@ -129,6 +129,7 @@ let run_turn
   ignore (Memory_oas_bridge.seed_episodes ~memory ~agent_name ~limit:30);
   ignore (Memory_oas_bridge.seed_procedures_as_oas ~memory ~agent_name ~limit:10);
   let reducer = Agent_sdk.Context_reducer.compose [
+    Agent_sdk.Context_reducer.keep_last 30;
     { Agent_sdk.Context_reducer.strategy =
         Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 } };
     { strategy = Agent_sdk.Context_reducer.Merge_contiguous };

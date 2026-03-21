@@ -45,7 +45,7 @@ export function refreshForTab(tab: string) {
       refreshMissionSnapshot()
     } else {
       refreshRoomTruth()
-      refreshMissionSnapshot('full')
+      refreshMissionSnapshot()
       refreshMissionBriefing()
     }
   }

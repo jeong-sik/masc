@@ -42,7 +42,7 @@ export function App() {
 
     // Register mission refresh for periodic recovery from transient failures.
     // Uses registration pattern to avoid circular imports.
-    registerMissionRefresh(() => void refreshMissionSnapshot('snapshot'))
+    registerMissionRefresh(() => void refreshMissionSnapshot())
 
     // Setup SSE -> store reaction (debounced refresh on events)
     const unsubSSE = setupSSEReaction()

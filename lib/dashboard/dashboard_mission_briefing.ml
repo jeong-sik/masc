@@ -77,26 +77,6 @@ end
 
 (* ── Response envelope builders ─────────────────────────────────── *)
 
-let error_json ~now ~reason =
-  `Assoc
-    [
-      ("generated_at", `String now);
-      ("cached", `Bool false);
-      ("stale", `Bool false);
-      ("refreshing", `Bool false);
-      ("status", `String "error");
-      ("summary", `String "Mission briefing refresh failed. Retry to request a fresh judgment.");
-      ("provenance", `String "narrative");
-      ("authoritative", `Bool false);
-      ("provenance_summary", mission_briefing_surface_contract_json);
-      ("model", `Null);
-      ("ttl_sec", `Int (int_of_float cache_ttl_sec));
-      ("criteria", criteria_json ());
-      ("sections", `List []);
-      ("error", `String reason);
-      ("last_error", option_string_json (Some reason));
-    ]
-
 let pending_json ~now ~last_error =
   `Assoc
     [
@@ -318,14 +298,7 @@ let json ?actor ?(force = false) ~config ~sw ~clock ~proc_mgr () =
         if not refresh_in_flight then
           start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr ();
         pending_json ~now:now_iso ~last_error)
-      else
-        match compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () with
-        | Ok result_json ->
-            with_cache_lock (fun () ->
-                cache.cached_json <- Some result_json;
-                cache.cached_at <- Unix.gettimeofday ();
-                cache.last_error <- None);
-            result_json
-        | Error reason ->
-            with_cache_lock (fun () -> cache.last_error <- Some reason);
-            error_json ~now:now_iso ~reason
+      else (
+        if not refresh_in_flight then
+          start_async_refresh ~actor_name ~config ~sw ~clock ~proc_mgr ();
+        pending_json ~now:now_iso ~last_error)

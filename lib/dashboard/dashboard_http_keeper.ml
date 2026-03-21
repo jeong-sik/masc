@@ -65,16 +65,22 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             max 0 (m.last_compaction_before_tokens - m.last_compaction_after_tokens)
           in
 
-          let metrics_path = Keeper_types.keeper_metrics_path config m.name in
+          let metrics_store = Keeper_types.keeper_metrics_store config m.name in
+          let metrics_window_max_bytes = 200000 in
+          let all_metrics_lines =
+            let n = max series_points 12000 in
+            let dated = Dated_jsonl.read_recent_lines metrics_store n in
+            if dated <> [] then dated
+            else
+              let metrics_path = Keeper_types.keeper_metrics_path config m.name in
+              Keeper_memory.read_file_tail_lines metrics_path
+                ~max_bytes:(max metrics_window_max_bytes 3000000) ~max_lines:n
+          in
           let (metrics_24h, metrics_24h_summary) =
             if compact then (`Null, `Null)
-            else keeper_metrics_24h_json ~metrics_path ~now_ts
+            else keeper_metrics_24h_json ~metrics_lines:all_metrics_lines ~now_ts
           in
-            let metrics_window_max_bytes = 200000 in
-            let metrics_lines =
-              Keeper_memory.read_file_tail_lines
-              metrics_path ~max_bytes:metrics_window_max_bytes ~max_lines:series_points
-          in
+          let metrics_lines = all_metrics_lines in
           let parsed_metrics =
             List.filter_map (fun line ->
               try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None

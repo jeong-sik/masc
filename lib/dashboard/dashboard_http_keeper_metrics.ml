@@ -2,8 +2,6 @@
     gen window stats, history summary, and helper utilities. *)
 
 
-open Dashboard_http_helpers
-
 let normalize_model_name s =
   let s = String.trim s in
   let s =
@@ -194,30 +192,11 @@ let create_keeper_24h_bucket_stats () : keeper_24h_bucket_stats =
   }
 
 let keeper_metrics_24h_json
-    ~(metrics_path : string)
+    ~(metrics_lines : string list)
     ~(now_ts : float) : Yojson.Safe.t * Yojson.Safe.t =
-  let max_lines =
-    int_of_env_default
-      "MASC_DASHBOARD_24H_MAX_LINES"
-      ~default:12000
-      ~min_v:200
-      ~max_v:50000
-  in
-  let max_bytes =
-    int_of_env_default
-      "MASC_DASHBOARD_24H_MAX_BYTES"
-      ~default:3000000
-      ~min_v:200000
-      ~max_v:20000000
-  in
   let window_sec = 24.0 *. 3600.0 in
   let start_ts = now_ts -. window_sec in
-  let lines =
-    Keeper_memory.read_file_tail_lines
-      metrics_path
-      ~max_bytes
-      ~max_lines
-  in
+  let lines = metrics_lines in
   let buckets : (int, keeper_24h_bucket_stats) Hashtbl.t = Hashtbl.create 64 in
   let sample_points = ref 0 in
   let proactive_points = ref 0 in
@@ -298,8 +277,7 @@ let keeper_metrics_24h_json
   let summary =
     `Assoc [
       ("window_hours", `Float 24.0);
-      ("source_max_lines", `Int max_lines);
-      ("source_max_bytes", `Int max_bytes);
+      ("source_lines", `Int (List.length metrics_lines));
       ("sample_points", `Int !sample_points);
       ("bucket_count", `Int bucket_count);
       ("from_ts_unix", `Float start_ts);

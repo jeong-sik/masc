@@ -203,6 +203,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
          MCP Endpoints
          ───────────────────────────────────────────────────────────────────── *)
       | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/managed" | `POST, "/mcp/operator" ->
+          let session_was_provided = Option.is_some session_id_opt in
           let session_id = match session_id_opt with
             | Some id -> id
             | None -> Mcp_session.generate ()
@@ -245,6 +246,20 @@ let make_request_handler ~sw ~clock ~server_start_time =
                          h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
                      | Ok _cred_opt ->
                          h2_read_body h2_reqd (fun body_str ->
+                             match
+                               Server_mcp_transport_http
+                               .validate_session_requirement
+                                 ~session_was_provided body_str
+                             with
+                             | Error msg ->
+                                 let body = json_rpc_error (-32600) msg in
+                                 h2_respond_json h2_reqd body
+                                   ~status:`Bad_request
+                                   ~extra_headers:
+                                     (cors
+                                     @ mcp_headers session_id
+                                         protocol_version)
+                             | Ok () ->
                              let accept_mode =
                                Server_mcp_transport_http_headers
                                .classify_mcp_accept_for_body httpun_request body_str

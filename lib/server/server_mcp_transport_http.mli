@@ -22,6 +22,9 @@ val validate_mcp_session_profile :
   profile:Mcp_server_eio.tool_profile -> string -> (unit, string) result
 val validate_mcp_session_delete_profile :
   profile:Mcp_server_eio.tool_profile -> string -> (unit, string) result
+val method_from_body : string -> string option
+val validate_session_requirement :
+  session_was_provided:bool -> string -> (unit, string) result
 val protocol_version_from_body : string -> string option
 val get_session_id_query : string -> string option
 val get_header_any_case : Httpun.Headers.t -> string -> string option

@@ -111,7 +111,7 @@ let () = test "dispatch_dashboard_invalid_scope" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test dispatch gc *)
+(* Test dispatch gc — Eio context provided by test helper *)
 let () = test "dispatch_gc" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [("days", `Int 7)] in

@@ -90,7 +90,7 @@ let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
 
     - PruneToolOutputs and MergeContiguous use OAS built-in strategies directly.
     - DropLowImportance uses OAS Custom with importance scoring (OAS has no scoring).
-    - SummarizeOld uses OAS Custom with extractive summarization (deterministic, no LLM). *)
+    - SummarizeOld uses OAS Custom with extractive summarization (deterministic, no model call). *)
 let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
   | PruneToolOutputs ->

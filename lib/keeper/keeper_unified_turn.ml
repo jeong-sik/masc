@@ -2,7 +2,7 @@
 
     Replaces the 3-path dispatcher (social/proactive/autonomy) with a unified
     observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
-    The LLM decides what to do; code only enforces safety and observes results.
+    The model decides what to do; code only enforces safety and observes results.
 
     @since Unified Keeper Loop *)
 

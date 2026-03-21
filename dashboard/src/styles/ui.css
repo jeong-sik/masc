@@ -392,14 +392,4 @@ button.monitor-row.bad {
   margin-bottom: 12px;
 }
 .semantic-tag,
-.semantic-code {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: var(--white-6);
-  color: #c9d8f0;
-  font-size: 11px;
-}
 

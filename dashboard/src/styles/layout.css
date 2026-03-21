@@ -1,15 +1,11 @@
 /* ── Responsive (components) ───────────────────────────────── */
 @media (max-width: 980px) {
 
-  .keeper-detail-grid { grid-template-columns: 1fr; }
   .keeper-kpis { grid-template-columns: repeat(2, 1fr); }
-  .council-grid { grid-template-columns: 1fr; }
   .agent-detail-grid { grid-template-columns: 1fr; }
 
 }
 @media (max-width: 900px) {
-  .trpg-layout { grid-template-columns: 1fr; }
-  .trpg-screen-tabs { grid-template-columns: 1fr; }
   .council-create { grid-template-columns: 1fr; }
   .control-row { grid-template-columns: 1fr; }
   .agent-mention-row { grid-template-columns: 1fr; }
@@ -17,13 +13,7 @@
 }
 @media (max-width: 600px) {
 
-  .trpg-control-grid { grid-template-columns: 1fr; }
-  .trpg-story-toolbar { flex-direction: column; align-items: stretch; }
-  .trpg-story-filter { min-width: 0; }
-  .trpg-annot-chip { grid-template-columns: 1fr; }
   .keeper-kpis { grid-template-columns: 1fr; }
-  .agents-grid { grid-template-columns: 1fr; }
-  .keeper-core-grid { grid-template-columns: 1fr; }
   .metric-tip-pop {
     left: 0;
     transform: none;

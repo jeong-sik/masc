@@ -10,7 +10,7 @@
 
 open Alcotest
 
-module Validation = Masc_mcp.Validation
+module Validation = Validation
 
 (* ============================================================
    Agent_id Tests

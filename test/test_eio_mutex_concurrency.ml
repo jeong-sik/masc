@@ -14,7 +14,7 @@
 open Alcotest
 
 module RL = Masc_mcp.Rate_limit
-module CB = Masc_mcp.Circuit_breaker
+module CB = Circuit_breaker
 module Prom = Masc_mcp.Prometheus
 module SH = Masc_mcp.Streamable_http
 

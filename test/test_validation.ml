@@ -1,6 +1,5 @@
 (** Tests for Validation module - Input security *)
 
-open Masc_mcp
 
 (* ===== Agent_id Tests ===== *)
 

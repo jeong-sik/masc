@@ -3,37 +3,37 @@
 open Alcotest
 
 let test_int_of_string_safe_valid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option int) "parses valid int" (Some 42) (int_of_string_safe "42")
 
 let test_int_of_string_safe_invalid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option int) "None on invalid" None (int_of_string_safe "abc")
 
 let test_int_of_string_with_default () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check int "default on invalid" 0 (int_of_string_with_default ~default:0 "abc")
 
 let test_float_of_string_safe_valid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option (float 0.001)) "parses valid float" (Some 3.14) (float_of_string_safe "3.14")
 
 let test_float_of_string_safe_invalid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option (float 0.001)) "None on invalid" None (float_of_string_safe "abc")
 
 let test_parse_json_safe_valid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = parse_json_safe ~context:"test" {|{"foo": "bar"}|} in
   check bool "Ok on valid JSON" true (Result.is_ok result)
 
 let test_parse_json_safe_invalid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = parse_json_safe ~context:"test" "not json" in
   check bool "Error on invalid JSON" true (Result.is_error result)
 
 let test_read_file_safe_not_found () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = read_file_safe "/nonexistent/path/file.txt" in
   check bool "Error on missing file" true (Result.is_error result)
 
@@ -41,31 +41,31 @@ let test_read_file_safe_not_found () =
 let sample_json = Yojson.Safe.from_string {|{"name": "test", "count": 42, "rate": 3.14, "active": true}|}
 
 let test_json_string () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check string "extracts string" "test" (json_string "name" sample_json)
 
 let test_json_string_missing () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check string "default on missing" "default" (json_string ~default:"default" "missing" sample_json)
 
 let test_json_int () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check int "extracts int" 42 (json_int "count" sample_json)
 
 let test_json_float () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (float 0.001) "extracts float" 3.14 (json_float "rate" sample_json)
 
 let test_json_bool () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check bool "extracts bool" true (json_bool "active" sample_json)
 
 let test_json_string_opt_present () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option string) "Some on present" (Some "test") (json_string_opt "name" sample_json)
 
 let test_json_string_opt_missing () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option string) "None on missing" None (json_string_opt "missing" sample_json)
 
 (* ================================================================
@@ -74,62 +74,62 @@ let test_json_string_opt_missing () =
 
 (* try_with_log *)
 let test_try_with_log_success () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = try_with_log "test" (fun () -> 42) in
   check (option int) "Some on success" (Some 42) result
 
 let test_try_with_log_failure () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = try_with_log "test" (fun () -> failwith "boom") in
   check (option int) "None on failure" None result
 
 (* try_with_default *)
 let test_try_with_default_success () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = try_with_default ~default:0 "test" (fun () -> 42) in
   check int "returns value" 42 result
 
 let test_try_with_default_failure () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = try_with_default ~default:0 "test" (fun () -> failwith "boom") in
   check int "returns default" 0 result
 
 (* float_of_string_with_default *)
 let test_float_of_string_with_default_valid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (float 0.001) "parses valid" 2.718
     (float_of_string_with_default ~default:0.0 "2.718")
 
 let test_float_of_string_with_default_invalid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (float 0.001) "default on invalid" 0.0
     (float_of_string_with_default ~default:0.0 "xyz")
 
 (* list_dir_safe *)
 let test_list_dir_safe_nonexistent () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = list_dir_safe "/nonexistent/directory/path" in
   check bool "Error on nonexistent" true (Result.is_error result)
 
 let test_list_dir_safe_not_a_dir () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   (* /dev/null exists but is not a directory *)
   let result = list_dir_safe "/dev/null" in
   check bool "Error on non-dir" true (Result.is_error result)
 
 let test_list_dir_safe_valid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = list_dir_safe "/tmp" in
   check bool "Ok on valid dir" true (Result.is_ok result)
 
 (* read_json_file_safe *)
 let test_read_json_file_safe_nonexistent () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = read_json_file_safe "/nonexistent/file.json" in
   check bool "Error on missing" true (Result.is_error result)
 
 let test_read_json_file_safe_valid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   (* Create a temp file with valid JSON *)
   let path = Filename.temp_file "test_safe_ops_" ".json" in
   let oc = open_out path in
@@ -140,7 +140,7 @@ let test_read_json_file_safe_valid () =
   check bool "Ok on valid json file" true (Result.is_ok result)
 
 let test_read_json_file_safe_invalid_json () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let path = Filename.temp_file "test_safe_ops_" ".json" in
   let oc = open_out path in
   output_string oc "not json content";
@@ -151,7 +151,7 @@ let test_read_json_file_safe_invalid_json () =
 
 (* read_file_safe with existing file *)
 let test_read_file_safe_valid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let path = Filename.temp_file "test_safe_ops_" ".txt" in
   let oc = open_out path in
   output_string oc "hello world";
@@ -164,25 +164,25 @@ let test_read_file_safe_valid () =
 
 (* remove_file_logged *)
 let test_remove_file_logged_existing () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let path = Filename.temp_file "test_safe_ops_" ".tmp" in
   remove_file_logged path;
   check bool "file removed" false (Sys.file_exists path)
 
 let test_remove_file_logged_nonexistent () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   (* Should not raise, just log *)
   remove_file_logged "/nonexistent/file.tmp";
   ()
 
 let test_remove_file_logged_custom_context () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   remove_file_logged ~context:"custom" "/nonexistent/file.tmp";
   ()
 
 (* close_in_logged *)
 let test_close_in_logged_valid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let path = Filename.temp_file "test_safe_ops_" ".txt" in
   let oc = open_out path in
   output_string oc "data";
@@ -194,126 +194,126 @@ let test_close_in_logged_valid () =
 
 (* get_env_int_logged *)
 let test_get_env_int_logged_missing () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = get_env_int_logged "MASC_TEST_NONEXISTENT_VAR_12345" ~default:99 in
   check int "default on missing" 99 result
 
 let test_get_env_int_logged_valid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   Unix.putenv "MASC_TEST_INT_VAR" "42";
   let result = get_env_int_logged "MASC_TEST_INT_VAR" ~default:0 in
   check int "parses env var" 42 result
 
 let test_get_env_int_logged_invalid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   Unix.putenv "MASC_TEST_INT_VAR_BAD" "not_int";
   let result = get_env_int_logged "MASC_TEST_INT_VAR_BAD" ~default:99 in
   check int "default on invalid" 99 result
 
 (* get_env_float_logged *)
 let test_get_env_float_logged_missing () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let result = get_env_float_logged "MASC_TEST_NONEXISTENT_FLOAT_12345" ~default:1.5 in
   check (float 0.001) "default on missing" 1.5 result
 
 let test_get_env_float_logged_valid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   Unix.putenv "MASC_TEST_FLOAT_VAR" "2.718";
   let result = get_env_float_logged "MASC_TEST_FLOAT_VAR" ~default:0.0 in
   check (float 0.001) "parses env var" 2.718 result
 
 let test_get_env_float_logged_invalid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   Unix.putenv "MASC_TEST_FLOAT_VAR_BAD" "not_float";
   let result = get_env_float_logged "MASC_TEST_FLOAT_VAR_BAD" ~default:1.5 in
   check (float 0.001) "default on invalid" 1.5 result
 
 (* json_int_opt *)
 let test_json_int_opt_present () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option int) "Some on present" (Some 42) (json_int_opt "count" sample_json)
 
 let test_json_int_opt_missing () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option int) "None on missing" None (json_int_opt "missing" sample_json)
 
 let test_json_int_opt_null () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"val": null}|} in
   check (option int) "None on null" None (json_int_opt "val" j)
 
 let test_json_int_opt_wrong_type () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option int) "None on string" None (json_int_opt "name" sample_json)
 
 (* json_float_opt *)
 let test_json_float_opt_present () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option (float 0.001)) "Some on float" (Some 3.14) (json_float_opt "rate" sample_json)
 
 let test_json_float_opt_from_int () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option (float 0.001)) "Some from int" (Some 42.0) (json_float_opt "count" sample_json)
 
 let test_json_float_opt_missing () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option (float 0.001)) "None on missing" None (json_float_opt "missing" sample_json)
 
 let test_json_float_opt_null () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"val": null}|} in
   check (option (float 0.001)) "None on null" None (json_float_opt "val" j)
 
 let test_json_float_opt_wrong_type () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (option (float 0.001)) "None on string" None (json_float_opt "name" sample_json)
 
 (* json_string_list (Safe_ops version) *)
 let test_json_string_list_present () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"tags": ["a", "b", "c"]}|} in
   check (list string) "extracts list" ["a"; "b"; "c"] (json_string_list "tags" j)
 
 let test_json_string_list_missing () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (list string) "empty on missing" [] (json_string_list "missing" sample_json)
 
 let test_json_string_list_wrong_type () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (list string) "empty on non-list" [] (json_string_list "name" sample_json)
 
 (* json_string_opt with null *)
 let test_json_string_opt_null () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"val": null}|} in
   check (option string) "None on null" None (json_string_opt "val" j)
 
 (* json_bool with defaults *)
 let test_json_bool_default () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check bool "default on missing" false (json_bool "missing" sample_json)
 
 let test_json_bool_custom_default () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check bool "custom default" true (json_bool ~default:true "missing" sample_json)
 
 (* json_int with default *)
 let test_json_int_default () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check int "default on missing" 0 (json_int "missing" sample_json)
 
 let test_json_int_custom_default () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check int "custom default" 99 (json_int ~default:99 "missing" sample_json)
 
 (* json_float with default *)
 let test_json_float_default () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   check (float 0.001) "default on missing" 0.0 (json_float "missing" sample_json)
 
 (* parse_json_safe long input preview *)
 let test_parse_json_safe_long_invalid () =
-  let open Masc_mcp.Safe_ops in
+  let open Safe_ops in
   let long_str = String.make 100 'x' in
   let result = parse_json_safe ~context:"test" long_str in
   check bool "Error on long invalid" true (Result.is_error result)

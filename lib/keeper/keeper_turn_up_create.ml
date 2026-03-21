@@ -282,6 +282,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          let base_dir = session_base_dir ctx.config in
          mkdir_p base_dir;
          let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
+           let persona_extended =
+             Keeper_types_profile.load_persona_extended p.name
+             |> Option.value ~default:""
+           in
            let system_prompt =
              build_keeper_system_prompt
                ~goal
@@ -293,6 +297,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                ~needs
                ~desires
                ~instructions
+               ~persona_extended
+               ()
          in
          let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary.max_context in
          (try ignore (save_checkpoint session ctx0 ~generation:0)

@@ -88,6 +88,8 @@ val build_keeper_system_prompt :
   needs:string ->
   desires:string ->
   instructions:string ->
+  ?persona_extended:string ->
+  unit ->
   string
 
 (** Append trait clause to existing trait string. *)

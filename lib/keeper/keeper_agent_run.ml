@@ -75,6 +75,10 @@ let run_turn
       ~base_dir
   in
   (* 3. Build base system prompt from meta *)
+  let persona_extended =
+    Keeper_types_profile.load_persona_extended meta.name
+    |> Option.value ~default:""
+  in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
       ~goal:meta.goal
@@ -86,6 +90,8 @@ let run_turn
       ~needs:meta.needs
       ~desires:meta.desires
       ~instructions:meta.instructions
+      ~persona_extended
+      ()
   in
   (* 4. Create or restore working context, re-apply current prompt *)
   let base_ctx =

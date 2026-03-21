@@ -16,6 +16,8 @@ val build_keeper_system_prompt :
   needs:string ->
   desires:string ->
   instructions:string ->
+  ?persona_extended:string ->
+  unit ->
   string
 
 val append_trait_clause : base:string -> clause:string -> string

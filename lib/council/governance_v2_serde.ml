@@ -14,13 +14,7 @@ include Governance_v2_types
 (* ================================================================ *)
 
 let read_file_safe path =
-  try
-    let ic = open_in path in
-    let content =
-      Fun.protect ~finally:(fun () -> close_in_noerr ic)
-        (fun () -> really_input_string ic (in_channel_length ic))
-    in
-    Ok content
+  try Ok (Fs_compat.load_file path)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
@@ -61,19 +55,17 @@ let write_json path json =
   let tmp_path =
     Filename.concat dir (Printf.sprintf ".%s.tmp.%d" base (Unix.getpid ()))
   in
-  let oc = open_out tmp_path in
-  let closed = ref false in
-  Fun.protect
-    ~finally:(fun () ->
-      if not !closed then (try close_out oc with Sys_error _ -> ());
-      if Sys.file_exists tmp_path then
-        try Sys.remove tmp_path with Sys_error _ -> ())
-    (fun () ->
-      output_string oc content;
-      flush oc;
-      close_out oc;
-      closed := true;
-      Sys.rename tmp_path path)
+  match
+    Fs_compat.save_file tmp_path content;
+    Sys.rename tmp_path path
+  with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as e) ->
+      (try Sys.remove tmp_path with Sys_error _ -> ());
+      raise e
+  | exception exn ->
+      (try Sys.remove tmp_path with Sys_error _ -> ());
+      raise exn
 
 let read_json path =
   match read_file_safe path with

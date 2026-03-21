@@ -74,7 +74,11 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
       else with_shell
     in
     dedupe_tool_names (keeper_board_tool_names @ with_research)
-  else keeper_model_tools |> List.map (fun tool -> tool.Types.name)
+  else
+    let base_names = keeper_model_tools |> List.map (fun tool -> tool.Types.name) in
+    if meta.soul_profile = "research" then
+      dedupe_tool_names (keeper_autoresearch_tool_names @ base_names)
+    else base_names
 
 let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     Types.tool_schema list =

@@ -69,11 +69,50 @@ let test_tool_count_matches_allowed () =
       check bool "all tools are in allowed list" true
         (List.for_all (fun name -> List.mem name allowed) tool_names))
 
+let make_research_meta () : Keeper_types.keeper_meta =
+  match Keeper_types.meta_of_json
+    (`Assoc [("name", `String "test-researcher");
+             ("agent_name", `String "test-researcher");
+             ("trace_id", `String "test-trace-research");
+             ("soul_profile", `String "research")]) with
+  | Ok meta -> meta
+  | Error e -> failwith (Printf.sprintf "make_research_meta failed: %s" e)
+
+let test_research_keeper_has_autoresearch_tools () =
+  let meta = make_research_meta () in
+  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let has_cycle = List.mem "masc_autoresearch_cycle" allowed in
+  let has_start = List.mem "masc_autoresearch_start" allowed in
+  let has_status = List.mem "masc_autoresearch_status" allowed in
+  check bool "has cycle" true has_cycle;
+  check bool "has start" true has_start;
+  check bool "has status" true has_status
+
+let test_non_research_keeper_no_autoresearch () =
+  let meta = make_test_meta () in
+  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let has_any = List.exists (fun n ->
+    String.length n > 18
+    && String.sub n 0 18 = "masc_autoresearch_") allowed in
+  check bool "no autoresearch tools" false has_any
+
+let test_research_model_tools_include_autoresearch () =
+  let meta = make_research_meta () in
+  let tools = Keeper_exec_tools.keeper_allowed_model_tools meta in
+  let has_cycle = List.exists (fun (t : Types.tool_schema) ->
+    t.name = "masc_autoresearch_cycle") tools in
+  check bool "model tools have cycle" true has_cycle
+
 let () =
   run "Keeper_tools_oas" [
     "make_tools", [
       test_case "returns nonempty" `Quick test_make_tools_returns_nonempty;
       test_case "valid schemas" `Quick test_tools_have_valid_schemas;
       test_case "count matches allowed" `Quick test_tool_count_matches_allowed;
+    ];
+    "research_profile", [
+      test_case "has autoresearch tools" `Quick test_research_keeper_has_autoresearch_tools;
+      test_case "non-research has none" `Quick test_non_research_keeper_no_autoresearch;
+      test_case "model tools include autoresearch" `Quick test_research_model_tools_include_autoresearch;
     ];
   ]

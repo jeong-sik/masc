@@ -25,6 +25,9 @@ let handle_bounded_run (ctx : context) : result option =
     | _ -> []
   in
   let prompt = arg_get_string ctx "prompt" "" in
+  if String.trim prompt = "" then
+    Some (false, Tool_args.error_response "prompt is required")
+  else
   let constraints_json = arguments |> U.member "constraints" in
   let goal_json = arguments |> U.member "goal" in
   let constraints = Bounded.constraints_of_json constraints_json in

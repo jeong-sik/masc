@@ -67,11 +67,14 @@ export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) 
         </div>
         <span class="command-chip">${relativeTime(item.timestamp ?? null)}</span>
       </div>
-      ${toolEvidenceTags(item).length > 0
-        ? html`<div class="semantic-tag-row">
-            ${toolEvidenceTags(item).map(name => html`<span class="semantic-tag">${name}</span>`)}
-          </div>`
-        : null}
+      ${(() => {
+        const tags = toolEvidenceTags(item)
+        return tags.length > 0
+          ? html`<div class="semantic-tag-row">
+              ${tags.map(name => html`<span class="semantic-tag">${name}</span>`)}
+            </div>`
+          : null
+      })()}
     </article>
   `
 }

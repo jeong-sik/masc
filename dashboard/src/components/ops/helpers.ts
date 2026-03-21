@@ -187,13 +187,6 @@ export function keeperPriorityReasons(keeper: OperatorKeeperSnapshot): KeeperPri
   return reasons
 }
 
-export function keeperPriorityTone(keeper: OperatorKeeperSnapshot): OpsPriorityTone {
-  const reasons = keeperPriorityReasons(keeper)
-  if (reasons.includes('offline')) return 'bad'
-  if (reasons.length > 0) return 'warn'
-  return 'ok'
-}
-
 function keeperReasonLabel(reason: KeeperPriorityReason): string {
   switch (reason) {
     case 'offline':
@@ -211,10 +204,19 @@ function keeperReasonLabel(reason: KeeperPriorityReason): string {
   }
 }
 
-export function keeperPrioritySummary(keeper: OperatorKeeperSnapshot): string {
+export function keeperPriorityInfo(keeper: OperatorKeeperSnapshot): { tone: OpsPriorityTone; summary: string } {
   const reasons = keeperPriorityReasons(keeper)
-  if (reasons.length === 0) return '점검 필요 신호 없음'
-  return reasons.map(keeperReasonLabel).join(' · ')
+  const tone: OpsPriorityTone = reasons.includes('offline') ? 'bad' : reasons.length > 0 ? 'warn' : 'ok'
+  const summary = reasons.length === 0 ? '점검 필요 신호 없음' : reasons.map(keeperReasonLabel).join(' · ')
+  return { tone, summary }
+}
+
+export function keeperPriorityTone(keeper: OperatorKeeperSnapshot): OpsPriorityTone {
+  return keeperPriorityInfo(keeper).tone
+}
+
+export function keeperPrioritySummary(keeper: OperatorKeeperSnapshot): string {
+  return keeperPriorityInfo(keeper).summary
 }
 
 export function attentionTone(items: OperatorAttentionItem[]): OpsPriorityTone {
@@ -254,8 +256,6 @@ export function actionTypeLabel(value?: string | null): string {
     case 'team_stop':
       return '세션 중지'
     case 'keeper_message':
-      return '키퍼 메시지'
-    case 'keeper_msg':
       return '키퍼 메시지'
     default:
       return value?.trim() || '액션'

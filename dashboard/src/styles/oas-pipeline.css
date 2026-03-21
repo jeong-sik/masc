@@ -1,8 +1,8 @@
 /* OAS Pipeline component styles */
 
 .oas-pipeline {
-  background: var(--card-bg, #1a1f2e);
-  border: 1px solid var(--border, #2a2f3e);
+  background: var(--card, #1a1f2e);
+  border: 1px solid var(--card-border, #2a2f3e);
   border-radius: 8px;
   padding: 12px 16px;
   margin-top: 12px;
@@ -18,13 +18,13 @@
 .oas-pipeline__title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary, #e0e0e0);
+  color: var(--text-strong, #e0e0e0);
   letter-spacing: 0.5px;
 }
 
 .oas-pipeline__count {
   font-size: 11px;
-  color: var(--text-secondary, #888);
+  color: var(--text-muted, #888);
   font-variant-numeric: tabular-nums;
 }
 
@@ -35,7 +35,7 @@
 .oas-section-label {
   font-size: 11px;
   font-weight: 500;
-  color: var(--text-secondary, #888);
+  color: var(--text-muted, #888);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 6px;
@@ -65,7 +65,7 @@
 }
 
 .oas-event-row:hover {
-  background: var(--hover-bg, rgba(255, 255, 255, 0.03));
+  background: var(--white-6, rgba(255, 255, 255, 0.03));
 }
 
 .oas-event-ts {
@@ -75,7 +75,7 @@
 }
 
 .oas-event-agent {
-  color: var(--text-primary, #e0e0e0);
+  color: var(--text-strong, #e0e0e0);
   font-weight: 500;
   min-width: 80px;
   max-width: 120px;
@@ -85,7 +85,7 @@
 }
 
 .oas-event-type {
-  color: var(--text-secondary, #888);
+  color: var(--text-muted, #888);
   min-width: 60px;
 }
 
@@ -132,11 +132,11 @@
 }
 
 .oas-keeper-row:hover {
-  background: var(--hover-bg, rgba(255, 255, 255, 0.03));
+  background: var(--white-6, rgba(255, 255, 255, 0.03));
 }
 
 .oas-keeper-name {
-  color: var(--text-primary, #e0e0e0);
+  color: var(--text-strong, #e0e0e0);
   font-weight: 500;
   min-width: 80px;
   max-width: 120px;
@@ -154,7 +154,7 @@
 .oas-keeper-bar-wrap {
   flex: 1;
   height: 6px;
-  background: var(--bar-bg, #2a2f3e);
+  background: var(--card);
   border-radius: 3px;
   overflow: hidden;
   min-width: 60px;
@@ -171,7 +171,7 @@
 .bar--warn { background: #f87171; }
 
 .oas-keeper-pct {
-  color: var(--text-secondary, #888);
+  color: var(--text-muted, #888);
   font-variant-numeric: tabular-nums;
   min-width: 32px;
   text-align: right;

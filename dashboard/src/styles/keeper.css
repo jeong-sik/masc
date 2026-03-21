@@ -168,7 +168,7 @@
 
 .keeper-comms-heading {
   margin: 0 0 14px;
-  color: var(--accent-cyan, #22d3ee);
+  color: var(--cyan);
   font-family: var(--font-display, inherit);
   font-size: 15px;
 }

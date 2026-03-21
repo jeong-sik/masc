@@ -189,7 +189,7 @@
   padding: 8px;
   margin-top: 4px;
   background: none;
-  border: 1px dashed var(--border, rgba(255, 255, 255, 0.1));
+  border: 1px dashed var(--card-border, rgba(255, 255, 255, 0.1));
   border-radius: 6px;
   color: var(--text-muted);
   font-size: 11px;
@@ -295,7 +295,7 @@
 
 .home-section-copy {
   margin-top: 3px;
-  color: var(--text-subtle, var(--text-muted));
+  color: var(--text-muted);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -395,8 +395,8 @@
 }
 
 .hot-session-card {
-  background: var(--card-bg, rgba(255, 255, 255, 0.03));
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  background: var(--white-3);
+  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.08));
   border-radius: 8px;
   padding: 10px 12px;
   cursor: pointer;
@@ -406,13 +406,13 @@
   border-color: var(--accent, #60a5fa);
 }
 .hot-session-card--critical {
-  border-color: var(--danger, #ef4444);
+  border-color: var(--bad);
   background: rgba(239, 68, 68, 0.06);
 }
 .hot-session-card__goal {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary, #e2e8f0);
+  color: var(--text-strong, #e2e8f0);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -460,7 +460,7 @@
 }
 .hot-session-card__blocker {
   font-size: 11px;
-  color: var(--danger, #ef4444);
+  color: var(--bad);
   margin-top: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -493,7 +493,7 @@
   background: rgba(255, 255, 255, 0.04);
 }
 .agent-pulse-card--working {
-  border-left: 2px solid var(--success, #22c55e);
+  border-left: 2px solid var(--ok);
 }
 .agent-pulse-card--watching {
   border-left: 2px solid var(--accent, #60a5fa);
@@ -514,7 +514,7 @@
 .agent-pulse-card__name {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary, #e2e8f0);
+  color: var(--text-strong, #e2e8f0);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

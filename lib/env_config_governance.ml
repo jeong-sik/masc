@@ -184,32 +184,6 @@ module LodgeV2 = struct
     get_bool ~default:false "MASC_DELEGATE_INFERENCE"
 end
 
-(** {1 Social Runtime — Keeper-owned public-square activity} *)
-
-module SocialRuntime = struct
-  type strategy =
-    | Event_driven
-    | Periodic_sweep
-    | Hybrid
-
-  let enabled =
-    get_bool ~default:true "MASC_SOCIAL_RUNTIME_ENABLED"
-
-  let strategy =
-    match
-      Sys.getenv_opt "MASC_SOCIAL_STRATEGY"
-      |> Option.map (fun value -> String.lowercase_ascii (String.trim value))
-    with
-    | Some "periodic_sweep" -> Periodic_sweep
-    | Some "hybrid" -> Hybrid
-    | _ -> Event_driven
-
-  let strategy_to_string = function
-    | Event_driven -> "event_driven"
-    | Periodic_sweep -> "periodic_sweep"
-    | Hybrid -> "hybrid"
-end
-
 (** {1 Thompson Sampling Configuration (env vars retain MASC_LODGE_* prefix for backward compat)} *)
 
 module LodgeSelection = struct

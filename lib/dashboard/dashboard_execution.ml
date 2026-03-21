@@ -18,7 +18,6 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
     | None -> false
   in
   let tempo = Tempo.get_tempo config in
-  let social_runtime_json = Social_runtime.status_json ~config in
   `Assoc
     [
       ("room", `String current_room);
@@ -28,7 +27,6 @@ let room_status_json (config : Room.config) : Yojson.Safe.t =
       ("current_room", `String current_room);
       ("tempo_interval_s", `Float tempo.current_interval_s);
       ("paused", `Bool paused);
-      ("social_runtime", social_runtime_json);
       ("version", `String Version.version);
     ]
 
@@ -215,12 +213,6 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
       let continuity_rows =
         build_continuity_briefs ~now_ts keepers session_contexts
       in
-      let social_tick_json, social_checkins =
-        Social_runtime.execution_json ~config
-      in
-      let social_tick_summary =
-        social_tick_json |> member_assoc "summary"
-      in
       (* --- Payload size reduction: filter + limit --- *)
       (* Sessions: running/paused first, then by severity, max 15 *)
       let sorted_sessions = List.sort (fun (a : session_context) (b : session_context) ->
@@ -243,8 +235,6 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
         [
           ("generated_at", `String (Types.now_iso ()));
           ("status", room_status_json config);
-          ("social_tick", social_tick_summary);
-          ("social_checkins", `List social_checkins);
           ("execution_queue", `List (List.map (fun (row : queue_context) -> row.json) limited_queue));
           ("session_briefs", `List (List.map (fun (row : session_context) -> row.json) limited_sessions));
           ("operation_briefs", `List (List.map (fun (row : operation_context) -> row.json) limited_ops));

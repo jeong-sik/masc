@@ -1,6 +1,6 @@
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import type {
-  Agent, Task, Message, ServerStatus, SocialRuntimeStatus,
+  Agent, Task, Message, ServerStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
   DashboardExecutionQueueItem, DashboardExecutionSessionBrief,
   DashboardExecutionOperationBrief, DashboardExecutionWorkerSupportBrief,
@@ -375,49 +375,12 @@ export function normalizeBuildIdentity(raw: unknown): ServerStatus['build'] | un
   }
 }
 
-export function normalizeSocialRuntimeStatus(raw: unknown): SocialRuntimeStatus | undefined {
-  if (!isRecord(raw)) return undefined
-  const lastResult = isRecord(raw.last_result) ? raw.last_result : null
-  return {
-    enabled: raw.enabled === true,
-    strategy: asString(raw.strategy) ?? undefined,
-    queue_depth: asNumber(raw.queue_depth) ?? undefined,
-    processed_events: asNumber(raw.processed_events) ?? undefined,
-    active_keepers: asNumber(raw.active_keepers) ?? undefined,
-    last_event_at: toIsoTimestamp(raw.last_event_at) ?? asString(raw.last_event_at) ?? null,
-    last_social_action_at:
-      toIsoTimestamp(raw.last_social_action_at) ?? asString(raw.last_social_action_at) ?? null,
-    last_pass_reason: asString(raw.last_pass_reason) ?? null,
-    last_system_skip_reason: asString(raw.last_system_skip_reason) ?? null,
-    total_checks: asNumber(raw.total_checks) ?? undefined,
-    total_acted: asNumber(raw.total_acted) ?? undefined,
-    total_passed: asNumber(raw.total_passed) ?? undefined,
-    total_skipped: asNumber(raw.total_skipped) ?? undefined,
-    total_failed: asNumber(raw.total_failed) ?? undefined,
-    last_result: lastResult
-      ? {
-          checked: asNumber(lastResult.checked) ?? undefined,
-          acted: asNumber(lastResult.acted) ?? undefined,
-          passed: asNumber(lastResult.passed) ?? undefined,
-          skipped: asNumber(lastResult.skipped) ?? undefined,
-          failed: asNumber(lastResult.failed) ?? undefined,
-          last_tick_at:
-            toIsoTimestamp(lastResult.last_tick_at) ?? asString(lastResult.last_tick_at) ?? null,
-          last_pass_reason: asString(lastResult.last_pass_reason) ?? null,
-          last_system_skip_reason: asString(lastResult.last_system_skip_reason) ?? null,
-          activity_report: asString(lastResult.activity_report) ?? null,
-        }
-      : null,
-  }
-}
-
 export function normalizeServerStatus(raw: unknown, generatedAt?: string): ServerStatus | null {
   if (!isRecord(raw)) return null
   return {
     ...(raw as ServerStatus),
     generated_at: generatedAt ?? toIsoTimestamp(raw.generated_at) ?? undefined,
     build: normalizeBuildIdentity(raw.build),
-    social_runtime: normalizeSocialRuntimeStatus(raw.social_runtime),
   }
 }
 

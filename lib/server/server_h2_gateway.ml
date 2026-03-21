@@ -157,12 +157,9 @@ let make_request_handler ~sw ~clock ~server_start_time =
             else if uptime_secs < 3600 then Printf.sprintf "%dm %ds" (uptime_secs / 60) (uptime_secs mod 60)
             else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
           in
-          let state = get_server_state () in
+          let _state = get_server_state () in
           let build = Build_identity.current () in
           let lodge_json = `Assoc [("status", `String "deprecated")] in
-          let social_runtime_json =
-            Social_runtime.status_json ~config:state.Mcp_server.room_config
-          in
           let health_json = `Assoc [
             ("status", `String "ok");
             ("server", `String "masc-mcp");
@@ -173,7 +170,6 @@ let make_request_handler ~sw ~clock ~server_start_time =
             ("uptime", `String uptime_str);
             ("sse_clients", `Int (Sse.client_count ()));
             ("lodge", lodge_json);
-            ("social_runtime", social_runtime_json);
           ] in
           let body = Yojson.Safe.to_string health_json in
           h2_respond_json h2_reqd body ~extra_headers:cors

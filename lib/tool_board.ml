@@ -43,15 +43,6 @@ let strip_state_blocks_text (s : string) : string =
 
 type result = bool * string
 
-type board_event_callback = {
-  on_post_created : Board.post -> unit;
-  on_comment_created : Board.comment -> unit;
-}
-
-let board_event_hook : board_event_callback option ref = ref None
-
-let register_board_event_callback cb =
-  board_event_hook := Some cb
 
 (** {1 Helpers} *)
 
@@ -186,13 +177,6 @@ let handle_post_create args =
   with
   | Ok post ->
       let json = Board.post_to_yojson post in
-      (match !board_event_hook with
-       | Some cb -> (
-           try cb.on_post_created post
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Log.BoardLog.error "on_post_created callback failed: %s"
-               (Printexc.to_string exn))
-       | None -> ());
       (true, Printf.sprintf "✅ Post created:\n%s" (Yojson.Safe.pretty_to_string json))
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))
@@ -317,13 +301,6 @@ let handle_comment_add args =
   match Board_dispatch.add_comment ~post_id ~author ~content ?parent_id ~ttl_hours () with
   | Ok comment ->
       let json = Board.comment_to_yojson comment in
-      (match !board_event_hook with
-       | Some cb -> (
-           try cb.on_comment_created comment
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Log.BoardLog.error "on_comment_created callback failed: %s"
-               (Printexc.to_string exn))
-       | None -> ());
       (true, Printf.sprintf "✅ Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
   | Error e ->
       (false, Printf.sprintf "❌ %s" (board_error_to_string e))

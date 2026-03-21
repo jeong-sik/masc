@@ -39,10 +39,6 @@ let print_summary () =
     Env_config_governance.LodgeV2.agents_per_tick
     Env_config_governance.LodgeV2.use_planner
     Env_config_governance.LodgeV2.reflection_threshold;
-  Log.Env.info "SocialRuntime: enabled=%b strategy=%s"
-    Env_config_governance.SocialRuntime.enabled
-    (Env_config_governance.SocialRuntime.strategy
-     |> Env_config_governance.SocialRuntime.strategy_to_string);
   Log.Env.info "LodgeSelection: max_starvation=%d thompson_weight=%.2f decay=%.2f"
     Env_config_governance.LodgeSelection.max_starvation_ticks
     Env_config_governance.LodgeSelection.thompson_weight

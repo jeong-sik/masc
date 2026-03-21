@@ -24,7 +24,7 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       return html`
-        <div class="error-card my-3 rounded-lg border border-[var(--bad)]/30 bg-[var(--ff-panel)] p-4">
+        <div class="error-card my-3 rounded-lg border border-[var(--bad)]/30 bg-[rgba(10,22,40,0.92)] p-4">
           <strong class="text-[var(--bad)]">${this.props.label ?? 'Component'} 렌더링 오류</strong>
           <pre class="text-xs whitespace-pre-wrap mt-2 opacity-70">${this.state.error.message}</pre>
           <button

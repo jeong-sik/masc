@@ -4,7 +4,6 @@
 
 import { html } from 'htm/preact'
 import { toneClass, relativeTime, trimText } from '../mission-utils'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionBrief,
@@ -81,7 +80,6 @@ export function AttentionSpotlight({ snap }: AttentionSpotlightProps) {
           <div class="home-section-copy">지금 바로 확인할 blocker와 attention 신호만 상단에 압축합니다.</div>
         </div>
         <div class="home-section-actions">
-          <${PanelSemanticDetails} panelId="home.attention_spotlight" compact=${true} />
         </div>
       </div>
       ${items.map(item => html`

@@ -61,23 +61,6 @@
   --warm-sage: #8dbd97;
 
   /* FF Character Sheet theme */
-  --ff-navy: #0a1628;
-  --ff-navy-light: #122040;
-  --ff-gold: #c8a84e;
-  --ff-gold-bright: #e8cc70;
-  --ff-gold-dim: rgba(200, 168, 78, 0.25);
-  --ff-crystal: #47b8ff;
-  --ff-border: rgba(200, 168, 78, 0.35);
-  --ff-border-subtle: rgba(200, 168, 78, 0.12);
-  --ff-border-hover: rgba(200, 168, 78, 0.6);
-  --ff-panel: rgba(10, 22, 40, 0.92);
-  --ff-hp-full: #4ade80;
-  --ff-hp-mid: #fbbf24;
-  --ff-hp-low: #f87171;
-  --ff-mp: #4a9ef5;
-  --ff-xp: #c8a84e;
-  --ff-ko-bg: rgba(40, 40, 50, 0.6);
-  --ff-ko-border: rgba(100, 100, 120, 0.25);
 
   /* Agent status (soft tones) */
   --agent-working: #7ae09a;

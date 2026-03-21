@@ -9,7 +9,6 @@ import {
   serverStatus,
 } from '../store'
 import { refreshForTab } from '../tab-refresh'
-import { PanelSemanticDetails } from './common/semantic-layer'
 import { navigate } from '../router'
 import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from '../operator-store'
 import { selectPendingConfirmState } from '../pending-confirm'
@@ -67,7 +66,6 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
     <section class="rail-card">
       <div class="rail-card-head">
         <h3>현황</h3>
-        <${PanelSemanticDetails} panelId="side_rail.snapshot" compact=${true} />
         <span class="rail-section-chip ${liveConnected ? 'ok' : 'bad'}">${liveConnected ? '연결됨' : '오프라인'}</span>
       </div>
       <div class="rail-stat-grid">
@@ -126,7 +124,6 @@ export function InterveneRailCard() {
     <section class="rail-card">
       <div class="rail-card-head">
         <h3>개입 바로가기</h3>
-        <${PanelSemanticDetails} panelId="side_rail.quick_actions" compact=${true} />
         <span class="rail-section-chip ${pendingConfirms > 0 ? 'warn' : 'ok'}">${pendingConfirms > 0 ? '확인 필요' : '정상'}</span>
       </div>
       <div class="rail-stat-grid">

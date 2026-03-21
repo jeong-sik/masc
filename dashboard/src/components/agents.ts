@@ -123,7 +123,7 @@ export function Execution() {
       <${Card}
         title="주의 항목"
         class="section"
-        semanticId="execution.queue"
+       
         testId="execution.queue"
       >
         ${allClear
@@ -139,7 +139,7 @@ export function Execution() {
         <${Card}
           title="관련 세션"
           class="section"
-          semanticId="execution.sessions"
+         
           testId="execution.session-briefs"
         >
           <${SessionBriefsBody} sessionRows=${sessionRows} />
@@ -148,7 +148,7 @@ export function Execution() {
         <${Card}
           title="관련 작업"
           class="section"
-          semanticId="execution.operations"
+         
           testId="execution.operation-briefs"
         >
           <${OperationBriefsBody} operationRows=${operationRows} />
@@ -157,7 +157,7 @@ export function Execution() {
         <${Card}
           title="참여 에이전트"
           class="section"
-          semanticId="execution.worker_support"
+         
           testId="execution.worker-support"
         >
           <div class="monitor-list">
@@ -170,7 +170,7 @@ export function Execution() {
         <${Card}
           title="키퍼 연속성"
           class="section"
-          semanticId="execution.continuity"
+         
           testId="execution.continuity"
         >
           <div class="monitor-list">
@@ -183,7 +183,7 @@ export function Execution() {
         <${Card}
           title="오프라인 에이전트"
           class="section"
-          semanticId="execution.offline"
+         
           testId="execution.offline-workers"
         >
           <div class="monitor-list">

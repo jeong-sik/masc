@@ -11,9 +11,9 @@
   gap: 12px;
   padding: 14px 18px;
   border-radius: 6px;
-  background: var(--ff-panel, rgba(10, 22, 40, 0.92));
-  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
-  border-left: 3px solid var(--ff-hp-full, var(--ok));
+  background: rgba(10, 22, 40, 0.92);
+  border: 1px solid var(--border-subtle, rgba(200, 168, 78, 0.15));
+  border-left: 3px solid var(--ok);
   font-size: 14px;
   font-weight: 500;
   color: var(--text-strong);
@@ -21,11 +21,11 @@
 }
 
 .situation-banner--ok {
-  border-left-color: var(--ff-hp-full, var(--ok));
+  border-left-color: var(--ok);
 }
 
 .situation-banner--warn {
-  border-left-color: var(--ff-xp, var(--ff-gold));
+  border-left-color: var(--gold, #c8a84e);
 }
 
 .situation-banner--bad {

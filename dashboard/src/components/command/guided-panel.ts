@@ -9,7 +9,6 @@ import {
   commandPlaneSnapshot,
 } from '../../command-store'
 import { agents, serverStatus, tasks } from '../../store'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import {
   currentCommandPlaneSummary,
   dashboardActorName,
@@ -196,7 +195,6 @@ function GuidedPanel() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">즉시 조치</div>
-          <${PanelSemanticDetails} panelId="command.summary" compact=${true} />
         </div>
         <div class="command-guide-card highlight command-next-step-card">
           <div class="command-guide-head">
@@ -250,7 +248,6 @@ function GuidedPanel() {
       <section class="card command-section">
         <div class="card-title-row">
           <div class="card-title">운영 경로</div>
-          <${PanelSemanticDetails} panelId="command.summary" compact=${true} />
         </div>
         ${commandPlaneHelpLoading.value
           ? html`<div class="empty-state">CPv2 runbook 불러오는 중…</div>`

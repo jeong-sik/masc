@@ -2,7 +2,6 @@
 
 import { signal } from '@preact/signals'
 import { html } from 'htm/preact'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import {
   fetchAutoresearchStatus,
   injectAutoresearchHypothesis,
@@ -143,7 +142,6 @@ export function OpsSessionColumn() {
       <section class="card ops-panel ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">Session 개입</div>
-          <${PanelSemanticDetails} panelId="intervene.session_queue" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">지금 개입 가능한 세션만 위에 두고, 종료된 세션은 아래에 접어 둡니다.</p>
 
@@ -173,7 +171,6 @@ export function OpsSessionColumn() {
       <section class="card ops-panel">
         <div class="card-title-row">
           <div class="card-title">선택한 Session 요약</div>
-          <${PanelSemanticDetails} panelId="intervene.session_digest" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">snapshot이 아니라 digest 기준 attention과 worker 카드를 보여줍니다.</p>
         ${selectedSession && sessionDigest ? html`
@@ -235,7 +232,6 @@ export function OpsSessionColumn() {
       <section class="card ops-panel ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">선택한 Session 액션</div>
-          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">
           ${selectedSessionActionable

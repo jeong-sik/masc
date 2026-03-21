@@ -9,7 +9,6 @@ import { roomTruthInitializing } from '../room-truth-store'
 import { Overview } from './overview/overview'
 import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
-import { PanelSemanticDetails } from './common/semantic-layer'
 import {
   DASHBOARD_SURFACES,
   DASHBOARD_NAV_ITEMS,
@@ -133,7 +132,6 @@ export function SideRail() {
       <section class="rail-card rail-card-compact">
         <div class="rail-card-head">
           <h3>탐색</h3>
-          <${PanelSemanticDetails} panelId="side_rail.navigate" compact=${true} />
         </div>
 
         <!-- Primary surfaces (5 items) -->

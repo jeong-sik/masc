@@ -1,6 +1,5 @@
 import { html } from 'htm/preact'
 import { route } from '../../router'
-import { PanelSemanticDetails } from '../common/semantic-layer'
 import { workflowContextForRoute } from '../../workflow-context'
 import {
   currentCommandPlaneSummary,
@@ -36,7 +35,6 @@ export function SwarmOverviewPanel() {
     <section class="card command-section">
       <div class="card-title-row">
         <div class="card-title">스웜</div>
-        <${PanelSemanticDetails} panelId="command.swarm" compact=${true} />
       </div>
       ${swarm
         ? html`

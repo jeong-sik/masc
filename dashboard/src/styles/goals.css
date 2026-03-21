@@ -197,7 +197,7 @@
 }
 
 .goal-due {
-  color: var(--ff-hp-low);
+  color: #f87171;
 }
 
 .goal-review-note {
@@ -248,7 +248,7 @@
 
 .priority-badge--p1 {
   background: rgba(248, 113, 113, 0.2);
-  color: var(--ff-hp-low);
+  color: #f87171;
   border: 1px solid rgba(248, 113, 113, 0.35);
 }
 

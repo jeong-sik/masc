@@ -61,7 +61,7 @@ export function DecisionDetail() {
     <${Card}
       title=${item ? '사건 상세' : '거버넌스 상세'}
       class="section"
-      semanticId="governance.detail"
+     
     >
       ${detailLoading.value
         ? html`<div class="loading-indicator">거버넌스 상세 불러오는 중...</div>`

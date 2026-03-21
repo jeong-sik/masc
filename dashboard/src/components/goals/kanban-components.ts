@@ -49,7 +49,7 @@ export function TaskBacklog() {
   const sortedDone = [...done].sort(sortByTimeDesc)
 
   return html`
-    <${Card} title="태스크 백로그" class="section" semanticId="planning.backlog">
+    <${Card} title="태스크 백로그" class="section">
       <div class="kanban-board">
         <div class="kanban-column">
           <div class="kanban-header todo">

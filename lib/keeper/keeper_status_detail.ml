@@ -519,7 +519,8 @@ let handle_keeper_status ctx args : tool_result =
            ("compaction_history_count", `Int (snd compaction_history_tail));
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path ctx.config m.name));
-             ("metrics", `String metrics_path);
+             ("metrics", `String (Dated_jsonl.base_dir metrics_store));
+             ("metrics_legacy", `String metrics_path);
              ("memory_bank", `String memory_bank_path);
              ("policy", `String (keeper_policy_log_path ctx.config m.name));
              ("feedback", `String (keeper_feedback_log_path ctx.config m.name));

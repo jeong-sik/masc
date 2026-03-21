@@ -8,12 +8,11 @@ import type {
 } from '../../types'
 import {
   confirmOperatorPendingAction,
-  dispatchOperatorAction,
   operatorActionBusy,
   operatorSnapshot,
 } from '../../operator-store'
 import { ProvenanceChip } from '../common/provenance-strip'
-import { dashboardActorName, relativeTime, toneClass } from './helpers'
+import { relativeTime, toneClass } from './helpers'
 import { SwarmWorkerGrid } from './swarm-cards'
 
 function swarmLaneTone(lane: CommandPlaneSwarmLane): string {
@@ -209,28 +208,18 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
   const resolution = swarm.run_resolution
   if (!runId || (!recommendation && !resolution)) return null
 
-  const actor = dashboardActorName() ?? 'dashboard'
   const pendingConfirm =
     operatorSnapshot.value?.pending_confirms.find(item =>
       item.target_type === 'swarm_run' && item.target_id === runId,
     ) ?? null
   const tone = runResolutionTone(recommendation, resolution)
-  const operationId = swarm.operation?.operation_id ?? swarm.operation_id ?? undefined
-  const basePayload: Record<string, unknown> = {
-    run_id: runId,
-  }
-  if (operationId) basePayload.operation_id = operationId
-  if (recommendation?.reason) basePayload.reason = recommendation.reason
-
-  const previewAction = async (actionType: 'swarm_run_continue' | 'swarm_run_rerun' | 'swarm_run_abandon') => {
-    await dispatchOperatorAction({
-      actor,
-      action_type: actionType,
-      target_type: 'swarm_run',
-      target_id: runId,
-      payload: basePayload,
-    })
-  }
+  const hasAdvisoryResolutionOnly =
+    Boolean(
+      recommendation
+      && (recommendation.continue_available
+        || recommendation.rerun_available
+        || recommendation.abandon_available),
+    )
 
   const confirmPending = async (decision: 'confirm' | 'deny') => {
     if (!pendingConfirm) return
@@ -282,19 +271,12 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
               </div>
             </div>
           `
-        : recommendation
+        : hasAdvisoryResolutionOnly
           ? html`
-              <div class="command-action-row">
-                ${recommendation.continue_available
-                  ? html`<button class="control-btn ghost" onClick=${() => { void previewAction('swarm_run_continue') }} disabled=${operatorActionBusy.value}>Continue</button>`
-                  : null}
-                ${recommendation.rerun_available
-                  ? html`<button class="control-btn" onClick=${() => { void previewAction('swarm_run_rerun') }} disabled=${operatorActionBusy.value}>Rerun</button>`
-                  : null}
-                ${recommendation.abandon_available
-                  ? html`<button class="control-btn ghost" onClick=${() => { void previewAction('swarm_run_abandon') }} disabled=${operatorActionBusy.value}>Abandon</button>`
-                  : null}
-              </div>
+              <p>
+                Run resolution은 현재 operator action surface에서 직접 실행되지 않습니다.
+                이 카드는 recommendation과 recorded resolution만 보여줍니다.
+              </p>
             `
           : null}
     </article>

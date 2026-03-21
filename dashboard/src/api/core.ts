@@ -271,12 +271,6 @@ function operatorActionTimeoutMs(body: OperatorActionRequest): number {
     case 'keeper_message':
     case 'keeper_recover':
       return 90_000
-    case 'swarm_run_continue':
-      return 60_000
-    case 'swarm_run_rerun':
-      return 120_000
-    case 'swarm_run_abandon':
-      return 30_000
     case 'social_sweep':
       return 45_000
     default:

@@ -91,10 +91,6 @@ let register_all () =
   (* ── Mod_council: non-schema tools ──────────────────────────── *)
   reg Mod_council [
     "masc_route"; "masc_execute"; "masc_execute_dry_run";
-    "masc_debate_start"; "masc_debate_argue";
-    "masc_debate_close"; "masc_debate_status"; "masc_debates";
-    "masc_consensus_start"; "masc_consensus_vote";
-    "masc_consensus_close"; "masc_consensus_result"; "masc_sessions";
   ];
 
   (* ── Mod_a2a: Tool_a2a ───────────────────────────────────────── *)

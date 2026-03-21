@@ -1,8 +1,19 @@
 (** Tool permission filter *)
 
 let admin_tools =
-  [ (* Legacy gardener tools removed — handlers no longer exist.
-       Kept as empty list; future admin tools go here. *)
+  [
+    (* Auth permission SSOT still exposes these as admin-only surfaces. *)
+    "masc_autoresearch_start";
+    "masc_autoresearch_swarm_start";
+    "masc_autoresearch_cycle";
+    "masc_autoresearch_inject";
+    "masc_autoresearch_stop";
+    "masc_policy_freeze_unit";
+    "masc_policy_kill_switch";
+    "masc_auth_create_token";
+    "masc_tool_grant";
+    "masc_tool_revoke";
+    "masc_tool_admin_update";
   ]
 
 let admin_set : (string, unit) Hashtbl.t = Hashtbl.create 8

@@ -79,6 +79,7 @@ let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =
       }
     in
     let stats = Keeper_runtime.bootstrap_existing_keepers keeper_ctx in
+    Keeper_runtime.maybe_start_supervisor_sweep keeper_ctx stats;
     if stats.enabled then
       Log.Keeper.info "scanned=%d started=%d stale=%d recovering=%d"
         stats.scanned stats.started stats.stale stats.recovering

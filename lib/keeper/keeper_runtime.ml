@@ -122,10 +122,15 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
     Runs alongside existing keepalive bootstrap, scanning for
     zombie fibers and restarting them with exponential backoff.
     Called once from start_existing_keepalives after bootstrap. *)
-let supervisor_sweep_started = ref false
+let supervisor_sweep : Pulse.t option ref = ref None
+
+let supervisor_sweep_running () =
+  match !supervisor_sweep with
+  | Some pulse -> Pulse.is_alive pulse
+  | None -> false
 
 let start_supervisor_sweep ctx =
-  if !supervisor_sweep_started then ()
+  if supervisor_sweep_running () then ()
   else begin
     let consumer : (module Pulse.Consumer) =
       (module struct
@@ -148,29 +153,34 @@ let start_supervisor_sweep ctx =
       ~lifecycle:Perpetual
       ~consumers:[consumer]
     in
+    supervisor_sweep := Some p;
     Pulse.run ~sw:ctx.sw p;
-    supervisor_sweep_started := true;
     Log.Keeper.info "resident supervisor sweep started (interval %.0fs)"
       Env_config.KeeperResidentSupervisor.sweep_interval_sec
   end
 
-let existing_keepalive_bootstrap_done = ref false
+let existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t =
+  Hashtbl.create 4
+
+let maybe_start_supervisor_sweep ctx (stats : keeper_bootstrap_stats) =
+  if stats.started > 0 || Keeper_resident_supervisor.supervised_count () > 0
+  then start_supervisor_sweep ctx
 
 let start_existing_keepalives ctx =
-  if !existing_keepalive_bootstrap_done then ()
+  let base_path = ctx.config.base_path in
+  if Hashtbl.mem existing_keepalive_bootstrap_done base_path then ()
   else begin
-    existing_keepalive_bootstrap_done := true;
+    Hashtbl.replace existing_keepalive_bootstrap_done base_path ();
     try
       let stats = bootstrap_existing_keepers ctx in
       if keeper_debug then
         Log.Keeper.debug "bootstrap_existing_keepers enabled=%b scanned=%d started=%d stale=%d recovering=%d"
           stats.enabled stats.scanned stats.started stats.stale
           stats.recovering;
-      (* Start supervisor sweep loop after bootstrap *)
-      start_supervisor_sweep ctx
+      maybe_start_supervisor_sweep ctx stats
     with exn ->
       (* Retry bootstrap on next keeper tool call if this attempt failed. *)
-      existing_keepalive_bootstrap_done := false;
+      Hashtbl.remove existing_keepalive_bootstrap_done base_path;
       raise exn
   end
 

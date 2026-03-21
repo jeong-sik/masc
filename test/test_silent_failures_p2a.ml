@@ -174,10 +174,10 @@ let test_source_metrics_fd_unlock () =
       {|fd unlock failed:|})
 
 let test_source_model_token_parse () =
-  check bool "masc_model.ml has token count type"
+  check bool "model_spec.ml keeps model parsing source"
     true (any_file_contains_pattern
-      ["lib/masc_model.ml"]
-      {|token|})
+      [ "lib/model_spec.ml" ]
+      {|model_spec_of_string|})
 
 let test_source_keeper_proactive () =
   check bool "keeper sources have proactive emission logging"
@@ -239,7 +239,7 @@ let () =
         `Quick test_source_metrics_fd_close;
       test_case "MA-H2b: metrics fd unlock logging present"
         `Quick test_source_metrics_fd_unlock;
-      test_case "MA-H3: model token parse logging present"
+      test_case "MA-H3: model spec parse source present"
         `Quick test_source_model_token_parse;
       test_case "MA-H4: keeper proactive logging present"
         `Quick test_source_keeper_proactive;

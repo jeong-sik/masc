@@ -145,7 +145,7 @@
 | 4.3.3 | 액션 실행 | `POST /api/v1/operator/action` | PASS | action_type 필드 필수 |
 | 4.3.4 | 대기 확인 | `POST /api/v1/operator/confirm` | PASS | confirm_token + actor + decision |
 
-**유효 action_type**: `keeper_message`, `keeper_recover`, `swarm_run_continue`, `swarm_run_rerun`, `swarm_run_abandon`, `social_sweep`, `lodge_tick`
+**유효 action_type**: `keeper_message`, `keeper_recover`, `team_worker_spawn_batch`, `social_sweep`, `lodge_tick`
 
 ---
 

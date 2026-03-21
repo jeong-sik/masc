@@ -18,7 +18,11 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 # 1. Pre-check
 echo "1️⃣ Pre-check..."
-BEFORE_TESTS=$(opam exec -- dune test --root "$REPO_DIR" 2>&1 | grep -c "Test Successful" || echo "0")
+BEFORE_TESTS=$(
+  CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
+    "$REPO_DIR/scripts/ci-run-tests.sh" \
+    "opam exec -- dune test --root \"$REPO_DIR\"" 2>&1 | grep -c "Test Successful" || echo "0"
+)
 echo "   Tests before: $BEFORE_TESTS passing"
 
 # 2. Build
@@ -31,7 +35,11 @@ echo "   ✅ Build OK"
 
 # 3. Test
 echo "3️⃣ Testing..."
-TEST_OUTPUT=$(opam exec -- dune test --root "$REPO_DIR" 2>&1 || true)
+TEST_OUTPUT=$(
+  CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
+    "$REPO_DIR/scripts/ci-run-tests.sh" \
+    "opam exec -- dune test --root \"$REPO_DIR\"" 2>&1 || true
+)
 AFTER_TESTS=$(echo "$TEST_OUTPUT" | grep -c "Test Successful" || echo "0")
 FAILED=$(echo "$TEST_OUTPUT" | grep -c "FAILED\|Error" || echo "0")
 

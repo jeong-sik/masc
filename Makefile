@@ -12,7 +12,7 @@ build:
 
 # Build dashboard SPA (Vite)
 dashboard:
-	cd dashboard && npm install --prefer-offline --no-audit && npm run build
+	cd dashboard && npm ci && npm run build
 
 # Build everything (OCaml + dashboard)
 build-all: build dashboard
@@ -47,7 +47,7 @@ clean:
 coverage:
 	rm -rf _coverage
 	mkdir -p _coverage
-	BISECT_FILE=$(CURDIR)/_coverage/bisect dune test --root . --instrument-with bisect_ppx --force
+	CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 scripts/ci-run-tests.sh "BISECT_FILE=$(CURDIR)/_coverage/bisect opam exec -- dune test --root . --instrument-with bisect_ppx --force"
 
 # Print coverage summary to stdout
 coverage-summary: coverage

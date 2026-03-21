@@ -95,3 +95,29 @@ let test_swarm_run_abandon_removed_from_operator_actions () =
       | Error err ->
           Alcotest.(check string) "unsupported action"
             "unsupported action_type: swarm_run_abandon" err)
+
+let test_swarm_run_rerun_removed_from_operator_actions () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Room.default_config base_dir in
+      ignore (Room.init config ~agent_name:(Some "dashboard"));
+      let ctx = operator_ctx env sw config "dashboard" in
+      match
+        Operator_control.action_json ctx
+          (`Assoc
+            [
+              ("actor", `String "dashboard");
+              ("action_type", `String "swarm_run_rerun");
+              ("target_type", `String "swarm_run");
+              ("target_id", `String "operator-swarm-rerun");
+              ("payload", `Assoc []);
+            ])
+      with
+      | Ok _ -> Alcotest.fail "swarm_run_rerun should be removed from operator actions"
+      | Error err ->
+          Alcotest.(check string) "unsupported action"
+            "unsupported action_type: swarm_run_rerun" err)

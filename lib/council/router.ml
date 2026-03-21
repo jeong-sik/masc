@@ -193,7 +193,7 @@ let select_agents
     classifications 
     |> List.filter (fun (_, score) -> score > 0.1)
     |> List.map fst
-    |> (fun l -> if List.length l > 2 then [List.nth l 0; List.nth l 1] else l)
+    |> (fun l -> match l with a :: b :: _ -> [a; b] | _ -> l)
   in
   
   (* Score each agent by strength match *)

@@ -134,12 +134,12 @@ let parse_chain_design (response: string) : (chain, string) result =
             in
             match missing with
             | [] -> None
-            | _ ->
+            | first_missing :: _ ->
                 Some
                   (Printf.sprintf "Node '%s' does not reference upstream inputs %s. Use template variables like {{%s}} in the prompt/args."
                      node.id
                      (String.concat ", " missing)
-                     (List.hd missing))
+                     first_missing)
         )
         chain.nodes
     in

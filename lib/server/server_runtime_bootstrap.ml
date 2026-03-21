@@ -125,24 +125,20 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   Sse.set_clock clock;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
   let event_bus = Agent_sdk.Event_bus.create () in
-  (* Subsystem health registry: tracks liveness of forked subsystems.
-     Maps name → (is_alive, last_crash_time option). *)
-  let subsystem_health : (string, bool * float option) Hashtbl.t = Hashtbl.create 8 in
   (* Eio fiber isolation: each subsystem runs in its own fiber.
-     If one crashes, others keep running — Eio's structured concurrency. *)
+     If one crashes, others keep running — Eio's structured concurrency.
+     Subsystem_health tracks liveness at module level (no init timing dependency). *)
   let fork_subsystem name f =
-    Hashtbl.replace subsystem_health name (true, None);
+    Subsystem_health.register name;
     Eio.Fiber.fork ~sw (fun () ->
       try f ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        Hashtbl.replace subsystem_health name (false, Some (Time_compat.now ()));
+        Subsystem_health.mark_dead name;
         Log.Server.error "subsystem %s crashed: %s" name
           (Printexc.to_string exn))
   in
-  (* Expose subsystem health for /health endpoint *)
-  Subsystem_health.set_registry subsystem_health;
   (* Event_bus → SSE bridge: relay masc:* events to dashboard *)
   Oas_sse_bridge.start ~sw ~clock ~bus:event_bus;
   (* Inject Event_bus into keeper resident runtime for telemetry publishing *)

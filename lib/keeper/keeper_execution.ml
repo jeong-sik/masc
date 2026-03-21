@@ -1,12 +1,13 @@
 (** Keeper_execution — keeper tool execution loop, prompting,
-    compaction, proactive/explicit room behavior, and keepalive runtime.
+    compaction, social board events, and keepalive runtime.
 
     Delegates to sub-modules:
     - Keeper_coordination: checkpoint, room presence, compaction
     - Keeper_prompt: system prompts, mention detection, text processing
-    - Keeper_exec_autonomy: autonomous goal evaluation and execution
-    - Keeper_exec_proactive: proactive emission and deliberation
-    - Keeper_exec_social: social board events and explicit room replies *)
+    - Keeper_exec_social: social board events
+
+    Proactive emission and autonomous goal turns are now handled by
+    Keeper_unified_turn via the unified keeper loop. *)
 
 
 include Keeper_coordination
@@ -35,6 +36,4 @@ type social_turn_outcome = Keeper_exec_context.social_turn_outcome = {
 
 let memory_check_default_json = Keeper_exec_context.memory_check_default_json
 
-include Keeper_exec_autonomy
-include Keeper_exec_proactive
 include Keeper_exec_social

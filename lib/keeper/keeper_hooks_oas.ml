@@ -30,6 +30,24 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
        | _ -> "")
   with Yojson.Safe.Util.Type_error _ -> ""
 
+(** Tools allowed at each autonomy level for the unified turn path.
+    Returns None if no filtering should be applied (AllowAll). *)
+let allowed_tools_for_autonomy_level
+    (level : Keeper_autonomy.autonomy_level) : string list option =
+  let base_safe = [
+    "keeper_board_get"; "keeper_board_post"; "keeper_board_comment";
+    "keeper_board_vote"; "keeper_board_list";
+    "keeper_read"; "keeper_fs_read";
+    "keeper_memory_search";
+    "keeper_time_now"; "keeper_context_status";
+  ] in
+  match level with
+  | L1_Reactive -> Some base_safe
+  | L2_Suggestive -> Some base_safe
+  | L3_Guided -> Some base_safe
+  | L4_Autonomous -> Some ("keeper_bash" :: base_safe)
+  | L5_Independent -> None  (* AllowAll *)
+
 (** Build OAS hooks for a keeper agent.
 
     @param config Room configuration
@@ -39,7 +57,8 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
     @param generation Current generation counter
     @param max_cost_usd Optional cost budget (rejects tool calls above limit)
     @param destructive_check Enable destructive pattern detection (default true)
-    @param on_tool_executed Optional callback after each tool execution *)
+    @param on_tool_executed Optional callback after each tool execution
+    @param autonomy_filter Optional autonomy level for tool visibility gating *)
 let make_hooks
     ~(config : Room.config)
     ~(meta_ref : Keeper_types.keeper_meta ref)
@@ -50,11 +69,17 @@ let make_hooks
     ?(destructive_check : bool = true)
     ?(on_tool_executed : string -> Yojson.Safe.t -> string -> unit =
         fun _ _ _ -> ())
+    ?(autonomy_filter : Keeper_autonomy.autonomy_level option)
     ()
   : Agent_sdk.Hooks.hooks =
   ignore config;
   let board_write_tools =
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote" ]
+  in
+  let autonomy_allowed =
+    match autonomy_filter with
+    | None -> None
+    | Some level -> allowed_tools_for_autonomy_level level
   in
   { Agent_sdk.Hooks.empty with
 
@@ -99,7 +124,18 @@ let make_hooks
              (!meta_ref).name accumulated_cost_usd limit tool_name;
            Agent_sdk.Hooks.Skip
          | _ ->
-           (* Safety gate 2: Destructive pattern detection *)
+           (* Safety gate 2: Autonomy-level tool visibility *)
+           let autonomy_blocked =
+             match autonomy_allowed with
+             | None -> false  (* AllowAll *)
+             | Some allowed -> not (List.mem tool_name allowed)
+           in
+           if autonomy_blocked then (
+             Log.Keeper.info "keeper:%s autonomy gate: %s not in allowed set, skipping"
+               (!meta_ref).name tool_name;
+             Agent_sdk.Hooks.Skip)
+           else
+           (* Safety gate 3: Destructive pattern detection *)
            if destructive_check && List.mem tool_name destructive_check_tools then
              let cmd = extract_command_from_input input in
              match Eval_gate.detect_destructive cmd with

@@ -61,11 +61,8 @@ val memory_check_default_json : unit -> Yojson.Safe.t
 
 (** {1 Keepalive Runtime} *)
 
-(** Emit proactive message if conditions are met (idle time, soul profile). *)
-val maybe_emit_proactive : _ context -> keeper_meta -> keeper_meta
-
-(** Emit explicit room replies if trigger mode requires it. *)
-val maybe_emit_explicit_room_replies : _ context -> keeper_meta -> keeper_meta
+(* Proactive emission and explicit room replies are now handled
+   by Keeper_unified_turn via the unified keeper loop. *)
 
 (** {1 Compaction} *)
 

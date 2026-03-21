@@ -62,6 +62,7 @@ let run_turn
     ?(max_tokens : int = 4096)
     ?max_cost_usd
     ?on_event
+    ?(autonomy_filter : Keeper_autonomy.autonomy_level option)
     ()
   : (run_result, string) result =
   (* 1. Ensure session directory *)
@@ -115,7 +116,8 @@ let run_turn
   let meta_ref = ref meta in
   let tools = Keeper_tools_oas.make_tools ~config ~meta ~ctx_ref in
   let hooks = Keeper_hooks_oas.make_hooks
-    ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd () in
+    ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
+    ?autonomy_filter () in
   let memory = Memory_oas_bridge.create_memory ~agent_name ~session_id:meta.trace_id () in
   ignore (Memory_oas_bridge.seed_institution ~memory ~config);
   ignore (Memory_oas_bridge.seed_procedures ~memory ~agent_name:"_global" ~limit:5);

@@ -110,50 +110,6 @@ export interface RouteState {
   postId: string | null
 }
 
-
-export interface DashboardSemanticMetric {
-  id: string
-  label: string
-  what_it_measures: string
-  why_it_exists: string
-  source_path: string
-  update_trigger: string
-  agent_behavior_effect: string
-  ecosystem_effect: string
-  interpretation: string
-  bad_smell: string
-  next_action: string
-}
-
-export interface DashboardSemanticPanel {
-  id: string
-  title: string
-  purpose: string
-  problem_solved: string
-  when_active: string
-  agent_role: string
-  ecosystem_function: string
-  related_tools: string[]
-  metrics: DashboardSemanticMetric[]
-}
-
-export interface DashboardSemanticSurface {
-  id: string
-  label: string
-  purpose: string
-  problem_solved: string
-  when_active: string
-  agent_role: string
-  ecosystem_function: string
-  panels: DashboardSemanticPanel[]
-}
-
-export interface DashboardSemanticsResponse {
-  schema_version?: string
-  generated_at?: string
-  surfaces: DashboardSemanticSurface[]
-}
-
 export type TabId =
   | 'home'
   | 'status'

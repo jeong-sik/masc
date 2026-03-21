@@ -107,9 +107,9 @@ export function historySummary(history?: ChainHistoryEventSummary | null): strin
 export type CommandSurfaceGroup = 'status' | 'history' | 'control'
 
 export const COMMAND_SURFACE_GROUPS: Array<{ id: CommandSurfaceGroup; label: string }> = [
-  { id: 'status', label: '현황' },
+  { id: 'status', label: '실행' },
   { id: 'history', label: '이력' },
-  { id: 'control', label: '통제' },
+  { id: 'control', label: '제어' },
 ]
 
 export const COMMAND_SURFACE_META: Array<{ id: CommandPlaneSurface; label: string; group: CommandSurfaceGroup }> = [

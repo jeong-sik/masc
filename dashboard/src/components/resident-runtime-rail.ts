@@ -9,7 +9,6 @@ import {
   serverStatus,
 } from '../store'
 import { refreshForTab } from '../tab-refresh'
-import { PanelSemanticDetails } from './common/semantic-layer'
 import { navigate } from '../router'
 import { operatorSnapshot, refreshOperatorRoomDigest, refreshOperatorSnapshot } from '../operator-store'
 import { selectPendingConfirmState } from '../pending-confirm'
@@ -91,8 +90,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
   return html`
     <section class="rail-card">
       <div class="rail-card-head">
-        <h3>현황</h3>
-        <${PanelSemanticDetails} panelId="side_rail.snapshot" compact=${true} />
+        <h3>실행 현황</h3>
         <span class="rail-section-chip ${liveConnected ? 'ok' : 'bad'}">${liveConnected ? '연결됨' : '오프라인'}</span>
       </div>
       <div class="rail-stat-grid">
@@ -124,7 +122,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
           새로고침
         </button>
         <button class="rail-secondary-btn" onClick=${() => navigate('operations', { section: 'intervene' })}>
-          운영 패널 열기
+          제어 화면 열기
         </button>
       </div>
       ${build
@@ -150,8 +148,7 @@ export function InterveneRailCard() {
   return html`
     <section class="rail-card">
       <div class="rail-card-head">
-        <h3>개입 바로가기</h3>
-        <${PanelSemanticDetails} panelId="side_rail.quick_actions" compact=${true} />
+        <h3>즉시 제어</h3>
         <span class="rail-section-chip ${pendingConfirms > 0 ? 'warn' : 'ok'}">${pendingConfirms > 0 ? '확인 필요' : '정상'}</span>
       </div>
       <div class="rail-stat-grid">
@@ -179,7 +176,7 @@ export function InterveneRailCard() {
           개입 데이터 갱신
         </button>
         <button class="rail-secondary-btn" onClick=${() => navigate('operations', { section: 'intervene' })}>
-          운영 패널 열기
+          제어 화면 열기
         </button>
       </div>
     </section>

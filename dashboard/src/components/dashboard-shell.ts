@@ -9,7 +9,6 @@ import { roomTruthInitializing } from '../room-truth-store'
 import { Overview } from './overview/overview'
 import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
-import { PanelSemanticDetails } from './common/semantic-layer'
 import {
   DASHBOARD_SURFACES,
   DASHBOARD_NAV_ITEMS,
@@ -119,11 +118,12 @@ export function SideRail() {
     <aside class="dashboard-rail">
       <section class="rail-card rail-card-compact">
         <div class="rail-card-head">
-          <h3>탐색</h3>
-          <${PanelSemanticDetails} panelId="side_rail.navigate" compact=${true} />
+          <div>
+            <h3>업무 흐름</h3>
+            <p class="rail-card-copy">현재 작업면과 바로 이어지는 세부 화면만 보여줍니다.</p>
+          </div>
         </div>
 
-        <!-- Primary surfaces (5 items) -->
         <div class="rail-tab-list">
           ${DASHBOARD_SURFACES.map(surface => {
             const isActive = surface.id === currentSurface
@@ -133,7 +133,6 @@ export function SideRail() {
                 key=${surface.id}
                 onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
               >
-                <span class="rail-tab-icon">${surface.icon}</span>
                 <span class="rail-tab-copy">
                   <strong>${surface.label}</strong>
                   <span>${surface.description}</span>
@@ -143,12 +142,11 @@ export function SideRail() {
           })}
         </div>
 
-        <!-- Sub-tabs within current surface -->
         ${(() => {
           if (sectionItems.length === 0) return null
           return html`
             <div class="rail-nav-group" style="margin-top: 12px;">
-              <div class="rail-group-label">${currentView?.label ?? currentSurface} 하위</div>
+              <div class="rail-group-label">${currentView?.label ?? currentSurface} 세부</div>
               <div class="rail-tab-list" style="margin-top: 6px;">
                 ${sectionItems.map(item => html`
                   <button
@@ -169,7 +167,7 @@ export function SideRail() {
         })()}
 
         <div class="rail-view-note">
-          <div class="rail-view-note-label">현재 화면</div>
+          <div class="rail-view-note-label">현재 위치</div>
           <strong>${currentSection ? `${currentView?.label ?? current} · ${currentSection.label}` : currentView?.label ?? current}</strong>
           <p>${currentSection?.description ?? currentView?.description ?? '운영 화면'}</p>
         </div>
@@ -189,25 +187,25 @@ export function TabContent() {
       return html`<${Overview} />`
     case 'status':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('현황 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('실행 화면')}>
           <${LazyStatus} />
         <//>
       `
     case 'work':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('작업 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('기록 화면')}>
           <${LazyWork} />
         <//>
       `
     case 'operations':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('운영 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('제어 화면')}>
           <${LazyOperations} />
         <//>
       `
     case 'lab':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('실험실 화면')}>
+        <${Suspense} fallback=${lazyTabFallback('실험 화면')}>
           <${LazyLabSurface} />
         <//>
       `

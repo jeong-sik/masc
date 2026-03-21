@@ -12,9 +12,9 @@ import { ErrorBoundary } from './common/error-boundary'
 type WorkSection = 'board' | 'governance' | 'evidence' | 'planning'
 
 const SECTIONS: { id: WorkSection; label: string; tooltip: string }[] = [
-  { id: 'board', label: '게시판', tooltip: '에이전트 간 소통과 지식 공유' },
-  { id: 'governance', label: '거버넌스', tooltip: '의사결정 기록과 판결' },
-  { id: 'evidence', label: '근거', tooltip: '작업 증거와 검증 결과' },
+  { id: 'board', label: '메모리', tooltip: '비동기 맥락과 대화 기록' },
+  { id: 'governance', label: '거버넌스', tooltip: '의사결정 기록과 승인 흐름' },
+  { id: 'evidence', label: '근거', tooltip: '작업 증거와 산출물' },
   { id: 'planning', label: '계획', tooltip: '장기 목표와 메트릭 루프' },
 ]
 

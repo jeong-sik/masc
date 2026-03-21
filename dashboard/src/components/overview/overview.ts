@@ -163,7 +163,7 @@ function HotSessions() {
     <div class="hot-sessions">
       <${HomeSectionHeader}
         label="팀 세션"
-        copy="홈에서는 사람 중심 작업과 자동 런타임을 나눠 보여줍니다."
+        copy="개요에서는 사람 중심 작업과 자동 런타임을 나눠 보여줍니다."
         semanticId="home.hot_sessions"
         linkLabel="전체 보기"
         onLink=${() => navigate('status', { section: 'sessions' })}

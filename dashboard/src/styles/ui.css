@@ -62,39 +62,41 @@
   margin: 0;
   padding: 8px;
   border-radius: 12px;
-  border: 1px solid rgba(138, 163, 211, 0.22);
-  background: rgba(17, 26, 46, 0.8);
+  border: 1px solid var(--card-border);
+  background: rgba(19, 24, 34, 0.82);
   backdrop-filter: blur(8px);
 }
 
 .main-tab-btn {
   border: 1px solid transparent;
-  color: #99aed8;
+  color: var(--text-muted);
   background: rgba(255, 255, 255, 0.02);
   font-weight: 500;
 }
 
 .main-tab-btn:hover {
-  color: #d6e5ff;
-  border-color: rgba(138, 163, 211, 0.35);
+  color: var(--text-strong);
+  border-color: rgba(148, 163, 184, 0.3);
 }
 
 .main-tab-btn.active {
-  color: #c9ebff;
-  border-color: rgba(71, 184, 255, 0.5);
+  color: var(--text-strong);
+  border-color: rgba(122, 162, 255, 0.4);
   background: var(--accent-soft);
 }
 
 .card {
   border-color: var(--card-border);
   background: var(--card);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
 }
 
 .card-title {
-  color: #d7e7ff;
+  color: var(--text-strong);
   font-size: 15px;
-  letter-spacing: 0.05em;
+  letter-spacing: -0.01em;
   line-height: 1.35;
+  text-transform: none;
 }
 
 /* Overview */
@@ -164,9 +166,9 @@ button.agent-card:hover {
 
 .room-truth-card {
   border-radius: 14px;
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--card-border);
   background:
-    linear-gradient(180deg, rgba(40, 56, 92, 0.34), rgba(19, 29, 51, 0.9)),
+    linear-gradient(180deg, rgba(29, 37, 51, 0.54), rgba(19, 24, 34, 0.92)),
     var(--card);
   padding: 14px 16px;
   display: flex;
@@ -191,7 +193,7 @@ button.agent-card:hover {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   font-size: 10px;
-  color: #7fa5d8;
+  color: #9aabca;
 }
 
 .room-truth-chip-row {
@@ -236,11 +238,12 @@ button.agent-card:hover {
   margin: 0;
   font-size: 18px;
   color: var(--text-strong);
+  letter-spacing: -0.02em;
 }
 
 .monitor-subheadline {
   margin: 6px 0 0;
-  color: #8ba2c9;
+  color: var(--text-muted);
   font-size: 13px;
   line-height: 1.45;
 }

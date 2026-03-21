@@ -25,6 +25,14 @@
   max-width: 62ch;
 }
 
+.ops-helper-note {
+  margin-top: 12px;
+  color: #b8c3d3;
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 64ch;
+}
+
 .ops-toolbar {
   display: flex;
   align-items: flex-end;

@@ -426,28 +426,29 @@
 
 .tab-pill-bar {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .tab-pill {
-  padding: 4px 14px;
-  border-radius: 16px;
-  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  background: none;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.025);
   color: var(--text-muted);
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
 .tab-pill:hover {
-  border-color: var(--accent, #60a5fa);
-  color: var(--text-primary, #e2e8f0);
+  border-color: rgba(122, 162, 255, 0.34);
+  color: var(--text-strong);
 }
 .tab-pill--active {
-  background: var(--accent, #60a5fa);
-  border-color: var(--accent, #60a5fa);
-  color: #fff;
+  background: rgba(122, 162, 255, 0.16);
+  border-color: rgba(122, 162, 255, 0.4);
+  color: var(--text-strong);
 }
 
 .tab-collapsible {
@@ -465,4 +466,3 @@
 .tab-collapsible__summary:hover {
   color: var(--text-primary, #e2e8f0);
 }
-

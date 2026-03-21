@@ -4,7 +4,7 @@
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  padding: 2px 8px;
+  padding: 3px 9px;
   border-radius: 999px;
 }
 .status-badge.active { background: rgba(74,222,128,0.15); color: var(--ok); }
@@ -26,114 +26,25 @@
 
 /* ── Card (generic wrapper) ────────────────────────────────── */
 .card {
-  background: var(--white-3);
-  border-radius: 12px;
-  padding: 20px;
-  border: 1px solid var(--white-8);
+  background: var(--card);
+  border-radius: 18px;
+  padding: 18px;
+  border: 1px solid var(--card-border);
 }
 .card-title {
-  font-size: 14px;
+  font-size: 12px;
   text-transform: uppercase;
-  letter-spacing: 2px;
-  color: var(--ok);
-  margin-bottom: 15px;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  margin-bottom: 14px;
 }
 .card-title-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 15px;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 .card-title-row .card-title {
   margin-bottom: 0;
 }
-.semantic-inline {
-  border: 1px solid rgba(74,222,128,0.18);
-  border-radius: 10px;
-  background: var(--white-3);
-}
-.semantic-inline.compact {
-  background: transparent;
-  border-color: rgba(74,222,128,0.14);
-}
-.semantic-summary {
-  cursor: pointer;
-  list-style: none;
-  padding: 6px 10px;
-  color: #9fe6b5;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.semantic-summary::-webkit-details-marker {
-  display: none;
-}
-.semantic-body {
-  padding: 0 12px 12px 12px;
-}
-.semantic-grid {
-  display: grid;
-  grid-template-columns: 110px minmax(0, 1fr);
-  gap: 8px 12px;
-  margin-bottom: 12px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.semantic-grid > span:nth-child(odd) {
-  color: #8ea9d6;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 10px;
-}
-.semantic-grid.compact {
-  grid-template-columns: 88px minmax(0, 1fr);
-}
-.semantic-tag-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-.semantic-tag,
-.semantic-code {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: var(--white-6);
-  color: #c9d8f0;
-  font-size: 11px;
-}
-.semantic-code {
-  background: rgba(34,211,238,0.12);
-  color: #9be7f3;
-  font-family: monospace;
-}
-.semantic-metric-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.semantic-metric-row {
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--white-3);
-  border: 1px solid var(--white-6);
-}
-.semantic-metric-row p {
-  margin: 6px 0 10px 0;
-  color: #d3dbeb;
-}
-.semantic-metric-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.semantic-inline-state {
-  color: #8ea9d6;
-  font-size: 11px;
-}
-

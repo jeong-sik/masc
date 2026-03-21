@@ -16,8 +16,6 @@ import type {
   KeeperLifecycleState,
   Goal,
   MdalLoop,
-  DashboardSemanticsResponse,
-  DashboardSemanticPanel,
   DashboardExecutionSummary,
   DashboardExecutionQueueItem,
   DashboardExecutionSessionBrief,
@@ -175,9 +173,6 @@ export const boardLoading = signal(false)
 export const trpgLoading = signal(false)
 export const mdalLoading = signal(false)
 
-// Semantics: loaded once on startup, never refreshed (static data).
-export const dashboardSemantics = signal<DashboardSemanticsResponse | null>(null)
-
 // --- Refresh timestamps ---
 
 export const lastDashboardRefreshAt = signal<string | null>(null)
@@ -292,15 +287,6 @@ export async function refreshDashboard(): Promise<void> {
   } finally {
     dashboardLoading.value = false
   }
-}
-
-export function findDashboardSemanticPanel(panelId: string): DashboardSemanticPanel | null {
-  const surfaces = dashboardSemantics.value?.surfaces ?? []
-  for (const surface of surfaces) {
-    const panel = surface.panels.find(row => row.id === panelId)
-    if (panel) return panel
-  }
-  return null
 }
 
 function applyPlanningEnvelope(data: {

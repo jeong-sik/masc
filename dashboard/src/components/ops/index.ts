@@ -166,6 +166,9 @@ export function Ops() {
           <p class="ops-subheading">
             읽는 화면이 아니라 행동하는 화면입니다. 방, 세션, 키퍼를 나눠 보고 바로 개입합니다.
           </p>
+          <p class="ops-helper-note">
+            여기서 실행한 요청은 실제 상태를 바꾸거나 확인 대기로 올립니다. 대상과 입력값을 확인한 뒤 실행하세요.
+          </p>
         </div>
         <div class="ops-toolbar">
           <label class="control-label" for="ops-actor">개입 ID</label>

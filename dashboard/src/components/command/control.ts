@@ -113,6 +113,7 @@ export function ControlSurface() {
           <div class="card-title">승인 대기</div>
           <${PanelSemanticDetails} panelId="command.control" compact=${true} />
         </div>
+        <p class="command-section-note">승인과 거부는 즉시 정책 실행 흐름에 영향을 줍니다. 대상을 먼저 확인하세요.</p>
         ${snapshot && snapshot.decisions.decisions.length > 0
           ? html`<div class="command-card-stack">
               ${snapshot.decisions.decisions.map(decision => html`<${DecisionCard} decision=${decision} />`)}
@@ -125,6 +126,7 @@ export function ControlSurface() {
           <div class="card-title">유닛 제어</div>
           <${PanelSemanticDetails} panelId="command.control" compact=${true} />
         </div>
+        <p class="command-section-note">동결과 킬 스위치는 새 배정과 실행을 막습니다. 운영 중인 유닛에는 신중하게 적용하세요.</p>
         ${snapshot && snapshot.capacity.capacity.length > 0
           ? html`<div class="command-card-stack">
               ${snapshot.capacity.capacity.map(row => html`<${CapacityRowCard} row=${row} />`)}

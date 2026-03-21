@@ -22,7 +22,6 @@ import type {
   DashboardPlanningResponse,
   DashboardRoomTruthResponse,
   DashboardShellResponse,
-  DashboardSemanticsResponse,
   BoardSortMode,
   GovernanceDecisionItem,
   GovernanceTimelineEvent,
@@ -235,10 +234,6 @@ export function fetchRuntimeParams(): Promise<RuntimeParamsResponse> {
 
 export function fetchGovernanceFeed(filter = 'decisions', limit = 20): Promise<unknown[]> {
   return get(`/api/v1/governance/feed?filter=${filter}&limit=${limit}`)
-}
-
-export function fetchDashboardSemantics(): Promise<DashboardSemanticsResponse> {
-  return get('/api/v1/dashboard/semantics')
 }
 
 export function fetchDashboardMission(mode?: 'snapshot' | 'full'): Promise<DashboardMissionResponse> {

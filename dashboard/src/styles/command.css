@@ -70,6 +70,13 @@
   gap: 18px;
 }
 
+.command-section-note {
+  margin: 0 0 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .command-plane-view.wallboard {
   min-height: calc(100vh - 48px);
   padding: 24px;

@@ -5,6 +5,37 @@
 
 open Types [@@warning "-33"]
 
+let activity_room_id (config : Room_utils.config) =
+  match config.scope with
+  | Default -> "default"
+  | Named id -> id
+
+let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
+  try
+    ignore
+      (Activity_graph.emit config ~room_id:(activity_room_id config)
+         ~actor:(Activity_graph.entity ~kind:"agent" actor)
+         ?subject ~kind ~payload ~tags ())
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Misc.warn "activity emit failed (%s): %s" kind
+        (Printexc.to_string exn)
+
+let extract_board_post_id (message : string) =
+  try
+    let idx = String.index message '{' in
+    let json =
+      Yojson.Safe.from_string
+        (String.sub message idx (String.length message - idx))
+    in
+    match Yojson.Safe.Util.member "id" json with
+    | `String id when String.trim id <> "" -> Some id
+    | _ -> None
+  with
+  | Not_found | Invalid_argument _
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+
 let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name =
   ignore (config, agent_name, state, sw, clock);
   let arg_get_string key default =
@@ -230,6 +261,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       if success then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
+        let post_id = extract_board_post_id message in
         (* Record board activity as a fitness metric so board-active agents
            appear in agent_fitness queries (Issue #1861). *)
         (try
@@ -254,16 +286,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("type", `String "masc/board_post");
           ("author", `String author);
           ("content", `String (String.sub content 0 (min 200 (String.length content))));
-          ("post_id", `String (
-            try
-              let idx = String.index message '{' in
-              let json = Yojson.Safe.from_string
-                (String.sub message idx (String.length message - idx)) in
-              Yojson.Safe.Util.(json |> member "id" |> to_string)
-            with
-            | Not_found | Invalid_argument _
-            | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> "unknown"
-          ));
+          ("post_id", `String (Option.value post_id ~default:"unknown"));
           ("timestamp", `String (Types.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
@@ -273,7 +296,21 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ~data:(`Assoc [
             ("event", `String "board_post");
             ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
-          ])
+          ]);
+        emit_activity config ~kind:"board.posted" ~actor:author
+          ?subject:
+            (Option.map (Activity_graph.entity ~kind:"post") post_id)
+          ~tags:[ "board"; "board.posted" ]
+          ~payload:
+            (`Assoc
+              [
+                ("content", `String content);
+                ( "post_id",
+                  match post_id with
+                  | Some id -> `String id
+                  | None -> `Null );
+              ])
+          ()
       end;
       Some result
 
@@ -317,7 +354,17 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
             ("event", `String "board_comment");
             ("post_id", `String post_id);
             ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
-          ])
+          ]);
+        emit_activity config ~kind:"board.commented" ~actor:author
+          ~subject:(Activity_graph.entity ~kind:"post" post_id)
+          ~tags:[ "board"; "board.commented" ]
+          ~payload:
+            (`Assoc
+              [
+                ("post_id", `String post_id);
+                ("content", `String content);
+              ])
+          ()
       end;
       Some result
 
@@ -326,14 +373,14 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       (* Record vote activity as a fitness metric (Issue #1861). *)
       if success then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
+        let target_id =
+          if name = "masc_board_vote" then
+            Safe_ops.json_string ~default:"unknown" "post_id" arguments
+          else
+            Safe_ops.json_string ~default:"unknown" "comment_id" arguments
+        in
         (try
            let now = Time_compat.now () in
-           let target_id =
-             if name = "masc_board_vote" then
-               Safe_ops.json_string ~default:"unknown" "post_id" arguments
-             else
-               Safe_ops.json_string ~default:"unknown" "comment_id" arguments
-           in
            let metric : Metrics_store_eio.task_metric = {
              id = Metrics_store_eio.generate_id ();
              agent_id = voter;
@@ -349,7 +396,20 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
            Metrics_store_eio.record config metric
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "board_vote fitness record failed: %s"
-             (Printexc.to_string exn))
+             (Printexc.to_string exn));
+        let subject_kind =
+          if String.equal name "masc_board_vote" then "post" else "comment"
+        in
+        emit_activity config ~kind:"board.voted" ~actor:voter
+          ~subject:(Activity_graph.entity ~kind:subject_kind target_id)
+          ~tags:[ "board"; "board.voted" ]
+          ~payload:
+            (`Assoc
+              [
+                ("target_id", `String target_id);
+                ("target_kind", `String subject_kind);
+              ])
+          ()
       end;
       Some result
 

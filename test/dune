@@ -149,8 +149,8 @@
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
- (name test_social_motion)
- (modules test_social_motion)
+ (name test_activity_graph)
+ (modules test_activity_graph)
  (libraries masc_mcp alcotest unix yojson eio eio_main))
 
 (test

@@ -98,6 +98,57 @@ let load_session_or_error config session_id =
   | Some s -> Ok s
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
 
+let activity_room_id (config : Room_utils.config) =
+  match config.scope with
+  | Default -> "default"
+  | Named id -> id
+
+let detail_string key detail =
+  match Yojson.Safe.Util.member key detail with
+  | `String value when String.trim value <> "" -> Some value
+  | _ -> None
+
+let emit_activity_event config ~session_id ~(event_type : string)
+    ~(detail : Yojson.Safe.t) =
+  let session_subject = Activity_graph.entity ~kind:"operation" session_id in
+  let actor_entity name = Activity_graph.entity ~kind:"agent" name in
+  let emit ?actor ?subject ~kind ~tags () =
+    try
+      ignore
+        (Activity_graph.emit config ~room_id:(activity_room_id config)
+           ?actor ?subject ~kind ~payload:detail ~tags ())
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Session.warn "team session activity emit failed (%s): %s" kind
+          (Printexc.to_string exn)
+  in
+  match event_type with
+  | "session_started" ->
+      emit
+        ?actor:(Option.map actor_entity (detail_string "created_by" detail))
+        ~subject:session_subject ~kind:"operation.started"
+        ~tags:[ "team_session"; "operation.started" ] ()
+  | "session_finalized" ->
+      emit ~actor:(actor_entity "team-session") ~subject:session_subject
+        ~kind:"operation.finalized"
+        ~tags:[ "team_session"; "operation.finalized" ] ()
+  | "recovered_after_restart" ->
+      emit ~actor:(actor_entity "team-session") ~subject:session_subject
+        ~kind:"operation.resumed"
+        ~tags:[ "team_session"; "operation.resumed" ] ()
+  | "team_turn" ->
+      emit
+        ?actor:(Option.map actor_entity (detail_string "actor" detail))
+        ~subject:session_subject ~kind:"team.turn"
+        ~tags:[ "team_session"; "team.turn" ] ()
+  | "team_turn_failed" ->
+      emit
+        ?actor:(Option.map actor_entity (detail_string "actor" detail))
+        ~subject:session_subject ~kind:"team.turn_failed"
+        ~tags:[ "team_session"; "team.turn_failed" ] ()
+  | _ -> ()
+
 let append_event config session_id ~(event_type : string) ~(detail : Yojson.Safe.t) =
   let ts = Time_compat.now () in
   let entry : Team_session_types.event_entry =
@@ -105,7 +156,8 @@ let append_event config session_id ~(event_type : string) ~(detail : Yojson.Safe
   in
   let line = Yojson.Safe.to_string (Team_session_types.event_entry_to_yojson entry) ^ "\n" in
   let path = events_jsonl_path config session_id in
-  with_file_lock config path (fun () -> append_text_file path line)
+  with_file_lock config path (fun () -> append_text_file path line);
+  emit_activity_event config ~session_id ~event_type ~detail
 
 let read_events ?max_events config session_id : Yojson.Safe.t list =
   let path = events_jsonl_path config session_id in

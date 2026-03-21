@@ -112,7 +112,7 @@
    server_routes_http_routes_command_plane_read
    server_routes_http_routes_command_plane_write
    server_routes_http_routes_provider_runs
-   server_routes_http_routes_social
+   server_routes_http_routes_activity
    server_h2_gateway
    server_h2_gateway_helpers
    server_h2_gateway_routes_extra
@@ -123,7 +123,7 @@
    server_command_plane_http_stream
    server_command_plane_http_mutations
    server_command_plane_http_help
-   server_social_http
+   server_activity_http
    server_mcp_transport_http
    server_mcp_transport_http_protocol
    server_mcp_transport_http_types
@@ -147,7 +147,7 @@
    graphql_client
    graphql_endpoint
    graphql_api
-   social_motion
+   activity_graph
    handover_eio
    hat
    heartbeat
@@ -657,7 +657,7 @@
  server_routes_http_routes_dashboard
  server_routes_http_routes_command_plane_read
  server_routes_http_routes_command_plane_write
- server_routes_http_routes_social
+ server_routes_http_routes_activity
  swarm_status_types
  swarm_status_json
  swarm_status_parse

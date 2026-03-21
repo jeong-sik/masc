@@ -56,7 +56,7 @@ let events_http_json ~deps ~state request =
     deps.int_query_param request "limit" ~default:200
     |> clamp ~min_v:1 ~max_v:1000
   in
-  Social_motion.json_response state.Mcp_server.room_config ?room_id ~kinds
+  Activity_graph.json_response state.Mcp_server.room_config ?room_id ~kinds
     ~after_seq ~limit ()
 
 let graph_http_json ~deps ~state request =
@@ -70,7 +70,7 @@ let graph_http_json ~deps ~state request =
     deps.int_query_param request "timeline_limit" ~default:80
     |> clamp ~min_v:10 ~max_v:200
   in
-  Social_motion.graph_json state.Mcp_server.room_config ?room_id ~kinds ~limit
+  Activity_graph.graph_json state.Mcp_server.room_config ?room_id ~kinds ~limit
     ~timeline_limit ()
 
 let stream_headers ~deps origin =
@@ -140,11 +140,11 @@ let handle_stream ~deps ~state request reqd =
     match !info_ref with
     | Some info ->
         if not (send_raw info event) then
-          Social_motion.unregister_if_current info.session_id info.client_id
+          Activity_graph.unregister_if_current info.session_id info.client_id
     | None -> ()
   in
   let client_id =
-    Social_motion.register session_id ~push ~last_seq:after_seq ?room_filter:room_id
+    Activity_graph.register session_id ~push ~last_seq:after_seq ?room_filter:room_id
       ~kind_filters:kinds ()
   in
   let info =
@@ -160,13 +160,13 @@ let handle_stream ~deps ~state request reqd =
   info_ref := Some info;
   ignore
     (send_raw info
-       (Printf.sprintf ": social-motion stream room=%s after=%d\nretry: 3000\n\n"
+       (Printf.sprintf ": activity-stream room=%s after=%d\nretry: 3000\n\n"
           (Option.value ~default:"*" room_id) after_seq));
   let replay =
-    Social_motion.list_events state.Mcp_server.room_config ?room_id ~kinds
+    Activity_graph.list_events state.Mcp_server.room_config ?room_id ~kinds
       ~after_seq ~limit:replay_limit ()
   in
-  List.iter (fun value -> ignore (send_raw info (Social_motion.format_sse_event value))) replay;
+  List.iter (fun value -> ignore (send_raw info (Activity_graph.format_sse_event value))) replay;
   (match (deps.get_switch (), deps.get_clock ()) with
   | Some sw, Some clock ->
       Eio.Fiber.fork ~sw (fun () ->
@@ -186,6 +186,6 @@ let handle_stream ~deps ~state request reqd =
           try loop ()
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             if not (is_cancelled exn) then close_stream info;
-            Social_motion.unregister_if_current info.session_id info.client_id)
+            Activity_graph.unregister_if_current info.session_id info.client_id)
   | _ -> ());
   ()

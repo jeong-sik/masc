@@ -1,6 +1,6 @@
-/* Social tab — graph visualization and activity feed */
+/* Activity graph surface — graph visualization and activity feed */
 
-.social-graph-container {
+.activity-graph-container {
   position: relative;
   width: 100%;
   border-radius: 12px;
@@ -9,13 +9,13 @@
   margin: 12px 0;
 }
 
-.social-graph-canvas {
+.activity-graph-canvas {
   display: block;
   width: 100%;
   cursor: crosshair;
 }
 
-.social-graph-tooltip {
+.activity-graph-tooltip {
   position: absolute;
   bottom: 12px;
   left: 12px;
@@ -31,12 +31,12 @@
   pointer-events: none;
 }
 
-.social-graph-tooltip strong {
+.activity-graph-tooltip strong {
   font-size: 13px;
   color: var(--text-near-white);
 }
 
-.social-graph-tooltip-kind {
+.activity-graph-tooltip-kind {
   padding: 2px 7px;
   border-radius: 6px;
   background: rgba(148, 163, 184, 0.15);
@@ -46,13 +46,13 @@
 
 /* Leaderboard */
 
-.social-leaderboard {
+.activity-graph-leaderboard {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.social-leaderboard-row {
+.activity-graph-leaderboard-row {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -62,7 +62,7 @@
   border: 1px solid rgba(148, 163, 184, 0.08);
 }
 
-.social-leaderboard-rank {
+.activity-graph-leaderboard-rank {
   width: 22px;
   text-align: center;
   font-size: 12px;
@@ -70,7 +70,7 @@
   color: var(--text-slate);
 }
 
-.social-leaderboard-info {
+.activity-graph-leaderboard-info {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -78,7 +78,7 @@
   min-width: 0;
 }
 
-.social-leaderboard-name {
+.activity-graph-leaderboard-name {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-near-white);
@@ -87,21 +87,21 @@
   text-overflow: ellipsis;
 }
 
-.social-leaderboard-bar-wrap {
+.activity-graph-leaderboard-bar-wrap {
   height: 4px;
   border-radius: 2px;
   background: rgba(148, 163, 184, 0.1);
   overflow: hidden;
 }
 
-.social-leaderboard-bar {
+.activity-graph-leaderboard-bar {
   height: 100%;
   border-radius: 2px;
   background: var(--cyan);
   transition: width 0.3s ease;
 }
 
-.social-leaderboard-weight {
+.activity-graph-leaderboard-weight {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-slate-light);
@@ -109,31 +109,31 @@
   text-align: right;
 }
 
-.social-leaderboard-status {
+.activity-graph-leaderboard-status {
   font-size: 11px;
   padding: 2px 7px;
   border-radius: 6px;
 }
 
-.social-leaderboard-status.active {
+.activity-graph-leaderboard-status.active {
   color: var(--ok);
   background: rgba(74, 222, 128, 0.1);
 }
 
-.social-leaderboard-status.inactive {
+.activity-graph-leaderboard-status.inactive {
   color: var(--text-slate);
   background: rgba(148, 163, 184, 0.1);
 }
 
 /* Kind breakdown chips */
 
-.social-kind-breakdown {
+.activity-graph-kind-breakdown {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.social-kind-chip {
+.activity-graph-kind-chip {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -143,12 +143,12 @@
   border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
-.social-kind-label {
+.activity-graph-kind-label {
   font-size: 12px;
   color: var(--text-slate-light);
 }
 
-.social-kind-count {
+.activity-graph-kind-count {
   font-size: 13px;
   font-weight: 700;
   color: var(--text-near-white);

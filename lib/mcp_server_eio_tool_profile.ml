@@ -426,7 +426,7 @@ let parse_cursor_only_params params =
     | `String cursor -> Ok { cursor = Some cursor }
     | _ -> Error "Invalid params: cursor must be a string"
 
-let list_page_size =
+let list_page_size () =
   match Sys.getenv_opt "MASC_LIST_PAGE_SIZE" with
   | Some raw -> (
       match int_of_string_opt (String.trim raw) with
@@ -452,6 +452,7 @@ let decode_cursor ~kind cursor =
   | Error _ -> None
 
 let page_items_with_cursor ~kind items cursor =
+  let page_size = list_page_size () in
   let offset =
     match cursor with
     | None -> Ok 0
@@ -474,7 +475,7 @@ let page_items_with_cursor ~kind items cursor =
   let count = List.length items in
   let* offset = offset in
   let offset = min offset count in
-  let page = items |> drop offset |> take list_page_size in
+  let page = items |> drop offset |> take page_size in
   let next_offset = offset + List.length page in
   let next_cursor =
     if next_offset < count then Some (encode_cursor ~kind next_offset) else None

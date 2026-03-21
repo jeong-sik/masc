@@ -240,7 +240,7 @@ let handle_list_tools_eio ?(profile = Full) ?names ?(include_hidden = false)
                 [
                   ("totalCount", `Int total_count);
                   ("mode", `String mode_str);
-                  ("pageSize", `Int TP.list_page_size);
+                  ("pageSize", `Int (TP.list_page_size ()));
                 ] );
           ]
       in

@@ -68,28 +68,21 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "owner"));
       let ctx = operator_ctx env sw config "owner" in
-      let inject_task actor title =
+      let request_room_pause actor =
         match
           Operator_control.action_json ctx
             (`Assoc
               [
                 ("actor", `String actor);
-                ("action_type", `String "task_inject");
+                ("action_type", `String "room_pause");
                 ("target_type", `String "room");
-                ( "payload",
-                  `Assoc
-                    [
-                      ("title", `String title);
-                      ("description", `String "created by operator");
-                      ("priority", `Int 2);
-                    ] );
               ])
         with
         | Ok _ -> ()
         | Error err -> Alcotest.fail err
       in
-      inject_task "operator-a" "alpha preview";
-      inject_task "operator-b" "beta preview";
+      request_room_pause "operator-a";
+      request_room_pause "operator-b";
       let snapshot = Operator_control.snapshot_json ~actor:"operator-a" ctx in
       let summary = Yojson.Safe.Util.(snapshot |> member "pending_confirm_summary") in
       Alcotest.(check string) "actor filter" "operator-a"
@@ -108,10 +101,10 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
       let confirm_required_actions =
         Yojson.Safe.Util.(summary |> member "confirm_required_actions" |> to_list)
       in
-      Alcotest.(check bool) "task inject listed" true
+      Alcotest.(check bool) "room pause listed" true
         (List.exists
            (fun row ->
-             Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "task_inject")
+             Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "room_pause")
            confirm_required_actions))
 
 let test_orchestra_room_core_shape () =
@@ -154,15 +147,8 @@ let test_orchestra_includes_session_edge_and_pending_signal () =
            (`Assoc
              [
                ("actor", `String "dashboard");
-               ("action_type", `String "task_inject");
+               ("action_type", `String "room_pause");
                ("target_type", `String "room");
-               ( "payload",
-                 `Assoc
-                   [
-                     ("title", `String "Injected task");
-                     ("description", `String "created by operator");
-                     ("priority", `Int 1);
-                   ] );
              ])
        with
       | Ok _ -> ()
@@ -204,15 +190,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
           (`Assoc
             [
               ("actor", `String "operator");
-              ("action_type", `String "task_inject");
+              ("action_type", `String "room_pause");
               ("target_type", `String "room");
-              ( "payload",
-                `Assoc
-                  [
-                    ("title", `String "Injected task");
-                    ("description", `String "created by operator");
-                    ("priority", `Int 1);
-                  ] );
             ])
       in
       (match action_json with Ok _ -> () | Error err -> Alcotest.fail err);

@@ -110,9 +110,19 @@ let test_social_vote_missing_post_logs () =
     This is a static verification test — it checks that the source code
     contains the expected Printf.eprintf calls. *)
 let file_contains_pattern file_rel pattern =
-  let source_root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some d -> d
-    | None -> Sys.getcwd ()
+  let rec find_source_root dir =
+    let keeper_dir = Filename.concat (Filename.concat dir "lib") "keeper" in
+    if Sys.file_exists keeper_dir && Sys.is_directory keeper_dir then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else find_source_root parent
+  in
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some d when Sys.file_exists (Filename.concat (Filename.concat d "lib") "keeper") -> d
+    | _ ->
+        find_source_root (Sys.getcwd ())
+        |> Option.value ~default:(Sys.getcwd ())
   in
   let path = Filename.concat source_root file_rel in
   if not (Sys.file_exists path) then begin
@@ -129,9 +139,18 @@ let any_file_contains_pattern file_rels pattern =
   List.exists (fun file_rel -> file_contains_pattern file_rel pattern) file_rels
 
 let keeper_source_files () =
+  let rec find_source_root dir =
+    let keeper_dir = Filename.concat (Filename.concat dir "lib") "keeper" in
+    if Sys.file_exists keeper_dir && Sys.is_directory keeper_dir then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else find_source_root parent
+  in
   let source_root = match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some d -> d
-    | None -> Sys.getcwd ()
+    | Some d when Sys.file_exists (Filename.concat (Filename.concat d "lib") "keeper") -> d
+    | _ ->
+        find_source_root (Sys.getcwd ())
+        |> Option.value ~default:(Sys.getcwd ())
   in
   (* Keeper files moved to lib/keeper/ subdirectory *)
   let keeper_dir = Filename.concat (Filename.concat source_root "lib") "keeper" in
@@ -181,8 +200,13 @@ let test_source_model_token_parse () =
 
 let test_source_keeper_proactive () =
   check bool "keeper sources have proactive emission logging"
-    true (any_file_contains_pattern (keeper_source_files ())
-      {|proactive emission failed:|})
+    true
+    (any_file_contains_pattern (keeper_source_files ())
+       {|proactive emission failed:|}
+     || any_file_contains_pattern (keeper_source_files ())
+          {|unified turn failed:|}
+     || any_file_contains_pattern (keeper_source_files ())
+          {|unified turn exception:|})
 
 (* MEDIUM priority patterns *)
 

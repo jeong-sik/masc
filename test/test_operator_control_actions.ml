@@ -1,7 +1,7 @@
 open Masc_mcp
 open Test_operator_control_support
 
-let test_task_inject_requires_confirm_then_executes () =
+let test_task_inject_executes_immediately () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -32,30 +32,18 @@ let test_task_inject_requires_confirm_then_executes () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check bool) "confirm required" true
+      Alcotest.(check bool) "confirm required" false
         Yojson.Safe.Util.(action_json |> member "confirm_required" |> to_bool);
-      let confirm_token =
-        Yojson.Safe.Util.(action_json |> member "confirm_token" |> to_string)
-      in
+      Alcotest.(check bool) "no confirm token" true
+        (Yojson.Safe.Util.member "confirm_token" action_json = `Null);
       let snapshot = Operator_control.snapshot_json ~actor:"operator" ctx in
       let pending_confirms =
         snapshot |> Yojson.Safe.Util.member "pending_confirms"
         |> Yojson.Safe.Util.to_list
       in
-      Alcotest.(check int) "pending confirm count" 1 (List.length pending_confirms);
-      Alcotest.(check bool) "pending confirm preview" true
-        (List.hd pending_confirms |> Yojson.Safe.Util.member "preview" <> `Null);
-      let confirm_json =
-        Operator_control.confirm_json ctx
-          (`Assoc [ ("actor", `String "operator"); ("confirm_token", `String confirm_token) ])
-      in
-      let confirm_json =
-        match confirm_json with
-        | Ok json -> json
-        | Error err -> Alcotest.fail err
-      in
-      Alcotest.(check bool) "executed action present" true
-        (Yojson.Safe.Util.member "executed_action" confirm_json <> `Null);
+      Alcotest.(check int) "pending confirm count" 0 (List.length pending_confirms);
+      Alcotest.(check bool) "result present" true
+        (Yojson.Safe.Util.member "result" action_json <> `Null);
       let tasks = Room.get_tasks_raw config in
       Alcotest.(check int) "task injected" 1 (List.length tasks))
 

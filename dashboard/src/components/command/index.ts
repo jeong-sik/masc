@@ -159,7 +159,7 @@ export function Command() {
   ])
 
   useEffect(() => {
-    let refreshTimer: ReturnType<typeof window.setTimeout> | null = null
+    let refreshTimer: number | null = null
     const scheduleRefresh = () => {
       if (refreshTimer) return
       refreshTimer = window.setTimeout(() => {

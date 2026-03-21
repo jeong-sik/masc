@@ -596,7 +596,7 @@ a:hover {
 
 .empty-state.ok {
   border-color: rgba(74, 222, 128, 0.3);
-  color: var(--text-secondary, var(--text-muted));
+  color: var(--text-muted, var(--text-muted));
 }
 
 .loading-indicator {

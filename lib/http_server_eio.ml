@@ -395,6 +395,9 @@ module Router = struct
   let prefix_get prefix handler routes =
     add ~path:("PREFIX:" ^ prefix) ~methods:[`GET] ~handler routes
 
+  let prefix_post prefix handler routes =
+    add ~path:("PREFIX:" ^ prefix) ~methods:[`POST] ~handler routes
+
   let dispatch routes request reqd =
     let req_path = Request.path request in
     let req_method = Request.method_ request in

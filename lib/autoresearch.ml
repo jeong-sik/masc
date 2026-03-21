@@ -250,7 +250,7 @@ let load_json_file path =
     try
       let content = Fs_compat.load_file path in
       Some (Yojson.Safe.from_string content)
-    with _ -> None
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
 
 let load_swarm_link_by_loop ~base_path loop_id =
   load_json_file (loop_link_file ~base_path loop_id)
@@ -579,7 +579,7 @@ let apply_code_change ~workdir ~target_file ~new_content =
       Fs_compat.save_file tmp_path new_content;
       Unix.rename tmp_path abs_path;
       Result.ok original
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       (try Sys.remove tmp_path with Sys_error _ -> ());
       Result.error (Printf.sprintf "Failed to write %s: %s"
         target_file (Printexc.to_string exn)))

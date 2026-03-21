@@ -355,7 +355,7 @@ let fetch_remote_agent_card url :
                 (Printf.sprintf "Fetch killed by signal %d: %s" sig_num well_known)
           | Unix.WSTOPPED _ ->
               Stdlib.Error (Printf.sprintf "Fetch stopped: %s" well_known)
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Stdlib.Error
             (Printf.sprintf "Remote discovery error (%s): %s" well_known
                (Printexc.to_string exn))

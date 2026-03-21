@@ -321,7 +321,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                    ~success:(Result.is_ok result) ~duration_ms)
                on_exec;
              result
-           with exn ->
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              let duration_ms = 0 in
              Option.iter
                (fun f -> f ~tool_name:"shell_exec" ~success:false ~duration_ms)

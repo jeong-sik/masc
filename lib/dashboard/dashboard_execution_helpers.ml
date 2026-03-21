@@ -271,7 +271,7 @@ let extract_persona_name (agent_name : string) : string =
 let load_persona_profile (persona_name : string) : agent_profile option =
   let me_root =
     try Env_config.me_root ()
-    with _ -> (
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> (
       match Sys.getenv_opt "HOME" with
       | Some home -> Filename.concat home "me"
       | None -> "/tmp")
@@ -288,21 +288,21 @@ let load_persona_profile (persona_name : string) : agent_profile option =
     | Ok json ->
         let open Yojson.Safe.Util in
         let name_val =
-          (try Some (json |> member "name" |> to_string) with _ -> None)
+          (try Some (json |> member "name" |> to_string) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
           |> Option.value ~default:persona_name
         in
         let keeper_json =
-          try Some (json |> member "keeper") with _ -> None
+          try Some (json |> member "keeper") with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
         in
         let model =
           match keeper_json with
           | Some kj -> (
               try Some (kj |> member "active_model" |> to_string)
-              with _ -> None)
+              with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
           | None -> None
         in
         let trait =
-          try Some (json |> member "trait" |> to_string) with _ -> None
+          try Some (json |> member "trait" |> to_string) with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
         in
         let traits = match trait with Some t -> [t] | None -> [] in
         Some
@@ -341,39 +341,39 @@ let load_neo4j_identity_cache () =
             (fun edge ->
               let node = edge |> member "node" in
               let name =
-                try node |> member "name" |> to_string with _ -> ""
+                try node |> member "name" |> to_string with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
               in
               if name <> "" then begin
                 let emoji =
                   (try Some (node |> member "emoji" |> to_string)
-                   with _ -> None)
+                   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
                   |> Option.value ~default:"🤖"
                 in
                 let korean_name =
                   (try Some (node |> member "koreanName" |> to_string)
-                   with _ -> None)
+                   with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None)
                   |> Option.value ~default:name
                 in
                 let model =
                   try Some (node |> member "model" |> to_string)
-                  with _ -> None
+                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
                 in
                 let traits =
                   try node |> member "traits" |> to_list |> List.map to_string
-                  with _ -> []
+                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
                 in
                 let interests =
                   try
                     node |> member "interests" |> to_list |> List.map to_string
-                  with _ -> []
+                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> []
                 in
                 let activity_level =
                   try Some (node |> member "activityLevel" |> to_float)
-                  with _ -> None
+                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
                 in
                 let primary_value =
                   try Some (node |> member "primaryValue" |> to_string)
-                  with _ -> None
+                  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
                 in
                 Hashtbl.replace neo4j_identity_cache name
                   {
@@ -387,7 +387,7 @@ let load_neo4j_identity_cache () =
                   }
               end)
             edges
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Log.Dashboard.warn "neo4j identity cache update failed: %s" (Printexc.to_string exn))
   end
 

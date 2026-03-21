@@ -115,8 +115,7 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 
 Start by calling mcp__masc__masc_status to see the current room state.|}
 
-(** Spawn the orchestrator agent.
-    Spawn_eio has been removed; uses blocking Spawn.spawn as fallback. *)
+(** Spawn the orchestrator agent. *)
 let spawn_orchestrator ~sw:_ ~proc_mgr:_ ?domain_mgr:_ config room_config =
   if Room.is_paused room_config then begin
     Log.Orchestrator.debug "room paused before spawn, aborting";
@@ -169,10 +168,10 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_con
           Eio.Fiber.fork ~sw (fun () ->
             try
               ignore (spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config)
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Orchestrator.error "spawn failed: %s" (Printexc.to_string exn));
         Ok ()
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let msg = Printf.sprintf "orchestrator check error: %s" (Printexc.to_string exn) in
         Log.Orchestrator.warn "%s (recovering...)" msg;
         Error msg
@@ -195,7 +194,7 @@ let make_zero_zombie_consumer ~room_config
             try
               String.sub status_trimmed 0 (min 4 (String.length status_trimmed)) = "\xf0\x9f\xa7\x9f" ||
               String.length status_trimmed >= 7 && String.sub status_trimmed 0 7 = "Cleaned"
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Orchestrator.warn "zombie indicator check failed: %s" (Printexc.to_string exn);
               false
           in
@@ -203,7 +202,7 @@ let make_zero_zombie_consumer ~room_config
             Log.Orchestrator.info "[zombie] %s" status_trimmed
         end;
         Ok ()
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         if Resilience.ZeroZombie.is_benign_error exn then
           Ok ()
         else begin

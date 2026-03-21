@@ -107,7 +107,7 @@ let load_prompt_dir dir =
                | Error msg ->
                    Log.Chain.warn "prompt parse failed for %s: %s"
                      path msg
-             with exn ->
+             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                Log.Chain.error "prompt load failed for %s: %s"
                  path (Printexc.to_string exn)))
 

@@ -144,7 +144,7 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
       with Yojson.Safe.Util.Type_error _ -> None
     in
     Some { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.warn "audit_log: entry parse failed: %s" (Printexc.to_string exn);
     None
 

@@ -152,7 +152,7 @@ let persist ~base_path =
     let tmp = path ^ ".tmp" in
     Fs_compat.save_file tmp (Yojson.Safe.pretty_to_string json);
     Sys.rename tmp path
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Config.error "Runtime_params.persist: %s" (Printexc.to_string exn)
 
 let restore ~base_path =
@@ -176,7 +176,7 @@ let restore ~base_path =
               pairs)
       | _ ->
           Log.Config.warn "Runtime_params.restore: invalid JSON in %s" path
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Config.error "Runtime_params.restore: %s" (Printexc.to_string exn))
 
 (* ── audit ───────────────────────────────────────────────────── *)

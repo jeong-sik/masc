@@ -127,7 +127,7 @@ let synapse_of_json json : synapse option =
       last_updated = json |> member "last_updated" |> to_float;
       created_at = json |> member "created_at" |> to_float;
     }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.error "Failed to parse synapse: %s" (Printexc.to_string exn);
     None
 
@@ -146,7 +146,7 @@ let graph_of_json json : synapse_graph =
       |> List.filter_map synapse_of_json in
     let last_consolidation = json |> member "last_consolidation" |> to_float in
     { synapses; last_consolidation }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.error "Failed to parse graph: %s" (Printexc.to_string exn);
     { synapses = []; last_consolidation = 0.0 }
 
@@ -160,7 +160,7 @@ let load_graph config : synapse_graph =
       let content = Fs_compat.load_file file in
       let json = Yojson.Safe.from_string content in
       graph_of_json json
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Misc.error "Failed to load graph from %s: %s" file (Printexc.to_string exn);
       { synapses = []; last_consolidation = 0.0 }
 

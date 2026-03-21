@@ -709,7 +709,7 @@ let make_request_handler ~sw ~clock ~server_start_time =
     in
     try
       dispatch_h2_route ()
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       let msg = Printexc.to_string exn in
       Log.Http.error "Handler error: %s" msg;
       h2_respond_text h2_reqd ("500 Internal Server Error: " ^ msg) ~status:`Internal_server_error ~extra_headers:cors

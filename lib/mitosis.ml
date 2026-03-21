@@ -436,7 +436,7 @@ let write_status ~base_path ~cell ~config =
   if Sys.file_exists masc_dir && Sys.is_directory masc_dir then begin
     try
       Fs_compat.save_file status_file (Yojson.Safe.pretty_to_string json ^ "\n")
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Mitosis_log.error "Failed to write status: %s" (Printexc.to_string exn)
   end
 
@@ -471,7 +471,7 @@ let write_status_with_backend ~room_config ~cell ~config =
   if Sys.file_exists masc_dir && Sys.is_directory masc_dir then begin
     try
       Fs_compat.save_file status_file (Yojson.Safe.pretty_to_string json ^ "\n")
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Mitosis_log.error "Failed to write status file: %s"
         (Printexc.to_string exn)
   end;

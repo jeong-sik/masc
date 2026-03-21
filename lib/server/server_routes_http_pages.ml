@@ -204,7 +204,7 @@ let asset_content_type name =
 
 let read_file path =
   try Ok (In_channel.with_open_bin path In_channel.input_all)
-  with exn -> Error (Printexc.to_string exn)
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let serve_graphiql_asset name _request reqd =
   let path = graphiql_asset_path name in

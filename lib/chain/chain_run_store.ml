@@ -296,7 +296,7 @@ let run_record_to_json (r : run_record) : Yojson.Safe.t =
 
 let persist_run_record (r : run_record) =
   try append_persistent_json (run_record_to_json r)
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Chain.error "persist failed: %s"
       (Printexc.to_string exn)
 
@@ -360,7 +360,7 @@ let read_persisted_run_json ~(run_id : string) : Yojson.Safe.t option =
                match Yojson.Safe.Util.member "run_id" json with
                | `String value when String.equal value run_id -> Some json
                | _ -> None
-             with exn ->
+             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                Log.Chain.warn "chain_run_store: run entry parse failed: %s" (Printexc.to_string exn);
                None)
 

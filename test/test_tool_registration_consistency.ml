@@ -110,9 +110,19 @@ let read_file path =
       really_input_string ic len)
 
 let repo_root () =
-  let cwd = Sys.getcwd () in
-  if Sys.file_exists (Filename.concat cwd "docs") then cwd
-  else Filename.dirname cwd
+  let has_docs_dir path =
+    Sys.file_exists (Filename.concat path "docs")
+  in
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_docs_dir root -> root
+  | _ ->
+      let rec ascend path =
+        if has_docs_dir path then path
+        else
+          let parent = Filename.dirname path in
+          if String.equal parent path then path else ascend parent
+      in
+      ascend (Sys.getcwd ())
 
 let doc_path name =
   Filename.concat (Filename.concat (repo_root ()) "docs") name

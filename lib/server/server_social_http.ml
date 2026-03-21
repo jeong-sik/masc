@@ -103,7 +103,7 @@ let send_raw info data =
           Httpun.Body.Writer.write_string info.writer data;
           Httpun.Body.Writer.flush info.writer (fun _ -> ());
           true
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Log.Social.warn "send_raw write failed: %s" (Printexc.to_string exn);
           info.closed <- true;
           false)
@@ -177,14 +177,14 @@ let handle_stream ~deps ~state request reqd =
           let rec loop () =
             if not !(info.stop) then begin
               (try Eio.Time.sleep clock keepalive_interval_s
-               with exn -> if is_cancelled exn then raise exn);
+               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> if is_cancelled exn then raise exn);
               if not !(info.stop) then
                 ignore (send_raw info ": keepalive\n\n");
               loop ()
             end
           in
           try loop ()
-          with exn ->
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             if not (is_cancelled exn) then close_stream info;
             Social_motion.unregister_if_current info.session_id info.client_id)
   | _ -> ());

@@ -291,7 +291,7 @@ let parse_yyyy_mm_dd s =
         let utc_as_local, _ = Unix.mktime (Unix.gmtime local_epoch) in
         let tz_offset = local_epoch -. utc_as_local in
         Some (local_epoch +. tz_offset))
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.warn "goal_store: parse_yyyy_mm_dd failed: %s" (Printexc.to_string exn);
     None
 

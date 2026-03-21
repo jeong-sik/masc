@@ -157,7 +157,7 @@ let handle_read _ctx args =
         try
           let content = In_channel.with_open_text path In_channel.input_all in
           (true, sprintf "## %s\n\n%s" (Filename.basename path) content)
-        with exn -> (false, sprintf "Read error: %s" (Printexc.to_string exn))
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Read error: %s" (Printexc.to_string exn))
   end
 
 (* Add document *)
@@ -214,7 +214,7 @@ verified_by: []
         Out_channel.with_open_text filepath (fun oc -> Out_channel.output_string oc full_content);
         let status = if confidence < 0.5 then "candidate (needs verification)" else "library" in
         (true, sprintf "Document added to %s: %s" status filepath)
-      with exn -> (false, sprintf "Write error: %s" (Printexc.to_string exn))
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Write error: %s" (Printexc.to_string exn))
     end
   end
 
@@ -252,7 +252,7 @@ let handle_promote ctx args =
           Out_channel.with_open_text dest_path (fun oc -> Out_channel.output_string oc with_verifier);
           Sys.remove src_path;
           (true, sprintf "Promoted to library: %s (confidence: %.2f)" dest_path new_confidence)
-        with exn -> (false, sprintf "Promote error: %s" (Printexc.to_string exn))
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Promote error: %s" (Printexc.to_string exn))
   end
 
 (* Search documents *)

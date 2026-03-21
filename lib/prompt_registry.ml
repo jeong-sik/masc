@@ -134,7 +134,7 @@ let init ?persist_dir () =
                   Hashtbl.replace version_index entry.id versions
               | Error msg ->
                 Log.Misc.error "Failed to parse %s: %s" file msg
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Misc.error "Failed to parse %s: %s" file (Printexc.to_string exn)
           end
         ) files

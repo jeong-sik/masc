@@ -177,12 +177,12 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
                 resolved
               else
                 agent_name
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               log_mcp_exn ~label:"is_agent_joined" exn;
               agent_name)
           else
             agent_name
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           log_mcp_exn ~label:__FUNCTION__ exn;
           agent_name
       else

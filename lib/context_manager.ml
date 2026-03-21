@@ -228,7 +228,7 @@ let offload_messages
     Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
       let _ = Unix.write_substring fd content 0 (String.length content) in ());
     Some path
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Memory.error "offload_messages failed: %s"
       (Printexc.to_string exn);
     None
@@ -381,7 +381,7 @@ let save_checkpoint session ckpt =
      This avoids JSON-in-JSON double encoding that corrupts multi-byte UTF-8. *)
   let context_json =
     try Yojson.Safe.from_string ckpt.serialized
-    with _ -> `String ckpt.serialized
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> `String ckpt.serialized
   in
   let json = `Assoc [
     ("checkpoint_id", `String ckpt.checkpoint_id);
@@ -421,7 +421,7 @@ let load_latest_checkpoint session =
           let ctx = json |> member "context" in
           if ctx = `Null then raise Not_found;
           Yojson.Safe.to_string ctx
-        with _ ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | _ ->
           json |> member "serialized" |> to_string
       in
       Some {

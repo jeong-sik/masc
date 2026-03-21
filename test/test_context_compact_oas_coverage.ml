@@ -83,7 +83,9 @@ let test_compact_drop_low_importance () =
     (List.length result < List.length msgs)
 
 let test_compact_summarize_old () =
-  let msgs = List.init 10 (fun i ->
+  (* Summarize_old operates on turn groups, not raw message count.
+     Use 6 user-led turns so keep_recent=5 actually compacts one old turn. *)
+  let msgs = List.init 12 (fun i ->
     msg (if i mod 2 = 0 then Agent_sdk.Types.User else Agent_sdk.Types.Assistant)
       (Printf.sprintf "message %d with enough content to be meaningful" i))
   in

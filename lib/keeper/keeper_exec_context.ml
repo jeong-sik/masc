@@ -129,25 +129,6 @@ let keeper_action_kind_of_tool_names tool_names =
   else if List.mem "keeper_board_vote" tool_names then "vote"
   else "none"
 
-type social_board_event = {
-  kind : [ `Board_post | `Board_comment ];
-  post_id : string;
-  comment_id : string option;
-  author : string;
-  post_author : string option;
-  content : string;
-  created_at : float;
-}
-
-type social_turn_outcome = {
-  outcome : [ `Acted | `Passed ];
-  summary : string;
-  reason : string;
-  action_kind : string;
-  tools_used : string list;
-  decision_reason : string option;
-  failure_reason : string option;
-}
 
 let effective_model_labels_for_turn
     (m : keeper_meta)
@@ -211,7 +192,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
           ignore
             (Room.heartbeat_in_room config ~room_id ~agent_name:meta.agent_name);
           room_id :: acc
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           log_keeper_exn ~label:(Printf.sprintf "room presence sync failed for %s in %s" meta.name room_id) exn;
           acc)
       [] room_ids

@@ -604,7 +604,7 @@ let start_server ~sw ~env config room_config : server =
   Eio.Fiber.fork ~sw (fun () ->
     try
       Grpc_eio.Server.serve ~sw ~env grpc_server
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Transport.info "serve crashed: %s" (Printexc.to_string exn)
   );
 

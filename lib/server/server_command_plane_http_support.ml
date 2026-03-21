@@ -79,7 +79,7 @@ let start_cp_summary_refresh_loop ~state ~sw ~clock =
         _cp_summary_ref := compute_cp_summary ~state;
         let dt = Time_compat.now () -. t0 in
         Log.CmdPlane.info "cp-summary refreshed (%.1fs)" dt
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let dt = Time_compat.now () -. t0 in
         Log.CmdPlane.warn "cp-summary refresh failed (%.1fs): %s"
           dt (Printexc.to_string exn));

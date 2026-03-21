@@ -64,7 +64,7 @@ let handle_start (ctx : context) : result option =
       try
         let _msg = Room.join active_config ~agent_name ~capabilities:[] () in
         Ok ()
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let msg = Printexc.to_string exn in
         if String.length msg > 0 then Error msg else Error "join failed"
     in
@@ -88,7 +88,7 @@ let handle_start (ctx : context) : result option =
             let start = !idx + String.length prefix in
             let end_idx = try String.index_from add_result start ':' with Not_found -> String.length add_result in
             String.sub add_result start (end_idx - start)
-          with _ -> ""
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
         in
         if task_id = "" then
           Some (true, Printf.sprintf "masc_start partial: joined as %s, but task creation failed: %s" agent_name add_result)

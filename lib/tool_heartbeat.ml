@@ -75,11 +75,11 @@ let handle_heartbeat_start ctx args =
           (* Keep agent liveness fresh so zombie cleanup does not remove active heartbeat owners. *)
           (try
              ignore (Room.heartbeat ctx.config ~agent_name:ctx.agent_name)
-           with exn -> log_non_cancelled "[Heartbeat] keepalive error" exn);
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_non_cancelled "[Heartbeat] keepalive error" exn);
           if should_send then begin
             (try
                ignore (Room.broadcast ctx.config ~from_agent:ctx.agent_name ~content:message)
-             with exn -> log_non_cancelled "[Heartbeat] broadcast error" exn);
+             with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_non_cancelled "[Heartbeat] broadcast error" exn);
             last_heartbeat := Time_compat.now ()
           end;
           (* Sleep for base interval (smart mode adjusts internally) *)
@@ -88,7 +88,7 @@ let handle_heartbeat_start ctx args =
       | _ -> ()
     in
     try loop ()
-    with exn -> log_non_cancelled "[Heartbeat] loop error" exn
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_non_cancelled "[Heartbeat] loop error" exn
   );
   let mode_str = if smart then " [SMART]" else "" in
   (true, Printf.sprintf "✅ Heartbeat started: %s (interval: %ds, message: %s)%s" hb_id interval message mode_str)

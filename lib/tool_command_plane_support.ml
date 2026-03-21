@@ -112,7 +112,7 @@ let json_string_member_opt json key =
 let read_json_file_opt path =
   if Sys.file_exists path then
     (try Some (Safe_ops.read_json_eio path)
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.CmdPlane.warn "read_json_file_opt %s: %s" path (Printexc.to_string exn);
        None)
   else
@@ -201,9 +201,9 @@ let run_process_with_timeout ~clock_opt ~timeout_sec ~prog ~argv ~env =
   let finalize exit_code =
     let stdout = In_channel.with_open_bin stdout_path In_channel.input_all in
     let stderr = In_channel.with_open_bin stderr_path In_channel.input_all in
-    (try Sys.remove stdout_path with exn ->
+    (try Sys.remove stdout_path with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.CmdPlane.warn "failed to remove stdout tmpfile %s: %s" stdout_path (Printexc.to_string exn));
-    (try Sys.remove stderr_path with exn ->
+    (try Sys.remove stderr_path with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.CmdPlane.warn "failed to remove stderr tmpfile %s: %s" stderr_path (Printexc.to_string exn));
     { exit_code; stdout; stderr }
   in

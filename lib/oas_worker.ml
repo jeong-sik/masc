@@ -202,7 +202,7 @@ let run
       | Some dir ->
         let ckpt = Oas.Agent.checkpoint ~session_id agent in
         (try persist_checkpoint ~dir ~session_id ckpt
-         with exn ->
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "oas_worker: Checkpoint save failed: %s"
              (Printexc.to_string exn));
         Some ckpt

@@ -110,7 +110,7 @@ let close_sse_conn info =
     info.closed <- true;
     info.stop := true;
     (try Httpun.Body.Writer.close info.writer
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Misc.debug "close_sse_conn: %s"
          (Printexc.to_string exn));
     Sse.unregister_if_current info.session_id info.client_id)

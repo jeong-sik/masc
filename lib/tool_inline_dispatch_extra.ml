@@ -59,7 +59,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
             (match Jiphyeon.Archive.get_agent_episodes ~sw ~env cell_id 5 with
              | Ok episodes -> (List.length episodes, List.nth_opt episodes 0)
              | Error _ -> (0, None))
-          with exn ->
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             Log.Inline.warn "%s: %s" __FUNCTION__ (Printexc.to_string exn);
             (0, None))
         | None -> (0, None)

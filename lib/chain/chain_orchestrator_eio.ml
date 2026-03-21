@@ -315,7 +315,7 @@ let orchestrate
   in
   let notify_chain_designed (chain : chain) =
     try on_chain_designed chain
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Chain_log.warn "orchestrator" "on_chain_designed failed for %s: %s"
         chain.id (Printexc.to_string exn)
   in

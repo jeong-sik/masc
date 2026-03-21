@@ -254,8 +254,6 @@ let build_handoff_prompt ~payload ~generation =
 
   header ^ context ^ footer
 
-(* execute_relay removed - was blocking Spawn.spawn, replaced by tool_relay.ml using Spawn_eio *)
-
 (** Checkpoint - saved state for smooth handoff *)
 type checkpoint = {
   cp_timestamp: float;
@@ -306,13 +304,6 @@ let checkpoint_to_payload cp generation =
     goal_progress = [];
     goal_blockers = [];
   }
-
-(* Removed deprecated functions:
-   - execute_relay: blocking Spawn.spawn
-   - auto_relay_check: used execute_relay
-   - smart_relay_check: used execute_relay
-   - auto_checkpoint: unused
-   All replaced by tool_relay.ml handlers using Spawn_eio *)
 
 (** Metrics to JSON *)
 let metrics_to_json metrics =

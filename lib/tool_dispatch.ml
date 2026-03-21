@@ -38,7 +38,7 @@ let dispatch ~name ~args : (bool * string) option =
   match Hashtbl.find_opt registry name with
   | Some handler -> (
       try handler ~name ~args
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Some
           ( false,
             Printf.sprintf "dispatch_v2 handler error for %s: %s" name

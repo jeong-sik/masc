@@ -94,7 +94,7 @@ let measure_metric_shell ?timeout_sec cmd =
         Error (Printf.sprintf "Terminated by signal %d" signal)
     | Unix.WSTOPPED signal ->
         Error (Printf.sprintf "Stopped by signal %d" signal)
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "Shell error: %s" (Printexc.to_string exn))
 
 let evaluate_aggregate strategy ~aggregate_goal_expr metrics =

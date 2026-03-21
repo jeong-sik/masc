@@ -136,7 +136,7 @@ let _parse_error () =
   let dispatch_request (handler : request_handler) request =
     try
       handler request
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       error_response
         ~id:(extract_id request)
         ~code:(-32603)

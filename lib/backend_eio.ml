@@ -418,7 +418,7 @@ module FileSystem = struct
           let _ = Unix.write_substring fd new_str 0 (String.length new_str) in
 
           Ok new_value
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Error (IOError (Printf.sprintf "atomic_increment failed: %s" (Printexc.to_string exn)))
 
   (** Atomically get the current counter value without incrementing *)
@@ -439,7 +439,7 @@ module FileSystem = struct
             let n = Unix.read fd buf 0 32 in
             if n = 0 then Ok 0
             else Ok (Safe_ops.int_of_string_with_default ~default:0 (String.trim (Bytes.sub_string buf 0 n)))
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Error (IOError (Printf.sprintf "atomic_get failed: %s" (Printexc.to_string exn)))
 
   (** Atomically update a file with a transform function.
@@ -511,7 +511,7 @@ module FileSystem = struct
           let _ = Unix.write_substring fd compressed 0 (String.length compressed) in
 
           Ok new_content
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Error (IOError (Printf.sprintf "atomic_update failed: %s" (Printexc.to_string exn)))
 
   (** {2 Health Check} *)

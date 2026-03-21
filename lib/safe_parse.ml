@@ -156,7 +156,7 @@ let json_of_string ~context ~default s =
     Use for encoding/compression where fallback is always safe. *)
 let try_or ~context ~fallback f =
   try f ()
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     if warn_enabled () then
       Log.Misc.error "%s failed: %s, using fallback" context (Printexc.to_string exn);
     fallback ()
@@ -164,7 +164,7 @@ let try_or ~context ~fallback f =
 (** Try operation, return None on any exception. Logs when warn enabled. *)
 let try_opt ~context f =
   try Some (f ())
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     if warn_enabled () then
       Log.Misc.error "%s failed: %s" context (Printexc.to_string exn);
     None

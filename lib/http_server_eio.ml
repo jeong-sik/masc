@@ -620,7 +620,7 @@ let run ~sw ~net ~clock config routes =
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
              Log.Http.error "Connection error: %s" (Printexc.to_string exn))
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          if is_cancelled exn then raise exn;
          let delay = !backoff_s in
          Log.Http.error "Accept error: %s (backoff %.2fs)"
@@ -628,7 +628,7 @@ let run ~sw ~net ~clock config routes =
          Eio.Time.sleep clock delay;
          bump_backoff ());
       accept_loop ()
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       if is_cancelled exn then ()
       else
         let delay = !backoff_s in

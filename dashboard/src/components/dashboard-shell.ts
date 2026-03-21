@@ -25,6 +25,7 @@ const LazyStatus = lazy(async () => ({ default: (await import('./status')).Statu
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
 const LazyOperations = lazy(async () => ({ default: (await import('./control')).Operations }))
 const LazyLabSurface = lazy(async () => ({ default: (await import('./lab-unified')).LabSurface }))
+const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
 function lazyTabFallback(label: string) {
   return html`<div class="loading-indicator">${label} 불러오는 중...</div>`
@@ -208,6 +209,12 @@ export function TabContent() {
       return html`
         <${Suspense} fallback=${lazyTabFallback('실험실 화면')}>
           <${LazyLabSurface} />
+        <//>
+      `
+    case 'logs':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('시스템 로그')}>
+          <${LazyLogViewer} />
         <//>
       `
     default:

@@ -137,10 +137,10 @@ let run_turn
       (fun input ->
         let additional =
           try Yojson.Safe.Util.(member "additional_turns" input |> to_int)
-          with _ -> 5 in
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 5 in
         let reason =
           try Yojson.Safe.Util.(member "reason" input |> to_string)
-          with _ -> "unspecified" in
+          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> "unspecified" in
         let additional = max 1 (min additional 20) in
         if !budget_extensions >= 10 then
           Ok { Types.content = Printf.sprintf

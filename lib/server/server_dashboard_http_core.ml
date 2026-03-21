@@ -212,7 +212,7 @@ let start_operator_refresh_loop ~state ~sw ~clock =
          | Error _ -> ());
         let dt = Time_compat.now () -. t0 in
         Log.Dashboard.info "operator refreshed (%.1fs)" dt
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let dt = Time_compat.now () -. t0 in
         Log.Dashboard.warn "operator refresh failed (%.1fs): %s"
           dt (Printexc.to_string exn));
@@ -313,6 +313,7 @@ let _mission_json_ref : Yojson.Safe.t ref =
   ])
 
 let _mission_refresh_interval_s = 120.0
+let _mission_refresh_max_backoff_s = 600.0
 
 let start_mission_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
@@ -327,12 +328,14 @@ let start_mission_refresh_loop ~state ~sw ~clock =
      _mission_json_ref := json;
      let dt = Time_compat.now () -. t0 in
      Log.Dashboard.info "mission warm cache done (%.1fs)" dt
-   with exn ->
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      let dt = Time_compat.now () -. t0 in
      Log.Dashboard.warn "mission warm cache failed (%.1fs): %s"
        dt (Printexc.to_string exn));
   Eio.Fiber.fork ~sw (fun () ->
     Log.Dashboard.info "starting mission proactive refresh loop";
+    let consecutive_failures = ref 0 in
+    let current_interval = ref _mission_refresh_interval_s in
     let rec loop () =
       let t0 = Time_compat.now () in
       (try
@@ -342,14 +345,24 @@ let start_mission_refresh_loop ~state ~sw ~clock =
         in
         _mission_json_ref := json;
         let dt = Time_compat.now () -. t0 in
+        if !consecutive_failures > 0 then
+          Log.Dashboard.info "mission refresh recovered after %d failures"
+            !consecutive_failures;
+        consecutive_failures := 0;
+        current_interval := _mission_refresh_interval_s;
         Log.Dashboard.info "mission refreshed (%.0fB, %.1fs)"
           (Float.of_int (String.length (Yojson.Safe.to_string json)))
           dt
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let dt = Time_compat.now () -. t0 in
-        Log.Dashboard.warn "mission refresh failed (%.1fs): %s"
-          dt (Printexc.to_string exn));
-      Eio.Time.sleep clock _mission_refresh_interval_s;
+        consecutive_failures := !consecutive_failures + 1;
+        if !consecutive_failures >= 3 then
+          current_interval :=
+            min _mission_refresh_max_backoff_s
+              (!current_interval *. 2.0);
+        Log.Dashboard.warn "mission refresh failed (%d consecutive, next in %.0fs, %.1fs): %s"
+          !consecutive_failures !current_interval dt (Printexc.to_string exn));
+      Eio.Time.sleep clock !current_interval;
       loop ()
     in
     loop ())

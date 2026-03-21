@@ -108,7 +108,7 @@ let add_task_safe config ~title ~description =
   try
     let response = Room.add_task config ~title ~priority:3 ~description in
     Ok response
-  with exn -> Error (Printexc.to_string exn)
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let execute_plan config ~agent_name:_ plan =
   let created = ref [] in

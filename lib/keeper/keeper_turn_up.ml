@@ -391,7 +391,7 @@ let handle_keeper_up ctx args : tool_result =
              in
              let ctx0 = Context_manager.create ~system_prompt ~max_tokens:primary.max_context in
              (try ignore (save_checkpoint session ctx0 ~generation:0)
-              with exn -> log_keeper_exn ~label:"save_checkpoint (init) failed" exn);
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn ~label:"save_checkpoint (init) failed" exn);
              let meta = {
                name;
                agent_name = keeper_agent_name name;

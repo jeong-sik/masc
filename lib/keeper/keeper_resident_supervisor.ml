@@ -143,14 +143,14 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (try
        if not (Room_utils.is_initialized ctx.config) then
          ignore (Room.init ctx.config ~agent_name:None)
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Keeper.error "supervisor room init failed: %s"
          (Printexc.to_string exn));
     (* Presence sync *)
     (try
        let synced = ensure_keeper_room_presence ctx.config meta in
        ignore (write_meta ctx.config synced)
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Keeper.error "supervisor presence sync failed: %s"
          (Printexc.to_string exn));
     publish_lifecycle "started" meta.name "supervised";

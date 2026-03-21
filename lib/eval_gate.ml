@@ -326,7 +326,7 @@ let guarded_execute
       let t0 = Time_compat.now () in
       let result =
         try execute ()
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Log.info "eval_gate tool %s failed: %s" tool_name (Printexc.to_string exn);
           Yojson.Safe.to_string (`Assoc [
             ("error", `String "Tool execution failed (internal error)");

@@ -224,7 +224,7 @@ let handle_post_mcp ~(deps : deps) ?(profile = Mcp_eio.Full) request reqd =
                                       protocol_version origin
                                   in
                                   respond_json `OK body headers
-                      with exn ->
+                      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                         let protocol_version =
                           Server_mcp_transport_http_session
                           .get_protocol_version_for_session ~session_id request
@@ -373,7 +373,7 @@ let handle_get_mcp ~(deps : deps) ?legacy_messages_endpoint
                              Eio.Time.sleep clock
                                Server_mcp_transport_http_headers
                                .sse_ping_interval_s
-                           with exn ->
+                           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                              if is_cancelled exn then raise exn;
                              Log.Server.error "ping sleep error: %s"
                                (Printexc.to_string exn));
@@ -385,7 +385,7 @@ let handle_get_mcp ~(deps : deps) ?legacy_messages_endpoint
                                ignore
                                  (Server_mcp_transport_http_sse.send_raw info
                                     ": ping\n\n")
-                           with exn ->
+                           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                              if is_cancelled exn then raise exn;
                              Log.Server.error "ping send error: %s"
                                (Printexc.to_string exn);
@@ -393,7 +393,7 @@ let handle_get_mcp ~(deps : deps) ?legacy_messages_endpoint
                                info.session_id);
                           loop ())
                       in
-                      try loop () with exn ->
+                      try loop () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                         if is_cancelled exn then ()
                         else
                           Log.Server.error "ping loop error: %s"

@@ -45,7 +45,7 @@ let history_file () =
 let append_history (json : Yojson.Safe.t) =
   try
     Fs_compat.append_jsonl (history_file ()) json
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     (* Log telemetry write errors for debugging - non-critical *)
     Log.Telemetry.error "Write error to %s: %s" (history_file ())
       (Printexc.to_string exn)
@@ -228,7 +228,7 @@ let emit event =
   (* Call handlers outside of lock to avoid deadlocks *)
   List.iter (fun handler ->
     try handler event
-    with exn -> Log.Chain.warn "chain_telemetry: event handler failed: %s" (Printexc.to_string exn)
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Chain.warn "chain_telemetry: event handler failed: %s" (Printexc.to_string exn)
   ) handlers
 
 (** {1 Subscription API} *)

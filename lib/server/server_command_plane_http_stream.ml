@@ -49,7 +49,7 @@ let stream_native_chain_events_http ~deps ~request reqd =
               Httpun.Body.Writer.write_string writer frame;
               Httpun.Body.Writer.flush writer (fun _ -> ());
               `Sent
-            with exn -> `Error exn)
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn -> `Error exn)
     in
     match write_result with
     | `Sent -> true
@@ -157,7 +157,7 @@ let stream_native_chain_events_h2 ~deps ~request h2_reqd =
               H2.Body.Writer.write_string writer frame;
               H2.Body.Writer.flush writer (fun _ -> ());
               `Sent
-            with exn -> `Error exn)
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn -> `Error exn)
     in
     match write_result with
     | `Sent -> true

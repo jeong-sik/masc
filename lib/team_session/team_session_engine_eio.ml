@@ -227,7 +227,7 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
               (Team_session_types.control_profile_to_string control_profile) );
           ("model_cascade", `List (List.map (fun m -> `String m) model_cascade));
         ])
-  with exn -> Error (Printexc.to_string exn)
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let refresh_duration_expired_session ~(config : Room.config) ~(session_id : string)
     (session : Team_session_types.session) : Team_session_types.session =

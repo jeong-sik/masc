@@ -189,6 +189,14 @@ let test_snapshot_keeper_tool_audit_fallback () =
         (keeper |> member "diagnostic" |> member "continuity_state" |> to_string))
 
 let test_keeper_msg_auto_team_session_bridge () =
+  (* This test triggers a real LLM cascade call (keeper_msg -> run_turn).
+     In CI there is no LLM server, so the cascade hangs until timeout.
+     Skip when CI=true or ALCOTEST_QUICK_TESTS=1 to prevent the build
+     from timing out.  See: #1936 *)
+  if Sys.getenv_opt "CI" = Some "true"
+     || Sys.getenv_opt "ALCOTEST_QUICK_TESTS" = Some "1" then
+    Alcotest.skip ()
+  else
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in

@@ -123,19 +123,19 @@ module ZeroZombie = struct
     in
     let rec loop () =
       (try Eio.Time.sleep clock interval
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          if is_cancelled exn then raise exn;
          Log.Misc.error "sleep error: %s" (Printexc.to_string exn));
       (try
          ignore (cleanup ~cleanup_fn)
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          if is_cancelled exn then raise exn;
          (* Silently ignore benign errors like "not initialized" *)
          if not (is_benign_error exn) then
            Log.Misc.error "cleanup error: %s" (Printexc.to_string exn));
       loop ()
     in
-    try loop () with exn ->
+    try loop () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       if is_cancelled exn then raise exn
       else if not (is_benign_error exn) then
         Log.Misc.error "loop error: %s" (Printexc.to_string exn)

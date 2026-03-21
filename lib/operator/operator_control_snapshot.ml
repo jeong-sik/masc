@@ -95,8 +95,15 @@ let recent_messages_json config =
   |> fun rows -> `List rows
 
 let latest_keeper_tools_from_metrics config keeper_name =
-  let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
-  Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:40000 ~max_lines:8
+  let store = Keeper_types.keeper_metrics_store config keeper_name in
+  let lines =
+    let dated = Dated_jsonl.read_recent_lines store 8 in
+    if dated <> [] then dated
+    else
+      let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
+      Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:40000 ~max_lines:8
+  in
+  lines
   |> List.rev
   |> List.find_map (fun line ->
          try
@@ -238,10 +245,14 @@ let keepers_json ?keeper_names config =
                   ("updated_at", `String meta.updated_at);
                   ("created_at", `String meta.created_at);
                   ("recent_activity",
-                    let metrics_path = Keeper_types.keeper_metrics_path config name in
+                    let store = Keeper_types.keeper_metrics_store config name in
                     let lines =
-                      Keeper_memory.read_file_tail_lines metrics_path
-                        ~max_bytes:8000 ~max_lines:5
+                      let dated = Dated_jsonl.read_recent_lines store 5 in
+                      if dated <> [] then dated
+                      else
+                        let metrics_path = Keeper_types.keeper_metrics_path config name in
+                        Keeper_memory.read_file_tail_lines metrics_path
+                          ~max_bytes:8000 ~max_lines:5
                     in
                     `List (List.filter_map (fun line ->
                       try Some (Yojson.Safe.from_string line)

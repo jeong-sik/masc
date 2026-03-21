@@ -106,7 +106,7 @@ let make_backend ~(pool : pool) ~(agent_name : string)
     ) pool with
     | Ok (Some json_str) ->
       (try Some (Yojson.Safe.from_string json_str)
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.MemoryPg.warn "retrieve(%s/%s) JSON parse failed: %s"
            agent_name key (Printexc.to_string exn);
          None)
@@ -151,7 +151,7 @@ let make_backend ~(pool : pool) ~(agent_name : string)
     | Ok rows ->
       List.filter_map (fun (key, json_str) ->
         try Some (key, Yojson.Safe.from_string json_str)
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Log.MemoryPg.warn "query(%s/%s) JSON parse failed: %s"
             agent_name key (Printexc.to_string exn);
           None

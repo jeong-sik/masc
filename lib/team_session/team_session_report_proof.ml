@@ -416,4 +416,4 @@ let generate_proof ?(proof_level = default_proof_level) config
         ~proof_generated_at_iso:generated_at_iso
     in
     Ok (proof_json, markdown)
-  with exn -> Error (Printexc.to_string exn)
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)

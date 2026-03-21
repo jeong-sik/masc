@@ -22,7 +22,7 @@
 }
 
 .goal-summary-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
   margin-top: 2px;
 }
@@ -41,7 +41,7 @@
 }
 
 .goal-filter-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
   margin-right: 4px;
 }
@@ -52,7 +52,7 @@
   color: #aaa;
   padding: 3px 10px;
   border-radius: 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -115,14 +115,14 @@
 
 .planning-loop-id {
   color: var(--text-strong);
-  font-size: 15px;
+  font-size: var(--fs-lg);
   font-weight: 650;
   text-transform: capitalize;
 }
 
 .planning-loop-sub {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   margin-top: 2px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -138,18 +138,18 @@
   gap: 10px;
   flex-wrap: wrap;
   color: #b9c9ea;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .planning-loop-target {
   color: var(--text-body);
-  font-size: 13px;
+  font-size: var(--fs-base);
   line-height: 1.5;
 }
 
 .planning-loop-footnote {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
@@ -166,13 +166,13 @@
 }
 
 .goal-title {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 500;
   color: #e0e0e0;
 }
 
 .goal-horizon-badge {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -183,7 +183,7 @@
   gap: 10px;
   flex-wrap: wrap;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
 }
 
@@ -201,7 +201,7 @@
 }
 
 .goal-review-note {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
   font-style: italic;
   margin-top: 4px;
@@ -218,8 +218,8 @@
 }
 
 .goal-updated {
-  font-size: 11px;
-  color: #666;
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
 }
 
 /* -- Planning toolbar (compact refresh) -- */
@@ -237,7 +237,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 4px;
@@ -282,7 +282,7 @@
 /* -- Task description preview (truncated, expandable) -- */
 
 .task-description-preview {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   line-height: 1.5;
   margin-left: 8px;

@@ -41,14 +41,14 @@
 
 .board-summary-label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .board-summary-item strong {
   color: var(--text-strong);
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 .board-sort-btn {
   padding: 6px 14px;
@@ -57,7 +57,7 @@
   background: var(--white-4);
   color: var(--text-dim);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   transition: all 0.2s;
 }
 .board-sort-btn:hover { background: var(--white-8); color: #ccc; }
@@ -96,7 +96,7 @@
 .vote-btn {
   background: none;
   border: none;
-  color: #666;
+  color: var(--text-dim);
   cursor: pointer;
   font-size: 16px;
   padding: 2px;
@@ -106,7 +106,7 @@
 .vote-btn.upvote:hover, .vote-btn.upvote.active { color: #ff4500; }
 .vote-btn.downvote:hover, .vote-btn.downvote.active { color: #7193ff; }
 .vote-btn.animate { animation: votePop 0.3s ease; }
-.vote-count { font-size: 14px; font-weight: bold; color: #ccc; }
+.vote-count { font-size: var(--fs-md); font-weight: bold; color: #ccc; }
 
 /* Post content */
 .post-content {
@@ -129,7 +129,7 @@
 }
 
 .post-title {
-  font-size: 15px;
+  font-size: var(--fs-lg);
   font-weight: 650;
   line-height: 1.45;
   color: var(--text-strong);
@@ -144,7 +144,7 @@
 }
 
 .board-meta-chip {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid rgba(71, 184, 255, 0.3);
@@ -156,13 +156,13 @@
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: #90a4cc;
 }
 
 .post-snippet {
   color: var(--text-body);
-  font-size: 13px;
+  font-size: var(--fs-base);
   line-height: 1.6;
 }
 
@@ -170,7 +170,7 @@
 
 /* Board detail */
 .board-detail { padding: 20px; }
-.board-detail .post-body { font-size: 14px; line-height: 1.7; margin: 15px 0; }
+.board-detail .post-body { font-size: var(--fs-md); line-height: 1.7; margin: 15px 0; }
 
 /* Board comments */
 .board-comment {
@@ -181,14 +181,14 @@
   border-left: 2px solid rgba(167,139,250,0.3);
   margin-bottom: 8px;
 }
-.board-comment .comment-author { font-size: 12px; font-weight: 600; color: var(--purple); }
-.board-comment .comment-text { font-size: 13px; margin-top: 4px; }
-.board-comment .comment-time { font-size: 11px; color: #666; }
+.board-comment .comment-author { font-size: var(--fs-sm); font-weight: 600; color: var(--purple); }
+.board-comment .comment-text { font-size: var(--fs-base); margin-top: 4px; }
+.board-comment .comment-time { font-size: var(--fs-xs); color: var(--text-dim); }
 
 /* ── Activity Tab ──────────────────────────────────────────── */
 .activity-line {
   font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 13px;
+  font-size: var(--fs-base);
   padding: 6px 10px;
   border-left: 2px solid var(--cyan);
   margin-bottom: 4px;
@@ -199,13 +199,13 @@
   display: flex;
   gap: 10px;
   padding: 6px 10px;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-family: monospace;
   border-bottom: 1px solid var(--white-4);
   align-items: baseline;
 }
 .journal-type {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   min-width: 100px;
   font-weight: 600;
 }

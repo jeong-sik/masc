@@ -42,9 +42,9 @@
   text-align: center;
   border: 1px solid var(--white-6);
 }
-.keeper-kpi-label { font-size: 10px; text-transform: uppercase; color: var(--text-dim); letter-spacing: 1px; }
+.keeper-kpi-label { font-size: var(--fs-2xs); text-transform: uppercase; color: var(--text-dim); letter-spacing: 1px; }
 .keeper-kpi-value { font-size: 22px; font-weight: bold; color: var(--ok); margin-top: 4px; }
-.keeper-kpi-hint { font-size: 10px; color: #666; margin-top: 2px; }
+.keeper-kpi-hint { font-size: var(--fs-2xs); color: var(--text-dim); margin-top: 2px; }
 
 /* Keeper Chart */
 
@@ -60,7 +60,7 @@
   border: 1px solid var(--white-10);
   border-radius: 8px;
   color: #e0e0e0;
-  font-size: 13px;
+  font-size: var(--fs-base);
   margin-bottom: 10px;
 }
 .keeper-field-search:focus { outline: none; border-color: rgba(74,222,128,0.4); }
@@ -69,10 +69,10 @@
   gap: 10px;
   padding: 6px 0;
   border-bottom: 1px solid var(--white-4);
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 .keeper-field-title { font-weight: 600; min-width: 90px; }
-.keeper-field-key { font-family: monospace; color: var(--cyan); font-size: 12px; }
+.keeper-field-key { font-family: monospace; color: var(--cyan); font-size: var(--fs-sm); }
 
 .keeper-signal-list {
   display: flex;
@@ -88,7 +88,7 @@
   border: 1px solid rgba(138, 163, 211, 0.18);
   border-radius: 8px;
   background: var(--white-3);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .keeper-signal-row strong {
@@ -103,7 +103,7 @@
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
   padding: 10px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #cfe0ff;
   line-height: 1.5;
 }
@@ -119,20 +119,20 @@
   padding: 6px 10px;
   background: var(--white-3);
   border-radius: 6px;
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
-.keeper-gen-label { color: var(--cyan); font-size: 11px; }
+.keeper-gen-label { color: var(--cyan); font-size: var(--fs-xs); }
 
 /* Keeper Memory */
 .keeper-memory-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
 
 /* Keeper K2K */
 .keeper-k2k-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-.keeper-k2k-route { font-family: monospace; font-size: 11px; color: var(--text-dim); }
+.keeper-k2k-route { font-family: monospace; font-size: var(--fs-xs); color: var(--text-dim); }
 
 /* Keeper Mentions */
 .keeper-mention-chip {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 2px 8px;
   border-radius: 999px;
   background: rgba(74,222,128,0.12);
@@ -150,7 +150,7 @@
   margin: 0 0 14px;
   color: var(--cyan);
   font-family: var(--font-display, inherit);
-  font-size: 15px;
+  font-size: var(--fs-lg);
 }
 
 .keeper-comms-layout {
@@ -172,7 +172,7 @@
 .keeper-comms-diagnostics-toggle {
   cursor: pointer;
   padding: 10px 14px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #8ca8d5;
   letter-spacing: 0.03em;
   list-style: none;
@@ -188,7 +188,7 @@
   display: inline-block;
   margin-right: 8px;
   transition: transform 0.15s ease;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .keeper-comms-diagnostics[open] > .keeper-comms-diagnostics-toggle::before {

@@ -18,14 +18,14 @@
 .roster-title {
   font-size: 20px;
   font-weight: 600;
-  color: #e8cc70;
+  color: var(--ff-gold-bright);
   margin: 0 0 var(--space-md, 16px) 0;
   letter-spacing: 0.5px;
   text-shadow: 0 1px 4px rgba(212, 169, 75, 0.2);
 }
 
 .agent-page__subtitle {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: rgba(255, 255, 255, 0.3);
   margin-top: 4px;
 }
@@ -43,14 +43,14 @@
   border: 1px solid rgba(200, 168, 78, 0.12);
   background: #0a1628;
   color: rgba(255, 255, 255, 0.9);
-  font-size: 13px;
+  font-size: var(--fs-base);
   width: 200px;
   transition: border-color 0.2s;
 }
 
 .roster-search:focus {
   outline: none;
-  border-color: #c8a84e;
+  border-color: var(--ff-gold);
   box-shadow: 0 0 0 2px rgba(200, 168, 78, 0.25);
 }
 
@@ -69,21 +69,21 @@
   border: 1px solid rgba(200, 168, 78, 0.12);
   background: transparent;
   color: rgba(255, 255, 255, 0.45);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .roster-filter-btn:hover {
   background: rgba(200, 168, 78, 0.25);
-  color: #e8cc70;
+  color: var(--ff-gold-bright);
   border-color: rgba(200, 168, 78, 0.35);
 }
 
 .roster-filter-btn.active {
   background: rgba(200, 168, 78, 0.25);
-  color: #e8cc70;
-  border-color: #c8a84e;
+  color: var(--ff-gold-bright);
+  border-color: var(--ff-gold);
 }
 
 /* ============================================
@@ -115,7 +115,7 @@
   position: absolute;
   width: 8px;
   height: 8px;
-  border-color: #c8a84e;
+  border-color: var(--ff-gold);
   opacity: 0.5;
   transition: opacity 0.2s;
 }
@@ -136,7 +136,7 @@
 
 .roster-card:hover {
   background: #122040;
-  border-color: #c8a84e;
+  border-color: var(--ff-gold);
   box-shadow: 0 0 12px rgba(212, 169, 75, 0.1);
 }
 
@@ -176,14 +176,14 @@
 }
 
 .roster-card__name {
-  font-size: 15px;
-  color: #e8cc70;
+  font-size: var(--fs-lg);
+  color: var(--ff-gold-bright);
   font-weight: 600;
   letter-spacing: 0.3px;
 }
 
 .roster-card__work {
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: rgba(255, 255, 255, 0.55);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -198,7 +198,7 @@
 .roster-card__meta {
   display: flex;
   gap: var(--space-sm, 8px);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: rgba(255, 255, 255, 0.3);
 }
 
@@ -215,7 +215,7 @@
    ============================================ */
 
 .roster-badge {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   padding: 2px 8px;
   border-radius: 3px;
   font-weight: 600;
@@ -231,7 +231,7 @@
 
 .roster-badge--idle {
   background: rgba(212, 169, 75, 0.1);
-  color: #c8a84e;
+  color: var(--ff-gold);
   border: 1px solid rgba(212, 169, 75, 0.2);
 }
 
@@ -245,7 +245,7 @@
   padding: var(--space-xl, 32px);
   text-align: center;
   color: rgba(255, 255, 255, 0.2);
-  font-size: 14px;
+  font-size: var(--fs-md);
   border: 1px dashed rgba(200, 168, 78, 0.12);
   border-radius: 6px;
 }
@@ -283,7 +283,7 @@
 }
 
 .roster-card__gen {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   padding: 2px 7px;
   border-radius: 3px;
   background: rgba(74, 158, 245, 0.12);
@@ -316,7 +316,7 @@
 }
 
 .roster-card__gauge-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: rgba(255, 255, 255, 0.4);
   white-space: nowrap;
   min-width: 50px;
@@ -332,8 +332,8 @@
 }
 .situation-reasons-collapse__summary {
   cursor: pointer;
-  font-size: 11px;
-  color: var(--text-muted, #94a3b8);
+  font-size: var(--fs-xs);
+  color: var(--text-muted, var(--text-slate));
   padding: 4px var(--space-md, 16px);
   letter-spacing: 0.04em;
 }
@@ -353,7 +353,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-sm, 8px);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: rgba(255, 255, 255, 0.55);
 }
 
@@ -362,7 +362,7 @@
 }
 
 .situation-reason--warn {
-  color: #c8a84e;
+  color: var(--ff-gold);
 }
 
 .situation-reason__tag {
@@ -389,12 +389,12 @@
 /* Attention badge — gold warning */
 .attention-badge {
   background: rgba(212, 169, 75, 0.15);
-  color: #c8a84e;
+  color: var(--ff-gold);
   border: 1px solid rgba(212, 169, 75, 0.3);
   border-radius: 3px;
   padding: 2px 8px;
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 /* Session triage additions */

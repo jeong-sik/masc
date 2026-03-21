@@ -14,7 +14,7 @@
   background: rgba(10, 22, 40, 0.92);
   border: 1px solid var(--border-subtle, rgba(200, 168, 78, 0.15));
   border-left: 3px solid var(--ok);
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 500;
   color: var(--text-strong);
   line-height: 1.4;
@@ -70,7 +70,7 @@
 }
 
 .attention-spotlight__card.ok .attention-spotlight__bar { background: var(--agent-working, var(--agent-working)); }
-.attention-spotlight__card.warn .attention-spotlight__bar { background: var(--agent-busy, #f0c060); }
+.attention-spotlight__card.warn .attention-spotlight__bar { background: var(--agent-busy, var(--agent-busy)); }
 .attention-spotlight__card.bad .attention-spotlight__bar { background: var(--bad, var(--bad)); }
 
 .attention-spotlight__body {
@@ -82,7 +82,7 @@
 
 .attention-spotlight__summary {
   color: var(--text-strong);
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 500;
   line-height: 1.4;
 }
@@ -99,14 +99,14 @@
   border-radius: 999px;
   background: var(--white-6);
   border: 1px solid var(--white-8);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--warm-amber, #f5c542);
   font-weight: 500;
 }
 
 .attention-spotlight__time {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 /* ── Narrative Timeline ──────────────────────── */
@@ -128,7 +128,7 @@
   color: var(--text-muted);
   text-align: center;
   padding: 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .narrative-group {
@@ -139,7 +139,7 @@
 
 .narrative-group__label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   padding-bottom: 2px;
@@ -158,7 +158,7 @@
 
 .narrative-event__text {
   color: var(--text-body);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
 }
 
@@ -169,13 +169,13 @@
 .narrative-event__raw summary {
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
 }
 
 .narrative-event__raw span {
   display: block;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 4px 8px;
   background: rgba(255, 255, 255, 0.02);
   border-radius: 4px;
@@ -192,7 +192,7 @@
   border: 1px dashed var(--card-border, rgba(255, 255, 255, 0.1));
   border-radius: 6px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   cursor: pointer;
   text-align: center;
 }
@@ -215,7 +215,7 @@
   gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 500;
 }
 
@@ -233,7 +233,7 @@
 }
 
 .health-beacon.warn .health-beacon__dot {
-  background: var(--agent-busy, #f0c060);
+  background: var(--agent-busy, var(--agent-busy));
   box-shadow: 0 0 8px rgba(240, 192, 96, 0.5);
   animation: pulse 1.5s ease-in-out infinite;
 }
@@ -245,7 +245,7 @@
 }
 
 .health-beacon.ok { color: var(--agent-working, var(--agent-working)); }
-.health-beacon.warn { color: var(--agent-busy, #f0c060); }
+.health-beacon.warn { color: var(--agent-busy, var(--agent-busy)); }
 .health-beacon.bad { color: var(--bad, var(--bad)); }
 
 /* ── Slim header variant for Home ──────────────── */
@@ -288,7 +288,7 @@
 
 .home-section-label {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -296,12 +296,12 @@
 .home-section-copy {
   margin-top: 3px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
 }
 
 .home-section-link {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--accent, #60a5fa);
   cursor: pointer;
   text-decoration: none;
@@ -349,7 +349,7 @@
 
 .hot-session-lane__title {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-strong);
 }
@@ -364,14 +364,14 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
 }
 
 .hot-session-lane__description {
   margin: 4px 0 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
 }
 
@@ -383,7 +383,7 @@
   border-radius: 8px;
   border: 1px dashed rgba(138, 163, 211, 0.18);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   text-align: center;
   background: rgba(255, 255, 255, 0.02);
 }
@@ -410,7 +410,7 @@
   background: rgba(239, 68, 68, 0.06);
 }
 .hot-session-card__goal {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-strong, #e2e8f0);
   white-space: nowrap;
@@ -419,7 +419,7 @@
 }
 .hot-session-card__context {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   line-height: 1.45;
   display: -webkit-box;
@@ -442,7 +442,7 @@
   border: 1px solid rgba(138, 163, 211, 0.18);
   background: rgba(138, 163, 211, 0.08);
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   letter-spacing: 0.02em;
 }
 .hot-session-card__chip--system {
@@ -454,12 +454,12 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   margin-top: 8px;
 }
 .hot-session-card__blocker {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--bad);
   margin-top: 4px;
   overflow: hidden;
@@ -512,7 +512,7 @@
   min-width: 0;
 }
 .agent-pulse-card__name {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-strong, #e2e8f0);
   white-space: nowrap;
@@ -520,7 +520,7 @@
   text-overflow: ellipsis;
 }
 .agent-pulse-card__status {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;

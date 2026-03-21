@@ -22,11 +22,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .agent-runtime-label {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 600;
   font-family: var(--font-mono, monospace);
   color: rgba(200, 168, 78, 0.5);
@@ -35,9 +35,9 @@
 }
 
 .agent-runtime-value {
-  color: var(--text-body, #c0d2f2);
+  color: var(--text-body, var(--text-body));
   font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .agent-runtime-model {
@@ -58,13 +58,13 @@
 
 .agent-runtime-ctx-fill {
   height: 100%;
-  background: #4ade80;
+  background: var(--ok);
   border-radius: 3px;
   transition: width 0.3s ease;
 }
 
 .agent-runtime-ctx-fill.warn {
-  background: #fbbf24;
+  background: var(--warn);
 }
 
 .agent-runtime-ctx-fill.bad {
@@ -99,35 +99,35 @@
   border-radius: 12px;
   border: 1px solid rgba(200, 168, 78, 0.12);
   background: none;
-  color: var(--text-muted, #86a0cf);
-  font-size: 11px;
+  color: var(--text-muted, var(--text-muted));
+  font-size: var(--fs-xs);
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .agent-live-chip:hover {
   border-color: rgba(200, 168, 78, 0.6);
-  color: var(--text-body, #c0d2f2);
+  color: var(--text-body, var(--text-body));
 }
 
 .agent-live-chip--active {
   background: rgba(200, 168, 78, 0.25);
-  border-color: #c8a84e;
-  color: #e8cc70;
+  border-color: var(--ff-gold);
+  color: var(--ff-gold-bright);
 }
 
 .agent-live-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .agent-event-rate {
   font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
-  color: #47b8ff;
+  color: var(--accent);
   padding: 2px 8px;
   background: rgba(71, 184, 255, 0.1);
   border: 1px solid rgba(71, 184, 255, 0.2);
@@ -135,7 +135,7 @@
 }
 
 .agent-live-count {
-  color: var(--text-muted, #86a0cf);
+  color: var(--text-muted, var(--text-muted));
 }
 
 .agent-live-autoscroll {
@@ -144,7 +144,7 @@
   border: 1px solid rgba(200, 168, 78, 0.12);
   background: none;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-family: var(--font-mono, monospace);
   cursor: pointer;
   transition: all 0.15s;
@@ -153,7 +153,7 @@
 .agent-live-autoscroll--on {
   background: rgba(74, 222, 128, 0.1);
   border-color: rgba(74, 222, 128, 0.25);
-  color: #4ade80;
+  color: var(--ok);
 }
 
 /* Scrolling event stream */
@@ -171,7 +171,7 @@
   align-items: baseline;
   gap: 6px;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   border-radius: 4px;
   transition: background 0.1s;
 }
@@ -195,17 +195,17 @@
 
 .agent-event-badge--heartbeat {
   background: rgba(74, 222, 128, 0.12);
-  color: #4ade80;
+  color: var(--ok);
 }
 
 .agent-event-badge--lifecycle {
   background: rgba(71, 184, 255, 0.12);
-  color: #47b8ff;
+  color: var(--accent);
 }
 
 .agent-event-badge--keeper {
   background: rgba(200, 168, 78, 0.15);
-  color: #e8cc70;
+  color: var(--ff-gold-bright);
 }
 
 .agent-event-badge--error {
@@ -215,22 +215,22 @@
 
 .agent-event-badge--broadcast {
   background: rgba(167, 139, 250, 0.12);
-  color: var(--purple, #a78bfa);
+  color: var(--purple, var(--purple));
 }
 
 .agent-event-badge--task {
   background: rgba(251, 191, 36, 0.12);
-  color: var(--warn, #fbbf24);
+  color: var(--warn, var(--warn));
 }
 
 .agent-event-badge--board {
   background: rgba(34, 211, 238, 0.12);
-  color: var(--cyan, #22d3ee);
+  color: var(--cyan, var(--cyan));
 }
 
 .agent-event-badge--default {
   background: rgba(138, 163, 211, 0.12);
-  color: var(--text-muted, #86a0cf);
+  color: var(--text-muted, var(--text-muted));
 }
 
 .agent-live-event-text {
@@ -243,7 +243,7 @@
 }
 
 .agent-live-event-time {
-  font-size: 10px;
-  color: var(--text-muted, #86a0cf);
+  font-size: var(--fs-2xs);
+  color: var(--text-muted, var(--text-muted));
   flex-shrink: 0;
 }

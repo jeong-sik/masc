@@ -16,14 +16,14 @@
 }
 
 .oas-pipeline__title {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text-strong, #e0e0e0);
   letter-spacing: 0.5px;
 }
 
 .oas-pipeline__count {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted, #888);
   font-variant-numeric: tabular-nums;
 }
@@ -33,7 +33,7 @@
 }
 
 .oas-section-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   color: var(--text-muted, #888);
   text-transform: uppercase;
@@ -42,7 +42,7 @@
 }
 
 .oas-empty {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted, #666);
   padding: 8px 0;
 }
@@ -60,7 +60,7 @@
   align-items: center;
   gap: 8px;
   padding: 3px 6px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   border-radius: 4px;
 }
 
@@ -92,26 +92,26 @@
 .oas-event-badge {
   padding: 1px 6px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 500;
 }
 
-.badge--post { background: #1a3a2a; color: #4ade80; }
+.badge--post { background: #1a3a2a; color: var(--ok); }
 .badge--comment { background: #1a2a3a; color: #60a5fa; }
 .badge--upvote { background: #3a3a1a; color: #facc15; }
-.badge--skip { background: #2a2a2a; color: #888; }
+.badge--skip { background: #2a2a2a; color: var(--text-dim); }
 
 .oas-event-trigger {
   color: var(--text-muted, #666);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
 }
 
 .oas-event-ok {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 600;
 }
 
-.oas-event-ok.ok { color: #4ade80; }
+.oas-event-ok.ok { color: var(--ok); }
 .oas-event-ok.fail { color: #f87171; }
 
 /* Keeper snapshot list */
@@ -127,7 +127,7 @@
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   border-radius: 4px;
 }
 
@@ -147,7 +147,7 @@
 
 .oas-keeper-gen {
   color: var(--text-muted, #666);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   min-width: 40px;
 }
 
@@ -166,7 +166,7 @@
   transition: width 0.3s ease;
 }
 
-.bar--ok { background: #4ade80; }
+.bar--ok { background: var(--ok); }
 .bar--mid { background: #facc15; }
 .bar--warn { background: #f87171; }
 
@@ -179,7 +179,7 @@
 
 .oas-keeper-msgs {
   color: var(--text-muted, #666);
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   min-width: 48px;
 }
 /* ── Pipeline Stage Indicator ─────────────────────────── */
@@ -215,7 +215,7 @@
 }
 
 .pipeline-stage-label {
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: rgba(255, 255, 255, 0.35);
   letter-spacing: 0.04em;
   margin-left: 4px;
@@ -299,7 +299,7 @@
   gap: 4px;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 500;
   letter-spacing: 0.04em;
   line-height: 1;

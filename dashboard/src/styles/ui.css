@@ -12,7 +12,7 @@
 .toast {
   padding: 12px 20px;
   border-radius: 10px;
-  font-size: 13px;
+  font-size: var(--fs-base);
   animation: slideIn 0.3s ease;
   background: rgba(30,30,50,0.95);
   border: 1px solid var(--white-10);
@@ -28,14 +28,14 @@
   background: var(--white-8);
   padding: 1px 5px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .markdown-content pre {
   background: rgba(0,0,0,0.3);
   padding: 12px;
   border-radius: 8px;
   overflow-x: auto;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .markdown-content blockquote {
   border-left: 3px solid var(--cyan);
@@ -54,7 +54,7 @@
 .think-block summary {
   cursor: pointer;
   color: var(--purple);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 /* ── SPA Refresh: class alignment + app shell tuning ─────── */
@@ -92,7 +92,7 @@
 
 .card-title {
   color: #d7e7ff;
-  font-size: 15px;
+  font-size: var(--fs-lg);
   letter-spacing: 0.05em;
   line-height: 1.35;
 }
@@ -158,21 +158,21 @@ button.agent-card:hover {
 
 .room-truth-card strong {
   color: #edf4ff;
-  font-size: 15px;
+  font-size: var(--fs-lg);
   line-height: 1.35;
 }
 
 .room-truth-card p {
   margin: 0;
   color: #96add7;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
 .room-truth-label {
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   color: #7fa5d8;
 }
 
@@ -186,7 +186,7 @@ button.agent-card:hover {
 .agent-card .agent-task {
   margin-top: 10px;
   color: #89a3cf;
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 
 .agent-card .agent-model {
@@ -201,8 +201,8 @@ button.agent-card:hover {
 
 .monitor-stat-caption {
   margin-top: 6px;
-  font-size: 11px;
-  color: #8ba2c9;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
 }
 
 .monitor-section-head {
@@ -217,8 +217,8 @@ button.agent-card:hover {
 
 .monitor-subheadline {
   margin: 6px 0 0;
-  color: #8ba2c9;
-  font-size: 13px;
+  color: var(--text-muted);
+  font-size: var(--fs-base);
   line-height: 1.45;
 }
 
@@ -302,14 +302,14 @@ button.monitor-row.bad {
 }
 
 .monitor-sub {
-  color: #8ba2c9;
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
 }
 
 .monitor-note {
   margin-top: 4px;
   color: #9ab1d7;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .monitor-meta {
@@ -317,21 +317,21 @@ button.monitor-row.bad {
   flex-wrap: wrap;
   gap: 8px 12px;
   margin-top: 10px;
-  color: #8ba2c9;
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
 }
 
 .monitor-focus {
   margin-top: 10px;
   color: #e4ecff;
-  font-size: 13px;
+  font-size: var(--fs-base);
   line-height: 1.5;
 }
 
 .monitor-footnote {
   margin-top: 8px;
   color: #7f96bd;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
 }
 
@@ -340,7 +340,7 @@ button.monitor-row.bad {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   padding: 2px 8px;
   border-radius: 999px;
 }
@@ -369,7 +369,7 @@ button.monitor-row.bad {
   border: 1px solid var(--white-8);
 }
 .card-title {
-  font-size: 14px;
+  font-size: var(--fs-md);
   text-transform: uppercase;
   letter-spacing: 2px;
   color: var(--ok);

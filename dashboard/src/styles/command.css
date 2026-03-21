@@ -46,7 +46,7 @@
 
 .monitor-stat-card span {
   color: rgba(255,255,255,0.6);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   word-break: keep-all;
@@ -61,7 +61,7 @@
 
 .monitor-stat-card small {
   color: rgba(255,255,255,0.5);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .command-plane-view {
@@ -132,7 +132,7 @@
 
 .command-entry-label {
   color: rgba(148, 163, 184, 0.92);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -204,7 +204,7 @@
   color: #7dd3fc;
   background: rgba(14, 116, 144, 0.22);
   border: 1px solid rgba(125, 211, 252, 0.18);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -361,7 +361,7 @@
 .command-step-tool {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #67e8f9;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .command-doc-links {
@@ -395,7 +395,7 @@
 }
 
 .command-tab-group-label {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: rgba(255, 255, 255, 0.4);
   text-transform: uppercase;
@@ -682,7 +682,7 @@
 
 .command-card-sub {
   color: rgba(255,255,255,0.56);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   margin-top: 4px;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -722,7 +722,7 @@
   border-top: 1px solid var(--white-8);
   color: #67e8f9;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -796,7 +796,7 @@
   align-items: center;
   padding: 3px 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: 0.02em;
   background: var(--white-8);
   color: rgba(255,255,255,0.86);
@@ -833,7 +833,7 @@
   flex-wrap: wrap;
   margin-top: 8px;
   color: rgba(255,255,255,0.56);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .command-warroom-guidance {
@@ -845,7 +845,7 @@
   border: 1px solid var(--white-8);
   background: var(--white-4);
   color: rgba(255,255,255,0.84);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
 }
 
@@ -917,7 +917,7 @@
   border-radius: 10px;
   background: rgba(9,12,20,0.75);
   color: rgba(224,242,254,0.92);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
   max-height: 220px;
   overflow: auto;

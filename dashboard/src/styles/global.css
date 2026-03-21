@@ -76,6 +76,14 @@
   --white-8: rgba(255, 255, 255, 0.08);
   --white-10: rgba(255, 255, 255, 0.1);
 
+  /* Font-size scale */
+  --fs-2xs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 15px;
+
   /* Extended text scale */
   --text-dim: #888;
   --text-slate: #94a3b8;
@@ -103,6 +111,15 @@
   --z-overlay-trpg-actor: 3040;
   --z-overlay-toast: 3070;
   --z-overlay-tooltip: 3080;
+
+  /* Breakpoint scale (used in @media max-width) */
+  /* 1450px: command warroom only */
+  /* 1200px: layout collapse (sidebar → stacked) */
+  /* 1100px: grid collapse (2-col → 1-col) */
+  /* 960px: compact cards */
+  /* 880px: mobile-first adaptations */
+  /* 768px: tablet/mobile */
+  /* 600px: small mobile */
 
   /* Spacing tokens */
   --space-xs: 4px;
@@ -551,7 +568,7 @@ a:hover {
   }
 }
 
-@media (max-width: 1250px) {
+@media (max-width: 1200px) {
 
   .dashboard-layout {
     grid-template-columns: 1fr;
@@ -573,7 +590,7 @@ a:hover {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 880px) {
 
   :root {
     --header-h: 86px;
@@ -588,7 +605,7 @@ a:hover {
 
 }
 
-@media (max-width: 700px) {
+@media (max-width: 768px) {
 
   .dashboard-rail {
     grid-template-columns: 1fr;

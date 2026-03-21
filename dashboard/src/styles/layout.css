@@ -1,11 +1,11 @@
 /* ── Responsive (components) ───────────────────────────────── */
-@media (max-width: 980px) {
+@media (max-width: 960px) {
 
   .keeper-kpis { grid-template-columns: repeat(2, 1fr); }
   .agent-detail-grid { grid-template-columns: 1fr; }
 
 }
-@media (max-width: 900px) {
+@media (max-width: 880px) {
   .council-create { grid-template-columns: 1fr; }
   .control-row { grid-template-columns: 1fr; }
   .agent-mention-row { grid-template-columns: 1fr; }

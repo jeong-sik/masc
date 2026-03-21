@@ -12,7 +12,7 @@
   border-radius: 8px;
   padding: 8px 10px;
   color: #f7b6b6;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .council-list {
   display: flex;
@@ -55,7 +55,7 @@ button.council-row.selected {
 
 .council-topic {
   color: #e8f0ff;
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
   word-break: break-word;
 }
@@ -66,13 +66,13 @@ button.council-row.selected {
   flex-wrap: wrap;
   gap: 8px;
   color: #8ea9d6;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .council-state {
   border-radius: 999px;
   padding: 3px 9px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   text-transform: lowercase;
   border: 1px solid rgba(138, 163, 211, 0.25);
   background: var(--white-6);
@@ -99,7 +99,7 @@ button.council-row.selected {
   background: rgba(0, 0, 0, 0.28);
   color: #d3e3ff;
   padding: 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
   font-family: "IBM Plex Mono", "Fira Code", monospace;
 }
@@ -146,7 +146,7 @@ button.council-row.selected {
   border: 1px solid rgba(138, 163, 211, 0.22);
   background: var(--white-6);
   color: #a9c3ee;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -160,7 +160,7 @@ button.council-row.selected {
 
 .governance-vote-meter {
   color: #8ea9d6;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .governance-chip-row {
@@ -176,7 +176,7 @@ button.council-row.selected {
   border: 1px solid var(--card-border);
   background: var(--white-5);
   color: #b8cdec;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
 }
 
 .governance-chip.ok {
@@ -239,7 +239,7 @@ button.council-row.selected {
   padding: 8px 10px;
   background: var(--white-4);
   color: #c8daf7;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .governance-summary-callout {
@@ -272,12 +272,12 @@ button.council-row.selected {
   align-items: center;
   gap: 8px;
   color: #9ab3de;
-  font-size: 11px;
+  font-size: var(--fs-xs);
 }
 
 .governance-ledger-head strong {
   color: #e8f0ff;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .governance-ledger-body {
@@ -290,7 +290,7 @@ button.council-row.selected {
 .governance-badge {
   border-radius: 999px;
   padding: 2px 8px;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   text-transform: lowercase;
   border: 1px solid rgba(138, 163, 211, 0.22);
   background: var(--white-5);
@@ -328,18 +328,18 @@ button.council-row.selected {
 .governance-side-block h4 {
   margin: 0;
   color: #e8f0ff;
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 
 .governance-side-line {
   color: #c8daf7;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
 }
 
 .governance-preview {
   margin-top: 0;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   max-height: 180px;
   overflow: auto;
 }
@@ -355,7 +355,7 @@ button.council-row.selected {
   gap: 8px;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1200px) {
 
   .governance-layout {
     grid-template-columns: 1fr;

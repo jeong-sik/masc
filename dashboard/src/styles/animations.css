@@ -59,7 +59,7 @@ button.monitor-row.state-offline:hover {
 /* Monitor pill state variants */
 .monitor-pill.state-offline {
   background: rgba(85, 85, 85, 0.20);
-  color: #666;
+  color: var(--text-dim);
   text-decoration: line-through;
 }
 

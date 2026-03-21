@@ -290,11 +290,9 @@ let serialize_context (ctx : working_context) : string =
   Yojson.Safe.to_string json
 
 let deserialize_context (s : string) ~max_tokens : working_context =
-  let json = Yojson.Safe.from_string (Inference_utils.sanitize_text_utf8 s) in
+  let json = Yojson.Safe.from_string s in
   let open Yojson.Safe.Util in
-  let system_prompt =
-    json |> member "system_prompt" |> to_string |> Inference_utils.sanitize_text_utf8
-  in
+  let system_prompt = json |> member "system_prompt" |> to_string in
   let messages = json |> member "messages" |> to_list |> List.map message_of_json in
   let token_count = json |> member "token_count" |> to_int in
   { system_prompt; messages; token_count; max_tokens; importance_scores = [];
@@ -317,7 +315,7 @@ let create_checkpoint ctx ~generation =
     generation;
     message_count = List.length ctx.messages;
     token_count = ctx.token_count;
-    serialized = serialize_context ctx |> Inference_utils.sanitize_text_utf8;
+    serialized = serialize_context ctx;
   }
 
 let to_oas_checkpoint ~(agent_name : string) ~(session_id : string)
@@ -372,27 +370,28 @@ let persist_message session msg =
       `Assoc (("timestamp", `Float now_ts) :: ("ts_unix", `Float now_ts) :: fields)
     | j -> j
   in
-  let line =
-    (Yojson.Safe.to_string payload |> Inference_utils.sanitize_text_utf8) ^ "\n"
-  in
+  let line = Yojson.Safe.to_string payload ^ "\n" in
   Fs_compat.append_file path line
 
 let save_checkpoint session ckpt =
-  let ckpt =
-    { ckpt with serialized = Inference_utils.sanitize_text_utf8 ckpt.serialized }
-  in
   session.checkpoints <- session.checkpoints @ [ckpt];
   let path = Filename.concat session.session_dir
     (sprintf "%s.json" ckpt.checkpoint_id) in
+  (* Store context as embedded JSON object, not as escaped string.
+     This avoids JSON-in-JSON double encoding that corrupts multi-byte UTF-8. *)
+  let context_json =
+    try Yojson.Safe.from_string ckpt.serialized
+    with _ -> `String ckpt.serialized
+  in
   let json = `Assoc [
     ("checkpoint_id", `String ckpt.checkpoint_id);
     ("timestamp", `Float ckpt.timestamp);
     ("generation", `Int ckpt.generation);
     ("message_count", `Int ckpt.message_count);
     ("token_count", `Int ckpt.token_count);
-    ("serialized", `String ckpt.serialized);
+    ("context", context_json);
   ] in
-  let content = Yojson.Safe.to_string json |> Inference_utils.sanitize_text_utf8 in
+  let content = Yojson.Safe.to_string json in
   Fs_compat.save_file path content
 
 let load_latest_checkpoint session =
@@ -416,12 +415,20 @@ let load_latest_checkpoint session =
         |> Yojson.Safe.from_string
       in
       let open Yojson.Safe.Util in
+      (* Support both new "context" (JSON object) and legacy "serialized" (string) format *)
+      let serialized =
+        try
+          let ctx = json |> member "context" in
+          if ctx = `Null then raise Not_found;
+          Yojson.Safe.to_string ctx
+        with _ ->
+          json |> member "serialized" |> to_string
+      in
       Some {
         checkpoint_id = json |> member "checkpoint_id" |> to_string;
         timestamp = json |> member "timestamp" |> to_number;
         generation = json |> member "generation" |> to_int;
         message_count = json |> member "message_count" |> to_int;
         token_count = json |> member "token_count" |> to_int;
-        serialized =
-          json |> member "serialized" |> to_string |> Inference_utils.sanitize_text_utf8;
+        serialized;
       }

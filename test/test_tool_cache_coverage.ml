@@ -82,6 +82,18 @@ let test_dispatch_cache_get () =
     | None -> fail "expected Some"
   with _ -> ()
 
+let test_dispatch_cache_get_miss_rejected () =
+  let ctx = make_ctx () in
+  let args = `Assoc [("key", `String "missing")] in
+  match Tool_cache.dispatch ctx ~name:"masc_cache_get" ~args with
+  | Some (success, body) ->
+      check bool "cache miss rejected" false success;
+      let json = Yojson.Safe.from_string body in
+      check bool "hit false" false Yojson.Safe.Util.(json |> member "hit" |> to_bool);
+      check string "error message" "cache entry not found"
+        Yojson.Safe.Util.(json |> member "error" |> to_string)
+  | None -> fail "expected Some"
+
 let test_dispatch_cache_delete () =
   let ctx = make_ctx () in
   let args = `Assoc [("key", `String "k1")] in
@@ -150,6 +162,7 @@ let () =
     "dispatch", [
       test_case "cache_set" `Quick test_dispatch_cache_set;
       test_case "cache_get" `Quick test_dispatch_cache_get;
+      test_case "cache_get miss rejected" `Quick test_dispatch_cache_get_miss_rejected;
       test_case "cache_delete" `Quick test_dispatch_cache_delete;
       test_case "cache_list" `Quick test_dispatch_cache_list;
       test_case "cache_clear" `Quick test_dispatch_cache_clear;

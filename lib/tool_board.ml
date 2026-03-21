@@ -146,7 +146,14 @@ let handle_post_create args =
   let body = get_string_opt args "body" |> Option.map strip_state_blocks_text in
   let raw_content = match body with Some value -> value | None -> get_string args "content" "" in
   let content = strip_state_blocks_text raw_content in
-  if String.length content > Board.Limits.max_content_length then
+  let title_is_empty =
+    match title with
+    | Some value -> String.trim value = ""
+    | None -> false
+  in
+  if title_is_empty then
+    (false, "❌ title is required")
+  else if String.length content > Board.Limits.max_content_length then
     (false, Printf.sprintf "Content exceeds max length (%d > %d chars)"
        (String.length content) Board.Limits.max_content_length)
   else
@@ -192,6 +199,15 @@ let sort_order_of_string = function
   | "discussed" | "comments" -> Discussed
   | _ -> Hot  (* default *)
 
+let parse_sort_order value =
+  match String.lowercase_ascii (String.trim value) with
+  | "hot" -> Ok Hot
+  | "trending" -> Ok Trending
+  | "recent" | "new" -> Ok Recent
+  | "updated" | "active" -> Ok Updated
+  | "discussed" | "comments" -> Ok Discussed
+  | _ -> Error "invalid sort. Valid: hot, trending, recent, updated, discussed"
+
 let dispatch_sort_of sort_by =
   match sort_by with
   | Hot -> Board_dispatch.Hot
@@ -206,7 +222,11 @@ let handle_post_list args =
   let hearth = get_string_opt args "hearth" in
   let random = get_bool args "random" false in
   let offset = get_int args "offset" 0 in
-  let sort_by = get_string args "sort_by" "hot" |> sort_order_of_string in
+  let sort_arg =
+    match get_string_opt args "sort_by" with
+    | Some _ as value -> value
+    | None -> get_string_opt args "sort"
+  in
   let exclude_system = get_bool args "exclude_system" false in
   let exclude_automation = get_bool args "exclude_automation" false in
   let since = get_float_opt args "since" in
@@ -215,61 +235,68 @@ let handle_post_list args =
     | Some s -> visibility_of_string s
     | None -> None
   in
-
-  let all_posts = Board_dispatch.list_posts ~visibility_filter ?hearth
-    ~exclude_automation
-    ~sort_by:(dispatch_sort_of sort_by) ~limit:(limit + offset + 100) () in
-
-  (* Filter out system posts when exclude_system is true *)
-  let all_posts = if exclude_system then
-    List.filter (fun (p : Board.post) ->
-      Board.classify_post_kind p <> Board.System_post
-      && Board.Agent_id.to_string p.author <> "system"
-    ) all_posts
-  else all_posts
+  let sort_by_result =
+    match sort_arg with
+    | None -> Ok Hot
+    | Some value -> parse_sort_order value
   in
+  match sort_by_result with
+  | Error msg -> (false, Printf.sprintf "❌ %s" msg)
+  | Ok sort_by ->
+      let all_posts = Board_dispatch.list_posts ~visibility_filter ?hearth
+        ~exclude_automation
+        ~sort_by:(dispatch_sort_of sort_by) ~limit:(limit + offset + 100) () in
 
-  (* Sorting is already handled by Board_dispatch *)
-  let sorted_posts = all_posts in
+      (* Filter out system posts when exclude_system is true *)
+      let all_posts = if exclude_system then
+        List.filter (fun (p : Board.post) ->
+          Board.classify_post_kind p <> Board.System_post
+          && Board.Agent_id.to_string p.author <> "system"
+        ) all_posts
+      else all_posts
+      in
 
-  let posts =
-    if random then
-      (* Shuffle via random-key sort (unbiased, unlike comparator trick) *)
-      let shuffled = List.map (fun p -> (Random.bits (), p)) sorted_posts
-        |> List.sort (fun (a, _) (b, _) -> compare a b)
-        |> List.map snd in
-      List.filteri (fun i _ -> i < limit) shuffled
-    else if offset > 0 then
-      (* Skip offset, take limit *)
-      List.filteri (fun i _ -> i >= offset && i < offset + limit) sorted_posts
-    else
-      List.filteri (fun i _ -> i < limit) sorted_posts
-  in
-  if posts = [] then
-    (true, "📭 No posts found.")
-  else
-    (* Check for new activity since timestamp *)
-    let has_new_activity (p : Board.post) =
-      match since with
-      | None -> false
-      | Some ts ->
-          (* Post itself is new *)
-          p.created_at > ts || p.updated_at > ts
-    in
-    let format_post_with_indicator p =
-      let indicator = if has_new_activity p then " 🔔" else "" in
-      format_post p ^ indicator
-    in
-    let formatted = List.map format_post_with_indicator posts in
-    let sort_label = match sort_by with
-      | Hot -> "🔥 Hot"
-      | Trending -> "📈 Trending"
-      | Recent -> "🕐 Recent"
-      | Updated -> "🔄 Recently Updated"
-      | Discussed -> "💬 Most Discussed"
-    in
-    let header = Printf.sprintf "📋 Posts (%d) — %s:" (List.length posts) sort_label in
-    (true, header ^ "\n\n" ^ String.concat "\n\n---\n\n" formatted)
+      (* Sorting is already handled by Board_dispatch *)
+      let sorted_posts = all_posts in
+
+      let posts =
+        if random then
+          (* Shuffle via random-key sort (unbiased, unlike comparator trick) *)
+          let shuffled = List.map (fun p -> (Random.bits (), p)) sorted_posts
+            |> List.sort (fun (a, _) (b, _) -> compare a b)
+            |> List.map snd in
+          List.filteri (fun i _ -> i < limit) shuffled
+        else if offset > 0 then
+          (* Skip offset, take limit *)
+          List.filteri (fun i _ -> i >= offset && i < offset + limit) sorted_posts
+        else
+          List.filteri (fun i _ -> i < limit) sorted_posts
+      in
+      if posts = [] then
+        (true, "📭 No posts found.")
+      else
+        (* Check for new activity since timestamp *)
+        let has_new_activity (p : Board.post) =
+          match since with
+          | None -> false
+          | Some ts ->
+              (* Post itself is new *)
+              p.created_at > ts || p.updated_at > ts
+        in
+        let format_post_with_indicator p =
+          let indicator = if has_new_activity p then " 🔔" else "" in
+          format_post p ^ indicator
+        in
+        let formatted = List.map format_post_with_indicator posts in
+        let sort_label = match sort_by with
+          | Hot -> "🔥 Hot"
+          | Trending -> "📈 Trending"
+          | Recent -> "🕐 Recent"
+          | Updated -> "🔄 Recently Updated"
+          | Discussed -> "💬 Most Discussed"
+        in
+        let header = Printf.sprintf "📋 Posts (%d) — %s:" (List.length posts) sort_label in
+        (true, header ^ "\n\n" ^ String.concat "\n\n---\n\n" formatted)
 
 let handle_post_get args =
   let post_id = get_string args "post_id" "" in

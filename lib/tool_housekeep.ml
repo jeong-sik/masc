@@ -3,7 +3,7 @@
     Gives keepers the ability to observe and maintain their own world (.masc/).
     The keeper decides what to clean; these tools provide the means. *)
 
-open Keeper_types_resident
+open Keeper_types
 
 let masc_dir config = Room_utils.masc_dir config
 
@@ -103,7 +103,7 @@ let housekeep_log_path config =
   Filename.concat (masc_dir config) "housekeep.log"
 
 let log_deletion config ~path ~reason =
-  let ts = Time_compat.now_iso () in
+  let ts = Types.now_iso () in
   let line = Printf.sprintf "[%s] DELETED %s reason=%s\n" ts path reason in
   let log_path = housekeep_log_path config in
   Fs_compat.append_file log_path line

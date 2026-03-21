@@ -129,25 +129,6 @@ let keeper_action_kind_of_tool_names tool_names =
   else if List.mem "keeper_board_vote" tool_names then "vote"
   else "none"
 
-type social_board_event = {
-  kind : [ `Board_post | `Board_comment ];
-  post_id : string;
-  comment_id : string option;
-  author : string;
-  post_author : string option;
-  content : string;
-  created_at : float;
-}
-
-type social_turn_outcome = {
-  outcome : [ `Acted | `Passed ];
-  summary : string;
-  reason : string;
-  action_kind : string;
-  tools_used : string list;
-  decision_reason : string option;
-  failure_reason : string option;
-}
 
 let effective_model_labels_for_turn
     (m : keeper_meta)

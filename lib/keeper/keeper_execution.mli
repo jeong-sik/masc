@@ -1,5 +1,5 @@
 (** Keeper_execution — keeper tool execution loop, prompting,
-    compaction, proactive/explicit room behavior, and keepalive runtime.
+    compaction, and keepalive runtime.
 
     Internal helpers (proactive quality checks, explicit room replies,
     autonomous execution) are hidden. Only externally-called functions
@@ -12,30 +12,6 @@ open Keeper_types
 
 (** Log a keeper exception with a descriptive label. *)
 val log_keeper_exn : label:string -> exn -> unit
-
-(** {1 Types} *)
-
-(** Social board event for proactive room behavior. *)
-type social_board_event = {
-  kind : [ `Board_post | `Board_comment ];
-  post_id : string;
-  comment_id : string option;
-  author : string;
-  post_author : string option;
-  content : string;
-  created_at : float;
-}
-
-(** Outcome of a social turn attempt. *)
-type social_turn_outcome = {
-  outcome : [ `Acted | `Passed ];
-  summary : string;
-  reason : string;
-  action_kind : string;
-  tools_used : string list;
-  decision_reason : string option;
-  failure_reason : string option;
-}
 
 (** {1 Context and Checkpoint} *)
 
@@ -151,12 +127,3 @@ val proactive_retry_instruction : int -> reason:string -> string
 
 (** Get temperature for proactive attempt. *)
 val proactive_temperature : int -> float
-
-(** {1 Social Board} *)
-
-(** Execute a social board event turn. *)
-val run_social_board_event_turn :
-  _ context ->
-  meta:keeper_meta ->
-  event:social_board_event ->
-  (keeper_meta * social_turn_outcome, string) result

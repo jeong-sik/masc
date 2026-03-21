@@ -498,7 +498,6 @@
    keeper_world_observation
    keeper_unified_prompt
    keeper_unified_turn
-   keeper_exec_social
 
    keeper_prompt
    keeper_coordination
@@ -663,7 +662,6 @@
   keeper_exec_status
   keeper_exec_persona
   keeper_exec_context
-  keeper_exec_social
   keeper_turn_session
   keeper_turn_setup
   keeper_turn_up

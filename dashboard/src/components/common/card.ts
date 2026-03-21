@@ -6,12 +6,11 @@ import type { ComponentChildren } from 'preact'
 interface CardProps {
   title?: ComponentChildren
   class?: string
-  semanticId?: string
   testId?: string
   children: ComponentChildren
 }
 
-export function Card({ title, class: className, semanticId: _semanticId, testId, children }: CardProps) {
+export function Card({ title, class: className, testId, children }: CardProps) {
   return html`
     <div class="card ${className ?? ''}" data-testid=${testId}>
       ${title

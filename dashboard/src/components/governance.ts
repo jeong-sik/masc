@@ -78,7 +78,7 @@ function GovernanceSummaryStrip() {
 
 function GovernanceToolbar() {
   return html`
-    <${Card} title="청원 콘솔" class="section" semanticId="governance.supervisor">
+    <${Card} title="청원 콘솔" class="section">
       <div class="governance-toolbar">
         <div class="council-create">
           <input
@@ -135,7 +135,7 @@ function GovernanceToolbar() {
 function DecisionInbox() {
   const items = filteredItemsByFilter(governanceFilter.value, governanceData.value?.items ?? [])
   return html`
-    <${Card} title="사건 수신함" class="section" semanticId="governance.inbox">
+    <${Card} title="사건 수신함" class="section">
       <div class="council-list governance-inbox">
         ${items.length === 0
           ? html`<div class="empty-state">이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.</div>`

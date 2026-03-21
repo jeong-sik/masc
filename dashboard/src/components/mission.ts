@@ -195,7 +195,7 @@ export function Mission() {
           `
         : null}
 
-      <${Card} title="진행중인 세션" class="mission-list-card" semanticId="mission.session_briefs" id="mission-sessions">
+      <${Card} title="진행중인 세션" class="mission-list-card" id="mission-sessions">
         <div class="mission-section-head">
           <h3>지금 진행중인 일</h3>
           <p>세션을 기준으로 목표, 최근 흐름, 막힘, 연결된 작전을 먼저 읽고 사회의 현재 상태를 파악합니다.</p>
@@ -216,7 +216,7 @@ export function Mission() {
 
       <details open id="mission-keepers" class="mission-collapsible-section">
         <summary class="mission-collapsible-summary">키퍼 연속성 <span class="monitor-pill">${keeperRows.length}</span>${keeperStatusWarnings > 0 ? html` <span class="monitor-pill warn">${keeperStatusWarnings} 주의</span>` : null}</summary>
-        <${Card} title="키퍼 연속성" class="mission-list-card" semanticId="mission.keeper_activity">
+        <${Card} title="키퍼 연속성" class="mission-list-card">
           <div class="mission-section-head">
             <h3>세션 밖에서 움직이는 행위자</h3>
             <p>키퍼는 세션과 별개로 보고, 사회의 연속성과 장기 행위자 상태를 먼저 읽습니다.</p>
@@ -236,7 +236,7 @@ export function Mission() {
 
       <details open id="mission-output" class="mission-collapsible-section">
         <summary class="mission-collapsible-summary">최근 사회 활동 <span class="monitor-pill">${focusSessionOutputs.length + keeperOutputRows.length}</span></summary>
-        <${Card} title="최근 사회 활동" class="mission-list-card" semanticId="mission.session_activity">
+        <${Card} title="최근 사회 활동" class="mission-list-card">
           <div class="mission-section-head">
             <h3>누가 방금 무엇을 했나</h3>
             <p>선택된 세션과 연결된 행위자의 최근 출력만 모아 읽고, 해석은 뒤로 미룹니다.</p>
@@ -267,7 +267,7 @@ export function Mission() {
 
       <details open id="mission-attention" class="mission-collapsible-section">
         <summary class="mission-collapsible-summary">세션 우선순위 <span class="monitor-pill${attentionQueue.length > 0 ? ' warn' : ''}">${attentionQueue.length}</span></summary>
-        <${Card} title="세션 우선순위" class="mission-list-card" semanticId="mission.attention_queue">
+        <${Card} title="세션 우선순위" class="mission-list-card">
           <div class="mission-section-head">
             <h3>어느 세션을 먼저 봐야 하나</h3>
             <p>주의 신호는 truth를 훑은 다음에만 읽고, 세션 집중 순서를 정하는 용도로만 씁니다.</p>
@@ -284,7 +284,7 @@ export function Mission() {
       <div class="mission-human-grid">
         <${MissionBriefingCard} />
 
-        <${Card} title="운영 보조 진단" class="mission-list-card" semanticId="mission.internal_signals">
+        <${Card} title="운영 보조 진단" class="mission-list-card">
           <div class="mission-section-head">
             <h3>시스템 진단</h3>
             <p>artifact scope drift 같은 내부 신호는 사회 흐름을 읽은 뒤에만 참고하도록 아래 보조 면으로 둡니다.</p>

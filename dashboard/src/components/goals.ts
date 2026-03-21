@@ -170,7 +170,7 @@ function HorizonGroup({ horizon, items }: { horizon: string; items: Goal[] }) {
   if (items.length === 0) return null
   const sorted = [...items].sort((a, b) => b.priority - a.priority)
   return html`
-    <${Card} title="${horizonLabel(horizon)} 목표 (${items.length})" class="section" semanticId="planning.goal_pipeline">
+    <${Card} title="${horizonLabel(horizon)} 목표 (${items.length})" class="section">
       <div class="goal-list">
         ${sorted.map(g => html`<${GoalRow} key=${g.id} goal=${g} />`)}
       </div>
@@ -335,7 +335,7 @@ function TaskBacklog() {
   const sortedDone = [...done].sort(sortByTimeDesc)
 
   return html`
-    <${Card} title="태스크 백로그" class="section" semanticId="planning.backlog">
+    <${Card} title="태스크 백로그" class="section">
       <div class="kanban-board">
         <div class="kanban-column">
           <div class="kanban-header todo">

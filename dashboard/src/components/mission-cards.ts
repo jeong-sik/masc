@@ -100,7 +100,7 @@ export function MissionBriefingCard() {
     || (briefing?.status === 'unavailable' && !briefing?.cached)
 
   return html`
-    <${Card} title="판단 레이어" class="mission-briefing-card" semanticId="mission.model_briefing">
+    <${Card} title="판단 레이어" class="mission-briefing-card">
       <div class="mission-section-head">
         <h3>왜 그렇게 보이나</h3>
         <p>사회 truth를 읽은 뒤에만 별도 판단 결과를 참고하고, 근거는 접어서 둡니다.</p>

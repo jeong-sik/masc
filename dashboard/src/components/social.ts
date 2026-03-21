@@ -217,7 +217,7 @@ export function Social() {
   return html`
     <div class="agents-monitor">
 
-      <${Card} title="소셜 그래프" class="section" semanticId="social.graph" testId="social.graph">
+      <${Card} title="소셜 그래프" class="section" testId="social.graph">
         <div class="monitor-section-head">
           <h2 class="monitor-headline">에이전트 관계 그래프</h2>
           <p class="monitor-subheadline">에이전트, 작업, 결정 간의 상호작용을 시각화합니다. 노드 크기는 활동 빈도를 반영합니다.</p>
@@ -232,7 +232,7 @@ export function Social() {
       <//>
 
       <div class="agents-workbench">
-        <${Card} title="에이전트 활동 순위" class="section" semanticId="social.leaderboard" testId="social.leaderboard">
+        <${Card} title="에이전트 활동 순위" class="section" testId="social.leaderboard">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">에이전트 활동 순위</h2>
             <p class="monitor-subheadline">그래프 이벤트 빈도(weight)를 기준으로 정렬한 에이전트 순위입니다.</p>
@@ -240,7 +240,7 @@ export function Social() {
           <${NodeLeaderboard} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="노드 종류 분포" class="section" semanticId="social.kinds" testId="social.kinds">
+        <${Card} title="노드 종류 분포" class="section" testId="social.kinds">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">노드 종류</h2>
             <p class="monitor-subheadline">그래프에 포함된 노드를 종류별로 분류합니다.</p>
@@ -248,7 +248,7 @@ export function Social() {
           <${KindBreakdown} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="최근 활동" class="section" semanticId="social.timeline" testId="social.timeline">
+        <${Card} title="최근 활동" class="section" testId="social.timeline">
           <div class="monitor-section-head">
             <h2 class="monitor-headline">타임라인</h2>
             <p class="monitor-subheadline">가장 최근의 소셜 이벤트를 시간순으로 보여줍니다.</p>

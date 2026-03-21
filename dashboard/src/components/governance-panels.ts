@@ -47,7 +47,7 @@ export function GuardrailPane({
   const order = detail?.execution_order
   return html`
     <div class="governance-side-column">
-      <${Card} title="판정 / 집행" class="section" semanticId="governance.guardrail">
+      <${Card} title="판정 / 집행" class="section">
         ${!item || !detail
           ? html`<div class="empty-state">사건을 고르면 판정과 집행 경로가 보입니다.</div>`
           : html`
@@ -86,7 +86,7 @@ export function GuardrailPane({
                 : null}
             `}
     <//>
-      <${Card} title="심의 입력" class="section" semanticId="governance.context">
+      <${Card} title="심의 입력" class="section">
         ${!item
           ? html`<div class="empty-state">사건을 선택한 뒤 의견을 추가하세요.</div>`
           : html`
@@ -131,7 +131,7 @@ export function GuardrailPane({
 export function ActivityRail() {
   const events = (governanceData.value?.activity ?? []).slice(0, 8)
   return html`
-    <${Card} title="최근 활동" class="section" semanticId="governance.activity">
+    <${Card} title="최근 활동" class="section">
       <div class="governance-activity-list">
         ${events.length === 0
           ? html`<div class="empty-state">거버넌스 활동이 아직 없습니다. 청원 접수, 심의, 판정이 이루어지면 여기에 기록됩니다.</div>`
@@ -169,7 +169,7 @@ export function RuntimeParamsPanel() {
   if (params.length === 0 && !runtimeLoading.value) return null
 
   return html`
-    <${Card} title="Runtime Parameters" class="section" semanticId="governance.params">
+    <${Card} title="Runtime Parameters" class="section">
       ${runtimeLoading.value
         ? html`<div class="loading-indicator">파라미터 로딩 중...</div>`
         : html`
@@ -269,7 +269,6 @@ export function DecisionDetail() {
     <${Card}
       title=${item ? '사건 상세' : '거버넌스 상세'}
       class="section"
-      semanticId="governance.detail"
     >
       ${detailLoading.value
         ? html`<div class="loading-indicator">거버넌스 상세 불러오는 중...</div>`

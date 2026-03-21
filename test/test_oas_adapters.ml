@@ -59,8 +59,8 @@ let test_roundtrip_tool_msg () =
   | None -> Alcotest.fail "tool message should not be dropped"
   | Some oas ->
     let rt = Oas_type_adapters.of_oas_message oas in
-    (* Oas_type_adapters.to_oas_message preserves Tool role directly (shared type).
-       Context_compact_oas.masc_msg_to_oas uses sentinel-tagging instead. *)
+    (* Both Oas_type_adapters and Context_compact_oas preserve Tool role
+       directly — MASC and OAS share the same Agent_sdk.Types.message type. *)
     Alcotest.(check string) "tool role preserved"
       "tool"
       (match rt.role with Agent_sdk.Types.Tool -> "tool" | _ -> "other");

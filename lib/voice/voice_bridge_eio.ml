@@ -1,4 +1,3 @@
-[@@@warning "-33"]
 (** Voice_bridge_eio — TTS synthesis, MCP voice sessions, conferences. *)
 
 include Voice_bridge_eio_core

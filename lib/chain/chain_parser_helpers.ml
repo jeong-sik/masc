@@ -1,4 +1,3 @@
-[@@@warning "-32"]
 (** Chain Parser - JSON to Chain AST conversion
 
     Parses JSON DSL into Chain_types structures.

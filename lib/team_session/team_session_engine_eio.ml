@@ -188,20 +188,23 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
        orchestration_mode is mapped by the bridge:
          Auto → Decentralized, Manual/Assist → Supervisor.
        The old 15-second polling engine (start_runtime_loop) is no longer
-       called for any mode. *)
-    Eio.Fiber.fork ~sw (fun () ->
-      let result =
-        Team_session_swarm_runner.run_swarm ~sw ~clock ~config
-          ~session_id ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no dispatch"))
-      in
-      match result with
-      | Ok _session ->
-        with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id)
-      | Error reason ->
-        ignore (finalize_session ~config ~session_id
-          ~final_status:Team_session_types.Failed ~reason
-          ~generate_report:true);
-        with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id));
+       called for any mode.
+       Skip swarm fork when planned_workers is empty — the session stays
+       Running and accepts manual steps via masc_team_session_step. *)
+    if session.planned_workers <> [] then
+      Eio.Fiber.fork ~sw (fun () ->
+        let result =
+          Team_session_swarm_runner.run_swarm ~sw ~clock ~config
+            ~session_id ~masc_tools:[] ~dispatch:(fun ~name:_ ~args:_ -> (false, "no dispatch"))
+        in
+        match result with
+        | Ok _session ->
+          with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id)
+        | Error reason ->
+          ignore (finalize_session ~config ~session_id
+            ~final_status:Team_session_types.Failed ~reason
+            ~generate_report:true);
+          with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id));
     Ok
       (`Assoc
         [
@@ -226,17 +229,34 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         ])
   with exn -> Error (Printexc.to_string exn)
 
+let refresh_duration_expired_session ~(config : Room.config) ~(session_id : string)
+    (session : Team_session_types.session) : Team_session_types.session =
+  if session.status = Team_session_types.Running
+     && Time_compat.now () >= session.planned_end_at
+  then
+    match
+      finalize_session ~config ~session_id
+        ~final_status:Team_session_types.Completed
+        ~reason:"duration_elapsed" ~generate_report:true
+    with
+    | Some finalized -> finalized
+    | None -> session
+  else session
+
 let status_session ~(config : Room.config) ~(session_id : string) :
     (Yojson.Safe.t, string) result =
   match Team_session_store.load_session config session_id with
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
-  | Some session -> Ok (session_status_json config session)
+  | Some session ->
+      let session = refresh_duration_expired_session ~config ~session_id session in
+      Ok (session_status_json config session)
 
 let stop_session ~(config : Room.config) ~(session_id : string) ~(reason : string)
     ~(generate_report : bool) : (Yojson.Safe.t, string) result =
   match Team_session_store.load_session config session_id with
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
   | Some session ->
+      let session = refresh_duration_expired_session ~config ~session_id session in
       if session.status = Team_session_types.Running then begin
         with_runtimes_lock (fun () ->
             match Hashtbl.find_opt runtimes session_id with
@@ -294,6 +314,7 @@ let generate_report ~(config : Room.config) ~(session_id : string)
   match Team_session_store.load_session config session_id with
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
   | Some session ->
+      let session = refresh_duration_expired_session ~config ~session_id session in
       let report_json_exists =
         Room_utils.path_exists config
           (Team_session_store.report_json_path config session_id)
@@ -359,14 +380,17 @@ let record_turn ~(config : Room.config) ~(session_id : string) ~(actor : string)
   in
   match Team_session_store.load_session config session_id with
   | None -> Error (Printf.sprintf "team session not found: %s" session_id)
-  | Some session when session.status <> Team_session_types.Running ->
-      Error "turn recording is only allowed while session is running"
-  | Some session
-    when not
-           (session_allows_actor ~actor session
-           || session_has_attached_actor ~config ~session_id ~actor) ->
-      Error "actor is not authorized for this team session"
   | Some session -> (
+      let session = refresh_duration_expired_session ~config ~session_id session in
+      if session.status <> Team_session_types.Running then
+        Error "turn recording is only allowed while session is running"
+      else if
+        not
+          (session_allows_actor ~actor session
+          || session_has_attached_actor ~config ~session_id ~actor)
+      then
+        Error "actor is not authorized for this team session"
+      else
       let message = normalize_opt message in
       let target_agent = normalize_opt target_agent in
       let task_title = normalize_opt task_title in

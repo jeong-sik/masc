@@ -1,7 +1,4 @@
-[@@@warning "-32-33-69"]
 (** Tool_local_runtime core — types, helpers, process discovery, model fetching. *)
-
-open Types
 
 type context = {
   config : Room.config;

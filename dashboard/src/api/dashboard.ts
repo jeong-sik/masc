@@ -11,6 +11,7 @@ import {
 } from './board'
 import { get, post, withRetries, ROOM_TRUTH_GET_TIMEOUT_MS } from './core'
 import type {
+  KeeperConfig,
   DashboardExecutionResponse,
   DashboardGovernanceResponse,
   DashboardMemoryResponse,
@@ -422,4 +423,10 @@ export function runCommandPlaneAction(
   body: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   return post(path, body)
+}
+
+// --- Keeper config (structured read-only view) ---
+
+export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
+  return get<KeeperConfig>(`/api/v1/keepers/${encodeURIComponent(name)}/config`)
 }

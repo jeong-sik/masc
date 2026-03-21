@@ -1,8 +1,8 @@
-(** Tests for Context_compact_oas — sentinel roundtrip, strategy mapping,
+(** Tests for Context_compact_oas — strategy mapping,
     shared scoring consistency, and edge cases.
 
-    Addresses PR #1517 review issues C1 (no tests), C2 (sentinel truncation),
-    C3 (score divergence). *)
+    Sentinel roundtrip tests removed: roles are natively compatible
+    (no masc_msg_to_oas/oas_msg_to_masc conversion needed). *)
 
 open Alcotest
 
@@ -19,147 +19,11 @@ let tool_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
     name = None; tool_call_id = None }
 
 (* ================================================================ *)
-(* Sentinel Roundtrip Tests (C2)                                    *)
+(* Merge Contiguous Tests                                           *)
 (* ================================================================ *)
-
-let test_roundtrip_user () =
-  let m = msg Agent_sdk.Types.User "Hello world" in
-  let oas = Compact.masc_msg_to_oas m in
-  let back = Compact.oas_msg_to_masc oas in
-  check string "role preserved" "User"
-    (match back.role with Agent_sdk.Types.User -> "User" | _ -> "other");
-  check string "text preserved" "Hello world"
-    (Agent_sdk.Types.text_of_message back)
-
-let test_roundtrip_assistant () =
-  let m = msg Agent_sdk.Types.Assistant "I can help" in
-  let oas = Compact.masc_msg_to_oas m in
-  let back = Compact.oas_msg_to_masc oas in
-  check string "role preserved" "Assistant"
-    (match back.role with Agent_sdk.Types.Assistant -> "Assistant" | _ -> "other");
-  check string "text preserved" "I can help"
-    (Agent_sdk.Types.text_of_message back)
-
-let test_roundtrip_system () =
-  let m = msg Agent_sdk.Types.System "You are helpful" in
-  let oas = Compact.masc_msg_to_oas m in
-  let back = Compact.oas_msg_to_masc oas in
-  check string "role preserved" "System"
-    (match back.role with Agent_sdk.Types.System -> "System" | _ -> "other");
-  check string "text preserved" "You are helpful"
-    (Agent_sdk.Types.text_of_message back)
-
-let test_roundtrip_tool () =
-  let m = tool_msg ~id:"call-42" "Result data" in
-  let oas = Compact.masc_msg_to_oas m in
-  let back = Compact.oas_msg_to_masc oas in
-  check string "role preserved" "Tool"
-    (match back.role with Agent_sdk.Types.Tool -> "Tool" | _ -> "other");
-  check string "text preserved" "Result data"
-    (Agent_sdk.Types.text_of_message back);
-  let tool_id = List.find_map (function
-    | Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
-    | _ -> None) back.content
-  in
-  check (option string) "tool_use_id preserved" (Some "call-42") tool_id
-
-let test_roundtrip_empty_text () =
-  let m = msg Agent_sdk.Types.System "" in
-  let oas = Compact.masc_msg_to_oas m in
-  let back = Compact.oas_msg_to_masc oas in
-  check string "role preserved" "System"
-    (match back.role with Agent_sdk.Types.System -> "System" | _ -> "other");
-  check string "empty text preserved" ""
-    (Agent_sdk.Types.text_of_message back)
-
-let test_roundtrip_unicode () =
-  let text = "한국어 텍스트 with emoji 🎉 and special chars: \t\n" in
-  let m = msg Agent_sdk.Types.User text in
-  let oas = Compact.masc_msg_to_oas m in
-  let back = Compact.oas_msg_to_masc oas in
-  check string "unicode preserved" text
-    (Agent_sdk.Types.text_of_message back)
-
-let test_roundtrip_text_containing_sentinel_prefix () =
-  (* User text that accidentally contains \x00 should not be misinterpreted *)
-  let text = "Normal text without null bytes" in
-  let m = msg Agent_sdk.Types.User text in
-  let oas = Compact.masc_msg_to_oas m in
-  let back = Compact.oas_msg_to_masc oas in
-  check string "text without sentinel survives" text
-    (Agent_sdk.Types.text_of_message back)
-
-(* ================================================================ *)
-(* Validate Roundtrip Tests                                         *)
-(* ================================================================ *)
-
-let test_validate_roundtrip_clean () =
-  let msgs = [
-    msg Agent_sdk.Types.System "sys";
-    msg Agent_sdk.Types.User "hello";
-    msg Agent_sdk.Types.Assistant "hi";
-    tool_msg "result";
-  ] in
-  check bool "clean roundtrip validates" true
-    (Compact.validate_roundtrip ~original:msgs ~reduced:msgs)
-
-let test_validate_roundtrip_no_sentinels () =
-  let msgs = [
-    msg Agent_sdk.Types.User "hello";
-    msg Agent_sdk.Types.Assistant "hi";
-  ] in
-  check bool "no sentinels = trivially valid" true
-    (Compact.validate_roundtrip ~original:msgs ~reduced:msgs)
-
-let test_validate_roundtrip_empty () =
-  check bool "empty lists valid" true
-    (Compact.validate_roundtrip ~original:[] ~reduced:[])
-
-(* ================================================================ *)
-(* Sentinel Corruption Tests (C2 — real OAS reduction scenarios)    *)
-(* ================================================================ *)
-
-let test_merge_contiguous_preserves_sentinel_roles () =
-  (* BUG SCENARIO: Two consecutive System messages become two User messages
-     with sentinel tags. OAS Merge_contiguous would merge them (same role),
-     corrupting the second sentinel into the first message's text.
-     After fix: sentinel-tagged messages are excluded from merging. *)
-  let msgs = [
-    msg Agent_sdk.Types.System "System prompt 1";
-    msg Agent_sdk.Types.System "System prompt 2";
-    msg Agent_sdk.Types.User "User question";
-    msg Agent_sdk.Types.Assistant "Response";
-  ] in
-  let result, _tokens = Compact.compact
-    ~system_prompt:"sys" ~messages:msgs
-    ~strategies:[Compact.MergeContiguous] in
-  (* Both system messages should survive as separate System messages *)
-  let system_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
-    m.role = Agent_sdk.Types.System) result in
-  check int "two system messages preserved separately" 2 (List.length system_msgs);
-  check string "first system text intact" "System prompt 1"
-    (Agent_sdk.Types.text_of_message (List.nth system_msgs 0));
-  check string "second system text intact" "System prompt 2"
-    (Agent_sdk.Types.text_of_message (List.nth system_msgs 1))
-
-let test_merge_contiguous_tool_sentinel_preserved () =
-  (* Consecutive Tool messages should not be merged either *)
-  let msgs = [
-    msg Agent_sdk.Types.User "query";
-    msg Agent_sdk.Types.Assistant "thinking";
-    tool_msg ~id:"t1" "Result 1";
-    tool_msg ~id:"t2" "Result 2";
-    msg Agent_sdk.Types.Assistant "final answer";
-  ] in
-  let result, _tokens = Compact.compact
-    ~system_prompt:"sys" ~messages:msgs
-    ~strategies:[Compact.MergeContiguous] in
-  let tool_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
-    m.role = Agent_sdk.Types.Tool) result in
-  check int "two tool messages preserved separately" 2 (List.length tool_msgs)
 
 let test_merge_contiguous_still_merges_plain_user () =
-  (* Regular User messages (no sentinel) should still be merged *)
+  (* Regular User messages should still be merged *)
   let msgs = [
     msg Agent_sdk.Types.User "Hello";
     msg Agent_sdk.Types.User "World";
@@ -171,26 +35,6 @@ let test_merge_contiguous_still_merges_plain_user () =
   let user_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
     m.role = Agent_sdk.Types.User) result in
   check int "plain user messages merged" 1 (List.length user_msgs)
-
-let test_prune_tool_outputs_sentinel_survives () =
-  (* ToolResult with sentinel tag and long content — sentinel at front
-     should survive truncation since max_output_len=500 > sentinel length *)
-  let long_tool_output = String.make 600 'x' in
-  let msgs = [
-    msg Agent_sdk.Types.User "query";
-    tool_msg long_tool_output;
-    msg Agent_sdk.Types.Assistant "done";
-  ] in
-  let result, _tokens = Compact.compact
-    ~system_prompt:"sys" ~messages:msgs
-    ~strategies:[Compact.PruneToolOutputs] in
-  let tool_msgs = List.filter (fun (m : Agent_sdk.Types.message) ->
-    m.role = Agent_sdk.Types.Tool) result in
-  check int "tool message exists" 1 (List.length tool_msgs);
-  (* The Tool role should be correctly recovered *)
-  let tool_text = Agent_sdk.Types.text_of_message (List.nth tool_msgs 0) in
-  check bool "tool text was pruned" true
-    (String.length tool_text < String.length long_tool_output)
 
 (* ================================================================ *)
 (* Strategy Mapping Tests                                           *)
@@ -305,25 +149,8 @@ let test_scoring_single () =
 
 let () =
   run "context_compact_oas" [
-    "sentinel_roundtrip", [
-      test_case "user" `Quick test_roundtrip_user;
-      test_case "assistant" `Quick test_roundtrip_assistant;
-      test_case "system" `Quick test_roundtrip_system;
-      test_case "tool" `Quick test_roundtrip_tool;
-      test_case "empty text" `Quick test_roundtrip_empty_text;
-      test_case "unicode" `Quick test_roundtrip_unicode;
-      test_case "text without sentinel" `Quick test_roundtrip_text_containing_sentinel_prefix;
-    ];
-    "validate_roundtrip", [
-      test_case "clean" `Quick test_validate_roundtrip_clean;
-      test_case "no sentinels" `Quick test_validate_roundtrip_no_sentinels;
-      test_case "empty" `Quick test_validate_roundtrip_empty;
-    ];
-    "sentinel_corruption", [
-      test_case "merge_contiguous preserves system sentinel" `Quick test_merge_contiguous_preserves_sentinel_roles;
-      test_case "merge_contiguous preserves tool sentinel" `Quick test_merge_contiguous_tool_sentinel_preserved;
-      test_case "merge_contiguous still merges plain user" `Quick test_merge_contiguous_still_merges_plain_user;
-      test_case "prune_tool_outputs sentinel survives" `Quick test_prune_tool_outputs_sentinel_survives;
+    "merge_contiguous", [
+      test_case "still merges plain user" `Quick test_merge_contiguous_still_merges_plain_user;
     ];
     "strategy_mapping", [
       test_case "prune_tool_outputs" `Quick test_compact_prune_tool_outputs;

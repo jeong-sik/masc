@@ -278,9 +278,9 @@ let test_is_jsonrpc_v2 () =
   let valid = `Assoc [("jsonrpc", `String "2.0"); ("method", `String "test")] in
   let invalid = `Assoc [("jsonrpc", `String "1.0")] in
   let no_version = `Assoc [("method", `String "test")] in
-  Alcotest.(check bool) "valid 2.0" true (Mcp_eio.is_jsonrpc_v2 valid);
-  Alcotest.(check bool) "invalid 1.0" false (Mcp_eio.is_jsonrpc_v2 invalid);
-  Alcotest.(check bool) "no version" false (Mcp_eio.is_jsonrpc_v2 no_version)
+  Alcotest.(check bool) "valid 2.0" true (Masc_mcp.Mcp_server.is_jsonrpc_v2 valid);
+  Alcotest.(check bool) "invalid 1.0" false (Masc_mcp.Mcp_server.is_jsonrpc_v2 invalid);
+  Alcotest.(check bool) "no version" false (Masc_mcp.Mcp_server.is_jsonrpc_v2 no_version)
 
 let test_jsonrpc_request_parsing () =
   let json = `Assoc [
@@ -289,7 +289,7 @@ let test_jsonrpc_request_parsing () =
     ("method", `String "initialize");
     ("params", `Assoc []);
   ] in
-  match Mcp_eio.jsonrpc_request_of_yojson json with
+  match Masc_mcp.Mcp_server.jsonrpc_request_of_yojson json with
   | Ok req ->
       Alcotest.(check string) "method" "initialize" req.method_;
       Alcotest.(check bool) "has id" true (req.id <> None)
@@ -306,16 +306,16 @@ let test_is_notification () =
     ("jsonrpc", `String "2.0");
     ("method", `String "notifications/initialized");
   ] in
-  (match Mcp_eio.jsonrpc_request_of_yojson with_id with
-   | Ok req -> Alcotest.(check bool) "with id" false (Mcp_eio.is_notification req)
+  (match Masc_mcp.Mcp_server.jsonrpc_request_of_yojson with_id with
+   | Ok req -> Alcotest.(check bool) "with id" false (Masc_mcp.Mcp_server.is_notification req)
    | Error _ -> Alcotest.fail "parse error");
-  (match Mcp_eio.jsonrpc_request_of_yojson without_id with
-   | Ok req -> Alcotest.(check bool) "without id" true (Mcp_eio.is_notification req)
+  (match Masc_mcp.Mcp_server.jsonrpc_request_of_yojson without_id with
+   | Ok req -> Alcotest.(check bool) "without id" true (Masc_mcp.Mcp_server.is_notification req)
    | Error _ -> Alcotest.fail "parse error")
 
 let test_protocol_version () =
   let params = Some (`Assoc [("protocolVersion", `String "2025-06-18")]) in
-  let version = Mcp_eio.protocol_version_from_params params in
+  let version = Masc_mcp.Mcp_server.protocol_version_from_params params in
   Alcotest.(check string) "version extracted" "2025-06-18" version;
 
   (match Mcp.validate_protocol_version "2025-06-18" with
@@ -323,7 +323,7 @@ let test_protocol_version () =
        Alcotest.(check string) "2025-06-18 is supported" "2025-06-18" version
    | Error msg -> Alcotest.fail msg);
 
-  let normalized = Mcp_eio.normalize_protocol_version "unknown" in
+  let normalized = Masc_mcp.Mcp_server.normalize_protocol_version "unknown" in
   Alcotest.(check string) "normalized to default" "2025-11-25" normalized;
 
   match Mcp.validate_protocol_version "unknown" with
@@ -335,7 +335,7 @@ let test_protocol_version () =
 (* ===== Unit Tests for Response Builders ===== *)
 
 let test_make_response () =
-  let response = Mcp_eio.make_response ~id:(`Int 42) (`String "result") in
+  let response = Masc_mcp.Mcp_server.make_response ~id:(`Int 42) (`String "result") in
   match response with
   | `Assoc fields ->
       let id = List.assoc "id" fields in
@@ -346,7 +346,7 @@ let test_make_response () =
   | _ -> Alcotest.fail "not an object"
 
 let test_make_error () =
-  let response = Mcp_eio.make_error ~id:(`Int 1) (-32600) "Invalid Request" in
+  let response = Masc_mcp.Mcp_server.make_error ~id:(`Int 1) (-32600) "Invalid Request" in
   match response with
   | `Assoc fields ->
       let error = List.assoc "error" fields in

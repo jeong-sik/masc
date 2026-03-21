@@ -8,12 +8,6 @@
     - Keeper_exec_proactive: proactive emission and deliberation
     - Keeper_exec_social: social board events and explicit room replies *)
 
-[@@@warning "-33"]
-
-open Keeper_types
-open Keeper_memory
-open Keeper_alerting
-open Keeper_exec_tools
 
 include Keeper_coordination
 include Keeper_prompt

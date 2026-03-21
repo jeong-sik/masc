@@ -419,7 +419,9 @@
    tool_unified
    tool_help_registry
    tool_registry
+   tool_council_feed
    tool_council_helpers
+   tool_council_internal_schemas
    tool_council_logic
    tool_council
    tool_council_json
@@ -688,7 +690,9 @@
   ;; godsplit-phase1: file split sub-modules
   tool_team_session_step_exec
   tool_schemas_room_extra
+  tool_council_feed
   tool_council_helpers
+  tool_council_internal_schemas
   tool_council_logic
   tool_council_schemas
   tool_council_json

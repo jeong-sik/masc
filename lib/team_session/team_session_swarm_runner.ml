@@ -24,39 +24,50 @@ let run_swarm ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
         Team_session_oas_bridge.session_to_swarm_config
           ~config ~masc_tools ~dispatch session
       in
-      let callbacks =
-        Team_session_swarm_callbacks.make_callbacks ~config ~session_id
-      in
-      match Swarm.Runner.run ~sw ~clock ~callbacks swarm_config with
-      | Ok swarm_result ->
-        let updated =
-          Team_session_oas_bridge.apply_swarm_result session swarm_result
-        in
-        Team_session_store.save_session config updated;
+      if swarm_config.entries = [] then begin
         Team_session_store.append_event config session_id
-          ~event_type:"swarm_completed"
-          ~detail:(`Assoc [
-            ("converged", `Bool swarm_result.converged);
-            ("iterations", `Int (List.length swarm_result.iterations));
-            ("total_elapsed", `Float swarm_result.total_elapsed);
-            ("final_metric",
-              match swarm_result.final_metric with
-              | Some m -> `Float m | None -> `Null);
-          ]);
-        Ok updated
-      | Error sdk_err ->
-        let reason = Agent_sdk.Error.to_string sdk_err in
-        Team_session_store.append_event config session_id
-          ~event_type:"swarm_error"
-          ~detail:(`Assoc [("error", `String reason)]);
-        let final_status = Team_session_types.Failed in
-        let now = Time_compat.now () in
-        let updated =
-          { session with
-            status = final_status;
-            stopped_at = Some now;
-            stop_reason = Some reason;
-            updated_at_iso = Types.now_iso () }
+          ~event_type:"swarm_deferred"
+          ~detail:
+            (`Assoc
+              [
+                ("reason", `String "no_planned_workers");
+                ("ts_iso", `String (Types.now_iso ()));
+              ]);
+        Ok session
+      end else
+        let callbacks =
+          Team_session_swarm_callbacks.make_callbacks ~config ~session_id
         in
-        Team_session_store.save_session config updated;
-        Error reason
+        match Swarm.Runner.run ~sw ~clock ~callbacks swarm_config with
+        | Ok swarm_result ->
+          let updated =
+            Team_session_oas_bridge.apply_swarm_result session swarm_result
+          in
+          Team_session_store.save_session config updated;
+          Team_session_store.append_event config session_id
+            ~event_type:"swarm_completed"
+            ~detail:(`Assoc [
+              ("converged", `Bool swarm_result.converged);
+              ("iterations", `Int (List.length swarm_result.iterations));
+              ("total_elapsed", `Float swarm_result.total_elapsed);
+              ("final_metric",
+                match swarm_result.final_metric with
+                | Some m -> `Float m | None -> `Null);
+            ]);
+          Ok updated
+        | Error sdk_err ->
+          let reason = Agent_sdk.Error.to_string sdk_err in
+          Team_session_store.append_event config session_id
+            ~event_type:"swarm_error"
+            ~detail:(`Assoc [("error", `String reason)]);
+          let final_status = Team_session_types.Failed in
+          let now = Time_compat.now () in
+          let updated =
+            { session with
+              status = final_status;
+              stopped_at = Some now;
+              stop_reason = Some reason;
+              updated_at_iso = Types.now_iso () }
+          in
+          Team_session_store.save_session config updated;
+          Error reason

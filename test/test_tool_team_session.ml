@@ -30,6 +30,10 @@ let () =
             Test_tool_team_session_flow.test_turn_events_and_prove;
           Alcotest.test_case "step-plain-turn-matches-legacy-turn" `Quick
             Test_tool_team_session_flow.test_step_plain_turn_matches_legacy_turn;
+          Alcotest.test_case "idle-session-stays-running-before-first-step"
+            `Quick
+            Test_tool_team_session_flow
+              .test_idle_session_stays_running_before_first_step;
           Alcotest.test_case "prove-requires-multi-actor-turn-coverage" `Quick
             Test_tool_team_session_proof.test_prove_requires_multi_actor_turn_coverage;
           Alcotest.test_case "missing-required-args" `Quick

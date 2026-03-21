@@ -12,7 +12,6 @@
     @since 2026-01
 *)
 
-[@@@warning "-69"]
 
 open Chain_category
 
@@ -130,7 +129,7 @@ type running_chain_info = {
   chain_id: string;
   started_at: float;
   mutable progress: float;  (** 0.0 to 1.0 *)
-  mutable nodes_completed: int;
+  mutable _nodes_completed: int;
   total_nodes: int;
 }
 
@@ -144,7 +143,7 @@ let register_running_chain ~chain_id ~total_nodes =
       chain_id;
       started_at = Unix.gettimeofday ();
       progress = 0.0;
-      nodes_completed = 0;
+      _nodes_completed = 0;
       total_nodes;
     } in
     Hashtbl.replace running_chains chain_id info
@@ -155,7 +154,7 @@ let update_chain_progress ~chain_id ~nodes_completed =
   with_mutex running_chains_mutex (fun () ->
     match Hashtbl.find_opt running_chains chain_id with
     | Some info ->
-        info.nodes_completed <- nodes_completed;
+        info._nodes_completed <- nodes_completed;
         info.progress <- if info.total_nodes > 0
           then float_of_int nodes_completed /. float_of_int info.total_nodes
           else 0.0

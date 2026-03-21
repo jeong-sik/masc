@@ -14,7 +14,6 @@
     - Tool implementations are direct-style Eio
 *)
 
-[@@@warning "-32"]  (* Suppress unused value warnings for re-exported helpers *)
 
 (** {1 Types} *)
 
@@ -33,16 +32,9 @@ type tool_profile =
 
 (** {1 JSON-RPC Helpers (re-exported)} *)
 
-val jsonrpc_request_of_yojson : Yojson.Safe.t -> (jsonrpc_request, string) result
-val is_jsonrpc_v2 : Yojson.Safe.t -> bool
 val is_jsonrpc_response : Yojson.Safe.t -> bool
-val is_notification : jsonrpc_request -> bool
 val get_id : jsonrpc_request -> Yojson.Safe.t
 val is_valid_request_id : Yojson.Safe.t -> bool
-val make_response : id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
-val make_error : ?data:Yojson.Safe.t -> id:Yojson.Safe.t -> int -> string -> Yojson.Safe.t
-val protocol_version_from_params : Yojson.Safe.t option -> string
-val normalize_protocol_version : string -> string
 val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
 
 (** JSON helper: field existence check (re-exported) *)
@@ -150,31 +142,6 @@ val clear_resource_subscriptions_for_session : string -> unit
     @param env Eio environment (for stdin/stdout)
     @param state Server state *)
 val run_stdio : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> server_state -> unit
-
-(** {1 Protocol Helpers - Re-exported} *)
-
-(** Check if JSON is valid JSON-RPC 2.0 *)
-val is_jsonrpc_v2 : Yojson.Safe.t -> bool
-
-(** Check if request is a notification (no id) *)
-val is_notification : jsonrpc_request -> bool
-
-(** Parse JSON-RPC request from JSON *)
-val jsonrpc_request_of_yojson : Yojson.Safe.t -> (jsonrpc_request, string) result
-
-(** Extract protocol version from initialize params *)
-val protocol_version_from_params : Yojson.Safe.t option -> string
-
-(** Normalize protocol version to supported version *)
-val normalize_protocol_version : string -> string
-
-(** {1 Response Builders} *)
-
-(** Make successful JSON-RPC response *)
-val make_response : id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
-
-(** Make error JSON-RPC response *)
-val make_error : ?data:Yojson.Safe.t -> id:Yojson.Safe.t -> int -> string -> Yojson.Safe.t
 
 (** {1 Protocol Detection} *)
 type transport_mode = Framed | LineDelimited

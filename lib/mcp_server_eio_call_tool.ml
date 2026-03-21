@@ -93,6 +93,10 @@ let read_only_retry_limit () =
   | None -> 2
 
 let is_retryable_message message =
+  (* Tool-level timeouts must not be retried — retrying a 30s timeout
+     causes 60-90s total wait time, amplifying the original issue. *)
+  if contains_casefold message "Tool timed out" then false
+  else
   contains_casefold message "timeout" ||
   contains_casefold message "temporary" ||
   contains_casefold message "temporarily" ||

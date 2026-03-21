@@ -290,11 +290,11 @@ let operator_digest_http_json ~state ~sw ~clock request =
     in
     Operator_control.digest_json ?actor ?target_type ?target_id ?include_workers ctx
 
-(* --- Mission proactive refresh (same pattern as execution) ----------
-   A background fiber recomputes the mission snapshot every
-   [_mission_refresh_interval_s] seconds.  The HTTP handler returns the
-   cached ref immediately (0ms).  Actor-parameterized requests fall back
-   to on-demand compute with SWR cache. *)
+(* --- Mission proactive refresh ----------------------------------------
+   A background fiber recomputes the mission snapshot periodically.
+   The HTTP handler returns the cached ref immediately (0ms).
+   Actor-parameterized requests fall back to on-demand compute with
+   SWR cache. *)
 
 let _mission_json_ref : Yojson.Safe.t ref =
   ref (`Assoc [
@@ -312,59 +312,17 @@ let _mission_json_ref : Yojson.Safe.t ref =
     ("internal_signals", `List []);
   ])
 
-let _mission_refresh_interval_s = 120.0
-let _mission_refresh_max_backoff_s = 600.0
-
 let start_mission_refresh_loop ~state ~sw ~clock =
-  let config = state.Mcp_server.room_config in
+  let room_config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
-  (* Warm cache with 30s timeout: do not block server startup. *)
-  (let t0 = Time_compat.now () in
-   try
-     match Eio.Time.with_timeout clock 30.0 (fun () ->
-       Ok (Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ())) with
-     | Ok json ->
-       _mission_json_ref := json;
-       Log.Dashboard.info "mission warm cache done (%.1fs)" (Time_compat.now () -. t0)
-     | Error `Timeout ->
-       Log.Dashboard.warn "mission warm cache skipped (%.1fs timeout)" (Time_compat.now () -. t0)
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     Log.Dashboard.warn "mission warm cache failed (%.1fs): %s"
-       (Time_compat.now () -. t0) (Printexc.to_string exn));
-  Eio.Fiber.fork ~sw (fun () ->
-    Log.Dashboard.info "starting mission proactive refresh loop";
-    let consecutive_failures = ref 0 in
-    let current_interval = ref _mission_refresh_interval_s in
-    let rec loop () =
-      let t0 = Time_compat.now () in
-      (try
-        let json =
-          Dashboard_mission.json
-            ~config ~sw ~clock ~proc_mgr ()
-        in
-        _mission_json_ref := json;
-        let dt = Time_compat.now () -. t0 in
-        if !consecutive_failures > 0 then
-          Log.Dashboard.info "mission refresh recovered after %d failures"
-            !consecutive_failures;
-        consecutive_failures := 0;
-        current_interval := _mission_refresh_interval_s;
-        Log.Dashboard.info "mission refreshed (%.0fB, %.1fs)"
-          (Float.of_int (String.length (Yojson.Safe.to_string json)))
-          dt
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        let dt = Time_compat.now () -. t0 in
-        consecutive_failures := !consecutive_failures + 1;
-        if !consecutive_failures >= 3 then
-          current_interval :=
-            min _mission_refresh_max_backoff_s
-              (!current_interval *. 2.0);
-        Log.Dashboard.warn "mission refresh failed (%d consecutive, next in %.0fs, %.1fs): %s"
-          !consecutive_failures !current_interval dt (Printexc.to_string exn));
-      Eio.Time.sleep clock !current_interval;
-      loop ()
-    in
-    loop ())
+  let compute () =
+    Dashboard_mission.json ~config:room_config ~sw ~clock ~proc_mgr ()
+  in
+  Proactive_refresh.start ~sw ~clock
+    ~config:{ (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0)
+              with timeout_s = 30.0 }
+    ~compute
+    ~on_result:(fun json -> _mission_json_ref := json)
 
 (* Trim a full mission JSON to a lightweight snapshot:
    summary, session_briefs (goal/elapsed/blocker only), attention_queue (top 5), counts.

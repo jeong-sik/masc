@@ -70,8 +70,7 @@ let handle_notification_count (registry : Session.registry) ~agent_name : result
     | Some session -> List.length session.message_queue
     | None -> 0
   ) in
-  (true, Printf.sprintf "Pending notifications: %d\n---\n%s"
-     count (Yojson.Safe.to_string (`Assoc [("count", `Int count)])))
+  (true, Yojson.Safe.to_string (`Assoc [("count", `Int count)]))
 
 let handle_check_notifications (registry : Session.registry) ~agent_name args : result =
   let limit = max 0 (get_int args "limit" 10) in
@@ -89,8 +88,7 @@ let handle_check_notifications (registry : Session.registry) ~agent_name args : 
     ("count", `Int (List.length notifications));
     ("notifications", `List notifications);
   ] in
-  (true, Printf.sprintf "Checked %d notification(s) for %s\n---\n%s"
-     (List.length notifications) agent_name (Yojson.Safe.pretty_to_string json))
+  (true, Yojson.Safe.to_string json)
 
 let handle_consume_notifications (registry : Session.registry) ~agent_name args : result =
   let limit = max 0 (get_int args "limit" 10) in
@@ -114,8 +112,7 @@ let handle_consume_notifications (registry : Session.registry) ~agent_name args 
     ("remaining", `Int remaining_count);
     ("notifications", `List consumed);
   ] in
-  (true, Printf.sprintf "Consumed %d notification(s), %d remaining\n---\n%s"
-     (List.length consumed) remaining_count (Yojson.Safe.pretty_to_string json))
+  (true, Yojson.Safe.to_string json)
 
 (** Dispatch tool call by name *)
 let dispatch registry ~agent_name ~name args : result option =

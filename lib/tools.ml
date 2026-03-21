@@ -34,6 +34,7 @@ let raw_schemas : tool_schema list =
   @ Tool_social.schemas
   @ Tool_vote.schemas
   @ Tool_code.schemas
+  @ Tool_code_write.schemas
   @ Tool_library.schemas
   @ Tool_audit.schemas
   @ Tool_heartbeat.schemas

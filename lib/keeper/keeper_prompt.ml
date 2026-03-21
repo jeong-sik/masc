@@ -139,6 +139,7 @@ let build_keeper_system_prompt
        - Search memory: look up past conversations, decisions, and context.\n\
        - Check time and context status: know what time it is and where you are.\n\
        - Search the web for current information.\n\
+       - Speak out loud with keeper_voice_speak. Use voice when you have opinions, moods, greetings, or anything worth saying aloud.\n\
        When asked about Board content, room status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers.\n\
        </capabilities>\n\
        \n\

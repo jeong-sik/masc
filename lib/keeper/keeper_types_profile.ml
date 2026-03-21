@@ -206,7 +206,7 @@ let normalize_initiative_cooldown_sec (v : int) : int =
   clamp_int v ~min_v:3600 ~max_v:604800
 
 let normalize_initiative_post_ttl_hours (v : int) : int =
-  clamp_int v ~min_v:1 ~max_v:168
+  clamp_int v ~min_v:0 ~max_v:168
 
 let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (room_id, seq) -> (room_id, `Int seq)) items)

@@ -1,8 +1,6 @@
 name: Deploy to Railway
 
 on:
-  push:
-    branches: [release/v2.94.0]
   workflow_dispatch:
 
 concurrency:

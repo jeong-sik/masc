@@ -2,6 +2,8 @@
 
 Multi-Agent Streaming Coordination server.
 
+**Common mistakes: `docs/COMMON-PITFALLS.md`** — read before refactoring or deleting modules.
+
 Current SSOTs:
 
 - Public MCP surface and grouping: `docs/MCP-SURFACE-AUDIT.md`

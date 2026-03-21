@@ -1,5 +1,7 @@
 # MASC MCP — Agent Instructions
 
+**Before submitting PRs, check `docs/COMMON-PITFALLS.md`** — stale references, Eio mistakes, dashboard guards.
+
 ## Architecture Overview
 
 OCaml (5.x + Eio) 기반 MCP 서버. 멀티 AI 에이전트 협업 조율.

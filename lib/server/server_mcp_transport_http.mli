@@ -17,6 +17,7 @@ val is_valid_protocol_version : string -> bool
 val remember_protocol_version : string -> string -> unit
 val remember_mcp_profile : string -> Mcp_server_eio.tool_profile -> unit
 val forget_mcp_session : string -> unit
+val reap_stale_sessions : is_active_session:(string -> bool) -> int
 val validate_mcp_session_profile :
   profile:Mcp_server_eio.tool_profile -> string -> (unit, string) result
 val validate_mcp_session_delete_profile :
@@ -53,6 +54,8 @@ val json_headers :
   deps:deps -> string -> string -> string -> (string * string) list
 val check_sse_connect_guard : string -> (unit, string * float) result
 val stop_sse_session : string -> unit
+val is_active_sse_session : string -> bool
+val reap_stale_guards : unit -> int
 val close_all_sse_connections : unit -> unit
 val handle_post_mcp :
   deps:deps ->

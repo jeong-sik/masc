@@ -211,6 +211,19 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
         let evicted = Cache_eio.evict_expired state.room_config in
         if evicted > 0 then
           Log.Server.info "Cache: evicted %d expired entries" evicted;
+        let sse_guards_reaped = Server_mcp_transport_http_sse.reap_stale_guards () in
+        let http_guards_reaped = Server_mcp_transport_http.reap_stale_guards () in
+        let is_active sid =
+          Server_mcp_transport_http_sse.is_active_sse_session sid
+          || Server_mcp_transport_http.is_active_sse_session sid
+        in
+        let sessions_reaped =
+          Server_mcp_transport_http_session.reap_stale_sessions
+            ~is_active_session:is_active
+        in
+        if sse_guards_reaped + http_guards_reaped + sessions_reaped > 0 then
+          Log.Server.info "reaped %d SSE guards + %d HTTP guards + %d stale sessions"
+            sse_guards_reaped http_guards_reaped sessions_reaped;
         loop ()
       in
       loop ());

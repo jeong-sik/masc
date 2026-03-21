@@ -44,6 +44,7 @@
    cp_serde
    cp_io
    cp_unit
+   cp_unit_projection
    cp_snapshot
    cp_snapshot_core
    cp_snapshot_summaries
@@ -68,7 +69,9 @@
    dashboard_execution
    dashboard_execution_helpers
    dashboard_execution_fixture
+   dashboard_execution_sessions
    dashboard_execution_builders
+   dashboard_mission_agents
    dashboard_mission_assembly
    dashboard_mission
    dashboard_proof
@@ -241,7 +244,10 @@
    lamport
    trace
    mitosis
+   mitosis_continuity
    mitosis_defaults
+   mitosis_dna
+   mitosis_handoff
    mitosis_metrics
    mode
    nickname
@@ -399,6 +405,7 @@
    tool_command_plane_schemas_02
    tool_mdal
    tool_mdal_schemas
+   tool_mdal_handlers
    tool_library
    tool_catalog
    tool_result
@@ -576,6 +583,9 @@
 (private_modules
  dashboard_http_keeper_metrics
  dashboard_http_keeper_detail
+ mitosis_continuity
+ mitosis_dna
+ mitosis_handoff
  mitosis_helpers
  mitosis_spawn
  tool_mitosis_utils
@@ -585,13 +595,16 @@
  board_votes
  cp_snapshot_core
  cp_snapshot_summaries
+ cp_unit_projection
  dashboard_execution_helpers
  dashboard_execution_fixture
+ dashboard_execution_sessions
  dashboard_execution_builders
  chain_parser_helpers
  chain_parser_parse
  chain_parser_validate
  chain_parser_serialize
+ dashboard_mission_agents
  dashboard_mission_assembly
  keeper_types_profile
  keeper_types_resident
@@ -631,6 +644,7 @@
  server_command_plane_http_stream
  server_command_plane_http_mutations
  server_command_plane_http_help
+ tool_mdal_handlers
  tool_command_plane_support
  tool_command_plane_chain_common
  tool_command_plane_chain_launch

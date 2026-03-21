@@ -2,7 +2,7 @@
 
 import { signal } from '@preact/signals'
 import { showToast } from '../common/toast'
-import { prettyJson, displayStatus } from '../../lib/status-label'
+import { prettyJson, displayStatus, statusLabel } from '../../lib/status-label'
 import type {
   OperatorAttentionItem,
   OperatorGuidanceSummary,
@@ -116,6 +116,45 @@ export interface OpsPriorityCardData {
 
 export function normalizeStatus(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+export function isSessionTerminal(session: OperatorSessionSnapshot): boolean {
+  const status = normalizeStatus(session.status)
+  return status === 'done'
+    || status === 'completed'
+    || status === 'ended'
+    || status === 'cancelled'
+    || status === 'stopped'
+    || status === 'failed'
+    || status === 'error'
+    || status === 'interrupted'
+}
+
+export function pickPreferredSession(
+  sessions: OperatorSessionSnapshot[],
+): OperatorSessionSnapshot | null {
+  return sessions.find(session => !isSessionTerminal(session)) ?? sessions[0] ?? null
+}
+
+function resolveSelectedSessionId(
+  sessions: OperatorSessionSnapshot[],
+): string {
+  if (
+    selectedSessionId.value
+    && sessions.some(session => session.session_id === selectedSessionId.value)
+  ) {
+    return selectedSessionId.value
+  }
+  return pickPreferredSession(sessions)?.session_id ?? ''
+}
+
+export function sessionHealthLabel(session: OperatorSessionSnapshot): string {
+  const health = normalizeStatus(session.team_health?.status)
+  return health ? statusLabel(health) : '상태 확인 필요'
+}
+
+export function sessionOutcomeLabel(session: OperatorSessionSnapshot): string {
+  return `${session.done_delta_total ?? 0}건 완료`
 }
 
 export function sessionPriorityTone(session: OperatorSessionSnapshot): OpsPriorityTone {
@@ -423,7 +462,7 @@ export async function submitTaskInject() {
 
 export async function submitTeamTurn() {
   const snapshot = operatorSnapshot.value
-  const sessionId = selectedSessionId.value || snapshot?.sessions[0]?.session_id || ''
+  const sessionId = resolveSelectedSessionId(snapshot?.sessions ?? [])
   if (!sessionId) {
     showToast('먼저 세션을 고르세요', 'warning')
     return
@@ -491,7 +530,7 @@ export async function submitTeamTurn() {
 
 export async function submitTeamStop() {
   const snapshot = operatorSnapshot.value
-  const sessionId = selectedSessionId.value || snapshot?.sessions[0]?.session_id || ''
+  const sessionId = resolveSelectedSessionId(snapshot?.sessions ?? [])
   if (!sessionId) {
     showToast('먼저 세션을 고르세요', 'warning')
     return

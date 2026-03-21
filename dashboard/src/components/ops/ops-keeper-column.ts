@@ -48,7 +48,7 @@ export function OpsKeeperColumn() {
       <section class="card ops-panel ops-lane-panel ops-keeper-section">
         <div class="card-title-row">
           <div class="card-title">Keeper 개입</div>
-          <${PanelSemanticDetails} panelId="intervene.keeper_queue" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.keeper_queue" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">장기 실행 중인 keeper를 고르고 바로 probe나 방향 수정 메시지를 보냅니다.</p>
 
@@ -108,7 +108,7 @@ export function OpsKeeperColumn() {
       <section class="card ops-panel ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">선택한 Keeper 액션</div>
-          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
 
@@ -134,7 +134,7 @@ export function OpsKeeperColumn() {
       <section class="card ops-panel">
         <div class="card-title-row">
           <div class="card-title">가능한 액션 목록</div>
-          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">백엔드가 현재 허용한다고 광고하는 액션입니다. 일부는 이 화면의 폼과 1:1로 연결됩니다.</p>
         <div class="ops-log-list">
@@ -156,7 +156,7 @@ export function OpsKeeperColumn() {
       <section class="card ops-panel">
         <div class="card-title-row">
           <div class="card-title">최근 개입 로그</div>
-          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} label="설명" />
         </div>
         <div class="ops-log-list">
           ${operatorActionLog.value.length === 0 ? html`

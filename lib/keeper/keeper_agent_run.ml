@@ -215,15 +215,6 @@ let run_turn
     let assistant_msg = Agent_sdk.Types.assistant_msg text in
     Keeper_exec_context.persist_message session assistant_msg;
     ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
-    (* OAS Eval: generate turn metrics *)
-    let _eval_metrics : Agent_sdk.Eval.metric list = [
-      { name = "turn_count"; value = Int_val result.turns;
-        unit_ = Some "turns"; tags = [("agent", agent_name)] };
-      { name = "tool_calls"; value = Int_val (List.length tool_names);
-        unit_ = Some "calls"; tags = [("agent", agent_name)] };
-      { name = "response_length"; value = Int_val (String.length text);
-        unit_ = Some "chars"; tags = [("agent", agent_name)] };
-    ] in
     Ok {
       response_text = text;
       model_used = model;

@@ -87,15 +87,13 @@ module Ring = struct
   let capacity = 5000
   let buf : entry array = Array.make capacity
     { seq = 0; ts = ""; level = ""; module_name = ""; message = "" }
-  let head = Atomic.make 0 (* next write position *)
   let total = Atomic.make 0 (* total entries ever written *)
 
   let push ~level_str ~module_name ~message =
     let seq = Atomic.fetch_and_add total 1 in
     let idx = seq mod capacity in
     buf.(idx) <- { seq; ts = timestamp_iso (); level = level_str;
-                   module_name; message };
-    ignore (Atomic.fetch_and_add head 1)
+                   module_name; message }
 
   let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")
       () : entry list =

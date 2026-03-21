@@ -251,6 +251,7 @@
    mitosis_metrics
    mode
    nickname
+   operator_approval
    operator_pending_confirm
    operator_digest
    operator_digest_types

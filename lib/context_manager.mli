@@ -65,7 +65,7 @@ val exceeds_threshold : working_context -> float -> bool
 val create : system_prompt:string -> max_tokens:int -> working_context
 
 (** Replace the system prompt and recompute token_count.
-    Useful when a keeper/perpetual goal or instructions change, while keeping messages. *)
+    Useful when a keeper goal or instructions change, while keeping messages. *)
 val set_system_prompt : working_context -> system_prompt:string -> working_context
 
 (** Append a message to working context, updating token count. *)
@@ -81,9 +81,9 @@ val score_importance : working_context -> working_context
 
 (** Prefix for goal-injection messages.
     Messages starting with this prefix receive sticky importance (>= 0.95)
-    so they survive compaction.  Used by perpetual_loop to inject the goal
-    as a user message rather than embedding it in the system prompt
-    (preserves prompt-cache prefix). *)
+    so they survive compaction.  Used to inject goals as user messages
+    rather than embedding them in the system prompt (preserves
+    prompt-cache prefix). *)
 val goal_prefix : string
 
 (** Format a single message as human-readable text: "role: content". *)

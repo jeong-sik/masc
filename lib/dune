@@ -518,7 +518,7 @@
    keeper_status_bridge
    keeper_policy
    keeper_persona
-   ;; Perpetual Agent Runtime (infinite context system)
+   ;; Context management (used by keeper agents)
    masc_eio_env
    discovery_cache
    oas_type_adapters
@@ -527,12 +527,6 @@
    context_manager
    context_compact_oas
    verifier_oas
-   succession_oas
-   perpetual_loop
-   perpetual_oas_state
-   perpetual_oas_hooks
-   perpetual_oas_build
-   perpetual_oas
    procedural_memory
    oas_events
    oas_worker
@@ -554,7 +548,6 @@
    env_config_keeper
    runtime_params
    governance_registry
-   tool_perpetual
    tool_compact
    tool_shard
    tool_keeper
@@ -713,9 +706,6 @@
   autoresearch_types
   tool_autoresearch_schemas
   backend_eio_compression
-  perpetual_oas_state
-  perpetual_oas_hooks
-  perpetual_oas_build
   room_multi
   dashboard_proof_events
   dashboard_proof_actors

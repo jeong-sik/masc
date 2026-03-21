@@ -1,49 +1,15 @@
-(** Dashboard HTTP MDAL — perpetual agent dashboard and MDAL loop rendering.
+(** Dashboard HTTP MDAL — MDAL loop rendering.
 
     Extracted from server_dashboard_http.ml. *)
 
 
-open Dashboard_http_helpers
 open Server_utils
 
+(** Perpetual agent system removed. Returns empty dashboard. *)
 let perpetual_dashboard_json () : Yojson.Safe.t =
-  let include_goals = bool_of_env "MASC_DASHBOARD_INCLUDE_GOALS" in
-  let items =
-    Hashtbl.fold (fun trace_id (state, (config : Perpetual_loop.loop_config)) acc ->
-      let base = Perpetual_loop.status ~config state in
-      let with_cfg =
-        match base with
-        | `Assoc fields ->
-              let models =
-              `List (List.map (fun (m : Model_spec.model_spec) ->
-                `Assoc [
-                  ("provider", `String (Model_spec.string_of_provider m.provider));
-                  ("model_id", `String m.model_id);
-                  ("max_context", `Int m.max_context);
-                ]
-              ) config.model_cascade)
-            in
-            `Assoc ([
-              ("goal", if include_goals then `String config.initial_goal else `Null);
-              ("model_cascade", models);
-              ("heartbeat_interval_s", `Float config.heartbeat_interval_s);
-              ("compact_threshold", `Float config.compact_threshold);
-              ("prepare_threshold", `Float config.prepare_threshold);
-              ("handoff_threshold", `Float config.handoff_threshold);
-            ] @ fields)
-        | other -> other
-      in
-      (trace_id, with_cfg) :: acc
-    ) Tool_perpetual.active_agents []
-  in
-  let items =
-    items
-    |> List.sort (fun (a, _) (b, _) -> String.compare a b)
-    |> List.map snd
-  in
   `Assoc [
-    ("agents", `List items);
-    ("total", `Int (List.length items));
+    ("agents", `List []);
+    ("total", `Int 0);
   ]
 
 let mdal_status_string (status : Mdal.status) : string =

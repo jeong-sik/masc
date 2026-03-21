@@ -83,7 +83,7 @@ type module_tag =
   | Mod_auth | Mod_hat | Mod_audit | Mod_rate_limit
   | Mod_cost | Mod_walph | Mod_agent | Mod_task | Mod_room
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
-  | Mod_library | Mod_keeper | Mod_perpetual | Mod_compact | Mod_mdal
+  | Mod_library | Mod_keeper | Mod_compact | Mod_mdal
   | Mod_notifications | Mod_inline
   | Mod_autoresearch
   | Mod_model_catalog

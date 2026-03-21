@@ -1,7 +1,6 @@
 (** Oas_worker — Unified entry point for OAS-based MASC tool modules.
 
-    Generalizes the build/run/checkpoint/events pattern from [perpetual_oas.ml]
-    into a reusable template.  Any MASC module that needs to run an OAS Agent
+    Reusable OAS Agent build/run/checkpoint/events template.  Any MASC module that needs to run an OAS Agent
     uses this instead of duplicating boilerplate.
 
     Phases:

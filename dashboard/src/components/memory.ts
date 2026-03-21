@@ -274,7 +274,7 @@ function PostCard({ post }: { post: BoardPost }) {
               </div>
             </div>
           <div class="post-meta">
-            <span>작성자 <a class="author-link" style="cursor:pointer;text-decoration:underline;" onClick=${(e: Event) => { e.stopPropagation(); navigate('status', { section: 'agents', agent: post.author }) }}>${post.author}</a></span>
+            <span>작성자 <a class="author-link" class="cursor-pointer underline" onClick=${(e: Event) => { e.stopPropagation(); navigate('status', { section: 'agents', agent: post.author }) }}>${post.author}</a></span>
             <span><${TimeAgo} timestamp=${post.created_at} /></span>
             ${isUpdated(post) ? html`<span>수정 <${TimeAgo} timestamp=${post.updated_at} /></span>` : null}
             <span>댓글 ${post.comment_count}</span>
@@ -288,13 +288,13 @@ function PostCard({ post }: { post: BoardPost }) {
 }
 
 function CommentThread({ comments }: { comments: BoardComment[] }) {
-  if (comments.length === 0) return html`<div class="empty-state" style="font-size:13px">아직 댓글이 없습니다</div>`
+  if (comments.length === 0) return html`<div class="empty-state" class="text-[13px]">아직 댓글이 없습니다</div>`
 
   return html`
     <div class="comment-thread">
       ${comments.map(comment => html`
         <div key=${comment.id} class="board-comment">
-          <span class="comment-author"><a class="author-link" style="cursor:pointer;text-decoration:underline;" onClick=${() => navigate('status', { section: 'agents', agent: comment.author })}>${comment.author}</a></span>
+          <span class="comment-author"><a class="author-link" class="cursor-pointer underline" onClick=${() => navigate('status', { section: 'agents', agent: comment.author })}>${comment.author}</a></span>
           <span class="comment-time"><${TimeAgo} timestamp=${comment.created_at} /></span>
           <div class="comment-text">${comment.content}</div>
         </div>
@@ -305,7 +305,7 @@ function CommentThread({ comments }: { comments: BoardComment[] }) {
 
 function CommentForm({ postId }: { postId: string }) {
   return html`
-    <div class="comment-form" style="margin-top:12px; display:flex; gap:8px;">
+    <div class="comment-form" class="mt-3 flex gap-2">
       <input
         type="text"
         placeholder="댓글 추가..."
@@ -348,14 +348,14 @@ function PostDetail({ post }: { post: BoardPost }) {
           <div class="post-body">
             <${Markdown} text=${stripStateBlocks(post.body)} />
           </div>
-          <div class="post-meta" style="margin-top:12px;">
-            <span><a class="author-link" style="cursor:pointer;text-decoration:underline;" onClick=${() => navigate('status', { section: 'agents', agent: post.author })}>${post.author}</a></span>
+          <div class="post-meta" class="mt-3">
+            <span><a class="author-link" class="cursor-pointer underline" onClick=${() => navigate('status', { section: 'agents', agent: post.author })}>${post.author}</a></span>
             <${TimeAgo} timestamp=${post.created_at} />
             <span>${post.votes ?? 0} votes</span>
           </div>
           ${(post.hearth || post.visibility || post.expires_at)
             ? html`
-                <div class="post-chip-row" style="margin-top:8px;">
+                <div class="post-chip-row" class="mt-2">
                   ${post.hearth ? html`<span class="board-meta-chip">${post.hearth}</span>` : null}
                   ${post.visibility ? html`<span class="board-meta-chip">${post.visibility}</span>` : null}
                   ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip">${boardPostKind(post)}</span>` : null}
@@ -365,18 +365,18 @@ function PostDetail({ post }: { post: BoardPost }) {
             : null}
           ${post.meta
             ? html`
-                <details style="margin-top:12px;">
+                <details class="mt-3">
                   <summary>운영 메타</summary>
-                  <div class="post-body" style="margin-top:8px;">
+                  <div class="post-body" class="mt-2">
                     ${post.meta.source ? html`<div><strong>출처</strong>: ${post.meta.source}</div>` : null}
                     ${post.meta.state_block
-                      ? html`<pre style="white-space:pre-wrap; margin-top:8px;">${post.meta.state_block}</pre>`
+                      ? html`<pre class="whitespace-pre-wrap mt-2">${post.meta.state_block}</pre>`
                       : null}
                   </div>
                 </details>
               `
             : null}
-          <div style="margin-top:8px; display:flex; gap:6px;">
+          <div class="mt-2 flex gap-1.5">
             <button class="vote-btn upvote" onClick=${() => handleVote('up')}>▲ 추천</button>
             <button class="vote-btn downvote" onClick=${() => handleVote('down')}>▼ 비추천</button>
           </div>
@@ -436,7 +436,7 @@ export function Memory() {
                   ${grouped.human.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                 </div>
                 ${grouped.human.length > visibleLimit.value ? html`
-                  <div style="text-align:center; padding:12px 0;">
+                  <div class="text-center py-3">
                     <button
                       class="control-btn ghost"
                       onClick=${() => { visibleLimit.value = visibleLimit.value + PAGE_SIZE }}

@@ -120,16 +120,16 @@ function BoolBadge({ value }: { value: boolean }) {
 }
 
 function ModelList({ models }: { models: string[] }) {
-  if (models.length === 0) return html`<span style="color:#666;">none</span>`
+  if (models.length === 0) return html`<span class="text-[#666]">none</span>`
   return html`
-    <div style="display:flex; flex-wrap:wrap; gap:4px;">
+    <div class="flex flex-wrap gap-1">
       ${models.map(m => html`<span class="pill" style="font-size:11px;">${m}</span>`)}
     </div>
   `
 }
 
 function LongText({ text }: { text: string }) {
-  if (!text || text.trim() === '') return html`<span style="color:#666;">--</span>`
+  if (!text || text.trim() === '') return html`<span class="text-[#666]">--</span>`
   const truncated = text.length > 200 ? text.slice(0, 200) + '...' : text
   return html`<div style="font-size:12px; color:#ccc; white-space:pre-wrap; max-height:120px; overflow-y:auto; background:rgba(255,255,255,0.02); padding:6px 8px; border-radius:4px; margin-top:4px;">${truncated}</div>`
 }
@@ -152,8 +152,8 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
   if (!d) return null
   const val = d[field] as string
   return html`
-    <div style="margin-top:8px;">
-      <div style="font-size:11px; color:#888; margin-bottom:2px;">${label}</div>
+    <div class="mt-2">
+      <div class="text-[11px] text-[var(--text-dim)] mb-0.5">${label}</div>
       <textarea
         style=${fieldStyle}
         rows=${rows}
@@ -169,8 +169,8 @@ function EditSelect({ field, label, options }: { field: keyof EditDraft; label: 
   if (!d) return null
   const val = d[field] as string
   return html`
-    <div style="margin-top:8px;">
-      <div style="font-size:11px; color:#888; margin-bottom:2px;">${label}</div>
+    <div class="mt-2">
+      <div class="text-[11px] text-[var(--text-dim)] mb-0.5">${label}</div>
       <select
         style=${fieldStyle}
         value=${val}
@@ -187,7 +187,7 @@ function EditCheckbox({ field, label }: { field: keyof EditDraft; label: string 
   if (!d) return null
   const val = d[field] as boolean
   return html`
-    <div class="keeper-signal-row" style="margin-top:4px;">
+    <div class="keeper-signal-row" class="mt-1">
       <span>${label}</span>
       <input
         type="checkbox"
@@ -203,7 +203,7 @@ function EditNumber({ field, label, min, max }: { field: keyof EditDraft; label:
   if (!d) return null
   const val = d[field] as number
   return html`
-    <div class="keeper-signal-row" style="margin-top:4px;">
+    <div class="keeper-signal-row" class="mt-1">
       <span>${label}</span>
       <input
         type="number"
@@ -280,7 +280,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
   // --- Toolbar ---
   const toolbar = html`
-    <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+    <div class="flex gap-1.5 items-center mb-2">
       ${isEditing ? html`
         <button
           style="${btnBase} background:#4ade80; color:#000;"
@@ -316,26 +316,26 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${EditTextarea} field="instructions" label="Instructions" rows=${4} />
   ` : html`
     <${SectionHeader} title="Prompt" />
-    <div style="font-size:11px; color:#888; margin-bottom:2px;">Goal</div>
+    <div class="text-[11px] text-[var(--text-dim)] mb-0.5">Goal</div>
     <${LongText} text=${c.prompt.goal} />
     ${c.prompt.short_goal ? html`
-      <div style="font-size:11px; color:#888; margin-top:8px; margin-bottom:2px;">Short-term goal</div>
+      <div class="text-[11px] text-[var(--text-dim)] mt-2 mb-0.5">Short-term goal</div>
       <${LongText} text=${c.prompt.short_goal} />
     ` : null}
     ${c.prompt.mid_goal ? html`
-      <div style="font-size:11px; color:#888; margin-top:8px; margin-bottom:2px;">Mid-term goal</div>
+      <div class="text-[11px] text-[var(--text-dim)] mt-2 mb-0.5">Mid-term goal</div>
       <${LongText} text=${c.prompt.mid_goal} />
     ` : null}
     ${c.prompt.long_goal ? html`
-      <div style="font-size:11px; color:#888; margin-top:8px; margin-bottom:2px;">Long-term goal</div>
+      <div class="text-[11px] text-[var(--text-dim)] mt-2 mb-0.5">Long-term goal</div>
       <${LongText} text=${c.prompt.long_goal} />
     ` : null}
     ${c.prompt.soul_profile ? html`
-      <div style="font-size:11px; color:#888; margin-top:8px; margin-bottom:2px;">Soul profile</div>
+      <div class="text-[11px] text-[var(--text-dim)] mt-2 mb-0.5">Soul profile</div>
       <${LongText} text=${c.prompt.soul_profile} />
     ` : null}
     ${c.prompt.instructions ? html`
-      <div style="font-size:11px; color:#888; margin-top:8px; margin-bottom:2px;">Instructions</div>
+      <div class="text-[11px] text-[var(--text-dim)] mt-2 mb-0.5">Instructions</div>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
   `
@@ -372,13 +372,13 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <span>Verify</span>
         <strong><${BoolBadge} value=${c.execution.verify} /></strong>
       </div>
-      <div style="margin-top:6px;">
-        <div style="font-size:11px; color:#888; margin-bottom:4px;">Models</div>
+      <div class="mt-1.5">
+        <div class="text-[11px] text-[var(--text-dim)] mb-1">Models</div>
         <${ModelList} models=${c.execution.models} />
       </div>
       ${c.execution.allowed_models.length > 0 ? html`
-        <div style="margin-top:6px;">
-          <div style="font-size:11px; color:#888; margin-bottom:4px;">Allowed models</div>
+        <div class="mt-1.5">
+          <div class="text-[11px] text-[var(--text-dim)] mb-1">Allowed models</div>
           <${ModelList} models=${c.execution.allowed_models} />
         </div>
       ` : null}

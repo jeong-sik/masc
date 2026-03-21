@@ -31,15 +31,15 @@ export function AutonomyMeter({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="keeper-signal-list">
-      <div style="margin-bottom:8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+      <div class="mb-2">
+        <div class="flex justify-between items-center mb-1">
           <span style="font-size:13px; font-weight:600; color:${info.color};">${info.label}</span>
-          <span style="font-size:11px; color:#888;">${idx + 1} / ${AUTONOMY_LEVELS.length}</span>
+          <span class="text-[11px] text-[var(--text-dim)]">${idx + 1} / ${AUTONOMY_LEVELS.length}</span>
         </div>
         <div style="width:100%; height:6px; background:#1a1a2e; border-radius:3px; overflow:hidden;">
           <div style="width:${pct}%; height:100%; background:${info.color}; border-radius:3px; transition:width 0.3s;"></div>
         </div>
-        <div style="display:flex; justify-content:space-between; margin-top:2px;">
+        <div class="flex justify-between mt-0.5">
           ${AUTONOMY_LEVELS.map((a, i) => html`
             <span style="width:8px; height:8px; border-radius:50%; background:${i <= idx ? a.color : '#333'}; display:inline-block;"></span>
           `)}
@@ -167,7 +167,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
   const lineColor = lastRatio > 85 ? '#ef4444' : lastRatio > 70 ? '#f59e0b' : '#22c55e'
 
   return html`
-    <div class="context-chart" style="display:flex;align-items:center;gap:8px">
+    <div class="context-chart" class="flex items-center gap-2">
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="background:#1a1a2e;border-radius:4px">
         <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="#666" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" stroke="#666" stroke-dasharray="3,3" stroke-width="0.5"/>
@@ -224,28 +224,28 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
         <div class="keeper-field-row">
           <span class="keeper-field-title">${f.title}</span>
           <span class="keeper-field-key">${f.key}</span>
-          <span style="flex:1; text-align:right; color:#ccc;">${f.value}</span>
+          <span class="flex-1 text-right text-[#ccc]">${f.value}</span>
         </div>
       `)}
       ${keeper.trace_id ? html`<div class="keeper-field-row"><span class="keeper-field-title">Trace ID</span><span class="keeper-field-key mono">${keeper.trace_id}</span></div>` : ''}
-      ${keeper.agent_name ? html`<div class="keeper-field-row"><span class="keeper-field-title">Agent</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.agent_name}</span></div>` : ''}
-      ${keeper.primary_model ? html`<div class="keeper-field-row"><span class="keeper-field-title">Primary Model</span><span class="mono" style="flex:1; text-align:right; color:#ccc;">${keeper.primary_model}</span></div>` : ''}
-      ${keeper.active_model ? html`<div class="keeper-field-row"><span class="keeper-field-title">Active Model</span><span class="mono" style="flex:1; text-align:right; color:#ccc;">${keeper.active_model}</span></div>` : ''}
-      ${keeper.next_model_hint ? html`<div class="keeper-field-row"><span class="keeper-field-title">Next Model Hint</span><span class="mono" style="flex:1; text-align:right; color:#ccc;">${keeper.next_model_hint}</span></div>` : ''}
-      ${keeper.skill_primary ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill (Primary)</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.skill_primary}</span></div>` : ''}
-      ${keeper.skill_secondary ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill (Secondary)</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.skill_secondary}</span></div>` : ''}
-      ${keeper.skill_reason ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill Reason</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.skill_reason}</span></div>` : ''}
-      ${keeper.context_source ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Source</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.context_source}</span></div>` : ''}
-      ${keeper.context_tokens != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Tokens</span><span style="flex:1; text-align:right; color:#ccc;">${formatTokens(keeper.context_tokens)}</span></div>` : ''}
-      ${keeper.context_max != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Max</span><span style="flex:1; text-align:right; color:#ccc;">${formatTokens(keeper.context_max)}</span></div>` : ''}
-      ${keeper.memory_recent_note ? html`<div class="keeper-field-row"><span class="keeper-field-title">Memory Note</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.memory_recent_note}</span></div>` : ''}
-      ${keeper.k2k_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">K2K Count</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.k2k_count}</span></div>` : ''}
-      ${keeper.conversation_tail_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Conv Tail</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.conversation_tail_count}</span></div>` : ''}
-      ${keeper.handoff_count_total != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Total Handoffs</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.handoff_count_total}</span></div>` : ''}
-      ${keeper.compaction_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Compactions</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.compaction_count}</span></div>` : ''}
-      ${keeper.last_compaction_saved_tokens != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Last Compact Saved</span><span style="flex:1; text-align:right; color:#ccc;">${formatTokens(keeper.last_compaction_saved_tokens)}</span></div>` : ''}
-      ${keeper.context?.message_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Message Count</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.context.message_count}</span></div>` : ''}
-      ${keeper.context?.has_checkpoint != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Has Checkpoint</span><span style="flex:1; text-align:right; color:#ccc;">${keeper.context.has_checkpoint ? 'Yes' : 'No'}</span></div>` : ''}
+      ${keeper.agent_name ? html`<div class="keeper-field-row"><span class="keeper-field-title">Agent</span><span class="flex-1 text-right text-[#ccc]">${keeper.agent_name}</span></div>` : ''}
+      ${keeper.primary_model ? html`<div class="keeper-field-row"><span class="keeper-field-title">Primary Model</span><span class="mono" class="flex-1 text-right text-[#ccc]">${keeper.primary_model}</span></div>` : ''}
+      ${keeper.active_model ? html`<div class="keeper-field-row"><span class="keeper-field-title">Active Model</span><span class="mono" class="flex-1 text-right text-[#ccc]">${keeper.active_model}</span></div>` : ''}
+      ${keeper.next_model_hint ? html`<div class="keeper-field-row"><span class="keeper-field-title">Next Model Hint</span><span class="mono" class="flex-1 text-right text-[#ccc]">${keeper.next_model_hint}</span></div>` : ''}
+      ${keeper.skill_primary ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill (Primary)</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_primary}</span></div>` : ''}
+      ${keeper.skill_secondary ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill (Secondary)</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_secondary}</span></div>` : ''}
+      ${keeper.skill_reason ? html`<div class="keeper-field-row"><span class="keeper-field-title">Skill Reason</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_reason}</span></div>` : ''}
+      ${keeper.context_source ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Source</span><span class="flex-1 text-right text-[#ccc]">${keeper.context_source}</span></div>` : ''}
+      ${keeper.context_tokens != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Tokens</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.context_tokens)}</span></div>` : ''}
+      ${keeper.context_max != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Context Max</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.context_max)}</span></div>` : ''}
+      ${keeper.memory_recent_note ? html`<div class="keeper-field-row"><span class="keeper-field-title">Memory Note</span><span class="flex-1 text-right text-[#ccc]">${keeper.memory_recent_note}</span></div>` : ''}
+      ${keeper.k2k_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">K2K Count</span><span class="flex-1 text-right text-[#ccc]">${keeper.k2k_count}</span></div>` : ''}
+      ${keeper.conversation_tail_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Conv Tail</span><span class="flex-1 text-right text-[#ccc]">${keeper.conversation_tail_count}</span></div>` : ''}
+      ${keeper.handoff_count_total != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Total Handoffs</span><span class="flex-1 text-right text-[#ccc]">${keeper.handoff_count_total}</span></div>` : ''}
+      ${keeper.compaction_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Compactions</span><span class="flex-1 text-right text-[#ccc]">${keeper.compaction_count}</span></div>` : ''}
+      ${keeper.last_compaction_saved_tokens != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Last Compact Saved</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.last_compaction_saved_tokens)}</span></div>` : ''}
+      ${keeper.context?.message_count != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Message Count</span><span class="flex-1 text-right text-[#ccc]">${keeper.context.message_count}</span></div>` : ''}
+      ${keeper.context?.has_checkpoint != null ? html`<div class="keeper-field-row"><span class="keeper-field-title">Has Checkpoint</span><span class="flex-1 text-right text-[#ccc]">${keeper.context.has_checkpoint ? 'Yes' : 'No'}</span></div>` : ''}
     </div>
   `
 }
@@ -258,21 +258,21 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
 
   return html`
     <div>
-      <div style="display: flex; gap: 12px; margin-bottom: 10px;">
-        <div style="flex:1;">
-          <div style="font-size:11px; color:#888;">HP ${stats.hp}/${stats.max_hp}</div>
+      <div class="flex gap-3 mb-2.5">
+        <div class="flex-1">
+          <div class="text-[11px] text-[var(--text-dim)]">HP ${stats.hp}/${stats.max_hp}</div>
           <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
             <div style="width:${hpPct}%; height:100%; background:${hpPct > 50 ? '#4ade80' : hpPct > 25 ? '#fbbf24' : '#ef4444'}; border-radius:3px;" />
           </div>
         </div>
-        <div style="flex:1;">
-          <div style="font-size:11px; color:#888;">MP ${stats.mp}/${stats.max_mp}</div>
+        <div class="flex-1">
+          <div class="text-[11px] text-[var(--text-dim)]">MP ${stats.mp}/${stats.max_mp}</div>
           <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
             <div style="width:${mpPct}%; height:100%; background:#818cf8; border-radius:3px;" />
           </div>
         </div>
       </div>
-      <div style="display:grid; grid-template-columns: repeat(3,1fr); gap:6px;">
+      <div class="grid grid-cols-3 gap-1.5">
         ${[
           { label: 'STR', value: stats.strength },
           { label: 'DEX', value: stats.dexterity },
@@ -281,13 +281,13 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
           { label: 'WIS', value: stats.wisdom },
           { label: 'CHA', value: stats.charisma },
         ].map(s => html`
-          <div style="text-align:center; padding:6px; background:rgba(255,255,255,0.03); border-radius:6px;">
-            <div style="font-size:10px; color:#888; text-transform:uppercase;">${s.label}</div>
-            <div style="font-size:16px; font-weight:bold; color:#e0e0e0;">${s.value}</div>
+          <div class="text-center p-1.5 bg-[var(--white-3)] rounded-md">
+            <div class="text-[10px] text-[var(--text-dim)] uppercase">${s.label}</div>
+            <div class="text-base font-bold text-[#e0e0e0]">${s.value}</div>
           </div>
         `)}
       </div>
-      <div style="margin-top:8px; font-size:12px; color:#888;">
+      <div class="mt-2 text-xs text-[var(--text-dim)]">
         Level ${stats.level} — XP ${stats.xp}
       </div>
     </div>
@@ -295,7 +295,7 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
 }
 
 export function EquipmentList({ items }: { items: string[] }) {
-  if (items.length === 0) return html`<div class="empty-state" style="font-size:13px">No equipment</div>`
+  if (items.length === 0) return html`<div class="empty-state" class="text-[13px]">No equipment</div>`
 
   return html`
     <div class="keeper-equipment-list">
@@ -311,12 +311,12 @@ export function EquipmentList({ items }: { items: string[] }) {
 
 export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   const entries = Object.entries(rels)
-  if (entries.length === 0) return html`<div class="empty-state" style="font-size:13px">No relationships</div>`
+  if (entries.length === 0) return html`<div class="empty-state" class="text-[13px]">No relationships</div>`
 
   return html`
     <div class="keeper-k2k-list">
       ${entries.map(([name, relation]) => html`
-        <div style="display:flex; align-items:center; gap:8px; padding:6px 10px; background:rgba(255,255,255,0.03); border-radius:6px;">
+        <div class="flex items-center gap-2 py-1.5 px-2.5 bg-[var(--white-3)] rounded-md">
           <span class="keeper-mention-chip">${name}</span>
           <span class="keeper-k2k-route">${relation}</span>
         </div>
@@ -329,9 +329,9 @@ export function TraitsList({ traits, label }: { traits: string[]; label: string 
   if (traits.length === 0) return null
 
   return html`
-    <div style="margin-bottom: 12px;">
-      <div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">${label}</div>
-      <div style="display:flex; flex-wrap:wrap; gap:6px;">
+    <div class="mb-3">
+      <div class="text-[11px] text-[var(--text-dim)] uppercase tracking-wider mb-1.5">${label}</div>
+      <div class="flex flex-wrap gap-1.5">
         ${traits.map(t => html`<span class="keeper-mention-chip">${t}</span>`)}
       </div>
     </div>

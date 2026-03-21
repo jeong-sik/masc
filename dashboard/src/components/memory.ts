@@ -294,7 +294,7 @@ function CommentThread({ comments }: { comments: BoardComment[] }) {
     <div class="comment-thread">
       ${comments.map(comment => html`
         <div key=${comment.id} class="board-comment">
-          <span class="comment-author"><a class="author-link" style="cursor:pointer;text-decoration:underline;" onClick=${() => navigate('status', { agent: comment.author })}>${comment.author}</a></span>
+          <span class="comment-author"><a class="author-link" style="cursor:pointer;text-decoration:underline;" onClick=${() => navigate('status', { section: 'agents', agent: comment.author })}>${comment.author}</a></span>
           <span class="comment-time"><${TimeAgo} timestamp=${comment.created_at} /></span>
           <div class="comment-text">${comment.content}</div>
         </div>

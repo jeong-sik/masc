@@ -365,5 +365,5 @@ let save ~sw ~env (r : record) : (unit, string) result =
     | Ok () -> Ok ()
     | Error e ->
       (* Neo4j 실패해도 PostgreSQL 성공이면 경고만 *)
-      Printf.eprintf "[WARN] Neo4j save failed: %s\n%!" e;
+      Log.Misc.warn "Neo4j save failed: %s" e;
       Ok ()

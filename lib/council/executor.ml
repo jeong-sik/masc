@@ -211,7 +211,7 @@ let execute_notification target message =
     Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       output_string oc (Yojson.Safe.to_string json ^ "\n"));
     (* Also log to stderr for visibility *)
-    Printf.eprintf "[Council] 📢 %s: %s\n%!" target message;
+    Log.Misc.info "[Council] %s: %s" target message;
     let msg = Printf.sprintf "Notified %s: %s" target message in
     { success = true;
       stdout = msg;
@@ -261,11 +261,11 @@ let find_action topic =
 let execute_decision ~topic ~result : exec_result option =
   match find_action topic with
   | None -> 
-    Printf.eprintf "[Executor] No action mapping for topic: %s\n%!" topic;
+    Log.Misc.warn "Executor: no action mapping for topic: %s" topic;
     None
   | Some mapping ->
     if check_threshold result mapping then begin
-      Printf.eprintf "[Executor] Executing action for: %s\n%!" topic;
+      Log.Misc.info "Executor: executing action for: %s" topic;
       (* Extract parameters from topic if needed *)
       let action = match mapping.action with
         | GitHubAction (MergePR _) ->
@@ -280,7 +280,7 @@ let execute_decision ~topic ~result : exec_result option =
       in
       Some (execute_action action)
     end else begin
-      Printf.eprintf "[Executor] Threshold not met for: %s\n%!" topic;
+      Log.Misc.info "Executor: threshold not met for: %s" topic;
       None
     end
 

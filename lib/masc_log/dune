@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name masc_log)
+ (public_name masc_mcp.masc_log)
+ (wrapped false)
+ (modules log)
+ (libraries unix yojson time_compat))

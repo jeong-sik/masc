@@ -101,7 +101,7 @@ let rec ensure_dir path =
   if not (Sys.file_exists path) then begin
     ensure_dir (Filename.dirname path);
     (try Sys.mkdir path 0o755 with Sys_error e ->
-      Printf.eprintf "[conversation] ensure_dir failed: %s (path=%s)\n%!" e path)
+      Log.Misc.error "conversation: ensure_dir failed: %s (path=%s)" e path)
   end
 
 let ensure_dirs config =
@@ -332,7 +332,7 @@ let start ~config ~topic ~initiator ?(max_turns = 50) ?(initial_content = "")
           in
           collect 0 []
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Printf.eprintf "[Council] mention extraction failed: %s\n%!"
+          Log.Misc.warn "Council: mention extraction failed: %s"
             (Printexc.to_string exn);
           []
       in

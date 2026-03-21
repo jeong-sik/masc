@@ -211,7 +211,6 @@
    chain_orchestrator_eio
    chain_run_store
    chain_native_eio
-   log
    oas_message
    oas_response
    thompson_sampling
@@ -837,6 +836,8 @@
    ;; Jiphyeon - Episode storage for Agent Being Protocol
    jiphyeon
    ;; Neo4j Bolt native driver (OCaml 5.x Eio)
+   ;; Structured logging (extracted sub-library)
+   masc_log
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

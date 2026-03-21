@@ -36,6 +36,7 @@ import {
   type AgentActivityEntry,
 } from './api'
 import { journal } from './sse'
+import { showToast } from './components/common/toast'
 import {
   deriveLifecycleState,
   keeperFreshnessTs,
@@ -412,6 +413,7 @@ export async function refreshShell(): Promise<void> {
     }
   } catch (err) {
     console.error('Dashboard shell fetch error:', err)
+    showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
   }
 }
 
@@ -472,6 +474,7 @@ export async function refreshExecution(opts?: { force?: boolean }): Promise<void
     lastDashboardRefreshAt.value = new Date().toISOString()
   } catch (err) {
     console.error('Dashboard execution fetch error:', err)
+    showToast('실행 데이터 로드 실패', 'error', 5000)
   }
 }
 

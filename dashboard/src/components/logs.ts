@@ -13,8 +13,8 @@ const autoRefresh = signal(true)
 const logLimit = signal(500)
 
 const LEVEL_COLORS: Record<string, string> = {
-  DEBUG: 'var(--c-muted)',
-  INFO: 'var(--c-text)',
+  DEBUG: 'var(--text-muted)',
+  INFO: 'var(--text-body)',
   WARN: '#e6a700',
   ERROR: '#e05050',
 }
@@ -92,18 +92,18 @@ export function LogViewer() {
         </div>
 
         <div class="logs-actions">
-          <span class="logs-total">${logTotal.value.toLocaleString()} total</span>
+          <span class="logs-total">${logTotal.value.toLocaleString()}건</span>
           <label class="logs-auto-label">
             <input
               type="checkbox"
               checked=${autoRefresh.value}
               onChange=${() => { autoRefresh.value = !autoRefresh.value }}
             />
-            auto
+            자동
           </label>
           <button class="logs-refresh-btn" onClick=${() => { void loadLogs() }}
             disabled=${logLoading.value}>
-            ${logLoading.value ? '...' : 'refresh'}
+            ${logLoading.value ? '...' : '새로고침'}
           </button>
         </div>
       </div>

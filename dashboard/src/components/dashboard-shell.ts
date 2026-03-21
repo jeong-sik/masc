@@ -56,9 +56,8 @@ export function ConnectionStatus() {
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
         <span
-          class="event-count attention-badge"
+          class="event-count attention-badge cursor-pointer"
           onClick=${() => navigate('home')}
-          style="cursor: pointer;"
         >주의 ${attentionCount}건</span>
       ` : null}
     </div>
@@ -161,18 +160,17 @@ export function SideRail() {
         ${(() => {
           if (sectionItems.length === 0) return null
           return html`
-            <div class="rail-nav-group" style="margin-top: 12px;">
+            <div class="rail-nav-group mt-3">
               <div class="rail-group-label">${currentView?.label ?? currentSurface} 하위</div>
-              <div class="rail-tab-list" style="margin-top: 6px;">
+              <div class="rail-tab-list mt-1.5">
                 ${sectionItems.map(item => html`
                   <button
-                    class="rail-tab-btn ${currentSection?.id === item.id ? 'active' : ''}"
+                    class="rail-tab-btn py-2 px-2.5 ${currentSection?.id === item.id ? 'active' : ''}"
                     key=${item.id}
                     onClick=${() => navigate(currentSurface, item.params)}
-                    style="padding: 8px 10px;"
                   >
                     <span class="rail-tab-copy">
-                      <strong style="font-size: 12px;">${item.label}</strong>
+                      <strong class="text-xs">${item.label}</strong>
                       <span>${item.description}</span>
                     </span>
                   </button>

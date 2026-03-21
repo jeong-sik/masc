@@ -227,6 +227,7 @@ export async function patch<T>(
   extraHeaders?: Record<string, string>,
   timeoutMs = DEFAULT_POST_TIMEOUT_MS,
 ): Promise<T> {
+  // Backend uses POST with PATCH semantics (OCaml server only routes POST)
   const res = await fetchWithTimeout(path, {
     method: 'POST',
     headers: {

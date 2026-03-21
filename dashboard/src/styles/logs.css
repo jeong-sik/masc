@@ -24,28 +24,28 @@
 }
 
 .logs-select {
-  background: var(--c-bg-card);
-  color: var(--c-text);
-  border: 1px solid var(--c-border);
+  background: var(--card);
+  color: var(--text-body);
+  border: 1px solid var(--card-border);
   border-radius: 4px;
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
-  font-family: var(--font-mono);
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
 }
 
 .logs-module-input {
-  background: var(--c-bg-card);
-  color: var(--c-text);
-  border: 1px solid var(--c-border);
+  background: var(--card);
+  color: var(--text-body);
+  border: 1px solid var(--card-border);
   border-radius: 4px;
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
-  font-family: var(--font-mono);
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
   width: 10rem;
 }
 
 .logs-module-input::placeholder {
-  color: var(--c-muted);
+  color: var(--text-muted);
 }
 
 .logs-actions {
@@ -53,7 +53,7 @@
   gap: 0.75rem;
   align-items: center;
   font-size: 0.75rem;
-  color: var(--c-muted);
+  color: var(--text-muted);
 }
 
 .logs-auto-label {
@@ -64,18 +64,18 @@
 }
 
 .logs-refresh-btn {
-  background: var(--c-bg-card);
-  color: var(--c-text);
-  border: 1px solid var(--c-border);
+  background: var(--card);
+  color: var(--text-body);
+  border: 1px solid var(--card-border);
   border-radius: 4px;
   padding: 0.2rem 0.6rem;
   font-size: 0.75rem;
-  font-family: var(--font-mono);
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
   cursor: pointer;
 }
 
 .logs-refresh-btn:hover {
-  border-color: var(--c-accent);
+  border-color: var(--accent);
 }
 
 .logs-total {
@@ -94,45 +94,45 @@
 .logs-table-wrap {
   flex: 1;
   overflow: auto;
-  border: 1px solid var(--c-border);
+  border: 1px solid var(--card-border);
   border-radius: 4px;
-  background: var(--c-bg-card);
+  background: var(--card);
 }
 
 .logs-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.72rem;
-  font-family: var(--font-mono);
+  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
   line-height: 1.4;
 }
 
 .logs-table thead {
   position: sticky;
   top: 0;
-  background: var(--c-bg-card);
+  background: var(--card);
   z-index: 1;
 }
 
 .logs-table th {
   padding: 0.3rem 0.5rem;
   text-align: left;
-  border-bottom: 1px solid var(--c-border);
-  color: var(--c-muted);
+  border-bottom: 1px solid var(--card-border);
+  color: var(--text-muted);
   font-weight: 500;
   white-space: nowrap;
 }
 
 .logs-table td {
   padding: 0.2rem 0.5rem;
-  border-bottom: 1px solid var(--c-border-subtle, rgba(255,255,255,0.04));
+  border-bottom: 1px solid rgba(255,255,255,0.04);
   vertical-align: top;
 }
 
 .logs-col-ts {
   width: 11rem;
   white-space: nowrap;
-  color: var(--c-muted);
+  color: var(--text-muted);
 }
 
 .logs-col-level {
@@ -144,7 +144,7 @@
 .logs-col-module {
   width: 8rem;
   white-space: nowrap;
-  color: var(--c-accent, #7aa2f7);
+  color: var(--accent);
 }
 
 .logs-col-msg {

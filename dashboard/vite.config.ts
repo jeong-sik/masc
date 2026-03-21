@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import preact from '@preact/preset-vite'
+import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig(({ command }) => {
   const proxyTarget = process.env.MASC_DASHBOARD_PROXY_TARGET
@@ -8,7 +9,7 @@ export default defineConfig(({ command }) => {
   }
 
   return {
-    plugins: [preact()],
+    plugins: [tailwindcss(), preact()],
     base: '/dashboard/',
     build: {
       outDir: '../assets/dashboard',

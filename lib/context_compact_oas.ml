@@ -1,26 +1,20 @@
-(** Context_compact_oas — Thin adapter bridging MASC compaction to OAS Context_reducer.
+(** Context_compact_oas — direct delegation to OAS Context_reducer.
 
-    Converts MASC messages to OAS messages, applies OAS Context_reducer strategies,
-    and converts back. This is Phase 1 of migrating MASC to use OAS properly.
+    MASC messages are [Agent_sdk.Types.message] — the same type OAS uses.
+    No role conversion or sentinel tagging is needed; OAS Context_reducer
+    natively supports all 4 roles (System, User, Assistant, Tool) and
+    preserves ToolUse/ToolResult pairing.
 
-    This module is deliberately independent of Context_manager to avoid circular
-    dependency. It operates on [Agent_sdk.Types.message list] directly and uses its own
-    strategy enum shared via Compaction_types.compaction_strategy.
+    MASC-specific strategies (DropLowImportance, SummarizeOld) use OAS
+    Custom closures to inject domain logic that OAS does not provide.
 
-    MASC has 4 roles (System, User, Assistant, Tool) while OAS has the same 4.
-    OAS Context_reducer strategies operate on OAS message lists and respect
-    ToolUse/ToolResult pairing. We use sentinel-tagged text to preserve MASC
-    role semantics through the OAS pipeline.
-
-    @since Phase 1 — OAS Context_reducer integration *)
+    @since Phase 1 — OAS Context_reducer integration
+    @since Phase B — Sentinel removal (roles are natively compatible) *)
 
 (* ================================================================ *)
 (* Strategy Type (shared via Compaction_types)                       *)
 (* ================================================================ *)
 
-(** Re-export from [Compaction_types] for backward compatibility.
-    Consumers that used [Context_compact_oas.PruneToolOutputs] etc.
-    continue to work without changes. *)
 type strategy = Compaction_types.compaction_strategy =
   | PruneToolOutputs
   | MergeContiguous
@@ -28,94 +22,12 @@ type strategy = Compaction_types.compaction_strategy =
   | SummarizeOld
 
 (* ================================================================ *)
-(* Role Tag Sentinels                                               *)
-(* ================================================================ *)
-
-(** \x00-prefixed sentinels prevent collision with user content.
-    No valid UTF-8 user text starts with a null byte. *)
-let system_role_tag = "\x00__MASC_ROLE:system__\x00"
-let tool_role_tag = "\x00__MASC_ROLE:tool__\x00"
-
-let starts_with ~prefix s =
-  let lp = String.length prefix in
-  String.length s >= lp && String.sub s 0 lp = prefix
-
-(* ================================================================ *)
-(* MASC <-> OAS Message Conversion                                  *)
-(* ================================================================ *)
-
-(** Convert a MASC message to an OAS message with role tags for lossless roundtrip.
-    System and Tool roles are mapped to User with a sentinel prefix so OAS
-    strategies (which expect User/Assistant alternation) handle them correctly. *)
-let masc_msg_to_oas (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
-  let text = Agent_sdk.Types.text_of_message m in
-  let role, tagged_text = match m.role with
-    | Agent_sdk.Types.System -> Agent_sdk.Types.User, system_role_tag ^ text
-    | Agent_sdk.Types.Tool -> Agent_sdk.Types.User, tool_role_tag ^ text
-    | Agent_sdk.Types.User -> Agent_sdk.Types.User, text
-    | Agent_sdk.Types.Assistant -> Agent_sdk.Types.Assistant, text
-  in
-  let content = match m.role with
-    | Agent_sdk.Types.Tool ->
-      let tool_use_id =
-        List.find_map (function Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id | _ -> None) m.content
-        |> Option.value ~default:"masc-tool"
-      in
-      [Agent_sdk.Types.ToolResult { tool_use_id; content = tagged_text; is_error = false }]
-    | _ -> [Agent_sdk.Types.Text tagged_text]
-  in
-  { Agent_sdk.Types.role; content; name = None; tool_call_id = None }
-
-(** Recover a MASC message from a tagged OAS message.
-    Strips sentinel prefixes and restores the original MASC role. *)
-let oas_msg_to_masc (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
-  let text, tool_id =
-    let parts = List.filter_map (fun (block : Agent_sdk.Types.content_block) ->
-      match block with
-      | Agent_sdk.Types.Text s -> Some (s, None)
-      | Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ->
-        Some (content, Some tool_use_id)
-      | _ -> None
-    ) m.content in
-    let texts = List.map fst parts in
-    let ids = List.filter_map snd parts in
-    (String.concat "\n" texts, List.nth_opt ids 0)
-  in
-  let role, content =
-    if starts_with ~prefix:system_role_tag text then
-      Agent_sdk.Types.System,
-      String.sub text (String.length system_role_tag)
-        (String.length text - String.length system_role_tag)
-    else if starts_with ~prefix:tool_role_tag text then
-      Agent_sdk.Types.Tool,
-      String.sub text (String.length tool_role_tag)
-        (String.length text - String.length tool_role_tag)
-    else
-      (match m.role with
-       | Agent_sdk.Types.User -> Agent_sdk.Types.User
-       | Agent_sdk.Types.Assistant -> Agent_sdk.Types.Assistant
-       | Agent_sdk.Types.System -> Agent_sdk.Types.System
-       | Agent_sdk.Types.Tool -> Agent_sdk.Types.Tool),
-      text
-  in
-  let content_blocks = match role with
-    | Agent_sdk.Types.Tool ->
-      let tool_use_id = Option.value ~default:"masc-tool" tool_id in
-      [Agent_sdk.Types.ToolResult { tool_use_id; content; is_error = false }]
-    | _ -> [Agent_sdk.Types.Text content]
-  in
-  { Agent_sdk.Types.role; content = content_blocks; name = None; tool_call_id = None }
-
-(* ================================================================ *)
-(* Importance Scoring — delegated to Context_scoring (shared SSOT)  *)
-(* ================================================================ *)
-
-(* ================================================================ *)
-(* Token Estimation                                                 *)
+(* Token Estimation                                                  *)
 (* ================================================================ *)
 
 let msg_tokens (m : Agent_sdk.Types.message) =
-  (String.length (Agent_sdk.Types.text_of_message m) / 4) + 4
+  let text = Agent_sdk.Types.text_of_message m in
+  (String.length text / 4) + 4
 
 let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
   let sys_tokens = (String.length system_prompt / 4) + 4 in
@@ -127,77 +39,28 @@ let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) 
 
 (** Map a local strategy to an OAS Context_reducer strategy.
 
-    - PruneToolOutputs and MergeContiguous map directly to OAS built-in strategies.
-    - DropLowImportance uses OAS Custom strategy with inline scoring.
-    - SummarizeOld uses OAS Custom strategy with heuristic summarization.
-
-    SummarizeOld uses extractive summarization (first-sentence extraction).
-    A future enhancement could accept an MODEL summarizer function parameter. *)
+    - PruneToolOutputs and MergeContiguous use OAS built-in strategies directly.
+    - DropLowImportance uses OAS Custom with MASC Context_scoring (OAS has no scoring).
+    - SummarizeOld uses OAS Custom with extractive summarization (deterministic, no LLM). *)
 let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
   match s with
   | PruneToolOutputs ->
     Agent_sdk.Context_reducer.Prune_tool_outputs { max_output_len = 500 }
   | MergeContiguous ->
-    (* Cannot delegate to OAS Merge_contiguous directly — it would merge
-       consecutive User messages that carry different sentinel tags (System
-       mapped to User, Tool mapped to User), corrupting role recovery.
-       Use Custom wrapper that skips sentinel-tagged messages from merging. *)
-    Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
-      let has_sentinel (m : Agent_sdk.Types.message) =
-        List.exists (function
-          | Agent_sdk.Types.Text s -> String.length s > 0 && s.[0] = '\x00'
-          | Agent_sdk.Types.ToolResult { content; _ } ->
-            String.length content > 0 && content.[0] = '\x00'
-          | _ -> false
-        ) m.content
-      in
-      (* Split into sentinel-protected and mergeable segments, merge only
-         the mergeable ones via OAS, then reassemble in order. *)
-      let reducer = { Agent_sdk.Context_reducer.strategy =
-        Agent_sdk.Context_reducer.Merge_contiguous } in
-      let rec process acc buf = function
-        | [] ->
-          let merged = if buf = [] then [] else
-            Agent_sdk.Context_reducer.reduce reducer (List.rev buf) in
-          List.rev_append acc merged
-        | m :: rest when has_sentinel m ->
-          let merged = if buf = [] then [] else
-            Agent_sdk.Context_reducer.reduce reducer (List.rev buf) in
-          process (m :: List.rev_append merged acc) [] rest
-        | m :: rest ->
-          process acc (m :: buf) rest
-      in
-      process [] [] oas_msgs)
+    Agent_sdk.Context_reducer.Merge_contiguous
   | DropLowImportance ->
-    Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
-      let masc_msgs = List.map oas_msg_to_masc oas_msgs in
-      let scores = Context_scoring.score_messages masc_msgs in
+    Agent_sdk.Context_reducer.Custom (fun msgs ->
+      let scores = Context_scoring.score_messages msgs in
       let threshold = 0.3 in
-      let filtered = List.filteri (fun i _m ->
+      List.filteri (fun i _m ->
         match List.assoc_opt i scores with
         | Some score -> score >= threshold
         | None -> true
-      ) masc_msgs in
-      List.map masc_msg_to_oas filtered)
+      ) msgs)
   | SummarizeOld ->
-    (* Extractive summarization: replace the middle section of messages with
-       a single System message containing first-sentence extracts of each
-       removed user/assistant turn. Preserves the first 2 and last 5 messages
-       intact (conversation start + recent context). The summary message
-       bridges the gap so the model knows what was discussed without reading
-       every old message.
-
-       This is deterministic (no MODEL call). A future enhancement could use
-       an MODEL for abstractive summarization via a callback parameter. *)
-    Agent_sdk.Context_reducer.Custom (fun oas_msgs ->
-      let n = List.length oas_msgs in
-      let first_n = 2 in
-      let last_n = 5 in
-      if n <= first_n + last_n + 1 then oas_msgs
-      else
-        let first = List.filteri (fun i _ -> i < first_n) oas_msgs in
-        let last = List.filteri (fun i _ -> i >= n - last_n) oas_msgs in
-        let middle = List.filteri (fun i _ -> i >= first_n && i < n - last_n) oas_msgs in
+    Agent_sdk.Context_reducer.Summarize_old {
+      keep_recent = 5;
+      summarizer = (fun old_msgs ->
         let first_sentence (s : string) =
           let s = String.trim s in
           let max_len = 120 in
@@ -214,91 +77,31 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.strategy =
           | Some pos when pos <= max_len -> String.sub s 0 pos
           | _ -> if String.length s > max_len then String.sub s 0 max_len ^ "..." else s
         in
-        let extract_text (m : Agent_sdk.Types.message) : string =
-          m.content
-          |> List.filter_map (function
-               | Agent_sdk.Types.Text s ->
-                 let t = String.trim s in
-                 if t = "" || (String.length t > 0 && t.[0] = '\x00') then None
-                 else Some t
-               | _ -> None)
-          |> String.concat " "
-        in
-        let summary_lines = middle |> List.mapi (fun i m ->
+        let lines = old_msgs |> List.mapi (fun i m ->
           let role_str = match m.Agent_sdk.Types.role with
             | Agent_sdk.Types.User -> "user"
             | Agent_sdk.Types.Assistant -> "assistant"
             | Agent_sdk.Types.System -> "system"
             | Agent_sdk.Types.Tool -> "tool"
           in
-          let text = extract_text m in
+          let text = String.trim (Agent_sdk.Types.text_of_message m) in
           if text = "" then None
-          else Some (Printf.sprintf "[%d] %s: %s" (first_n + i + 1) role_str (first_sentence text))
+          else Some (Printf.sprintf "[%d] %s: %s" (i + 1) role_str (first_sentence text))
         ) |> List.filter_map Fun.id in
-        let omitted_count = List.length middle in
-        let summary_text = Printf.sprintf
-          "[Compacted %d messages into summary]\n%s"
-          omitted_count (String.concat "\n" summary_lines)
-        in
-        let summary_msg = Agent_sdk.Types.text_message
-          Agent_sdk.Types.System summary_text in
-        first @ [summary_msg] @ last)
-
-(* ================================================================ *)
-(* Sentinel Roundtrip Validation                                    *)
-(* ================================================================ *)
-
-(** Validate that sentinel-tagged messages survive OAS reduction intact.
-    Returns [true] if all sentinel tags in the original messages can be
-    correctly recovered from the reduced messages. Detects corruption
-    from strategies like Merge_contiguous or Summarize_old that may
-    concatenate or truncate content containing \x00 sentinel bytes. *)
-let validate_roundtrip
-    ~(original : Agent_sdk.Types.message list)
-    ~(reduced : Agent_sdk.Types.message list)
-  : bool =
-  (* Count sentinel-tagged messages (System and Tool roles) in original *)
-  let count_sentinels msgs =
-    List.fold_left (fun acc (m : Agent_sdk.Types.message) ->
-      match m.role with
-      | Agent_sdk.Types.System | Agent_sdk.Types.Tool -> acc + 1
-      | _ -> acc
-    ) 0 msgs
-  in
-  let original_sentinel_count = count_sentinels original in
-  (* If no sentinel-tagged messages, nothing to validate *)
-  if original_sentinel_count = 0 then true
-  else begin
-    (* Verify each reduced message with a sentinel tag can be cleanly parsed *)
-    let valid = List.for_all (fun (m : Agent_sdk.Types.message) ->
-      let text = Agent_sdk.Types.text_of_message m in
-      (* Check for corrupted sentinels: \x00 present but not as valid prefix *)
-      if String.contains text '\x00' then
-        starts_with ~prefix:system_role_tag text
-        || starts_with ~prefix:tool_role_tag text
-        (* Also allow text that has no sentinel at all — it was a plain message *)
-      else true
-    ) reduced in
-    valid
-  end
+        Printf.sprintf "[Compacted %d messages into summary]\n%s"
+          (List.length old_msgs) (String.concat "\n" lines)
+      );
+    }
 
 (* ================================================================ *)
 (* Public API                                                       *)
 (* ================================================================ *)
 
-(** Apply compaction via the OAS Context_reducer pipeline.
+(** Apply compaction via OAS Context_reducer.
 
-    Takes MASC messages, system prompt, and strategies. Converts to OAS messages,
-    builds a composed OAS reducer, runs the reduction, and converts back.
-
-    Returns the compacted message list and new token count.
-
-    After reduction, validates sentinel integrity. If corruption is detected
-    (e.g., from Merge_contiguous joining sentinel-tagged content), falls back
-    to returning the original messages with a warning log.
-
-    This function is functionally equivalent to [Context_manager.compact]
-    but routes through OAS Context_reducer, enabling A/B comparison. *)
+    Messages are passed directly — no role conversion needed since
+    MASC and OAS share the same [Agent_sdk.Types.message] type with
+    the same 4 roles (System, User, Assistant, Tool). *)
 let compact
     ~(system_prompt : string)
     ~(messages : Agent_sdk.Types.message list)
@@ -307,22 +110,6 @@ let compact
   let oas_strategies = List.map oas_strategy_of strategies in
   let reducer = Agent_sdk.Context_reducer.compose
     (List.map (fun s -> { Agent_sdk.Context_reducer.strategy = s }) oas_strategies) in
-  let oas_msgs = List.map masc_msg_to_oas messages in
-  let reduced = Agent_sdk.Context_reducer.reduce reducer oas_msgs in
-  let result_messages = List.map oas_msg_to_masc reduced in
-  (* Validate sentinel integrity after reduction *)
-  if validate_roundtrip ~original:messages ~reduced:result_messages then begin
-    let token_count = count_tokens system_prompt result_messages in
-    (result_messages, token_count)
-  end else begin
-    Log.Memory.warn "sentinel corruption detected after \
-             reduction with strategies [%s], falling back to original messages"
-      (String.concat ", " (List.map (fun s -> match s with
-        | PruneToolOutputs -> "PruneToolOutputs"
-        | MergeContiguous -> "MergeContiguous"
-        | DropLowImportance -> "DropLowImportance"
-        | SummarizeOld -> "SummarizeOld"
-      ) strategies));
-    let token_count = count_tokens system_prompt messages in
-    (messages, token_count)
-  end
+  let reduced = Agent_sdk.Context_reducer.reduce reducer messages in
+  let token_count = count_tokens system_prompt reduced in
+  (reduced, token_count)

@@ -110,5 +110,14 @@ let build_perpetual_agent
          (sprintf "Perpetual agent (gen %d, trace %s)"
            pstate.generation pstate.trace_id)
   in
+  (* Phase C: 5-tier OAS Memory seeding (matches Keeper pattern) *)
+  let memory = Memory_oas_bridge.create_memory
+    ~agent_name:config.agent_name ~session_id:pstate.trace_id () in
+  ignore (Memory_oas_bridge.seed_institution ~memory ~config:(Room.default_config "."));
+  ignore (Memory_oas_bridge.seed_procedures ~memory ~agent_name:"_global" ~limit:5);
+  ignore (Memory_oas_bridge.seed_memory_bank ~memory ~agent_name:config.agent_name ~limit:10);
+  ignore (Memory_oas_bridge.seed_episodes ~memory ~agent_name:config.agent_name ~limit:30);
+  ignore (Memory_oas_bridge.seed_procedures_as_oas ~memory ~agent_name:config.agent_name ~limit:10);
+  let builder = Oas.Builder.with_memory memory builder in
   Oas.Builder.build_safe builder
   |> Result.map_error Oas.Error.to_string

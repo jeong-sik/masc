@@ -103,7 +103,6 @@ let handle_relay_now ctx args =
     goal_blockers;
   } in
   let prompt = Relay.build_handoff_prompt ~payload ~generation:(generation + 1) in
-  (* Spawn_eio removed; use blocking Spawn.spawn *)
   ignore ctx.proc_mgr;
   let result = Spawn.spawn ~agent_name:target_agent
     ~prompt ~timeout_seconds:Env_config.Spawn.timeout_seconds ()

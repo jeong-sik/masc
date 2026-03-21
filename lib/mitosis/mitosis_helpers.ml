@@ -42,8 +42,7 @@ let last_handoff_time : float ref = ref 0.0
 let reset_handoff_cooldown () =
   last_handoff_time := 0.0
 
-(** Create spawn_fn for mitosis.
-    Spawn_eio has been removed; always use the blocking Spawn.spawn path. *)
+(** Create spawn_fn for mitosis. *)
 let make_spawn_fn ~ctx ~agent_name ~timeout_seconds : (prompt:string -> Spawn.spawn_result) =
   ignore ctx;
   (fun ~prompt ->

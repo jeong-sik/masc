@@ -297,8 +297,7 @@ let build_successor_prompt (h : handover_record) ~additional_instructions : stri
 
 Begin work now.|} dna instructions
 
-(** Claim a handover and spawn the successor agent.
-    Spawn_eio has been removed; returns an error stub. *)
+(** Claim a handover and spawn the successor agent. *)
 let claim_and_spawn ~sw:_ ~fs ~proc_mgr:_ config ~handover_id ~agent_name ?additional_instructions ?timeout_seconds:_ ()
     : (Spawn.spawn_result, string) result =
   match claim_handover ~fs config ~handover_id ~agent_name with

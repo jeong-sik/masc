@@ -212,19 +212,60 @@ let cascade_of_worker
     | first :: _ when first <> "" -> first
     | _ -> "keeper_turn"
 
+let telemetry_of_run_result (result : Oas_worker.run_result) :
+    Swarm.Swarm_types.agent_telemetry =
+  {
+    Swarm.Swarm_types.trace_ref = None;
+    usage = Option.map (Oas.Types.add_usage Oas.Types.empty_usage) result.response.usage;
+    turn_count = max 1 result.turns;
+  }
+
+let make_convergence_metric ~(entry_count : int)
+    (success_by_agent : (string, bool) Hashtbl.t) :
+    Swarm.Swarm_types.convergence_config option =
+  if entry_count <= 0 then None
+  else
+    Some
+      {
+        Swarm.Swarm_types.metric =
+          Callback
+            (fun () ->
+              let successes =
+                Hashtbl.fold
+                  (fun _ succeeded acc -> if succeeded then acc + 1 else acc)
+                  success_by_agent 0
+              in
+              float_of_int successes /. float_of_int entry_count);
+        target = 1.0;
+        max_iterations = 1;
+        patience = 1;
+        aggregate = Best_score;
+      }
+
+let budget_of_session_timeout timeout_sec =
+  match timeout_sec with
+  | Some seconds ->
+      {
+        Swarm.Swarm_types.no_budget with
+        max_total_time_sec = Some seconds;
+      }
+  | None -> Swarm.Swarm_types.no_budget
+
 (* ── planned_worker -> agent_entry ─────────────────────────────── *)
 
-let planned_worker_to_entry
+let planned_worker_to_entry_with_state
     ~(config : Room.config)
     ~(session_cascade : string list)
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(success_by_agent : (string, bool) Hashtbl.t)
     (pw : Team_session_types.planned_worker)
   : Swarm.Swarm_types.agent_entry =
   let name = pw.spawn_agent in
   let role = role_of_spawn_role ~worker_class:pw.worker_class pw.spawn_role in
   let cascade_name = cascade_of_worker ~session_cascade pw in
   let max_turns = Option.value ~default:10 pw.max_turns in
+  let telemetry_ref = ref Swarm.Swarm_types.empty_telemetry in
   let system_prompt =
     Printf.sprintf "You are agent '%s' in a team session (room: %s). Your role: %s."
       name config.base_path
@@ -242,13 +283,30 @@ let planned_worker_to_entry
         ~masc_tools ~dispatch:dispatch_with_defaults ~max_turns
         ~temperature:0.3 ~max_tokens:4096 ()
     with
-    | Ok result -> Ok result.response
+    | Ok result ->
+        Hashtbl.replace success_by_agent name true;
+        telemetry_ref := telemetry_of_run_result result;
+        Ok result.response
     | Error e ->
-      Error (Oas.Error.Config
-        (Oas.Error.InvalidConfig {
-          field = "worker"; detail = Printf.sprintf "%s: %s" name e }))
+        Hashtbl.replace success_by_agent name false;
+        telemetry_ref := Swarm.Swarm_types.empty_telemetry;
+        Error
+          (Oas.Error.Config
+             (Oas.Error.InvalidConfig
+                { field = "worker"; detail = Printf.sprintf "%s: %s" name e }))
   in
-  { name; run; role; get_telemetry = None }
+  { name; run; role; get_telemetry = Some (fun () -> !telemetry_ref) }
+
+let planned_worker_to_entry
+    ~(config : Room.config)
+    ~(session_cascade : string list)
+    ~(masc_tools : Types.tool_schema list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    (pw : Team_session_types.planned_worker)
+  : Swarm.Swarm_types.agent_entry =
+  let success_by_agent = Hashtbl.create 1 in
+  planned_worker_to_entry_with_state ~config ~session_cascade ~masc_tools
+    ~dispatch ~success_by_agent pw
 
 (* ── session -> swarm_config ───────────────────────────────────── *)
 
@@ -258,28 +316,36 @@ let session_to_swarm_config
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     (session : Team_session_types.session)
   : Swarm.Swarm_types.swarm_config =
+  let success_by_agent = Hashtbl.create 8 in
   let entries =
     List.map
-      (planned_worker_to_entry ~config
-         ~session_cascade:session.model_cascade ~masc_tools ~dispatch)
+      (planned_worker_to_entry_with_state ~config
+         ~session_cascade:session.model_cascade ~masc_tools ~dispatch
+         ~success_by_agent)
       session.planned_workers
   in
+  List.iter
+    (fun (entry : Swarm.Swarm_types.agent_entry) ->
+      Hashtbl.replace success_by_agent entry.name false)
+    entries;
   let mode = mode_of_orchestration session.orchestration_mode in
   let collaboration =
     Team_context.collaboration_of_session ~base_path:config.base_path session
   in
+  let entry_count = List.length entries in
   let timeout_sec =
     if session.duration_seconds > 0 then
       Some (float_of_int session.duration_seconds)
     else None
   in
-  { entries; mode; convergence = None;
+  { entries; mode;
+    convergence = make_convergence_metric ~entry_count success_by_agent;
     max_parallel = max 1 (List.length entries);
     prompt = session.goal; timeout_sec;
-    budget = Swarm.Swarm_types.no_budget;
+    budget = budget_of_session_timeout timeout_sec;
     max_agent_retries = 1;
     collaboration = Some collaboration;
-    resource_check = None;
+    resource_check = Some (fun () -> Room.is_initialized config);
     max_concurrent_agents = Some (max 1 (List.length entries)) }
 
 (* ── Inverse: swarm result -> session update ───────────────────── *)

@@ -47,13 +47,14 @@ The main remaining problems are no longer “missing migration” at large. They
 The bridge still throws away part of MASC session semantics:
 
 - `planned_worker` metadata is only partially projected into swarm entries
-- `get_telemetry` remains `None`
-- `convergence` and `resource_check` are still unset
-- `budget` is still `no_budget`
+- per-agent telemetry now exists, but only usage/turn_count are surfaced; `trace_ref` is still absent
+- convergence now uses a single-pass success-ratio callback, but not a richer multi-iteration swarm policy
+- `resource_check` now guards on room initialization only; it is not yet a broader runtime-health probe
+- budget now derives wall-clock time from `duration_seconds`, but there is still no richer token/cost policy
 
 This means the runner is now tool-capable, but not yet fidelity-complete.
 
-### 2. Resume path still has its own direct OAS run logic
+### 2. Resume path is only partially consolidated
 
 Direct OAS build/run sites now remain primarily in:
 
@@ -61,7 +62,7 @@ Direct OAS build/run sites now remain primarily in:
 - `worker_oas.ml`
 - `local/worker_container_runners.ml` resume/continue path
 
-That is a much smaller surface than before, but the resume path still needs the same consolidation treatment as the initial run path.
+The resume path now shares the same checkpoint/evidence/completion-log cleanup helper as the initial run path, but it still constructs resume-specific config locally before delegating into the shared execution tail.
 
 ### 3. Memory bridge scope is now honest, but not universal
 
@@ -80,6 +81,6 @@ should be treated as outdated until refreshed.
 
 ## Recommended Priorities
 
-1. Finish team-session bridge fidelity: telemetry, convergence/resource settings, and less-lossy worker/session projection.
-2. Collapse the local worker resume path onto the same shared OAS execution template used by initial runs.
+1. Finish team-session bridge fidelity: trace refs, richer runtime-health checks, and less-lossy worker/session projection.
+2. Collapse the remaining resume-config construction path onto the same shared worker execution template used by initial runs.
 3. Keep docs synced to code after each OAS migration step; the documentation drift is currently more dangerous than the remaining missing code.

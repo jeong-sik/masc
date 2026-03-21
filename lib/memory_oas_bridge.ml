@@ -3,7 +3,8 @@
     Tier mapping:
     - {b Long_term} — PostgreSQL via [Memory_pg] when MASC_POSTGRES_URL is set;
                         no-op stubs otherwise
-    - {b Episodic}  — no-op (Memory_stream removed)
+    - {b Episodic}  — [seed_episodes] loads recent [Institution_eio] JSONL
+                       episodes and [flush_episodes] writes new OAS episodes back
     - {b Procedural} — [seed_procedures_as_oas] loads [Procedural_memory] entries;
                         [flush_procedures] writes back
     - {b Working/Scratchpad} — managed by OAS in-memory; no backend needed
@@ -109,10 +110,12 @@ let seed_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limi
     List.length procs
   end
 
-(** Pre-seed the keeper's memory bank.
+(** Legacy keeper memory-bank adapter.
 
-    No-op: Memory_stream has been removed.
-    Returns 0 (no entries seeded). *)
+    Historical call sites still invoke this helper, but the current 5-tier path
+    seeds episodic memory through [seed_episodes]. The removed Memory_stream
+    backend is not revived here, so this remains an intentional no-op.
+    Returns 0 to preserve legacy callers. *)
 let seed_memory_bank ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) ~(limit : int) : int =
   ignore (memory, agent_name, limit);
   0

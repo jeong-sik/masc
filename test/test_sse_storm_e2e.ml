@@ -284,7 +284,7 @@ let check_status label expected result =
            result.curl_exit
            result.stderr)
 
-let test_mcp_rejects_reconnect_then_recovers () =
+let test_mcp_reconnect_stays_accepted () =
   with_server @@ fun ~port ->
   let sid = Printf.sprintf "storm-mcp-%06d" (Random.int 1_000_000) in
   let headers = [("Accept", "text/event-stream"); ("Mcp-Session-Id", sid)] in
@@ -292,10 +292,8 @@ let test_mcp_rejects_reconnect_then_recovers () =
   let first = run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" () in
   check_status "first /mcp connect accepted" 200 first;
 
-  (* MCP path no longer rate-limits SSE reconnects (rate limiting removed
-     during TRPG archival). Verify immediate reconnect is accepted. *)
   let second = run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" () in
-  check_status "immediate /mcp reconnect accepted" 200 second
+  check_status "follow-up /mcp reconnect accepted" 200 second
 
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ->
@@ -305,15 +303,17 @@ let test_ag_ui_rejects_reconnect_then_recovers () =
   let first = run_curl ~headers ~max_time:0.6 ~port ~path:"/ag-ui/events?room=default" () in
   check_status "first /ag-ui/events connect accepted" 200 first;
 
-  (* AG-UI SSE now mirrors MCP transport behavior: immediate reconnects stay
-     accepted and do not emit a session cooldown response. *)
   let second = run_curl ~headers ~max_time:0.6 ~port ~path:"/ag-ui/events?room=default" () in
-  check_status "immediate /ag-ui/events reconnect accepted" 200 second
+  check_status "immediate /ag-ui/events reconnect rejected" 429 second;
+
+  Unix.sleepf 1.0;
+  let third = run_curl ~headers ~max_time:0.6 ~port ~path:"/ag-ui/events?room=default" () in
+  check_status "cooldown /ag-ui/events reconnect recovers" 200 third
 
 let () =
   Random.self_init ();
   run "sse_storm_e2e"
     [
-      ("mcp", [test_case "reconnect cooldown + recovery" `Slow test_mcp_rejects_reconnect_then_recovers]);
+      ("mcp", [test_case "follow-up reconnect accepted" `Slow test_mcp_reconnect_stays_accepted]);
       ("ag_ui", [test_case "reconnect cooldown + recovery" `Slow test_ag_ui_rejects_reconnect_then_recovers]);
     ]

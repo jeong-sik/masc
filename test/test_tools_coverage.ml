@@ -313,7 +313,8 @@ let test_remote_operator_action_schema_is_strict () =
                   (List.mem (`String "team_worker_spawn_batch") enums);
                 Alcotest.(check bool) "remote includes social_sweep" true
                   (List.mem (`String "social_sweep") enums);
-                (* lodge_tick removed from schema enum — alias works at runtime *)
+                Alcotest.(check bool) "remote excludes lodge_tick alias" false
+                  (List.mem (`String "lodge_tick") enums);
                 Alcotest.(check bool) "remote includes keeper_probe" true
                   (List.mem (`String "keeper_probe") enums);
                 Alcotest.(check bool) "remote includes keeper_recover" true

@@ -31,7 +31,8 @@ let strict_action_enums =
   ]
 
 let legacy_action_alias_enums =
-  [ `String "team_turn"; `String "keeper_msg"; `String "task_inject" ]
+  [ `String "team_turn"; `String "keeper_msg"; `String "task_inject";
+    `String "lodge_tick"; `String "lodge_poke" ]
 
 let target_type_enums =
   [ `String "room"; `String "team_session"; `String "keeper" ]

@@ -1,0 +1,153 @@
+/* Keeper Chat Panel — FF-themed conversation UI */
+
+.keeper-chat {
+  border: 1px solid var(--ff-border, rgba(200, 168, 78, 0.35));
+  border-radius: var(--radius-md, 12px);
+  background: var(--ff-panel, rgba(10, 22, 40, 0.92));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.keeper-chat__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  background: rgba(10, 22, 40, 0.6);
+}
+
+.keeper-chat__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ff-gold-bright, #e8cc70);
+  letter-spacing: 0.3px;
+}
+
+.keeper-chat__cancel {
+  font-size: 11px;
+  color: var(--ff-hp-low, #f87171);
+}
+
+.keeper-chat__messages {
+  flex: 1;
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.keeper-chat__empty {
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 13px;
+  text-align: center;
+  padding: 40px 0;
+}
+
+.keeper-chat__msg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 85%;
+}
+
+.keeper-chat__msg--user {
+  align-self: flex-end;
+}
+
+.keeper-chat__msg--assistant {
+  align-self: flex-start;
+}
+
+.keeper-chat__role {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.keeper-chat__msg--user .keeper-chat__role {
+  text-align: right;
+}
+
+.keeper-chat__text {
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 12px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.keeper-chat__msg--user .keeper-chat__text {
+  background: rgba(71, 184, 255, 0.12);
+  border: 1px solid rgba(71, 184, 255, 0.2);
+  color: var(--text-body, #c0d2f2);
+}
+
+.keeper-chat__msg--assistant .keeper-chat__text {
+  background: rgba(200, 168, 78, 0.08);
+  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  color: var(--text-body, #c0d2f2);
+}
+
+.keeper-chat__msg--streaming .keeper-chat__text {
+  border-color: rgba(200, 168, 78, 0.25);
+}
+
+.keeper-chat__text--thinking {
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
+}
+
+.keeper-chat__cursor {
+  animation: keeper-blink 0.8s step-end infinite;
+  color: var(--ff-gold, #c8a84e);
+}
+
+@keyframes keeper-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.keeper-chat__error {
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--ff-hp-low, #f87171);
+  background: rgba(248, 113, 113, 0.08);
+  border-top: 1px solid rgba(248, 113, 113, 0.15);
+}
+
+.keeper-chat__input-row {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  background: rgba(10, 22, 40, 0.6);
+}
+
+.keeper-chat__input {
+  flex: 1;
+}
+
+.keeper-chat__send {
+  flex-shrink: 0;
+}
+
+/* Scrollbar */
+.keeper-chat__messages::-webkit-scrollbar {
+  width: 4px;
+}
+
+.keeper-chat__messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.keeper-chat__messages::-webkit-scrollbar-thumb {
+  background: rgba(200, 168, 78, 0.2);
+  border-radius: 2px;
+}

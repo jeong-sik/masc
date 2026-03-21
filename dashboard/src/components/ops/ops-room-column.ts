@@ -59,7 +59,7 @@ export function OpsRoomColumn() {
       <section class="card ops-panel ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">Room 개입</div>
-          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">전체 room에 영향 주는 액션입니다. 방송, 정지/재개, 작업 주입을 여기서 처리합니다.</p>
 
@@ -160,7 +160,7 @@ export function OpsRoomColumn() {
       <section class="card ops-panel">
         <div class="card-title-row">
           <div class="card-title">추천 개입</div>
-          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
         <article class="ops-guidance-card ${guidanceLayerTone(guidanceLayer)}">
@@ -207,7 +207,7 @@ export function OpsRoomColumn() {
       <section class="card ops-panel ops-pending-section">
         <div class="card-title-row">
           <div class="card-title">승인 대기</div>
-          <${PanelSemanticDetails} panelId="intervene.pending_confirmations" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.pending_confirmations" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">
           ${actorFilter
@@ -262,7 +262,7 @@ export function OpsRoomColumn() {
       <section class="card ops-panel">
         <div class="card-title-row">
           <div class="card-title">최근 Room 메시지</div>
-          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.recommended_actions" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
         ${roomFeed.length > 0 ? html`

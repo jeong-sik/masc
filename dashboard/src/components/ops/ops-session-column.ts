@@ -22,11 +22,15 @@ import {
   guidanceFreshnessLabel,
   guidanceLayerLabel,
   guidanceLayerTone,
+  isSessionTerminal,
   deliveryModeLabel,
+  pickPreferredSession,
   prettyJson,
   runtimeJudgeLabel,
   selectedSessionId,
   sessionActionLabel,
+  sessionHealthLabel,
+  sessionOutcomeLabel,
   submitTeamStop,
   submitTeamTurn,
   targetTypeLabel,
@@ -47,12 +51,18 @@ export function OpsSessionColumn() {
   const snapshot = operatorSnapshot.value
   const sessionDigest = operatorSessionDigest.value
   const sessions = snapshot?.sessions ?? []
+  const liveSessions = sessions.filter(session => !isSessionTerminal(session))
+  const archivedSessions = sessions.filter(isSessionTerminal)
   const availableSessionActions = (snapshot?.available_actions ?? []).filter(action => action.target_type === 'team_session')
-  const selectedSession = sessions.find(session => session.session_id === selectedSessionId.value) ?? sessions[0] ?? null
+  const selectedSession =
+    sessions.find(session => session.session_id === selectedSessionId.value)
+    ?? pickPreferredSession(sessions)
+  const selectedSessionActionable = selectedSession ? !isSessionTerminal(selectedSession) : false
   const activeSummary = sessionDigest?.active_summary
   const guidanceLayer = sessionDigest?.active_guidance_layer ?? 'fallback'
   const residentRuntime = sessionDigest?.resident_judge_runtime ?? snapshot?.resident_judge_runtime
-  const linkedAutoresearch = selectedSession?.linked_autoresearch ?? null
+  const linkedAutoresearch =
+    selectedSessionActionable ? selectedSession?.linked_autoresearch ?? null : null
   const busy = operatorActionBusy.value || autoresearchBusy.value
   const activeRecommendedActions =
     sessionDigest?.active_recommended_actions?.length
@@ -107,40 +117,63 @@ export function OpsSessionColumn() {
     )
   }
 
+  const renderSessionCard = (
+    session: typeof sessions[number],
+    archived = false,
+  ) => html`
+    <button
+      key=${session.session_id}
+      class="ops-entity-card ${selectedSession?.session_id === session.session_id ? 'active' : ''}"
+      onClick=${() => { selectedSessionId.value = session.session_id }}
+    >
+      <div class="ops-entity-title-row">
+        <strong>${session.session_id}</strong>
+        <span class="status-badge ${session.status ?? 'idle'}">${displayStatus(session.status)}</span>
+      </div>
+      <div class="ops-entity-meta">
+        <span>${Math.round(session.progress_pct ?? 0)}%</span>
+        <span>${sessionOutcomeLabel(session)}</span>
+        <span>${archived ? '종료 세션' : `팀 상태 ${sessionHealthLabel(session)}`}</span>
+      </div>
+    </button>
+  `
+
   return html`
     <div class="ops-column">
       <section class="card ops-panel ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">Session 개입</div>
-          <${PanelSemanticDetails} panelId="intervene.session_queue" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.session_queue" compact=${true} label="설명" />
         </div>
-        <p class="ops-context-note">어떤 세션이 뜨거운지 고르고, 그 세션에만 노트, 작업, 중지를 적용합니다.</p>
+        <p class="ops-context-note">지금 개입 가능한 세션만 위에 두고, 종료된 세션은 아래에 접어 둡니다.</p>
 
-        <div class="ops-entity-list">
-          ${sessions.length === 0 ? html`<div class="ops-empty">지금 활성 team session이 없습니다.</div>` : sessions.map(session => html`
-            <button
-              key=${session.session_id}
-              class="ops-entity-card ${selectedSession?.session_id === session.session_id ? 'active' : ''}"
-              onClick=${() => { selectedSessionId.value = session.session_id }}
-            >
-              <div class="ops-entity-title-row">
-                <strong>${session.session_id}</strong>
-                <span class="status-badge ${session.status ?? 'idle'}">${displayStatus(session.status)}</span>
-              </div>
-              <div class="ops-entity-meta">
-                <span>${Math.round(session.progress_pct ?? 0)}%</span>
-                <span>${session.done_delta_total ?? 0}건 완료</span>
-                <span>${session.team_health?.status ? displayStatus(String(session.team_health.status)) : '상태 확인 필요'}</span>
-              </div>
-            </button>
-          `)}
+        <div class="ops-entity-section">
+          <div class="ops-entity-section-head">
+            <strong>개입 가능한 세션</strong>
+            <span>${liveSessions.length}</span>
+          </div>
+          <div class="ops-entity-list">
+            ${liveSessions.length === 0
+              ? html`<div class="ops-empty">지금 바로 개입할 live team session이 없습니다.</div>`
+              : liveSessions.map(session => renderSessionCard(session))}
+          </div>
         </div>
+
+        ${archivedSessions.length > 0 ? html`
+          <details class="ops-archive-panel">
+            <summary class="ops-archive-summary">최근 종료 세션 ${archivedSessions.length}</summary>
+            <p class="ops-context-note">완료/중단된 세션은 읽기 전용 참고용입니다. 새 노트, 작업, 중지는 위 live 세션에만 적용하세요.</p>
+            <div class="ops-entity-list">
+              ${archivedSessions.slice(0, 8).map(session => renderSessionCard(session, true))}
+            </div>
+          </details>
+        ` : null}
       </section>
 
       <section class="card ops-panel">
         <div class="card-title-row">
           <div class="card-title">선택한 Session 요약</div>
-          <${PanelSemanticDetails} panelId="intervene.session_digest" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.session_digest" compact=${true} label="설명" />
         </div>
         <p class="ops-context-note">snapshot이 아니라 digest 기준 attention과 worker 카드를 보여줍니다.</p>
         ${selectedSession && sessionDigest ? html`
@@ -202,9 +235,13 @@ export function OpsSessionColumn() {
       <section class="card ops-panel ops-lane-panel">
         <div class="card-title-row">
           <div class="card-title">선택한 Session 액션</div>
-          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} />
+          <${PanelSemanticDetails} panelId="intervene.action_studio" compact=${true} label="설명" />
         </div>
-        <p class="ops-context-note">선택한 세션에만 메모, 작업, 체크포인트, 중지 요청을 보냅니다.</p>
+        <p class="ops-context-note">
+          ${selectedSessionActionable
+            ? '선택한 live 세션에만 메모, 작업, 체크포인트, 중지 요청을 보냅니다.'
+            : '종료된 세션은 여기서 읽기만 하고, 실제 개입은 위 live 세션을 다시 골라서 진행합니다.'}
+        </p>
         ${availableSessionActions.length > 0 ? html`
           <div class="ops-log-list">
             ${availableSessionActions.map(action => html`
@@ -226,6 +263,7 @@ export function OpsSessionColumn() {
               <span>상태: ${displayStatus(selectedSession.status)}</span>
               <span>경과: ${selectedSession.elapsed_sec ?? 0}초</span>
               <span>남은 시간: ${selectedSession.remaining_sec ?? 0}초</span>
+              <span>${selectedSessionActionable ? `팀 상태: ${sessionHealthLabel(selectedSession)}` : '종료 세션'}</span>
             </div>
             ${selectedSession.linked_autoresearch ? html`
               <div class="ops-detail-meta">
@@ -260,6 +298,10 @@ export function OpsSessionColumn() {
             ` : null}
           </div>
         ` : html`<div class="ops-empty">먼저 세션을 하나 고르세요.</div>`}
+
+        ${selectedSession && !selectedSessionActionable ? html`
+          <div class="ops-empty">이 세션은 이미 종료돼서 새 노트, 작업, 중지를 보내지 않습니다. 위의 live 세션을 선택하세요.</div>
+        ` : null}
 
         ${linkedAutoresearch?.loop_id ? html`
           <label class="control-label" for="ops-autoresearch-hypothesis">Autoresearch 제어</label>
@@ -299,14 +341,14 @@ export function OpsSessionColumn() {
             class="control-input ops-select"
             value=${teamTurnKind.value}
             onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
-            disabled=${busy || !selectedSession}
+            disabled=${busy || !selectedSessionActionable}
           >
             <option value="note">노트</option>
             <option value="broadcast">방송</option>
             <option value="task">작업</option>
             <option value="worker_spawn_batch">worker 교체</option>
           </select>
-          <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSession}>
+          <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSessionActionable}>
             적용
           </button>
         </div>
@@ -318,7 +360,7 @@ export function OpsSessionColumn() {
           placeholder="세션에 남길 메시지"
           value=${teamMessage.value}
           onInput=${(event: Event) => { teamMessage.value = (event.target as HTMLTextAreaElement).value }}
-          disabled=${busy || !selectedSession}
+          disabled=${busy || !selectedSessionActionable}
         ></textarea>
 
         ${teamTurnKind.value === 'task' ? html`
@@ -328,7 +370,7 @@ export function OpsSessionColumn() {
             placeholder="주입할 작업 제목"
             value=${teamTaskTitle.value}
             onInput=${(event: Event) => { teamTaskTitle.value = (event.target as HTMLInputElement).value }}
-            disabled=${busy || !selectedSession}
+            disabled=${busy || !selectedSessionActionable}
           />
           <textarea
             class="control-textarea"
@@ -336,13 +378,13 @@ export function OpsSessionColumn() {
             placeholder="주입할 작업 설명"
             value=${teamTaskDescription.value}
             onInput=${(event: Event) => { teamTaskDescription.value = (event.target as HTMLTextAreaElement).value }}
-            disabled=${busy || !selectedSession}
+            disabled=${busy || !selectedSessionActionable}
           ></textarea>
           <select
             class="control-input ops-select"
             value=${teamTaskPriority.value}
             onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
-            disabled=${busy || !selectedSession}
+            disabled=${busy || !selectedSessionActionable}
           >
             <option value="1">P1</option>
             <option value="2">P2</option>
@@ -357,7 +399,7 @@ export function OpsSessionColumn() {
             placeholder='spawn_batch JSON, 예: [{"spawn_agent":"llama","spawn_prompt":"...", "spawn_role":"replacement"}]'
             value=${teamSpawnBatchJson.value}
             onInput=${(event: Event) => { teamSpawnBatchJson.value = (event.target as HTMLTextAreaElement).value }}
-            disabled=${busy || !selectedSession}
+            disabled=${busy || !selectedSessionActionable}
           ></textarea>
         ` : null}
 
@@ -367,9 +409,9 @@ export function OpsSessionColumn() {
             type="text"
             value=${teamStopReason.value}
             onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
-            disabled=${busy || !selectedSession}
+            disabled=${busy || !selectedSessionActionable}
           />
-          <button class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSession}>
+          <button class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSessionActionable}>
             세션 중지
           </button>
         </div>

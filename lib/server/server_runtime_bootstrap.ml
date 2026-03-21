@@ -122,6 +122,7 @@ let init_memory_pg_schema () =
 let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
     (state : Mcp_server.server_state) =
   Progress.set_sse_callback Sse.broadcast;
+  Sse.set_clock clock;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems. *)
   let event_bus = Agent_sdk.Event_bus.create () in
   (* Eio fiber isolation: each subsystem runs in its own fiber.
@@ -196,6 +197,9 @@ let start_background_maintenance ~sw ~clock (state : Mcp_server.server_state) =
         if stale_sids <> [] then
           Log.Server.info "Reaped %d stale connections (active: %d)"
             (List.length stale_sids) (Sse.client_count ());
+        let evicted_events = Sse.cleanup_expired_events () in
+        if evicted_events > 0 then
+          Log.Server.info "Evicted %d expired SSE buffer events" evicted_events;
         loop ()
       in
       loop ());

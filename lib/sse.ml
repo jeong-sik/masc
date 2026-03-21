@@ -60,22 +60,39 @@ let client_id_counter = Atomic.make 0
 (** Global event counter for resumability *)
 let event_counter = Atomic.make 0
 
-(** Event buffer for resumability - stores (event_id, event_string) pairs *)
+(** Event buffer for resumability - stores (event_id, event_string, timestamp) *)
 let max_buffer_size = 100
-let event_buffer : (int * string) Queue.t = Queue.create ()
+let buffer_ttl_seconds = 300.0
+let event_buffer : (int * string * float) Queue.t = Queue.create ()
 
 (** Add event to buffer, maintaining max size *)
 let buffer_event event_id event_str =
   if Queue.length event_buffer >= max_buffer_size then
     ignore (Queue.pop event_buffer);
-  Queue.push (event_id, event_str) event_buffer
+  Queue.push (event_id, event_str, Time_compat.now ()) event_buffer
 
 (** Get events after given ID for replay (MCP spec MUST) *)
 let get_events_after last_id =
-  Queue.fold (fun acc (id, ev) ->
+  Queue.fold (fun acc (id, ev, _ts) ->
     if id > last_id then ev :: acc else acc
   ) [] event_buffer
   |> List.rev
+
+(** Remove events older than [buffer_ttl_seconds] from the front of the buffer.
+    Returns count of evicted events. *)
+let cleanup_expired_events () =
+  let now = Time_compat.now () in
+  let count = ref 0 in
+  let keep_popping = ref true in
+  while !keep_popping && not (Queue.is_empty event_buffer) do
+    let (_id, _ev, ts) = Queue.peek event_buffer in
+    if now -. ts > buffer_ttl_seconds then begin
+      ignore (Queue.pop event_buffer);
+      incr count
+    end else
+      keep_popping := false
+  done;
+  !count
 
 (** Format SSE event with optional ID and event type *)
 let format_event ?id ?event_type data =
@@ -169,9 +186,21 @@ let update_last_event_id session_id event_id =
         mark_seen client
     | None -> ())
 
+(** Eio clock ref for per-client push timeout.
+    Set during startup via [set_clock]. Without a clock, push has no timeout. *)
+let clock_ref : float Eio.Time.clock_ty Eio.Resource.t option ref = ref None
+
+let set_clock (clock : float Eio.Time.clock_ty Eio.Resource.t) =
+  clock_ref := Some clock
+
+(** Per-client push timeout (seconds).
+    5s is generous for a local TCP write; slow clients beyond this are dropped. *)
+let push_timeout_s = 5.0
+
 (** Broadcast event to all connected clients.
     Uses snapshot-then-act: take snapshot under lock, push outside lock.
-    Failed clients are unregistered individually afterwards. *)
+    Per-client timeout prevents a single slow client from blocking all pushes.
+    Failed/timed-out clients are unregistered individually afterwards. *)
 let broadcast json =
   let data = Yojson.Safe.to_string json in
   let current_event_id = Atomic.get event_counter + 1 in
@@ -185,11 +214,22 @@ let broadcast json =
   let failed = ref [] in
   List.iter (fun (session_id, client) ->
     if current_event_id > client.last_event_id then begin
-      match client.push event with
-      | () -> update_last_event_id session_id current_event_id
-      | exception e ->
-        Log.Server.error "Push failed for session %s: %s" session_id (Printexc.to_string e);
-        failed := session_id :: !failed
+      (try
+        (match !clock_ref with
+        | Some clock ->
+            Eio.Time.with_timeout_exn clock push_timeout_s (fun () ->
+              client.push event)
+        | None ->
+            client.push event);
+        update_last_event_id session_id current_event_id
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | Eio.Time.Timeout ->
+          Log.Server.error "Push timed out for session %s (>%.0fs)" session_id push_timeout_s;
+          failed := session_id :: !failed
+      | e ->
+          Log.Server.error "Push failed for session %s: %s" session_id (Printexc.to_string e);
+          failed := session_id :: !failed)
     end
   ) clients_snapshot;
   (* Remove failed connections *)

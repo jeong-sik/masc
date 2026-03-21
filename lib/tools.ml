@@ -22,9 +22,9 @@ let raw_schemas : tool_schema list =
   @ Tool_cost.schemas
   @ Tool_rate_limit.schemas
   @ Tool_encryption.schemas
-  @ Tool_council.schemas
+  @ Tool_council_oas.schemas
   @ Tool_relay.schemas
-  @ Tool_mitosis.schemas
+  @ Tool_mitosis_oas.schemas
   @ Tool_handover.schemas
   @ Tool_tempo.schemas
   @ Tool_walph.schemas

@@ -89,7 +89,7 @@ let run_validate dna_str file_path =
   Printf.printf "Validating DNA (%d chars)...\n\n" (String.length dna);
   print_dna_stats dna;
   Printf.printf "\n=== Validation Result ===\n";
-  match Tool_mitosis.validate_dna dna with
+  match Tool_mitosis_utils.validate_dna dna with
   | Ok _ ->
     Printf.printf "  Status: OK (valid DNA)\n";
     `Ok ()

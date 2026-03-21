@@ -31,6 +31,7 @@ import {
   KeeperNeighborhood,
   RuntimeSignals,
 } from './keeper-detail-runtime'
+import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -43,6 +44,7 @@ export function openKeeperDetail(k: Keeper) {
 
 export function closeKeeperDetail() {
   selectedKeeper.value = null
+  resetKeeperConfig()
 }
 
 // ── Main Detail Overlay ───────────────────────────────────
@@ -217,6 +219,10 @@ export function KeeperDetailOverlay() {
 
           <${Card} title="이웃 관계 및 도구 감사">
             <${KeeperNeighborhood} keeper=${keeper} />
+          <//>
+
+          <${Card} title="Config">
+            <${KeeperConfigPanel} keeperName=${keeper.name} />
           <//>
 
           <${Card} title="메모리 및 컨텍스트">

@@ -144,6 +144,41 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
+  (* Keeper config — structured read-only config view for a single keeper *)
+  |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let req_path = Http.Request.path req in
+         let prefix = "/api/v1/keepers/" in
+         let suffix = "/config" in
+         let plen = String.length prefix in
+         let slen = String.length suffix in
+         let tlen = String.length req_path in
+         if tlen > plen + slen
+            && String.sub req_path 0 plen = prefix
+            && String.sub req_path (tlen - slen) slen = suffix
+         then
+           let name =
+             String.trim
+               (String.sub req_path plen (tlen - plen - slen))
+           in
+           if String.length name = 0 then
+             Http.Response.json ~status:`Bad_request
+               {|{"error":"keeper name is required"}|} reqd
+           else
+             let config = state.Mcp_server.room_config in
+             let (st, json) =
+               Dashboard_http_keeper.keeper_config_json config name
+             in
+             let status : Httpun.Status.t =
+               match st with `OK -> `OK | `Not_found -> `Not_found
+             in
+             Http.Response.json ~status ~compress:true ~request:req
+               (Yojson.Safe.to_string json) reqd
+         else
+           Http.Response.json ~status:`Not_found
+             {|{"error":"not found"}|} reqd
+       ) request reqd)
+
   (* Agent activity — per-agent tool call stats from telemetry *)
   |> Http.Router.get "/api/v1/agent-activity" (fun request reqd ->
        with_public_read (fun state req reqd ->

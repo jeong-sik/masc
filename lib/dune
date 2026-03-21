@@ -351,6 +351,7 @@
    mitosis_spawn
    tool_mitosis_utils
    tool_mitosis_handoff
+   tool_mitosis_schemas
    tool_mitosis
    tool_mitosis_oas
    tool_portal

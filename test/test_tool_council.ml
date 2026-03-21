@@ -170,16 +170,15 @@ let test_human_gate_requires_confirm_then_executes () =
   let tasks = Room.get_tasks_raw (Room.default_config base_path) in
   check bool "task created after confirm" true (List.length tasks = 1)
 
-let test_legacy_surfaces_return_removed_error () =
+let test_legacy_surfaces_removed_from_dispatch () =
   with_base_path @@ fun base_path ->
   let ctx = make_ctx ~base_path ~agent_name:"alice" in
-  let ok, body =
-    dispatch_exn ctx ~name:"masc_debate_start"
+  match
+    Tool_council.dispatch ctx ~name:"masc_debate_start"
       ~args:(`Assoc [ ("topic", `String "legacy") ])
-  in
-  check bool "legacy fails" false ok;
-  check bool "mentions removed" true
-    (contains_substring ~needle:"removed in governance v2" body)
+  with
+  | None -> ()
+  | Some _ -> fail "expected removed legacy council surface to be undispatched"
 
 let test_duplicate_petition_merges_by_source_ref () =
   with_base_path @@ fun base_path ->
@@ -263,7 +262,7 @@ let () =
           test_case "human gate confirm executes" `Quick
             test_human_gate_requires_confirm_then_executes;
           test_case "legacy surfaces removed" `Quick
-            test_legacy_surfaces_return_removed_error;
+            test_legacy_surfaces_removed_from_dispatch;
           test_case "unsupported action type rejected" `Quick
             test_petition_rejects_unsupported_action_type;
           test_case "duplicate petitions merge by source_ref" `Quick

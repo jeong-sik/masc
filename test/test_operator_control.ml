@@ -76,11 +76,11 @@ let () =
           (* Lodge tick test removed — deprecated #1596 *)
           Alcotest.test_case "expired confirmation rejected" `Quick
             Test_operator_control_swarm.test_confirm_rejects_expired_token;
-          Alcotest.test_case "swarm run continue confirm flow" `Quick
+          Alcotest.test_case "swarm run continue removed from operator actions" `Quick
             Test_operator_control_swarm
-            .test_swarm_run_continue_requires_confirm_then_executes;
-          Alcotest.test_case "swarm run abandon soft resolution" `Quick
+            .test_swarm_run_continue_removed_from_operator_actions;
+          Alcotest.test_case "swarm run abandon removed from operator actions" `Quick
             Test_operator_control_swarm
-            .test_swarm_run_abandon_records_soft_resolution;
+            .test_swarm_run_abandon_removed_from_operator_actions;
         ] );
     ]

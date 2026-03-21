@@ -49,15 +49,15 @@ let test_snapshot_exposes_keeper_and_social_actions () =
             Yojson.Safe.Util.(keeper_recover |> member "target_type" |> to_string);
           Alcotest.(check bool) "keeper_recover confirm false" false
             Yojson.Safe.Util.(keeper_recover |> member "confirm_required" |> to_bool);
-          let swarm_continue =
-            match find_action "swarm_run_continue" with
+          let worker_spawn_batch =
+            match find_action "team_worker_spawn_batch" with
             | Some row -> row
-            | None -> Alcotest.fail "expected swarm_run_continue in available_actions"
+            | None -> Alcotest.fail "expected team_worker_spawn_batch in available_actions"
           in
-          Alcotest.(check string) "swarm continue target_type" "swarm_run"
-            Yojson.Safe.Util.(swarm_continue |> member "target_type" |> to_string);
-          Alcotest.(check bool) "swarm continue confirm true" true
-            Yojson.Safe.Util.(swarm_continue |> member "confirm_required" |> to_bool))
+          Alcotest.(check string) "worker spawn batch target_type" "team_session"
+            Yojson.Safe.Util.(worker_spawn_batch |> member "target_type" |> to_string);
+          Alcotest.(check bool) "worker spawn batch confirm true" true
+            Yojson.Safe.Util.(worker_spawn_batch |> member "confirm_required" |> to_bool))
 
 (* test_select_checkin_agents_manual_override_quiet_hours removed — Lodge deprecated #1596 *)
 

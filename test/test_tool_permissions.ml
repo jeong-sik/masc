@@ -12,12 +12,14 @@ let setup () =
 (* --- requires_admin tests --- *)
 
 let test_admin_tools_classified () =
-  Alcotest.(check bool) "operator_action is admin"
-    true (Tool_permissions.requires_admin "masc_operator_action");
-  Alcotest.(check bool) "tool_admin_snapshot is admin"
-    true (Tool_permissions.requires_admin "masc_tool_admin_snapshot");
-  Alcotest.(check bool) "operator_confirm is admin"
-    true (Tool_permissions.requires_admin "masc_operator_confirm");
+  Alcotest.(check bool) "tool_admin_update is admin"
+    true (Tool_permissions.requires_admin "masc_tool_admin_update");
+  Alcotest.(check bool) "auth_create_token is admin"
+    true (Tool_permissions.requires_admin "masc_auth_create_token");
+  Alcotest.(check bool) "operator_action is not admin"
+    false (Tool_permissions.requires_admin "masc_operator_action");
+  Alcotest.(check bool) "tool_admin_snapshot is not admin"
+    false (Tool_permissions.requires_admin "masc_tool_admin_snapshot");
   Alcotest.(check bool) "status is not admin"
     false (Tool_permissions.requires_admin "masc_status");
   Alcotest.(check bool) "heartbeat is not admin"
@@ -37,7 +39,7 @@ let test_check_denies_admin_without_cap () =
   Alcotest.(check bool) "admin tool denied"
     true
     (Result.is_error (Tool_permissions.check
-       ~agent_name:"normal_agent" ~tool_name:"masc_operator_action"))
+       ~agent_name:"normal_agent" ~tool_name:"masc_tool_admin_update"))
 
 let test_check_allows_admin_with_cap () =
   setup ();
@@ -45,18 +47,18 @@ let test_check_allows_admin_with_cap () =
   Alcotest.(check bool) "admin tool allowed with cap"
     true
     (Result.is_ok (Tool_permissions.check
-       ~agent_name:"admin_agent" ~tool_name:"masc_operator_action"))
+       ~agent_name:"admin_agent" ~tool_name:"masc_tool_admin_update"))
 
 (* --- pre-hook integration tests --- *)
 
 let test_hook_blocks_admin_no_identity () =
   setup ();
   Tool_dispatch.register
-    ~tool_name:"masc_operator_action"
+    ~tool_name:"masc_tool_admin_update"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "should not reach"));
   Tool_permissions.install ~get_agent_name:(fun () -> None);
   match Tool_dispatch.dispatch_structured
-          ~name:"masc_operator_action" ~args:`Null with
+          ~name:"masc_tool_admin_update" ~args:`Null with
   | Some r ->
     Alcotest.(check bool) "blocked" false r.success
   | None -> Alcotest.fail "expected Some from short-circuit"
@@ -64,12 +66,12 @@ let test_hook_blocks_admin_no_identity () =
 let test_hook_blocks_admin_no_cap () =
   setup ();
   Tool_dispatch.register
-    ~tool_name:"masc_tool_admin_snapshot"
+    ~tool_name:"masc_tool_admin_update"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "should not reach"));
   Tool_permissions.set_capability_checker (fun _agent _cap -> false);
   Tool_permissions.install ~get_agent_name:(fun () -> Some "normal");
   match Tool_dispatch.dispatch_structured
-          ~name:"masc_tool_admin_snapshot" ~args:`Null with
+          ~name:"masc_tool_admin_update" ~args:`Null with
   | Some r ->
     Alcotest.(check bool) "blocked" false r.success
   | None -> Alcotest.fail "expected Some from short-circuit"
@@ -77,12 +79,12 @@ let test_hook_blocks_admin_no_cap () =
 let test_hook_allows_admin_with_cap () =
   setup ();
   Tool_dispatch.register
-    ~tool_name:"masc_operator_confirm"
+    ~tool_name:"masc_tool_admin_update"
     ~handler:(fun ~name:_ ~args:_ -> Some (true, "allowed"));
   Tool_permissions.set_capability_checker (fun _agent cap -> cap = "admin");
   Tool_permissions.install ~get_agent_name:(fun () -> Some "admin_agent");
   match Tool_dispatch.dispatch_structured
-          ~name:"masc_operator_confirm" ~args:`Null with
+          ~name:"masc_tool_admin_update" ~args:`Null with
   | Some r ->
     Alcotest.(check bool) "allowed" true r.success
   | None -> Alcotest.fail "expected Some"

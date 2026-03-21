@@ -29,16 +29,13 @@ let strict_action_enums =
     `String "keeper_message";
     `String "keeper_probe";
     `String "keeper_recover";
-    `String "swarm_run_continue";
-    `String "swarm_run_rerun";
-    `String "swarm_run_abandon";
   ]
 
 let legacy_action_alias_enums =
   [ `String "team_turn"; `String "keeper_msg"; `String "task_inject" ]
 
 let target_type_enums =
-  [ `String "room"; `String "team_session"; `String "keeper"; `String "swarm_run" ]
+  [ `String "room"; `String "team_session"; `String "keeper" ]
 
 let snapshot_schema ~remote =
   {

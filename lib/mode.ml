@@ -270,7 +270,7 @@ let tool_category tool_name =
   | "masc_heartbeat_list" | "masc_heartbeat_result"
   | "masc_heartbeat_start" | "masc_heartbeat_stop"
   | "masc_metrics_compare" | "masc_metrics_record"
-  | "masc_recall_search" | "masc_sessions"
+  | "masc_recall_search"
   | "masc_tool_stats"
   | "masc_notification_count" | "masc_check_notifications"
   | "masc_consume_notifications"

@@ -596,11 +596,8 @@ export type OperatorActionType =
   | 'keeper_message'
   | 'keeper_probe'
   | 'keeper_recover'
-  | 'swarm_run_continue'
-  | 'swarm_run_rerun'
-  | 'swarm_run_abandon'
 
-export type OperatorTargetType = 'room' | 'team_session' | 'keeper' | 'swarm_run'
+export type OperatorTargetType = 'room' | 'team_session' | 'keeper'
 
 export interface OperatorActionRequest {
   actor: string

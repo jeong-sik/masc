@@ -149,9 +149,9 @@ let record_event
          | Some f -> append_jsonl_unlocked ~fs:f json
          | None -> append_jsonl_sys json;
          if stream_enabled () then
-           (try Sse.broadcast json with exn ->
+           (try Sse.broadcast json with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Misc.error "SSE broadcast failed: %s" (Printexc.to_string exn)))
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Misc.error "Write failed: %s" (Printexc.to_string exn))
 
 (** Record a tool execution to the run log *)

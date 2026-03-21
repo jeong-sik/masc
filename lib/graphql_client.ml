@@ -69,7 +69,7 @@ let request_curl ~timeout_sec body =
             (try
                let output = Process_eio.run_argv ~timeout_sec argv in
                ensure_json_response output
-             with exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn)))
+             with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printf.sprintf "curl: %s" (Printexc.to_string exn)))
           else
             (* Unix fallback when Eio loop not started *)
             (try
@@ -80,7 +80,7 @@ let request_curl ~timeout_sec body =
                    (fun () -> In_channel.input_all ic)
                in
                ensure_json_response output
-             with exn -> Error (Printexc.to_string exn))))
+             with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn))))
 
 (** Cohttp_eio primary transport with curl fallback. *)
 let request ?(timeout_sec=10.0) body : (string, string) result =
@@ -126,9 +126,9 @@ let request ?(timeout_sec=10.0) body : (string, string) result =
       match Eio_context.get_clock_opt () with
       | Some clock ->
         (try Eio.Time.with_timeout_exn clock timeout_sec run
-         with exn -> Error (Printexc.to_string exn))
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn))
       | None ->
-        (try run () with exn -> Error (Printexc.to_string exn))
+        (try run () with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn))
   in
   match cohttp_result with
   | Ok _ as success -> success

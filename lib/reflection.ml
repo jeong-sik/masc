@@ -42,7 +42,7 @@ let load_meta ~agent_name : float =
       let content = Fs_compat.load_file path in
       let json = Yojson.Safe.from_string content in
       Json_util.get_float json "last_reflection" |> Option.value ~default:0.0
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Misc.warn "reflection: meta load failed: %s" (Printexc.to_string exn);
       0.0
   end

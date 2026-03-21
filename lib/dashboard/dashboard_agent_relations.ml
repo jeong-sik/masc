@@ -62,7 +62,7 @@ let json ~agent_name () : Yojson.Safe.t =
     | Some agent ->
       let open Yojson.Safe.Util in
       (try agent |> member "interests" |> to_list
-       with _ -> [])
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> [])
     | None -> []
   in
   let relations = match agent_data with
@@ -89,7 +89,7 @@ let json ~agent_name () : Yojson.Safe.t =
             ("note", member "note" node);
             ("participants", `List participants);
           ])
-       with _ -> [])
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> [])
     | None -> []
   in
   `Assoc [

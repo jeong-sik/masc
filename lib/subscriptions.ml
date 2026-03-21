@@ -162,7 +162,7 @@ let push_event_to_sessions (event : Yojson.Safe.t) : unit =
   match !session_registry_ref with
   | Some push_fn ->
       (try ignore (push_fn event)
-       with exn -> Log.Sub.error "push_event failed: %s" (Printexc.to_string exn))
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Sub.error "push_event failed: %s" (Printexc.to_string exn))
   | None ->
       Log.Sub.info "push_event_to_sessions: registry not wired"
 
@@ -194,7 +194,7 @@ let notify_change ~(resource : resource_type) ~(change : change_type)
          ("timestamp", `Float now);
        ] in
        (try ignore (push_fn event)
-        with exn -> Log.Sub.error "push_sub_event failed: %s" (Printexc.to_string exn))
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Sub.error "push_sub_event failed: %s" (Printexc.to_string exn))
    | None -> ());
   List.length subs
 

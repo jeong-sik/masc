@@ -197,7 +197,7 @@ let write_memory_bank_rows
     Fs_compat.save_file tmp content;
     Sys.rename tmp path;
     Ok ()
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Safe_ops.remove_file_logged ~context:"memory_compaction" tmp;
     Error (Printf.sprintf "failed to rewrite memory bank: %s" (Printexc.to_string exn))
 

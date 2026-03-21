@@ -387,7 +387,7 @@ let handle_request
   try
     let json =
       try Ok (Yojson.Safe.from_string request_str)
-      with exn -> Error (Printexc.to_string exn)
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
     in
     match json with
     | Error msg ->

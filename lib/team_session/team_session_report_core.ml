@@ -861,5 +861,5 @@ let generate config (session : Team_session_types.session) :
     in
     Team_session_store.write_text_file report_md_path markdown;
     Ok (report_json, markdown)
-  with exn -> Error (Printexc.to_string exn)
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 

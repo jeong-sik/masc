@@ -406,7 +406,7 @@ let execute_stream_merge ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : ex
     let safe_stream_add value =
       try
         Eio.Stream.add stream value
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         if is_cancelled exn then raise exn;
         Log.Chain.error "stream add error: %s"
           (Printexc.to_string exn)
@@ -432,14 +432,14 @@ let execute_stream_merge ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : ex
                incr completed_count);
              safe_stream_add (Some (node.id, Error err))
        ) nodes)
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        if is_cancelled exn then raise exn;
        Log.Chain.info "producer crashed: %s"
          (Printexc.to_string exn));
     (* Signal completion after all producers done *)
     (try
        safe_stream_add None
-     with exn ->
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        if is_cancelled exn then raise exn;
        Log.Chain.error "completion signal error: %s"
          (Printexc.to_string exn))

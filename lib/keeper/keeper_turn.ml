@@ -205,13 +205,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             | Error e ->
               (try ignore (Trajectory.finalize trajectory_acc
                  (Trajectory.Failed e))
-               with exn -> log_keeper_exn
+               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run error)" exn);
               (false, Printf.sprintf "❌ Agent.run failed: %s" e)
             | Ok result ->
               (try ignore (Trajectory.finalize trajectory_acc
                  Trajectory.Completed)
-               with exn -> log_keeper_exn
+               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
               let reply_json = `Assoc [
                 ("reply", `String result.response_text);

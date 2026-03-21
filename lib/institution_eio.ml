@@ -647,7 +647,7 @@ let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings 
   let path = episodes_jsonl_path () in
   (try
     Fs_compat.append_jsonl path (episode_to_json episode)
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Institution.error "JSONL episode write failed: %s"
       (Printexc.to_string exn));
   episode

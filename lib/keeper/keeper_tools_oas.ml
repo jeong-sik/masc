@@ -43,7 +43,7 @@ let make_tools
                 ~name:td.name ~input
             in
             (true, result)
-          with exn ->
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             let msg = Printf.sprintf "tool %s failed: %s"
               td.name (Printexc.to_string exn) in
             Log.Keeper.error "%s" msg;

@@ -110,7 +110,7 @@ let checkpoint_of_json (json : Yojson.Safe.t) : (checkpoint, string) result =
         | Error _ -> None
     in
     Ok { run_id; chain_id; node_id; outputs; traces; timestamp; total_tokens }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "Failed to parse checkpoint: %s" (Printexc.to_string exn))
 
 (** Save a checkpoint to disk using Eio *)
@@ -139,7 +139,7 @@ let save (store : checkpoint_store) (cp : checkpoint) : (unit, string) result =
       output_string oc content
     );
     Ok ()
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "Failed to save checkpoint: %s" (Printexc.to_string exn))
 
 (** Load a checkpoint from disk using Eio *)

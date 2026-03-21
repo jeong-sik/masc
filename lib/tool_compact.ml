@@ -137,10 +137,10 @@ let handle_compact args : result =
     let strategy_str = args |> member "strategy" |> to_string in
     let max_tokens =
       (try args |> member "max_tokens" |> to_int
-       with _ -> 128_000) in
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> 128_000) in
     let system_prompt =
       (try args |> member "system_prompt" |> to_string
-       with _ -> "") in
+       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> "") in
     let strategies = match strategies_of_string strategy_str with
       | Ok s -> s
       | Error msg -> raise (Invalid_argument msg)

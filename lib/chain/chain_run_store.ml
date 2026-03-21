@@ -360,7 +360,7 @@ let read_persisted_run_json ~(run_id : string) : Yojson.Safe.t option =
                match Yojson.Safe.Util.member "run_id" json with
                | `String value when String.equal value run_id -> Some json
                | _ -> None
-             with exn ->
+             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                Log.Chain.warn "chain_run_store: run entry parse failed: %s" (Printexc.to_string exn);
                None)
 

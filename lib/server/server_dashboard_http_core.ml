@@ -212,7 +212,7 @@ let start_operator_refresh_loop ~state ~sw ~clock =
          | Error _ -> ());
         let dt = Time_compat.now () -. t0 in
         Log.Dashboard.info "operator refreshed (%.1fs)" dt
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let dt = Time_compat.now () -. t0 in
         Log.Dashboard.warn "operator refresh failed (%.1fs): %s"
           dt (Printexc.to_string exn));
@@ -327,7 +327,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
      _mission_json_ref := json;
      let dt = Time_compat.now () -. t0 in
      Log.Dashboard.info "mission warm cache done (%.1fs)" dt
-   with exn ->
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      let dt = Time_compat.now () -. t0 in
      Log.Dashboard.warn "mission warm cache failed (%.1fs): %s"
        dt (Printexc.to_string exn));
@@ -345,7 +345,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
         Log.Dashboard.info "mission refreshed (%.0fB, %.1fs)"
           (Float.of_int (String.length (Yojson.Safe.to_string json)))
           dt
-      with exn ->
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let dt = Time_compat.now () -. t0 in
         Log.Dashboard.warn "mission refresh failed (%.1fs): %s"
           dt (Printexc.to_string exn));

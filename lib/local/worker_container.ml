@@ -447,7 +447,7 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
             try
               Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
                 ~duration_ms ~agent_id:worker_name ()
-            with exn ->
+            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.LocalWorker.warn "telemetry error for %s/%s: %s"
                 worker_name tool_name (Printexc.to_string exn))
         | _ -> ());

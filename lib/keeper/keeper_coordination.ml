@@ -82,7 +82,7 @@ let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
           ignore
             (Room.heartbeat_in_room config ~room_id ~agent_name:meta.agent_name);
           room_id :: acc
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           log_keeper_exn ~label:(Printf.sprintf "room presence sync failed for %s in %s" meta.name room_id) exn;
           acc)
       [] room_ids

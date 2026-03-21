@@ -126,7 +126,7 @@ let phase_cleanup state ~clock =
         try
           hook.action ();
           Log.Server.debug "[Shutdown] hook '%s' completed" hook.name
-        with exn ->
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Log.Server.warn "[Shutdown] hook '%s' failed: %s" hook.name (Printexc.to_string exn)
       ) all_hooks)
   with Eio.Time.Timeout ->

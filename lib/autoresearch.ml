@@ -250,7 +250,7 @@ let load_json_file path =
     try
       let content = Fs_compat.load_file path in
       Some (Yojson.Safe.from_string content)
-    with _ -> None
+    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None
 
 let load_swarm_link_by_loop ~base_path loop_id =
   load_json_file (loop_link_file ~base_path loop_id)

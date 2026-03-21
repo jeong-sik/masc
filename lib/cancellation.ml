@@ -128,7 +128,7 @@ module TokenStore = struct
         if not t.cancelled then begin
           t.cancelled <- true;
           List.iter (fun cb ->
-            try cb () with exn ->
+            try cb () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Cancel.error "Callback failed: %s" (Printexc.to_string exn)
           ) t.callbacks
         end
@@ -147,7 +147,7 @@ let cancel ?(reason : string option) (token : token) : unit =
     token.reason <- reason;
     (* Execute callbacks in reverse order (LIFO) *)
     List.iter (fun cb ->
-      try cb () with exn ->
+      try cb () with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Log.Cancel.error "Callback failed: %s" (Printexc.to_string exn)
     ) token.callbacks
   end

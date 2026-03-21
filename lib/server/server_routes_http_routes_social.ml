@@ -159,7 +159,7 @@ let add_routes router =
                (Yojson.Safe.to_string (`Assoc [
                  ("ok", `Bool ok); ("message", `String msg)
                ]))
-           with exn ->
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string (`Assoc [
                  ("ok", `Bool false);
@@ -179,7 +179,7 @@ let add_routes router =
                (Yojson.Safe.to_string (`Assoc [
                  ("ok", `Bool ok); ("message", `String msg)
                ]))
-           with exn ->
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_with_cors ~status:`Bad_request request reqd
                (Yojson.Safe.to_string (`Assoc [
                  ("ok", `Bool false);

@@ -442,7 +442,7 @@ let list_sessions ~(config : Room.config) ~(requester_agent : string option)
           ("count", `Int (List.length items));
           ("sessions", `List items);
         ])
-  with exn -> Error (Printexc.to_string exn)
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (Printexc.to_string exn)
 
 let compare_sessions ~(config : Room.config) ~(requester_agent : string option)
     ~(base_session_id : string) ~(target_session_id : string) :

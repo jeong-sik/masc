@@ -309,7 +309,7 @@ let slack_api_post_json
   | Unix.WEXITED 0 ->
       (try
          Ok (Yojson.Safe.from_string out)
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Error (Printf.sprintf "json_parse_failed: %s" (Printexc.to_string exn)))
   | Unix.WEXITED n ->
       Error (Printf.sprintf "curl_exit_%d: %s" n (short_preview ~max_len:220 out))
@@ -480,7 +480,7 @@ let maybe_emit_interesting_alert
           ("reply_preview", `String (short_preview ~max_len:360 reply));
         ]
       in
-      (try append_jsonl_line (keeper_alerts_path ctx.config) alert_json with exn ->
+      (try append_jsonl_line (keeper_alerts_path ctx.config) alert_json with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Keeper.error "alert JSONL write failed: %s" (Printexc.to_string exn));
       let board_result =
         run_alert_channel_with_retry ctx
@@ -552,7 +552,7 @@ let maybe_emit_interesting_alert
                 ("failed_channels",
                   `List (List.map alert_channel_result_to_json attempted_failures));
               ])
-         with exn ->
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Keeper.error "failed-channels JSONL write failed: %s" (Printexc.to_string exn));
       if deadlettered then
         (try
@@ -566,7 +566,7 @@ let maybe_emit_interesting_alert
                 ("channels",
                   `List (List.map alert_channel_result_to_json channels));
               ])
-         with exn ->
+         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Keeper.error "deadletter JSONL write failed: %s" (Printexc.to_string exn));
       {
         enabled = true;

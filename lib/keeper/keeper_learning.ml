@@ -88,7 +88,7 @@ let decision_record_of_json (json : Yojson.Safe.t) : decision_record option =
           feedback_comment =
             Safe_ops.json_string ~default:"" "feedback_comment" json;
         }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.warn "keeper_learning: decision record parse failed: %s" (Printexc.to_string exn);
     None
 

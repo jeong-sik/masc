@@ -141,7 +141,7 @@ let load_plan base_path plan_id : (swarm_plan, string) result =
           created_at = json |> member "created_at" |> to_float;
           base_path = json |> member "base_path" |> to_string;
         }
-    with exn -> Error (sprintf "Failed to load plan: %s" (Printexc.to_string exn))
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Error (sprintf "Failed to load plan: %s" (Printexc.to_string exn))
 
 (* ================================================================ *)
 (* Plan — grep + split                                              *)
@@ -155,7 +155,7 @@ let grep_matches ~base_path ~pattern ~file_glob ~exclude_files =
   in
   let output =
     try Process_eio.run_argv ~timeout_sec:30.0 argv
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.CodeSwarm.error "grep failed: %s" (Printexc.to_string exn);
       ""
   in

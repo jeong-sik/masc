@@ -96,7 +96,7 @@ let parse_geval_response (text : string) :
          else
            Error
              (Printf.sprintf "scores out of range: r=%d q=%d s=%d" r q s)
-       with exn ->
+       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Error
            (Printf.sprintf "missing fields: %s" (Printexc.to_string exn)))
 

@@ -140,7 +140,7 @@ let start_supervisor_sweep ctx =
         let should_act _beat = true
         let on_beat _beat =
           (try Keeper_resident_supervisor.sweep_and_recover ctx
-           with exn ->
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Keeper.error "supervisor sweep failed: %s"
                (Printexc.to_string exn));
           Ok ()
@@ -180,7 +180,7 @@ let start_existing_keepalives ctx =
           stats.enabled stats.scanned stats.started stats.stale
           stats.recovering;
       maybe_start_supervisor_sweep ctx stats
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       (* Retry bootstrap on next keeper tool call if this attempt failed. *)
       Hashtbl.remove existing_keepalive_bootstrap_done base_path;
       raise exn

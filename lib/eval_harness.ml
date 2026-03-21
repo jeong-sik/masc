@@ -424,7 +424,7 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
       max_cost_usd = float_opt "max_cost_usd" 0.10;
       tags = str_list "tags";
     }
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "Failed to parse scenario: %s" (Printexc.to_string exn))
 
 (** Load scenarios from a JSON file containing an array of scenario objects. *)
@@ -449,7 +449,7 @@ let load_scenarios_from_file (path : string) : (scenario list, string) result =
            | Ok s -> Ok [s]
            | Error e -> Error e)
       | _ -> Error "Expected JSON array or object"
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Error (Printf.sprintf "Failed to load scenarios: %s" (Printexc.to_string exn))
 
 (* ================================================================ *)

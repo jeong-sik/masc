@@ -168,7 +168,7 @@ let maybe_sweep reg =
   let now = Time_compat.now () in
   if now -. reg.last_sweep > float_of_int Limits.sweeper_interval_sec then
     (try ignore (sweep reg)
-     with exn -> Log.Spawn.error "sweep failed: %s" (Printexc.to_string exn))
+     with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Spawn.error "sweep failed: %s" (Printexc.to_string exn))
 
 (** {1 Cooldown Management} *)
 

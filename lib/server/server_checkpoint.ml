@@ -185,7 +185,7 @@ let save (c : checkpoint) : (unit, string) result =
     Log.Server.debug "[Checkpoint] saved to %s (%.0f bytes)"
       path (float_of_int (String.length json_str));
     Ok ()
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     let msg = Printf.sprintf "checkpoint save failed: %s" (Printexc.to_string exn) in
     Log.Server.warn "[Checkpoint] %s" msg;
     Error msg
@@ -208,7 +208,7 @@ let load () : checkpoint option =
       | None ->
           Log.Server.warn "[Checkpoint] invalid checkpoint at %s, ignoring" path;
           None
-    with exn ->
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Server.warn "[Checkpoint] load failed: %s" (Printexc.to_string exn);
       None
 

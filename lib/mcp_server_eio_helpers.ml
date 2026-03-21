@@ -21,7 +21,7 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
    | Some _ -> ()
    | None ->
        (try ignore (Session.register registry ~agent_name)
-        with exn -> log_mcp_exn ~label:"session register (SSE) failed" exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_mcp_exn ~label:"session register (SSE) failed" exn));
   Session.update_activity registry ~agent_name ~is_listening:(Some true) ();
   let rec wait_loop () =
     let elapsed = Time_compat.now () -. start_time in
@@ -39,7 +39,7 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
     end
   in
   try wait_loop ()
-  with exn ->
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     log_mcp_exn ~label:"listen wait_loop interrupted" exn;
     Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
     None

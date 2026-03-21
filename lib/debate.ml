@@ -140,7 +140,7 @@ let write_json path json =
   (try
      Fs_compat.save_file tmp_path content;
      Sys.rename tmp_path path
-   with exn ->
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      (if Sys.file_exists tmp_path then
         Safe_ops.remove_file_logged ~context:"debate" tmp_path);
      raise exn)

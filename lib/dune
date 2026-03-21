@@ -25,7 +25,6 @@
    board_dispatch
    board_listener
    capability_registry
-   error
    backend_core
    backend
    backend_pg
@@ -467,6 +466,7 @@
    transport
    udp_socket_eio
    types
+   udp_socket_eio
    validation
    circuit_breaker
    backoff
@@ -587,8 +587,6 @@
    ;; Anti-Fake Test Quality Scoring (harness P2)
    anti_fake
    ;; godsplit-phase1: type/schema sub-modules
-   types_core
-   types_auth
    team_session_types_enums
    tool_schemas_room_core
    tool_schemas_room_extra
@@ -721,8 +719,6 @@
   team_session_report_proof_helpers
   team_session_report_proof
   ;; godsplit-phase1: type/schema sub-modules
-  types_core
-  types_auth
   team_session_types_enums
   tool_schemas_room_core
   ;; godsplit-phase1: chain_executor sub-modules
@@ -835,6 +831,8 @@
    ;; Neo4j Bolt native driver (OCaml 5.x Eio)
    ;; Structured logging (extracted sub-library)
    masc_log
+   ;; Core types (extracted sub-library)
+   masc_types
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

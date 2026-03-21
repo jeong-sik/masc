@@ -42,7 +42,7 @@ let add_task config ~title ~priority ~description =
     files = [];
     created_at = now_iso ();
     worktree = None;  (* Linked when worktree is created *)
-    required_role = Agent_identity.Unassigned;
+    required_role = Types_core.Unassigned;
   } in
 
   let new_backlog = {
@@ -96,10 +96,10 @@ let add_task_with_role config ~title ~priority ~description ~required_role =
           ("title", `String title);
           ("priority", `Int priority);
           ( "required_role",
-            `String (Agent_identity.role_to_string required_role) );
+            `String (Types_core.role_to_string required_role) );
         ]);
 
-  let role_str = Agent_identity.role_to_string required_role in
+  let role_str = Types_core.role_to_string required_role in
   let _ = broadcast config ~from_agent:"system"
     ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str) in
   Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str
@@ -124,7 +124,7 @@ let batch_add_tasks config tasks =
           files = [];
           created_at = now_iso ();
           worktree = None;
-          required_role = Agent_identity.Unassigned;
+          required_role = Types_core.Unassigned;
         }
       ) tasks in
       let new_backlog = {
@@ -220,7 +220,7 @@ let claim_task config ~agent_name ~task_id =
     When [agent_role] is provided and the task has a [required_role],
     the claim is rejected if the roles do not match. *)
 let claim_task_r config ~agent_name ~task_id
-    ?(agent_role = Agent_identity.Unassigned) () : string Types.masc_result =
+    ?(agent_role = Types_core.Unassigned) () : string Types.masc_result =
   if not (is_initialized config) then Error Types.NotInitialized
   else match validate_agent_name_r agent_name, validate_task_id_r task_id with
   | Error e, _ -> Error e
@@ -244,12 +244,12 @@ let claim_task_r config ~agent_name ~task_id
         (match target_task with
         | None -> Error (Types.TaskNotFound task_id)
         | Some task ->
-          if not (Agent_identity.role_satisfies
+          if not (Types_core.role_satisfies
                     ~required:task.required_role ~agent_role) then
             Error (Types.TaskRoleMismatch {
               task_id;
-              required = Agent_identity.role_to_string task.required_role;
-              actual = Agent_identity.role_to_string agent_role;
+              required = Types_core.role_to_string task.required_role;
+              actual = Types_core.role_to_string agent_role;
             })
           else begin
             let found = ref false in

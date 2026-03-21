@@ -560,7 +560,7 @@ let test_backlog_to_yojson_with_tasks () =
     files = [];
     created_at = "2024-01-15T12:00:00Z";
     worktree = None;
-    required_role = Masc_mcp.Agent_identity.Unassigned;
+    required_role = Types_core.Unassigned;
   } in
   let b : Types.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
   let json = Types.backlog_to_yojson b in
@@ -1246,7 +1246,7 @@ let test_task_to_yojson () =
     files = ["file1.ml"; "file2.ml"];
     created_at = "2024-01-15T12:00:00Z";
     worktree = None;
-    required_role = Masc_mcp.Agent_identity.Unassigned;
+    required_role = Types_core.Unassigned;
   } in
   let json = Types.task_to_yojson t in
   match json with
@@ -1272,7 +1272,7 @@ let test_task_to_yojson_with_worktree () =
     files = [];
     created_at = "2024-01-15T12:00:00Z";
     worktree = Some wt;
-    required_role = Masc_mcp.Agent_identity.Unassigned;
+    required_role = Types_core.Unassigned;
   } in
   let json = Types.task_to_yojson t in
   match json with

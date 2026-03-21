@@ -10,7 +10,7 @@ let security_agent = {
   capabilities = ["code-review"; "penetration-testing"];
   model = Some "claude-opus";
   activity_level = 0.8;
-  role = Masc_mcp.Agent_identity.Reviewer;
+  role = Types_core.Reviewer;
 }
 
 let frontend_agent = {
@@ -20,7 +20,7 @@ let frontend_agent = {
   capabilities = ["ui-design"; "testing"];
   model = Some "claude-sonnet";
   activity_level = 0.7;
-  role = Masc_mcp.Agent_identity.Writer;
+  role = Types_core.Writer;
 }
 
 let devops_agent = {
@@ -30,7 +30,7 @@ let devops_agent = {
   capabilities = ["infrastructure"; "deployment"];
   model = Some "claude-haiku";
   activity_level = 0.9;
-  role = Masc_mcp.Agent_identity.Writer;
+  role = Types_core.Writer;
 }
 
 (* Tasks with semantic nuance — keyword overlap misses these *)
@@ -40,7 +40,7 @@ let cybersecurity_task = {
   description = "Evaluate the system for potential cyber threats and recommend hardening measures";
   priority = 1;
   keywords = extract_keywords "Audit cybersecurity posture Evaluate the system for potential cyber threats and recommend hardening measures";
-  required_role = Masc_mcp.Agent_identity.Unassigned;
+  required_role = Types_core.Unassigned;
 }
 
 let ui_development_task = {
@@ -49,7 +49,7 @@ let ui_development_task = {
   description = "Create reusable UI widgets with responsive layout and WCAG compliance";
   priority = 2;
   keywords = extract_keywords "Build user interface components Create reusable UI widgets with responsive layout and WCAG compliance";
-  required_role = Masc_mcp.Agent_identity.Unassigned;
+  required_role = Types_core.Unassigned;
 }
 
 let cloud_infra_task = {
@@ -58,7 +58,7 @@ let cloud_infra_task = {
   description = "Containerize services and set up orchestration with auto-scaling and health checks";
   priority = 3;
   keywords = extract_keywords "Migrate to cloud infrastructure Containerize services and set up orchestration with auto-scaling and health checks";
-  required_role = Masc_mcp.Agent_identity.Unassigned;
+  required_role = Types_core.Unassigned;
 }
 
 let print_scores label agents tasks =

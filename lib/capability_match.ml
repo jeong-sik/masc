@@ -32,7 +32,7 @@ type agent_profile = {
   capabilities: string list;   (** Technical capabilities: ["code-review"; "testing"] *)
   model: string option;        (** MODEL model, if relevant *)
   activity_level: float;       (** 0.0-1.0, higher = more active *)
-  role: Agent_identity.role;   (** Agent's role for task filtering *)
+  role: Types_core.role;   (** Agent's role for task filtering *)
 } [@@deriving show, eq]
 
 (** Task requirements extracted from task content *)
@@ -42,7 +42,7 @@ type task_profile = {
   description: string;
   priority: int;
   keywords: string list;       (** Auto-extracted from title + description *)
-  required_role: Agent_identity.role;  (** Role required to claim this task *)
+  required_role: Types_core.role;  (** Role required to claim this task *)
 } [@@deriving show, eq]
 
 (** Match result between one agent and one task *)
@@ -155,8 +155,8 @@ let agent_profile_of_json (json : Yojson.Safe.t) : agent_profile option =
       | _ -> []
     in
     let role = match json |> U.member "role" |> U.to_string_option with
-      | Some s -> Agent_identity.role_of_string s
-      | None -> Agent_identity.Unassigned
+      | Some s -> Types_core.role_of_string s
+      | None -> Types_core.Unassigned
     in
     Some {
       name;
@@ -299,7 +299,7 @@ let keyword_overlap (reference : string list) (candidate : string list) : float 
     When the task has a required_role, agents without a matching role
     receive a total_score of 0.0 (filtered out). *)
 let score_keyword (agent : agent_profile) (task : task_profile) : match_score =
-  let role_ok = Agent_identity.role_satisfies
+  let role_ok = Types_core.role_satisfies
     ~required:task.required_role ~agent_role:agent.role in
   let trait_score = keyword_overlap task.keywords agent.traits in
   let interest_score = keyword_overlap task.keywords agent.interests in
@@ -316,7 +316,7 @@ let score_keyword (agent : agent_profile) (task : task_profile) : match_score =
 
 (** Compute MODEL-based match score. Falls back to keyword on parse failure. *)
 let score_model (agent : agent_profile) (task : task_profile) : match_score =
-  let role_ok = Agent_identity.role_satisfies
+  let role_ok = Types_core.role_satisfies
     ~required:task.required_role ~agent_role:agent.role in
   if not role_ok then
     make_match_score ~mode:Model ~provenance:Judgment
@@ -339,7 +339,7 @@ let score_model (agent : agent_profile) (task : task_profile) : match_score =
 
 (** Compute hybrid match score: MODEL first, keyword fallback on failure. *)
 let score_hybrid (agent : agent_profile) (task : task_profile) : match_score =
-  let role_ok = Agent_identity.role_satisfies
+  let role_ok = Types_core.role_satisfies
     ~required:task.required_role ~agent_role:agent.role in
   if not role_ok then
     make_match_score ~mode:Hybrid ~provenance:Fallback

@@ -26,7 +26,7 @@ let security_agent = {
   capabilities = ["code-review"; "penetration-testing"];
   model = Some "claude-opus";
   activity_level = 0.8;
-  role = Masc_mcp.Agent_identity.Reviewer;
+  role = Types_core.Reviewer;
 }
 
 let frontend_agent = {
@@ -36,7 +36,7 @@ let frontend_agent = {
   capabilities = ["ui-design"; "testing"];
   model = Some "claude-sonnet";
   activity_level = 0.7;
-  role = Masc_mcp.Agent_identity.Writer;
+  role = Types_core.Writer;
 }
 
 let devops_agent = {
@@ -46,7 +46,7 @@ let devops_agent = {
   capabilities = ["infrastructure"; "deployment"];
   model = Some "claude-haiku";
   activity_level = 0.9;
-  role = Masc_mcp.Agent_identity.Writer;
+  role = Types_core.Writer;
 }
 
 let generalist_agent = {
@@ -56,7 +56,7 @@ let generalist_agent = {
   capabilities = [];
   model = None;
   activity_level = 0.5;
-  role = Masc_mcp.Agent_identity.Unassigned;
+  role = Types_core.Unassigned;
 }
 
 (* ---------- Test Tasks ---------- *)
@@ -67,7 +67,7 @@ let security_task = {
   description = "Review and fix the JWT token validation bypass in the auth middleware";
   priority = 1;
   keywords = extract_keywords "Fix authentication vulnerability Review and fix the JWT token validation bypass in the auth middleware";
-  required_role = Masc_mcp.Agent_identity.Unassigned;
+  required_role = Types_core.Unassigned;
 }
 
 let frontend_task = {
@@ -76,7 +76,7 @@ let frontend_task = {
   description = "Update CSS grid layout for mobile accessibility improvements";
   priority = 2;
   keywords = extract_keywords "Improve responsive design Update CSS grid layout for mobile accessibility improvements";
-  required_role = Masc_mcp.Agent_identity.Unassigned;
+  required_role = Types_core.Unassigned;
 }
 
 let devops_task = {
@@ -85,7 +85,7 @@ let devops_task = {
   description = "Configure Docker and Kubernetes for automated deployment monitoring";
   priority = 3;
   keywords = extract_keywords "Setup deployment pipeline Configure Docker and Kubernetes for automated deployment monitoring";
-  required_role = Masc_mcp.Agent_identity.Unassigned;
+  required_role = Types_core.Unassigned;
 }
 
 (* ---------- Keyword Extraction Tests ---------- *)
@@ -345,7 +345,7 @@ let test_score_keyword_role_filter () =
     description = "Review the authentication module for security issues";
     priority = 1;
     keywords = extract_keywords "Review security code Review the authentication module for security issues";
-    required_role = Masc_mcp.Agent_identity.Reviewer;
+    required_role = Types_core.Reviewer;
   } in
   (* security_agent is Reviewer — should get a score *)
   let m1 = score_keyword security_agent restricted_task in

@@ -193,6 +193,27 @@ let remove_pending_confirm config token =
   in
   write_pending_confirms config remaining
 
+let remove_pending_confirms_by_target config ~target_type ~target_id =
+  let all = raw_pending_confirms config in
+  let remaining =
+    List.filter
+      (fun (entry : pending_confirm) ->
+        not
+          (String.equal entry.target_type target_type
+          && entry.target_id = target_id))
+      all
+  in
+  let removed = List.length all - List.length remaining in
+  if removed > 0 then write_pending_confirms config remaining;
+  removed
+
+let gc_expired_confirms config =
+  let all = raw_pending_confirms config in
+  let active = List.filter (fun entry -> not (pending_confirm_expired entry)) all in
+  let removed = List.length all - List.length active in
+  if removed > 0 then write_pending_confirms config active;
+  removed
+
 let normalize_pending_confirm_actor_filter = function
   | Some raw ->
       let trimmed = String.trim raw in

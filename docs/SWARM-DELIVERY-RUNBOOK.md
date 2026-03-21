@@ -80,6 +80,16 @@
 13. `masc_team_session_prove`
 14. draft PR + cross-model review evidence
 
+local fallback review helper:
+
+```bash
+./scripts/review/local-review.sh --base origin/main --head HEAD --format markdown
+```
+
+이 helper는 `.masc/review-cache/local-review/` 아래에 결과 cache를 남기고,
+동일 diff에 대한 concurrent review 요청은 single-flight로 합치며,
+stale pending reviewer PID가 있으면 정리한 뒤 다시 시작한다.
+
 ## Autoresearch Wrapper
 
 Karpathy-style raw `masc_autoresearch_*` loop는 그대로 유지하되, swarm canonical path로 진입할 때는 `masc_autoresearch_swarm_start`를 우선 사용한다.

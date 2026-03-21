@@ -121,9 +121,11 @@ let publish_q =
   "INSERT INTO masc_pubsub (channel, message) VALUES ($1, $2)"
 
 (* pg_notify sends real-time notification to all LISTEN clients
-   Payload limited to 8000 bytes by PostgreSQL *)
+   Payload limited to 8000 bytes by PostgreSQL.
+   NOTE: pg_notify() returns void but SELECT always produces one row.
+   Using ->! unit (expect one row, discard void value) avoids Caqti error. *)
 let notify_q =
-  (Caqti_type.(t2 string string) ->. Caqti_type.unit)
+  (Caqti_type.(t2 string string) ->! Caqti_type.unit)
   "SELECT pg_notify($1, $2)"
 
 (* PostgreSQL pg_notify payload limit (actual limit is 8000, use 7900 for safety margin) *)
@@ -397,7 +399,7 @@ let publish t ~channel ~message =
        Skip NOTIFY for large payloads - subscribers poll anyway *)
     let total_payload = String.length channel + String.length message + 1 in
     if total_payload <= pg_notify_max_payload then
-      C.exec notify_q (channel, message)
+      C.find notify_q (channel, message)
     else begin
       Log.debug ~ctx:"Pubsub" "NOTIFY skipped: payload too large (%d bytes, limit %d)"
         total_payload pg_notify_max_payload;

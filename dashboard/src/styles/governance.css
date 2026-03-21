@@ -944,3 +944,101 @@ button.council-row.selected {
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* ── Activity Timeline (case-grouped) ────────────────────── */
+
+.governance-case-group {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.governance-case-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.governance-case-topic {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.governance-case-events {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 4px;
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
+}
+
+.governance-case-events .governance-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0 2px 8px;
+  font-size: 12px;
+}
+
+.governance-event-summary {
+  flex: 1;
+  color: rgba(255, 255, 255, 0.6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.governance-event-time {
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* ── Lifecycle progress indicator ────────────────────────── */
+
+.governance-lifecycle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.lifecycle-step {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.lifecycle-pending {
+  color: rgba(255, 255, 255, 0.25);
+  background: transparent;
+}
+
+.lifecycle-done {
+  color: rgba(74, 222, 128, 0.7);
+  background: rgba(74, 222, 128, 0.08);
+}
+
+.lifecycle-current {
+  color: rgba(96, 165, 250, 0.9);
+  background: rgba(96, 165, 250, 0.12);
+  font-weight: 600;
+}
+
+.lifecycle-arrow {
+  color: rgba(255, 255, 255, 0.15);
+  font-size: 10px;
+}
+
+.lifecycle-arrow.done {
+  color: rgba(74, 222, 128, 0.4);
+}

@@ -128,20 +128,68 @@ export function GuardrailPane({
   `
 }
 
-export function ActivityRail() {
-  const events = (governanceData.value?.activity ?? []).slice(0, 8)
+/** Lifecycle step order for visual progress indicator */
+const LIFECYCLE_ORDER: Record<string, number> = {
+  petition_submitted: 0,
+  brief_submitted: 1,
+  ruling_issued: 2,
+  execution_order: 3,
+}
+const LIFECYCLE_STEPS = ['청원', '의견', '판정', '집행']
+
+function LifecycleProgress({ events }: { events: GovernanceTimelineEvent[] }) {
+  const reached = new Set(events.map(e => LIFECYCLE_ORDER[e.kind] ?? -1))
+  const maxStep = Math.max(...Array.from(reached), -1)
   return html`
-    <${Card} title="최근 활동" class="section" semanticId="governance.activity">
+    <div class="governance-lifecycle">
+      ${LIFECYCLE_STEPS.map((label, i) => {
+        const done = reached.has(i)
+        const current = i === maxStep
+        const cls = done ? (current ? 'lifecycle-current' : 'lifecycle-done') : 'lifecycle-pending'
+        return html`
+          ${i > 0 ? html`<span class="lifecycle-arrow ${done ? 'done' : ''}">-></span>` : null}
+          <span class="lifecycle-step ${cls}">${label}</span>
+        `
+      })}
+    </div>
+  `
+}
+
+export function ActivityRail() {
+  const events = (governanceData.value?.activity ?? []).slice(0, 20)
+
+  // Group by case (item_id or topic)
+  const grouped = new Map<string, { topic: string; events: GovernanceTimelineEvent[] }>()
+  for (const event of events) {
+    const key = event.item_id || event.topic || 'unknown'
+    const existing = grouped.get(key)
+    if (existing) {
+      existing.events.push(event)
+    } else {
+      grouped.set(key, { topic: event.topic || key, events: [event] })
+    }
+  }
+
+  return html`
+    <${Card} title="활동 타임라인" class="section" semanticId="governance.activity">
       <div class="governance-activity-list">
-        ${events.length === 0
-          ? html`<div class="empty-state">거버넌스 활동이 아직 없습니다. 청원 접수, 심의, 판정이 이루어지면 여기에 기록됩니다.</div>`
-          : events.map((event: GovernanceTimelineEvent) => html`
-              <div class="governance-activity-row">
-                <div class="governance-ledger-head">
-                  <span class="governance-badge ${governanceToneClass(event.kind)}">${activityKindLabel(event.kind)}</span>
-                  ${event.created_at ? html`<span><${TimeAgo} timestamp=${event.created_at} /></span>` : null}
+        ${grouped.size === 0
+          ? html`<div class="empty-state">거버넌스 활동이 아직 없습니다.</div>`
+          : Array.from(grouped.entries()).map(([, group]) => html`
+              <div class="governance-case-group">
+                <div class="governance-case-header">
+                  <span class="governance-case-topic">${group.topic}</span>
+                  <${LifecycleProgress} events=${group.events} />
                 </div>
-                <div class="governance-ledger-body">${event.summary || event.topic || '활동이 기록되었습니다.'}</div>
+                <div class="governance-case-events">
+                  ${group.events.map((event: GovernanceTimelineEvent) => html`
+                    <div class="governance-activity-row">
+                      <span class="governance-badge ${governanceToneClass(event.kind)}">${activityKindLabel(event.kind)}</span>
+                      <span class="governance-event-summary">${event.summary || ''}</span>
+                      ${event.created_at ? html`<span class="governance-event-time"><${TimeAgo} timestamp=${event.created_at} /></span>` : null}
+                    </div>
+                  `)}
+                </div>
               </div>
             `)}
       </div>

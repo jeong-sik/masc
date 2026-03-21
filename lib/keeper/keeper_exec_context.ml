@@ -493,7 +493,8 @@ let run_proactive_generation
       let (agent_result, attempt_latency) = timed (fun () ->
           Oas_worker.run_named ~cascade_name:"keeper_turn"
             ~goal:prompt ~system_prompt:turn_system_prompt
-            ~tools ~max_turns:10 ~temperature ~max_tokens ()) in
+            ~tools ~initial_messages:ctx_work.messages
+            ~max_turns:10 ~temperature ~max_tokens ()) in
       match agent_result with
       | Error _ -> None
       | Ok result ->

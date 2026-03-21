@@ -218,11 +218,7 @@ let delegated_tool_for action_type =
   | "task_inject" -> "masc_add_task"
   | _ -> "unknown"
 
-let confirm_required = function
-  | "room_pause" | "team_stop" | "task_inject" | "team_task_inject"
-  | "team_worker_spawn_batch" ->
-      true
-  | _ -> false
+let confirm_required = Operator_approval.confirm_required
 
 let preview_of_action (request : action_request) =
   let base =

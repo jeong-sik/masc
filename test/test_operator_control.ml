@@ -79,6 +79,9 @@ let () =
           Alcotest.test_case "swarm run continue removed from operator actions" `Quick
             Test_operator_control_swarm
             .test_swarm_run_continue_removed_from_operator_actions;
+          Alcotest.test_case "swarm run rerun removed from operator actions" `Quick
+            Test_operator_control_swarm
+            .test_swarm_run_rerun_removed_from_operator_actions;
           Alcotest.test_case "swarm run abandon removed from operator actions" `Quick
             Test_operator_control_swarm
             .test_swarm_run_abandon_removed_from_operator_actions;

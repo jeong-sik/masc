@@ -1,0 +1,49 @@
+(** Global Eio context for shared network/clock access.
+    Set during server startup (main_eio.ml). *)
+
+type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
+
+val set_net :
+  [> `Network | `Platform of [> `Generic | `Unix ]] Eio.Resource.t -> unit
+(** Set the global Eio network handle. *)
+
+val set_clock : float Eio.Time.clock_ty Eio.Resource.t -> unit
+(** Set the global Eio clock. *)
+
+val set_mono_clock : Eio.Time.Mono.ty Eio.Resource.t -> unit
+(** Set the global Eio monotonic clock. *)
+
+val get_mono_clock : unit -> Eio.Time.Mono.ty Eio.Resource.t
+(** Get the global Eio monotonic clock.
+    @raise Invalid_argument if not initialized. *)
+
+val set_switch : Eio.Switch.t -> unit
+(** Set the global Eio switch. *)
+
+val get_net_opt : unit -> eio_net option
+(** Get the Eio network handle if available. *)
+
+val get_clock_opt : unit -> float Eio.Time.clock_ty Eio.Resource.t option
+(** Get the Eio clock if available. *)
+
+val get_switch_opt : unit -> Eio.Switch.t option
+(** Get the Eio switch if available. *)
+
+val get_net : unit -> eio_net
+(** Get the Eio network handle.
+    @raise Invalid_argument if not initialized. *)
+
+val get_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t
+(** Get the Eio clock.
+    @raise Invalid_argument if not initialized. *)
+
+val get_switch : unit -> Eio.Switch.t
+(** Get the Eio switch.
+    @raise Invalid_argument if not initialized. *)
+
+val get_https_connector :
+  unit ->
+  (Uri.t ->
+   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
+   [ `Close | `Flow | `R | `Shutdown | `Tls | `W ] Eio.Resource.t)
+(** TLS connector for Cohttp_eio HTTPS support. *)

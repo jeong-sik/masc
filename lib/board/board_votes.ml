@@ -286,7 +286,9 @@ let load_persisted_posts store =
         Log.BoardLog.info "loaded %d posts from %s" !loaded path
       else
         Log.BoardLog.debug "loaded 0 posts from %s" path
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Log.BoardLog.error "load posts failed: %s" (Printexc.to_string e)
   end
 
@@ -313,7 +315,9 @@ let load_persisted_comments store =
         Log.BoardLog.info "loaded %d comments from %s" !loaded path
       else
         Log.BoardLog.debug "loaded 0 comments from %s" path
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Log.BoardLog.error "load comments failed: %s" (Printexc.to_string e)
   end
 
@@ -355,7 +359,9 @@ let load_persisted_votes store =
         Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
       else
         Log.BoardLog.debug "loaded 0 vote entries from %s" path
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Log.BoardLog.error "load votes failed: %s" (Printexc.to_string e)
   end
 

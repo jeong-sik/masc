@@ -252,7 +252,9 @@ let handle_join (ctx : context) : result option =
     let agent_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
     (try
       Fs_compat.save_file agent_file nickname
-    with e ->
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e ->
       Log.Misc.error "Failed to write agent file %s: %s" agent_file (Printexc.to_string e))
   end;
   (* Cultural Inheritance: append institution welcome to join response *)

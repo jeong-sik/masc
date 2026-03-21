@@ -233,7 +233,9 @@ let get_tty () =
             if String.length trimmed > 0 then Some trimmed else None
           else None
         with Unix.Unix_error _ -> None
-  with e ->
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e ->
     Log.Misc.error "get_tty failed: %s" (Printexc.to_string e);
     None
 

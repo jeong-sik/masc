@@ -24,7 +24,9 @@ let add_routes ~sw ~clock router =
              let config = state.Mcp_server.room_config in
              let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
              Http.Response.json {|{"ok":true}|} reqd
-           with e ->
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | e ->
              Http.Response.json
                (Printf.sprintf {|{"ok":false,"error":"%s"}|} (Printexc.to_string e))
                reqd
@@ -41,7 +43,9 @@ let add_routes ~sw ~clock router =
              let config = state.Mcp_server.room_config in
              let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
              Http.Response.json {|{"ok":true}|} reqd
-           with e ->
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | e ->
              Http.Response.json
                (Printf.sprintf {|{"ok":false,"error":"%s"}|} (Printexc.to_string e))
                reqd

@@ -95,7 +95,9 @@ module JsonRpc = struct
         let method_name = json |> U.member "method" |> U.to_string in
         let params = json |> U.member "params" in
         Ok { id; method_name; params; headers = [] }
-    with e -> Error (Printexc.to_string e)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | e -> Error (Printexc.to_string e)
 
   (** Serialize JSON-RPC response *)
   let serialize_response (resp : response) : Yojson.Safe.t =

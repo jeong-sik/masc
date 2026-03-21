@@ -288,14 +288,14 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
         `)}
       </div>
       <div style="margin-top:8px; font-size:12px; color:#888;">
-        Level ${stats.level} — XP ${stats.xp}
+        레벨 ${stats.level} · 경험치 ${stats.xp}
       </div>
     </div>
   `
 }
 
 export function EquipmentList({ items }: { items: string[] }) {
-  if (items.length === 0) return html`<div class="empty-state" style="font-size:13px">No equipment</div>`
+  if (items.length === 0) return html`<div class="empty-state" style="font-size:13px">장비 없음</div>`
 
   return html`
     <div class="keeper-equipment-list">
@@ -311,7 +311,7 @@ export function EquipmentList({ items }: { items: string[] }) {
 
 export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   const entries = Object.entries(rels)
-  if (entries.length === 0) return html`<div class="empty-state" style="font-size:13px">No relationships</div>`
+  if (entries.length === 0) return html`<div class="empty-state" style="font-size:13px">관계 없음</div>`
 
   return html`
     <div class="keeper-k2k-list">
@@ -337,4 +337,3 @@ export function TraitsList({ traits, label }: { traits: string[]; label: string 
     </div>
   `
 }
-

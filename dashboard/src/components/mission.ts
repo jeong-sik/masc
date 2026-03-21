@@ -284,7 +284,7 @@ export function Mission() {
       <div class="mission-human-grid">
         <${MissionBriefingCard} />
 
-        <${Card} title="운영 보조 진단" class="mission-list-card">
+        <${Card} title="내부 진단" class="mission-list-card">
           <div class="mission-section-head">
             <h3>시스템 진단</h3>
             <p>artifact scope drift 같은 내부 신호는 사회 흐름을 읽은 뒤에만 참고하도록 아래 보조 면으로 둡니다.</p>

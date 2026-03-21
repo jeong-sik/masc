@@ -68,9 +68,9 @@ async function runSocialSweep(): Promise<void> {
     })
     invalidateDashboardCache()
     await refreshDashboard()
-    showToast('Social sweep finished', 'success')
+    showToast('소셜 스윕 완료', 'success')
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to run social sweep'
+    const message = err instanceof Error ? err.message : '소셜 스윕 실행 실패'
     showToast(message, 'error')
   }
 }
@@ -78,7 +78,7 @@ async function runSocialSweep(): Promise<void> {
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="keeper-comms-section">
-      <h3 class="keeper-comms-heading">Direct Comms</h3>
+      <h3 class="keeper-comms-heading">직접 대화</h3>
 
       <div class="keeper-comms-layout">
         ${'' /* Chat takes full width — the primary interaction surface */}
@@ -190,10 +190,10 @@ export function KeeperDetailOverlay() {
             `
             : null}
 
-          ${'' /* TRPG Stats (if available) */}
+          ${'' /* TRPG stats (if available) */}
           ${keeper.trpg_stats
             ? html`
-              <${Card} title="TRPG Stats">
+              <${Card} title="TRPG 스탯">
                 <${TrpgStats} stats=${keeper.trpg_stats} />
               <//>
             `
@@ -202,7 +202,7 @@ export function KeeperDetailOverlay() {
           ${'' /* Equipment */}
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`
-              <${Card} title="Equipment (${keeper.inventory.length})">
+              <${Card} title="장비 (${keeper.inventory.length})">
                 <${EquipmentList} items=${keeper.inventory} />
               <//>
             `
@@ -211,7 +211,7 @@ export function KeeperDetailOverlay() {
           ${'' /* Relationships */}
           ${keeper.relationships && Object.keys(keeper.relationships).length > 0
             ? html`
-              <${Card} title="Relationships (${Object.keys(keeper.relationships).length})">
+              <${Card} title="관계 (${Object.keys(keeper.relationships).length})">
                 <${RelationshipList} rels=${keeper.relationships} />
               <//>
             `
@@ -225,7 +225,7 @@ export function KeeperDetailOverlay() {
             <${KeeperNeighborhood} keeper=${keeper} />
           <//>
 
-          <${Card} title="Config">
+          <${Card} title="설정">
             <${KeeperConfigPanel} keeperName=${keeper.name} />
           <//>
 

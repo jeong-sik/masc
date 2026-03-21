@@ -36,9 +36,9 @@ function provenanceDetail(value?: string | null): string {
     case 'recorded':
       return '이미 기록된 결정 또는 증거'
     case 'narrative':
-      return 'MODEL 해석 레이어'
+      return '모델 해석'
     case 'judgment':
-      return '판단 레이어'
+      return '운영 판단'
     default:
       return '근거 계층'
   }

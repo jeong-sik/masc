@@ -21,6 +21,7 @@ open Backend_core
 type t = {
   pool: (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t;
   namespace: string;
+  clock: float Eio.Time.clock_ty Eio.Resource.t;
   _sw: Eio.Switch.t;  (* Keep switch alive for pool lifetime *)
 }
 
@@ -228,7 +229,7 @@ let create_eio ~sw ~env (cfg : config) : (t, error) result =
           ) pool in
           (match init_result with
            | Error err -> Error (caqti_error_to_masc err)
-           | Ok () -> Ok { pool; namespace = cfg.cluster_name; _sw = sw })
+           | Ok () -> Ok { pool; namespace = cfg.cluster_name; clock = env#clock; _sw = sw })
 
 (** Lightweight pool creation for use in a different Eio domain.
     Skips schema initialization (assumed already done by the main pool).
@@ -244,7 +245,7 @@ let[@warning "-32"] create_eio_readonly ~sw ~env (cfg : config) : (t, error) res
       match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
       | Error err -> Error (caqti_error_to_masc err)
       | Ok pool ->
-          Ok { pool; namespace = cfg.cluster_name; _sw = sw }
+          Ok { pool; namespace = cfg.cluster_name; clock = env#clock; _sw = sw }
 
 let close _t = ()
 
@@ -339,8 +340,7 @@ let acquire_lock t ~key ~ttl_seconds ~owner =
   (* Clean up expired locks with Eio cooperative timeout.
      If PG is saturated, cleanup times out after 2s instead of blocking. *)
   (try
-     let clock = Eio_context.get_clock () in
-     Eio.Time.with_timeout_exn clock cleanup_timeout_sec (fun () ->
+     Eio.Time.with_timeout_exn t.clock cleanup_timeout_sec (fun () ->
        match Caqti_eio.Pool.use (fun conn ->
          let module C = (val conn : Caqti_eio.CONNECTION) in
          C.exec cleanup_expired_q ()

@@ -296,6 +296,7 @@ let default_model_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec:_ ~max_cha
 let walph_loop config ~net:_net ~clock ~agent_name
     ?(preset="drain") ?(max_iterations=10) ?target
     ?(max_consecutive_errors=5) ?(error_backoff_sec=2)
+    ?(default_model=Env_config.Glm.default_model)
     ?(model_dispatch=default_model_dispatch) () =
   Room.ensure_initialized config;
 
@@ -491,7 +492,7 @@ let walph_loop config ~net:_net ~clock ~agent_name
 	                        try
 	                          let response = model_dispatch
 	                            ~tool_name:"glm"
-	                            ~model:Env_config.Glm.default_model
+	                            ~model:default_model
 	                            ~prompt:goal
 	                            ~timeout_sec:60
 	                            ~max_chars:4000

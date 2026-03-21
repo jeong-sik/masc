@@ -32,12 +32,9 @@ let with_scope config scope = { config with scope }
     Constructs [Caqti_eio.stdenv] from [Eio_context] globals (net/clock
     are cross-domain safe, only Switch is domain-bound).
     Returns [None] on failure. *)
-let with_domain_local_pg_backend ~sw config =
+let with_domain_local_pg_backend ~sw ~net ~clock ~mono_clock config =
   match config.backend with
   | PostgresNative _ ->
-    let net = Eio_context.get_net () in
-    let clock = Eio_context.get_clock () in
-    let mono_clock = Eio_context.get_mono_clock () in
     let env : Caqti_eio.stdenv =
       object
         method net = (net :> [`Generic] Eio.Net.ty Eio.Resource.t)

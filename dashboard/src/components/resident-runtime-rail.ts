@@ -61,32 +61,7 @@ function renderResidentRuntimeCard(
 export function SnapshotCard({ currentTab }: { currentTab: string }) {
   const liveConnected = connected.value
   const build = serverStatus.value?.build
-  const socialRuntime = serverStatus.value?.social_runtime
   const residentCards: ComponentChildren[] = []
-
-  if (socialRuntime) {
-    residentCards.push(
-      renderResidentRuntimeCard(
-        'Social Runtime',
-        socialRuntime.enabled
-          ? residentStatusLabel('live')
-          : residentStatusLabel('disabled'),
-        socialRuntime.enabled ? 'ok' : 'bad',
-        [
-          renderRuntimeStat('전략', socialRuntime.strategy ?? 'unknown'),
-          renderRuntimeStat('대상 keeper', socialRuntime.active_keepers ?? 0),
-          renderRuntimeStat('큐', socialRuntime.queue_depth ?? 0),
-          renderRuntimeStat(
-            '최근 결과',
-            socialRuntime.last_result?.activity_report
-              ?? (socialRuntime.last_pass_reason ? `판단 패스: ${socialRuntime.last_pass_reason}` : null)
-              ?? (socialRuntime.last_system_skip_reason ? `시스템 스킵: ${socialRuntime.last_system_skip_reason}` : null)
-              ?? '없음',
-          ),
-        ],
-      ),
-    )
-  }
 
   return html`
     <section class="rail-card">

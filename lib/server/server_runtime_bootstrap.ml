@@ -154,8 +154,6 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   | exn ->
     Log.Server.error "subsystem orchestrator failed to start: %s"
       (Printexc.to_string exn));
-  fork_subsystem "social_runtime" (fun () ->
-    Social_runtime.start ~sw ~clock ~config:state.room_config);
   fork_subsystem "governance_judge" (fun () ->
     Dashboard_governance_judge.start ~sw ~clock
       ~base_path:state.room_config.base_path

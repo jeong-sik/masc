@@ -189,39 +189,10 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
             ("result", `Assoc [ ("status", `String status) ]);
           ])
   | "social_sweep" ->
-      let* () = validate_target_type "room" request in
-      if not Env_config.SocialRuntime.enabled then
-        Ok
-          (`Assoc
-            [
-              ("delegated_tool", `String "social_sweep");
-              ( "result",
-                `Assoc
-                  [
-                    ("checked", `Int 0);
-                    ("acted", `Int 0);
-                    ("passed", `Int 0);
-                    ("skipped", `Int 1);
-                    ("failed", `Int 0);
-                    ("strategy", `String "event_driven");
-                    ("queue_depth", `Int 0);
-                    ("activity_report", `String "Social runtime is disabled");
-                    ("last_system_skip_reason", `String "social runtime disabled");
-                    ("checkins", `List []);
-                  ] );
-            ])
-      else
-        let summary_json, rows =
-          Social_runtime.manual_sweep ~sw:ctx.sw ~clock:ctx.clock ~config:ctx.config
-        in
-        Ok
-          (`Assoc
-            [
-              ("delegated_tool", `String "social_sweep");
-              ( "result",
-                merge_json_objects summary_json
-                  (`Assoc [ ("checkins", `List rows) ]) );
-            ])
+      Ok (`Assoc [
+        ("delegated_tool", `String "social_sweep");
+        ("result", `Assoc [("status", `String "removed"); ("reason", `String "Social runtime removed. Keepers discover board events via proactive turns.")]);
+      ])
   | "task_inject" ->
       let* () = validate_target_type "room" request in
       let* title =

@@ -145,7 +145,6 @@
    graphql_endpoint
    graphql_api
    social_motion
-   social_runtime
    handover_eio
    hat
    heartbeat

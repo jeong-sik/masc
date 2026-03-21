@@ -180,33 +180,6 @@ export interface GovernanceMonitoring {
   judge_online?: boolean
 }
 
-export interface SocialRuntimeStatus {
-  enabled: boolean
-  strategy?: string
-  queue_depth?: number
-  processed_events?: number
-  active_keepers?: number
-  last_event_at?: string | null
-  last_social_action_at?: string | null
-  last_pass_reason?: string | null
-  last_system_skip_reason?: string | null
-  total_checks?: number
-  total_acted?: number
-  total_passed?: number
-  total_skipped?: number
-  total_failed?: number
-  last_result?: {
-    checked?: number
-    acted?: number
-    passed?: number
-    skipped?: number
-    failed?: number
-    last_tick_at?: string | null
-    last_pass_reason?: string | null
-    last_system_skip_reason?: string | null
-    activity_report?: string | null
-  } | null
-}
 
 
 export interface PendingConfirmation {

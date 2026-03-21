@@ -1,7 +1,7 @@
 import type { Agent, BoardPost } from './core'
 import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
 import type { CommandPlaneSurface } from './command-plane'
-import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, PendingConfirmation, PendingConfirmSummary, SocialRuntimeStatus } from './governance'
+import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, PendingConfirmation, PendingConfirmSummary } from './governance'
 
 // --- Dashboard projection responses ---
 
@@ -327,7 +327,6 @@ export interface ServerStatus {
     board?: BoardMonitoring
     governance?: GovernanceMonitoring
   }
-  social_runtime?: SocialRuntimeStatus
   data_quality?: {
     board_contract_ok?: boolean
     governance_feed_ok?: boolean

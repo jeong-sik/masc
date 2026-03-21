@@ -359,10 +359,10 @@ export function WarRoomJumpButton({
       onClick=${() => {
         if (surface) {
           setCommandPlaneSurface(surface)
-          navigate('lab', { ...surfaceRouteParams(surface), ...params })
+          navigate('operations', { ...surfaceRouteParams(surface), ...params })
           return
         }
-        navigate('control')
+        navigate('operations', { section: 'intervene' })
       }}
     >
       ${label}

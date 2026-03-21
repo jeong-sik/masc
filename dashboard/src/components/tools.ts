@@ -223,12 +223,10 @@ function FullInventoryView({
   const listContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (route.value.tab !== 'control') return
+    if (route.value.tab !== 'operations' || route.value.params.section !== 'tools') return
     const q = route.value.params.q?.trim()
-    if (q && q !== searchQuery.value) {
-      searchQuery.value = q
-    }
-  }, [route.value.tab, route.value.params.q])
+    searchQuery.value = q ?? ''
+  }, [route.value.tab, route.value.params.section, route.value.params.q])
 
   const handleScroll = useCallback(() => {
     const el = listContainerRef.current

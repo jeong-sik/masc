@@ -38,6 +38,7 @@ import {
   historySummary,
   incrementMermaidRenderCount,
   relativeTime,
+  surfaceRouteParams,
   toneClass,
 } from './helpers'
 
@@ -196,8 +197,8 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
           class="control-btn ghost"
           onClick=${() => {
             setCommandPlaneSurface('swarm')
-            navigate('lab', {
-              surface: 'swarm',
+            navigate('operations', {
+              ...surfaceRouteParams('swarm'),
               operation_id: op.operation_id,
               ...(runId ? { run_id: runId } : {}),
             })
@@ -212,7 +213,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
                 onClick=${() => {
                   focusCommandPlaneChainOperation(op.operation_id)
                   setCommandPlaneSurface('chains')
-                  navigate('lab', { surface: 'chains', operation: op.operation_id })
+                  navigate('operations', { ...surfaceRouteParams('chains'), operation: op.operation_id })
                 }}
               >
                 체인 열기

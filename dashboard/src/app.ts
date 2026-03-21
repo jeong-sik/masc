@@ -20,7 +20,7 @@ import {
 import { KeeperDetailOverlay } from './components/keeper-detail'
 import { AgentDetailOverlay } from './components/agent-detail'
 import { ToastContainer } from './components/common/toast'
-import { DASHBOARD_NAV_ITEMS } from './config/navigation'
+import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from './config/navigation'
 
 export function App() {
   useEffect(() => {
@@ -62,29 +62,29 @@ export function App() {
     // to prevent stale fetch results arriving after navigation (C-4/M-12).
     cancelPendingSSERefreshes()
     refreshForTab(route.value.tab)
-  }, [route.value.tab])
+  }, [route.value.tab, route.value.params.section, route.value.params.surface, route.value.params.q])
 
   const currentTab = route.value.tab
-  const isHome = currentTab === 'home'
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
+  const currentSection = currentSectionForRoute(route.value)
 
   return html`
     <div class="app-shell">
-      <header class="dashboard-header ${isHome ? 'dashboard-header--slim' : ''}">
+      <header class="dashboard-header">
         <div class="header-title-wrap">
           <h1>
             MASC 대시보드
             <${BuildIdentityBadge} />
           </h1>
-          <p class="header-subtitle">${currentView?.description ?? '운영자 의사결정 및 실행 콘솔'}</p>
+          <p class="header-subtitle">${currentSection?.description ?? currentView?.description ?? '운영자 의사결정 및 실행 콘솔'}</p>
         </div>
         <div class="header-right">
           <${ConnectionStatus} />
         </div>
       </header>
 
-      <div class="dashboard-layout ${isHome ? 'dashboard-layout--home' : ''}">
-        ${isHome ? null : html`<${SideRail} />`}
+      <div class="dashboard-layout">
+        <${SideRail} />
         <main class="dashboard-main">
           <${DashboardMain} />
         </main>

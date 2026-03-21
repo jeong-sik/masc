@@ -191,22 +191,23 @@ function inheritedWorkflowRouteParams(): Record<string, string> {
 
 export function surfaceRouteParams(surface: CommandPlaneSurface): Record<string, string> {
   const inherited = inheritedWorkflowRouteParams()
+  const base = { ...inherited, section: 'command' }
   const swarmRunId = dashboardSwarmRunId()
   const swarmOperationId = dashboardSwarmOperationId()
-  if (surface === 'operations') return inherited
+  if (surface === 'operations') return base
   if (surface === 'chains') {
     const operationId = commandPlaneChainFocusOperationId.value
-    return operationId ? { ...inherited, surface, operation: operationId } : { ...inherited, surface }
+    return operationId ? { ...base, surface, operation: operationId } : { ...base, surface }
   }
   if (surface === 'swarm' || surface === 'warroom' || surface === 'orchestra') {
     return {
-      ...inherited,
+      ...base,
       surface,
       ...(swarmRunId ? { run_id: swarmRunId } : {}),
       ...(swarmOperationId ? { operation_id: swarmOperationId } : {}),
     }
   }
-  return { ...inherited, surface }
+  return { ...base, surface }
 }
 
 export function chainEventsUrl(): string {

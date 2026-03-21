@@ -1,35 +1,47 @@
-// MASC Dashboard — Lab Tab
-// Absorbs: command + lab(TRPG). Command plane default, TRPG as subsection.
+// MASC Dashboard — Experimental Surface
+// Keeps TRPG and avatar experiments outside the main operations surface.
 
 import { html } from 'htm/preact'
 import { route, navigate } from '../router'
-import { Command } from './command'
 import { Lab } from './lab'
 
-export function LabUnified() {
-  const surface = route.value.params.surface
+type LabSection = 'overview' | 'trpg' | 'avatars'
+
+function currentSection(): LabSection {
+  const section = route.value.params.section
+  if (section === 'trpg' || section === 'avatars') return section
+  return 'overview'
+}
+
+export function LabSurface() {
+  const section = currentSection()
 
   return html`
     <div class="tab-unified">
       <div class="tab-pill-bar">
         <button
-          class="tab-pill ${surface !== 'trpg' ? 'tab-pill--active' : ''}"
-          onClick=${() => navigate('lab')}
+          class="tab-pill ${section === 'overview' ? 'tab-pill--active' : ''}"
+          onClick=${() => navigate('lab', { section: 'overview' })}
         >
-          지휘
+          개요
         </button>
         <button
-          class="tab-pill ${surface === 'trpg' ? 'tab-pill--active' : ''}"
-          onClick=${() => navigate('lab', { surface: 'trpg' })}
+          class="tab-pill ${section === 'trpg' ? 'tab-pill--active' : ''}"
+          onClick=${() => navigate('lab', { section: 'trpg' })}
         >
           TRPG
         </button>
+        <button
+          class="tab-pill ${section === 'avatars' ? 'tab-pill--active' : ''}"
+          onClick=${() => navigate('lab', { section: 'avatars' })}
+        >
+          아바타
+        </button>
       </div>
 
-      ${surface === 'trpg'
-        ? html`<${Lab} />`
-        : html`<${Command} />`
-      }
+      <${Lab} />
     </div>
   `
 }
+
+export const LabUnified = LabSurface

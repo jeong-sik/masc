@@ -1,28 +1,41 @@
-// MASC Dashboard — Control Tab
-// Absorbs: intervene + tools. Ops (intervene) default, tools as secondary.
+// MASC Dashboard — Operations Surface
+// Conventional operator dashboard split: intervene + command + tools.
 
 import { html } from 'htm/preact'
 import { route, navigate } from '../router'
 import { Ops } from './ops'
 import { Tools } from './tools'
+import { Command } from './command'
 
-type ControlSection = 'intervene' | 'tools'
+type OperationsSection = 'intervene' | 'command' | 'tools'
 
-export function Control() {
-  const section: ControlSection = route.value.params.section === 'tools' ? 'tools' : 'intervene'
+function currentSection(): OperationsSection {
+  const section = route.value.params.section
+  if (section === 'tools' || section === 'command') return section
+  return 'intervene'
+}
+
+export function Operations() {
+  const section = currentSection()
 
   return html`
     <div class="tab-unified">
       <div class="tab-pill-bar">
         <button
           class="tab-pill ${section === 'intervene' ? 'tab-pill--active' : ''}"
-          onClick=${() => navigate('control')}
+          onClick=${() => navigate('operations', { section: 'intervene' })}
         >
           개입
         </button>
         <button
+          class="tab-pill ${section === 'command' ? 'tab-pill--active' : ''}"
+          onClick=${() => navigate('operations', { section: 'command' })}
+        >
+          지휘
+        </button>
+        <button
           class="tab-pill ${section === 'tools' ? 'tab-pill--active' : ''}"
-          onClick=${() => navigate('control', { section: 'tools' })}
+          onClick=${() => navigate('operations', { section: 'tools' })}
         >
           도구
         </button>
@@ -30,8 +43,11 @@ export function Control() {
 
       ${section === 'tools'
         ? html`<${Tools} />`
-        : html`<${Ops} />`
-      }
+        : section === 'command'
+          ? html`<${Command} />`
+          : html`<${Ops} />`}
     </div>
   `
 }
+
+export const Control = Operations

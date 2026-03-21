@@ -56,7 +56,7 @@ function SurfaceTabs() {
                   class="command-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
                   onClick=${() => {
                     setCommandPlaneSurface(surface.id)
-                    navigate('lab', surfaceRouteParams(surface.id))
+                    navigate('operations', surfaceRouteParams(surface.id))
                   }}
                 >
                   ${surface.label}
@@ -116,7 +116,7 @@ export function Command() {
   }, [])
 
   useEffect(() => {
-    if (route.value.tab !== 'lab') return
+    if (route.value.tab !== 'operations' || route.value.params.section !== 'command') return
     const requestedSurface = route.value.params.surface
     const requestedOperation = route.value.params.operation
     const workflowContext = workflowContextForRoute(route.value)
@@ -146,6 +146,7 @@ export function Command() {
     }
   }, [
     route.value.tab,
+    route.value.params.section,
     route.value.params.surface,
     route.value.params.operation,
     route.value.params.operation_id,
@@ -255,7 +256,7 @@ export function Command() {
               class="control-btn ghost"
               onClick=${() => {
                 setCommandPlaneSurface('warroom')
-                navigate('lab', { ...surfaceRouteParams('warroom'), presentation: 'wallboard' })
+                navigate('operations', { ...surfaceRouteParams('warroom'), presentation: 'wallboard' })
               }}
             >
               Wallboard

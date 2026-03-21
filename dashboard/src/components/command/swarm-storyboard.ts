@@ -14,6 +14,7 @@ import {
 import { ProvenanceChip } from '../common/provenance-strip'
 import { relativeTime, toneClass } from './helpers'
 import { SwarmWorkerGrid } from './swarm-cards'
+import { actorName } from '../ops/helpers'
 
 function swarmLaneTone(lane: CommandPlaneSwarmLane): string {
   if (lane.motion_state === 'stalled') return 'bad'
@@ -223,6 +224,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
 
   const confirmPending = async (decision: 'confirm' | 'deny') => {
     if (!pendingConfirm) return
+    const actor = actorName.value.trim() || 'dashboard'
     await confirmOperatorPendingAction(actor, pendingConfirm.confirm_token, decision)
   }
 

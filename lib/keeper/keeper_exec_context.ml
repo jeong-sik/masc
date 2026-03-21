@@ -274,29 +274,40 @@ let build_keeper_system_prompt
     else Printf.sprintf "\nCustom instructions:\n%s\n" s
   in
   Printf.sprintf
-    "You are a keeper agent with persistent memory.\n\
+    "<world>\n\
+     You live in MASC (Multi-Agent Streaming Coordination).\n\
+     Multiple AI agents coexist in rooms, post on a shared Board, and coordinate tasks.\n\
+     A human operator (Vincent) runs this system. You are one of these agents.\n\
+     </world>\n\
+     \n\
+     <identity>\n\
      Goal: %s\n\
-     Goal horizons:\n\
-     - Short: %s\n\
-     - Mid: %s\n\
-     - Long: %s\n\
+     - Short-term: %s\n\
+     - Mid-term: %s\n\
+     - Long-term: %s\n\
+     Will: %s\n\
+     Needs: %s\n\
+     Desires: %s\n\
+     %s\n\
+     </identity>\n\
      \n\
-     Tool guidance:\n\
-     - You can call tools for time/context/memory/weather checks.\n\
-     - Prefer tools when user asks for factual current status or memory lookup evidence.\n\
-     - After tool use, answer with concise, grounded statements.\n\
-     \n\
-     Self model:\n\
-     - Will: %s\n\
-     - Needs: %s\n\
-     - Desires: %s\n\
+     <capabilities>\n\
+     What you can do with your tools:\n\
+     - Read and write to the Board: see what other agents posted, share your thoughts, comment, vote.\n\
+     - Read files: check project files to understand current state.\n\
+     - Search memory: look up past conversations, decisions, and context.\n\
+     - Check time and context status: know what time it is and where you are.\n\
+     Use tools on your own judgment. Do not wait for someone to ask.\n\
+     </capabilities>\n\
      \n\
      %s\n\
      \n\
-    %s\
-    %s"
-    goal short_goal mid_goal long_goal will needs desires profile_policy
-    keeper_constitution custom
+     <continuity>\n\
+     This conversation may be compacted or handed off to a successor.\n\
+     Reply in the user's language. Keep replies concise.\n\
+     </continuity>"
+    goal short_goal mid_goal long_goal will needs desires custom
+    profile_policy
 
 let append_trait_clause ~(base : string) ~(clause : string) : string =
   let b = String.trim base in
@@ -312,8 +323,8 @@ let proactive_prompt_for_keeper
     ~(idle_seconds : int)
     (snapshot : keeper_state_snapshot option)
     (continuity_summary : string) : string =
-  let seed = proactive_seed_for_soul_profile meta.soul_profile in
-  let profile =
+  let _seed = proactive_seed_for_soul_profile meta.soul_profile in
+  let _profile =
     canonical_soul_profile meta.soul_profile
     |> Option.value ~default:default_soul_profile
   in
@@ -333,22 +344,14 @@ let proactive_prompt_for_keeper
     else continuity_snapshot
   in
   Printf.sprintf
-    "Autonomous proactive turn (no new user message) after %d seconds idle.\n\
-     Keeper SOUL profile: %s.\n\
-     Goal: %s\n\
-     Last proactive preview (avoid repeating): %s\n\
-     Continuity snapshot:\n%s\n\
-     SOUL perspective hint: %s\n\
-     Guidance (strict):\n\
-     - Prefer the same language as the recent conversation.\n\
-     - Avoid repeating the previous proactive message verbatim.\n\
-     - Keep it concise and useful for the current goal.\n\
-     - If external checks or actions are needed, call tools before finalizing.\n\
-     - When a required write action is identified, execute it via tools and then summarize.\n\
-     - For this proactive turn only, do NOT output [STATE] blocks.\n\
-     - Output exactly one line using this format:\n\
-       CHECKIN: <single complete sentence ending with punctuation>"
-    idle_seconds profile meta.goal last_preview continuity_snapshot seed
+    "%d seconds since last activity. No new messages.\n\
+     Act on your own judgment. Use tools to check what is happening, then decide what to do.\n\
+     \n\
+     Last action (do not repeat): %s\n\
+     %s"
+    idle_seconds last_preview
+    (if continuity_snapshot = "No continuity snapshot available." then ""
+     else Printf.sprintf "Context:\n%s" continuity_snapshot)
 
 type proactive_generation_result = {
   reply: string;

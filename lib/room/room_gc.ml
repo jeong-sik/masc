@@ -352,7 +352,8 @@ let gc config ?(days=7) () =
    | Error e ->
        results := Printf.sprintf "⚠️ Backend pubsub cleanup failed: %s" (Backend.show_error e) :: !results);
 
-  (* 5. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json) *)
+  (* 5. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json)
+        and orphan date-split metrics directories (<name>/metrics/ without <name>.json) *)
   let keeper_orphan_count = ref 0 in
   let pk_dir = Filename.concat (Filename.concat config.base_path ".masc") "perpetual-keepers" in
   if Sys.file_exists pk_dir then begin
@@ -363,7 +364,7 @@ let gc config ?(days=7) () =
         Some (Filename.chop_suffix name ".json")
       else None
     ) entries in
-    (* Find and remove orphan sidecar files *)
+    (* Find and remove orphan legacy sidecar files *)
     List.iter (fun name ->
       (* Skip global files starting with _ (e.g. _alerts.jsonl) *)
       if String.length name > 0 && name.[0] <> '_' then begin
@@ -375,6 +376,37 @@ let gc config ?(days=7) () =
           if not (List.mem base active_keepers) then begin
             (try Sys.remove (Filename.concat pk_dir name)
              with Sys_error _ -> ());
+            incr keeper_orphan_count
+          end
+        end
+      end
+    ) entries;
+    (* Find and remove orphan date-split metrics directories *)
+    let rec rmdir_recursive path =
+      if Sys.file_exists path && Sys.is_directory path then begin
+        Array.iter (fun child ->
+          let child_path = Filename.concat path child in
+          if Sys.is_directory child_path then rmdir_recursive child_path
+          else (try Sys.remove child_path with Sys_error _ -> ())
+        ) (Sys.readdir path);
+        (try Unix.rmdir path with Unix.Unix_error _ -> ())
+      end
+    in
+    List.iter (fun name ->
+      if String.length name > 0 && name.[0] <> '_'
+         && not (Filename.check_suffix name ".json")
+         && not (Filename.check_suffix name ".jsonl") then begin
+        let dir_path = Filename.concat pk_dir name in
+        if Sys.file_exists dir_path && Sys.is_directory dir_path then begin
+          let metrics_dir = Filename.concat dir_path "metrics" in
+          if not (List.mem name active_keepers)
+             && Sys.file_exists metrics_dir && Sys.is_directory metrics_dir then begin
+            rmdir_recursive metrics_dir;
+            (* Remove the keeper dir itself if now empty *)
+            (try
+               if Array.length (Sys.readdir dir_path) = 0 then
+                 Unix.rmdir dir_path
+             with Sys_error _ | Unix.Unix_error _ -> ());
             incr keeper_orphan_count
           end
         end

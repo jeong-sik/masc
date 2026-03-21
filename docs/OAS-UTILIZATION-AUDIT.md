@@ -1,8 +1,8 @@
 # MASC-MCP OAS Utilization Audit
 
 Date: 2026-03-21
-OAS Version: 0.80.0 (CI/runtime pin on `jeong-sik/oas#main`)
-Snapshot: `chore/oas-upgrade-0800` on top of `main`
+OAS Version: 0.81.0 (CI/runtime pin on `jeong-sik/oas#main`)
+Snapshot: `main` audit aligned to the current upstream `agent_sdk.opam`
 
 ## Current Read
 

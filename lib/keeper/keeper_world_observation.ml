@@ -99,7 +99,7 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
 let read_context_ratio ~(config : Room.config) ~(meta : keeper_meta) : float =
   try
     let primary_max_context =
-      Model_spec.resolve_primary_max_context meta.models
+      Oas_model_resolve.resolve_primary_max_context meta.models
     in
     let base_dir = session_base_dir config in
     let _session, ctx_opt =
@@ -118,7 +118,7 @@ let read_continuity_summary ~(config : Room.config) ~(meta : keeper_meta)
     : string =
   try
     let primary_max_context =
-      Model_spec.resolve_primary_max_context meta.models
+      Oas_model_resolve.resolve_primary_max_context meta.models
     in
     let base_dir = session_base_dir config in
     let _session, ctx_opt =

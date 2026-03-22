@@ -512,6 +512,7 @@
    masc_eio_env
    discovery_cache
    oas_type_adapters
+   oas_model_resolve
    context_compact_oas
    verifier_oas
    procedural_memory

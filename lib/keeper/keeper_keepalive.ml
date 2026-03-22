@@ -104,7 +104,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                    keeper_metrics_store ctx.config meta_current.name
                  in
                  let primary_max_context =
-                   Model_spec.resolve_primary_max_context meta_current.models
+                   Oas_model_resolve.resolve_primary_max_context meta_current.models
                  in
                  let base_dir = session_base_dir ctx.config in
                  let _session, ctx_opt =

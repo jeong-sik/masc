@@ -116,8 +116,9 @@ let test_memory_scratchpad_lifecycle () =
     Memory_oas_bridge.create_memory ~agent_name:"test-scratch" ()
   in
   (* Store to scratchpad *)
-  Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
-    "current_tool" (`String "bash");
+  let (_ : (unit, string) result) =
+    Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
+      "current_tool" (`String "bash") in
   let (sp, _, _, _, _) = Oas.Memory.stats memory in
   Alcotest.(check int) "scratchpad has 1" 1 sp;
   (* Clear scratchpad (simulating turn boundary) *)
@@ -131,10 +132,12 @@ let test_memory_working_survives_clear () =
   let memory =
     Memory_oas_bridge.create_memory ~agent_name:"test-working" ()
   in
-  Oas.Memory.store memory ~tier:Oas.Memory.Working
-    "session_goal" (`String "deploy v2");
-  Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
-    "temp" (`String "ephemeral");
+  let (_ : (unit, string) result) =
+    Oas.Memory.store memory ~tier:Oas.Memory.Working
+      "session_goal" (`String "deploy v2") in
+  let (_ : (unit, string) result) =
+    Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
+      "temp" (`String "ephemeral") in
   Oas.Memory.clear_scratchpad memory;
   let (sp, wk, _, _, _) = Oas.Memory.stats memory in
   Alcotest.(check int) "scratchpad cleared" 0 sp;
@@ -150,8 +153,9 @@ let test_memory_promote_scratchpad_to_working () =
   let memory =
     Memory_oas_bridge.create_memory ~agent_name:"test-promote" ()
   in
-  Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
-    "important_finding" (`String "bug in auth");
+  let (_ : (unit, string) result) =
+    Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
+      "important_finding" (`String "bug in auth") in
   let promoted = Oas.Memory.promote memory "important_finding" in
   Alcotest.(check bool) "promote succeeded" true promoted;
   Oas.Memory.clear_scratchpad memory;
@@ -309,9 +313,12 @@ let test_flush_procedures_dedupes_legacy_records () =
 let test_stats_all_tiers () =
   let dir = setup_tmp_dir () in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-stats" () in
-  Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad "s1" (`Int 1);
-  Oas.Memory.store memory ~tier:Oas.Memory.Working "w1" (`Int 2);
-  Oas.Memory.store memory ~tier:Oas.Memory.Working "w2" (`Int 3);
+  let (_ : (unit, string) result) =
+    Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad "s1" (`Int 1) in
+  let (_ : (unit, string) result) =
+    Oas.Memory.store memory ~tier:Oas.Memory.Working "w1" (`Int 2) in
+  let (_ : (unit, string) result) =
+    Oas.Memory.store memory ~tier:Oas.Memory.Working "w2" (`Int 3) in
   let ep : Oas.Memory.episode = {
     id = "stat-ep"; timestamp = 0.0; participants = [];
     action = "a"; outcome = Oas.Memory.Neutral;

@@ -86,6 +86,7 @@ type module_tag =
   | Mod_library | Mod_keeper | Mod_compact | Mod_mdal
   | Mod_notifications | Mod_inline
   | Mod_autoresearch
+  | Mod_research
   | Mod_model_catalog
   | Mod_shard
   | Mod_fire_task

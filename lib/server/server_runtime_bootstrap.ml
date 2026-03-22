@@ -65,6 +65,36 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
    | exn ->
      Log.Misc.error "tool registry warm-up failed: %s"
        (Printexc.to_string exn));
+  (* Prune old date-split JSONL files on startup (default: 30 days).
+     Iterates known store directories and deletes day-files exceeding retention. *)
+  (try
+     let days =
+       Safe_ops.get_env_int_logged "MASC_JSONL_RETENTION_DAYS" ~default:30
+     in
+     let masc = Filename.concat state.room_config.base_path ".masc" in
+     let prune_dir dir =
+       if Sys.file_exists dir then
+         Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
+       else 0
+     in
+     let total =
+       prune_dir (Filename.concat masc "audit")
+       + prune_dir (Filename.concat masc "telemetry")
+       + prune_dir (Filename.concat (Filename.concat masc "governance") "judgments")
+       + (let keepers = Filename.concat masc "perpetual-keepers" in
+          if not (Sys.file_exists keepers) then 0
+          else
+            Array.fold_left (fun acc name ->
+              acc + prune_dir (Filename.concat (Filename.concat keepers name) "metrics")
+            ) 0 (Sys.readdir keepers))
+     in
+     if total > 0 then
+       Log.Misc.info "startup prune: deleted %d old JSONL day-files (retention=%dd)"
+         total days
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Misc.error "startup prune failed: %s" (Printexc.to_string exn));
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =

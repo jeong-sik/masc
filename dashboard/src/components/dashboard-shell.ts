@@ -128,68 +128,54 @@ export function SideRail() {
   const sectionItems = sectionItemsForTab(current)
 
   return html`
-    <aside class="dashboard-rail sticky top-[calc(var(--header-h)+16px)] z-[var(--z-layout)] flex flex-col gap-3 max-h-[calc(100dvh-var(--header-h)-32px)] overflow-y-auto overscroll-contain scrollbar-stable pr-1">
-      <section class="border border-solid border-[var(--card-border)] rounded-xl bg-[var(--card)] py-2.5 px-3">
-        <div class="flex items-center justify-between gap-3">
-          <h3 class="mb-0 text-[color:var(--text-strong)] text-xs uppercase tracking-[0.08em]">탐색</h3>
-        </div>
+    <nav class="flex flex-col h-full">
+      <!-- Navigation -->
+      <div class="flex-1 overflow-y-auto py-4 px-3">
+        <div class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] px-2 mb-2">탐색</div>
 
-        <!-- Primary surfaces (5 items) -->
-        <div class="rail-tab-list grid grid-cols-1 gap-1.5">
+        <div class="flex flex-col gap-0.5">
           ${DASHBOARD_SURFACES.map(surface => {
             const isActive = surface.id === currentSurface
             return html`
               <button
-                class="border border-solid rounded-[10px] py-2.5 px-[11px] cursor-pointer text-xs flex items-start gap-2.5 text-left hover:bg-[var(--white-10)] ${isActive ? 'border-[rgba(71,184,255,0.48)] bg-[var(--accent-soft)] text-[#bde6ff]' : 'border-[var(--card-border)] bg-[var(--white-3)] text-[color:var(--text-body)]'}"
+                class="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left cursor-pointer border-0 transition-colors duration-150 ${isActive ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-transparent text-[var(--text-body)] hover:bg-[var(--white-6)]'}"
                 key=${surface.id}
                 onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
               >
-                <span class="text-base leading-[1.2]">${surface.icon}</span>
-                <span class="min-w-0 grid gap-0.5">
-                  <strong class="text-[color:var(--text-strong)] text-[13px] leading-[1.3]">${surface.label}</strong>
-                  <span class="${isActive ? 'text-[#c7dcf7]' : 'text-[color:var(--text-muted)]'} text-[11px] leading-[1.4]">${surface.description}</span>
-                </span>
+                <span class="text-sm w-5 text-center shrink-0">${surface.icon}</span>
+                <span class="text-[13px] font-medium truncate">${surface.label}</span>
               </button>
             `
           })}
         </div>
 
-        <!-- Sub-tabs within current surface -->
+        <!-- Sub-sections -->
         ${(() => {
           if (sectionItems.length === 0) return null
           return html`
-            <div class="rail-nav-group mt-3">
-              <div class="rail-group-label">${currentView?.label ?? currentSurface} 하위</div>
-              <div class="rail-tab-list grid grid-cols-1 gap-1.5 mt-1.5">
+            <div class="mt-5 pt-4 border-t border-[var(--white-6)]">
+              <div class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] px-2 mb-2">${currentView?.label ?? currentSurface}</div>
+              <div class="flex flex-col gap-0.5">
                 ${sectionItems.map(item => html`
                   <button
-                    class="border border-solid rounded-[10px] py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5 text-left hover:bg-[var(--white-10)] ${currentSection?.id === item.id ? 'border-[rgba(71,184,255,0.48)] bg-[var(--accent-soft)] text-[#bde6ff]' : 'border-[var(--card-border)] bg-[var(--white-3)] text-[color:var(--text-body)]'}"
+                    class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-left cursor-pointer border-0 text-[13px] transition-colors duration-150 ${currentSection?.id === item.id ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-medium' : 'bg-transparent text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]'}"
                     key=${item.id}
                     onClick=${() => navigate(currentSurface, item.params)}
                   >
-                    <span class="rail-tab-copy min-w-0 grid gap-0.5">
-                      <strong class="text-[color:var(--text-strong)] text-xs leading-[1.3]">${item.label}</strong>
-                      <span class="text-[color:var(--text-muted)] text-[11px] leading-[1.4]">${item.description}</span>
-                    </span>
+                    ${item.label}
                   </button>
                 `)}
               </div>
             </div>
           `
         })()}
+      </div>
 
-        ${current !== 'home' ? html`
-          <div class="mt-3.5 pt-2.5 border-t border-[var(--card-border)] grid gap-1">
-            <div class="text-[color:var(--text-muted)] text-[11px] tracking-[0.06em] uppercase">현재 화면</div>
-            <strong class="text-[color:var(--text-strong)] text-sm">${currentSection ? `${currentView?.label ?? current} · ${currentSection.label}` : currentView?.label ?? current}</strong>
-            <p class="text-[color:var(--text-muted)] text-xs leading-[1.45]">${currentSection?.description ?? currentView?.description ?? '운영 화면'}</p>
-          </div>
-        ` : null}
-      </section>
-
-      <${SnapshotCard} currentTab=${current} />
-      ${current !== 'home' ? html`<${InterveneRailCard} />` : null}
-    </aside>
+      <!-- Status Footer -->
+      <div class="shrink-0 border-t border-[var(--white-6)] p-3">
+        <${SnapshotCard} currentTab=${current} />
+      </div>
+    </nav>
   `
 }
 

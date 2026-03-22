@@ -303,26 +303,23 @@ let require_eio () =
   | None, _ -> Error "Eio switch not available (running outside server context)"
   | _, None -> Error "Eio net not available (running outside server context)"
 
-(** Resolve cascade model specs from config + defaults. *)
-let resolve_cascade_specs ~cascade_name : Model_spec.model_spec list =
+(** Resolve cascade provider configs via OAS Cascade_config.
+    Returns OAS Provider_config.t list directly, bypassing Model_spec. *)
+let resolve_cascade_providers ~cascade_name : Llm_provider.Provider_config.t list =
   let defaults = default_model_strings ~cascade_name in
+  let config_path = default_config_path () in
   let configured =
-    match default_config_path () with
-    | Some path ->
-      let from_file =
-        Model_spec.load_cascade_profile ~config_path:path ~name:cascade_name
-      in
-      if from_file <> [] then from_file else defaults
-    | None -> defaults
+    Llm_provider.Cascade_config.resolve_model_strings
+      ?config_path ~name:cascade_name ~defaults ()
   in
-  let specs = Model_spec.available_model_specs_of_strings configured in
+  let specs = Llm_provider.Cascade_config.parse_model_strings configured in
   if specs <> [] then specs
   else if configured = defaults then (
       Log.Misc.warn "cascade %s: no callable models from built-in defaults" cascade_name;
       [])
     else (
       Log.Misc.warn "cascade %s: configured models unavailable — retrying built-in defaults" cascade_name;
-      Model_spec.available_model_specs_of_strings defaults)
+      Llm_provider.Cascade_config.parse_model_strings defaults)
 
 let config_for_model
     ~(name : string)
@@ -392,18 +389,30 @@ let run_named
   let named_cascade = Oas.Api.named_cascade ?config_path
     ~name:cascade_name ~defaults () in
   let name = Printf.sprintf "oas-%s" cascade_name in
-  (* Use first available model as primary for Builder.
-     Fallback to glm_cloud preset when no cascade models resolve. *)
-  let primary_spec = match resolve_cascade_specs ~cascade_name with
-    | spec :: _ -> spec
-    | [] -> Model_spec.glm_cloud
+  (* Use first available provider config as primary for Builder.
+     OAS named_cascade handles actual fallback — this is just the
+     initial provider for Agent construction. *)
+  let primary_provider = match resolve_cascade_providers ~cascade_name with
+    | cfg :: _ -> cfg
+    | [] ->
+      Llm_provider.Provider_config.make
+        ~kind:Llm_provider.Provider_config.Glm
+        ~model_id:"auto"
+        ~base_url:"https://open.bigmodel.cn/api/paas/v4"
+        ~request_path:"/chat/completions"
+        ()
+  in
+  let provider : Oas.Provider.config =
+    Oas_type_adapters.provider_config_to_oas primary_provider
   in
   let config =
-    config_for_model ~name ~model_spec:primary_spec ~system_prompt ~tools
-      ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
-      ?context_reducer ?memory
-      ~description:(Some (Printf.sprintf "cascade:%s" cascade_name))
-      ()
+    { (default_config ~name ~provider ~model_id:primary_provider.model_id
+         ~system_prompt ~tools)
+      with
+      max_turns; max_tokens; temperature;
+      guardrails; hooks; context_reducer; memory;
+      description = Some (Printf.sprintf "cascade:%s" cascade_name);
+    }
   in
   let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in
   match run ~sw ~net ~config ?on_event ?agent_ref goal with

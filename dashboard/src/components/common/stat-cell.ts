@@ -9,14 +9,26 @@ interface StatCellProps {
   value: ComponentChildren
   detail?: ComponentChildren
   tone?: string
+  size?: 'md' | 'lg'
+  bg?: 'white-3' | 'white-4'
   class?: string
 }
 
-export function StatCell({ label, value, detail, tone, class: className }: StatCellProps) {
+const BG = {
+  'white-3': 'bg-[var(--white-3)]',
+  'white-4': 'bg-[var(--white-4)]',
+} as const
+
+const VALUE_SIZE = {
+  md: 'text-lg',
+  lg: 'text-xl',
+} as const
+
+export function StatCell({ label, value, detail, tone, size = 'md', bg = 'white-4', class: className }: StatCellProps) {
   return html`
-    <div class="p-4 rounded-xl bg-[var(--white-4)] border border-[var(--white-6)] grid gap-1.5 ${tone ?? ''} ${className ?? ''}">
+    <div class="p-4 rounded-xl ${BG[bg]} border border-[var(--white-6)] grid gap-1.5 ${tone ?? ''} ${className ?? ''}">
       <span class="text-[10px] text-[var(--text-muted)] tracking-wider uppercase font-medium">${label}</span>
-      <strong class="text-[var(--text-strong)] text-lg leading-tight tabular-nums">${value}</strong>
+      <strong class="text-[var(--text-strong)] ${VALUE_SIZE[size]} leading-tight tabular-nums">${value}</strong>
       ${detail != null ? html`<small class="text-[var(--text-muted)] text-[10px] leading-relaxed">${detail}</small>` : null}
     </div>
   `

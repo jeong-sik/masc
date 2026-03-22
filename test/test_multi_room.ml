@@ -248,14 +248,19 @@ let test_room_task_isolation () =
     ignore (Room.room_create config ~name:"Isolated Room" ~description:None);
     ignore (Room.room_enter config ~room_id:"isolated-room" ~agent_type:"codex" ());
 
-    (* Default room tasks should not leak into the new room. *)
-    check int "isolated room starts empty" 0 (task_count config);
+    (* Re-resolve scope after room_enter wrote current_room file.
+       masc_dir no longer re-reads the file on every call. *)
+    let isolated_config = Room.config_with_resolved_scope config in
 
-    ignore (Room.add_task config ~title:"isolated-task" ~priority:3 ~description:"isolated room task");
-    check int "isolated room task count" 1 (task_count config);
+    (* Default room tasks should not leak into the new room. *)
+    check int "isolated room starts empty" 0 (task_count isolated_config);
+
+    ignore (Room.add_task isolated_config ~title:"isolated-task" ~priority:3 ~description:"isolated room task");
+    check int "isolated room task count" 1 (task_count isolated_config);
 
     ignore (Room.room_enter config ~room_id:"default" ~agent_type:"codex" ());
-    check int "default room remains isolated" 1 (task_count config);
+    let default_config = Room.config_with_resolved_scope config in
+    check int "default room remains isolated" 1 (task_count default_config);
   )
 
 let test_rooms_list_task_count_active_only () =
@@ -271,7 +276,9 @@ let test_rooms_list_task_count_active_only () =
 
     ignore (Room.room_create config ~name:"Count Room" ~description:None);
     ignore (Room.room_enter config ~room_id:"count-room" ~agent_type:"codex" ());
-    ignore (Room.add_task config ~title:"count-room-task" ~priority:3 ~description:"");
+    (* Re-resolve scope after room_enter wrote current_room file *)
+    let count_config = Room.config_with_resolved_scope config in
+    ignore (Room.add_task count_config ~title:"count-room-task" ~priority:3 ~description:"");
 
     let result = Room.rooms_list config in
     check (option int) "default counts only active tasks" (Some 1)

@@ -95,6 +95,44 @@ let bootstrap_server_state (state : Mcp_server.server_state) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      Log.Misc.error "startup prune failed: %s" (Printexc.to_string exn));
+  (* Prune old keeper checkpoint files: keep only latest 3 per trace session.
+     Prevents unbounded growth from AfterTurn hook saving every turn. *)
+  (try
+     let perpetual_dir =
+       Filename.concat
+         (Filename.concat state.room_config.base_path ".masc") "perpetual"
+     in
+     if Sys.file_exists perpetual_dir then begin
+       let total = ref 0 in
+       Array.iter (fun trace_name ->
+         let trace_dir = Filename.concat perpetual_dir trace_name in
+         if Sys.is_directory trace_dir then begin
+           let files = Sys.readdir trace_dir |> Array.to_list in
+           let ckpt_files =
+             files
+             |> List.filter (fun f ->
+               let len = String.length f in
+               len > 5 && String.sub f 0 5 = "ckpt-"
+               && String.sub f (len - 5) 5 = ".json")
+             |> List.sort (fun a b -> compare b a)
+           in
+           if List.length ckpt_files > 3 then
+             List.iteri (fun i f ->
+               if i >= 3 then begin
+                 (try Sys.remove (Filename.concat trace_dir f)
+                  with Sys_error _ -> ());
+                 incr total
+               end
+             ) ckpt_files
+         end
+       ) (Sys.readdir perpetual_dir);
+       if !total > 0 then
+         Log.Misc.info "startup prune: deleted %d old keeper checkpoint files" !total
+     end
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Misc.error "startup checkpoint prune failed: %s" (Printexc.to_string exn));
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let bootstrap_keepers ~sw ~clock (state : Mcp_server.server_state) =

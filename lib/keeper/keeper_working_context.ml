@@ -313,6 +313,10 @@ let persist_message session msg =
   let line = Yojson.Safe.to_string payload ^ "\n" in
   Fs_compat.append_file path line
 
+(** Maximum number of checkpoint files to retain per session.
+    Only the latest N are kept; older ones are deleted after each save. *)
+let max_checkpoints_retained = 3
+
 let save_session_checkpoint session ckpt =
   session.checkpoints <- session.checkpoints @ [ckpt];
   let path = Filename.concat session.session_dir
@@ -330,7 +334,28 @@ let save_session_checkpoint session ckpt =
     ("context", context_json);
   ] in
   let content = Yojson.Safe.to_string json in
-  Fs_compat.save_file path content
+  Fs_compat.save_file path content;
+  (* Prune old checkpoints: keep only the latest max_checkpoints_retained *)
+  let dir = session.session_dir in
+  (try
+    let files = Sys.readdir dir |> Array.to_list in
+    let ckpt_files =
+      files
+      |> List.filter (fun f ->
+        let len = String.length f in
+        len > 5 && String.sub f 0 5 = "ckpt-"
+        && String.sub f (len - 5) 5 = ".json")
+      |> List.sort (fun a b -> compare b a) (* newest first *)
+    in
+    if List.length ckpt_files > max_checkpoints_retained then
+      let to_delete =
+        List.filteri (fun i _ -> i >= max_checkpoints_retained) ckpt_files
+      in
+      List.iter (fun f ->
+        let p = Filename.concat dir f in
+        (try Sys.remove p with Sys_error _ -> ())
+      ) to_delete
+  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
 
 let load_latest_checkpoint session =
   let dir = session.session_dir in

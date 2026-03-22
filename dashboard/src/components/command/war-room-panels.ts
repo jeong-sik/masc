@@ -127,9 +127,9 @@ export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
 
 export function WarRoomFeedCard({ item }: { item: WarRoomFeedItem }) {
   return html`
-    <article class="command-trace-row warroom-feed-card rounded-xl ${item.tone}">
-      <div class="command-trace-main">
-        <div class="command-trace-head">
+    <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3.5 warroom-feed-card rounded-xl ${item.tone}">
+      <div class="min-w-0 [overflow-wrap:anywhere] break-words">
+        <div class="flex justify-between items-start">
           <strong>${item.title}</strong>
           <span class="command-chip rounded-full ${item.tone}">${item.timestamp ? relativeTime(item.timestamp) : item.source}</span>
         </div>

@@ -192,7 +192,7 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
       return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">실시간 워룸 불러오는 중…</div>`
     }
     return html`
-      <section class="card rounded-xl min-h-[240px] command-warroom-empty ${wallboard ? 'wallboard' : ''}">
+      <section class="card rounded-xl ${wallboard ? 'min-h-[calc(100vh-180px)]' : 'min-h-[360px]'} flex flex-col justify-center gap-[18px]">
         <div class="card rounded-xl-title-row">
           <div class="card rounded-xl-title">실시간 워룸</div>
         </div>
@@ -212,7 +212,7 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
   }
 
   return html`
-    <div class="command-section-stack ${wallboard ? 'wallboard' : ''}">
+    <div class="flex flex-col ${wallboard ? 'gap-5' : 'gap-4'}">
       <${WarRoomHeroStrip}
         wallboard=${wallboard}
         stickyTone=${stickyTone}

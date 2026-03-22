@@ -23,10 +23,10 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
   const build = serverStatus.value?.build
 
   return html`
-    <section class="rail-card rounded-xl">
+    <section class="border border-solid border-[var(--card-border)] rounded-xl bg-[var(--card)] p-3.5">
       <div class="flex items-center justify-between gap-3">
-        <h3 class="mb-0">현황</h3>
-        <span class="rail-section-chip rounded-full ${liveConnected ? 'ok' : 'bad'}">${liveConnected ? '연결됨' : '오프라인'}</span>
+        <h3 class="mb-0 text-[color:var(--text-strong)] text-xs uppercase tracking-[0.08em]">현황</h3>
+        <span class="inline-flex items-center py-1 px-[9px] text-[10px] uppercase tracking-[0.08em] rounded-full border border-solid ${liveConnected ? 'text-[#86efac] border-[var(--ok-30)] bg-[var(--ok-12)]' : 'text-[#fda4af] border-[rgba(239,68,68,0.28)] bg-[var(--bad-12)]'}">${liveConnected ? '연결됨' : '오프라인'}</span>
       </div>
       <div class="grid grid-cols-2 gap-2">
         <div class="border border-[var(--border-slate-16)] rounded-[10px] py-2.5 px-[11px] bg-[var(--white-3)] grid gap-1">
@@ -48,7 +48,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
       </div>
       <div class="rail-inline-actions mt-3 grid grid-cols-2 gap-2">
         <button
-          class="rail-refresh-btn"
+          class="w-full border border-solid border-[rgba(71,184,255,0.4)] rounded-[10px] bg-[var(--accent-12)] text-[#d7efff] py-[9px] px-[11px] text-xs cursor-pointer hover:bg-[var(--accent-20)]"
           onClick=${() => {
             refreshDashboard()
             refreshForTab(currentTab)
@@ -74,10 +74,10 @@ export function InterveneRailCard() {
   const keeperCount = snapshot?.keepers.length ?? 0
 
   return html`
-    <section class="rail-card rounded-xl">
+    <section class="border border-solid border-[var(--card-border)] rounded-xl bg-[var(--card)] p-3.5">
       <div class="flex items-center justify-between gap-3">
-        <h3 class="mb-0">개입 바로가기</h3>
-        <span class="rail-section-chip rounded-full ${pendingConfirms > 0 ? 'warn' : 'ok'}">${pendingConfirms > 0 ? '확인 필요' : '정상'}</span>
+        <h3 class="mb-0 text-[color:var(--text-strong)] text-xs uppercase tracking-[0.08em]">개입 바로가기</h3>
+        <span class="inline-flex items-center py-1 px-[9px] text-[10px] uppercase tracking-[0.08em] rounded-full border border-solid ${pendingConfirms > 0 ? 'text-[color:var(--text-body)] border-[var(--warn-soft)] bg-[var(--white-6)]' : 'text-[#86efac] border-[var(--ok-30)] bg-[var(--ok-12)]'}">${pendingConfirms > 0 ? '확인 필요' : '정상'}</span>
       </div>
       <div class="grid grid-cols-2 gap-2">
         <div class="border border-[var(--border-slate-16)] rounded-[10px] py-2.5 px-[11px] bg-[var(--white-3)] grid gap-1">
@@ -95,7 +95,7 @@ export function InterveneRailCard() {
       </div>
       <div class="rail-inline-actions mt-3 grid grid-cols-2 gap-2">
         <button
-          class="rail-refresh-btn"
+          class="w-full border border-solid border-[rgba(71,184,255,0.4)] rounded-[10px] bg-[var(--accent-12)] text-[#d7efff] py-[9px] px-[11px] text-xs cursor-pointer hover:bg-[var(--accent-20)]"
           onClick=${() => {
             refreshOperatorSnapshot()
             refreshOperatorRoomDigest()

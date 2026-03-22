@@ -106,7 +106,7 @@ function CapacityRowCard({ row }: { row: CommandPlaneCapacityRow }) {
 export function ControlSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
-    <div class="command-surface-grid">
+    <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
       <section class="card rounded-xl min-h-[240px]">
         <div class="card rounded-xl-title-row">
           <div class="card rounded-xl-title">승인 대기</div>

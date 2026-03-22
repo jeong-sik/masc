@@ -50,12 +50,12 @@ export function ConnectionStatus() {
     : `재연결 중...${formatDisconnectDuration()}`
 
   return html`
-    <div class="flex items-center gap-2 text-[length:var(--fs-sm)] text-[color:var(--text-muted)] whitespace-nowrap connection-status ${isConnected ? 'connected' : 'disconnected'}">
-      <span class="size-[9px] rounded-full inline-block status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
+    <div class="flex items-center gap-2 text-[length:var(--fs-sm)] whitespace-nowrap ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}">
+      <span class="size-[9px] rounded-full inline-block ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_9px_rgba(74,222,128,0.8)]' : 'bg-[var(--bad)]'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
         <span
-          class="event-count rounded-full attention-badge cursor-pointer"
+          class="inline-flex items-center justify-center py-0.5 px-2 min-w-[80px] border border-solid border-[var(--card-border)] bg-[var(--white-4)] tabular-nums rounded-full attention-badge cursor-pointer"
           onClick=${() => navigate('home')}
         >주의 ${attentionCount}건</span>
       ` : null}
@@ -81,7 +81,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button
-        class="text-[11px] py-[2px] px-[9px] rounded-full border border-solid border-[rgba(71,184,255,0.35)] bg-[var(--accent-soft)] text-[#9ad9ff] build-badge-trigger"
+        class="text-[11px] py-[2px] px-[9px] rounded-full border border-solid border-[rgba(71,184,255,0.35)] bg-[var(--accent-soft)] text-[#9ad9ff] cursor-pointer font-[inherit]"
         type="button"
         aria-expanded=${buildIdentityOpen.value}
         onClick=${() => {
@@ -92,7 +92,7 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="build-badge-panel">
+            <div class="absolute top-[calc(100%+10px)] left-0 min-w-[280px] py-3 px-3.5 border border-solid border-[var(--card-border)] rounded-[var(--radius-md)] bg-[rgba(10,18,34,0.96)] shadow-[0_18px_34px_rgba(0,0,0,0.34)] grid gap-2">
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>릴리즈</span>
                 <strong class="text-[color:var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
@@ -128,10 +128,10 @@ export function SideRail() {
   const sectionItems = sectionItemsForTab(current)
 
   return html`
-    <aside class="dashboard-rail">
-      <section class="rail-card rounded-xl py-2.5 px-3">
+    <aside class="dashboard-rail sticky top-[calc(var(--header-h)+16px)] z-[var(--z-layout)] flex flex-col gap-3 max-h-[calc(100dvh-var(--header-h)-32px)] overflow-y-auto overscroll-contain scrollbar-stable pr-1">
+      <section class="border border-solid border-[var(--card-border)] rounded-xl bg-[var(--card)] py-2.5 px-3">
         <div class="flex items-center justify-between gap-3">
-          <h3 class="mb-0">탐색</h3>
+          <h3 class="mb-0 text-[color:var(--text-strong)] text-xs uppercase tracking-[0.08em]">탐색</h3>
         </div>
 
         <!-- Primary surfaces (5 items) -->
@@ -140,14 +140,14 @@ export function SideRail() {
             const isActive = surface.id === currentSurface
             return html`
               <button
-                class="rail-tab-btn ${isActive ? 'active' : ''}"
+                class="border border-solid rounded-[10px] py-2.5 px-[11px] cursor-pointer text-xs flex items-start gap-2.5 text-left hover:bg-[var(--white-10)] ${isActive ? 'border-[rgba(71,184,255,0.48)] bg-[var(--accent-soft)] text-[#bde6ff]' : 'border-[var(--card-border)] bg-[var(--white-3)] text-[color:var(--text-body)]'}"
                 key=${surface.id}
                 onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
               >
                 <span class="text-base leading-[1.2]">${surface.icon}</span>
-                <span class="rail-tab-copy min-w-0 grid gap-0.5">
+                <span class="min-w-0 grid gap-0.5">
                   <strong class="text-[color:var(--text-strong)] text-[13px] leading-[1.3]">${surface.label}</strong>
-                  <span class="text-[color:var(--text-muted)] text-[11px] leading-[1.4]">${surface.description}</span>
+                  <span class="${isActive ? 'text-[#c7dcf7]' : 'text-[color:var(--text-muted)]'} text-[11px] leading-[1.4]">${surface.description}</span>
                 </span>
               </button>
             `
@@ -163,7 +163,7 @@ export function SideRail() {
               <div class="rail-tab-list grid grid-cols-1 gap-1.5 mt-1.5">
                 ${sectionItems.map(item => html`
                   <button
-                    class="rail-tab-btn py-2 px-2.5 ${currentSection?.id === item.id ? 'active' : ''}"
+                    class="border border-solid rounded-[10px] py-2 px-2.5 cursor-pointer text-xs flex items-start gap-2.5 text-left hover:bg-[var(--white-10)] ${currentSection?.id === item.id ? 'border-[rgba(71,184,255,0.48)] bg-[var(--accent-soft)] text-[#bde6ff]' : 'border-[var(--card-border)] bg-[var(--white-3)] text-[color:var(--text-body)]'}"
                     key=${item.id}
                     onClick=${() => navigate(currentSurface, item.params)}
                   >

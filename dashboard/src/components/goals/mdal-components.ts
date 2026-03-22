@@ -23,7 +23,7 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
           </div>
           <div class="flex gap-1.5 flex-wrap">
             <${StatusBadge} status=${loop.status} />
-            <span class="pill rounded-full">${loop.current_iteration}${loop.max_iterations > 0 ? `/${loop.max_iterations}` : ''}</span>
+            <span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${loop.current_iteration}${loop.max_iterations > 0 ? `/${loop.max_iterations}` : ''}</span>
           </div>
         </div>
 

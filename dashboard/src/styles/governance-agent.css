@@ -1,19 +1,12 @@
 /* ── FF Character Sheet — kept: gradient plate, signal variants, responsive ── */
 
 .ff-plate {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 16px;
-  padding: 18px;
-  margin-bottom: 16px;
-  border-radius: 10px;
   background:
     linear-gradient(
       135deg,
       rgba(10, 22, 40, 0.95) 0%,
       rgba(16, 28, 52, 0.88) 100%
     );
-  border: 1px solid var(--ff-gold-15);
   box-shadow:
     0 0 20px rgba(200, 168, 78, 0.04),
     inset 0 1px 0 var(--ff-gold-8);

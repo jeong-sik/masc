@@ -49,11 +49,11 @@ export function Proof() {
   const snapshot = proofSnapshot.value
 
   if (proofLoading.value && !snapshot) {
-    return html`<section class="dashboard-panel"><div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">근거 화면 불러오는 중…</div></section>`
+    return html`<section class="flex flex-col gap-[18px]"><div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">근거 화면 불러오는 중…</div></section>`
   }
 
   if (proofError.value && !snapshot) {
-    return html`<section class="dashboard-panel"><div class="error-card rounded-xl">${proofError.value}</div></section>`
+    return html`<section class="flex flex-col gap-[18px]"><div class="error-card rounded-xl">${proofError.value}</div></section>`
   }
 
   const summary = snapshot?.summary
@@ -108,7 +108,7 @@ export function Proof() {
   )
 
   return html`
-    <section class="dashboard-panel flex flex-col gap-4">
+    <section class="flex flex-col gap-[18px]">
       <div class="panel-header">
         <div>
           <h2>근거</h2>

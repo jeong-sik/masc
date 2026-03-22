@@ -1,18 +1,6 @@
 /* ── Goals ────────────────────────────────────── */
 
-/* goal-summary: migrated to inline Tailwind (flex gap-3 flex-wrap) */
-
-/* goal-summary-item/value/label: migrated to inline Tailwind */
-
-/* goal-filter-label: migrated to inline Tailwind */
-
 .goal-filter-btn {
-  background: var(--white-5);
-  border: 1px solid var(--white-8);
-  color: #aaa;
-  padding: 3px 10px;
-  font-size: var(--fs-sm);
-  cursor: pointer;
   transition: all 0.15s;
 }
 
@@ -27,39 +15,7 @@
   color: #818cf8;
 }
 
-/* goal-row: migrated to inline Tailwind (flex justify-between items-start gap-3 ...) */
-.planning-loop-row {
-  border: 1px solid var(--card-border);
-  background: rgba(13, 22, 40, 0.58);
-  padding: 14px;
-}
-
-/* planning-loop-head: migrated to inline Tailwind */
-
-/* planning-loop-id/sub/target/footnote: migrated to inline Tailwind */
-
-/* goal-title, goal-horizon-badge, goal-review-note: migrated to inline Tailwind */
-
-/* goal-row-right: migrated to inline Tailwind (flex flex-col items-end gap-1 shrink-0) */
-
-/* goal-updated: migrated to inline Tailwind */
-
-/* planning-toolbar: migrated to inline Tailwind (flex justify-end py-2 mb-1) */
-
 /* -- Priority badge (inline P1-P4) -- */
-
-.priority-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: var(--fs-2xs);
-  font-weight: 700;
-  padding: 2px 6px;
-  letter-spacing: 0.5px;
-  flex-shrink: 0;
-  line-height: 1;
-}
-
 .priority-badge--p1 {
   background: rgba(248, 113, 113, 0.2);
   color: var(--bad-light);
@@ -84,28 +40,11 @@
   border: 1px solid var(--white-8);
 }
 
-/* kanban-card-header: removed (unused) */
-
 /* -- Task description preview (truncated, expandable) -- */
-
 .task-description-preview {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-  line-height: 1.5;
-  margin-left: 8px;
-  padding: 4px 8px;
-  border-left: 2px solid var(--white-6);
-  cursor: pointer;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  transition: color 0.15s;
 }
 
 .task-description-preview:hover {
   color: var(--text-body);
-}
-
-.task-description-preview--expanded {
-  white-space: normal;
-  text-overflow: unset;
 }

@@ -113,7 +113,7 @@ export function Mission() {
   }, [activeSessionId])
 
   return html`
-    <section class="dashboard-panel flex flex-col gap-4">
+    <section class="flex flex-col gap-[18px]">
       <div class="panel-header">
         <div>
           <h2>상황판</h2>

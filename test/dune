@@ -665,7 +665,13 @@
 (test
  (name test_fire_task)
  (modules test_fire_task)
- (libraries masc_mcp alcotest eio eio_main unix yojson str mirage-crypto-rng mirage-crypto-rng.unix))
+ (libraries masc_mcp masc_process alcotest eio eio_main unix yojson str mirage-crypto-rng mirage-crypto-rng.unix))
+
+; Worktree-based per-task sandbox isolation tests
+(test
+ (name test_task_sandbox)
+ (modules test_task_sandbox)
+ (libraries masc_mcp masc_process alcotest eio eio_main unix yojson str mirage-crypto-rng mirage-crypto-rng.unix))
 
 ; Error logging coverage tests (PR #466 silent failure fixes)
 (test

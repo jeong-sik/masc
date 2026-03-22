@@ -309,6 +309,7 @@
    tool_schemas_portal
    tool_schemas_worktree
    tool_schemas_fire_task
+   task_sandbox
    tool_fire_task
    tool_schemas_auth
    tool_schemas_agent

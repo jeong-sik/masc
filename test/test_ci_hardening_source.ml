@@ -239,6 +239,15 @@ let test_dashboard_executor_pool_contracts () =
     (file_contains_pattern "lib/server/server_runtime_bootstrap.ml"
        "Server_dashboard_http.set_executor_pool exec_pool")
 
+let test_mermaid_xss_contracts () =
+  check bool "mermaid securityLevel is strict (not loose)" true
+    (file_contains_pattern "dashboard/src/components/command/helpers.ts"
+       "securityLevel: 'strict'");
+  check bool "mermaid securityLevel loose is absent" true
+    (not
+       (file_contains_pattern "dashboard/src/components/command/helpers.ts"
+          "securityLevel: 'loose'"))
+
 let () =
   run "ci_hardening_source"
     [
@@ -253,5 +262,6 @@ let () =
            test_case "keeper oas cleanup contracts" `Quick test_keeper_oas_cleanup_contracts;
            test_case "dashboard executor pool contracts" `Quick
              test_dashboard_executor_pool_contracts;
+           test_case "mermaid xss contracts" `Quick test_mermaid_xss_contracts;
          ]);
     ]

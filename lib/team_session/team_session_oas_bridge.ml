@@ -96,7 +96,8 @@ let tool_requires_presence = function
 
 let ensure_agent_joined ~(config : Room.config) ~(agent_name : string) =
   try
-    if not (Room.is_initialized config) then ignore (Room.init config ~agent_name:None);
+    if not (Room.is_initialized config) then (
+      let (_init_msg : string) = Room.init config ~agent_name:None in ());
     let joined =
       try Room.is_agent_joined config ~agent_name
       with Sys_error _ | Not_found | Yojson.Json_error _ -> false

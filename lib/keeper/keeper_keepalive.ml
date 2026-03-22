@@ -385,7 +385,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
       { stop; started_at = Time_compat.now () };
     (try
        if not (Room_utils.is_initialized ctx.config) then
-         ignore (Room.init ctx.config ~agent_name:None)
+         let (_init_msg : string) = Room.init ctx.config ~agent_name:None in ()
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->

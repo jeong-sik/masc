@@ -253,7 +253,7 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
   let init_error =
     if (not auth_enabled) && join_required && not !room_init_cached then
       (try
-         ignore (Room.init config ~agent_name:None);
+         let (_init_msg : string) = Room.init config ~agent_name:None in
          room_init_cached := true;  (* Fix 3: update cache after successful init *)
          None
        with Invalid_argument msg -> Some msg

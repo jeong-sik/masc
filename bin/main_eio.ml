@@ -191,7 +191,7 @@ let run_server ~sw ~env ~host ~port ~base_path =
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
   with exn ->
-    Printf.eprintf "[main] keeper bootstrap failed: %s\n%!" (Printexc.to_string exn);
+    Log.Server.error "[main] keeper bootstrap failed: %s" (Printexc.to_string exn);
     raise exn
 
 (** CLI options *)
@@ -241,14 +241,14 @@ let run_cmd host port base_path =
   let initiate_shutdown signal_name =
     if not !shutdown_initiated then begin
       shutdown_initiated := true;
-      Printf.eprintf "\n[MASC] Received %s, shutting down gracefully...\n%!" signal_name;
+      Log.Server.info "[MASC] Received %s, shutting down gracefully..." signal_name;
 
       (* Start force-exit timer: if shutdown doesn't complete in 5s, force exit *)
       if not !force_exit_timer_started then begin
         force_exit_timer_started := true;
         ignore (Thread.create (fun () ->
           Unix.sleepf 5.0;
-          Printf.eprintf "[MASC] Graceful shutdown timed out after 5s, forcing exit.\n%!";
+          Log.Server.error "[MASC] Graceful shutdown timed out after 5s, forcing exit.";
           exit 1
         ) ())
       end;
@@ -259,7 +259,7 @@ let run_cmd host port base_path =
         signal_name
       in
       Sse.broadcast (Yojson.Safe.from_string shutdown_data);
-      Printf.eprintf "[MASC] Sent shutdown notification to %d SSE clients\n%!" (Sse.client_count ());
+      Log.Server.info "[MASC] Sent shutdown notification to %d SSE clients" (Sse.client_count ());
 
       (* Give clients 200ms to receive the notification *)
       Unix.sleepf 0.2;
@@ -269,7 +269,7 @@ let run_cmd host port base_path =
 
       (* Flush dirty board data to prevent data loss *)
       (try Board_dispatch.flush ()
-       with _ -> Printf.eprintf "[Shutdown] Board flush skipped (not initialized)\n%!");
+       with _ -> Log.Server.warn "[Shutdown] Board flush skipped (not initialized)");
 
       (* Also close local SSE connections tracked in main_eio *)
       close_all_sse_connections ();
@@ -294,22 +294,21 @@ let run_cmd host port base_path =
       run_server ~sw ~env ~host ~port ~base_path
     with
     | Shutdown ->
-        Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"
+        Log.Server.info "MASC MCP: Shutdown complete."
     | Eio.Cancel.Cancelled _ ->
-        Printf.eprintf "🚀 MASC MCP: Shutdown complete.\n%!"
+        Log.Server.info "MASC MCP: Shutdown complete."
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) when attempt < max_bind_retries ->
         let delay = Float.min 30.0 (2.0 ** Float.of_int attempt) in
-        Printf.eprintf "⚠️  Port %d in use, retrying in %.0fs (attempt %d/%d)...\n%!"
+        Log.Server.warn "Port %d in use, retrying in %.0fs (attempt %d/%d)"
           port delay (attempt + 1) max_bind_retries;
         Time_compat.sleep delay;
         try_start (attempt + 1)
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
-        Printf.eprintf "❌ [MASC FATAL] Port %d is still in use after %d retries.\n%!"
-          port max_bind_retries;
-        Printf.eprintf "   Try: lsof -i :%d | grep LISTEN\n%!" port;
+        Log.Server.error "[FATAL] Port %d is still in use after %d retries. Try: lsof -i :%d | grep LISTEN"
+          port max_bind_retries port;
         exit 1
     | Unix.Unix_error (Unix.EACCES, _, _) ->
-        Printf.eprintf "❌ [MASC FATAL] Permission denied binding to port %d.\n%!" port;
+        Log.Server.error "[FATAL] Permission denied binding to port %d" port;
         exit 1)
   in
   try_start 0

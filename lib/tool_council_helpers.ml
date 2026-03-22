@@ -25,8 +25,9 @@ let room_config_of_ctx (ctx : context) =
 
 let ensure_room_ready (ctx : context) =
   let config = room_config_of_ctx ctx in
-  if not (Room.is_initialized config) then
-    ignore (Room.init config ~agent_name:(Some ctx.agent_name));
+  (if not (Room.is_initialized config) then
+    let (_init_msg : string) = Room.init config ~agent_name:(Some ctx.agent_name) in
+    ());
   config
 
 let contains_text haystack needle =

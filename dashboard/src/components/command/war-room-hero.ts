@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { CmdStatCard } from './cmd-stat-card'
 import type {
   CommandPlaneChainOverlay,
   CommandPlaneSwarmLane,
@@ -139,31 +140,11 @@ export function WarRoomHeroStrip({
         </div>
       </div>
       <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
-        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card">
-          <span>워커</span>
-          <strong>${workerJoined ?? 0}/${workerExpected ?? 0}</strong>
-          <small>${swarmHasEvidence ? (swarm?.summary?.completed_workers ?? 0) : 0} 완료 · ${workerCardCount} 카드</small>
-        </div>
-        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card">
-          <span>런타임</span>
-          <strong>${swarmHasEvidence ? (swarm?.provider?.runtime_blocker ? '막힘' : swarm?.provider?.provider_reachable ? '준비됨' : selectedSession ? displayStatus(selectedSession.status) : '확인 필요') : (selectedSession ? displayStatus(selectedSession.status) : '확인 필요')}</strong>
-          <small>${swarmHasEvidence ? `설정 ${swarm?.provider?.configured_capacity ?? 'n/a'} · 실제 ${swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0} · hot ${swarm?.summary?.peak_hot_slots ?? swarm?.provider?.peak_active_slots ?? 0}` : `세션 워커 ${workerCardCount}`}</small>
-        </div>
-        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card ${toneClass(blockersCount > 0 || pendingApprovals > 0 || pendingConfirmTotal > 0 ? 'warn' : 'ok')}">
-          <span>압력</span>
-          <strong>${blockersCount + pendingApprovals + pendingConfirmTotal}</strong>
-          <small>막힘 ${blockersCount} · 승인 ${pendingApprovals} · 확인 ${pendingConfirmVisible}${pendingConfirmHidden > 0 ? `/${pendingConfirmTotal}` : ''}</small>
-        </div>
-        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card ${toneClass(guidanceLayerTone(guidanceLayer))}">
-          <span>상주 판정기</span>
-          <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
-          <small>${guidanceFreshnessLabel(activeSummary)}${residentRuntime?.model_used ? ` · ${residentRuntime.model_used}` : ''}</small>
-        </div>
-        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card">
-          <span>마지막 신호</span>
-          <strong>${relativeTime(latestSignal)}</strong>
-          <small>${latestMessage ? '메시지' : latestTrace ? '트레이스' : '대기 중'}</small>
-        </div>
+        <${CmdStatCard} label="워커" value=${`${workerJoined ?? 0}/${workerExpected ?? 0}`} detail=${`${swarmHasEvidence ? (swarm?.summary?.completed_workers ?? 0) : 0} 완료 · ${workerCardCount} 카드`} />
+        <${CmdStatCard} label="런타임" value=${swarmHasEvidence ? (swarm?.provider?.runtime_blocker ? '막힘' : swarm?.provider?.provider_reachable ? '준비됨' : selectedSession ? displayStatus(selectedSession.status) : '확인 필요') : (selectedSession ? displayStatus(selectedSession.status) : '확인 필요')} detail=${swarmHasEvidence ? `설정 ${swarm?.provider?.configured_capacity ?? 'n/a'} · 실제 ${swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0} · hot ${swarm?.summary?.peak_hot_slots ?? swarm?.provider?.peak_active_slots ?? 0}` : `세션 워커 ${workerCardCount}`} />
+        <${CmdStatCard} label="압력" value=${blockersCount + pendingApprovals + pendingConfirmTotal} detail=${`막힘 ${blockersCount} · 승인 ${pendingApprovals} · 확인 ${pendingConfirmVisible}${pendingConfirmHidden > 0 ? `/${pendingConfirmTotal}` : ''}`} tone=${toneClass(blockersCount > 0 || pendingApprovals > 0 || pendingConfirmTotal > 0 ? 'warn' : 'ok')} />
+        <${CmdStatCard} label="상주 판정기" value=${runtimeJudgeLabel(residentRuntime)} detail=${`${guidanceFreshnessLabel(activeSummary)}${residentRuntime?.model_used ? ` · ${residentRuntime.model_used}` : ''}`} tone=${toneClass(guidanceLayerTone(guidanceLayer))} />
+        <${CmdStatCard} label="마지막 신호" value=${relativeTime(latestSignal)} detail=${latestMessage ? '메시지' : latestTrace ? '트레이스' : '대기 중'} />
       </div>
     </section>
   `

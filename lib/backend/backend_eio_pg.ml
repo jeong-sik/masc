@@ -105,7 +105,18 @@ let create ~sw ~env ~url ~cluster_name ~node_id =
     | Some s -> (try int_of_string s with _ -> 10)
     | None -> 10
   in
-  let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
+  let pool_config = Caqti_pool_config.create
+      ~max_size:max_pool ~max_idle_size:(min max_pool 3)
+      ~max_idle_age:(Some (Mtime.Span.of_uint64_ns 30_000_000_000L))
+      ~max_use_count:(Some 50) () in
+  let uri =
+    if Uri.get_query_param uri "keepalives" <> None then uri
+    else uri
+      |> (fun u -> Uri.add_query_param' u ("keepalives", "1"))
+      |> (fun u -> Uri.add_query_param' u ("keepalives_idle", "15"))
+      |> (fun u -> Uri.add_query_param' u ("keepalives_interval", "5"))
+      |> (fun u -> Uri.add_query_param' u ("keepalives_count", "3"))
+  in
   match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
   | Error err -> Error (caqti_error_to_masc err)
   | Ok pool ->

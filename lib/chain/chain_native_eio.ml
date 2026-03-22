@@ -276,10 +276,13 @@ let call_model_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~promp
         | _ -> ""
       in
       let tool_defs = model_tool_defs_of_json tools in
+      (* Inference parameters (temperature, max_tokens) are delegated to OAS
+         pipeline defaults. No hardcoded values here -- OAS controls inference
+         params via cascade config or provider defaults. #2408 *)
       let result =
         if tool_defs = [] then
           Oas_worker.run_model_by_label ~model_label ~goal:prompt ~system_prompt
-            ~max_turns:1 ~temperature:0.2 ~max_tokens:4096 ()
+            ~max_turns:1 ()
         else
           (Oas_worker.run_model_with_masc_tools ~model_label ~goal:prompt
               ~system_prompt ~masc_tools:tool_defs
@@ -302,7 +305,7 @@ let call_model_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~promp
                       ?mcp_session_id:runtime.mcp_session_id
                       ?auth_token:runtime.auth_token runtime.mcp_state ~name
                       ~arguments:final_args)
-              ~max_turns:1 ~temperature:0.2 ~max_tokens:4096 ())
+              ~max_turns:1 ())
       in
       (match result with
       | Ok run_result ->

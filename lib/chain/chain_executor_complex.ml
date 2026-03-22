@@ -154,7 +154,7 @@ let execute_goal_driven ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : exe
           "Evaluate the following output for '%s' metric. Return ONLY a number between 0.0 and 1.0:\n\n%s"
           goal_metric output
         in
-        let result = exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt:prompt ?tools:None () in
+        let result = judge_call ~prompt () in
         (match result with
          | Ok score_str ->
              (try Some (float_of_string (String.trim score_str))
@@ -278,7 +278,7 @@ let execute_feedback_loop ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : e
           | Some p -> Printf.sprintf "%s\n\nOutput to evaluate:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
           | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
         in
-        (match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt ?tools:None () with
+        (match judge_call ~prompt () with
          | Ok score_str ->
              let cleaned = String.trim score_str in
              (try min 1.0 (max 0.0 (float_of_string cleaned))
@@ -317,7 +317,7 @@ let execute_feedback_loop ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : e
       "The following output scored %.2f out of 1.0 for quality. Provide specific, actionable feedback on how to improve it:\n\n%s\n\nProvide 2-3 concrete suggestions for improvement:"
       score output
     in
-    match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt ?tools:None () with
+    match judge_call ~prompt () with
     | Ok feedback -> feedback
     | Error _ -> "Please improve the quality and accuracy of the output."
   in

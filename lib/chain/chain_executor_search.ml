@@ -144,7 +144,7 @@ let execute_mcts ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_no
                   | Some p -> Printf.sprintf "%s\n\nOutput to evaluate:\n%s" p sim_output
                   | None -> Printf.sprintf "Rate this output from 0.0 to 1.0:\n%s" sim_output
                 in
-                (match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt ?tools:None () with
+                (match judge_call ~prompt () with
                  | Ok s ->
                      let raw = Safe_parse.float ~context:"model_judge" ~default:0.5 (String.trim s) in
                      Float.min 1.0 (Float.max 0.0 raw)
@@ -187,7 +187,7 @@ let execute_mcts ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_no
                     "Rate this code/test quality from 0.0 to 1.0. Check for: fake tests, missing assertions, incomplete coverage.\n\n%s"
                     sim_output
                   in
-                  match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt ?tools:None () with
+                  match judge_call ~prompt () with
                   | Ok s -> Safe_parse.float ~context:"anti_fake:model" ~default:0.5 (String.trim s)
                   | Error _ -> 0.5
                 in
@@ -308,13 +308,13 @@ let execute_evaluator ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execu
       )
   ) candidates);
 
-  (* Helper: MODEL-based scoring using exec_fn *)
+  (* Helper: MODEL-based scoring via OAS chain_judge cascade *)
   let model_score output =
     let prompt = match scoring_prompt with
       | Some p -> Printf.sprintf "%s\n\nCandidate output:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
       | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
     in
-    let result = exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt:prompt ?tools:None () in
+    let result = judge_call ~prompt () in
     match result with
     | Ok score_str ->
         (* Extract float from response *)
@@ -448,7 +448,7 @@ Reply with ONLY a number between 0.0 and 1.0:|}
                 (String.sub output 0 (min 1500 (String.length output)))
               in
               let model_score =
-                match exec_fn ~model:Env_config_runtime.Chain.judge_model ?system:None ~prompt:model_prompt ?tools:None () with
+                match judge_call ~prompt:model_prompt () with
                 | Ok score_str ->
                     (try float_of_string (String.trim score_str) *. 0.5
                      with Failure _ -> 0.25)

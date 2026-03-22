@@ -129,6 +129,11 @@ val maybe_summarize_and_rotate : exec_fn:Chain_conversation.exec_fn -> Chain_con
 (** {1 Node Execution Types} *)
 
 type exec_fn = Chain_conversation.exec_fn
+
+(** Judge/evaluator call routed through OAS cascade pipeline.
+    Uses cascade_name "chain_judge" for inference parameter delegation. *)
+val judge_call : prompt:string -> unit -> (string, string) result
+
 type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
 type execute_node_fn = exec_context -> sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> exec_fn:exec_fn -> tool_exec:tool_exec -> Chain_types.node -> (string, string) result
 

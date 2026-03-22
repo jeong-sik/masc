@@ -23,6 +23,8 @@
   "routing_judge_models": ["llama:auto", "glm:auto"],
   "team_router_models": ["llama:auto", "glm:auto"],
   "chain_model_models": ["llama:auto", "glm:auto"],
+  "chain_step_models": ["llama:auto", "glm:auto"],
+  "chain_judge_models": ["llama:auto", "glm:auto"],
   "autoresearch_models": ["llama:auto", "glm:auto"],
   "trpg_intent_models": ["llama:auto", "glm:auto"],
   "governance_judge_models": ["llama:auto", "glm:auto"],

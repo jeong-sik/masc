@@ -196,6 +196,112 @@ let test_get_float_missing () =
     (Tool_args.get_float args "key" 1.5)
 
 (* ============================================================
+   Audit trail (trace_id linking) tests
+   ============================================================ *)
+
+module Audit_log = Masc_mcp.Audit_log
+
+let test_audit_entry_trace_id_in_json () =
+  let entry : Audit_log.audit_entry = {
+    timestamp = 1000000.0;
+    agent_id = "operator";
+    action = Audit_log.GovernanceDecision "confirm";
+    room_id = None;
+    details = `Assoc [("action_type", `String "room_pause")];
+    outcome = Audit_log.Success;
+    cost_estimate = None;
+    token_count = None;
+    trace_id = Some "ops_abc123";
+  } in
+  let json = Audit_log.entry_to_json entry in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "trace_id present" "ops_abc123"
+    (json |> member "trace_id" |> to_string);
+  Alcotest.(check string) "action contains decision"
+    "governance_decision:confirm"
+    (json |> member "action" |> to_string)
+
+let test_audit_entry_no_trace_id () =
+  let entry : Audit_log.audit_entry = {
+    timestamp = 1000000.0;
+    agent_id = "test";
+    action = Audit_log.Join;
+    room_id = None;
+    details = `Null;
+    outcome = Audit_log.Success;
+    cost_estimate = None;
+    token_count = None;
+    trace_id = None;
+  } in
+  let json = Audit_log.entry_to_json entry in
+  let keys = match json with `Assoc pairs -> List.map fst pairs | _ -> [] in
+  Alcotest.(check bool) "trace_id absent from JSON" false
+    (List.mem "trace_id" keys)
+
+let test_entry_of_json_with_trace_id () =
+  let json = `Assoc [
+    ("timestamp", `Float 1000000.0);
+    ("agent_id", `String "operator");
+    ("action", `String "governance_decision:deny");
+    ("room_id", `Null);
+    ("details", `Null);
+    ("outcome", `Assoc [("status", `String "success")]);
+    ("trace_id", `String "ops_xyz789");
+  ] in
+  match Audit_log.entry_of_json json with
+  | Some entry ->
+    Alcotest.(check (option string)) "trace_id parsed" (Some "ops_xyz789") entry.trace_id;
+    (match entry.action with
+     | Audit_log.GovernanceDecision "deny" -> ()
+     | _ -> Alcotest.fail "expected GovernanceDecision deny")
+  | None -> Alcotest.fail "entry_of_json returned None"
+
+let test_entry_of_json_without_trace_id () =
+  let json = `Assoc [
+    ("timestamp", `Float 1000000.0);
+    ("agent_id", `String "test");
+    ("action", `String "join");
+    ("room_id", `Null);
+    ("details", `Null);
+    ("outcome", `Assoc [("status", `String "success")]);
+  ] in
+  match Audit_log.entry_of_json json with
+  | Some entry ->
+    Alcotest.(check (option string)) "trace_id is None" None entry.trace_id
+  | None -> Alcotest.fail "entry_of_json returned None"
+
+let test_governance_decision_roundtrip () =
+  let action = Audit_log.GovernanceDecision "expired" in
+  let s = Audit_log.action_to_string action in
+  Alcotest.(check string) "serialized" "governance_decision:expired" s;
+  let parsed = Audit_log.string_to_action s in
+  match parsed with
+  | Audit_log.GovernanceDecision "expired" -> ()
+  | _ -> Alcotest.fail "roundtrip mismatch"
+
+let test_dispatch_audit_trail () =
+  let ctx, base_dir = make_ctx () in
+  let result = Tool_audit.dispatch ctx ~name:"masc_audit_trail" ~args:(`Assoc []) in
+  Alcotest.(check bool) "audit_trail dispatches" true (result <> None);
+  cleanup_dir base_dir
+
+let test_handle_audit_trail_with_trace_id () =
+  let ctx, base_dir = make_ctx () in
+  let args = `Assoc [
+    ("trace_id", `String "ops_test_12345678");
+    ("since_hours", `Float 720.0);
+  ] in
+  let (ok, msg) = Tool_audit.handle_audit_trail ctx args in
+  Alcotest.(check bool) "succeeds" true ok;
+  let json = Yojson.Safe.from_string msg in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "trace_id_filter echoed" "ops_test_12345678"
+    (json |> member "trace_id_filter" |> to_string);
+  Alcotest.(check int) "count is 0 for empty log" 0
+    (json |> member "count" |> to_int);
+  cleanup_dir base_dir
+
+(* ============================================================
    Test runner
    ============================================================ *)
 
@@ -231,5 +337,14 @@ let () =
       Alcotest.test_case "get_float present" `Quick test_get_float_present;
       Alcotest.test_case "get_float from int" `Quick test_get_float_from_int;
       Alcotest.test_case "get_float missing" `Quick test_get_float_missing;
+    ]);
+    ("audit_trail_trace_id", [
+      Alcotest.test_case "entry includes trace_id in JSON" `Quick test_audit_entry_trace_id_in_json;
+      Alcotest.test_case "entry omits trace_id when None" `Quick test_audit_entry_no_trace_id;
+      Alcotest.test_case "entry_of_json parses trace_id" `Quick test_entry_of_json_with_trace_id;
+      Alcotest.test_case "entry_of_json handles missing trace_id" `Quick test_entry_of_json_without_trace_id;
+      Alcotest.test_case "governance_decision action roundtrip" `Quick test_governance_decision_roundtrip;
+      Alcotest.test_case "audit_trail dispatches" `Quick test_dispatch_audit_trail;
+      Alcotest.test_case "audit_trail with trace_id filter" `Quick test_handle_audit_trail_with_trace_id;
     ]);
   ]

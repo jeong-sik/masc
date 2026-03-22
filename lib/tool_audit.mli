@@ -49,6 +49,9 @@ val handle_audit_query : context -> Yojson.Safe.t -> bool * string
 (** Handle masc_audit_stats *)
 val handle_audit_stats : context -> Yojson.Safe.t -> bool * string
 
+(** Handle masc_audit_trail — query linked audit entries by trace_id *)
+val handle_audit_trail : context -> Yojson.Safe.t -> bool * string
+
 (** Generate governance summary from audit trail entries *)
 val governance_summary : ?since:string -> ?until_time:string -> Audit_log.audit_entry list -> governance_report
 

@@ -137,6 +137,7 @@ let register_all () =
   (* ── Mod_audit: Tool_audit ────────────────────────────────────── *)
   reg Mod_audit [
     "masc_audit_query"; "masc_audit_stats"; "masc_governance_report";
+    "masc_audit_trail";
   ];
 
   (* Mod_cost and Mod_rate_limit: fully covered by schemas — no entries needed *)

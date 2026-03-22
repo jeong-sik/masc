@@ -32,6 +32,7 @@ type action =
   | CircuitOpen
   | CircuitClose
   | SearchRefinement
+  | GovernanceDecision of string
   | Custom of string
 
 type audit_entry = {
@@ -43,6 +44,7 @@ type audit_entry = {
   outcome: outcome;
   cost_estimate: float option;
   token_count: int option;
+  trace_id: string option;
 }
 
 (** {1 Serialization} *)
@@ -61,6 +63,7 @@ let action_to_string = function
   | CircuitOpen -> "circuit_open"
   | CircuitClose -> "circuit_close"
   | SearchRefinement -> "search_refinement"
+  | GovernanceDecision decision -> "governance_decision:" ^ decision
   | Custom name -> "custom:" ^ name
 
 let string_to_action = function
@@ -78,6 +81,8 @@ let string_to_action = function
   | "search_refinement" -> SearchRefinement
   | s when String.length s > 10 && String.sub s 0 10 = "tool_call:" ->
       ToolCall (String.sub s 10 (String.length s - 10))
+  | s when String.length s > 20 && String.sub s 0 20 = "governance_decision:" ->
+      GovernanceDecision (String.sub s 20 (String.length s - 20))
   | s when String.length s > 7 && String.sub s 0 7 = "custom:" ->
       Custom (String.sub s 7 (String.length s - 7))
   | s -> Custom s
@@ -106,7 +111,11 @@ let entry_to_json (e : audit_entry) : Yojson.Safe.t =
     | Some t -> with_cost @ [("token_count", `Int t)]
     | None -> with_cost
   in
-  `Assoc with_tokens
+  let with_trace = match e.trace_id with
+    | Some tid -> with_tokens @ [("trace_id", `String tid)]
+    | None -> with_tokens
+  in
+  `Assoc with_trace
 
 (** Parse a JSON object back into an audit_entry *)
 let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
@@ -143,7 +152,11 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
         | _ -> None
       with Yojson.Safe.Util.Type_error _ -> None
     in
-    Some { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count }
+    let trace_id =
+      try json |> U.member "trace_id" |> U.to_string_option
+      with Yojson.Safe.Util.Type_error _ -> None
+    in
+    Some { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count; trace_id }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Misc.warn "audit_log: entry parse failed: %s" (Printexc.to_string exn);
     None
@@ -202,6 +215,7 @@ let log_action
     ?(details : Yojson.Safe.t = `Null)
     ?(cost_estimate : float option)
     ?(token_count : int option)
+    ?(trace_id : string option)
     ~outcome
     () =
   let entry = {
@@ -213,6 +227,7 @@ let log_action
     outcome;
     cost_estimate;
     token_count;
+    trace_id;
   } in
   append_entry config entry
 
@@ -278,6 +293,16 @@ let log_circuit_breaker config ~agent_id ~opened ~reason ?cost_estimate ?token_c
   log_action config ~agent_id ~action
     ~details:(`Assoc [("reason", `String reason)])
     ?cost_estimate ?token_count ~outcome:Success ()
+
+let log_governance_decision config ~agent_id ~trace_id ~decision ~action_type ~confirmation_state () =
+  log_action config ~agent_id
+    ~action:(GovernanceDecision decision)
+    ~trace_id
+    ~details:(`Assoc [
+      ("action_type", `String action_type);
+      ("confirmation_state", `String confirmation_state);
+    ])
+    ~outcome:Success ()
 
 (** {1 Pruning (replaces rotation)} *)
 

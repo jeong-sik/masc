@@ -46,10 +46,77 @@ include Room_worktree
 
 (* Heartbeat & GC *)
 include Room_gc
-(* Connect the force_release_task callback for zombie cleanup *)
-let () = Room_gc.force_release_task_fn :=
+
+(* ============================================ *)
+(* Wire Room_hooks callbacks                    *)
+(* ============================================ *)
+
+(* force_release_task — zombie cleanup needs task management logic *)
+let () = Room_hooks.force_release_task_fn :=
   (fun config ~agent_name ~task_id () ->
     force_release_task_r config ~agent_name ~task_id ())
+
+(* Activity graph emit — wraps Activity_graph for room sub-modules *)
+let () = Room_hooks.activity_emit_fn :=
+  (fun config ~room_id ~actor ?subject ~kind ~payload ~tags () ->
+    ignore (Activity_graph.emit config ~room_id
+      ~actor:(Activity_graph.entity ~kind:actor.Room_hooks.kind actor.id)
+      ?subject:(Option.map (fun (s : Room_hooks.activity_entity) ->
+        Activity_graph.entity ~kind:s.kind s.id) subject)
+      ~kind ~payload ~tags ()))
+
+(* Agent economy earn — wraps Agent_economy for task completion credits *)
+let () = Room_hooks.agent_economy_earn_fn :=
+  (fun ~base_path ~agent_name ~reason ->
+    match Agent_economy.earn ~base_path ~agent_name
+      ~kind:Earn_task_done ~reason () with
+    | Ok _bal -> ()
+    | Error msg -> Log.Misc.error "task earn failed: %s" msg)
+
+(* Relation materializer — agent leave *)
+let () = Room_hooks.relation_on_leave_fn := Relation_materializer.on_agent_leave
+
+(* Relation materializer — task done *)
+let () = Room_hooks.relation_on_task_done_fn := Relation_materializer.on_task_done
+
+(* Board artifact cleanup — wraps Board_dispatch for GC *)
+let () = Room_hooks.cleanup_board_artifacts_fn := (fun () ->
+  let stale_system_daily_sec = 12.0 *. 3600.0 in
+  let board_artifact_title title =
+    let title = String.lowercase_ascii (String.trim title) in
+    String.starts_with ~prefix:"[sentinel daily]" title
+    || String.starts_with ~prefix:"[keeper daily]" title
+  in
+  let board_artifact_author author =
+    let author = String.lowercase_ascii (String.trim author) in
+    author = "auto-researcher"
+    || String.starts_with ~prefix:"qa-" author
+    || String.starts_with ~prefix:"qwen35-probe" author
+    || ((not (String.contains author ' '))
+        && String.ends_with ~suffix:"-probe" author)
+  in
+  let now = Time_compat.now () in
+  Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5200 ()
+  |> List.fold_left
+       (fun removed (post : Board.post) ->
+         let author = Board.Agent_id.to_string post.author in
+         if board_artifact_author author
+            || ((String.equal (String.lowercase_ascii author) "sentinel"
+                 || String.equal (String.lowercase_ascii author) "keeper")
+                && board_artifact_title post.title
+                && now -. post.updated_at >= stale_system_daily_sec) then
+           match Board_dispatch.delete_post
+                   ~post_id:(Board.Post_id.to_string post.id) with
+           | Ok () -> removed + 1
+           | Error _ -> removed
+         else removed)
+       0)
+
+(* Governance stale case purge — wraps Council.Governance_v2 for GC *)
+let () = Room_hooks.governance_purge_fn := (fun base_path ->
+  let test = Council.Governance_v2.purge_stale_test_cases base_path in
+  let artifact = Council.Governance_v2.purge_stale_artifact_cases base_path in
+  (test, artifact))
 
 (* Agent status, capability registration, discovery *)
 include Room_agent

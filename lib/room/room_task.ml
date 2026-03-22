@@ -11,15 +11,14 @@ let activity_room_id (config : Room_utils.config) =
 
 let emit_task_activity config ~agent_name ~task_id ~kind ~payload =
   try
-    ignore
-      (Activity_graph.emit config
-         ~room_id:(activity_room_id config)
-         ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
-         ~subject:(Activity_graph.entity ~kind:"task" task_id)
-         ~kind
-         ~payload
-         ~tags:[ "task"; kind ]
-         ())
+    !Room_hooks.activity_emit_fn config
+      ~room_id:(activity_room_id config)
+      ~actor:Room_hooks.{ kind = "agent"; id = agent_name }
+      ~subject:Room_hooks.{ kind = "task"; id = task_id }
+      ~kind
+      ~payload
+      ~tags:[ "task"; kind ]
+      ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -509,10 +508,10 @@ let complete_task config ~agent_name ~task_id ~notes =
               agent_name task_id
               (if notes = "" then "null" else Printf.sprintf "\"%s\"" notes)
               (now_iso ()));
-            (* Record task collaboration to Neo4j (async, non-blocking) *)
+            (* Record task collaboration via hook (async, non-blocking) *)
             (try
                let active = (Room_state.read_state config).active_agents in
-               Relation_materializer.on_task_done ~assignee:agent_name ~active_agents:active
+               !Room_hooks.relation_on_task_done_fn ~assignee:agent_name ~active_agents:active
              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                Log.RoomTask.error "relation-materializer task hook error: %s"
                  (Printexc.to_string exn));
@@ -589,13 +588,10 @@ let complete_task_r config ~agent_name ~task_id ~notes : string Types.masc_resul
                       ("notes", if notes = "" then `Null else `String notes);
                     ]);
               log_event config (Yojson.Safe.to_string (`Assoc [("type", `String "task_done"); ("agent", `String agent_name); ("task", `String task_id); ("notes", if notes = "" then `Null else `String notes); ("ts", `String (now_iso ()))]));
-              (* Agent Economy: earn credits for task completion *)
-              (match Agent_economy.earn
-                 ~base_path:config.base_path ~agent_name
-                 ~kind:Earn_task_done ~reason:(Printf.sprintf "completed %s" task_id) () with
-               | Ok _bal -> ()
-               | Error msg ->
-                 Log.Misc.error "task earn failed: %s" msg);
+              (* Agent Economy: earn credits via hook *)
+              !Room_hooks.agent_economy_earn_fn
+                ~base_path:config.base_path ~agent_name
+                ~reason:(Printf.sprintf "completed %s" task_id);
               Ok (Printf.sprintf "✅ %s completed %s" agent_name task_id)
             end
       with

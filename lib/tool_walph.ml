@@ -9,6 +9,28 @@ type ('a, 'b) context = {
   clock: 'b Eio.Time.clock;
 }
 
+(** Walph response validator — moved from room_walph_eio.ml to remove
+    Oas_response dependency from Room sub-modules. *)
+let walph_response_is_valid (resp : Oas_response.api_response) =
+  let content = String.trim (Oas_response.text_of_response resp) in
+  let lower = String.lowercase_ascii content in
+  let len = String.length content in
+  len > 0
+  && not (len >= 5 && String.sub lower 0 5 = "error")
+  && not (len >= 14 && String.sub content 0 14 = "Empty response")
+  && not (len >= 9 && String.sub content 0 9 = "{\"error\":")
+
+(** Default model dispatch — moved from room_walph_eio.ml to remove
+    Oas_worker dependency from Room sub-modules. *)
+let default_model_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec:_ ~max_chars () =
+  match
+    Oas_worker.run_named ~cascade_name:"walph"
+      ~goal:prompt ~max_turns:1
+      ~max_tokens:max_chars ~accept:walph_response_is_valid ()
+  with
+  | Ok result -> Oas_response.text_of_response result.Oas_worker.response
+  | Error err -> failwith err
+
 (* Handle masc_walph_loop *)
 let handle_walph_loop ctx args =
   let preset = get_string args "preset" "drain" in
@@ -17,7 +39,8 @@ let handle_walph_loop ctx args =
   let error_backoff_sec = get_int args "error_backoff_sec" 2 in
   let target = get_string_opt args "target" in
   (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name
-    ~preset ~max_iterations ~max_consecutive_errors ~error_backoff_sec ?target ())
+    ~preset ~max_iterations ~max_consecutive_errors ~error_backoff_sec ?target
+    ~model_dispatch:default_model_dispatch ())
 
 (* Handle masc_walph_control *)
 let handle_walph_control ctx args =
@@ -68,13 +91,13 @@ let handle_walph_natural ctx args =
     | `Status ->
         (true, Room_walph_eio.walph_control ctx.config ~from_agent:ctx.agent_name ~command:"STATUS" ~args:"" ())
     | `Start_coverage ->
-        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"coverage" ~max_iterations:10 ())
+        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"coverage" ~max_iterations:10 ~model_dispatch:default_model_dispatch ())
     | `Start_refactor ->
-        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"refactor" ~max_iterations:10 ())
+        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"refactor" ~max_iterations:10 ~model_dispatch:default_model_dispatch ())
     | `Start_docs ->
-        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"docs" ~max_iterations:10 ())
+        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"docs" ~max_iterations:10 ~model_dispatch:default_model_dispatch ())
     | `Start_drain ->
-        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"drain" ~max_iterations:10 ())
+        (true, Room_walph_eio.walph_loop ctx.config ~net:ctx.net ~clock:ctx.clock ~agent_name:ctx.agent_name ~preset:"drain" ~max_iterations:10 ~model_dispatch:default_model_dispatch ())
   end
 
 (* Handle masc_walph_status *)

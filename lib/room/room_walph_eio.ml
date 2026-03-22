@@ -264,23 +264,8 @@ let get_chain_id_for_preset = function
   | "figma" -> Some "walph-figma"
   | _ -> None
 
-let walph_response_is_valid (resp : Oas_response.api_response) =
-  let content = String.trim (Oas_response.text_of_response resp) in
-  let lower = String.lowercase_ascii content in
-  let len = String.length content in
-  len > 0
-  && not (len >= 5 && String.sub lower 0 5 = "error")
-  && not (len >= 14 && String.sub content 0 14 = "Empty response")
-  && not (len >= 9 && String.sub content 0 9 = "{\"error\":")
-
-let default_model_dispatch ~tool_name:_ ~model:_ ~prompt ~timeout_sec:_ ~max_chars () =
-  match
-    Oas_worker.run_named ~cascade_name:"walph"
-      ~goal:prompt ~max_turns:1
-      ~max_tokens:max_chars ~accept:walph_response_is_valid ()
-  with
-  | Ok result -> Oas_response.text_of_response result.Oas_worker.response
-  | Error err -> failwith err
+(* default_model_dispatch and walph_response_is_valid moved to tool_walph.ml
+   to remove Oas_worker/Oas_response dependency from Room. *)
 
 (** {1 Main Loop} *)
 
@@ -297,7 +282,7 @@ let walph_loop config ~net:_net ~clock ~agent_name
     ?(preset="drain") ?(max_iterations=10) ?target
     ?(max_consecutive_errors=5) ?(error_backoff_sec=2)
     ?(default_model=Env_config.Glm.default_model)
-    ?(model_dispatch=default_model_dispatch) () =
+    ~model_dispatch () =
   Room.ensure_initialized config;
 
   (* Get Walph state for this specific agent *)

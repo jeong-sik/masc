@@ -312,8 +312,8 @@ let leave config ~agent_name =
       "{\"type\":\"agent_leave\",\"agent\":\"%s\",\"ts\":\"%s\"}"
       actual_name (now_iso ()));
 
-    (* Record co-presence relationships to Neo4j (async, non-blocking) *)
-    (try Relation_materializer.on_agent_leave
+    (* Record co-presence relationships via hook (async, non-blocking) *)
+    (try !Room_hooks.relation_on_leave_fn
            ~leaving_agent:actual_name ~active_agents:peers_before_leave
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Room.error "relation-materializer leave hook error: %s"

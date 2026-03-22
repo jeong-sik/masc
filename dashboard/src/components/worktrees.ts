@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState } from './common/empty-state'
 import { useEffect, useState } from 'preact/hooks'
 import { callMcpTool } from '../api/mcp'
 
@@ -46,9 +47,7 @@ export function Worktrees() {
 
   if (!worktrees || worktrees.length === 0) {
     return html`
-      <div class="empty-state text-center p-10 text-text-muted border border-dashed border-card-border rounded-2xl bg-card/20 backdrop-blur-sm">
-        활성화된 워크트리가 없습니다.
-      </div>
+      <${EmptyState} message="활성화된 워크트리가 없습니다." />
     `
   }
 

@@ -132,11 +132,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             value=${search}
             onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
           />
-          <div class="flex gap-1">
+          <div class="flex gap-1.5">
             ${(['all', 'active', 'idle', 'offline'] as StatusFilter[]).map(f => html`
               <button
                 key=${f}
-                class="roster-filter-btn ${filter === f ? 'active' : ''}"
+                class="px-2.5 py-1 text-[length:var(--fs-xs)] rounded-xl border cursor-pointer transition-all duration-150 ${filter === f
+                  ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
+                  : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'}"
                 onClick=${() => setFilter(f)}
               >
                 ${f === 'all' ? '전체' : f === 'active' ? '활성' : f === 'idle' ? '유휴' : '오프라인'} ${counts[f]}

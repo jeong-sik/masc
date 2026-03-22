@@ -71,7 +71,7 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
   const source = node.unit.source ?? 'unknown'
   const connectionLabel = activeOps > 0 ? `${activeOps}개 작전 연결` : '실행 연결 없음'
   return html`
-    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-tree-node depth-${Math.min(depth, 3)} ${depth <= 2 ? 'border-[rgba(248,113,113,0.3)]' : ''}">
+    <div class="border border-[var(--white-8)] p-3.5 rounded-xl ${Math.min(depth, 3) >= 3 ? 'bg-[var(--white-3)]' : 'bg-[var(--white-4)]'} ${depth <= 2 ? 'border-[rgba(248,113,113,0.3)]' : ''}">
       <div class="flex justify-between items-start">
         <div>
           <div class="flex justify-between items-start flex-wrap gap-2">

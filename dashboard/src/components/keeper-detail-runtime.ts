@@ -1,5 +1,6 @@
 // Keeper runtime signals, neighborhood, and tool audit panels.
-// Extracted from keeper-detail-panels.ts for maintainability.
+// Redesigned: consistent signal row styling with inline Tailwind,
+// clean tool chip badges, proper section spacing.
 
 import { html } from 'htm/preact'
 import { TimeAgo } from './common/time-ago'
@@ -69,6 +70,41 @@ function formatPct(value: number | undefined): string {
   return `${Math.round(value * 100)}%`
 }
 
+// ── Shared row component ─────────────────────────────────
+
+function SignalRow({ label, value }: { label: string; value: string | number }) {
+  return html`
+    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+      <span class="text-xs text-[var(--text-muted)]">${label}</span>
+      <span class="text-xs font-medium text-[var(--text-strong)]">${value}</span>
+    </div>
+  `
+}
+
+// ── Tool chip badge ──────────────────────────────────────
+
+function ToolChip({ name }: { name: string }) {
+  return html`
+    <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${name}</span>
+  `
+}
+
+// ── Tool list section ────────────────────────────────────
+
+function ToolSection({ title, description, tools, fallback }: { title: string; description?: string; tools: string[]; fallback: string }) {
+  return html`
+    <div class="flex flex-col gap-1.5 mt-3">
+      <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${title}</span>
+      ${description ? html`<span class="text-[11px] text-[var(--text-muted)] leading-snug">${description}</span>` : null}
+      <div class="flex flex-wrap gap-1.5">
+        ${tools.length > 0
+          ? tools.map(tool => html`<${ToolChip} name=${tool} />`)
+          : html`<span class="text-[11px] text-[var(--text-muted)] italic">${fallback}</span>`}
+      </div>
+    </div>
+  `
+}
+
 // ── Runtime Signals ──────────────────────────────────────
 
 export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
@@ -76,23 +112,23 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
 
   const rows: Array<{ label: string; value: string | number }> = [
     { label: 'Model fallback', value: formatPct(typeof mw?.model_fallback_rate === 'number' ? mw.model_fallback_rate : undefined) },
-    { label: '선제적 폴백', value: formatPct(typeof mw?.proactive_fallback_rate === 'number' ? mw.proactive_fallback_rate : undefined) },
-    { label: '메모리 통과율', value: formatPct(typeof mw?.memory_pass_rate === 'number' ? mw.memory_pass_rate : undefined) },
-    { label: '핸드오프', value: typeof mw?.handoff_count === 'number' ? mw.handoff_count : keeper.handoff_count_total ?? '-' },
-    { label: '컴팩션', value: typeof mw?.compaction_events === 'number' ? mw.compaction_events : keeper.compaction_count ?? '-' },
-    { label: '절약 토큰', value: typeof mw?.compaction_saved_tokens === 'number' ? mw.compaction_saved_tokens : keeper.last_compaction_saved_tokens ?? '-' },
-    { label: 'K2K 이벤트', value: keeper.k2k_count ?? '-' },
-    { label: '대화 꼬리', value: keeper.conversation_tail_count ?? '-' },
-    { label: '도구 호출', value: typeof mw?.tool_call_count === 'number' ? mw.tool_call_count : '-' },
-    { label: '미리보기 유사도', value: typeof mw?.proactive_preview_similarity_avg === 'number' ? `${(mw.proactive_preview_similarity_avg * 100).toFixed(1)}%` : '-' },
-    { label: '메모리 평균 점수', value: typeof mw?.memory_avg_score === 'number' ? mw.memory_avg_score.toFixed(3) : '-' },
-    { label: '폴백 비율', value: typeof mw?.fallback_rate === 'number' ? `${(mw.fallback_rate * 100).toFixed(1)}%` : '-' },
+    { label: 'Proactive fallback', value: formatPct(typeof mw?.proactive_fallback_rate === 'number' ? mw.proactive_fallback_rate : undefined) },
+    { label: 'Memory pass rate', value: formatPct(typeof mw?.memory_pass_rate === 'number' ? mw.memory_pass_rate : undefined) },
+    { label: 'Handoffs', value: typeof mw?.handoff_count === 'number' ? mw.handoff_count : keeper.handoff_count_total ?? '-' },
+    { label: 'Compactions', value: typeof mw?.compaction_events === 'number' ? mw.compaction_events : keeper.compaction_count ?? '-' },
+    { label: 'Saved tokens', value: typeof mw?.compaction_saved_tokens === 'number' ? mw.compaction_saved_tokens : keeper.last_compaction_saved_tokens ?? '-' },
+    { label: 'K2K events', value: keeper.k2k_count ?? '-' },
+    { label: 'Conv tail', value: keeper.conversation_tail_count ?? '-' },
+    { label: 'Tool calls', value: typeof mw?.tool_call_count === 'number' ? mw.tool_call_count : '-' },
+    { label: 'Preview similarity', value: typeof mw?.proactive_preview_similarity_avg === 'number' ? `${(mw.proactive_preview_similarity_avg * 100).toFixed(1)}%` : '-' },
+    { label: 'Memory avg score', value: typeof mw?.memory_avg_score === 'number' ? mw.memory_avg_score.toFixed(3) : '-' },
+    { label: 'Fallback rate', value: typeof mw?.fallback_rate === 'number' ? `${(mw.fallback_rate * 100).toFixed(1)}%` : '-' },
   ]
 
   const visibleRows = rows.filter(row =>
     !(
       row.value === '-'
-      || row.value === '—'
+      || row.value === '\u2014'
       || row.value === ''
     ))
 
@@ -100,12 +136,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex flex-col gap-1.5">
-      ${visibleRows.map(r => html`
-        <div class="keeper-signal-row rounded-lg">
-          <span>${r.label}</span>
-          <strong>${r.value}</strong>
-        </div>
-      `)}
+      ${visibleRows.map(r => html`<${SignalRow} label=${r.label} value=${r.value} />`)}
     </div>
   `
 }
@@ -133,8 +164,8 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const auditAt = missionBrief?.tool_audit_at ?? keeper.tool_audit_at
   const capabilities = keeper.agent?.capabilities ?? []
   const roomName = room.current_room ?? room.room_id ?? serverStatus.value?.room ?? 'default'
-  const project = room.project ?? serverStatus.value?.project ?? '확인 없음'
-  const cluster = room.cluster ?? serverStatus.value?.cluster ?? '확인 없음'
+  const project = room.project ?? serverStatus.value?.project ?? 'N/A'
+  const cluster = room.cluster ?? serverStatus.value?.cluster ?? 'N/A'
   const allowlistFallback = toolAuditStateLabel(allowlistEmptyState(keeper))
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
@@ -150,95 +181,63 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex flex-col gap-1.5">
-      <div class="keeper-signal-row rounded-lg">
-        <span>Room</span>
-        <strong>${roomName}</strong>
-      </div>
-      <div class="keeper-signal-row rounded-lg">
-        <span>Project</span>
-        <strong>${project}</strong>
-      </div>
-      <div class="keeper-signal-row rounded-lg">
-        <span>Cluster</span>
-        <strong>${cluster}</strong>
-      </div>
-      <div class="keeper-signal-row rounded-lg">
-        <span>Current task</span>
-        <strong>${currentTaskLabel}</strong>
-      </div>
-      <div class="keeper-signal-row rounded-lg">
-        <span>Skill route</span>
-        <strong>${skillRouteLabel}</strong>
-      </div>
+      <${SignalRow} label="Room" value=${roomName} />
+      <${SignalRow} label="Project" value=${project} />
+      <${SignalRow} label="Cluster" value=${cluster} />
+      <${SignalRow} label="Current task" value=${currentTaskLabel} />
+      <${SignalRow} label="Skill route" value=${skillRouteLabel} />
+
       <div class="flex justify-end mt-1">
-        <button class="control-btn rounded-lg ghost" onClick=${() => { openToolsInventory(openToolsQuery) }}>
+        <button
+          class="py-1.5 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-colors cursor-pointer"
+          onClick=${() => { openToolsInventory(openToolsQuery) }}
+        >
           Open tools panel
         </button>
       </div>
-      <div class="flex flex-col gap-2 mt-2">
-        <span class="text-xs text-[var(--text-dim)]">Allowed tools</span>
-        <span class="text-[11px] text-[var(--text-slate)]">Currently permitted tools for this keeper runtime.</span>
-        <div class="flex flex-wrap gap-1.5">
-          ${allowedTools.length > 0
-            ? allowedTools.map(tool => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${tool}</span>`)
-            : html`<span class="text-xs text-[var(--text-dim)]">${allowlistFallback}</span>`}
-        </div>
+
+      <${ToolSection}
+        title="Allowed tools"
+        description="Currently permitted tools for this keeper runtime."
+        tools=${allowedTools}
+        fallback=${allowlistFallback}
+      />
+
+      <${ToolSection}
+        title="Observed tools"
+        description="Recent execution evidence from heartbeat or runtime telemetry."
+        tools=${observedTools}
+        fallback=${observedFallback}
+      />
+
+      <${SignalRow} label="Tool calls" value=${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback} />
+      <${SignalRow} label="Evidence source" value=${auditSource ?? metadataFallback} />
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">Observed at</span>
+        <span class="text-xs font-medium text-[var(--text-strong)]">${auditAt ? html`<${TimeAgo} timestamp=${auditAt} />` : metadataFallback}</span>
       </div>
-      <div class="flex flex-col gap-2 mt-2">
-        <span class="text-xs text-[var(--text-dim)]">Observed tools</span>
-        <span class="text-[11px] text-[var(--text-slate)]">Recent execution evidence from heartbeat or runtime telemetry.</span>
-        <div class="flex flex-wrap gap-1.5">
-          ${observedTools.length > 0
-            ? observedTools.map(tool => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${tool}</span>`)
-            : html`<span class="text-xs text-[var(--text-dim)]">${observedFallback}</span>`}
-        </div>
-      </div>
-      <div class="keeper-signal-row rounded-lg">
-        <span>Tool calls</span>
-        <strong>${typeof toolCallCount === 'number' ? toolCallCount : observedFallback === 'none_recent' ? 0 : metadataFallback}</strong>
-      </div>
-      <div class="keeper-signal-row rounded-lg">
-        <span>Evidence source</span>
-        <strong>${auditSource ?? metadataFallback}</strong>
-      </div>
-      <div class="keeper-signal-row rounded-lg">
-        <span>Observed at</span>
-        <strong>${auditAt ? html`<${TimeAgo} timestamp=${auditAt} />` : metadataFallback}</strong>
-      </div>
-      <div class="flex flex-col gap-2 mt-2">
-        <span class="text-xs text-[var(--text-dim)]">Keeper recent tools</span>
-        <div class="flex flex-wrap gap-1.5">
-          ${recentTools.length > 0
-            ? recentTools.map(tool => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${tool}</span>`)
-            : html`<span class="text-xs text-[var(--text-dim)]">${linkedRecentFallback}</span>`}
-        </div>
-      </div>
+
+      <${ToolSection}
+        title="Keeper recent tools"
+        tools=${recentTools}
+        fallback=${linkedRecentFallback}
+      />
+
       ${topTools.length > 0
-        ? html`
-            <div class="flex flex-col gap-2 mt-2">
-              <span class="text-xs text-[var(--text-dim)]">Window top tools</span>
-              <div class="flex flex-wrap gap-1.5">
-                ${topTools.map(tool => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${tool}</span>`)}
-              </div>
-            </div>
-          `
+        ? html`<${ToolSection} title="Window top tools" tools=${topTools} fallback="" />`
         : null}
-      <div class="flex flex-col gap-2 mt-2">
-        <span class="text-xs text-[var(--text-dim)]">Capabilities</span>
-        <div class="flex flex-wrap gap-1.5">
-          ${capabilities.length > 0
-            ? capabilities.map(capability => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${capability}</span>`)
-            : html`<span class="text-xs text-[var(--text-dim)]">등록된 capability 없음</span>`}
-        </div>
-      </div>
-      <div class="flex flex-col gap-2 mt-2">
-        <span class="text-xs text-[var(--text-dim)]">Available actions nearby</span>
-        <div class="flex flex-wrap gap-1.5">
-          ${actions.length > 0
-            ? actions.map(action => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${actionDescriptorLabel(action.action_type)}</span>`)
-            : html`<span class="text-xs text-[var(--text-dim)]">operator action 광고 없음</span>`}
-        </div>
-      </div>
+
+      <${ToolSection}
+        title="Capabilities"
+        tools=${capabilities}
+        fallback="No registered capabilities"
+      />
+
+      <${ToolSection}
+        title="Available actions nearby"
+        tools=${actions.map(action => actionDescriptorLabel(action.action_type))}
+        fallback="No operator action advertisements"
+      />
     </div>
   `
 }

@@ -1,6 +1,6 @@
 // Keeper detail sub-components — KPIs, charts, field dictionary,
 // TRPG stats, equipment, relationships, autonomy, traits
-// Extracted from keeper-detail.ts for maintainability.
+// Redesigned: individual KPI cards, clean table, proper spacing.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -30,35 +30,35 @@ export function AutonomyMeter({ keeper }: { keeper: Keeper }) {
   const pct = ((idx + 1) / AUTONOMY_LEVELS.length) * 100
 
   return html`
-    <div class="flex flex-col gap-1.5">
-      <div class="mb-2">
-        <div class="flex justify-between items-center mb-1">
-          <span style="font-size:13px; font-weight:600; color:${info.color};">${info.label}</span>
-          <span class="text-[11px] text-[var(--text-dim)]">${idx + 1} / ${AUTONOMY_LEVELS.length}</span>
+    <div class="flex flex-col gap-2">
+      <div>
+        <div class="flex justify-between items-center mb-1.5">
+          <span class="text-[13px] font-semibold" style="color:${info.color};">${info.label}</span>
+          <span class="text-[11px] text-[var(--text-muted)]">${idx + 1} / ${AUTONOMY_LEVELS.length}</span>
         </div>
-        <div style="width:100%; height:6px; background:#1a1a2e; border-radius:3px; overflow:hidden;">
-          <div style="width:${pct}%; height:100%; background:${info.color}; border-radius:3px; transition:width 0.3s;"></div>
+        <div class="w-full h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden">
+          <div class="h-full rounded-full transition-all duration-300" style="width:${pct}%; background:${info.color};"></div>
         </div>
-        <div class="flex justify-between mt-0.5">
+        <div class="flex justify-between mt-1.5">
           ${AUTONOMY_LEVELS.map((a, i) => html`
-            <span style="width:8px; height:8px; border-radius:50%; background:${i <= idx ? a.color : '#333'}; display:inline-block;"></span>
+            <span class="size-2 rounded-full inline-block transition-colors" style="background:${i <= idx ? a.color : 'var(--white-10)'};"></span>
           `)}
         </div>
       </div>
-      <div class="keeper-signal-row rounded-lg">
-        <span>Autonomous actions</span>
-        <strong>${keeper.autonomous_action_count ?? 0}</strong>
+      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+        <span class="text-xs text-[var(--text-muted)]">Autonomous actions</span>
+        <span class="text-xs font-medium text-[var(--text-strong)]">${keeper.autonomous_action_count ?? 0}</span>
       </div>
       ${keeper.last_autonomous_action_at
-        ? html`<div class="keeper-signal-row rounded-lg">
-            <span>Last autonomous action</span>
-            <strong><${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></strong>
+        ? html`<div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+            <span class="text-xs text-[var(--text-muted)]">Last autonomous action</span>
+            <span class="text-xs font-medium text-[var(--text-strong)]"><${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>
           </div>`
         : null}
       ${keeper.active_goal_ids && keeper.active_goal_ids.length > 0
-        ? html`<div class="keeper-signal-row rounded-lg">
-            <span>Active goals</span>
-            <strong>${keeper.active_goal_ids.length}</strong>
+        ? html`<div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+            <span class="text-xs text-[var(--text-muted)]">Active goals</span>
+            <span class="text-xs font-medium text-[var(--text-strong)]">${keeper.active_goal_ids.length}</span>
           </div>`
         : null}
     </div>
@@ -68,14 +68,26 @@ export function AutonomyMeter({ keeper }: { keeper: Keeper }) {
 // ── Utility functions ────────────────────────────────────
 
 export function formatTokens(n: number | undefined): string {
-  if (!n) return '—'
+  if (!n) return '-'
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return String(n)
 }
 
 
-// ── KPI & Chart components ───────────────────────────────
+// ── KPI Card ─────────────────────────────────────────────
+
+function KpiCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+  return html`
+    <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1">
+      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${label}</div>
+      <div class="text-2xl font-bold text-[var(--text-strong)] tabular-nums leading-tight">${value}</div>
+      ${hint ? html`<div class="text-[11px] text-[var(--text-muted)] leading-snug">${hint}</div>` : null}
+    </div>
+  `
+}
+
+// ── KPI Grid ─────────────────────────────────────────────
 
 export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
@@ -85,61 +97,50 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
       ? `$${lastPt.cost_usd.toFixed(4)}`
       : null
 
-  const items: { label: string; value: string | number; hint?: string }[] = [
-    {
-      label: '세대',
-      value: keeper.generation ?? '-',
-      hint: '승계 횟수',
-    },
-    {
-      label: '턴',
-      value: keeper.turn_count ?? '-',
-      hint: '총 루프 턴',
-    },
-    {
-      label: '컨텍스트',
-      value: keeper.context_ratio != null ? `${Math.round(keeper.context_ratio * 100)}%` : '-',
-      hint: keeper.context_ratio != null && keeper.context_ratio > 0.8 ? '한계 근접' : undefined,
-    },
-    {
-      label: '활동도',
-      value: keeper.activityLevel ?? '-',
-      hint: '0–5 단계',
-    },
-  ]
+  const contextHint = keeper.context_ratio != null && keeper.context_ratio > 0.8 ? 'Approaching limit' : undefined
 
   return html`
-    <div class="grid grid-cols-4 gap-2.5 mb-4">
-      ${items.map(i => html`
-        <div class="keeper-kpi rounded-lg">
-          <div class="keeper-kpi rounded-lg-label">${i.label}</div>
-          <div class="keeper-kpi rounded-lg-value">${i.value}</div>
-          ${i.hint ? html`<div class="keeper-kpi rounded-lg-hint">${i.hint}</div>` : null}
-        </div>
-      `)}
-      <div class="kpi-tile">
-        <div class="text-[color:var(--text-strong)] text-[17px] leading-[1.1] font-semibold tabular-nums">${formatTokens(keeper.context_tokens)}</div>
-        <div class="kpi-label">Tokens</div>
-      </div>
-      <div class="kpi-tile">
-        <div class="text-[color:var(--text-strong)] text-[17px] leading-[1.1] font-semibold tabular-nums">${keeper.handoff_count_total ?? '—'}</div>
-        <div class="kpi-label">Handoffs</div>
-      </div>
-      <div class="kpi-tile">
-        <div class="text-[color:var(--text-strong)] text-[17px] leading-[1.1] font-semibold tabular-nums">${keeper.compaction_count ?? '—'}</div>
-        <div class="kpi-label">Compactions</div>
-      </div>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+      <${KpiCard}
+        label="Generation"
+        value=${keeper.generation ?? '-'}
+        hint="Succession count"
+      />
+      <${KpiCard}
+        label="Turns"
+        value=${keeper.turn_count ?? '-'}
+        hint="Total loop turns"
+      />
+      <${KpiCard}
+        label="Context"
+        value=${keeper.context_ratio != null ? `${Math.round(keeper.context_ratio * 100)}%` : '-'}
+        hint=${contextHint}
+      />
+      <${KpiCard}
+        label="Activity"
+        value=${keeper.activityLevel ?? '-'}
+        hint="Level 0-5"
+      />
+      <${KpiCard}
+        label="Tokens"
+        value=${formatTokens(keeper.context_tokens)}
+      />
+      <${KpiCard}
+        label="Handoffs"
+        value=${keeper.handoff_count_total ?? '-'}
+      />
+      <${KpiCard}
+        label="Compactions"
+        value=${keeper.compaction_count ?? '-'}
+      />
       ${latestCost
-        ? html`
-            <div class="kpi-tile">
-              <div class="text-[color:var(--text-strong)] text-[17px] leading-[1.1] font-semibold tabular-nums">${latestCost}</div>
-              <div class="kpi-label">Cost (USD)</div>
-            </div>
-          `
+        ? html`<${KpiCard} label="Cost (USD)" value=${latestCost} />`
         : null}
     </div>
   `
 }
+
+// ── Context Chart ────────────────────────────────────────
 
 export function ContextChart({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
@@ -147,11 +148,11 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
     const pct = ((keeper.context?.context_ratio ?? 0) * 100)
     const color = pct > 85 ? '#ef4444' : pct > 70 ? '#f59e0b' : '#22c55e'
     return html`
-      <div class="context-chart">
-        <div class="chart-bar-bg">
-          <div class="chart-bar" style="width:${pct.toFixed(1)}%;background:${color}"></div>
+      <div class="flex items-center gap-3 mb-5 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
+          <div class="h-full rounded-full transition-all duration-300" style="width:${pct.toFixed(1)}%;background:${color}"></div>
         </div>
-        <span class="chart-pct">${pct.toFixed(1)}%</span>
+        <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${pct.toFixed(1)}%</span>
       </div>`
   }
 
@@ -167,10 +168,10 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
   const lineColor = lastRatio > 85 ? '#ef4444' : lastRatio > 70 ? '#f59e0b' : '#22c55e'
 
   return html`
-    <div class="context-chart flex items-center gap-2">
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="background:#1a1a2e;border-radius:4px">
-        <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="#666" stroke-dasharray="3,3" stroke-width="0.5"/>
-        <line x1="${pad}" y1="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" stroke="#666" stroke-dasharray="3,3" stroke-width="0.5"/>
+    <div class="flex items-center gap-3 mb-5 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded" style="background:#0b1220;">
+        <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
+        <line x1="${pad}" y1="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - 0.85 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.85 * (H - 2 * pad)).toFixed(1)}" stroke="#f59e0b" stroke-dasharray="3,3" stroke-width="0.5"/>
         ${pts.filter(({ p }) => p.is_handoff).map(({ x }) => html`
           <line x1="${x.toFixed(1)}" y1="${pad}" x2="${x.toFixed(1)}" y2="${H - pad}" stroke="#ef4444" stroke-width="1.5" opacity="0.7"/>
@@ -180,7 +181,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
           <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="#a855f7"/>
         `)}
       </svg>
-      <span class="chart-pct">${lastRatio.toFixed(1)}%</span>
+      <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${lastRatio.toFixed(1)}%</span>
     </div>`
 }
 
@@ -207,6 +208,28 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
     { title: 'Interests', key: 'interests', value: keeper.interests?.join(', ') || '-' },
   ]
 
+  // Extra fields from keeper object
+  const extras: { title: string; value: string; mono?: boolean }[] = []
+  if (keeper.trace_id) extras.push({ title: 'Trace ID', value: keeper.trace_id, mono: true })
+  if (keeper.agent_name) extras.push({ title: 'Agent', value: keeper.agent_name })
+  if (keeper.primary_model) extras.push({ title: 'Primary Model', value: keeper.primary_model, mono: true })
+  if (keeper.active_model) extras.push({ title: 'Active Model', value: keeper.active_model, mono: true })
+  if (keeper.next_model_hint) extras.push({ title: 'Next Model Hint', value: keeper.next_model_hint, mono: true })
+  if (keeper.skill_primary) extras.push({ title: 'Skill (Primary)', value: keeper.skill_primary })
+  if (keeper.skill_secondary) extras.push({ title: 'Skill (Secondary)', value: keeper.skill_secondary })
+  if (keeper.skill_reason) extras.push({ title: 'Skill Reason', value: keeper.skill_reason })
+  if (keeper.context_source) extras.push({ title: 'Context Source', value: keeper.context_source })
+  if (keeper.context_tokens != null) extras.push({ title: 'Context Tokens', value: formatTokens(keeper.context_tokens) })
+  if (keeper.context_max != null) extras.push({ title: 'Context Max', value: formatTokens(keeper.context_max) })
+  if (keeper.memory_recent_note) extras.push({ title: 'Memory Note', value: keeper.memory_recent_note })
+  if (keeper.k2k_count != null) extras.push({ title: 'K2K Count', value: String(keeper.k2k_count) })
+  if (keeper.conversation_tail_count != null) extras.push({ title: 'Conv Tail', value: String(keeper.conversation_tail_count) })
+  if (keeper.handoff_count_total != null) extras.push({ title: 'Total Handoffs', value: String(keeper.handoff_count_total) })
+  if (keeper.compaction_count != null) extras.push({ title: 'Compactions', value: String(keeper.compaction_count) })
+  if (keeper.last_compaction_saved_tokens != null) extras.push({ title: 'Last Compact Saved', value: formatTokens(keeper.last_compaction_saved_tokens) })
+  if (keeper.context?.message_count != null) extras.push({ title: 'Message Count', value: String(keeper.context.message_count) })
+  if (keeper.context?.has_checkpoint != null) extras.push({ title: 'Has Checkpoint', value: keeper.context.has_checkpoint ? 'Yes' : 'No' })
+
   const filtered = filter
     ? fields.filter(f => f.title.toLowerCase().includes(filter) || f.key.includes(filter) || f.value.toLowerCase().includes(filter))
     : fields
@@ -214,38 +237,27 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="max-h-[460px] overflow-y-auto">
       <input
-        class="keeper-field-search rounded-lg"
+        class="w-full py-2 px-3 mb-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-xs text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--ok-40)]"
         type="text"
-        placeholder="필드 검색..."
+        placeholder="Search fields..."
         value=${fieldSearch.value}
         onInput=${(e: Event) => { fieldSearch.value = (e.target as HTMLInputElement).value }}
       />
-      ${filtered.map(f => html`
-        <div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]">
-          <span class="font-semibold min-w-[90px]">${f.title}</span>
-          <span class="font-mono text-cyan text-[var(--fs-sm)]">${f.key}</span>
-          <span class="flex-1 text-right text-[#ccc]">${f.value}</span>
-        </div>
-      `)}
-      ${keeper.trace_id ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Trace ID</span><span class="keeper-field-key font-mono">${keeper.trace_id}</span></div>` : ''}
-      ${keeper.agent_name ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Agent</span><span class="flex-1 text-right text-[#ccc]">${keeper.agent_name}</span></div>` : ''}
-      ${keeper.primary_model ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Primary Model</span><span class="font-mono flex-1 text-right text-[#ccc]">${keeper.primary_model}</span></div>` : ''}
-      ${keeper.active_model ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Active Model</span><span class="font-mono flex-1 text-right text-[#ccc]">${keeper.active_model}</span></div>` : ''}
-      ${keeper.next_model_hint ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Next Model Hint</span><span class="font-mono flex-1 text-right text-[#ccc]">${keeper.next_model_hint}</span></div>` : ''}
-      ${keeper.skill_primary ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Skill (Primary)</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_primary}</span></div>` : ''}
-      ${keeper.skill_secondary ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Skill (Secondary)</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_secondary}</span></div>` : ''}
-      ${keeper.skill_reason ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Skill Reason</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_reason}</span></div>` : ''}
-      ${keeper.context_source ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Context Source</span><span class="flex-1 text-right text-[#ccc]">${keeper.context_source}</span></div>` : ''}
-      ${keeper.context_tokens != null ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Context Tokens</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.context_tokens)}</span></div>` : ''}
-      ${keeper.context_max != null ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Context Max</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.context_max)}</span></div>` : ''}
-      ${keeper.memory_recent_note ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Memory Note</span><span class="flex-1 text-right text-[#ccc]">${keeper.memory_recent_note}</span></div>` : ''}
-      ${keeper.k2k_count != null ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">K2K Count</span><span class="flex-1 text-right text-[#ccc]">${keeper.k2k_count}</span></div>` : ''}
-      ${keeper.conversation_tail_count != null ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Conv Tail</span><span class="flex-1 text-right text-[#ccc]">${keeper.conversation_tail_count}</span></div>` : ''}
-      ${keeper.handoff_count_total != null ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Total Handoffs</span><span class="flex-1 text-right text-[#ccc]">${keeper.handoff_count_total}</span></div>` : ''}
-      ${keeper.compaction_count != null ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Compactions</span><span class="flex-1 text-right text-[#ccc]">${keeper.compaction_count}</span></div>` : ''}
-      ${keeper.last_compaction_saved_tokens != null ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Last Compact Saved</span><span class="flex-1 text-right text-[#ccc]">${formatTokens(keeper.last_compaction_saved_tokens)}</span></div>` : ''}
-      ${keeper.context?.message_count != null ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Message Count</span><span class="flex-1 text-right text-[#ccc]">${keeper.context.message_count}</span></div>` : ''}
-      ${keeper.context?.has_checkpoint != null ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Has Checkpoint</span><span class="flex-1 text-right text-[#ccc]">${keeper.context.has_checkpoint ? 'Yes' : 'No'}</span></div>` : ''}
+      <div class="flex flex-col">
+        ${filtered.map((f, i) => html`
+          <div class="grid grid-cols-[100px_80px_1fr] gap-2 py-2 px-2 text-xs rounded-md ${i % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
+            <span class="font-semibold text-[var(--text-body)] truncate">${f.title}</span>
+            <span class="font-mono text-[var(--cyan)] text-[11px] truncate">${f.key}</span>
+            <span class="text-right text-[var(--text-body)] truncate">${f.value}</span>
+          </div>
+        `)}
+        ${extras.map((f, i) => html`
+          <div class="grid grid-cols-[100px_1fr] gap-2 py-2 px-2 text-xs rounded-md ${(filtered.length + i) % 2 === 0 ? 'bg-[var(--white-2)]' : ''}">
+            <span class="font-semibold text-[var(--text-body)] truncate">${f.title}</span>
+            <span class="text-right text-[var(--text-body)] truncate ${f.mono ? 'font-mono' : ''}">${f.value}</span>
+          </div>
+        `)}
+      </div>
     </div>
   `
 }
@@ -258,21 +270,27 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
 
   return html`
     <div>
-      <div class="flex gap-3 mb-2.5">
+      <div class="flex gap-3 mb-3">
         <div class="flex-1">
-          <div class="text-[11px] text-[var(--text-dim)]">HP ${stats.hp}/${stats.max_hp}</div>
-          <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
-            <div style="width:${hpPct}%; height:100%; background:${hpPct > 50 ? '#4ade80' : hpPct > 25 ? '#fbbf24' : '#ef4444'}; border-radius:3px;" />
+          <div class="flex justify-between text-[11px] text-[var(--text-muted)] mb-1">
+            <span>HP</span>
+            <span>${stats.hp}/${stats.max_hp}</span>
+          </div>
+          <div class="h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all" style="width:${hpPct}%; background:${hpPct > 50 ? '#4ade80' : hpPct > 25 ? '#fbbf24' : '#ef4444'};" />
           </div>
         </div>
         <div class="flex-1">
-          <div class="text-[11px] text-[var(--text-dim)]">MP ${stats.mp}/${stats.max_mp}</div>
-          <div style="height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
-            <div style="width:${mpPct}%; height:100%; background:#818cf8; border-radius:3px;" />
+          <div class="flex justify-between text-[11px] text-[var(--text-muted)] mb-1">
+            <span>MP</span>
+            <span>${stats.mp}/${stats.max_mp}</span>
+          </div>
+          <div class="h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
+            <div class="h-full rounded-full" style="width:${mpPct}%; background:#818cf8;" />
           </div>
         </div>
       </div>
-      <div class="grid grid-cols-3 gap-1.5">
+      <div class="grid grid-cols-3 gap-2">
         ${[
           { label: 'STR', value: stats.strength },
           { label: 'DEX', value: stats.dexterity },
@@ -281,28 +299,28 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
           { label: 'WIS', value: stats.wisdom },
           { label: 'CHA', value: stats.charisma },
         ].map(s => html`
-          <div class="text-center p-1.5 bg-[var(--white-3)] rounded-md">
-            <div class="text-[10px] text-[var(--text-dim)] uppercase">${s.label}</div>
-            <div class="text-base font-bold text-[#e0e0e0]">${s.value}</div>
+          <div class="text-center py-2 px-1.5 bg-[var(--white-3)] rounded-lg border border-[var(--card-border)]">
+            <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">${s.label}</div>
+            <div class="text-lg font-bold text-[var(--text-strong)] mt-0.5">${s.value}</div>
           </div>
         `)}
       </div>
-      <div class="mt-2 text-xs text-[var(--text-dim)]">
-        Level ${stats.level} — XP ${stats.xp}
+      <div class="mt-3 text-xs text-[var(--text-muted)]">
+        Level ${stats.level} -- XP ${stats.xp}
       </div>
     </div>
   `
 }
 
 export function EquipmentList({ items }: { items: string[] }) {
-  if (items.length === 0) return html`<div class="empty-state">장비 없음</div>`
+  if (items.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">No equipment</div>`
 
   return html`
     <div class="flex flex-col gap-1.5">
       ${items.map((item, i) => html`
-        <div class="keeper-equipment-row rounded-md">
-          <span>${item}</span>
-          <span class="text-cyan text-[var(--fs-xs)]">#${i + 1}</span>
+        <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
+          <span class="text-xs text-[var(--text-body)]">${item}</span>
+          <span class="text-[10px] text-[var(--cyan)] font-mono">#${i + 1}</span>
         </div>
       `)}
     </div>
@@ -311,14 +329,14 @@ export function EquipmentList({ items }: { items: string[] }) {
 
 export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   const entries = Object.entries(rels)
-  if (entries.length === 0) return html`<div class="empty-state">관계 없음</div>`
+  if (entries.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">No relationships</div>`
 
   return html`
     <div class="max-h-[220px] overflow-y-auto flex flex-col gap-1.5">
       ${entries.map(([name, relation]) => html`
-        <div class="flex items-center gap-2 py-1.5 px-2.5 bg-[var(--white-3)] rounded-md">
-          <span class="keeper-mention-chip rounded-full">${name}</span>
-          <span class="font-mono text-[var(--fs-xs)] text-[var(--text-dim)]">${relation}</span>
+        <div class="flex items-center gap-2 py-2 px-3 bg-[var(--white-3)] rounded-lg">
+          <span class="inline-flex items-center py-0.5 px-2 rounded-full text-[11px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${name}</span>
+          <span class="text-[11px] text-[var(--text-muted)] font-mono">${relation}</span>
         </div>
       `)}
     </div>
@@ -330,11 +348,10 @@ export function TraitsList({ traits, label }: { traits: string[]; label: string 
 
   return html`
     <div class="mb-3">
-      <div class="text-[11px] text-[var(--text-dim)] uppercase tracking-wider mb-1.5">${label}</div>
+      <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold mb-2">${label}</div>
       <div class="flex flex-wrap gap-1.5">
-        ${traits.map(t => html`<span class="keeper-mention-chip rounded-full">${t}</span>`)}
+        ${traits.map(t => html`<span class="inline-flex items-center py-0.5 px-2.5 rounded-full text-[11px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${t}</span>`)}
       </div>
     </div>
   `
 }
-

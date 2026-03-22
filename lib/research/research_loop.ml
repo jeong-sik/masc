@@ -15,6 +15,8 @@ type hypothesis = {
   target_file : string;
   rationale : string;
   patch : string;
+  old_text : string;  (** search text for search-replace mode (empty = use patch mode) *)
+  new_text : string;  (** replacement text for search-replace mode *)
 }
 
 type experiment_entry = {
@@ -134,11 +136,14 @@ let parse_hypothesis (response : string) : hypothesis option =
   try
     let json = Yojson.Safe.from_string stripped in
     let open Yojson.Safe.Util in
+    let str_or_empty key = match member key json with `String s -> s | _ -> "" in
     Some {
       description = json |> member "description" |> to_string;
       target_file = json |> member "target_file" |> to_string;
       rationale = json |> member "rationale" |> to_string;
-      patch = json |> member "patch" |> to_string;
+      patch = str_or_empty "patch";
+      old_text = str_or_empty "old_text";
+      new_text = str_or_empty "new_text";
     }
   with _ -> None
 
@@ -239,15 +244,36 @@ let cleanup_worktree ~(repo_path : string) ~(worktree_path : string) : unit =
   with _ -> ())
 
 (** Apply a patch to the target file in the worktree.
-    Supports:
-    - Unified diff (starts with "---" or "diff") → git apply
-    - Full file content (default) → write to target *)
+    Supports (in priority order):
+    1. Search-replace: old_text + new_text fields → string substitution
+    2. Unified diff: patch starts with "---" or "diff" → git apply
+    3. Full file content: patch is complete file → write to target *)
 let apply_patch ~(worktree_path : string) ~(hypothesis : hypothesis) : bool =
-  if hypothesis.target_file = "" || hypothesis.patch = "" then false
+  let has_search_replace = hypothesis.old_text <> "" && hypothesis.new_text <> "" in
+  if hypothesis.target_file = "" || (hypothesis.patch = "" && not has_search_replace) then false
   else begin
     let target = Printf.sprintf "%s/%s" worktree_path hypothesis.target_file in
     try
       if not (Sys.file_exists target) then false
+      else if has_search_replace then begin
+        (* Search-replace mode: read file, substitute old_text → new_text *)
+        let ic = open_in target in
+        let content = In_channel.input_all ic in
+        close_in ic;
+        if String.length content > 0 &&
+           (try ignore (Re.Str.search_forward (Re.Str.regexp_string hypothesis.old_text) content 0); true
+            with Not_found -> false)
+        then begin
+          let replaced = Re.Str.global_replace
+            (Re.Str.regexp_string hypothesis.old_text) hypothesis.new_text content in
+          let oc = open_out target in
+          output_string oc replaced; close_out oc;
+          true
+        end else begin
+          Log.Server.warn "research: old_text not found in %s" hypothesis.target_file;
+          false
+        end
+      end
       else
         let patch = hypothesis.patch in
         let is_diff = String.length patch > 4 &&

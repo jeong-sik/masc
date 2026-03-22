@@ -56,8 +56,9 @@ let default ?(repo = default_repo_config ()) () : t =
        in the .mli signatures provided, it does not exist. \
        The 'Code around' sections show actual code near TODOs — use this to write \
        precise patches that fit the existing style and indentation. \
-       The 'patch' field should contain the COMPLETE new content for the target file, \
-       or a unified diff (starting with '---'). \
+       For changes, PREFERRED: provide 'old_text' (exact text to find) and 'new_text' \
+       (replacement text). This is safest for small changes. \
+       Alternative: provide 'patch' with complete file content or unified diff. \
        Respond ONLY with a JSON object: \
-       {\"description\": \"...\", \"target_file\": \"...\", \"rationale\": \"...\", \"patch\": \"...\"}";
+       {\"description\": \"...\", \"target_file\": \"...\", \"rationale\": \"...\", \"old_text\": \"...\", \"new_text\": \"...\"}";
   }

@@ -230,7 +230,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
 
   return html`
     <article class="command-guide-card rounded-xl ${toneClass(tone)}">
-      <div class="command-guide-head">
+      <div class="flex justify-between gap-2.5 items-start">
         <strong>Run Resolution</strong>
         <span class="command-chip rounded-full ${toneClass(tone)}">
           ${runResolutionLabel(resolution?.status ?? recommendation?.recommended_kind ?? null)}
@@ -262,12 +262,12 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
       ${pendingConfirm
         ? html`
             <div class="command-guide-card rounded-xl warn">
-              <div class="command-guide-head">
+              <div class="flex justify-between gap-2.5 items-start">
                 <strong>확인 대기</strong>
                 <span class="command-chip rounded-full warn">${pendingConfirm.confirm_token}</span>
               </div>
               ${pendingConfirm.preview ? html`<pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[length:var(--fs-sm)] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${previewText(pendingConfirm.preview)}</pre>` : null}
-              <div class="command-action-row">
+              <div class="flex gap-2.5 flex-wrap mt-3">
                 <button class="control-btn rounded-lg" onClick=${() => { void confirmPending('confirm') }} disabled=${operatorActionBusy.value}>확인 실행</button>
                 <button class="control-btn rounded-lg ghost" onClick=${() => { void confirmPending('deny') }} disabled=${operatorActionBusy.value}>취소</button>
               </div>

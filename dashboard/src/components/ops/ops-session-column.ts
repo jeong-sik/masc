@@ -141,7 +141,7 @@ export function OpsSessionColumn() {
   return html`
     <div class="flex flex-col gap-4 min-w-0">
       <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">Session 개입</div>
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">지금 개입 가능한 세션만 위에 두고, 종료된 세션은 아래에 접어 둡니다.</p>
@@ -170,7 +170,7 @@ export function OpsSessionColumn() {
       </section>
 
       <section class="card flex flex-col gap-3 min-h-0">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">선택한 Session 요약</div>
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">snapshot이 아니라 digest 기준 attention과 worker 카드를 보여줍니다.</p>
@@ -231,7 +231,7 @@ export function OpsSessionColumn() {
       </section>
 
       <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">선택한 Session 액션</div>
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">

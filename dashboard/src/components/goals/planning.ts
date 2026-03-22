@@ -59,7 +59,7 @@ export function Planning() {
       </div>
 
       <!-- Compact refresh toolbar -->
-      <div class="planning-toolbar">
+      <div class="flex justify-end py-2 mb-1">
         <button
           class="control-btn rounded-lg secondary"
           onClick=${() => {

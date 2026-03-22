@@ -44,11 +44,11 @@ import { ControlSurface } from './control'
 
 function SurfaceTabs() {
   return html`
-    <div class="command-surface-tabs grouped">
+    <div class="command-surface-tabs flex-col gap-3">
       ${COMMAND_SURFACE_GROUPS.map(group => html`
-        <div class="command-tab-group" key=${group.id}>
+        <div class="flex flex-col gap-1.5" key=${group.id}>
           <span class="command-tab-group-label">${group.label}</span>
-          <div class="command-tab-group-items">
+          <div class="flex flex-wrap gap-2">
             ${COMMAND_SURFACE_META
               .filter(surface => surface.group === group.id)
               .map(surface => html`
@@ -222,12 +222,12 @@ export function Command() {
   return html`
     <section class="dashboard-panel command-plane-view ${wallboardMode ? 'wallboard' : ''}">
       ${wallboardMode ? null : html`
-        <div class="panel-header">
+        <div class="flex justify-between gap-4 items-start">
           <div>
             <h2>지휘면</h2>
             <p>기본 진입은 라이브 워룸입니다. 실제 run, worker, message, trace를 먼저 보고 필요할 때만 detail surface로 내려갑니다.</p>
           </div>
-          <div class="panel-actions">
+          <div class="flex gap-2.5 flex-wrap">
             <button
               class="control-btn rounded-lg ghost"
               onClick=${() => {

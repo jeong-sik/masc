@@ -156,7 +156,7 @@ export function ChatMessageBubble({
             <div class="chat-detail-panel rounded-xl">
               ${overview.length > 0
                 ? html`
-                    <div class="chat-overview-grid">
+                    <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                       ${overview.map(item => html`
                         <div class="chat-overview-card rounded-xl">
                           <div class="chat-overview-label">${item.label}</div>
@@ -181,7 +181,7 @@ export function ChatMessageBubble({
                 ? html`
                     <div class="chat-detail-section">
                       <div class="chat-detail-section-title">상태 스냅샷</div>
-                      <div class="chat-state-grid">
+                      <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
                           <div class="chat-state-card rounded-xl">
                             <div class="chat-state-label">${item.label}</div>

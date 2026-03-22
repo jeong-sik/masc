@@ -57,7 +57,7 @@ export function SwarmOverviewPanel() {
 
               <div class="command-card rounded-xl-stack">
                 <div class="command-guide-card rounded-xl highlight ${focusKey === 'recommendation' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
-                  <div class="command-guide-head">
+                  <div class="flex justify-between gap-2.5 items-start">
                     <strong>${recommendation?.label ?? '운영자 상태 확인'}</strong>
                     <span class="command-chip rounded-full">${recommendation?.lane_id ?? '전체'}</span>
                   </div>
@@ -68,7 +68,7 @@ export function SwarmOverviewPanel() {
                 <${SwarmProofPanel} proof=${proof} />
 
                 <div class="command-guide-card rounded-xl ${gaps.length > 0 ? 'warn' : 'ok'} ${focusKey === 'gaps' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
-                  <div class="command-guide-head">
+                  <div class="flex justify-between gap-2.5 items-start">
                     <strong>핵심 공백</strong>
                     <span class="command-chip rounded-full ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
                   </div>
@@ -78,7 +78,7 @@ export function SwarmOverviewPanel() {
                 </div>
 
                 <div class="command-guide-card rounded-xl">
-                  <div class="command-guide-head">
+                  <div class="flex justify-between gap-2.5 items-start">
                     <strong>이동 타임라인</strong>
                     <span class="command-chip rounded-full">${timeline.length}</span>
                   </div>

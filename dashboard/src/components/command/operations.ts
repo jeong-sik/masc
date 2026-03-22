@@ -134,7 +134,7 @@ function ChainOperationListItem(
 function ChainHistoryRow({ item }: { item: ChainHistoryEventSummary }) {
   return html`
     <article class="command-chain-history-row text-red-300">
-      <div class="command-guide-head">
+      <div class="flex justify-between gap-2.5 items-start">
         <strong>${item.chain_id ?? '알 수 없는 체인'}</strong>
         <span class="command-chip rounded-full ${chainStatusTone(item.event)}">${item.event}</span>
       </div>
@@ -147,7 +147,7 @@ function ChainHistoryRow({ item }: { item: ChainHistoryEventSummary }) {
 function ChainRunNodeRow({ node }: { node: CommandPlaneChainRunNode }) {
   return html`
     <article class="p-3 rounded-[10px] bg-[rgba(9,12,20,0.5)] border border-solid border-[var(--white-6)]">
-      <div class="command-guide-head">
+      <div class="flex justify-between gap-2.5 items-start">
         <strong>${node.id}</strong>
         <span class="command-chip rounded-full ${chainStatusTone(node.status)}">${node.status ?? '확인 필요'}</span>
       </div>
@@ -197,7 +197,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
       ${op.checkpoint_ref
         ? html`<div class="command-card rounded-xl-foot">체크포인트 ${op.checkpoint_ref}</div>`
         : null}
-      <div class="command-action-row">
+      <div class="flex gap-2.5 flex-wrap mt-3">
         <button
           class="control-btn rounded-lg ghost"
           onClick=${() => {
@@ -335,7 +335,7 @@ export function ChainsSurface() {
           <div class="card rounded-xl-title">Chains</div>
         </div>
         <article class="command-guide-card rounded-xl ${chainStatusTone(summary?.connection.status)}">
-          <div class="command-guide-head">
+          <div class="flex justify-between gap-2.5 items-start">
             <strong>native chain 연결</strong>
             <span class="command-chip rounded-full ${chainStatusTone(summary?.connection.status)}">${summary?.connection.status ?? 'disconnected'}</span>
           </div>
@@ -357,7 +357,7 @@ export function ChainsSurface() {
           ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">체인 오버레이 불러오는 중…</div>`
           : overlays.length > 0
             ? html`
-                <div class="command-chain-list">
+                <div class="flex flex-col gap-3 mt-3.5">
                   ${overlays.map(overlay => html`
                     <${ChainOperationListItem}
                       overlay=${overlay}
@@ -369,8 +369,8 @@ export function ChainsSurface() {
               `
             : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">체인 기반 작전이 아직 없습니다.</div>`}
 
-        <div class="command-chain-history">
-          <div class="command-guide-head">
+        <div class="flex flex-col gap-3 mt-3.5">
+          <div class="flex justify-between gap-2.5 items-start">
             <strong>최근 이력</strong>
             <span class="command-chip rounded-full">${summary?.recent_history.length ?? 0}</span>
           </div>
@@ -416,7 +416,7 @@ export function ChainsSurface() {
               ${selectedOverlay.mermaid
                 ? html`
                     <div class="command-chain-panel rounded-xl">
-                      <div class="command-guide-head">
+                      <div class="flex justify-between gap-2.5 items-start">
                         <strong>Mermaid 그래프</strong>
                         <span class="command-chip rounded-full">${selectedOverlay.operation.chain?.chain_id ?? 'graph'}</span>
                       </div>
@@ -426,7 +426,7 @@ export function ChainsSurface() {
                 : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">기록된 Mermaid 그래프가 아직 없습니다.</div>`}
 
               <div class="command-chain-panel rounded-xl">
-                <div class="command-guide-head">
+                <div class="flex justify-between gap-2.5 items-start">
                   <strong>실행 상세</strong>
                   <span class="command-chip rounded-full ${run?.success === false ? 'bad' : 'ok'}">
                     ${run

@@ -52,7 +52,7 @@ function DecisionCard({ decision }: { decision: CommandPlaneDecisionRecord }) {
       </div>
       ${decision.status === 'pending' && !isLegacy
         ? html`
-            <div class="command-action-row">
+            <div class="flex gap-2.5 flex-wrap mt-3">
               <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(approveKey)} onClick=${() => fire(() => approveCommandPlaneDecision(decision.decision_id))}>
                 ${actionDisabled(approveKey) ? '승인 중…' : '승인'}
               </button>
@@ -91,7 +91,7 @@ function CapacityRowCard({ row }: { row: CommandPlaneCapacityRow }) {
         <span>동결</span><span>${frozen ? '예' : '아니오'}</span>
         <span>킬 스위치</span><span>${killSwitch ? '켜짐' : '꺼짐'}</span>
       </div>
-      <div class="command-action-row">
+      <div class="flex gap-2.5 flex-wrap mt-3">
         <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(freezeKey)} onClick=${() => fire(() => toggleCommandPlaneFreeze(unit.unit_id, !frozen))}>
           ${actionDisabled(freezeKey) ? '적용 중…' : frozen ? '동결 해제' : '동결'}
         </button>

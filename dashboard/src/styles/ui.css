@@ -1,14 +1,5 @@
 /* ── Toast Notifications ───────────────────────────────────── */
-.toast-container {
-  /* Uses --z-overlay-toast */
-  position: fixed;
-  top: 20px;
-  right: 20px;
-  z-index: var(--z-overlay-toast, 3070);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+/* toast-container: migrated to inline Tailwind */
 .toast {
   padding: 12px 20px;
   border-radius: 10px;
@@ -118,12 +109,7 @@ button.agent-card {
   }
 }
 
-.room-truth-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  margin: 0 0 16px;
-}
+/* room-truth-strip: migrated to inline Tailwind */
 
 .room-truth-strip-loading,
 .room-truth-strip-error {
@@ -171,11 +157,7 @@ button.agent-card {
   color: #7fa5d8;
 }
 
-.room-truth-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
+/* room-truth-chip-row: migrated to inline Tailwind (flex flex-wrap gap-2) */
 
 .agent-card .agent-task {
   margin-top: 10px;
@@ -187,11 +169,7 @@ button.agent-card {
   margin-top: 10px;
 }
 
-.agents-monitor {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
+/* agents-monitor: migrated to inline Tailwind (flex flex-col gap-5) */
 
 .monitor-stat-caption {
   margin-top: 6px;
@@ -212,12 +190,7 @@ button.agent-card {
   line-height: 1.45;
 }
 
-.monitor-alert-list,
-.monitor-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+/* monitor-alert-list, monitor-list: migrated to inline Tailwind (flex flex-col gap-2.5) */
 
 button.monitor-alert,
 button.monitor-row {
@@ -261,19 +234,8 @@ button.monitor-alert.bad,
   padding: 12px 14px;
 }
 
-.monitor-row-header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-  align-items: center;
-  gap: 10px;
-}
-
-.monitor-name-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
+/* monitor-row-header: migrated to inline Tailwind */
+/* monitor-name-line: migrated to inline Tailwind (flex items-center gap-2 flex-wrap) */
 
 .monitor-title {
   color: #f5f7ff;
@@ -291,14 +253,7 @@ button.monitor-alert.bad,
   font-size: var(--fs-sm);
 }
 
-.monitor-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  margin-top: 10px;
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-}
+/* monitor-meta: migrated to inline Tailwind */
 
 .monitor-focus {
   margin-top: 10px;
@@ -352,21 +307,5 @@ button.monitor-alert.bad,
   color: var(--ok);
   margin-bottom: 15px;
 }
-.card-title-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 15px;
-
-  & .card-title {
-    margin-bottom: 0;
-  }
-}
-.semantic-tag-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-.semantic-tag,
+/* card-title-row: migrated to inline Tailwind (flex items-start justify-between gap-3 mb-[15px]) */
+/* semantic-tag-row: migrated to inline Tailwind (flex flex-wrap gap-1.5 mb-3) */

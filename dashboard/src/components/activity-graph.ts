@@ -119,14 +119,14 @@ function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
     return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">최근 실행 이벤트가 없습니다.</div>`
   }
   return html`
-    <div class="monitor-list">
+    <div class="flex flex-col gap-2.5">
       ${events.map(event => {
         const actor = eventActor(event)
         return html`
           <div class="monitor-row rounded-xl p-3.5 ok" key=${event.seq}>
             <div class="monitor-row rounded-xl-header">
               <div class="min-w-0">
-                <div class="monitor-name-line">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span class="monitor-title">${actor || '(unknown)'}</span>
                   <span class="monitor-sub">${eventKindLabel(event.kind)}</span>
                 </div>
@@ -134,7 +134,7 @@ function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
               </div>
               <span class="monitor-pill ok inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em]">${eventKindLabel(event.kind)}</span>
             </div>
-            <div class="monitor-meta">
+            <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]">
               <span>${event.room_id}</span>
               ${event.ts_iso ? html`<span><${TimeAgo} timestamp=${event.ts_iso} /></span>` : null}
               ${event.tags.length > 0 ? html`<span>${event.tags.join(', ')}</span>` : null}
@@ -205,7 +205,7 @@ function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
 
 function EmptyActivityGraph() {
   return html`
-    <div class="agents-monitor">
+    <div class="flex flex-col gap-5">
       <${Card} title="활동 그래프" class="section mb-3.5" testId="activity_graph.graph">
         <div class="mb-3.5">
           <h2 class="monitor-headline">활동 그래프가 비어 있습니다</h2>
@@ -234,7 +234,7 @@ export function ActivityGraphSurface() {
 
   if (error && !data) {
     return html`
-      <div class="agents-monitor">
+      <div class="flex flex-col gap-5">
         <${Card} title="오류" class="section mb-3.5" testId="activity_graph.error">
           <div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">활동 그래프를 불러올 수 없습니다: ${error}</div>
           <button class="control-btn rounded-lg ghost" onClick=${loadGraph}>다시 시도</button>
@@ -252,7 +252,7 @@ export function ActivityGraphSurface() {
   }
 
   return html`
-    <div class="agents-monitor">
+    <div class="flex flex-col gap-5">
 
       <${Card} title="활동 그래프" class="section mb-3.5" testId="activity_graph.graph">
         <div class="mb-3.5">
@@ -261,7 +261,7 @@ export function ActivityGraphSurface() {
         </div>
         <${StatsRow} data=${data} />
         <${GraphView} data=${data} />
-        <div class="monitor-meta" class="mt-2">
+        <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]" class="mt-2">
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
           ${data.window.room_id ? html`<span>room: ${data.window.room_id}</span>` : null}

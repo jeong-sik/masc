@@ -78,7 +78,7 @@ export function WarRoomBodyGrid({
 }: WarRoomBodyProps) {
   return html`
     <div class="command-warroom-grid ${wallboard ? 'wallboard' : ''}">
-      <div class="command-warroom-column">
+      <div class="flex flex-col gap-4 min-w-0">
         <section class="card rounded-xl min-h-[240px]">
           <div class="card rounded-xl-title-row">
             <div class="card rounded-xl-title">실행 흐름</div>
@@ -91,7 +91,7 @@ export function WarRoomBodyGrid({
             : selectedSession
               ? html`
                   <article class="command-guide-card rounded-xl">
-                    <div class="command-guide-head">
+                    <div class="flex justify-between gap-2.5 items-start">
                       <strong>${selectedSession.session_id}</strong>
                       <span class="command-chip rounded-full ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
                     </div>
@@ -125,13 +125,13 @@ export function WarRoomBodyGrid({
         </section>
       </div>
 
-      <div class="command-warroom-column">
+      <div class="flex flex-col gap-4 min-w-0">
         <section class="card rounded-xl min-h-[240px]">
           <div class="card rounded-xl-title-row">
             <div class="card rounded-xl-title">상황 피드</div>
           </div>
           ${feedItems.length > 0
-            ? html`<div class="command-trace-stack">
+            ? html`<div class="flex flex-col gap-3">
                 ${feedItems.map(item => html`<${WarRoomFeedCard} item=${item} />`)}
               </div>`
             : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">메시지, chain, autoresearch, attention feed가 아직 없습니다.</div>`}
@@ -142,20 +142,20 @@ export function WarRoomBodyGrid({
             <div class="card rounded-xl-title">트레이스 흐름</div>
           </div>
           ${swarm && swarm.recent_trace_events.length > 0
-            ? html`<div class="command-trace-stack">
+            ? html`<div class="flex flex-col gap-3">
                 ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
               </div>`
             : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">실행 범위 트레이스 이벤트가 아직 없습니다.</div>`}
         </section>
       </div>
 
-      <div class="command-warroom-column">
+      <div class="flex flex-col gap-4 min-w-0">
         <section class="card rounded-xl min-h-[240px]">
           <div class="card rounded-xl-title-row">
             <div class="card rounded-xl-title">Agents</div>
           </div>
           ${agentViews.length > 0
-            ? html`<div class="warroom-presence-grid">
+            ? html`<div class="grid grid-cols-1 gap-3">
                 ${agentViews.map(item => html`<${WarRoomPresenceCard} item=${item} />`)}
               </div>`
             : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">가시적인 active agent가 아직 없습니다.</div>`}
@@ -166,7 +166,7 @@ export function WarRoomBodyGrid({
             <div class="card rounded-xl-title">Keepers</div>
           </div>
           ${keeperViews.length > 0
-            ? html`<div class="warroom-presence-grid">
+            ? html`<div class="grid grid-cols-1 gap-3">
                 ${keeperViews.map(item => html`<${WarRoomPresenceCard} item=${item} />`)}
               </div>`
             : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">가시적인 keeper/runtime 카드가 아직 없습니다.</div>`}
@@ -184,7 +184,7 @@ export function WarRoomBodyGrid({
             ${pendingApprovals > 0
               ? html`
                   <article class="command-guide-card rounded-xl warn">
-                    <div class="command-guide-head">
+                    <div class="flex justify-between gap-2.5 items-start">
                       <strong>승인 대기</strong>
                       <span class="command-chip rounded-full warn">${pendingApprovals}</span>
                     </div>
@@ -195,7 +195,7 @@ export function WarRoomBodyGrid({
             ${pendingConfirmTotal > 0
               ? html`
                   <article class="command-guide-card rounded-xl warn">
-                    <div class="command-guide-head">
+                    <div class="flex justify-between gap-2.5 items-start">
                       <strong>확인 대기</strong>
                       <span class="command-chip rounded-full warn">${pendingConfirmHidden > 0 ? `${pendingConfirmVisible}/${pendingConfirmTotal}` : pendingConfirmTotal}</span>
                     </div>

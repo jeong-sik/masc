@@ -36,7 +36,7 @@ export function GoalRow({ goal }: { goal: Goal }) {
           <div class="goal-review-note">${goal.last_review_note}</div>
         ` : null}
       </div>
-      <div class="goal-row rounded-lg-right">
+      <div class="flex flex-col items-end gap-1 shrink-0">
         <${StatusBadge} status=${goal.status} />
         <div class="goal-updated">
           <${TimeAgo} timestamp=${goal.updated_at} />
@@ -96,7 +96,7 @@ export function GoalsSummary() {
     if (g.horizon in byHorizon) byHorizon[g.horizon as keyof typeof byHorizon]++
   }
   return html`
-    <div class="goal-summary">
+    <div class="flex gap-3 flex-wrap">
       <div class="goal-summary-item rounded-lg">
         <div class="goal-summary-value">${all.length}</div>
         <div class="goal-summary-label">전체</div>

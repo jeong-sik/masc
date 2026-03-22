@@ -66,7 +66,7 @@ export function OpsRoomColumn() {
   return html`
     <div class="flex flex-col gap-4 min-w-0">
       <section class="card flex flex-col gap-3 min-h-0">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">추천 개입</div>
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
@@ -112,7 +112,7 @@ export function OpsRoomColumn() {
       </section>
 
       <section class="card flex flex-col gap-3 min-h-0 ops-pending-section">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">승인 대기</div>
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">
@@ -166,7 +166,7 @@ export function OpsRoomColumn() {
       </section>
 
       <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">Room 상태</div>
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">평소에는 추천 개입만 보면 됩니다. room 전체를 건드릴 때만 아래 고급 제어를 여세요.</p>
@@ -280,7 +280,7 @@ export function OpsRoomColumn() {
       </section>
 
       <section class="card flex flex-col gap-3 min-h-0">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">최근 Room 메시지</div>
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>

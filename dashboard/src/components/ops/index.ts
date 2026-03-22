@@ -159,7 +159,7 @@ export function Ops() {
     <section class="flex flex-col gap-4">
       <div class="flex justify-between items-start gap-4 max-[880px]:flex-col card">
         <div>
-          <div class="card-title-row">
+          <div class="flex items-start justify-between gap-3 mb-[15px]">
             <div class="card-title">개입</div>
           </div>
           <h2 class="text-text-strong text-2xl leading-[1.2]">방, 세션, 키퍼를 바로 조정하는 화면</h2>

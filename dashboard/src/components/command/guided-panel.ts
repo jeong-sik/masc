@@ -197,7 +197,7 @@ function GuidedPanel() {
           <div class="card rounded-xl-title">즉시 조치</div>
         </div>
         <div class="command-guide-card rounded-xl highlight mb-3">
-          <div class="command-guide-head">
+          <div class="flex justify-between gap-2.5 items-start">
             <strong>${nextStep?.title ?? nextTool}</strong>
             <span class="command-chip rounded-full ok">${nextTool}</span>
           </div>
@@ -209,11 +209,11 @@ function GuidedPanel() {
             : null}
         </div>
 
-        <div class="command-readiness-list">
+        <div class="flex flex-col gap-2.5">
           ${readiness.map(item => html`
             <article class="command-readiness-row rounded-xl ${toneClass(item.tone)}">
               <div>
-                <div class="command-readiness-title-row">
+                <div class="flex justify-between gap-2.5 items-start">
                   <strong>${item.title}</strong>
                   <span class="command-chip rounded-full ${toneClass(item.tone)}">${item.tone}</span>
                 </div>
@@ -227,11 +227,11 @@ function GuidedPanel() {
         ${pitfalls.length > 0
           ? html`
               <div class="command-guide-card rounded-xl warn">
-                <div class="command-guide-head">
+                <div class="flex justify-between gap-2.5 items-start">
                   <strong>자주 막히는 지점</strong>
                   <span class="command-chip rounded-full warn">${pitfalls.length}</span>
                 </div>
-                <div class="command-guide-list">
+                <div class="flex flex-col gap-3">
                   ${pitfalls.map(pitfall => html`
                     <article class="p-3 rounded-[10px] bg-[rgba(9,12,20,0.5)] border border-solid border-[var(--white-6)] break-words [overflow-wrap:anywhere]">
                       <strong>${pitfall.title}</strong>
@@ -257,15 +257,15 @@ function GuidedPanel() {
                 <div class="grid gap-3">
                   ${renderedPaths.map(path => html`
                     <article class="command-guide-card rounded-xl">
-                      <div class="command-guide-head">
+                      <div class="flex justify-between gap-2.5 items-start">
                         <strong>${path.title}</strong>
                         <span class="command-chip rounded-full">${path.id}</span>
                       </div>
                       <p>${path.summary}</p>
                       <div class="command-card rounded-xl-sub">${path.when_to_use}</div>
-                      <div class="command-step-list compact">
+                      <div class="flex flex-col gap-1.5 mt-3">
                         ${path.steps.slice(0, 4).map(step => html`
-                          <div class="command-step-row">
+                          <div class="flex gap-2.5 flex-wrap items-baseline">
                             <span class="font-mono text-[#67e8f9] text-[length:var(--fs-sm)]">${step.tool}</span>
                             <span>${step.title}</span>
                           </div>
@@ -275,7 +275,7 @@ function GuidedPanel() {
                   `)}
                 </div>
                 ${docs.length > 0
-                  ? html`<div class="command-doc-links">
+                  ? html`<div class="flex flex-wrap gap-2 mt-3">
                       ${docs.map(doc => html`<span class="command-tag rounded-full">${doc.title}: ${doc.path}</span>`)}
                     </div>`
                   : null}

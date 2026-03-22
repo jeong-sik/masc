@@ -133,6 +133,7 @@ let provider_of_oas ~(registry_name : string)
   | Gemini -> Gemini
   | Glm -> Glm_cloud
   | Claude_code -> Claude
+  | Glm -> Glm_cloud
   | OpenAI_compat -> (
       match registry_name with
       | "llama" -> Llama

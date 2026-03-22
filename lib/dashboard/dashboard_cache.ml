@@ -121,10 +121,24 @@ let get_or_compute_eio key ~ttl compute =
               key elapsed;
             Hashtbl.remove table key;
             Eio.Condition.broadcast cond;
-            let new_cond = Eio.Condition.create () in
+            (* Fix D: cooldown after timeout eviction.
+               Instead of immediately starting a new Compute (which causes thrashing),
+               insert a short-lived Ready entry with error JSON.  Next request after
+               the cooldown_ttl will trigger a fresh compute. *)
+            let cooldown_ttl = 15.0 in
+            let ts = now () in
+            let error_value = `Assoc [
+              ("error", `String "computation_cooldown");
+              ("message", `String (Printf.sprintf
+                "Dashboard %s timed out (%.0fs). Cooling down for %.0fs."
+                key elapsed cooldown_ttl));
+              ("generated_at", `String (Types.now_iso ()));
+            ] in
             Hashtbl.replace table key
-              (Computing { cond = new_cond; started_at = now (); stale = None });
-            `Compute new_cond
+              (Ready { value = error_value;
+                       expires_at = ts +. cooldown_ttl;
+                       stale_until = ts +. cooldown_ttl });
+            `Hit error_value
           end else
             `Wait cond
         | _ ->

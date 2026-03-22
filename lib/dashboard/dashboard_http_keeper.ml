@@ -70,15 +70,19 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
           in
 
           let metrics_store = Keeper_types.keeper_metrics_store config m.name in
-          let metrics_window_max_bytes = 200000 in
+          (* Cap metrics lines to avoid O(n) slowdown as keepers accumulate turns.
+             series_points (120) suffices for the chart; 500 covers 24h summary.
+             Previous value of 12000 caused 60K+ lines across 5 keepers. *)
+          let metrics_cap = if compact then series_points else 500 in
+          let metrics_window_max_bytes = if compact then 50000 else 200000 in
           let all_metrics_lines =
-            let n = max series_points 12000 in
+            let n = metrics_cap in
             let dated = Dated_jsonl.read_recent_lines metrics_store n in
             if dated <> [] then dated
             else
               let metrics_path = Keeper_types.keeper_metrics_path config m.name in
               Keeper_memory.read_file_tail_lines metrics_path
-                ~max_bytes:(max metrics_window_max_bytes 3000000) ~max_lines:n
+                ~max_bytes:metrics_window_max_bytes ~max_lines:n
           in
           let (metrics_24h, metrics_24h_summary) =
             if compact then (`Null, `Null)
@@ -140,21 +144,25 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
             ) m.models)
           in
 
-          let memory_bank_summary =
-            Keeper_memory.read_keeper_memory_summary
-              config
-              ~name:m.name
-              ~max_bytes:120000
-              ~max_lines:200
-              ~recent_limit:4
-          in
-          let memory_bank_json =
-            Keeper_memory.memory_summary_to_json memory_bank_summary
-          in
-          let memory_recent_note =
-            match memory_bank_summary.Keeper_memory.recent_notes with
-            | row :: _ -> Some row.Keeper_memory.text
-            | [] -> None
+          (* In compact mode (used by execution surface), skip heavy memory bank I/O.
+             Full memory bank is only needed for individual keeper detail view. *)
+          let (memory_bank_json, memory_recent_note) =
+            if compact then
+              (`Assoc [("total_files", `Int 0); ("skipped", `Bool true)], None)
+            else
+              let summary =
+                Keeper_memory.read_keeper_memory_summary
+                  config
+                  ~name:m.name
+                  ~max_bytes:120000
+                  ~max_lines:200
+                  ~recent_limit:4
+              in
+              let note = match summary.Keeper_memory.recent_notes with
+                | row :: _ -> Some row.Keeper_memory.text
+                | [] -> None
+              in
+              (Keeper_memory.memory_summary_to_json summary, note)
           in
           let history_path =
             Filename.concat
@@ -417,11 +425,22 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
 	                | None -> `Null);
               ("metrics_window", metrics_window_summary);
               ("metrics_24h_summary", metrics_24h_summary);
-              ("memory_note_count", `Int memory_bank_summary.Keeper_memory.total_notes);
+              ("memory_note_count",
+                (match memory_bank_json with
+                 | `Assoc fields ->
+                     (match List.assoc_opt "total_notes" fields with
+                      | Some n -> n
+                      | None -> (match List.assoc_opt "total_files" fields with
+                                 | Some n -> n
+                                 | None -> `Int 0))
+                 | _ -> `Int 0));
               ("memory_top_kind",
-                match memory_bank_summary.Keeper_memory.top_kind with
-                | Some kind -> `String kind
-                | None -> `Null);
+                (match memory_bank_json with
+                 | `Assoc fields ->
+                     (match List.assoc_opt "top_kind" fields with
+                      | Some (`String _ as s) -> s
+                      | _ -> `Null)
+                 | _ -> `Null));
               ("memory_recent_note",
                 match memory_recent_note with
                 | Some text -> `String text

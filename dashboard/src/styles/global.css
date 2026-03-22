@@ -521,7 +521,52 @@ tbody tr:hover {
 .warn { border-color: var(--warn-soft); }
 .bad { border-color: var(--bad-soft); }
 
-/* Header/Main-layout/Core-cards → Tailwind inline */
+/* ── App Shell + Header ────────────────────────── */
+.app-shell {
+  width: calc(100% - 32px);
+  max-width: 1600px;
+  margin: 16px auto 28px;
+}
+
+.dashboard-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header, 40);
+  min-height: var(--header-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 18px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: rgba(8, 15, 29, 0.78);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.32);
+}
+
+.header-title-wrap h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-strong);
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.header-subtitle {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
 
 /* ── Command Plane utilities (migrated from command.css) ──── */
 

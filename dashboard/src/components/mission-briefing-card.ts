@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
+import { TagBadge } from './common/tag-badge'
+import { ActionBar, ActionBtn } from './common/action-bar'
 import { ProvenanceStrip } from './common/provenance-strip'
 import {
   missionBriefing,
@@ -20,7 +22,7 @@ export function MissionBriefingCard() {
 
   return html`
     <${Card} title="판단 레이어" class="mission-briefing-card rounded-xl">
-      <div class="grid gap-1 mb-3">
+      <div class="grid gap-1.5 mb-4">
         <h3>왜 그렇게 보이나</h3>
         <p>사회 truth를 읽은 뒤에만 별도 판단 결과를 참고하고, 근거는 접어서 둡니다.</p>
         <${ProvenanceStrip}
@@ -31,7 +33,7 @@ export function MissionBriefingCard() {
         />
       </div>
 
-      <div class="flex gap-2 flex-wrap mb-3">
+      <div class="flex gap-3 flex-wrap mb-4">
         <span class="cmd-chip rounded-full ${briefingTone}">
           ${statusLabel(briefing?.status ?? (missionBriefingError.value ? 'error' : 'loading'))}
         </span>
@@ -44,17 +46,17 @@ export function MissionBriefingCard() {
 
       ${missionBriefingError.value ? html`<${EmptyState} message=${missionBriefingError.value} compact />` : null}
       ${briefing?.error ? html`<${EmptyState} message=${briefing.error} compact />` : null}
-      ${briefing?.summary ? html`<div class="grid gap-1">${briefing.summary}</div>` : null}
+      ${briefing?.summary ? html`<div class="grid gap-1.5">${briefing.summary}</div>` : null}
       ${briefing?.last_error && !briefing.error
-        ? html`<div class="grid gap-1">최근 갱신 실패: ${briefing.last_error}</div>`
+        ? html`<div class="grid gap-1.5">최근 갱신 실패: ${briefing.last_error}</div>`
         : null}
 
       ${briefing && briefing.sections.length > 0
         ? html`
-            <div class="grid grid-cols-3 gap-3">
+            <div class="grid grid-cols-3 gap-3 mt-3">
               ${briefing.sections.slice(0, 3).map(section => html`
-                <article class="p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-2 ${toneClass(section.status)}">
-                  <div class="flex justify-between gap-2 items-start flex-wrap">
+                <article class="p-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)] grid gap-3 ${toneClass(section.status)}">
+                  <div class="flex justify-between gap-3 items-start flex-wrap">
                     <strong>${section.label}</strong>
                     <div class="flex gap-2 flex-wrap justify-end">
                       <span class="cmd-chip rounded-full ${toneClass(section.status)}">${statusLabel(section.status)}</span>
@@ -67,10 +69,10 @@ export function MissionBriefingCard() {
                   <p class="m-0 text-[rgba(255,255,255,0.8)] leading-normal">${section.summary}</p>
                   ${section.evidence.length > 0
                     ? html`
-                        <details class="pt-1 border-t border-[var(--white-6)] mt-2">
+                        <details class="pt-2 border-t border-[var(--white-6)] mt-3">
                           <summary>근거 보기</summary>
-                          <div class="flex gap-2 flex-wrap mt-2.5">
-                            ${section.evidence.map(item => html`<span class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.76)] text-[length:var(--fs-sm)] leading-[1.35]">${item}</span>`)}
+                          <div class="flex gap-3 flex-wrap mt-3">
+                            ${section.evidence.map(item => html`<${TagBadge}>${item}<//>`)}
                           </div>
                         </details>
                       `
@@ -89,16 +91,16 @@ export function MissionBriefingCard() {
 
       ${briefing && briefing.metadata_gaps.length > 0
         ? html`
-            <details class="pt-1 border-t border-[var(--white-6)] mt-2 mt-3">
+            <details class="pt-2 border-t border-[var(--white-6)] mt-4">
               <summary>관측 공백 (${briefing.metadata_gap_count ?? briefing.metadata_gaps.length})</summary>
-              <div class="flex flex-col gap-3">
+              <div class="flex flex-col gap-3 mt-3">
                 ${briefing.metadata_gaps.map(item => html`
-                  <article class="p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] grid gap-2 ${item.severity === 'watch' ? 'warn' : ''}">
-                    <div class="flex justify-between gap-2 items-start flex-wrap">
+                  <article class="p-4 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] grid gap-3 ${item.severity === 'watch' ? 'warn' : ''}">
+                    <div class="flex justify-between gap-3 items-start flex-wrap">
                       <strong>${missionTargetTypeLabel(item.scope_type)}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
                       <span class="cmd-chip rounded-full ${item.severity === 'watch' ? 'warn' : ''}">${statusLabel(item.severity)}</span>
                     </div>
-                    <p class="m-0 text-[rgba(255,255,255,0.78)] leading-[1.45]">${item.summary}</p>
+                    <p class="m-0 text-[rgba(255,255,255,0.78)] leading-snug">${item.summary}</p>
                   </article>
                 `)}
               </div>
@@ -106,14 +108,18 @@ export function MissionBriefingCard() {
           `
         : null}
 
-      <div class="flex gap-2 flex-wrap mt-2.5">
-        <button class="control-btn rounded-lg ghost" onClick=${() => { void refreshMissionBriefing(retryNeedsForce) }} disabled=${missionBriefingLoading.value}>
-          ${missionBriefingLoading.value ? '응답 기다리는 중…' : '판단 다시 읽기'}
-        </button>
-        <button class="control-btn rounded-lg ghost" onClick=${() => { void refreshMissionBriefing(true) }} disabled=${missionBriefingLoading.value}>
-          강제 갱신
-        </button>
-      </div>
+      <${ActionBar}>
+        <${ActionBtn}
+          label=${missionBriefingLoading.value ? '응답 기다리는 중…' : '판단 다시 읽기'}
+          onClick=${() => { void refreshMissionBriefing(retryNeedsForce) }}
+          disabled=${missionBriefingLoading.value}
+        />
+        <${ActionBtn}
+          label="강제 갱신"
+          onClick=${() => { void refreshMissionBriefing(true) }}
+          disabled=${missionBriefingLoading.value}
+        />
+      <//>
     <//>
   `
 }

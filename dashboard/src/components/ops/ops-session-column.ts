@@ -123,14 +123,14 @@ export function OpsSessionColumn() {
   ) => html`
     <button
       key=${session.session_id}
-      class="ops-entity-card p-3 rounded-[10px] border border-[var(--white-8)] bg-[var(--white-3)] text-inherit text-left cursor-pointer ${selectedSession?.session_id === session.session_id ? 'active' : ''}"
+      class="ops-entity-card p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] text-inherit text-left cursor-pointer ${selectedSession?.session_id === session.session_id ? 'active' : ''}"
       onClick=${() => { selectedSessionId.value = session.session_id }}
     >
       <div class="flex justify-between items-center gap-2.5 max-[880px]:flex-col max-[880px]:items-start">
         <strong>${session.session_id}</strong>
         <span class="border border-solid border-[var(--card-border)] ${session.status ?? 'idle'} ${session.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(session.status)}</span>
       </div>
-      <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+      <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
         <span>${Math.round(session.progress_pct ?? 0)}%</span>
         <span>${sessionOutcomeLabel(session)}</span>
         <span>${archived ? '종료 세션' : `팀 상태 ${sessionHealthLabel(session)}`}</span>
@@ -140,50 +140,50 @@ export function OpsSessionColumn() {
 
   return html`
     <div class="flex flex-col gap-4 min-w-0">
-      <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
-        <div class="flex items-start justify-between gap-3 mb-[15px]">
-          <div class="card-title">Session 개입</div>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel">
+        <div class="pb-2 border-b border-[var(--card-border)] mb-1">
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Session 개입</h3>
         </div>
-        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">지금 개입 가능한 세션만 위에 두고, 종료된 세션은 아래에 접어 둡니다.</p>
+        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">지금 개입 가능한 세션만 위에 두고, 종료된 세션은 아래에 접어 둡니다.</p>
 
         <div class="flex flex-col gap-2">
-          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
+          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
             <strong>${'개입 가능한 세션'}</strong>
             <span>${liveSessions.length}</span>
           </div>
-          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
+          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
             ${liveSessions.length === 0
-              ? html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">지금 바로 개입할 live team session이 없습니다.</div>`
+              ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">지금 바로 개입할 live team session이 없습니다.</div>`
               : liveSessions.map(session => renderSessionCard(session))}
           </div>
         </div>
 
         ${archivedSessions.length > 0 ? html`
           <details class="ops-archive-panel">
-            <summary class="cursor-pointer text-text-muted text-[var(--fs-sm)] list-none">최근 종료 세션 ${archivedSessions.length}</summary>
-            <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">완료/중단된 세션은 읽기 전용 참고용입니다. 새 노트, 작업, 중지는 위 live 세션에만 적용하세요.</p>
-            <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
+            <summary class="cursor-pointer text-[var(--text-muted)] text-[var(--fs-sm)] list-none">최근 종료 세션 ${archivedSessions.length}</summary>
+            <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">완료/중단된 세션은 읽기 전용 참고용입니다. 새 노트, 작업, 중지는 위 live 세션에만 적용하세요.</p>
+            <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
               ${archivedSessions.slice(0, 8).map(session => renderSessionCard(session, true))}
             </div>
           </details>
         ` : null}
       </section>
 
-      <section class="card flex flex-col gap-3 min-h-0">
-        <div class="flex items-start justify-between gap-3 mb-[15px]">
-          <div class="card-title">선택한 Session 요약</div>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+        <div class="pb-2 border-b border-[var(--card-border)] mb-1">
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">선택한 Session 요약</h3>
         </div>
-        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">snapshot이 아니라 digest 기준 attention과 worker 카드를 보여줍니다.</p>
+        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">snapshot이 아니라 digest 기준 attention과 worker 카드를 보여줍니다.</p>
         ${selectedSession && sessionDigest ? html`
-          <article class="ops-guidance-card p-3 rounded-[10px] border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-2 ${guidanceLayerTone(guidanceLayer)}">
-            <div class="flex flex-wrap gap-2 text-text-muted text-[var(--fs-xs)]">
+          <article class="ops-guidance-card p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-2 ${guidanceLayerTone(guidanceLayer)}">
+            <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
               <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
               <span>${runtimeJudgeLabel(residentRuntime)}</span>
             </div>
-            <div class="text-text-strong leading-[1.5]">
+            <div class="text-[var(--text-strong)] leading-[1.5]">
               ${activeSummary?.summary ?? '현재 이 session에 대한 resident guidance가 없습니다. fallback digest를 표시합니다.'}
             </div>
-            <div class="flex flex-wrap gap-2 text-text-muted text-[var(--fs-xs)]">
+            <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
               <span>authoritative ${sessionDigest.authoritative_judgment_available ? 'yes' : 'no'}</span>
               <span>${guidanceFreshnessLabel(activeSummary)}</span>
               ${residentRuntime?.model_used ? html`<span>${residentRuntime.model_used}</span>` : null}
@@ -192,8 +192,8 @@ export function OpsSessionColumn() {
           ${activeRecommendedActions.length > 0 ? html`
             <div class="flex flex-col gap-2">
               ${activeRecommendedActions.map(item => html`
-                <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'session'}`} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(item.severity)}">
-                  <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'session'}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(item.severity)}">
+                  <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                     <strong>${actionTypeLabel(item.action_type)}</strong>
                     <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                   </div>
@@ -204,17 +204,17 @@ export function OpsSessionColumn() {
           ` : null}
           <div class="flex flex-col gap-2">
             ${sessionDigest.attention_items.length > 0 ? sessionDigest.attention_items.map(item => html`
-              <article key=${`${item.kind}:${item.target_id ?? 'session'}`} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(item.severity)}">
-                <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+              <article key=${`${item.kind}:${item.target_id ?? 'session'}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(item.severity)}">
+                <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${item.kind}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                 </div>
                 <div class="mt-1.5 whitespace-pre-wrap break-words">${item.summary}</div>
               </article>
-            `) : html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">이 세션의 attention item은 없습니다.</div>`}
+            `) : html`<div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">이 세션의 attention item은 없습니다.</div>`}
             ${sessionDigest.worker_cards.length > 0 ? sessionDigest.worker_cards.map(card => html`
-              <article key=${`${card.actor ?? card.spawn_role ?? 'worker'}:${card.spawn_agent ?? card.runtime_pool ?? 'runtime'}`} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)]">
-                <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+              <article key=${`${card.actor ?? card.spawn_role ?? 'worker'}:${card.spawn_agent ?? card.runtime_pool ?? 'runtime'}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
+                <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${card.actor ?? card.spawn_role ?? 'worker'}</strong>
                   <span>${displayStatus(card.status)}</span>
                   <span>${card.spawn_agent ?? card.runtime_pool ?? 'runtime 확인 필요'}</span>
@@ -226,15 +226,15 @@ export function OpsSessionColumn() {
             `) : null}
           </div>
         ` : html`
-          <div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">세션을 고르면 세부 요약을 불러옵니다.</div>
+          <div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">세션을 고르면 세부 요약을 불러옵니다.</div>
         `}
       </section>
 
-      <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
-        <div class="flex items-start justify-between gap-3 mb-[15px]">
-          <div class="card-title">선택한 Session 액션</div>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel">
+        <div class="pb-2 border-b border-[var(--card-border)] mb-1">
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">선택한 Session 액션</h3>
         </div>
-        <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">
+        <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">
           ${selectedSessionActionable
             ? '선택한 live 세션에만 메모, 작업, 체크포인트, 중지 요청을 보냅니다.'
             : '종료된 세션은 여기서 읽기만 하고, 실제 개입은 위 live 세션을 다시 골라서 진행합니다.'}
@@ -242,8 +242,8 @@ export function OpsSessionColumn() {
         ${availableSessionActions.length > 0 ? html`
           <div class="flex flex-col gap-2">
             ${availableSessionActions.map(action => html`
-              <article key=${action.action_type} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)]">
-                <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+              <article key=${action.action_type} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
+                <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${actionTypeLabel(action.action_type)}</strong>
                   <span>${deliveryModeLabel(action.confirm_required)}</span>
                 </div>
@@ -256,20 +256,20 @@ export function OpsSessionColumn() {
         ${selectedSession ? html`
           <div class="flex flex-col gap-2">
             <div class="mt-1.5 whitespace-pre-wrap break-words">${selectedSession.session_id}</div>
-            <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+            <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
               <span>상태: ${displayStatus(selectedSession.status)}</span>
               <span>경과: ${selectedSession.elapsed_sec ?? 0}초</span>
               <span>남은 시간: ${selectedSession.remaining_sec ?? 0}초</span>
               <span>${selectedSessionActionable ? `팀 상태: ${sessionHealthLabel(selectedSession)}` : '종료 세션'}</span>
             </div>
             ${selectedSession.linked_autoresearch ? html`
-              <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+              <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                 <span>Autoresearch: ${String(selectedSession.linked_autoresearch.status ?? 'unknown')}</span>
                 <span>Loop: ${String(selectedSession.linked_autoresearch.loop_id ?? 'n/a')}</span>
                 <span>Cycle: ${String(selectedSession.linked_autoresearch.current_cycle ?? 0)}</span>
                 <span>Best: ${String(selectedSession.linked_autoresearch.best_score ?? 'n/a')}</span>
               </div>
-              <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+              <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                 <span>파일: ${selectedSession.linked_autoresearch.target_file ?? 'n/a'}</span>
                 <span>최근 결정: ${selectedSession.linked_autoresearch.last_decision ?? 'n/a'}</span>
                 <span>세션 연결: ${selectedSession.linked_autoresearch.session_id ?? selectedSession.session_id}</span>
@@ -278,26 +278,26 @@ export function OpsSessionColumn() {
                   : null}
               </div>
               ${selectedSession.linked_autoresearch.program_note
-                ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">Program note: ${selectedSession.linked_autoresearch.program_note}</div>`
+                ? html`<div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">Program note: ${selectedSession.linked_autoresearch.program_note}</div>`
                 : null}
               ${selectedSession.linked_autoresearch.queued_hypothesis
-                ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">Queued hypothesis: ${selectedSession.linked_autoresearch.queued_hypothesis}</div>`
+                ? html`<div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">Queued hypothesis: ${selectedSession.linked_autoresearch.queued_hypothesis}</div>`
                 : null}
               ${selectedSession.linked_autoresearch.warnings && selectedSession.linked_autoresearch.warnings.length > 0
-                ? html`<div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">Warnings: ${selectedSession.linked_autoresearch.warnings.join(', ')}</div>`
+                ? html`<div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">Warnings: ${selectedSession.linked_autoresearch.warnings.join(', ')}</div>`
                 : null}
               ${selectedSession.linked_autoresearch.error
-                ? html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">${selectedSession.linked_autoresearch.error}</div>`
+                ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">${selectedSession.linked_autoresearch.error}</div>`
                 : null}
             ` : null}
             ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
-              <pre class="mt-2 py-[10px] px-3 rounded-[10px] bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[length:var(--fs-xs)] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
+              <pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[length:var(--fs-xs)] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
             ` : null}
           </div>
-        ` : html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">먼저 세션을 하나 고르세요.</div>`}
+        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">먼저 세션을 하나 고르세요.</div>`}
 
         ${selectedSession && !selectedSessionActionable ? html`
-          <div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">이 세션은 이미 종료돼서 새 노트, 작업, 중지를 보내지 않습니다. 위의 live 세션을 선택하세요.</div>
+          <div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">이 세션은 이미 종료돼서 새 노트, 작업, 중지를 보내지 않습니다. 위의 live 세션을 선택하세요.</div>
         ` : null}
 
         ${linkedAutoresearch?.loop_id ? html`
@@ -326,9 +326,9 @@ export function OpsSessionColumn() {
             <button class="control-btn" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
               hypothesis 주입
             </button>
-            <span class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
+            <span class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
           </div>
-          ${autoresearchError.value ? html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">${autoresearchError.value}</div>` : null}
+          ${autoresearchError.value ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">${autoresearchError.value}</div>` : null}
         ` : null}
 
         <label class="control-label" for="ops-turn-kind">세션 액션</label>
@@ -349,7 +349,7 @@ export function OpsSessionColumn() {
             적용
           </button>
         </div>
-        <div class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">현재 선택: ${sessionActionLabel(teamTurnKind.value)}</div>
+        <div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">현재 선택: ${sessionActionLabel(teamTurnKind.value)}</div>
 
         <textarea
           class="control-textarea"

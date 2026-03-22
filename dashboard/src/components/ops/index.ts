@@ -157,32 +157,29 @@ export function Ops() {
 
   return html`
     <section class="flex flex-col gap-4">
-      <div class="flex justify-between items-start gap-4 max-[880px]:flex-col card">
+      <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex justify-between items-start gap-4 max-[880px]:flex-col">
         <div>
-          <div class="flex items-start justify-between gap-3 mb-[15px]">
-            <div class="card-title">개입</div>
-          </div>
-          <h2 class="text-text-strong text-2xl leading-[1.2]">방, 세션, 키퍼를 바로 조정하는 화면</h2>
-          <p class="mt-1.5 text-text-muted text-[var(--fs-base)] max-w-[62ch]">
-            읽는 화면이 아니라 행동하는 화면입니다. 방, 세션, 키퍼를 나눠 보고 바로 개입합니다.
+          <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">개입</h2>
+          <p class="text-[13px] text-[var(--text-muted)] max-w-[62ch] leading-relaxed">
+            방, 세션, 키퍼를 나눠 보고 바로 개입합니다.
           </p>
         </div>
         <div class="flex items-end gap-2.5 flex-wrap max-[880px]:w-full">
-          <label class="control-label text-[length:var(--fs-xs)] text-[color:var(--text-muted)] tracking-[0.06em] uppercase" for="ops-actor">개입 ID</label>
+          <label class="text-[11px] text-[var(--text-muted)] uppercase tracking-[0.06em] font-medium" for="ops-actor">개입 ID</label>
           <input
             id="ops-actor"
-            class="control-input rounded-lg ops-actor-input min-w-[180px]"
+            class="w-full px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] focus:border-[var(--accent)]/50 outline-none ops-actor-input min-w-[180px]"
             type="text"
             value=${actorName.value}
             onInput=${(event: Event) => persistActorName((event.target as HTMLInputElement).value)}
           />
-            <button
-              class="control-btn ghost"
-              onClick=${() => {
-                void refreshRoomTruth()
-                void refreshOperatorSnapshot()
-                void refreshOperatorRoomDigest()
-                void refreshOperatorSessionDigest(selectedSession?.session_id ?? null)
+          <button
+            class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
+            onClick=${() => {
+              void refreshRoomTruth()
+              void refreshOperatorSnapshot()
+              void refreshOperatorRoomDigest()
+              void refreshOperatorSessionDigest(selectedSession?.session_id ?? null)
             }}
             disabled=${operatorLoading.value || operatorActionBusy.value}
           >
@@ -191,19 +188,19 @@ export function Ops() {
         </div>
       </div>
 
-      ${operatorError.value ? html`<section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--white-8)] rounded-xl error">${operatorError.value}</section>` : null}
-      ${operatorDigestError.value ? html`<section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--white-8)] rounded-xl error">${operatorDigestError.value}</section>` : null}
+      ${operatorError.value ? html`<section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] error">${operatorError.value}</section>` : null}
+      ${operatorDigestError.value ? html`<section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] error">${operatorDigestError.value}</section>` : null}
       <${RoomTruthStrip} />
       ${workflowContext ? html`
-        <section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--white-8)] rounded-xl ${workflowReady ? 'info' : 'warn'} grid gap-2">
-          <div class="flex gap-2 flex-wrap items-center text-[rgba(255,255,255,0.72)]">
-            <strong>${workflowContext.source_label}</strong>
+        <section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] ${workflowReady ? 'info' : 'warn'} grid gap-2">
+          <div class="flex gap-2 flex-wrap items-center text-[var(--text-body)]">
+            <strong class="font-semibold">${workflowContext.source_label}</strong>
             <span>${workflowActionLabel(workflowContext.action_type)}</span>
             <span>${workflowTargetLabel(workflowContext)}</span>
           </div>
-          <div class="text-[rgba(255,255,255,0.84)] leading-[1.5]">${workflowContext.summary}</div>
-          ${workflowContext.payload_preview ? html`<div class="ops-handoff-preview rounded-xl">${workflowContext.payload_preview}</div>` : null}
-          <div class="text-[rgba(255,255,255,0.58)] text-[var(--fs-sm)]">
+          <div class="text-[var(--text-strong)] leading-relaxed">${workflowContext.summary}</div>
+          ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded-lg bg-[var(--white-3)] text-[12px] font-mono">${workflowContext.payload_preview}</div>` : null}
+          <div class="text-[var(--text-muted)] text-[12px]">
             ${workflowReady
               ? '추천 액션 기준으로 대상 선택과 입력값을 미리 맞춰 두었습니다.'
               : '대상이 현재 snapshot에 없습니다. 일반 개입 화면으로 열렸고, 실제 대상 선택은 수동으로 해야 합니다.'}
@@ -252,8 +249,8 @@ export function Ops() {
         }
         if (actions.length === 0) return null
         return html`
-          <section class="rounded-[10px] py-4 px-5 mb-4 bg-[rgba(138,163,211,0.06)] border border-solid border-[rgba(138,163,211,0.15)]">
-            <h3 class="text-[var(--fs-base)] font-semibold text-[rgba(255,255,255,0.6)] mb-2.5">지금 할 수 있는 것</h3>
+          <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+            <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-3">지금 할 수 있는 것</h3>
             <div class="flex flex-col gap-2">
               ${actions.slice(0, 3).map(action => html`
                 <button class="ops-action-guide-item rounded-lg ${action.tone}" onClick=${action.onClick}>
@@ -266,17 +263,15 @@ export function Ops() {
         `
       })()}
 
-      <section class="card">
-        <div class="mb-3.5">
-          <h2 class="monitor-headline">개입 우선순위</h2>
-          <p class="monitor-subheadline">지금 가장 먼저 손댈 대상이 방인지, 세션인지, 키퍼인지 먼저 좁힙니다.</p>
-        </div>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">개입 우선순위</h2>
+        <p class="text-[12px] text-[var(--text-muted)] mb-3.5">지금 가장 먼저 손댈 대상이 방인지, 세션인지, 키퍼인지 먼저 좁힙니다.</p>
         <div class="ops-priority-grid grid grid-cols-4 gap-2.5 max-[1200px]:grid-cols-2 max-[880px]:grid-cols-1">
           ${priorityCards.map(card => html`
-            <div key=${card.key} class="ops-priority-card p-3.5 rounded-xl border border-[var(--border-slate-16)] bg-[var(--white-3)] grid gap-1.5 rounded-xl ${card.tone}">
-              <span class="text-text-muted text-[var(--fs-xs)] uppercase tracking-[0.06em]">${card.label}</span>
+            <div key=${card.key} class="ops-priority-card p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-1.5 ${card.tone}">
+              <span class="text-[var(--text-muted)] text-[11px] uppercase tracking-[0.06em] font-medium">${card.label}</span>
               <strong>${card.value}</strong>
-              <div class="text-[#9ab1d7] text-[var(--fs-sm)] leading-[1.45]">${card.detail}</div>
+              <div class="text-[var(--text-muted)] text-[12px] leading-[1.45]">${card.detail}</div>
             </div>
           `)}
         </div>

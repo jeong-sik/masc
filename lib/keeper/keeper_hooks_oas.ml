@@ -47,10 +47,18 @@ let allowed_tools_for_autonomy_level
     "extend_turns";
     "keeper_voice_speak"; "keeper_voice_agent";
   ] in
+  (* L3 adds read-only shell + code navigation — keepers can inspect
+     the codebase, run tests, and search without modifying files. *)
+  let l3_tools = [
+    "keeper_shell_readonly";
+    "keeper_code_read"; "keeper_code_search"; "keeper_code_symbols";
+    "keeper_github";
+  ] in
   match String.lowercase_ascii (String.trim level) with
-  | "l4_autonomous" -> Some ("keeper_bash" :: base_safe)
+  | "l3_guided" -> Some (l3_tools @ base_safe)
+  | "l4_autonomous" -> Some ("keeper_bash" :: "keeper_fs_edit" :: "keeper_edit" :: l3_tools @ base_safe)
   | "l5_independent" -> None  (* AllowAll *)
-  | _ -> Some base_safe  (* L1/L2/L3 and unknown: safe tools only *)
+  | _ -> Some base_safe  (* L1/L2 and unknown: safe tools only *)
 
 (** Build OAS hooks for a keeper agent.
 

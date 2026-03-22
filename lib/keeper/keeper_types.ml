@@ -427,7 +427,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
         parsed_ts
     in
     let autonomy_level =
-      Safe_ops.json_string ~default:"l1_reactive" "autonomy_level" json
+      Safe_ops.json_string ~default:"l3_guided" "autonomy_level" json
     in
     let active_goal_ids = Safe_ops.json_string_list "active_goal_ids" json in
     let auto_team_session_enabled =

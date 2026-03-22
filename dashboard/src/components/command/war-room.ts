@@ -192,16 +192,16 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
       return html`<div class="empty-state">실시간 워룸 불러오는 중…</div>`
     }
     return html`
-      <section class="card min-h-[240px] command-warroom-empty ${wallboard ? 'wallboard' : ''}">
+      <section class="card min-h-[240px] min-h-[360px] flex flex-col justify-center gap-4.5 ${wallboard ? 'wallboard' : ''}">
         <div class="card-title-row">
           <div class="card-title">실시간 워룸</div>
         </div>
-        <div class="command-warroom-empty-copy">
-          <span class="command-hero-kicker">Narrative Playback</span>
+        <div class="flex flex-col gap-2.5 max-w-[520px] [\"command-warroom-empty-copy"_strong]:text-[26px]">
+          <span class="inline-flex w-fit items-center gap-2 px-2.5 py-1 rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-wide uppercase">Narrative Playback</span>
           <strong>지금 붙잡을 live swarm 또는 team session이 없습니다</strong>
           <p>chain, autoresearch, worker wallboard는 활성 작전 또는 세션이 생기면 자동으로 붙습니다. 지금은 drill-down surface로 이동하는 편이 맞습니다.</p>
         </div>
-        <div class="command-action-row">
+        <div class="flex gap-2.5 flex-wrap mt-3">
           <${WarRoomJumpButton} label="작전 보기" surface="operations" />
           <${WarRoomJumpButton} label="스웜 보기" surface="swarm" />
           <${WarRoomJumpButton} label="체인 보기" surface="chains" />

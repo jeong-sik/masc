@@ -77,8 +77,8 @@ export function WarRoomBodyGrid({
   activeLane,
 }: WarRoomBodyProps) {
   return html`
-    <div class="command-warroom-grid ${wallboard ? 'wallboard' : ''}">
-      <div class="command-warroom-column">
+    <div class="grid gap-4 items-start max-[1450px]:grid-cols-1 ${wallboard ? 'grid-cols-[minmax(0,1.05fr)_minmax(0,1.12fr)_minmax(320px,0.9fr)]' : 'grid-cols-[minmax(0,1.05fr)_minmax(0,1.05fr)_minmax(320px,0.9fr)]'}">
+      <div class="flex flex-col gap-4 min-w-0">
         <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">실행 흐름</div>
@@ -91,7 +91,7 @@ export function WarRoomBodyGrid({
             : selectedSession
               ? html`
                   <article class="command-guide-card">
-                    <div class="command-guide-head">
+                    <div class="flex justify-between gap-2.5 items-start">
                       <strong>${selectedSession.session_id}</strong>
                       <span class="command-chip ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
                     </div>
@@ -118,20 +118,20 @@ export function WarRoomBodyGrid({
             <div class="card-title">워커 현황</div>
           </div>
           ${workers.length > 0
-            ? html`<div class="command-card-stack">
+            ? html`<div class="flex flex-col gap-3 mt-3.5">
                 ${workers.map(worker => html`<${WarRoomWorkerCard} worker=${worker} />`)}
               </div>`
             : html`<div class="empty-state">활성 워커 카드가 아직 없습니다.</div>`}
         </section>
       </div>
 
-      <div class="command-warroom-column">
+      <div class="flex flex-col gap-4 min-w-0">
         <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">상황 피드</div>
           </div>
           ${feedItems.length > 0
-            ? html`<div class="command-trace-stack">
+            ? html`<div class="flex flex-col gap-3">
                 ${feedItems.map(item => html`<${WarRoomFeedCard} item=${item} />`)}
               </div>`
             : html`<div class="empty-state">메시지, chain, autoresearch, attention feed가 아직 없습니다.</div>`}
@@ -142,20 +142,20 @@ export function WarRoomBodyGrid({
             <div class="card-title">트레이스 흐름</div>
           </div>
           ${swarm && swarm.recent_trace_events.length > 0
-            ? html`<div class="command-trace-stack">
+            ? html`<div class="flex flex-col gap-3">
                 ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
               </div>`
             : html`<div class="empty-state">실행 범위 트레이스 이벤트가 아직 없습니다.</div>`}
         </section>
       </div>
 
-      <div class="command-warroom-column">
+      <div class="flex flex-col gap-4 min-w-0">
         <section class="card min-h-[240px]">
           <div class="card-title-row">
             <div class="card-title">Agents</div>
           </div>
           ${agentViews.length > 0
-            ? html`<div class="warroom-presence-grid">
+            ? html`<div class="grid grid-cols-1 gap-3">
                 ${agentViews.map(item => html`<${WarRoomPresenceCard} item=${item} />`)}
               </div>`
             : html`<div class="empty-state">가시적인 active agent가 아직 없습니다.</div>`}
@@ -166,7 +166,7 @@ export function WarRoomBodyGrid({
             <div class="card-title">Keepers</div>
           </div>
           ${keeperViews.length > 0
-            ? html`<div class="warroom-presence-grid">
+            ? html`<div class="grid grid-cols-1 gap-3">
                 ${keeperViews.map(item => html`<${WarRoomPresenceCard} item=${item} />`)}
               </div>`
             : html`<div class="empty-state">가시적인 keeper/runtime 카드가 아직 없습니다.</div>`}
@@ -176,7 +176,7 @@ export function WarRoomBodyGrid({
           <div class="card-title-row">
             <div class="card-title">압력</div>
           </div>
-          <div class="command-card-stack">
+          <div class="flex flex-col gap-3 mt-3.5">
             ${swarmHasEvidence && swarm ? html`<${SwarmRunResolutionCard} swarm=${swarm} />` : null}
             ${blockers.length > 0
               ? blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)
@@ -184,7 +184,7 @@ export function WarRoomBodyGrid({
             ${pendingApprovals > 0
               ? html`
                   <article class="command-guide-card warn">
-                    <div class="command-guide-head">
+                    <div class="flex justify-between gap-2.5 items-start">
                       <strong>승인 대기</strong>
                       <span class="command-chip warn">${pendingApprovals}</span>
                     </div>
@@ -195,7 +195,7 @@ export function WarRoomBodyGrid({
             ${pendingConfirmTotal > 0
               ? html`
                   <article class="command-guide-card warn">
-                    <div class="command-guide-head">
+                    <div class="flex justify-between gap-2.5 items-start">
                       <strong>확인 대기</strong>
                       <span class="command-chip warn">${pendingConfirmHidden > 0 ? `${pendingConfirmVisible}/${pendingConfirmTotal}` : pendingConfirmTotal}</span>
                     </div>
@@ -203,7 +203,7 @@ export function WarRoomBodyGrid({
                       운영자 미리보기가 사람 확인을 기다리고 있습니다.
                       ${pendingConfirmHidden > 0 ? ` 현재 actor 기준으로는 ${pendingConfirmVisible}건만 보입니다.` : ''}
                     </p>
-                    <div class="command-tag-row">
+                    <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
                       ${pendingConfirms.slice(0, 3).map(item => html`<span class="command-tag">${item.confirm_token}</span>`)}
                     </div>
                   </article>
@@ -212,10 +212,10 @@ export function WarRoomBodyGrid({
             ${activeLane
               ? html`
                   <article class="command-card p-3">
-                    <div class="command-card-head">
+                    <div class="flex justify-between items-start">
                       <div>
                         <strong>${activeLane.label}</strong>
-                        <div class="command-card-sub">${activeLane.kind} · ${activeLane.phase}</div>
+                        <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${activeLane.kind} · ${activeLane.phase}</div>
                       </div>
                       <span class="command-chip ${toneClass(sessionStatusTone(activeLane.motion_state))}">${displayStatus(activeLane.motion_state)}</span>
                     </div>
@@ -231,10 +231,10 @@ export function WarRoomBodyGrid({
             ${swarmHasEvidence && swarm?.detachment
               ? html`
                   <article class="command-card p-3">
-                    <div class="command-card-head">
+                    <div class="flex justify-between items-start">
                       <div>
                         <strong>${swarm.detachment.detachment_id}</strong>
-                        <div class="command-card-sub">${swarm.detachment.assigned_unit_id}</div>
+                        <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${swarm.detachment.assigned_unit_id}</div>
                       </div>
                       <span class="command-chip ${toneClass(sessionStatusTone(swarm.detachment.status))}">${displayStatus(swarm.detachment.status ?? 'active')}</span>
                     </div>
@@ -249,10 +249,10 @@ export function WarRoomBodyGrid({
               : selectedSession
                 ? html`
                     <article class="command-card p-3">
-                      <div class="command-card-head">
+                      <div class="flex justify-between items-start">
                         <div>
                           <strong>${selectedSession.session_id}</strong>
-                          <div class="command-card-sub">현재 세션 기준</div>
+                          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">현재 세션 기준</div>
                         </div>
                         <span class="command-chip ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
                       </div>

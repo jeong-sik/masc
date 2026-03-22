@@ -12,12 +12,12 @@ import { alertBorderTone, relativeTime, toneClass } from './helpers'
 export function SwarmChecklistCard({ item }: { item: CommandPlaneSwarmChecklistItem }) {
   return html`
     <article class="command-guide-card ${toneClass(item.status)}">
-      <div class="command-guide-head">
+      <div class="flex justify-between gap-2.5 items-start">
         <strong>${item.title}</strong>
         <span class="command-chip ${toneClass(item.status)}">${item.status}</span>
       </div>
       <p>${item.detail}</p>
-      <div class="command-card-foot">Next tool: ${item.next_tool}</div>
+      <div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">Next tool: ${item.next_tool}</div>
     </article>
   `
 }
@@ -25,11 +25,11 @@ export function SwarmChecklistCard({ item }: { item: CommandPlaneSwarmChecklistI
 export function SwarmBlockerCard({ blocker }: { blocker: CommandPlaneSwarmBlocker }) {
   return html`
     <article class="command-alert ${toneClass(blocker.severity)} ${alertBorderTone(toneClass(blocker.severity))}">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <strong>${blocker.title}</strong>
         <span class="command-chip ${toneClass(blocker.severity)}">${blocker.severity}</span>
       </div>
-      <div class="command-alert-meta">
+      <div class="flex justify-between items-start">
         <span>${blocker.code}</span>
         <span>next ${blocker.next_tool}</span>
       </div>
@@ -41,10 +41,10 @@ export function SwarmBlockerCard({ blocker }: { blocker: CommandPlaneSwarmBlocke
 export function SwarmWorkerCard({ worker }: { worker: CommandPlaneSwarmWorker }) {
   return html`
     <article class="command-card p-3">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <div>
           <strong>${worker.name}</strong>
-          <div class="command-card-sub">${worker.role} · ${worker.lane}</div>
+          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${worker.role} · ${worker.lane}</div>
         </div>
         <span class="command-chip ${toneClass(worker.joined ? (worker.heartbeat_fresh ? 'ok' : 'warn') : 'bad')}">
           ${worker.status}
@@ -61,7 +61,7 @@ export function SwarmWorkerCard({ worker }: { worker: CommandPlaneSwarmWorker })
         <span>Squad</span><span>${worker.squad_member ? 'yes' : 'no'}</span>
         <span>Detachment</span><span>${worker.detachment_member ? 'yes' : 'no'}</span>
       </div>
-      <div class="command-tag-row">
+      <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
         <span class="command-tag">${worker.lane}</span>
         <span class="command-tag ${worker.current_task_matches_run ? 'ok' : 'warn'}">current_task</span>
         <span class="command-tag ${worker.claim_marker_seen ? 'ok' : 'warn'}">claim</span>
@@ -69,7 +69,7 @@ export function SwarmWorkerCard({ worker }: { worker: CommandPlaneSwarmWorker })
         <span class="command-tag ${worker.final_marker_seen ? 'ok' : 'warn'}">final</span>
       </div>
       ${worker.last_message
-        ? html`<div class="command-card-foot">${relativeTime(worker.last_message.timestamp)} · ${worker.last_message.content}</div>`
+        ? html`<div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">${relativeTime(worker.last_message.timestamp)} · ${worker.last_message.content}</div>`
         : null}
     </article>
   `
@@ -101,7 +101,7 @@ export function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEven
       <div class="swarm-event-body min-w-0 flex-1">
         <strong>${event.title}</strong>
         <span class="swarm-event-kind">${event.kind}</span>
-        ${event.detail ? html`<div class="command-card-sub">${event.detail}</div>` : null}
+        ${event.detail ? html`<div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${event.detail}</div>` : null}
       </div>
     </div>
   `
@@ -112,7 +112,7 @@ export function SwarmGapDot({ gap }: { gap: CommandPlaneSwarmGap }) {
     <div class="swarm-gap-inline flex items-center gap-1.5">
       <span class="swarm-gap-dot"></span>
       <span class="command-chip ${toneClass(gap.severity)}">${gap.code} (${gap.count})</span>
-      <span class="command-card-sub">${gap.summary}</span>
+      <span class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${gap.summary}</span>
     </div>
   `
 }
@@ -128,7 +128,7 @@ export function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
           : 'warn'
   return html`
     <div class="command-guide-card ${toneClass(tone)}">
-        <div class="command-guide-head">
+        <div class="flex justify-between gap-2.5 items-start">
           <strong>Hot Proof / 가동 증거</strong>
           <span class="command-chip ${toneClass(tone)}">${proof?.status ?? 'missing'}</span>
         </div>
@@ -144,7 +144,7 @@ export function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
               <span>워커 증거</span><span>${proof.workers.expected ?? 'n/a'} 예상 · ${proof.workers.done ?? 'n/a'} 완료 · ${proof.workers.final ?? 'n/a'} 최종</span>
             </div>
             ${proof.artifact_ref
-              ? html`<div class="command-card-foot">${proof.artifact_ref}</div>`
+              ? html`<div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">${proof.artifact_ref}</div>`
               : null}
             ${proof.missing_reason
               ? html`<p>${proof.missing_reason}</p>`

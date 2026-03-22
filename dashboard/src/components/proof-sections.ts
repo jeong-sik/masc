@@ -36,7 +36,7 @@ export function SelectionCard({
     && summary?.live_verdict !== 'proven'
   return html`
     <div class="command-guide-card ${selectionTone(selection)}">
-      <div class="command-guide-head">
+      <div class="flex justify-between gap-2.5 items-start">
         <strong>${selectionLabel(selection)}</strong>
         <span class="command-chip ${selectionTone(selection)}">${selection.mode ?? 'none'}</span>
       </div>
@@ -57,7 +57,7 @@ export function SelectionCard({
 export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) {
   return html`
     <article class="command-card proof-artifact-row">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <div>
           <strong>${item.summary ?? item.event_type ?? '도구 근거'}</strong>
           <div class="command-meta-line">
@@ -82,7 +82,7 @@ export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) 
 export function TimelineRow({ item }: { item: DedupedTimelineItem }) {
   return html`
     <article class="command-card proof-timeline-row">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <div>
           <strong>${item.summary ?? item.event_type ?? '이벤트'}</strong>
           <div class="command-meta-line">
@@ -168,7 +168,7 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
 export function ArtifactRow({ item }: { item: DashboardProofArtifactRef }) {
   return html`
     <article class="command-card proof-artifact-row">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <div>
           <strong>${item.kind}</strong>
           <div class="command-meta-line">

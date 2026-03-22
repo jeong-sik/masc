@@ -96,7 +96,7 @@ function MermaidGraph({ source }: { source: string }) {
   return html`
     <div class="mt-3 min-h-[160px]">
       ${error ? html`<div class="empty-state error">${error}</div>` : null}
-      <div class="command-chain-graph" ref=${hostRef}></div>
+      <div class="overflow-auto rounded-[10px] p-3 bg-[rgba(9,12,20,0.7)] [&_svg]:block [&_svg]:min-w-full [&_svg]:h-auto" ref=${hostRef}></div>
     </div>
   `
 }
@@ -107,49 +107,49 @@ function ChainOperationListItem(
   const chain = overlay.operation.chain
   const runtime = overlay.runtime
   return html`
-    <button class="command-chain-item ${selected ? 'selected' : ''}" onClick=${onSelect}>
-      <div class="command-card-head">
+    <button class="w-full text-left text-inherit font-inherit cursor-pointer bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl p-3.5 ${selected ? 'border-[rgba(34,211,238,0.38)] shadow-[inset_0_0_0_1px_rgba(34,211,238,0.2)] bg-[linear-gradient(180deg,var(--cyan-12),var(--white-3))]' : ''}" onClick=${onSelect}>
+      <div class="flex justify-between items-start">
         <div>
           <strong>${overlay.operation.objective}</strong>
-          <div class="command-card-sub">${overlay.operation.operation_id}</div>
+          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${overlay.operation.operation_id}</div>
         </div>
         <span class="command-chip ${chainStatusTone(chain?.status)}">${chain?.status ?? overlay.operation.status}</span>
       </div>
-      <div class="command-tag-row">
+      <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
         <span class="command-tag">${chain?.kind ?? 'chain_dsl'}</span>
         ${chain?.chain_id ? html`<span class="command-tag">${chain.chain_id}</span>` : null}
         ${runtime ? html`<span class="command-tag ${chainStatusTone(chain?.status)}">${formatPercent(runtime.progress)} progress</span>` : null}
       </div>
-      <div class="command-card-sub">${historySummary(overlay.history)}</div>
+      <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${historySummary(overlay.history)}</div>
     </button>
   `
 }
 
 function ChainHistoryRow({ item }: { item: ChainHistoryEventSummary }) {
   return html`
-    <article class="command-chain-history-row text-red-300">
-      <div class="command-guide-head">
+    <article class="text-red-300">
+      <div class="flex justify-between gap-2.5 items-start">
         <strong>${item.chain_id ?? '알 수 없는 체인'}</strong>
         <span class="command-chip ${chainStatusTone(item.event)}">${item.event}</span>
       </div>
-      <div class="command-card-sub">${relativeTime(item.timestamp)}</div>
-      <div class="command-card-sub">${historySummary(item)}</div>
+      <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${relativeTime(item.timestamp)}</div>
+      <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${historySummary(item)}</div>
     </article>
   `
 }
 
 function ChainRunNodeRow({ node }: { node: CommandPlaneChainRunNode }) {
   return html`
-    <article class="command-chain-node-row">
-      <div class="command-guide-head">
+    <article class="p-3 rounded-[10px] bg-[rgba(9,12,20,0.5)] border border-[var(--white-6)]">
+      <div class="flex justify-between gap-2.5 items-start">
         <strong>${node.id}</strong>
         <span class="command-chip ${chainStatusTone(node.status)}">${node.status ?? '확인 필요'}</span>
       </div>
-      <div class="command-card-sub">
+      <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">
         ${node.type ?? '노드'}
         ${typeof node.duration_ms === 'number' ? ` · ${node.duration_ms}ms` : ''}
       </div>
-      ${node.error ? html`<div class="command-card-sub text-red-300">${node.error}</div>` : null}
+      ${node.error ? html`<div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere] text-red-300">${node.error}</div>` : null}
     </article>
   `
 }
@@ -162,11 +162,11 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
   const chain = op.chain
   const runId = chain?.run_id ?? null
   return html`
-    <article class="command-card">
-      <div class="command-card-head">
+    <article class="flex justify-between items-start">
+      <div class="flex justify-between items-start">
         <div>
           <strong>${op.objective}</strong>
-          <div class="command-card-sub">${op.operation_id}</div>
+          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${op.operation_id}</div>
         </div>
         <span class="command-chip ${toneClass(op.status === 'active' ? 'ok' : op.status === 'paused' ? 'warn' : op.status === 'failed' ? 'bad' : 'ok')}">${operationStatusLabel(op.status)}</span>
       </div>
@@ -180,7 +180,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
       </div>
       ${chain
         ? html`
-            <div class="command-tag-row">
+            <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
               <span class="command-tag">${chain.kind}</span>
               <span class="command-tag ${chainStatusTone(chain.status)}">${operationStatusLabel(chain.status)}</span>
               ${chain.chain_id ? html`<span class="command-tag">${chain.chain_id}</span>` : null}
@@ -189,9 +189,9 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
           `
         : null}
       ${op.checkpoint_ref
-        ? html`<div class="command-card-foot">체크포인트 ${op.checkpoint_ref}</div>`
+        ? html`<div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">체크포인트 ${op.checkpoint_ref}</div>`
         : null}
-      <div class="command-action-row">
+      <div class="flex gap-2.5 flex-wrap mt-3">
         <button
           class="control-btn ghost"
           onClick=${() => {
@@ -245,10 +245,10 @@ function DetachmentCard({ card }: { card: CommandPlaneDetachmentCard }) {
   const detachment = card.detachment
   return html`
     <article class="command-card p-3">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <div>
           <strong>${detachment.detachment_id}</strong>
-          <div class="command-card-sub">${card.operation?.objective ?? detachment.operation_id}</div>
+          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${card.operation?.objective ?? detachment.operation_id}</div>
         </div>
         <span class="command-chip ${toneClass(detachment.status)}">${detachment.status ?? 'active'}</span>
       </div>
@@ -263,7 +263,7 @@ function DetachmentCard({ card }: { card: CommandPlaneDetachmentCard }) {
         <span>하트비트</span><span>${deadlineLabel(detachment.heartbeat_deadline)}</span>
         <span>최근 갱신</span><span>${relativeTime(detachment.updated_at)}</span>
       </div>
-      <div class="command-tag-row">
+      <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
         ${detachment.heartbeat_deadline
           ? html`<span class="command-tag ${expiryTone(detachment.heartbeat_deadline)}">
               기한 ${detachment.heartbeat_deadline}
@@ -277,13 +277,13 @@ function DetachmentCard({ card }: { card: CommandPlaneDetachmentCard }) {
 export function OperationsSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
-    <div class="command-surface-grid">
+    <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4 max-[1100px]:grid-cols-1">
       <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">작전</div>
         </div>
         ${snapshot && snapshot.operations.operations.length > 0
-          ? html`<div class="command-card-stack">
+          ? html`<div class="flex flex-col gap-3 mt-3.5">
               ${snapshot.operations.operations.map(card => html`<${OperationCard} card=${card} />`)}
             </div>`
           : html`<div class="empty-state">관리형 또는 투영된 작전이 없습니다.</div>`}
@@ -293,7 +293,7 @@ export function OperationsSurface() {
           <div class="card-title">분견대</div>
         </div>
         ${snapshot && snapshot.detachments.detachments.length > 0
-          ? html`<div class="command-card-stack">
+          ? html`<div class="flex flex-col gap-3 mt-3.5">
               ${snapshot.detachments.detachments.map(card => html`<${DetachmentCard} card=${card} />`)}
             </div>`
           : html`<div class="empty-state">투영된 분견대가 없습니다.</div>`}
@@ -323,13 +323,13 @@ export function ChainsSurface() {
   }, [selectedRunId])
 
   return html`
-    <div class="command-grid">
+    <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4 max-[1100px]:grid-cols-1">
       <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">Chains</div>
         </div>
         <article class="command-guide-card ${chainStatusTone(summary?.connection.status)}">
-          <div class="command-guide-head">
+          <div class="flex justify-between gap-2.5 items-start">
             <strong>native chain 연결</strong>
             <span class="command-chip ${chainStatusTone(summary?.connection.status)}">${summary?.connection.status ?? 'disconnected'}</span>
           </div>
@@ -351,7 +351,7 @@ export function ChainsSurface() {
           ? html`<div class="empty-state">체인 오버레이 불러오는 중…</div>`
           : overlays.length > 0
             ? html`
-                <div class="command-chain-list">
+                <div class="flex flex-col gap-3 mt-3.5">
                   ${overlays.map(overlay => html`
                     <${ChainOperationListItem}
                       overlay=${overlay}
@@ -363,14 +363,14 @@ export function ChainsSurface() {
               `
             : html`<div class="empty-state">체인 기반 작전이 아직 없습니다.</div>`}
 
-        <div class="command-chain-history">
-          <div class="command-guide-head">
+        <div class="flex flex-col gap-3 mt-3.5">
+          <div class="flex justify-between gap-2.5 items-start">
             <strong>최근 이력</strong>
             <span class="command-chip">${summary?.recent_history.length ?? 0}</span>
           </div>
           ${summary && summary.recent_history.length > 0
             ? html`
-                <div class="command-card-stack">
+                <div class="flex flex-col gap-3 mt-3.5">
                   ${summary.recent_history.slice(0, 6).map(item => html`<${ChainHistoryRow} item=${item} />`)}
                 </div>
               `
@@ -384,11 +384,11 @@ export function ChainsSurface() {
         </div>
         ${selectedOverlay
           ? html`
-              <article class="command-card">
-                <div class="command-card-head">
+              <article class="flex justify-between items-start">
+                <div class="flex justify-between items-start">
                   <div>
                     <strong>${selectedOverlay.operation.objective}</strong>
-                    <div class="command-card-sub">${selectedOverlay.operation.operation_id}</div>
+                    <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${selectedOverlay.operation.operation_id}</div>
                   </div>
                   <span class="command-chip ${chainStatusTone(selectedOverlay.operation.chain?.status)}">
                     ${selectedOverlay.operation.chain?.status ?? selectedOverlay.operation.status}
@@ -403,14 +403,14 @@ export function ChainsSurface() {
                   <span>최근 갱신</span><span>${relativeTime(selectedOverlay.operation.chain?.last_sync_at ?? selectedOverlay.operation.updated_at)}</span>
                 </div>
                 ${selectedOverlay.operation.chain?.goal
-                  ? html`<div class="command-card-foot">${selectedOverlay.operation.chain.goal}</div>`
+                  ? html`<div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">${selectedOverlay.operation.chain.goal}</div>`
                   : null}
               </article>
 
               ${selectedOverlay.mermaid
                 ? html`
-                    <div class="command-chain-panel">
-                      <div class="command-guide-head">
+                    <div class="mt-3.5 p-3.5 rounded-xl bg-[var(--white-4)] border border-[var(--white-8)]">
+                      <div class="flex justify-between gap-2.5 items-start">
                         <strong>Mermaid 그래프</strong>
                         <span class="command-chip">${selectedOverlay.operation.chain?.chain_id ?? 'graph'}</span>
                       </div>
@@ -419,8 +419,8 @@ export function ChainsSurface() {
                   `
                 : html`<div class="empty-state">기록된 Mermaid 그래프가 아직 없습니다.</div>`}
 
-              <div class="command-chain-panel">
-                <div class="command-guide-head">
+              <div class="mt-3.5 p-3.5 rounded-xl bg-[var(--white-4)] border border-[var(--white-8)]">
+                <div class="flex justify-between gap-2.5 items-start">
                   <strong>실행 상세</strong>
                   <span class="command-chip ${run?.success === false ? 'bad' : 'ok'}">
                     ${run
@@ -441,9 +441,9 @@ export function ChainsSurface() {
                             <span>노드</span><span>${run.nodes.length}</span>
                           </div>
                           ${isPreviewRun
-                            ? html`<div class="command-card-foot">run-store에 기록되기 전, 설계된 체인으로 만든 미리보기입니다.</div>`
+                            ? html`<div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">run-store에 기록되기 전, 설계된 체인으로 만든 미리보기입니다.</div>`
                             : null}
-                          <div class="command-card-stack">
+                          <div class="flex flex-col gap-3 mt-3.5">
                             ${run.nodes.map(node => html`<${ChainRunNodeRow} node=${node} />`)}
                           </div>
                         `

@@ -72,9 +72,9 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
   const connectionLabel = activeOps > 0 ? `${activeOps}개 작전 연결` : '실행 연결 없음'
   return html`
     <div class="command-tree-node depth-${Math.min(depth, 3)} ${depth <= 2 ? 'border-[rgba(248,113,113,0.3)]' : ''}">
-      <div class="command-tree-head">
+      <div class="flex justify-between items-start">
         <div>
-          <div class="command-tree-title-row">
+          <div class="flex justify-between items-start">
             <strong>${node.unit.label}</strong>
             <span class="command-chip">${unitKindLabel(node.unit.kind)}</span>
             <span class="command-chip ${toneClass(node.health)}">${node.health ?? 'ok'}</span>
@@ -83,23 +83,23 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
             ${policy?.frozen ? html`<span class="command-chip warn">동결됨</span>` : null}
             ${policy?.kill_switch ? html`<span class="command-chip bad">킬 스위치</span>` : null}
           </div>
-          <div class="command-tree-meta">
+          <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
             <span>ID ${node.unit.unit_id}</span>
             <span>리더 ${node.unit.leader_id ?? '미지정'} / ${node.leader_status ?? '확인 필요'}</span>
             <span>편성 ${rosterLive}/${rosterTotal}</span>
             <span>작전 ${activeOps}</span>
             <span>자율성 ${policy?.autonomy_level ?? '정보 없음'}</span>
           </div>
-          <div class="command-card-sub">${nodeRealitySummary(node)}</div>
+          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${nodeRealitySummary(node)}</div>
           ${node.reasons && node.reasons.length > 0
-            ? html`<div class="command-tag-row">
+            ? html`<div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
                 ${node.reasons.map(reason => html`<span class="command-tag warn">${reason}</span>`)}
               </div>`
             : null}
         </div>
       </div>
       ${node.children.length > 0
-        ? html`<div class="command-tree-children">
+        ? html`<div class="flex flex-col gap-2.5 mt-3 pl-4 border-l border-l-[var(--white-8)]">
             ${node.children.map(child => html`<${TopologyNode} node=${child} depth=${depth + 1} />`)}
           </div>`
         : null}
@@ -110,11 +110,11 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
 function AlertCard({ alert }: { alert: CommandPlaneAlert }) {
   return html`
     <article class="command-alert ${toneClass(alert.severity)} ${alertBorderTone(toneClass(alert.severity))}">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <strong>${alert.title ?? alert.kind ?? alert.alert_id}</strong>
         <span class="command-chip ${toneClass(alert.severity)}">${alert.severity ?? 'warn'}</span>
       </div>
-      <div class="command-alert-meta">
+      <div class="flex justify-between items-start">
         <span>${alert.scope_type ?? '범위'}:${alert.scope_id ?? '정보 없음'}</span>
         <span>${relativeTime(alert.timestamp)}</span>
       </div>
@@ -126,13 +126,13 @@ function AlertCard({ alert }: { alert: CommandPlaneAlert }) {
 export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
   return html`
     <article class="command-trace-row">
-      <div class="command-trace-main">
-        <div class="command-trace-head">
+      <div class="min-w-0 break-words [overflow-wrap:anywhere]">
+        <div class="flex justify-between items-start">
           <strong>${event.event_type}</strong>
           <span class="command-chip">${event.source ?? 'control_plane'}</span>
           <span class="command-chip">${relativeTime(event.timestamp)}</span>
         </div>
-        <div class="command-card-sub">
+        <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">
           ${event.operation_id ?? event.trace_id}
           ${event.unit_id ? ` · ${event.unit_id}` : ''}
           ${event.actor ? ` · ${event.actor}` : ''}
@@ -157,8 +157,8 @@ export function TopologySurface() {
       </div>
       ${snapshot
         ? html`
-            <div class="command-topology-explainer">
-              <div class="command-tree-title-row">
+            <div class="mb-3.5 p-3.5 rounded-xl bg-[var(--white-4)] border border-[var(--white-8)]">
+              <div class="flex justify-between items-start">
                 <span class="command-chip ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
                 <span class="command-chip">관리 유닛 ${managedUnits}</span>
                 <span class="command-chip ${activeOps > 0 ? 'ok' : 'warn'}">활성 작전 ${activeOps}</span>
@@ -182,7 +182,7 @@ export function AlertsSurface() {
         <div class="card-title">경보</div>
       </div>
       ${snapshot && snapshot.alerts.alerts.length > 0
-        ? html`<div class="command-card-stack">
+        ? html`<div class="flex flex-col gap-3 mt-3.5">
             ${snapshot.alerts.alerts.map(alert => html`<${AlertCard} alert=${alert} />`)}
           </div>`
         : html`<div class="empty-state">지금 올라온 지휘면 경보는 없습니다.</div>`}
@@ -198,7 +198,7 @@ export function TraceSurface() {
         <div class="card-title">최근 트레이스</div>
       </div>
       ${snapshot && snapshot.traces.events.length > 0
-        ? html`<div class="command-trace-stack">
+        ? html`<div class="flex flex-col gap-3">
             ${snapshot.traces.events.map(event => html`<${TraceRow} event=${event} />`)}
           </div>`
         : html`<div class="empty-state">최근 트레이스 이벤트가 없습니다.</div>`}

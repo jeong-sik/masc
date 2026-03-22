@@ -27,8 +27,8 @@ export function CommandWorkflowBanner() {
   const context = workflowContextForRoute(route.value)
   if (!context) return null
   return html`
-    <section class="command-focus-banner">
-      <div class="command-focus-head">
+    <section class="rounded-[14px] border border-[rgba(34,211,238,0.26)] bg-[linear-gradient(180deg,rgba(34,211,238,0.1),var(--white-3))] p-3.5 grid gap-2">
+      <div class="flex gap-2 flex-wrap items-center [\"command-focus-head"_strong]:text-[var(--text-strong)]">
         <strong>${context.source_label}</strong>
         <span class="command-chip">${workflowActionLabel(context.action_type)}</span>
         <span class="command-chip">${workflowTargetLabel(context)}</span>
@@ -36,7 +36,7 @@ export function CommandWorkflowBanner() {
       </div>
       <div class="text-[rgba(255,255,255,0.84)] leading-normal">${context.summary}</div>
       ${context.payload_preview
-        ? html`<div class="command-focus-preview">${context.payload_preview}</div>`
+        ? html`<div class="p-2.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-5)] text-[var(--text-strong)] leading-snug">${context.payload_preview}</div>`
         : null}
     </section>
   `
@@ -48,14 +48,14 @@ export function CommandEntryStrip() {
   const recommendation = currentSurfaceRecommendation(surface)
 
   return html`
-    <section class="command-entry-strip">
+    <section class="grid grid-cols-2 gap-3">
       <article class="command-entry-card">
-        <span class="command-entry-label">현재 표면</span>
+        <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-wide">현재 표면</span>
         <strong>${guide.title}</strong>
         <p>${guide.description}</p>
       </article>
       <article class="command-entry-card">
-        <span class="command-entry-label">다음 추천</span>
+        <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-wide">다음 추천</span>
         <strong>${recommendation.tool}</strong>
         <p>${recommendation.reason}</p>
       </article>
@@ -77,14 +77,14 @@ function GraphicGauge({
   color: string
 }) {
   return html`
-    <article class="command-gauge-card">
+    <article class="grid grid-cols-[88px_minmax(0,1fr)] gap-3 items-center p-3 rounded-2xl bg-[rgba(255,255,255,0.045)] border border-[var(--white-8)] min-w-0">
       <div class="command-gauge-ring" style=${gaugeStyle(percent, color)}>
         <div class="command-gauge-core">
           <strong>${value}</strong>
           <span>${Math.round(clampPercent(percent))}%</span>
         </div>
       </div>
-      <div class="command-gauge-copy">
+      <div class="grid gap-1 min-w-0">
         <span>${label}</span>
         <small>${subtext}</small>
       </div>
@@ -106,8 +106,8 @@ function SignalRail({
   tone: string
 }) {
   return html`
-    <article class="command-signal-rail ${toneClass(tone)}">
-      <div class="command-signal-copy">
+    <article class="grid gap-2.5 p-3.5 rounded-[14px] bg-[var(--white-3h)] border border-[var(--white-8)] ${toneClass(tone)}">
+      <div class="flex items-baseline justify-between gap-2.5">
         <span>${label}</span>
         <strong>${value}</strong>
       </div>
@@ -153,12 +153,12 @@ export function SummaryHero() {
       : '이 화면은 체크리스트보다 계기판에 가까워야 합니다. 아래 게이지가 지금 어디가 살아 있는지 먼저 보여줍니다.'
 
   return html`
-    <section class="command-hero command-hero-summary">
+    <section class="command-hero grid grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)] gap-4.5 items-center max-[1450px]:grid-cols-1 max-[1100px]:grid-cols-1">
       <div class="command-hero-copy">
-        <span class="command-hero-kicker">현재 지휘 상태</span>
+        <span class="inline-flex w-fit items-center gap-2 px-2.5 py-1 rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-wide uppercase">현재 지휘 상태</span>
         <h3>${headline}</h3>
         <p>${subcopy}</p>
-        <div class="command-hero-badges">
+        <div class="flex flex-wrap gap-2">
         <span class="command-chip ${toneClass(activeOps > 0 ? 'ok' : 'warn')}">활성 작전 ${activeOps}</span>
           <span class="command-chip ${toneClass(movingLanes > 0 ? 'ok' : activeLanes > 0 ? 'warn' : 'warn')}">이동 레인 ${movingLanes}/${Math.max(activeLanes, movingLanes)}</span>
           <span class="command-chip ${toneClass(badAlerts > 0 ? 'bad' : warnAlerts > 0 ? 'warn' : 'ok')}">치명 알림 ${badAlerts}</span>
@@ -166,7 +166,7 @@ export function SummaryHero() {
         </div>
       </div>
 
-      <div class="command-gauge-grid">
+      <div class="relative z-[1] grid grid-cols-2 gap-3 max-[1100px]:grid-cols-1">
         <${GraphicGauge}
           label="관리 단위 범위"
           value=${`${managedUnits}/${Math.max(totalUnits, managedUnits)}`}
@@ -197,7 +197,7 @@ export function SummaryHero() {
         />
       </div>
     </section>
-    <div class="command-signal-grid">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3 mb-4">
       <${SignalRail}
         label="승인 대기열"
         value=${`${pendingApprovals}건 대기`}
@@ -244,7 +244,7 @@ export function SummaryCards() {
   const issuePressure = microarch?.signals?.issue_pressure
   const cache = microarch?.cache
   return html`
-    <div class="command-summary-grid">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3 max-[1100px]:grid-cols-1">
       <div class="monitor-stat-card"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
       <div class="monitor-stat-card"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
       <div class="monitor-stat-card"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>

@@ -4,7 +4,7 @@ import { SwarmOverviewPanel } from './swarm-overview-panel'
 
 export function SwarmSurface() {
   return html`
-    <div class="command-section-stack">
+    <div class="flex flex-col gap-4">
       <${SwarmOverviewPanel} />
       <${SwarmLivePanels} />
     </div>

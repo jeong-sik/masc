@@ -79,10 +79,10 @@ function warRoomMarkerLabel(marker: string): string {
 export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
   return html`
     <article class="command-card p-3 warroom-worker-card ${toneClass(sessionStatusTone(worker.status))}">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <div>
           <strong>${worker.name}</strong>
-          <div class="command-card-sub">${worker.role} · ${worker.lane}</div>
+          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${worker.role} · ${worker.lane}</div>
         </div>
         <span class="command-chip ${toneClass(sessionStatusTone(worker.status))}">${displayStatus(worker.status)}</span>
       </div>
@@ -96,7 +96,7 @@ export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
         ${worker.markers.map(marker => html`<span class="command-tag">${warRoomMarkerLabel(marker)}</span>`)}
       </div>
       ${worker.note
-        ? html`<div class="command-card-foot">${truncate(worker.note, 220)}</div>`
+        ? html`<div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">${truncate(worker.note, 220)}</div>`
         : null}
     </article>
   `
@@ -105,10 +105,10 @@ export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
 export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
   return html`
     <article class="command-card p-3 warroom-presence-card ${item.tone}">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <div>
           <strong>${item.name}</strong>
-          <div class="command-card-sub">${item.role} · ${item.source}</div>
+          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${item.role} · ${item.source}</div>
         </div>
         <span class="command-chip ${item.tone}">${item.status}</span>
       </div>
@@ -117,10 +117,10 @@ export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
         <span>최근 신호</span><span>${item.signal}</span>
         <span>근거</span><span>${item.detail}</span>
       </div>
-      <div class="command-tag-row">
+      <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
         ${item.chips.map(chip => html`<span class="command-tag">${chip}</span>`)}
       </div>
-      ${item.note ? html`<div class="command-card-foot">${truncate(item.note, 200)}</div>` : null}
+      ${item.note ? html`<div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">${truncate(item.note, 200)}</div>` : null}
     </article>
   `
 }
@@ -128,14 +128,14 @@ export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
 export function WarRoomFeedCard({ item }: { item: WarRoomFeedItem }) {
   return html`
     <article class="command-trace-row warroom-feed-card ${item.tone}">
-      <div class="command-trace-main">
-        <div class="command-trace-head">
+      <div class="min-w-0 break-words [overflow-wrap:anywhere]">
+        <div class="flex justify-between items-start">
           <strong>${item.title}</strong>
           <span class="command-chip ${item.tone}">${item.timestamp ? relativeTime(item.timestamp) : item.source}</span>
         </div>
-        <div class="command-card-sub">${item.meta}</div>
+        <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${item.meta}</div>
       </div>
-      <div class="warroom-feed-detail">${item.detail}</div>
+      <div class="text-[rgba(226,232,240,0.86)] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${item.detail}</div>
     </article>
   `
 }

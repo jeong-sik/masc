@@ -382,14 +382,14 @@ export function WarRoomOrchestrationRail({
   }
 
   return html`
-    <div class="warroom-orchestration-grid">
+    <div class="grid grid-cols-1 gap-3">
       ${chainOverlay
         ? html`
             <article class="command-card warroom-orchestration-card min-h-[220px]">
-              <div class="command-card-head">
+              <div class="flex justify-between items-start">
                 <div>
                   <strong>Chain Orchestration</strong>
-                  <div class="command-card-sub">${chainOverlay.operation.operation_id}</div>
+                  <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${chainOverlay.operation.operation_id}</div>
                 </div>
                 <span class="command-chip ${toneClass(sessionStatusTone(chainOverlay.operation.status))}">${displayStatus(chainOverlay.operation.status)}</span>
               </div>
@@ -399,7 +399,7 @@ export function WarRoomOrchestrationRail({
                 <span>Elapsed</span><span>${formatElapsed(chainOverlay.runtime?.elapsed_sec)}</span>
                 <span>최근 이벤트</span><span>${historySummary(chainOverlay.history)}</span>
               </div>
-              <div class="command-action-row">
+              <div class="flex gap-2.5 flex-wrap mt-3">
                 <${WarRoomJumpButton}
                   label="체인 상세"
                   surface="chains"
@@ -412,10 +412,10 @@ export function WarRoomOrchestrationRail({
       ${linkedAutoresearch
         ? html`
             <article class="command-card warroom-orchestration-card min-h-[220px]">
-              <div class="command-card-head">
+              <div class="flex justify-between items-start">
                 <div>
                   <strong>Autoresearch Loop</strong>
-                  <div class="command-card-sub">${linkedAutoresearch.loop_id ?? linkedAutoresearch.session_id ?? 'linked session'}</div>
+                  <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${linkedAutoresearch.loop_id ?? linkedAutoresearch.session_id ?? 'linked session'}</div>
                 </div>
                 <span class="command-chip ${linkedAutoresearch.error ? 'bad' : linkedAutoresearch.status === 'running' ? 'warn' : 'ok'}">${linkedAutoresearch.status ?? 'unknown'}</span>
               </div>
@@ -425,7 +425,7 @@ export function WarRoomOrchestrationRail({
                 <span>Target</span><span>${linkedAutoresearch.target_file ?? 'n/a'}</span>
                 <span>Last decision</span><span>${linkedAutoresearch.last_decision ?? linkedAutoresearch.error ?? '기록 없음'}</span>
               </div>
-              <div class="command-action-row">
+              <div class="flex gap-2.5 flex-wrap mt-3">
                 <${WarRoomJumpButton} label="세션 개입" />
                 ${linkedAutoresearch.operation_id
                   ? html`<${WarRoomJumpButton}

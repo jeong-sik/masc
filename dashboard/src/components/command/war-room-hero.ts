@@ -90,17 +90,17 @@ export function WarRoomHeroStrip({
 }: WarRoomHeroProps) {
   return html`
     <section class="command-warroom-strip ${toneClass(stickyTone)} ${wallboard ? 'wallboard' : ''}">
-      <div class="command-warroom-strip-head">
+      <div class="flex justify-between gap-3.5 items-start flex-wrap [\"command-warroom-strip-head"_strong]:block [\"command-warroom-strip-head"_strong]:text-2xl [\"command-warroom-strip-head"_strong]:leading-tight">
         <div>
-          <span class="command-hero-kicker">${wallboard ? 'War Room Wallboard' : '실시간 워룸'}</span>
+          <span class="inline-flex w-fit items-center gap-2 px-2.5 py-1 rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-wide uppercase">${wallboard ? 'War Room Wallboard' : '실시간 워룸'}</span>
           <strong>${heroTitle}</strong>
-          <div class="command-card-sub">
+          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">
             ${swarmHasEvidence ? (swarm?.operation?.operation_id ?? '작전 정보 없음') : '세션 기준값'}
             ${selectedSession?.session_id ? ` · 세션 ${selectedSession.session_id}` : ''}
             ${swarmHasEvidence && swarm?.detachment?.detachment_id ? ` · 분견대 ${swarm.detachment.detachment_id}` : ''}
             ${activeLane ? ` · 대표 레인 ${activeLane.label}` : ''}
           </div>
-          <div class="command-warroom-summary">${heroSummary}</div>
+          <div class="mt-3 text-[rgba(226,232,240,0.86)] leading-relaxed max-w-[82ch]">${heroSummary}</div>
           ${activeSummary?.summary
             ? html`<div class="command-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
                 <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
@@ -108,7 +108,7 @@ export function WarRoomHeroStrip({
               </div>`
             : null}
         </div>
-        <div class="command-warroom-hero-actions">
+        <div class="flex gap-2.5 flex-wrap items-start justify-end">
           <button class="control-btn ghost" onClick=${onRefresh}>새로고침</button>
           ${wallboard
             ? html`
@@ -138,7 +138,7 @@ export function WarRoomHeroStrip({
           <${WarRoomJumpButton} label="개입" />
         </div>
       </div>
-      <div class="command-warroom-strip-stats">
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
         <div class="monitor-stat-card">
           <span>워커</span>
           <strong>${workerJoined ?? 0}/${workerExpected ?? 0}</strong>

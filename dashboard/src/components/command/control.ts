@@ -35,10 +35,10 @@ function DecisionCard({ decision }: { decision: CommandPlaneDecisionRecord }) {
   const isLegacy = decision.source === 'projected_operator'
   return html`
     <article class="command-card ${toneClass(decision.status)}">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <div>
           <strong>${decision.requested_action}</strong>
-          <div class="command-card-sub">${decision.scope_type}:${decision.scope_id}</div>
+          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${decision.scope_type}:${decision.scope_id}</div>
         </div>
         <span class="command-chip ${toneClass(decision.status)}">${controlStatusLabel(decision.status ?? 'pending')}</span>
       </div>
@@ -52,7 +52,7 @@ function DecisionCard({ decision }: { decision: CommandPlaneDecisionRecord }) {
       </div>
       ${decision.status === 'pending' && !isLegacy
         ? html`
-            <div class="command-action-row">
+            <div class="flex gap-2.5 flex-wrap mt-3">
               <button class="control-btn ghost" disabled=${actionDisabled(approveKey)} onClick=${() => fire(() => approveCommandPlaneDecision(decision.decision_id))}>
                 ${actionDisabled(approveKey) ? '승인 중…' : '승인'}
               </button>
@@ -62,7 +62,7 @@ function DecisionCard({ decision }: { decision: CommandPlaneDecisionRecord }) {
             </div>
           `
         : null}
-      ${isLegacy ? html`<div class="command-card-foot">레거시 operator 승인입니다. 실제 실행은 operator control에서 처리합니다.</div>` : null}
+      ${isLegacy ? html`<div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">레거시 operator 승인입니다. 실제 실행은 operator control에서 처리합니다.</div>` : null}
     </article>
   `
 }
@@ -76,10 +76,10 @@ function CapacityRowCard({ row }: { row: CommandPlaneCapacityRow }) {
   const utilization = Math.round((row.utilization ?? 0) * 100)
   return html`
     <article class="command-card p-3">
-      <div class="command-card-head">
+      <div class="flex justify-between items-start">
         <div>
           <strong>${unit.label}</strong>
-          <div class="command-card-sub">${unit.unit_id}</div>
+          <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${unit.unit_id}</div>
         </div>
         <span class="command-chip ${toneClass(utilization > 100 ? 'bad' : utilization > 70 ? 'warn' : 'ok')}">${utilization}%</span>
       </div>
@@ -91,7 +91,7 @@ function CapacityRowCard({ row }: { row: CommandPlaneCapacityRow }) {
         <span>동결</span><span>${frozen ? '예' : '아니오'}</span>
         <span>킬 스위치</span><span>${killSwitch ? '켜짐' : '꺼짐'}</span>
       </div>
-      <div class="command-action-row">
+      <div class="flex gap-2.5 flex-wrap mt-3">
         <button class="control-btn ghost" disabled=${actionDisabled(freezeKey)} onClick=${() => fire(() => toggleCommandPlaneFreeze(unit.unit_id, !frozen))}>
           ${actionDisabled(freezeKey) ? '적용 중…' : frozen ? '동결 해제' : '동결'}
         </button>
@@ -106,13 +106,13 @@ function CapacityRowCard({ row }: { row: CommandPlaneCapacityRow }) {
 export function ControlSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
-    <div class="command-surface-grid">
+    <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4 max-[1450px]:grid-cols-1 max-[1100px]:grid-cols-1">
       <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">승인 대기</div>
         </div>
         ${snapshot && snapshot.decisions.decisions.length > 0
-          ? html`<div class="command-card-stack">
+          ? html`<div class="flex flex-col gap-3 mt-3.5">
               ${snapshot.decisions.decisions.map(decision => html`<${DecisionCard} decision=${decision} />`)}
             </div>`
           : html`<div class="empty-state">지금 승인 대기 항목은 없습니다.</div>`}
@@ -123,7 +123,7 @@ export function ControlSurface() {
           <div class="card-title">유닛 제어</div>
         </div>
         ${snapshot && snapshot.capacity.capacity.length > 0
-          ? html`<div class="command-card-stack">
+          ? html`<div class="flex flex-col gap-3 mt-3.5">
               ${snapshot.capacity.capacity.map(row => html`<${CapacityRowCard} row=${row} />`)}
             </div>`
           : html`<div class="empty-state">제어할 용량 행이 아직 없습니다.</div>`}

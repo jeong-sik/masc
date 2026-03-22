@@ -375,7 +375,7 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
         <p>${signalNode.detail ?? '세부 설명이 없습니다.'}</p>
         ${signalNode.suggested_surface
           ? html`
-              <div class="command-action-row">
+              <div class="flex gap-2.5 flex-wrap mt-3">
                 <button
                   class="control-btn"
                   onClick=${() => jumpTo('command', signalNode.suggested_surface, signalNode.suggested_params ?? {})}
@@ -398,7 +398,7 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
         <div class="card-title">${node.label}</div>
         <span class="command-chip ${toneClass(node.tone)}">${orchestraNodeKindLabel(node.kind)}</span>
       </div>
-      ${node.subtitle ? html`<p class="command-card-sub">${node.subtitle}</p>` : null}
+      ${node.subtitle ? html`<p class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${node.subtitle}</p>` : null}
       <div class="orchestra-fact-list flex flex-col gap-2">
         ${node.facts.map(factRow => html`
           <div class="orchestra-fact-row flex justify-between gap-3 py-2 px-2.5 rounded-[10px]">
@@ -408,14 +408,14 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
         `)}
       </div>
       ${relatedSignals.length > 0 ? html`
-        <div class="command-tag-row">
+        <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
           ${relatedSignals.map(signalNode => html`<span class="command-chip ${toneClass(signalNode.tone)}">${signalNode.label}</span>`)}
         </div>
       ` : null}
-      <div class="command-card-sub">연결 ${relatedEdges.length}개 · 근거 ${node.provenance}</div>
+      <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">연결 ${relatedEdges.length}개 · 근거 ${node.provenance}</div>
       ${(node.link_tab && (node.link_surface || Object.keys(node.link_params ?? {}).length > 0))
         ? html`
-            <div class="command-action-row">
+            <div class="flex gap-2.5 flex-wrap mt-3">
               <button
                 class="control-btn"
                 onClick=${() => jumpTo(node.link_tab ?? 'command', node.link_surface, node.link_params ?? {})}

@@ -50,7 +50,7 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
             <strong>${lane.label}</strong>
           </div>
         </div>
-        <div class="command-tag-row">
+        <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
           <span class="command-chip ${toneClass(tone)}">${lane.phase}</span>
           <span class="command-chip ${toneClass(tone)}">${lane.motion_state}</span>
           <span class="command-chip">${relativeTime(lane.last_movement_at)}</span>
@@ -230,7 +230,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
 
   return html`
     <article class="command-guide-card ${toneClass(tone)}">
-      <div class="command-guide-head">
+      <div class="flex justify-between gap-2.5 items-start">
         <strong>Run Resolution</strong>
         <span class="command-chip ${toneClass(tone)}">
           ${runResolutionLabel(resolution?.status ?? recommendation?.recommended_kind ?? null)}
@@ -249,7 +249,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
       </div>
       ${recommendation?.evidence
         ? html`
-            <div class="command-tag-row">
+            <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
               <span class="command-tag">joined ${recommendation.evidence.joined_workers ?? 0}</span>
               <span class="command-tag">trace ${recommendation.evidence.trace_events ?? 0}</span>
               <span class="command-tag">message ${recommendation.evidence.message_events ?? 0}</span>
@@ -262,12 +262,12 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
       ${pendingConfirm
         ? html`
             <div class="command-guide-card warn">
-              <div class="command-guide-head">
+              <div class="flex justify-between gap-2.5 items-start">
                 <strong>확인 대기</strong>
                 <span class="command-chip warn">${pendingConfirm.confirm_token}</span>
               </div>
               ${pendingConfirm.preview ? html`<pre class="command-trace-detail">${previewText(pendingConfirm.preview)}</pre>` : null}
-              <div class="command-action-row">
+              <div class="flex gap-2.5 flex-wrap mt-3">
                 <button class="control-btn" onClick=${() => { void confirmPending('confirm') }} disabled=${operatorActionBusy.value}>확인 실행</button>
                 <button class="control-btn ghost" onClick=${() => { void confirmPending('deny') }} disabled=${operatorActionBusy.value}>취소</button>
               </div>

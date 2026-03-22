@@ -191,35 +191,35 @@ function GuidedPanel() {
   )
 
   return html`
-    <div class="command-guided-layout">
+    <div class="grid grid-cols-[minmax(0,1.06fr)_minmax(0,0.94fr)] gap-4 max-[1450px]:grid-cols-1 max-[1100px]:grid-cols-1">
       <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">즉시 조치</div>
         </div>
         <div class="command-guide-card highlight mb-3">
-          <div class="command-guide-head">
+          <div class="flex justify-between gap-2.5 items-start">
             <strong>${nextStep?.title ?? nextTool}</strong>
             <span class="command-chip ok">${nextTool}</span>
           </div>
           <p>${nextStep?.summary ?? '지금 막고 있는 병목을 풀기 위해 canonical flow의 다음 tool부터 실행합니다.'}</p>
           ${nextStep?.success_signals?.length
-            ? html`<div class="command-tag-row">
+            ? html`<div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
                 ${nextStep.success_signals.map(signal => html`<span class="command-tag ok">${signal}</span>`)}
               </div>`
             : null}
         </div>
 
-        <div class="command-readiness-list">
+        <div class="flex flex-col gap-2.5">
           ${readiness.map(item => html`
             <article class="command-readiness-row ${toneClass(item.tone)}">
               <div>
-                <div class="command-readiness-title-row">
+                <div class="flex justify-between gap-2.5 items-start">
                   <strong>${item.title}</strong>
                   <span class="command-chip ${toneClass(item.tone)}">${item.tone}</span>
                 </div>
                 <p>${item.detail}</p>
               </div>
-              <div class="command-card-foot">Next tool: ${item.tool}</div>
+              <div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">Next tool: ${item.tool}</div>
             </article>
           `)}
         </div>
@@ -227,16 +227,16 @@ function GuidedPanel() {
         ${pitfalls.length > 0
           ? html`
               <div class="command-guide-card warn">
-                <div class="command-guide-head">
+                <div class="flex justify-between gap-2.5 items-start">
                   <strong>자주 막히는 지점</strong>
                   <span class="command-chip warn">${pitfalls.length}</span>
                 </div>
-                <div class="command-guide-list">
+                <div class="flex flex-col gap-3">
                   ${pitfalls.map(pitfall => html`
-                    <article class="command-guide-inline">
+                    <article class="p-3 rounded-[10px] bg-[rgba(9,12,20,0.5)] border border-[var(--white-6)] break-words [overflow-wrap:anywhere]">
                       <strong>${pitfall.title}</strong>
                       <div>${pitfall.symptom}</div>
-                      <div class="command-card-sub">${pitfall.fix_tool} 로 해결: ${pitfall.fix_summary}</div>
+                      <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${pitfall.fix_tool} 로 해결: ${pitfall.fix_summary}</div>
                     </article>
                   `)}
                 </div>
@@ -257,16 +257,16 @@ function GuidedPanel() {
                 <div class="grid gap-3">
                   ${renderedPaths.map(path => html`
                     <article class="command-guide-card">
-                      <div class="command-guide-head">
+                      <div class="flex justify-between gap-2.5 items-start">
                         <strong>${path.title}</strong>
                         <span class="command-chip">${path.id}</span>
                       </div>
                       <p>${path.summary}</p>
-                      <div class="command-card-sub">${path.when_to_use}</div>
-                      <div class="command-step-list compact">
+                      <div class="text-[var(--white-56)] text-[length:var(--fs-sm)] mt-1 break-words [overflow-wrap:anywhere]">${path.when_to_use}</div>
+                      <div class="flex flex-col gap-2 mt-3 compact">
                         ${path.steps.slice(0, 4).map(step => html`
-                          <div class="command-step-row">
-                            <span class="command-step-tool">${step.tool}</span>
+                          <div class="flex gap-2.5 flex-wrap items-baseline">
+                            <span class="font-mono text-[#67e8f9] text-[length:var(--fs-sm)]">${step.tool}</span>
                             <span>${step.title}</span>
                           </div>
                         `)}
@@ -275,7 +275,7 @@ function GuidedPanel() {
                   `)}
                 </div>
                 ${docs.length > 0
-                  ? html`<div class="command-doc-links">
+                  ? html`<div class="flex flex-wrap gap-2 mt-3">
                       ${docs.map(doc => html`<span class="command-tag">${doc.title}: ${doc.path}</span>`)}
                     </div>`
                   : null}

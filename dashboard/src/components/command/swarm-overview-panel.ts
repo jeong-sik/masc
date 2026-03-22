@@ -49,26 +49,26 @@ export function SwarmOverviewPanel() {
             ${lanes.length > 0 ? html`<${SwarmHealthBar} lanes=${lanes} />` : null}
 
             <div class="command-swarm-layout ${compactLayout ? 'compact' : ''}">
-              <div class="command-card-stack">
+              <div class="flex flex-col gap-3 mt-3.5">
                 ${lanes.length > 0
                   ? lanes.map(lane => html`<${SwarmLaneStrip} lane=${lane} />`)
                   : html`<div class="empty-state">활성 스웜 레인이 없습니다.</div>`}
               </div>
 
-              <div class="command-card-stack">
+              <div class="flex flex-col gap-3 mt-3.5">
                 <div class="command-guide-card highlight ${focusKey === 'recommendation' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
-                  <div class="command-guide-head">
+                  <div class="flex justify-between gap-2.5 items-start">
                     <strong>${recommendation?.label ?? '운영자 상태 확인'}</strong>
                     <span class="command-chip">${recommendation?.lane_id ?? '전체'}</span>
                   </div>
                   <p>${recommendation?.reason ?? '보이는 활성 스웜 레인이 아직 없습니다.'}</p>
-                  <div class="command-card-foot">${recommendation?.tool ?? 'masc_operator_snapshot'}</div>
+                  <div class="mt-3 pt-3 border-t border-t-[var(--white-8)] text-[#67e8f9] font-mono text-[length:var(--fs-sm)] break-words [overflow-wrap:anywhere]">${recommendation?.tool ?? 'masc_operator_snapshot'}</div>
                 </div>
 
                 <${SwarmProofPanel} proof=${proof} />
 
                 <div class="command-guide-card ${gaps.length > 0 ? 'warn' : 'ok'} ${focusKey === 'gaps' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
-                  <div class="command-guide-head">
+                  <div class="flex justify-between gap-2.5 items-start">
                     <strong>핵심 공백</strong>
                     <span class="command-chip ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
                   </div>
@@ -78,7 +78,7 @@ export function SwarmOverviewPanel() {
                 </div>
 
                 <div class="command-guide-card">
-                  <div class="command-guide-head">
+                  <div class="flex justify-between gap-2.5 items-start">
                     <strong>이동 타임라인</strong>
                     <span class="command-chip">${timeline.length}</span>
                   </div>

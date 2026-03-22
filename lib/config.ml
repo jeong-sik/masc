@@ -124,6 +124,7 @@ let raw_all_tool_schemas : Types.tool_schema list =
     @ Tool_team_session.schemas
     @ Tool_voice.schemas
     @ Tool_compact.schemas
+    @ Tool_autoresearch.schemas
     )
 
 (** Validate tool schemas at module initialization time.

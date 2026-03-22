@@ -163,7 +163,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               role="button"
               tabindex="0"
             >
-              ${isKeeper && ctxPct != null ? html`<div class="absolute bottom-0 left-0 h-1 bg-linear-to-r from-[var(--accent)] to-[var(--ok)] transition-all duration-300 opacity-80 group-hover:opacity-100" style=${{ width: \`\${ctxPct}%\` }}></div>` : null}
+              ${isKeeper && ctxPct != null ? html`<div class="absolute bottom-0 left-0 h-1 bg-linear-to-r from-[var(--accent)] to-[var(--ok)] transition-all duration-300 opacity-80 group-hover:opacity-100" style=${{ width: ctxPct + '%' }}></div>` : null}
               
               <div class="flex items-start gap-4">
                 <div class="shrink-0 relative">

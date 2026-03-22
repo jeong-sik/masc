@@ -472,10 +472,10 @@ let resolve_provider_run_request ~provider ~model_opt ~prompt =
 
 (** Check if a model label is runnable (has provider config + Gemini auth check). *)
 let is_label_runnable (label : string) : bool =
-  match Model_spec.model_spec_of_string label with
-  | Error _ -> false
-  | Ok spec ->
-    let rn = Model_spec.registry_name_of_provider spec.provider in
+  match Llm_provider.Cascade_config.parse_model_string label with
+  | None -> false
+  | Some cfg ->
+    let rn = Llm_provider.Provider_config.(match cfg.kind with Anthropic -> "claude" | Gemini -> "gemini" | Glm -> "glm" | OpenAI_compat -> "openai" | Claude_code -> "claude") in
     match rn with
     | "gemini" -> (
         match Provider_adapter.resolve_gemini_direct_auth () with
@@ -495,9 +495,9 @@ let execute_single_agent_run ~sw:_ ~provider ~model ~prompt =
   | Error _ as error -> error
   | Ok label -> (
       (* Validate label parses *)
-      match Model_spec.model_spec_of_string label with
-      | Error message -> Error message
-      | Ok _spec ->
+      match Llm_provider.Cascade_config.parse_model_string label with
+      | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
+      | Some _cfg ->
         if not (is_label_runnable label) then
           Error
             (Printf.sprintf

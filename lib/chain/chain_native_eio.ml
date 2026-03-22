@@ -210,9 +210,9 @@ let model_runner_of_string raw =
   let lower = String.lowercase_ascii model in
   let direct label =
     (* Validate the label parses, but carry the string *)
-    match Model_spec.model_spec_of_string label with
-    | Ok _ -> Ok (Direct label)
-    | Error msg -> Error msg
+    match Llm_provider.Cascade_config.parse_model_string label with
+    | Some _ -> Ok (Direct label)
+    | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
   in
   match lower with
   | "" | "gemini" -> direct "gemini:pro"
@@ -241,28 +241,28 @@ let model_runner_of_string raw =
       in
       direct (Printf.sprintf "codex-api:%s" effective)
   | value -> (
-      match Model_spec.model_spec_of_string model with
-      | Ok _ -> Ok (Direct model)
-      | Error _ when starts_with ~prefix:"llama:" value -> direct model
-      | Error _ when starts_with ~prefix:"gemini:" value -> direct model
-      | Error _ when starts_with ~prefix:"claude:" value -> direct model
-      | Error _ when starts_with ~prefix:"glm:" value -> direct model
+      match Llm_provider.Cascade_config.parse_model_string model with
+      | Some _ -> Ok (Direct model)
+      | None when starts_with ~prefix:"llama:" value -> direct model
+      | None when starts_with ~prefix:"gemini:" value -> direct model
+      | None when starts_with ~prefix:"claude:" value -> direct model
+      | None when starts_with ~prefix:"glm:" value -> direct model
       (* Bare provider model names → route to provider *)
-      | Error _ when starts_with ~prefix:"glm-" value ->
+      | None when starts_with ~prefix:"glm-" value ->
           direct (Printf.sprintf "glm:%s" value)
-      | Error _ when starts_with ~prefix:"gemini-" value ->
+      | None when starts_with ~prefix:"gemini-" value ->
           direct (Printf.sprintf "gemini:%s" value)
-      | Error _ when starts_with ~prefix:"claude-" value ->
+      | None when starts_with ~prefix:"claude-" value ->
           direct (Printf.sprintf "claude:%s" value)
-      | Error _ when starts_with ~prefix:"codex-" value ->
+      | None when starts_with ~prefix:"codex-" value ->
           direct (Printf.sprintf "codex-api:%s" value)
-      | Error _ when starts_with ~prefix:"gpt-" value ->
+      | None when starts_with ~prefix:"gpt-" value ->
           direct (Printf.sprintf "codex-api:%s" value)
-      | Error _ when String.equal value "gpt" ->
+      | None when String.equal value "gpt" ->
           direct (Printf.sprintf "codex-api:%s" Env_config.OpenAI.default_model)
-      | Error _ when starts_with ~prefix:"o1" value || starts_with ~prefix:"o3" value ->
+      | None when starts_with ~prefix:"o1" value || starts_with ~prefix:"o3" value ->
           direct (Printf.sprintf "codex-api:%s" value)
-      | Error msg -> Error msg)
+      | None -> Error (Printf.sprintf "Cannot parse model: %s" model))
 
 let call_model_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~prompt
     ~timeout_sec () =

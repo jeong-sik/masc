@@ -131,6 +131,7 @@ let provider_of_oas ~(registry_name : string)
   match kind with
   | Anthropic -> Claude
   | Gemini -> Gemini
+  | Glm -> Glm_cloud
   | Claude_code -> Claude
   | OpenAI_compat -> (
       match registry_name with

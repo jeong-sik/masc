@@ -11,10 +11,10 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 
-let add_routes router =
+  let add_routes router =
   router
   |> Http.Router.get "/api/v1/status" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+       with_read_auth (fun state _req reqd ->
          let config = state.Mcp_server.room_config in
          let room_state = Room.read_state config in
          let tempo = Tempo.get_tempo config in
@@ -27,7 +27,7 @@ let add_routes router =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/tasks" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       with_read_auth (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let status_filter = query_param req "status" in
          let include_done = bool_query_param req "include_done" ~default:false in
@@ -85,7 +85,7 @@ let add_routes router =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       with_read_auth (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let status_filter = query_param req "status" in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
@@ -129,7 +129,7 @@ let add_routes router =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/messages" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       with_read_auth (fun state req reqd ->
          let config = state.Mcp_server.room_config in
          let since_seq = int_query_param req "since_seq" ~default:0 in
          let limit = int_query_param req "limit" ~default:20 in

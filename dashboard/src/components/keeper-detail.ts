@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { runOperatorAction } from '../api'
 import { TimeAgo } from './common/time-ago'
+import { DataRow } from './common/data-row'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
 import { selectKeeper } from '../keeper-runtime'
@@ -15,6 +16,7 @@ import {
   KeeperRuntimeActions,
 } from './keeper-shared'
 import { showToast } from './common/toast'
+import { SectionCard } from './common/card'
 import {
   AutonomyMeter,
   ContextChart,
@@ -31,6 +33,7 @@ import {
 } from './keeper-detail-runtime'
 import { KeeperConfigPanel, resetKeeperConfig } from './keeper-config-panel'
 import { PipelineStageBar } from './keeper-pipeline-stage'
+import { SectionHeader } from './common/section-header'
 
 // ── Global overlay state ──────────────────────────────────
 
@@ -110,8 +113,8 @@ function KeeperStatusPill({ status }: { status: string }) {
 
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   return html`
-    <div class="mt-6 border-t border-[var(--border-slate-12)] pt-6">
-      <h3 class="m-0 mb-4 text-[15px] font-semibold text-[var(--text-strong)]">Direct Comms</h3>
+    <div class="border-t border-[var(--border-slate-12)] pt-5">
+      <${SectionHeader} size="md" class="mb-3">Direct Comms<//>
 
       <div class="flex flex-col gap-4">
         <div class="w-full">
@@ -137,17 +140,6 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   `
 }
 
-// ── Section Card (detail page variant) ───────────────────
-
-function SectionCard({ title, children }: { title: string; children: preact.ComponentChildren }) {
-  return html`
-    <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-3">${title}</div>
-      ${children}
-    </div>
-  `
-}
-
 // ── Main Detail Overlay ─────────────────────────────────
 
 export function KeeperDetailOverlay() {
@@ -164,21 +156,21 @@ export function KeeperDetailOverlay() {
         }
       }}
     >
-      <div class="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#111a2e] rounded-2xl border border-[var(--card-border)] p-6 shadow-2xl">
+      <div class="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#0d1526] rounded-2xl border border-[var(--card-border)] shadow-[0_24px_64px_rgba(0,0,0,0.5)]">
 
-        ${'' /* ── Header ── */}
-        <div class="flex items-start justify-between mb-6">
+        ${'' /* ── Header bar ── */}
+        <div class="sticky top-0 z-10 flex items-center justify-between px-6 py-4 border-b border-[var(--card-border)] bg-[rgba(13,21,38,0.95)] backdrop-blur-md rounded-t-2xl">
           <div class="flex items-center gap-3.5">
-            <span class="text-[32px] leading-none">${keeper.emoji}</span>
-            <div class="flex flex-col">
+            <span class="text-[28px] leading-none">${keeper.emoji}</span>
+            <div class="flex flex-col gap-0.5">
               <div class="flex items-center gap-2.5">
-                <h2 class="m-0 text-xl font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
+                <h2 class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
                 <${KeeperStatusPill} status=${keeper.status} />
                 ${keeper.model ? html`
-                  <span class="inline-flex items-center py-0.5 px-2.5 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${keeper.model}</span>
+                  <span class="inline-flex items-center py-0.5 px-2 rounded text-[10px] font-mono bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.2)]">${keeper.model}</span>
                 ` : null}
               </div>
-              ${keeper.koreanName ? html`<div class="text-[13px] text-[var(--text-muted)] mt-0.5">${keeper.koreanName}</div>` : null}
+              ${keeper.koreanName ? html`<span class="text-[12px] text-[var(--text-muted)]">${keeper.koreanName}</span>` : null}
             </div>
           </div>
           <button
@@ -190,14 +182,17 @@ export function KeeperDetailOverlay() {
           </button>
         </div>
 
-        ${'' /* ── Pipeline stage indicator ── */}
-        <${PipelineStageBar} stage=${keeper.pipeline_stage} />
+        ${'' /* ── Body content ── */}
+        <div class="p-6 flex flex-col gap-6">
 
-        ${'' /* ── KPIs ── */}
-        <${KpiGrid} keeper=${keeper} />
+          ${'' /* ── Pipeline stage indicator ── */}
+          <${PipelineStageBar} stage=${keeper.pipeline_stage} />
 
-        ${'' /* ── Context chart ── */}
-        <${ContextChart} keeper=${keeper} />
+          ${'' /* ── KPIs ── */}
+          <${KpiGrid} keeper=${keeper} />
+
+          ${'' /* ── Context chart ── */}
+          <${ContextChart} keeper=${keeper} />
 
         ${'' /* ── Direct conversation ── */}
         <${KeeperCommsPanel} keeper=${keeper} />
@@ -205,11 +200,11 @@ export function KeeperDetailOverlay() {
         ${'' /* ── Detail sections grid ── */}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
 
-          <${SectionCard} title="Field Dictionary">
+          <${SectionCard} label="Field Dictionary">
             <${FieldDictionary} keeper=${keeper} />
           <//>
 
-          <${SectionCard} title="Profile">
+          <${SectionCard} label="Profile">
             <${TraitsList} traits=${keeper.traits ?? []} label="Traits" />
             <${TraitsList} traits=${keeper.interests ?? []} label="Interests" />
             ${keeper.primaryValue
@@ -237,7 +232,7 @@ export function KeeperDetailOverlay() {
 
           ${keeper.autonomy_level
             ? html`
-              <${SectionCard} title="Autonomy">
+              <${SectionCard} label="Autonomy">
                 <${AutonomyMeter} keeper=${keeper} />
               <//>
             `
@@ -245,7 +240,7 @@ export function KeeperDetailOverlay() {
 
           ${keeper.trpg_stats
             ? html`
-              <${SectionCard} title="TRPG Stats">
+              <${SectionCard} label="TRPG Stats">
                 <${TrpgStats} stats=${keeper.trpg_stats} />
               <//>
             `
@@ -253,7 +248,7 @@ export function KeeperDetailOverlay() {
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`
-              <${SectionCard} title="Equipment (${keeper.inventory.length})">
+              <${SectionCard} label="Equipment (${keeper.inventory.length})">
                 <${EquipmentList} items=${keeper.inventory} />
               <//>
             `
@@ -261,38 +256,32 @@ export function KeeperDetailOverlay() {
 
           ${keeper.relationships && Object.keys(keeper.relationships).length > 0
             ? html`
-              <${SectionCard} title="Relationships (${Object.keys(keeper.relationships).length})">
+              <${SectionCard} label="Relationships (${Object.keys(keeper.relationships).length})">
                 <${RelationshipList} rels=${keeper.relationships} />
               <//>
             `
             : null}
 
-          <${SectionCard} title="Runtime Signals">
+          <${SectionCard} label="Runtime Signals">
             <${RuntimeSignals} keeper=${keeper} />
           <//>
 
-          <${SectionCard} title="Neighborhood & Tool Audit">
+          <${SectionCard} label="Neighborhood & Tool Audit">
             <${KeeperNeighborhood} keeper=${keeper} />
           <//>
 
-          <${SectionCard} title="Config">
+          <${SectionCard} label="Config">
             <${KeeperConfigPanel} keeperName=${keeper.name} />
           <//>
 
-          <${SectionCard} title="Memory & Context">
+          <${SectionCard} label="Memory & Context">
             <div class="flex flex-col gap-2">
-              <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-                <span class="text-xs text-[var(--text-muted)]">Context source</span>
-                <span class="text-xs font-medium text-[var(--text-strong)]">${keeper.context_source ?? keeper.context?.source ?? '-'}</span>
-              </div>
-              <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-                <span class="text-xs text-[var(--text-muted)]">Context tokens</span>
-                <span class="text-xs font-medium text-[var(--text-strong)]">
+              <${DataRow} label="Context source" alt>${keeper.context_source ?? keeper.context?.source ?? '-'}<//>
+              <${DataRow} label="Context tokens" alt>
                   ${keeper.context_tokens ?? keeper.context?.context_tokens ?? '-'}
                   /
                   ${keeper.context_max ?? keeper.context?.context_max ?? '-'}
-                </span>
-              </div>
+              <//>
               ${keeper.memory_recent_note
                 ? html`
                   <div class="py-2 px-3 rounded-lg bg-[rgba(167,139,250,0.06)] border border-[rgba(167,139,250,0.12)] text-xs text-[var(--text-body)] leading-relaxed">
@@ -302,6 +291,7 @@ export function KeeperDetailOverlay() {
                 : html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic">No recent memory note</div>`}
             </div>
           <//>
+        </div>
         </div>
       </div>
     </div>

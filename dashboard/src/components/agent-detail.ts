@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { Card } from './common/card'
+import { EmptyState } from './common/feedback-state'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { keeperIdentityHint } from './common/keeper-identity'
@@ -153,13 +154,13 @@ export function AgentDetailOverlay() {
         <div class="grid grid-cols-2 gap-3 mb-3">
           <${Card} title="할당된 작업">
             ${ownedTasks.length === 0
-              ? html`<div class="empty-state">할당된 작업이 없습니다</div>`
+              ? html`<${EmptyState}>할당된 작업이 없습니다<//>`
               : html`<div class="flex flex-col gap-2">${ownedTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`}
           <//>
 
           <${Card} title="최근 활동">
             ${lines.length === 0
-              ? html`<div class="empty-state">최근 활동 기록이 없습니다</div>`
+              ? html`<${EmptyState}>최근 활동 기록이 없습니다<//>`
               : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[length:var(--fs-sm)] text-[#c8daf7] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
           <//>
         </div>
@@ -169,7 +170,7 @@ export function AgentDetailOverlay() {
         <${AgentWorkerBrief} agentName=${agentName} />
         <${Card} title="작업 이력">
           ${taskHistories.value.length === 0
-            ? html`<div class="empty-state">작업 이력이 없습니다</div>`
+            ? html`<${EmptyState}>작업 이력이 없습니다<//>`
             : html`<div class="flex flex-col gap-2.5">${taskHistories.value.map((row: TaskHistoryRow) => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`}
         <//>
 

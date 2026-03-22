@@ -1,0 +1,79 @@
+// StatRow / KpiCard — data display primitives
+// Replaces 100+ inline label-value pair patterns
+
+import { html } from 'htm/preact'
+import type { ComponentChildren } from 'preact'
+
+// ── Key-value row (horizontal) ──
+interface StatRowProps {
+  label: string
+  class?: string
+  children: ComponentChildren
+}
+
+/** Horizontal label → value row with muted label and strong value */
+export function StatRow({ label, class: cx, children }: StatRowProps) {
+  return html`
+    <div class="flex items-center justify-between ${cx ?? ''}">
+      <span class="text-[var(--text-muted)]">${label}</span>
+      <strong class="text-[var(--text-strong)] tabular-nums">${children}</strong>
+    </div>
+  `
+}
+
+// ── KPI card (vertical: label on top, big number, optional hint) ──
+interface KpiCardProps {
+  label: string
+  value: ComponentChildren
+  hint?: string
+  tone?: string
+  class?: string
+}
+
+export function KpiCard({ label, value, hint, tone, class: cx }: KpiCardProps) {
+  return html`
+    <div class="flex flex-col gap-1 p-3 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] ${cx ?? ''}">
+      <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-[0.06em] font-medium">${label}</span>
+      <span class="text-[20px] font-semibold tabular-nums leading-none ${tone ?? 'text-[var(--text-strong)]'}">${value}</span>
+      ${hint ? html`<span class="text-[11px] text-[var(--text-dim)] mt-0.5">${hint}</span>` : null}
+    </div>
+  `
+}
+
+// ── Stat grid (2-col or 3-col layout) ──
+interface StatGridProps {
+  cols?: 2 | 3 | 4
+  class?: string
+  children: ComponentChildren
+}
+
+export function StatGrid({ cols = 2, class: cx, children }: StatGridProps) {
+  const colClass = cols === 2 ? 'grid-cols-2' : cols === 3 ? 'grid-cols-3' : 'grid-cols-4'
+  return html`
+    <div class="grid ${colClass} gap-x-4 gap-y-1 text-[11px] ${cx ?? ''}">${children}</div>
+  `
+}
+
+// ── Field dictionary (alternating-row table) ──
+interface FieldDictEntry {
+  key: string
+  value: ComponentChildren
+}
+
+interface FieldDictProps {
+  entries: FieldDictEntry[]
+  class?: string
+}
+
+export function FieldDict({ entries, class: cx }: FieldDictProps) {
+  return html`
+    <div class="flex flex-col ${cx ?? ''}">
+      ${entries.map((e, i) => html`
+        <div class="flex items-start justify-between gap-4 py-1.5 px-2 text-[11px] ${i % 2 === 0 ? 'bg-[var(--white-3)]' : ''} rounded">
+          <span class="text-[var(--text-muted)] shrink-0">${e.key}</span>
+          <span class="text-[var(--text-body)] text-right break-all">${e.value}</span>
+        </div>
+      `)}
+    </div>
+  `
+}

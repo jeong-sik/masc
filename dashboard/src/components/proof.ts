@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
-import { Card } from './common/card'
+import { Card, SurfaceCard } from './common/card'
+import { EmptyState, LoadingState } from './common/feedback-state'
 import { route } from '../router'
 import { proofError, proofLoading, proofSnapshot, refreshProofSnapshot } from '../proof-store'
 import type {
@@ -49,7 +50,7 @@ export function Proof() {
   const snapshot = proofSnapshot.value
 
   if (proofLoading.value && !snapshot) {
-    return html`<section class="flex flex-col gap-[18px]"><div class="loading-state loading-pulse">근거 화면 불러오는 중…</div></section>`
+    return html`<section class="flex flex-col gap-[18px]"><${LoadingState}>근거 화면 불러오는 중…<//></section>`
   }
 
   if (proofError.value && !snapshot) {
@@ -130,67 +131,67 @@ export function Proof() {
 
       <!-- Primary stat cards -->
       <div class="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3">
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${verdictTone(verdict)}">
+        <${SurfaceCard} class="flex flex-col gap-2" tone="${verdictTone(verdict)}">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">판정</span>
           <strong class="text-lg font-bold text-[var(--text-strong)] tabular-nums">${verdictLabel(verdict)}</strong>
           <small class="text-[11px] text-[var(--text-muted)] leading-snug">${summary?.detail ?? '협업 증거를 verdict로 요약합니다.'}</small>
-        </div>
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <//>
+        <${SurfaceCard} class="flex flex-col gap-2">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">실제 흔적</span>
           <strong class="text-lg font-bold text-[var(--text-strong)] tabular-nums">${actorCount}</strong>
           <small class="text-[11px] text-[var(--text-muted)] leading-snug">이벤트를 남긴 actor 수${plannedActorCount > 0 ? ` (계획 ${plannedActorCount})` : ''}</small>
-        </div>
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${evidenceCount > 0 ? 'ok' : 'warn'}">
+        <//>
+        <${SurfaceCard} class="flex flex-col gap-2" tone="${evidenceCount > 0 ? 'ok' : 'warn'}">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">근거</span>
           <strong class="text-lg font-bold text-[var(--text-strong)] tabular-nums">${evidenceCount}</strong>
           <small class="text-[11px] text-[var(--text-muted)] leading-snug">도구 ${(toolEvidence?.length ?? 0)} / 산출물 ${presentArtifacts}/${artifacts.length} / CP ${traceCount}</small>
-        </div>
+        <//>
       </div>
 
       <!-- Expanded detail metrics -->
       <details class="mb-1">
         <summary class="cursor-pointer text-[13px] text-[var(--text-muted)] py-1.5 hover:text-[var(--text-body)] transition-colors">상세 지표 (${8}개)</summary>
         <div class="grid grid-cols-[repeat(auto-fit,minmax(155px,1fr))] gap-3 mt-3">
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${verdictTone(liveVerdict)}">
+          <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5" tone="${verdictTone(liveVerdict)}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">Live 판정</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${liveVerdict}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">${verdictBasisLabel(verdictBasis)} 기준</small>
-          </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${verdictTone(historicalVerdict ?? 'insufficient')}">
+          <//>
+          <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5" tone="${verdictTone(historicalVerdict ?? 'insufficient')}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">Historical</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${historicalVerdict ?? 'none'}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">persisted proof 문서 기준</small>
-          </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${unansweredActorCount > 0 ? 'warn' : 'ok'}">
+          <//>
+          <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5" tone="${unansweredActorCount > 0 ? 'warn' : 'ok'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">무응답</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${unansweredActorCount}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">${unansweredActorCount > 0 ? '호출됐지만 응답 없음' : '없음'}</small>
-          </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${interactionCount > 0 ? 'ok' : 'warn'}">
+          <//>
+          <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5" tone="${interactionCount > 0 ? 'ok' : 'warn'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">직접 상호작용</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${interactionCount}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">참여자 간 직접 연결</small>
-          </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${traceCount > 0 ? 'ok' : 'warn'}">
+          <//>
+          <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5" tone="${traceCount > 0 ? 'ok' : 'warn'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">CP 트레이스</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${traceCount}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">관리형 backing</small>
-          </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${validatedWorkerRunCount > 0 ? 'ok' : 'warn'}">
+          <//>
+          <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5" tone="${validatedWorkerRunCount > 0 ? 'ok' : 'warn'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">OAS 워커 근거</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${validatedWorkerRunCount}/${Math.max(rawTraceRunCount, workerRunEvidence.length)}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">검증됨 / 수집됨</small>
-          </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${(missingArtifacts === 0 && artifacts.length > 0) ? 'ok' : 'warn'}">
+          <//>
+          <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5" tone="${(missingArtifacts === 0 && artifacts.length > 0) ? 'ok' : 'warn'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">산출물</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${presentArtifacts}/${artifacts.length}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">${missingArtifacts > 0 ? `${missingArtifacts}개 누락` : '전부 존재함'}</small>
-          </div>
-          <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] ${plannedActorCount > actorCount ? 'warn' : 'ok'}">
+          <//>
+          <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5" tone="${plannedActorCount > actorCount ? 'warn' : 'ok'}">
             <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">계획된 참여자</span>
             <strong class="text-[15px] font-bold text-[var(--text-strong)] tabular-nums">${plannedActorCount}</strong>
             <small class="text-[11px] text-[var(--text-muted)]">${mentionedActorCount > 0 ? `${mentionedActorCount}명 호출됨` : '호출 기록 없음'}</small>
-          </div>
+          <//>
         </div>
       </details>
 
@@ -232,7 +233,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${dedupedTimeline.length > 0
               ? dedupedTimeline.slice(0, 18).map(item => html`<${TimelineRow} key=${item.id} item=${item} />`)
-              : html`<div class="empty-state">타임라인 근거가 없습니다. 에이전트 협업이 진행되면 세션과 지휘 이벤트가 여기에 나타납니다.</div>`}
+              : html`<${EmptyState}>타임라인 근거가 없습니다. 에이전트 협업이 진행되면 세션과 지휘 이벤트가 여기에 나타납니다.<//>`}
           </div>
         <//>
 
@@ -244,7 +245,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${contributions.length > 0
               ? contributions.map(item => html`<${ActorContributionRow} key=${item.actor} item=${item} />`)
-              : html`<div class="empty-state">참여 흔적이 없습니다. 에이전트가 작업에 참여하면 턴, 도구 호출, 산출물이 기록됩니다.</div>`}
+              : html`<${EmptyState}>참여 흔적이 없습니다. 에이전트가 작업에 참여하면 턴, 도구 호출, 산출물이 기록됩니다.<//>`}
           </div>
         <//>
       </div>
@@ -258,7 +259,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${toolEvidence.length > 0
               ? toolEvidence.map((item, idx) => html`<${ToolEvidenceRow} key=${`${item.actor ?? 'system'}-${idx}`} item=${item} />`)
-              : html`<div class="empty-state">도구 근거가 없습니다. 에이전트가 MCP 도구를 사용하면 호출 내역이 여기에 기록됩니다.</div>`}
+              : html`<${EmptyState}>도구 근거가 없습니다. 에이전트가 MCP 도구를 사용하면 호출 내역이 여기에 기록됩니다.<//>`}
           </div>
         <//>
 
@@ -270,7 +271,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${workerRunEvidence.length > 0
               ? workerRunEvidence.map(item => html`<${WorkerRunEvidenceRow} key=${item.worker_run_id} item=${item} />`)
-              : html`<div class="empty-state">표시할 OAS worker evidence가 없습니다. raw trace 또는 summary-only evidence가 생기면 여기에 나타납니다.</div>`}
+              : html`<${EmptyState}>표시할 OAS worker evidence가 없습니다. raw trace 또는 summary-only evidence가 생기면 여기에 나타납니다.<//>`}
           </div>
         <//>
       </div>
@@ -298,7 +299,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${artifacts.length > 0
               ? artifacts.map(item => html`<${ArtifactRow} key=${item.path} item=${item} />`)
-              : html`<div class="empty-state">산출물이 없습니다. proof/report/session 파일이 생성되면 존재 여부가 표시됩니다.</div>`}
+              : html`<${EmptyState}>산출물이 없습니다. proof/report/session 파일이 생성되면 존재 여부가 표시됩니다.<//>`}
           </div>
         <//>
       </div>

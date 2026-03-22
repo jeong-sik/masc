@@ -2,6 +2,7 @@
 // Absorbs: agent-roster + execution + keeper-roster into one view with chip toggle.
 
 import { html } from 'htm/preact'
+import { CountBadge } from './common/badge'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { navigate, route } from '../router'
@@ -85,7 +86,7 @@ export function AgentsUnified() {
             }}
           >
             ${c.label}
-            ${chipCount(c.id) != null ? html`<span class="text-[10px] px-1 py-px rounded bg-[var(--white-8)] tabular-nums">${chipCount(c.id)}</span>` : null}
+            ${chipCount(c.id) != null ? html`<${CountBadge}>${chipCount(c.id)}<//>` : null}
           </button>
         `)}
       </div>

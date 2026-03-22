@@ -2,6 +2,9 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback } from 'preact/hooks'
+import { SurfaceCard } from '../common/card'
+import { EmptyState } from '../common/feedback-state'
+import { SectionHeader } from '../common/section-header'
 import { VirtualList } from '../common/virtual-list'
 import { route } from '../../router'
 import type { DashboardToolInventoryItem } from '../../api'
@@ -82,30 +85,30 @@ export function FullInventoryView({
   return html`
     <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[rgba(11,18,32,0.95)] backdrop-blur-[8px] py-3 border-b border-[var(--card-border)]">
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4">
-        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+        <${SurfaceCard} variant="light" class="flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${totalCount}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">전체 도구</span>
-        </div>
-        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <${SectionHeader} size="sm">전체 도구<//>
+        <//>
+        <${SurfaceCard} variant="light" class="flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${enabledCount}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">활성화됨</span>
-        </div>
-        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <${SectionHeader} size="sm">활성화됨<//>
+        <//>
+        <${SurfaceCard} variant="light" class="flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${hiddenCount}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">숨김</span>
-        </div>
-        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <${SectionHeader} size="sm">숨김<//>
+        <//>
+        <${SurfaceCard} variant="light" class="flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${deprecatedCount}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">지원 중단</span>
-        </div>
-        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <${SectionHeader} size="sm">지원 중단<//>
+        <//>
+        <${SurfaceCard} variant="light" class="flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${directCallCount}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">직접 호출</span>
-        </div>
-        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <${SectionHeader} size="sm">직접 호출<//>
+        <//>
+        <${SurfaceCard} variant="light" class="flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${filtered.length}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">필터 결과</span>
-        </div>
+          <${SectionHeader} size="sm">필터 결과<//>
+        <//>
       </div>
 
       <div class="flex flex-wrap gap-2 mb-3.5">
@@ -201,7 +204,7 @@ export function FullInventoryView({
             getKey=${(item: DashboardToolInventoryItem) => item.name}
             className="flex flex-col gap-3"
           />`
-        : html`<div class="empty-state">조건에 맞는 도구가 없습니다.</div>`}
+        : html`<${EmptyState}>조건에 맞는 도구가 없습니다.<//>`}
     </div>
 
     <button

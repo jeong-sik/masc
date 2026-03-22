@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState, LoadingState, ErrorState } from '../common/feedback-state'
 import type { CommandPlaneHelpPath } from '../../types'
 import {
   commandPlaneDetailError,
@@ -250,9 +251,9 @@ function GuidedPanel() {
           <div class="card rounded-xl-title">운영 경로</div>
         </div>
         ${commandPlaneHelpLoading.value
-          ? html`<div class="empty-state">CPv2 runbook 불러오는 중…</div>`
+          ? html`<${LoadingState}>CPv2 runbook 불러오는 중…<//>`
           : commandPlaneHelpError.value
-            ? html`<div class="empty-state error">${commandPlaneHelpError.value}</div>`
+            ? html`<${ErrorState}>${commandPlaneHelpError.value}<//>`
             : html`
                 <div class="grid gap-3">
                   ${renderedPaths.map(path => html`
@@ -295,10 +296,10 @@ export function SummarySurface() {
 
 export function DetailLoadingState() {
   if (commandPlaneDetailLoading.value) {
-    return html`<div class="empty-state">command-plane detail 불러오는 중…</div>`
+    return html`<${LoadingState}>command-plane detail 불러오는 중…<//>`
   }
   if (commandPlaneDetailError.value) {
-    return html`<div class="empty-state error">${commandPlaneDetailError.value}</div>`
+    return html`<${ErrorState}>${commandPlaneDetailError.value}<//>`
   }
-  return html`<div class="empty-state">surface를 선택하면 command-plane detail을 로드합니다.</div>`
+  return html`<${EmptyState}>surface를 선택하면 command-plane detail을 로드합니다.<//>`
 }

@@ -2,6 +2,7 @@
 // Top 3 anomalies (blockers + attention). Vanishes when clean.
 
 import { html } from 'htm/preact'
+import { CountBadge } from '../common/badge'
 import { relativeTime, trimText } from '../mission-utils'
 import type {
   DashboardMissionResponse,
@@ -100,7 +101,7 @@ export function AttentionSpotlight({ snap }: AttentionSpotlightProps) {
               </div>
               <div class="flex gap-2 flex-wrap items-center pl-4">
                 ${item.relatedNames.map(name => html`
-                  <span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-6)] text-[var(--text-muted)] font-medium" key=${name}>${name}</span>
+                  <${CountBadge} key=${name}>${name}<//>
                 `)}
                 ${item.lastSeen ? html`
                   <span class="text-[10px] text-[var(--text-muted)]">${relativeTime(item.lastSeen)}</span>

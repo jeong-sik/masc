@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
+import { EmptyState, LoadingState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
 import { governanceToneClass } from '../lib/tone'
 import type { GovernanceTimelineEvent } from '../types'
@@ -32,7 +33,7 @@ export function ActivityRail() {
     <${Card} title="활동 타임라인" class="section mb-3.5">
       <div class="flex flex-col gap-2">
         ${grouped.size === 0
-          ? html`<div class="empty-state">거버넌스 활동이 아직 없습니다.</div>`
+          ? html`<${EmptyState}>거버넌스 활동이 아직 없습니다.<//>`
           : Array.from(grouped.entries()).map(([, group]) => html`
               <div class="governance-case-group rounded-lg">
                 <div class="flex items-center justify-between mb-2 gap-2">
@@ -104,7 +105,7 @@ export function RuntimeParamsPanel() {
   return html`
     <${Card} title="Runtime Parameters" class="section mb-3.5">
       ${runtimeLoading.value
-        ? html`<div class="loading-state loading-pulse">파라미터 로딩 중...</div>`
+        ? html`<${LoadingState}>파라미터 로딩 중...<//>`
         : html`
             <div class="governance-params-surfaces">
               ${surfaces.map((surface: RuntimeParamsSurface) => {

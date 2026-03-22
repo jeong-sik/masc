@@ -8,6 +8,7 @@ import { fetchKeeperConfig, patchKeeperConfig } from '../api/dashboard'
 import type { KeeperConfigUpdatePayload } from '../api/dashboard'
 import type { KeeperConfig } from '../types'
 import { formatTokens } from './keeper-detail-panels'
+import { SectionHeader } from './common/section-header'
 
 // ── State ────────────────────────────────────────────────
 
@@ -104,11 +105,9 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
   `
 }
 
-function SectionHeader({ title }: { title: string }) {
+function ConfigSectionHeader({ title }: { title: string }) {
   return html`
-    <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--purple)] mt-4 mb-2 pb-1 border-b border-[rgba(167,139,250,0.15)]">
-      ${title}
-    </div>
+    <${SectionHeader} class="mt-4 mb-2 pb-1 border-b border-[rgba(167,139,250,0.15)] [&_h4]:text-[var(--purple)] [&_h4]:font-bold">${title}<//>
   `
 }
 
@@ -151,7 +150,7 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
   const val = d[field] as string
   return html`
     <div class="mt-2">
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">${label}</div>
+      <${SectionHeader} class="mb-1">${label}<//>
       <textarea
         style=${fieldStyle}
         rows=${rows}
@@ -168,7 +167,7 @@ function EditSelect({ field, label, options }: { field: keyof EditDraft; label: 
   const val = d[field] as string
   return html`
     <div class="mt-2">
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">${label}</div>
+      <${SectionHeader} class="mb-1">${label}<//>
       <select
         style=${fieldStyle}
         value=${val}
@@ -305,7 +304,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
   // --- Prompt section (editable) ---
   const promptSection = isEditing ? html`
-    <${SectionHeader} title="Prompt (editing)" />
+    <${ConfigSectionHeader} title="Prompt (editing)" />
     <${EditTextarea} field="goal" label="Goal" rows=${3} />
     <${EditTextarea} field="short_goal" label="Short-term goal" rows=${2} />
     <${EditTextarea} field="mid_goal" label="Mid-term goal" rows=${2} />
@@ -316,40 +315,40 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${EditTextarea} field="desires" label="Desires" rows=${2} />
     <${EditTextarea} field="instructions" label="Instructions" rows=${4} />
   ` : html`
-    <${SectionHeader} title="Prompt" />
-    <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Goal</div>
+    <${ConfigSectionHeader} title="Prompt" />
+    <${SectionHeader} class="mb-0.5">Goal<//>
     <${LongText} text=${c.prompt.goal} />
     ${c.prompt.short_goal ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Short-term goal</div>
+      <${SectionHeader} class="mt-2 mb-0.5">Short-term goal<//>
       <${LongText} text=${c.prompt.short_goal} />
     ` : null}
     ${c.prompt.mid_goal ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Mid-term goal</div>
+      <${SectionHeader} class="mt-2 mb-0.5">Mid-term goal<//>
       <${LongText} text=${c.prompt.mid_goal} />
     ` : null}
     ${c.prompt.long_goal ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Long-term goal</div>
+      <${SectionHeader} class="mt-2 mb-0.5">Long-term goal<//>
       <${LongText} text=${c.prompt.long_goal} />
     ` : null}
     ${c.prompt.soul_profile ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Soul profile</div>
+      <${SectionHeader} class="mt-2 mb-0.5">Soul profile<//>
       <${LongText} text=${c.prompt.soul_profile} />
     ` : null}
     ${c.prompt.instructions ? html`
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">Instructions</div>
+      <${SectionHeader} class="mt-2 mb-0.5">Instructions<//>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
   `
 
   // --- Drift section (editable) ---
   const driftSection = isEditing ? html`
-    <${SectionHeader} title="Drift (editing)" />
+    <${ConfigSectionHeader} title="Drift (editing)" />
     <${EditCheckbox} field="drift_enabled" label="Enabled" />
     <${EditNumber} field="drift_min_turn_gap" label="Min turn gap" min=${1} max=${50} />
     <${ConfigRow} label="Count total" value=${String(c.drift.count_total)} />
     ${c.drift.last_reason ? html`<${ConfigRow} label="Last reason" value=${c.drift.last_reason} />` : null}
   ` : html`
-    <${SectionHeader} title="Drift" />
+    <${ConfigSectionHeader} title="Drift" />
     <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
       <span class="text-xs text-[var(--text-muted)]">Enabled</span>
       <${BoolBadge} value=${c.drift.enabled} />
@@ -365,7 +364,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${toolbar}
 
       ${'' /* --- Execution (read-only) --- */}
-      <${SectionHeader} title="Execution" />
+      <${ConfigSectionHeader} title="Execution" />
       <${ConfigRow} label="Active model" value=${c.execution.active_model || '--'} />
       <${ConfigRow} label="Policy mode" value=${c.execution.policy_mode || '--'} />
       <${ConfigRow} label="Shell mode" value=${c.execution.policy_shell_mode || '--'} />
@@ -374,18 +373,18 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${BoolBadge} value=${c.execution.verify} />
       </div>
       <div class="mt-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Models</div>
+        <${SectionHeader} class="mb-1">Models<//>
         <${ModelList} models=${c.execution.models} />
       </div>
       ${c.execution.allowed_models.length > 0 ? html`
         <div class="mt-1.5">
-          <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Allowed models</div>
+          <${SectionHeader} class="mb-1">Allowed models<//>
           <${ModelList} models=${c.execution.allowed_models} />
         </div>
       ` : null}
 
       ${'' /* --- Compaction (read-only) --- */}
-      <${SectionHeader} title="Compaction" />
+      <${ConfigSectionHeader} title="Compaction" />
       <${ConfigRow} label="Profile" value=${c.compaction.profile || '--'} />
       <${ConfigRow} label="Ratio gate" value=${(c.compaction.ratio_gate * 100).toFixed(0) + '%'} />
       <${ConfigRow} label="Message gate" value=${String(c.compaction.message_gate)} />
@@ -393,7 +392,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="Cooldown" value=${c.compaction.cooldown_sec + 's'} />
 
       ${'' /* --- Proactive (read-only) --- */}
-      <${SectionHeader} title="Proactive" />
+      <${ConfigSectionHeader} title="Proactive" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">Enabled</span>
         <${BoolBadge} value=${c.proactive.enabled} />
@@ -405,7 +404,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${driftSection}
 
       ${'' /* --- Initiative (read-only) --- */}
-      <${SectionHeader} title="Initiative" />
+      <${ConfigSectionHeader} title="Initiative" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">Enabled</span>
         <${BoolBadge} value=${c.initiative.enabled} />
@@ -416,7 +415,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="Context mode" value=${c.initiative.context_mode || '--'} />
 
       ${'' /* --- Handoff (read-only) --- */}
-      <${SectionHeader} title="Handoff" />
+      <${ConfigSectionHeader} title="Handoff" />
       <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">Auto</span>
         <${BoolBadge} value=${c.handoff.auto} />
@@ -425,7 +424,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="Cooldown" value=${c.handoff.cooldown_sec + 's'} />
 
       ${'' /* --- Metrics (read-only) --- */}
-      <${SectionHeader} title="Metrics" />
+      <${ConfigSectionHeader} title="Metrics" />
       <${ConfigRow} label="Generation" value=${String(c.metrics.generation)} />
       <${ConfigRow} label="Total turns" value=${String(c.metrics.total_turns)} />
       <${ConfigRow} label="Total tokens" value=${formatTokens(c.metrics.total_tokens)} />

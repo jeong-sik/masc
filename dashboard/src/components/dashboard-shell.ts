@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { route, navigate } from '../router'
+import { LoadingState } from './common/feedback-state'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
 import { missionSnapshot } from '../mission-store'
@@ -16,7 +17,8 @@ import {
   sectionItemsForTab,
   surfaceForTab,
 } from '../config/navigation'
-import { InterveneRailCard, SnapshotCard } from './resident-runtime-rail'
+import { NavItem, SubNavItem, NavSectionLabel } from './common/nav-item'
+import { SnapshotCard } from './resident-runtime-rail'
 
 const buildIdentityOpen = signal(false)
 
@@ -27,7 +29,7 @@ const LazyLabSurface = lazy(async () => ({ default: (await import('./lab-unified
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
 function lazyTabFallback(label: string) {
-  return html`<div class="loading-state loading-pulse">${label} 불러오는 중...</div>`
+  return html`<${LoadingState}>${label} 불러오는 중...<//>`
 }
 
 function formatDisconnectDuration(): string {
@@ -131,22 +133,17 @@ export function SideRail() {
     <nav class="flex flex-col h-full">
       <!-- Navigation -->
       <div class="flex-1 overflow-y-auto py-4 px-3">
-        <div class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] px-2 mb-2">탐색</div>
+        <${NavSectionLabel}>탐색<//>
 
         <div class="flex flex-col gap-0.5">
-          ${DASHBOARD_SURFACES.map(surface => {
-            const isActive = surface.id === currentSurface
-            return html`
-              <button
-                class="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left cursor-pointer border-l-2 border-t-0 border-r-0 border-b-0 border-solid transition-all duration-150 ${isActive ? 'border-l-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]' : 'border-l-transparent bg-transparent text-[var(--text-body)] hover:bg-[var(--white-6)] hover:border-l-[var(--white-20)]'}"
-                key=${surface.id}
-                onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
-              >
-                <span class="text-sm w-5 text-center shrink-0">${surface.icon}</span>
-                <span class="text-[13px] font-medium truncate">${surface.label}</span>
-              </button>
-            `
-          })}
+          ${DASHBOARD_SURFACES.map(surface => html`
+            <${NavItem}
+              key=${surface.id}
+              active=${surface.id === currentSurface}
+              icon=${surface.icon}
+              onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
+            >${surface.label}<//>
+          `)}
         </div>
 
         <!-- Sub-sections -->
@@ -154,16 +151,14 @@ export function SideRail() {
           if (sectionItems.length === 0) return null
           return html`
             <div class="mt-5 pt-4 mx-4 border-t border-[var(--border-slate-12)]">
-              <div class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] px-2 mb-2">${currentView?.label ?? currentSurface}</div>
+              <${NavSectionLabel}>${currentView?.label ?? currentSurface}<//>
               <div class="flex flex-col gap-0.5">
                 ${sectionItems.map(item => html`
-                  <button
-                    class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-left cursor-pointer border-l-2 border-t-0 border-r-0 border-b-0 border-solid text-[13px] transition-all duration-150 ${currentSection?.id === item.id ? 'border-l-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-medium' : 'border-l-transparent bg-transparent text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]'}"
+                  <${SubNavItem}
                     key=${item.id}
+                    active=${currentSection?.id === item.id}
                     onClick=${() => navigate(currentSurface, item.params)}
-                  >
-                    ${item.label}
-                  </button>
+                  >${item.label}<//>
                 `)}
               </div>
             </div>
@@ -222,7 +217,7 @@ export function TabContent() {
 
 export function DashboardMain() {
   if (dashboardLoading.value && !connected.value && !roomTruthInitializing.value) {
-    return html`<div class="loading-state loading-pulse">대시보드 불러오는 중...</div>`
+    return html`<${LoadingState}>대시보드 불러오는 중...<//>`
   }
 
   const routeLabel = [

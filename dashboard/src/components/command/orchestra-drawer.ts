@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/feedback-state'
 import type {
   CommandPlaneOrchestraEdge,
   CommandPlaneOrchestraNode,
@@ -363,7 +364,7 @@ export function OrchestraNodeLayer({
 
 export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOrchestraResponse }) {
   const selected = selectedTarget(orchestra)
-  if (!selected) return html`<aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card rounded-xl"><div class="empty-state">선택 가능한 대상이 아직 없습니다.</div></aside>`
+  if (!selected) return html`<aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card rounded-xl"><${EmptyState}>선택 가능한 대상이 아직 없습니다.<//></aside>`
   if (selected.type === 'signal') {
     const signalNode = selected.value
     return html`

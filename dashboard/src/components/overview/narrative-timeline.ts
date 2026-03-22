@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import type { ReadonlySignal } from '@preact/signals'
+import { SectionHeader } from '../common/section-header'
 import type { JournalEntry } from '../../types'
 
 interface NarrativeTimelineProps {
@@ -100,7 +101,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
     <div class="flex flex-col gap-3">
       ${groups.map(group => html`
         <div class="flex flex-col gap-0" key=${group.label}>
-          <div class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider pb-1.5 mb-1 border-b border-[var(--white-6)]">${group.label}</div>
+          <${SectionHeader} class="pb-1.5 mb-1 border-b border-[var(--white-6)]">${group.label}<//>
           <div class="flex flex-col">
             ${group.events.map(event => html`
               <div class="flex items-start gap-3 py-1.5 group" key=${event.timestamp}>

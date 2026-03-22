@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState } from './common/feedback-state'
 import { openAgentDetail } from './agent-detail'
 import { workflowActionLabel } from '../workflow-context'
 import type {
@@ -86,7 +87,7 @@ export function AttentionCard({
                 `)}
               </div>
             `
-          : html`<div class="empty-state">직접 연결된 세션이 아직 없습니다.</div>`}
+          : html`<${EmptyState}>직접 연결된 세션이 아직 없습니다.<//>`}
 
         ${item.related_agent_names.length > 0
           ? html`

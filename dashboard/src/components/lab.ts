@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { route } from '../router'
 import { agents } from '../store'
 import { Card } from './common/card'
+import { LoadingState } from './common/feedback-state'
 import { Trpg } from './trpg'
 import { AgentAvatar } from './overview/agent-avatar'
 
@@ -11,7 +12,7 @@ function AvatarGallery() {
   const displayAgents = agentList.slice(0, 12)
 
   if (displayAgents.length === 0) {
-    return html`<div class="empty-state">에이전트 데이터를 불러오는 중...</div>`
+    return html`<${LoadingState}>에이전트 데이터를 불러오는 중...<//>`
   }
 
   return html`

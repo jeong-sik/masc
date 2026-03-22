@@ -7,6 +7,7 @@ import { topActiveAgents } from '../../observatory-store'
 import { journal } from '../../sse'
 import { navigate } from '../../router'
 import { formatDuration, statusLabel } from '../mission-utils'
+import { CountBadge } from '../common/badge'
 import { SituationBanner } from './situation-banner'
 import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
@@ -72,7 +73,7 @@ function HomeSectionHeader({
     <div class="flex items-center justify-between mb-3">
       <div class="flex items-center gap-2">
         <span class="text-xs font-semibold text-[var(--text-strong)] uppercase tracking-wider">${label}</span>
-        ${count != null ? html`<span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-8)] text-[var(--text-muted)] font-medium tabular-nums">${count}</span>` : null}
+        ${count != null ? html`<${CountBadge}>${count}<//>` : null}
       </div>
       ${linkLabel && onLink
         ? html`<button class="text-[10px] text-[var(--accent)] cursor-pointer bg-transparent border-0 p-0 hover:underline" onClick=${onLink}>${linkLabel}</button>`
@@ -126,7 +127,7 @@ function SessionLane({ title, icon, sessions, emptyCopy }: SessionLaneProps) {
       <div class="flex items-center gap-2">
         <span class="text-xs text-[var(--text-muted)]">${icon}</span>
         <span class="text-xs font-medium text-[var(--text-strong)]">${title}</span>
-        <span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-6)] text-[var(--text-muted)] tabular-nums">${sessions.length}</span>
+        <${CountBadge}>${sessions.length}<//>
       </div>
       ${sessions.length > 0
         ? html`<div class="flex flex-col gap-2">${sessions.map(renderSessionCard)}</div>`

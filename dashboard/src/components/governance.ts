@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
-import { Card } from './common/card'
+import { Card, SurfaceCard } from './common/card'
+import { EmptyState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
 import { governanceToneClass } from '../lib/tone'
 import type { GovernanceFilter } from './governance-utils'
@@ -55,26 +56,26 @@ function GovernanceSummaryStrip() {
       ${data?.generated_at ? html`<span>${data.generated_at}</span>` : null}
     </div>
     <div class="grid grid-cols-[repeat(auto-fit,minmax(155px,1fr))] gap-3 mb-4">
-      <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+      <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">열린 케이스</span>
         <strong class="text-lg font-semibold text-[var(--text-strong)] tabular-nums">${summary?.cases_open ?? itemCount}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+      <//>
+      <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">판정 대기</span>
         <strong class="text-lg font-semibold text-[var(--text-strong)] tabular-nums">${summary?.pending_ruling ?? 0}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+      <//>
+      <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">자동집행 준비</span>
         <strong class="text-lg font-semibold text-[var(--text-strong)] tabular-nums">${summary?.ready_auto_execute ?? 0}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+      <//>
+      <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">관리자 승인 대기</span>
         <strong class="text-lg font-semibold text-[var(--text-strong)] tabular-nums">${summary?.needs_human_gate ?? 0}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+      <//>
+      <${SurfaceCard} variant="compact" class="flex flex-col gap-1.5">
         <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">집행 완료</span>
         <strong class="text-lg font-semibold text-[var(--text-strong)] tabular-nums">${summary?.executed ?? 0}</strong>
-      </div>
+      <//>
     </div>
   `
 }
@@ -153,7 +154,7 @@ function DecisionInbox() {
     <${Card} title="사건 수신함" class="section mb-4">
       <div class="flex flex-col gap-2 governance-inbox">
         ${items.length === 0
-          ? html`<div class="empty-state">이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.</div>`
+          ? html`<${EmptyState}>이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.<//>`
           : items.map(item => {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`

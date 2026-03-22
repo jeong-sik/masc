@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ErrorState } from '../common/feedback-state'
 import { useEffect } from 'preact/hooks'
 import {
   commandPlaneActionError,
@@ -18,6 +19,7 @@ import {
 import { refreshRoomTruth } from '../../room-truth-store'
 import { refreshOperatorSnapshot } from '../../operator-store'
 import { navigate, route } from '../../router'
+import { SurfaceCard } from '../common/card'
 import { RoomTruthStrip } from '../common/room-truth-strip'
 import {
   commandSurfaceForContext,
@@ -222,7 +224,7 @@ export function Command() {
   return html`
     <section class="flex flex-col gap-[18px] ${wallboardMode ? 'p-4 rounded-[18px] cmd-plane-view wallboard' : ''}">
       ${wallboardMode ? null : html`
-        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex justify-between gap-4 items-start max-[880px]:flex-col">
+        <${SurfaceCard} class="flex justify-between gap-4 items-start max-[880px]:flex-col">
           <div>
             <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">지휘면</h2>
             <p class="text-[13px] text-[var(--text-muted)] leading-relaxed max-w-[62ch]">기본 진입은 라이브 워룸입니다. 실제 run, worker, message, trace를 먼저 보고 필요할 때만 detail surface로 내려갑니다.</p>
@@ -262,14 +264,14 @@ export function Command() {
               Wallboard
             </button>
           </div>
-        </div>
+        <//>
       `}
 
       ${commandPlaneError.value
-        ? html`<div class="empty-state error">${commandPlaneError.value}</div>`
+        ? html`<${ErrorState}>${commandPlaneError.value}<//>`
         : null}
       ${commandPlaneActionError.value
-        ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
+        ? html`<${ErrorState}>${commandPlaneActionError.value}<//>`
         : null}
       ${wallboardMode ? null : html`<${RoomTruthStrip} />`}
       ${wallboardMode ? null : html`<${CommandWorkflowBanner} />`}

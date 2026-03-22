@@ -5,6 +5,10 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { TimeAgo } from './common/time-ago'
+import { SurfaceCard } from './common/card'
+import { KpiCard } from './common/stat-row'
+import { DataRow } from './common/data-row'
+import { SectionHeader } from './common/section-header'
 import type { Keeper, KeeperMetricPoint, TrpgCharacterStats, AutonomyLevel } from '../types'
 
 // ── Autonomy helpers ─────────────────────────────────────
@@ -45,21 +49,12 @@ export function AutonomyMeter({ keeper }: { keeper: Keeper }) {
           `)}
         </div>
       </div>
-      <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">Autonomous actions</span>
-        <span class="text-xs font-medium text-[var(--text-strong)]">${keeper.autonomous_action_count ?? 0}</span>
-      </div>
+      <${DataRow} label="Autonomous actions" alt>${keeper.autonomous_action_count ?? 0}<//>
       ${keeper.last_autonomous_action_at
-        ? html`<div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-            <span class="text-xs text-[var(--text-muted)]">Last autonomous action</span>
-            <span class="text-xs font-medium text-[var(--text-strong)]"><${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /></span>
-          </div>`
+        ? html`<${DataRow} label="Last autonomous action" alt><${TimeAgo} timestamp=${keeper.last_autonomous_action_at} /><//>`
         : null}
       ${keeper.active_goal_ids && keeper.active_goal_ids.length > 0
-        ? html`<div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-            <span class="text-xs text-[var(--text-muted)]">Active goals</span>
-            <span class="text-xs font-medium text-[var(--text-strong)]">${keeper.active_goal_ids.length}</span>
-          </div>`
+        ? html`<${DataRow} label="Active goals" alt>${keeper.active_goal_ids.length}<//>`
         : null}
     </div>
   `
@@ -75,18 +70,6 @@ export function formatTokens(n: number | undefined): string {
 }
 
 
-// ── KPI Card ─────────────────────────────────────────────
-
-function KpiCard({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
-  return html`
-    <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1">
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${label}</div>
-      <div class="text-2xl font-bold text-[var(--text-strong)] tabular-nums leading-tight">${value}</div>
-      ${hint ? html`<div class="text-[11px] text-[var(--text-muted)] leading-snug">${hint}</div>` : null}
-    </div>
-  `
-}
-
 // ── KPI Grid ─────────────────────────────────────────────
 
 export function KpiGrid({ keeper }: { keeper: Keeper }) {
@@ -100,7 +83,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const contextHint = keeper.context_ratio != null && keeper.context_ratio > 0.8 ? 'Approaching limit' : undefined
 
   return html`
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
       <${KpiCard}
         label="Generation"
         value=${keeper.generation ?? '-'}
@@ -148,12 +131,12 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
     const pct = ((keeper.context?.context_ratio ?? 0) * 100)
     const color = pct > 85 ? '#ef4444' : pct > 70 ? '#f59e0b' : '#22c55e'
     return html`
-      <div class="flex items-center gap-3 mb-5 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+      <${SurfaceCard} variant="light" class="flex items-center gap-3 !p-3">
         <div class="flex-1 h-2 bg-[var(--white-6)] rounded-full overflow-hidden">
           <div class="h-full rounded-full transition-all duration-300" style="width:${pct.toFixed(1)}%;background:${color}"></div>
         </div>
         <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${pct.toFixed(1)}%</span>
-      </div>`
+      <//>`
   }
 
   const W = 200, H = 60, pad = 2
@@ -168,7 +151,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
   const lineColor = lastRatio > 85 ? '#ef4444' : lastRatio > 70 ? '#f59e0b' : '#22c55e'
 
   return html`
-    <div class="flex items-center gap-3 mb-5 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+    <${SurfaceCard} variant="light" class="flex items-center gap-3 !p-3">
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded" style="background:#0b1220;">
         <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
@@ -182,7 +165,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
         `)}
       </svg>
       <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${lastRatio.toFixed(1)}%</span>
-    </div>`
+    <//>`
 }
 
 // ── Field Dictionary ─────────────────────────────────────
@@ -216,7 +199,7 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
   if (keeper.active_model) extras.push({ title: 'Active Model', value: keeper.active_model, mono: true })
   if (keeper.next_model_hint) extras.push({ title: 'Next Model Hint', value: keeper.next_model_hint, mono: true })
   if (keeper.skill_primary) extras.push({ title: 'Skill (Primary)', value: keeper.skill_primary })
-  if (keeper.skill_secondary) extras.push({ title: 'Skill (Secondary)', value: keeper.skill_secondary })
+  if (keeper.skill_secondary?.length) extras.push({ title: 'Skill (Secondary)', value: keeper.skill_secondary.join(', ') })
   if (keeper.skill_reason) extras.push({ title: 'Skill Reason', value: keeper.skill_reason })
   if (keeper.context_source) extras.push({ title: 'Context Source', value: keeper.context_source })
   if (keeper.context_tokens != null) extras.push({ title: 'Context Tokens', value: formatTokens(keeper.context_tokens) })
@@ -300,7 +283,7 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
           { label: 'CHA', value: stats.charisma },
         ].map(s => html`
           <div class="text-center py-2 px-1.5 bg-[var(--white-3)] rounded-lg border border-[var(--card-border)]">
-            <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">${s.label}</div>
+            <${SectionHeader}>${s.label}<//>
             <div class="text-lg font-bold text-[var(--text-strong)] mt-0.5">${s.value}</div>
           </div>
         `)}
@@ -348,7 +331,7 @@ export function TraitsList({ traits, label }: { traits: string[]; label: string 
 
   return html`
     <div class="mb-3">
-      <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold mb-2">${label}</div>
+      <${SectionHeader} class="mb-2">${label}<//>
       <div class="flex flex-wrap gap-1.5">
         ${traits.map(t => html`<span class="inline-flex items-center py-0.5 px-2.5 rounded-full text-[11px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${t}</span>`)}
       </div>

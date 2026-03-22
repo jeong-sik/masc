@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
+import { EmptyState, LoadingState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
 import { governanceToneClass } from '../lib/tone'
 import type {
@@ -65,9 +66,9 @@ export function DecisionDetail() {
      
     >
       ${detailLoading.value
-        ? html`<div class="loading-state loading-pulse">거버넌스 상세 불러오는 중...</div>`
+        ? html`<${LoadingState}>거버넌스 상세 불러오는 중...<//>`
         : !item || !detail
-          ? html`<div class="empty-state">왼쪽 수신함에서 사건을 선택하면 청원, 심의, 판정, 집행 기록이 여기에 표시됩니다.</div>`
+          ? html`<${EmptyState}>왼쪽 수신함에서 사건을 선택하면 청원, 심의, 판정, 집행 기록이 여기에 표시됩니다.<//>`
           : html`
               <div class="flex justify-between items-start gap-4 mb-3.5">
                 <div>
@@ -89,12 +90,12 @@ export function DecisionDetail() {
               </div>
               <div class="flex flex-col gap-2.5">
                 ${petitions.length === 0
-                  ? html`<div class="empty-state">기록된 청원이 없습니다.</div>`
+                  ? html`<${EmptyState}>기록된 청원이 없습니다.<//>`
                   : petitions.map(petition => html`<${PetitionEntry} key=${petition.id} petition=${petition} />`)}
               </div>
               <div class="flex flex-col gap-2.5">
                 ${briefs.length === 0
-                  ? html`<div class="empty-state">심의 의견이 아직 없습니다.</div>`
+                  ? html`<${EmptyState}>심의 의견이 아직 없습니다.<//>`
                   : briefs.map(brief => html`<${BriefEntry} key=${brief.id} brief=${brief} />`)}
               </div>
               <${ActivityRail} />

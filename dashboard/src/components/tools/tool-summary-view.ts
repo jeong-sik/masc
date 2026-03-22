@@ -2,6 +2,8 @@
 
 import { html } from 'htm/preact'
 import type { DashboardToolInventoryItem } from '../../api'
+import { SurfaceCard } from '../common/card'
+import { SectionHeader } from '../common/section-header'
 import { toolBadge } from './tool-state'
 
 export function ToolSummaryView({ inventory }: { inventory: DashboardToolInventoryItem[] }) {
@@ -21,18 +23,18 @@ export function ToolSummaryView({ inventory }: { inventory: DashboardToolInvento
   return html`
     <div class="py-2">
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4">
-        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+        <${SurfaceCard} variant="light" class="flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${totalCount}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">전체 도구</span>
-        </div>
-        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <${SectionHeader} size="sm">전체 도구<//>
+        <//>
+        <${SurfaceCard} variant="light" class="flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${enabledCount}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">활성화됨</span>
-        </div>
-        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <${SectionHeader} size="sm">활성화됨<//>
+        <//>
+        <${SurfaceCard} variant="light" class="flex flex-col gap-1.5">
           <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${deprecatedCount}</span>
-          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">폐기 예정</span>
-        </div>
+          <${SectionHeader} size="sm">폐기 예정<//>
+        <//>
       </div>
 
       ${essential.length > 0 ? html`

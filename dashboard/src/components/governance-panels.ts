@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
+import { EmptyState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
 import type { GovernanceExecutionOrder } from '../types'
 import {
@@ -43,7 +44,7 @@ export function GuardrailPane({
     <div class="flex flex-col gap-3.5">
       <${Card} title="판정 / 집행" class="section mb-3.5">
         ${!item || !detail
-          ? html`<div class="empty-state">사건을 고르면 판정과 집행 경로가 보입니다.</div>`
+          ? html`<${EmptyState}>사건을 고르면 판정과 집행 경로가 보입니다.<//>`
           : html`
               <div class="flex flex-col gap-2">
                 <h4>판정</h4>
@@ -82,7 +83,7 @@ export function GuardrailPane({
     <//>
       <${Card} title="심의 입력" class="section mb-3.5">
         ${!item
-          ? html`<div class="empty-state">사건을 선택한 뒤 의견을 추가하세요.</div>`
+          ? html`<${EmptyState}>사건을 선택한 뒤 의견을 추가하세요.<//>`
           : html`
               <div class="flex flex-col gap-2">
                 <div class="flex flex-wrap gap-2">

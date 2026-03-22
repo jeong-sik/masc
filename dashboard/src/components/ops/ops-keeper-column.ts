@@ -1,6 +1,8 @@
 // Ops — Keeper column: keeper list, keeper actions, available actions, recent action log
 
 import { html } from 'htm/preact'
+import { SurfaceCard } from '../common/card'
+import { SectionHeader } from '../common/section-header'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { openKeeperDetail } from '../keeper-detail'
 import { findKeeper } from '../execution/shared'
@@ -46,7 +48,7 @@ export function OpsKeeperColumn() {
 
   return html`
     <div class="flex flex-col gap-4 min-w-0">
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel ops-keeper-section">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0 ops-lane-panel ops-keeper-section">
         <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">Keeper 개입</h3>
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">장기 실행 중인 keeper를 고르고 바로 probe나 방향 수정 메시지를 보냅니다.</p>
 
@@ -117,9 +119,9 @@ export function OpsKeeperColumn() {
                 </article>
               `)}
         </div>
-      </section>
+      <//>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0 ops-lane-panel">
         <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">선택한 Keeper 액션</h3>
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
 
@@ -143,9 +145,9 @@ export function OpsKeeperColumn() {
             placeholder="구조화된 probe, 방향 수정, 재지시 내용을 적으세요"
           />
         ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">먼저 keeper를 하나 고르세요.</div>`}
-      </section>
+      <//>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0">
         <div class="flex items-center justify-between pb-2 border-b border-[var(--card-border)]">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">액션</h3>
           <span class="text-[12px] text-[var(--text-muted)]">${availableActions.length}개</span>
@@ -157,7 +159,7 @@ export function OpsKeeperColumn() {
                 if (group.length === 0) return null
                 return html`
                   <div key=${targetType}>
-                    <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider mb-1">${targetTypeLabel(targetType)}</div>
+                    <${SectionHeader} class="mb-1">${targetTypeLabel(targetType)}<//>
                     <div class="flex flex-wrap gap-1">
                       ${group.map((action: any) => html`
                         <span key=${action.action_type}
@@ -172,9 +174,9 @@ export function OpsKeeperColumn() {
               })}
             </div>`
           : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">액션 없음</div>`}
-      </section>
+      <//>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0">
         <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider pb-2 border-b border-[var(--card-border)]">최근 개입 로그</h3>
         <div class="flex flex-col gap-2">
           ${operatorActionLog.value.length === 0 ? html`
@@ -190,7 +192,7 @@ export function OpsKeeperColumn() {
             </article>
           `)}
         </div>
-      </section>
+      <//>
     </div>
   `
 }

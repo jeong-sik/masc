@@ -1,6 +1,9 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
+import { EmptyState, LoadingState, ErrorState } from './common/feedback-state'
+import { CountBadge } from './common/badge'
+import { CollapsibleSection } from './common/collapsible'
 import { navigate } from '../router'
 import {
   missionError,
@@ -35,13 +38,13 @@ import { ProvenanceStrip } from './common/provenance-strip'
 export function Mission() {
   const mission = missionSnapshot.value
   if (missionLoading.value && !mission) {
-    return html`<div class="loading-state loading-pulse">상황판 스냅샷 불러오는 중...</div>`
+    return html`<${LoadingState}>상황판 스냅샷 불러오는 중...<//>`
   }
   if (missionError.value && !mission) {
-    return html`<div class="empty-state error">${missionError.value}</div>`
+    return html`<${ErrorState}>${missionError.value}<//>`
   }
   if (!mission) {
-    return html`<div class="empty-state">상황판 스냅샷이 아직 없습니다.</div>`
+    return html`<${EmptyState}>상황판 스냅샷이 아직 없습니다.<//>`
   }
 
   const sessionRows = mission.sessions
@@ -193,13 +196,8 @@ export function Mission() {
       />
 
       <!-- Keepers -->
-      <details open id="mission-keepers" class="rounded-lg border border-[var(--card-border)] overflow-hidden">
-        <summary class="mission-collapsible-summary flex items-center gap-2 px-4 py-3 cursor-pointer text-sm font-medium text-[var(--text-strong)]">
-          키퍼 연속성
-          <span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-8)] text-[var(--text-muted)] tabular-nums">${keeperRows.length}</span>
-          ${keeperStatusWarnings > 0 ? html`<span class="text-[10px] px-1.5 py-px rounded bg-[var(--warn-12)] text-[var(--warn)] tabular-nums">${keeperStatusWarnings} 주의</span>` : null}
-        </summary>
-        <div class="p-4 pt-0">
+      <${CollapsibleSection} title="키퍼 연속성" open id="mission-keepers" badge=${html`<${CountBadge}>${keeperRows.length}<//>
+          ${keeperStatusWarnings > 0 ? html`<${CountBadge} tone="warn">${keeperStatusWarnings} 주의<//>` : null}`}>
           <div class="mb-3">
             <p class="m-0 text-xs text-[var(--text-muted)]">키퍼는 세션과 별개로 보고, 연속성과 장기 행위자 상태를 관찰합니다.</p>
             <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
@@ -213,16 +211,10 @@ export function Mission() {
             <button class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('status', { section: 'sessions' })}>세션 보기</button>
             <button class="px-2.5 py-1 rounded border border-[var(--card-border)] bg-transparent text-[10px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]" onClick=${() => navigate('operations', { section: 'command' })}>지휘 진단면</button>
           </div>
-        </div>
-      </details>
+      <//>
 
       <!-- Activity -->
-      <details open id="mission-output" class="rounded-lg border border-[var(--card-border)] overflow-hidden">
-        <summary class="mission-collapsible-summary flex items-center gap-2 px-4 py-3 cursor-pointer text-sm font-medium text-[var(--text-strong)]">
-          최근 활동
-          <span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-8)] text-[var(--text-muted)] tabular-nums">${focusSessionOutputs.length + keeperOutputRows.length}</span>
-        </summary>
-        <div class="p-4 pt-0">
+      <${CollapsibleSection} title="최근 활동" open id="mission-output" badge=${html`<${CountBadge}>${focusSessionOutputs.length + keeperOutputRows.length}<//>`}>
           <div class="mb-3">
             <p class="m-0 text-xs text-[var(--text-muted)]">선택된 세션과 연결된 행위자의 최근 출력.</p>
             <${ProvenanceStrip} items=${[{ kind: 'truth' }]} />
@@ -249,16 +241,10 @@ export function Mission() {
                 `)
               : null}
           </div>
-        </div>
-      </details>
+      <//>
 
       <!-- Attention queue -->
-      <details open id="mission-attention" class="rounded-lg border border-[var(--card-border)] overflow-hidden">
-        <summary class="mission-collapsible-summary flex items-center gap-2 px-4 py-3 cursor-pointer text-sm font-medium text-[var(--text-strong)]">
-          세션 우선순위
-          <span class="text-[10px] px-1.5 py-px rounded ${attentionQueue.length > 0 ? 'bg-[var(--warn-12)] text-[var(--warn)]' : 'bg-[var(--white-8)] text-[var(--text-muted)]'} tabular-nums">${attentionQueue.length}</span>
-        </summary>
-        <div class="p-4 pt-0">
+      <${CollapsibleSection} title="세션 우선순위" open id="mission-attention" badge=${html`<${CountBadge} tone=${attentionQueue.length > 0 ? 'warn' : 'default'}>${attentionQueue.length}<//>`}>
           <div class="mb-3">
             <p class="m-0 text-xs text-[var(--text-muted)]">주의 신호 기준 세션 집중 순서.</p>
             <${ProvenanceStrip} items=${[{ kind: 'derived' }]} />
@@ -268,19 +254,14 @@ export function Mission() {
               ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${activeSelectedAttentionId === item.id} sessionLookup=${sessionLookup} />`)
               : html`<div class="text-xs text-[var(--text-muted)] py-3 text-center">주의 대기열 비어 있음.</div>`}
           </div>
-        </div>
-      </details>
+      <//>
 
       ${internalSignals.length > 0 ? html`
-        <details class="rounded-lg border border-[var(--card-border)] overflow-hidden">
-          <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer text-xs text-[var(--text-muted)]">
-            내부 신호
-            <span class="text-[10px] px-1.5 py-px rounded bg-[var(--white-8)] text-[var(--text-muted)] tabular-nums">${internalSignals.length}</span>
-          </summary>
-          <div class="flex flex-col gap-3 p-4 pt-0">
+        <${CollapsibleSection} title="내부 신호" badge=${html`<${CountBadge}>${internalSignals.length}<//>`}>
+          <div class="flex flex-col gap-3">
             ${internalSignals.map(item => html`<${InternalSignalCard} key=${item.id} item=${item} />`)}
           </div>
-        </details>
+        <//>
       ` : null}
     </section>
   `

@@ -1,6 +1,9 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { Card } from './common/card'
+import { TextInput, TextArea } from './common/input'
+import { Card, SurfaceCard, SectionCard } from './common/card'
+import { EmptyState, LoadingState } from './common/feedback-state'
+import { KpiCard } from './common/stat-row'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
@@ -123,7 +126,7 @@ function authorAvatar(name: string): string {
   for (let i = 0; i < name.length; i++) {
     hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0
   }
-  return avatars[Math.abs(hash) % avatars.length]
+  return avatars[Math.abs(hash) % avatars.length] ?? '🤖'
 }
 
 function kindBadgeColor(kind: string): string {
@@ -224,20 +227,18 @@ function NewPostForm() {
   }
 
   return html`
-    <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-3">
-      <input
-        class="w-full px-3 py-2 rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-[14px] font-medium focus:border-[rgba(71,184,255,0.5)] outline-none placeholder:text-[var(--text-muted)]"
-        type="text"
+    <${SurfaceCard} variant="light" class="grid gap-3">
+      <${TextInput}
+        class="text-[14px] font-medium"
         placeholder="제목"
         value=${newPostTitle.value}
         onInput=${(e: Event) => { newPostTitle.value = (e.target as HTMLInputElement).value }}
       />
-      <textarea
-        class="w-full px-3 py-2 rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] min-h-[80px] resize-y focus:border-[rgba(71,184,255,0.5)] outline-none placeholder:text-[var(--text-muted)]"
+      <${TextArea}
         placeholder="내용을 입력하세요..."
         value=${newPostContent.value}
         onInput=${(e: Event) => { newPostContent.value = (e.target as HTMLTextAreaElement).value }}
-      ></textarea>
+      />
       <div class="flex gap-2 justify-end">
         <button
           class="px-3 py-1.5 rounded-lg text-[13px] border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]"
@@ -249,7 +250,7 @@ function NewPostForm() {
           onClick=${() => { void submitNewPost() }}
         >${newPostSubmitting.value ? '등록 중...' : '등록'}</button>
       </div>
-    </div>
+    <//>
   `
 }
 
@@ -257,7 +258,7 @@ function SortBar() {
   const current = boardSortMode.value
   const hideLabel = hideAutomationPosts.value ? '자동화 글 숨김' : '자동화 글 표시 중'
   return html`
-    <div class="flex flex-col gap-3 mb-4 p-3 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+    <${SurfaceCard} class="flex flex-col gap-3 mb-4 !p-3">
       <div class="flex items-center gap-1.5 flex-wrap">
         ${SORT_MODES.map(mode => html`
           <button
@@ -312,7 +313,7 @@ function SortBar() {
           </button>
         </div>
       </div>
-    </div>
+    <//>
   `
 }
 
@@ -322,26 +323,21 @@ function MemorySummary() {
   const visibleCount = grouped.human.length + grouped.operations.length
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3 mb-4">
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">보이는 글</span>
-        <strong class="text-xl font-semibold text-[var(--text-strong)] tabular-nums">${visibleCount}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">정렬</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${sortLabel}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">잡음 필터</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 숨김` : '분리된 레인 표시'}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">시스템 글 정책</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 레인 표시'}</strong>
-      </div>
-      <div class="flex flex-col gap-1.5 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
-        <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">최근 갱신</span>
-        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : '아직 불러오지 않음'}</strong>
-      </div>
+      <${SurfaceCard} class="flex flex-col gap-1.5">
+        <${KpiCard} label="보이는 글" value=${visibleCount} />
+      <//>
+      <${SurfaceCard} class="flex flex-col gap-1.5">
+        <${KpiCard} label="정렬" value=${sortLabel} />
+      <//>
+      <${SurfaceCard} class="flex flex-col gap-1.5">
+        <${KpiCard} label="잡음 필터" value=${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 숨김` : '분리된 레인 표시'} />
+      <//>
+      <${SurfaceCard} class="flex flex-col gap-1.5">
+        <${KpiCard} label="시스템 글 정책" value=${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 레인 표시'} />
+      <//>
+      <${SurfaceCard} class="flex flex-col gap-1.5">
+        <${KpiCard} label="최근 갱신" value=${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : '아직 불러오지 않음'} />
+      <//>
     </div>
   `
 }
@@ -445,7 +441,7 @@ function CommentItem({ comment }: { comment: BoardComment }) {
 }
 
 function CommentThread({ comments }: { comments: BoardComment[] }) {
-  if (comments.length === 0) return html`<div class="empty-state text-[13px] text-[var(--text-muted)]">아직 댓글이 없습니다</div>`
+  if (comments.length === 0) return html`<${EmptyState}>아직 댓글이 없습니다<//>`
 
   return html`
     <div class="flex flex-col gap-2">
@@ -457,9 +453,8 @@ function CommentThread({ comments }: { comments: BoardComment[] }) {
 function CommentForm({ postId }: { postId: string }) {
   return html`
     <div class="mt-4 flex gap-2">
-      <input
-        type="text"
-        class="flex-1 py-2 px-3 bg-[var(--white-5)] border border-[var(--border-slate-18)] rounded-lg text-[var(--text-body)] text-[13px] font-[inherit] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[rgba(71,184,255,0.55)] transition-colors"
+      <${TextInput}
+        class="flex-1"
         placeholder="댓글 추가..."
         value=${commentText.value}
         onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}
@@ -502,7 +497,7 @@ function PostDetail({ post }: { post: BoardPost }) {
         onClick=${() => navigate('work', { section: 'board' })}
       >← 게시판으로 돌아가기</button>
 
-      <${Card} title=${post.title}>
+      <${SectionCard} label=${post.title}>
         <div class="flex flex-col gap-4">
           <div class="text-[13px] text-[var(--text-body)] leading-[1.65]">
             <${Markdown} text=${stripStateBlocks(post.body)} />
@@ -558,9 +553,9 @@ function PostDetail({ post }: { post: BoardPost }) {
       <//>
 
       <div class="mt-4">
-        <${Card} title="댓글">
+        <${SectionCard} label="댓글">
           ${detailLoading.value
-            ? html`<div class="loading-state loading-pulse">댓글 불러오는 중...</div>`
+            ? html`<${LoadingState}>댓글 불러오는 중...<//>`
             : html`<${CommentThread} comments=${detailComments.value} />`}
           <${CommentForm} postId=${post.id} />
         <//>
@@ -595,8 +590,8 @@ export function Memory() {
               onClick=${() => navigate('work', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
-              ? html`<div class="loading-state loading-pulse">글 불러오는 중...</div>`
-              : html`<div class="empty-state">글을 찾지 못했습니다</div>`}
+              ? html`<${LoadingState}>글 불러오는 중...<//>`
+              : html`<${EmptyState}>글을 찾지 못했습니다<//>`}
           </div>
         `
   }
@@ -609,9 +604,9 @@ export function Memory() {
         <${NewPostForm} />
       </div>
       ${boardLoading.value
-        ? html`<div class="loading-state loading-pulse">메모리 피드 불러오는 중...</div>`
+        ? html`<${LoadingState}>메모리 피드 불러오는 중...<//>`
         : posts.length === 0
-          ? html`<div class="empty-state">아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다.</div>`
+          ? html`<${EmptyState}>아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다.<//>`
           : html`
               <${Card} title="사람이 쓴 글" class="mb-4">
                 <div class="flex flex-col gap-2">

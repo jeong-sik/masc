@@ -1,6 +1,7 @@
 // 실행 표면 — 작전 카드 및 본문
 
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import type { DashboardExecutionOperationBrief } from '../../types'
 import {
@@ -56,7 +57,7 @@ export function OperationBriefsBody({ operationRows }: { operationRows: Dashboar
     <div class="flex flex-col gap-2.5">
       ${hasActive
         ? activeOps.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)
-        : html`<div class="empty-state">${hasTerminal ? '진행 중인 작전이 없습니다.' : '선택된 실행과 연결된 작전이 없습니다.'}</div>`}
+        : html`<${EmptyState}>${hasTerminal ? '진행 중인 작전이 없습니다.' : '선택된 실행과 연결된 작전이 없습니다.'}<//>`}
     </div>
     ${hasTerminal
       ? html`

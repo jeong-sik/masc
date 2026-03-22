@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState, LoadingState, ErrorState } from '../common/feedback-state'
 import { groupByKey } from '../common/collection'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type {
@@ -215,13 +216,13 @@ export function OrchestraSurface() {
   }, [])
 
   if (commandPlaneOrchestraLoading.value && !orchestra) {
-    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state">오케스트라 맵 불러오는 중…</div></section>`
+    return html`<section class="card rounded-xl min-h-[240px]"><${LoadingState}>오케스트라 맵 불러오는 중…<//></section>`
   }
   if (commandPlaneOrchestraError.value) {
-    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state error">${commandPlaneOrchestraError.value}</div></section>`
+    return html`<section class="card rounded-xl min-h-[240px]"><${ErrorState}>${commandPlaneOrchestraError.value}<//></section>`
   }
   if (!orchestra) {
-    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state">오케스트라 맵 데이터가 아직 없습니다.</div></section>`
+    return html`<section class="card rounded-xl min-h-[240px]"><${EmptyState}>오케스트라 맵 데이터가 아직 없습니다.<//></section>`
   }
 
   const density = orchestraDensity.value

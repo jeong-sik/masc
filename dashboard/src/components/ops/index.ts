@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+import { SurfaceCard } from '../common/card'
 import { refreshRoomTruth } from '../../room-truth-store'
 import { RoomTruthStrip } from '../common/room-truth-strip'
 import { route } from '../../router'
@@ -40,6 +41,7 @@ import {
   type OpsPriorityTone,
 } from './helpers'
 import { selectPendingConfirmState } from '../../pending-confirm'
+import { SectionHeader } from '../common/section-header'
 import { OpsRoomColumn } from './ops-room-column'
 import { OpsSessionColumn } from './ops-session-column'
 import { OpsKeeperColumn } from './ops-keeper-column'
@@ -157,7 +159,7 @@ export function Ops() {
 
   return html`
     <section class="flex flex-col gap-4">
-      <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex justify-between items-start gap-4 max-[880px]:flex-col">
+      <${SurfaceCard} class="flex justify-between items-start gap-4 max-[880px]:flex-col">
         <div>
           <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">개입</h2>
           <p class="text-[13px] text-[var(--text-muted)] max-w-[62ch] leading-relaxed">
@@ -186,7 +188,7 @@ export function Ops() {
             ${operatorLoading.value ? '새로고침 중...' : '새로고침'}
           </button>
         </div>
-      </div>
+      <//>
 
       ${operatorError.value ? html`<section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] error">${operatorError.value}</section>` : null}
       ${operatorDigestError.value ? html`<section class="ops-banner rounded-xl py-3 px-3.5 border border-[var(--card-border)] error">${operatorDigestError.value}</section>` : null}
@@ -249,7 +251,7 @@ export function Ops() {
         }
         if (actions.length === 0) return null
         return html`
-          <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+          <${SurfaceCard}>
             <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-3">지금 할 수 있는 것</h3>
             <div class="flex flex-col gap-2">
               ${actions.slice(0, 3).map(action => html`
@@ -259,23 +261,23 @@ export function Ops() {
                 </button>
               `)}
             </div>
-          </section>
+          <//>
         `
       })()}
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+      <${SurfaceCard}>
         <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">개입 우선순위</h2>
         <p class="text-[12px] text-[var(--text-muted)] mb-3.5">지금 가장 먼저 손댈 대상이 방인지, 세션인지, 키퍼인지 먼저 좁힙니다.</p>
         <div class="ops-priority-grid grid grid-cols-4 gap-2.5 max-[1200px]:grid-cols-2 max-[880px]:grid-cols-1">
           ${priorityCards.map(card => html`
             <div key=${card.key} class="ops-priority-card p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-1.5 ${card.tone}">
-              <span class="text-[var(--text-muted)] text-[11px] uppercase tracking-[0.06em] font-medium">${card.label}</span>
+              <${SectionHeader} size="sm">${card.label}<//>
               <strong>${card.value}</strong>
               <div class="text-[var(--text-muted)] text-[12px] leading-[1.45]">${card.detail}</div>
             </div>
           `)}
         </div>
-      </section>
+      <//>
 
       <div class="ops-workbench grid gap-4 max-[1200px]:grid-cols-1">
         <${OpsRoomColumn} />

@@ -1,6 +1,7 @@
 // 실행 표면 — 대기열 카드 및 본문
 
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import type { DashboardExecutionQueueItem } from '../../types'
 import {
@@ -60,7 +61,7 @@ export function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutio
     <div class="flex flex-col gap-2.5">
       ${hasActive
         ? activeItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)
-        : html`<div class="empty-state">지금은 개입이 필요한 실행이 없습니다.</div>`}
+        : html`<${EmptyState}>지금은 개입이 필요한 실행이 없습니다.<//>`}
     </div>
     ${hasTerminal
       ? html`

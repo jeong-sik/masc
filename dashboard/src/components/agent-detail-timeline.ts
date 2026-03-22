@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { Card } from './common/card'
+import { EmptyState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
 import { agentTimeline, compactCopy } from './agent-detail-state'
 import type { AgentTimelineEvent } from '../api'
@@ -43,7 +44,7 @@ export function AgentTimelineSection() {
         </div>
       ` : null}
       ${events.length === 0
-        ? html`<div class="empty-state">타임라인 이벤트 없음</div>`
+        ? html`<${EmptyState}>타임라인 이벤트 없음<//>`
         : html`
             <div class="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">
               ${events.map((evt: AgentTimelineEvent, idx: number) => {

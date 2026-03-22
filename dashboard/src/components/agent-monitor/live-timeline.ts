@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useRef, useMemo } from 'preact/hooks'
+import { EmptyState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import { journal } from '../../sse'
 import type { JournalEntry, JournalEventType } from '../../types'
@@ -153,7 +154,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
 
       <div class="flex flex-col gap-0.5 max-h-[320px] overflow-y-auto" ref=${scrollRef}>
         ${filtered.length === 0
-          ? html`<div class="empty-state">필터에 맞는 이벤트 없음</div>`
+          ? html`<${EmptyState}>필터에 맞는 이벤트 없음<//>`
           : filtered.map((entry: JournalEntry, idx: number) => html`
               <div class="flex items-baseline gap-1.5 py-1 px-2 text-[length:var(--fs-sm)] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
                 <span class="agent-event-badge ${eventKindBadgeClass(entry.eventType)}">

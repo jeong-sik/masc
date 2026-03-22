@@ -2,6 +2,7 @@
 
 import { signal } from '@preact/signals'
 import { html } from 'htm/preact'
+import { SurfaceCard } from '../common/card'
 import {
   fetchAutoresearchStatus,
   injectAutoresearchHypothesis,
@@ -140,7 +141,7 @@ export function OpsSessionColumn() {
 
   return html`
     <div class="flex flex-col gap-4 min-w-0">
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Session 개입</h3>
         </div>
@@ -167,9 +168,9 @@ export function OpsSessionColumn() {
             </div>
           </details>
         ` : null}
-      </section>
+      <//>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">선택한 Session 요약</h3>
         </div>
@@ -228,9 +229,9 @@ export function OpsSessionColumn() {
         ` : html`
           <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">세션을 고르면 세부 요약을 불러옵니다.</div>
         `}
-      </section>
+      <//>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">선택한 Session 액션</h3>
         </div>
@@ -412,7 +413,7 @@ export function OpsSessionColumn() {
             세션 중지
           </button>
         </div>
-      </section>
+      <//>
     </div>
   `
 }

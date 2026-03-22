@@ -2,6 +2,7 @@
 // Shows 3-line summary + keeper context bars. Raw events behind <details> toggle.
 
 import { html } from 'htm/preact'
+import { SectionHeader } from '../common/section-header'
 import { oasAgentEvents, oasKeeperSnapshots, oasHealthSummary } from '../../store'
 
 function formatTs(ts: number): string {
@@ -88,7 +89,7 @@ function OasKeeperBars() {
 
   return html`
     <div class="flex flex-col gap-2 mb-4">
-      <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold mb-1">키퍼 컨텍스트</div>
+      <${SectionHeader} class="mb-1">키퍼 컨텍스트<//>
       ${entries.map(snap => {
         const pct = Math.round(snap.context_ratio * 100)
         return html`

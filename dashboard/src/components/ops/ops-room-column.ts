@@ -2,6 +2,8 @@
 
 import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
+import { SurfaceCard } from '../common/card'
+import { LoadingState } from '../common/feedback-state'
 import {
   operatorActionBusy,
   operatorDigestLoading,
@@ -65,7 +67,7 @@ export function OpsRoomColumn() {
 
   return html`
     <div class="flex flex-col gap-4 min-w-0">
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">추천 개입</h3>
         </div>
@@ -85,7 +87,7 @@ export function OpsRoomColumn() {
           </div>
         </article>
         ${operatorDigestLoading.value && !roomDigest ? html`
-          <div class="loading-state loading-pulse">개입 추천을 불러오는 중입니다...</div>
+          <${LoadingState}>개입 추천을 불러오는 중입니다...<//>
         ` : activeRecommendedActions.length > 0 ? html`
           <div class="flex flex-col gap-2">
             ${activeRecommendedActions.map(item => html`
@@ -109,9 +111,9 @@ export function OpsRoomColumn() {
         ` : html`
           <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">지금 떠 있는 추천 개입은 없습니다.</div>
         `}
-      </section>
+      <//>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-pending-section">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0 ops-pending-section">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">승인 대기</h3>
         </div>
@@ -163,9 +165,9 @@ export function OpsRoomColumn() {
               : '지금 승인 대기는 없습니다. 위 목록의 preview-confirm 액션을 먼저 만들어야 여기에 쌓입니다.'}
           </div>
         `}
-      </section>
+      <//>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0 ops-lane-panel">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0 ops-lane-panel">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Room 상태</h3>
         </div>
@@ -277,9 +279,9 @@ export function OpsRoomColumn() {
             </div>
           </div>
         </details>
-      </section>
+      <//>
 
-      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col gap-3 min-h-0">
+      <${SurfaceCard} class="flex flex-col gap-3 min-h-0">
         <div class="pb-2 border-b border-[var(--card-border)] mb-1">
           <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">최근 Room 메시지</h3>
         </div>
@@ -297,7 +299,7 @@ export function OpsRoomColumn() {
             `)}
           </div>
         ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">최근 room 메시지가 없습니다.</div>`}
-      </section>
+      <//>
     </div>
   `
 }

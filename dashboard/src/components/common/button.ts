@@ -1,0 +1,70 @@
+// ActionButton — reusable button with variant styles
+// Replaces repeated inline button patterns across dashboard
+
+import { html } from 'htm/preact'
+import type { ComponentChildren } from 'preact'
+
+type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle'
+type ButtonSize = 'sm' | 'md'
+
+const SIZE_CLASSES: Record<ButtonSize, string> = {
+  sm: 'py-1 px-2 text-[10px]',
+  md: 'py-1.5 px-2.5 text-[11px]',
+}
+
+const VARIANT_CLASSES: Record<ButtonVariant, string> = {
+  primary: 'border border-solid border-[rgba(71,184,255,0.3)] bg-[var(--accent-12)] text-[#d7efff] hover:bg-[var(--accent-20)]',
+  ghost: 'border border-solid border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] hover:bg-[var(--white-8)]',
+  danger: 'border border-solid border-[rgba(251,113,133,0.3)] bg-[rgba(251,113,133,0.08)] text-[#fda4af] hover:bg-[rgba(251,113,133,0.15)]',
+  subtle: 'border-none bg-transparent text-[var(--text-muted)] hover:text-[var(--text-body)] hover:bg-[var(--white-6)]',
+}
+
+const BASE = 'rounded-lg cursor-pointer transition-colors duration-150 font-medium'
+
+interface ActionButtonProps {
+  variant?: ButtonVariant
+  size?: ButtonSize
+  class?: string
+  disabled?: boolean
+  /** Full width */
+  block?: boolean
+  onClick?: (e: Event) => void
+  children: ComponentChildren
+}
+
+export function ActionButton({
+  variant = 'primary',
+  size = 'md',
+  class: cx,
+  disabled,
+  block,
+  onClick,
+  children,
+}: ActionButtonProps) {
+  const cls = [
+    BASE,
+    SIZE_CLASSES[size],
+    VARIANT_CLASSES[variant],
+    block ? 'w-full' : '',
+    disabled ? 'opacity-50 pointer-events-none' : '',
+    cx,
+  ].filter(Boolean).join(' ')
+
+  return html`
+    <button class=${cls} onClick=${onClick} disabled=${disabled}>${children}</button>
+  `
+}
+
+// ── Button group (grid layout) ──
+interface ButtonGroupProps {
+  cols?: 2 | 3
+  class?: string
+  children: ComponentChildren
+}
+
+export function ButtonGroup({ cols = 2, class: cx, children }: ButtonGroupProps) {
+  const colClass = cols === 2 ? 'grid-cols-2' : 'grid-cols-3'
+  return html`
+    <div class="grid ${colClass} gap-1.5 ${cx ?? ''}">${children}</div>
+  `
+}

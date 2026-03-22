@@ -2,11 +2,12 @@
 
 import { html } from 'htm/preact'
 import type { DashboardToolInventoryItem } from '../../api'
+import { SurfaceCard } from '../common/card'
 import { toolBadge } from './tool-state'
 
 export function InventoryRow({ item }: { item: DashboardToolInventoryItem }) {
   return html`
-    <article class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
+    <${SurfaceCard} variant="light">
       <div class="flex justify-between gap-3 items-start">
         <div>
           <div class="text-[15px] font-bold text-[var(--text-strong)]">${item.name}</div>
@@ -34,6 +35,6 @@ export function InventoryRow({ item }: { item: DashboardToolInventoryItem }) {
         ${item.replacement ? html`<span>대체 도구: <strong class="text-[var(--text-body)]">${item.replacement}</strong></span>` : null}
         ${item.doc_refs.length > 0 ? html`<span>문서: <strong class="text-[var(--text-body)]">${item.doc_refs.join(', ')}</strong></span>` : null}
       </div>
-    </article>
+    <//>
   `
 }

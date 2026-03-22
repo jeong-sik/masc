@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import { TimeAgo } from './common/time-ago'
+import { SectionHeader } from './common/section-header'
 import { missionSnapshot } from '../mission-store'
 import type { DashboardMissionKeeperBrief, Keeper } from '../types'
 import { serverStatus } from '../store'
@@ -94,7 +95,7 @@ function ToolChip({ name }: { name: string }) {
 function ToolSection({ title, description, tools, fallback }: { title: string; description?: string; tools: string[]; fallback: string }) {
   return html`
     <div class="flex flex-col gap-1.5 mt-3">
-      <span class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">${title}</span>
+      <${SectionHeader}>${title}<//>
       ${description ? html`<span class="text-[11px] text-[var(--text-muted)] leading-snug">${description}</span>` : null}
       <div class="flex flex-wrap gap-1.5">
         ${tools.length > 0

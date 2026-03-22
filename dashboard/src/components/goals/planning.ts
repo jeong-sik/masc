@@ -1,6 +1,7 @@
 // Planning main component — orchestrates goals, MDAL, and kanban views
 
 import { html } from 'htm/preact'
+import { EmptyState, LoadingState } from '../common/feedback-state'
 import {
   goals,
   goalsLoading,
@@ -16,6 +17,7 @@ import {
   groupedByHorizon,
   loopsList,
 } from './goal-helpers'
+import { SurfaceCard } from '../common/card'
 import { GoalsSummary, FilterBar, HorizonGroup } from './goal-components'
 import { LoopRow } from './mdal-components'
 import { TaskBacklog } from './kanban-components'
@@ -36,26 +38,26 @@ export function Planning() {
 
       <!-- Task-based stats grid -->
       <div class="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3 mb-4">
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <${SurfaceCard} class="flex flex-col gap-2">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">전체 태스크</span>
           <span class="text-[28px] font-bold text-[var(--text-strong)] leading-none tabular-nums">${totalTasks}</span>
-        </div>
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <//>
+        <${SurfaceCard} class="flex flex-col gap-2">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">할 일</span>
           <span class="text-[28px] font-bold leading-none tabular-nums text-[#e0e0e0]">${todo.length}</span>
-        </div>
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <//>
+        <${SurfaceCard} class="flex flex-col gap-2">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">진행 중</span>
           <span class="text-[28px] font-bold leading-none tabular-nums text-[var(--warn)]">${inProgress.length}</span>
-        </div>
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <//>
+        <${SurfaceCard} class="flex flex-col gap-2">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">완료</span>
           <span class="text-[28px] font-bold leading-none tabular-nums text-[var(--ok)]">${done.length}</span>
-        </div>
-        <div class="flex flex-col gap-2 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <//>
+        <${SurfaceCard} class="flex flex-col gap-2">
           <span class="text-[10px] text-[var(--text-muted)] tracking-[0.08em] uppercase font-medium">높은 우선순위</span>
           <span class="text-[28px] font-bold leading-none tabular-nums" style="color:${highPriority > 0 ? '#f87171' : '#888'}">${highPriority}</span>
-        </div>
+        <//>
       </div>
 
       <!-- Compact refresh toolbar -->
@@ -86,18 +88,18 @@ export function Planning() {
             <${GoalsSummary} />
             <${FilterBar} />
             ${goalsLoading.value && goals.value.length === 0
-              ? html`<div class="loading-state loading-pulse">목표 불러오는 중...</div>`
+              ? html`<${LoadingState}>목표 불러오는 중...<//>`
               : filteredGoals.value.length === 0
-                ? html`<div class="empty-state">현재 필터에 맞는 목표가 없습니다</div>`
+                ? html`<${EmptyState}>현재 필터에 맞는 목표가 없습니다<//>`
                 : html`
                     <${HorizonGroup} horizon="short" items=${grouped.short ?? []} />
                     <${HorizonGroup} horizon="mid" items=${grouped.mid ?? []} />
                     <${HorizonGroup} horizon="long" items=${grouped.long ?? []} />
                   `}
           ` : html`
-            <div class="empty-state">
+            <${EmptyState}>
               장기 목표가 아직 없습니다. <code class="px-1 py-0.5 rounded bg-[var(--white-8)] text-[var(--text-body)] text-[11px]">masc_goal_upsert</code>로 단기/중기/장기 목표를 등록하면 메트릭 기반 추적이 시작됩니다.
-            </div>
+            <//>
           `}
         </div>
       </details>
@@ -110,11 +112,11 @@ export function Planning() {
         </summary>
         <div>
           ${mdalLoading.value && loops.length === 0
-            ? html`<div class="loading-state loading-pulse">MDAL 루프 불러오는 중...</div>`
+            ? html`<${LoadingState}>MDAL 루프 불러오는 중...<//>`
             : loops.length === 0 && (mdalState === 'error' || lastMdalError.value)
-              ? html`<div class="empty-state">MDAL 스냅샷을 불러오지 못했습니다${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. 백엔드 상태를 확인하세요.</div>`
+              ? html`<${EmptyState}>MDAL 스냅샷을 불러오지 못했습니다${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. 백엔드 상태를 확인하세요.<//>`
               : loops.length === 0
-                ? html`<div class="empty-state">가동 중인 루프가 없습니다. <code class="px-1 py-0.5 rounded bg-[var(--white-8)] text-[var(--text-body)] text-[11px]">masc_mdal_start</code>로 시작할 수 있습니다.</div>`
+                ? html`<${EmptyState}>가동 중인 루프가 없습니다. <code class="px-1 py-0.5 rounded bg-[var(--white-8)] text-[var(--text-body)] text-[11px]">masc_mdal_start</code>로 시작할 수 있습니다.<//>`
                 : html`
                   <div class="grid gap-3">
                     ${loops.map(loop => html`<${LoopRow} key=${loop.loop_id} loop=${loop} />`)}

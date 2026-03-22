@@ -29,6 +29,14 @@
   margin-bottom: 6px;
 }
 
+.oas-summary-lines {
+  display: flex;
+  gap: 12px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted, #888);
+  margin-bottom: 10px;
+}
+
 .oas-empty {
   font-size: var(--fs-xs);
   color: var(--text-muted, #666);

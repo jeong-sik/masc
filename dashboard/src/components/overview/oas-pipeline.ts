@@ -34,7 +34,7 @@ function OasSummaryLines() {
   return html`
     <div class="oas-summary-lines">
       <span>활성 에이전트 ${activeAgents.size}명</span>
-      <span>${health.totalEvents}건${snapshots.size > 0 ? `, 키퍼 ${snapshots.size}명` : ''}</span>
+      <span>${health.totalEvents}건${snapshots.size > 0 ? ` · 키퍼 ${snapshots.size}명` : ''}</span>
       <span>${agoMin != null ? `${agoMin}분 전` : '이벤트 대기 중'}</span>
     </div>
   `

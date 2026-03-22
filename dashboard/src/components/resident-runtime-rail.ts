@@ -14,7 +14,7 @@ import { selectPendingConfirmState } from '../pending-confirm'
 
 function shortCommit(commit: string | null | undefined): string {
   const value = commit?.trim()
-  if (!value) return '커밋 정보 없음'
+  if (!value) return 'dev'
   return value.length > 10 ? value.slice(0, 10) : value
 }
 

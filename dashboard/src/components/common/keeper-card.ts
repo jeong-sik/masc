@@ -44,7 +44,7 @@ type KeeperCardProps = {
 }
 
 function formatContext(value?: number | null): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
+  if (typeof value !== 'number' || Number.isNaN(value)) return 'N/A'
   return `${Math.round(value * 100)}%`
 }
 

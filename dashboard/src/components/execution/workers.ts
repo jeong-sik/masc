@@ -27,6 +27,10 @@ export function WorkerSupportRow({
   row: DashboardExecutionWorkerSupportBrief
   testId: string
 }) {
+  // When observation state is "offline", override status badge to match
+  // so we don't show "가동 중" badge alongside "오프라인" label.
+  const effectiveStatus = row.state === 'offline' ? 'offline' : (row.status ?? 'unknown')
+
   return html`
     <button class="monitor-row rounded-xl p-3.5 ${row.tone} state-${row.state}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
       <div class="monitor-row rounded-xl-header">
@@ -38,8 +42,10 @@ export function WorkerSupportRow({
           </div>
           <div class="monitor-note">${row.note}</div>
         </div>
-        <${StatusBadge} status=${row.status ?? 'unknown'} />
-        <span class="monitor-pill ${row.tone} state-${row.state} inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em]">${agentStateLabel(row.state)}</span>
+        <${StatusBadge} status=${effectiveStatus} />
+        ${row.state !== 'offline' || effectiveStatus !== 'offline'
+          ? html`<span class="monitor-pill ${row.tone} state-${row.state} inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em]">${agentStateLabel(row.state)}</span>`
+          : null}
       </div>
 
       <div class="monitor-meta">

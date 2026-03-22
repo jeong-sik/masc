@@ -4,6 +4,7 @@ import type {
   DashboardProofArtifactRef,
   DashboardProofSelection,
   DashboardProofToolEvidence,
+  DashboardProofWorkerRunEvidence,
   DashboardProofVerdict,
 } from '../types'
 import { relativeTime } from './command/helpers'
@@ -16,6 +17,10 @@ import {
   selectionTone,
   timelineMetaLabel,
   toolEvidenceTags,
+  workerRunEvidenceLabel,
+  workerRunEvidenceMeta,
+  workerRunEvidencePreview,
+  workerRunEvidenceTone,
   type DedupedTimelineItem,
 } from './proof-helpers'
 
@@ -75,6 +80,48 @@ export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) 
             </div>`
           : null
       })()}
+    </article>
+  `
+}
+
+export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEvidence }) {
+  const preview = workerRunEvidencePreview(item)
+  const validationFailures = Array.isArray(item.validation_failures) ? item.validation_failures : []
+  const toolNames = Array.isArray(item.tool_names) ? item.tool_names : []
+  return html`
+    <article class="mission-activity-row proof-actor-row">
+      <div class="mission-activity-head">
+        <div>
+          <strong>${item.worker_name ?? item.worker_run_id}</strong>
+          <div class="mission-activity-meta">
+            <span>${item.worker_run_id}</span>
+            <span>${item.ts_iso ? relativeTime(item.ts_iso) : '기록 없음'}</span>
+          </div>
+        </div>
+        <span class="command-chip ${workerRunEvidenceTone(item)}">
+          ${workerRunEvidenceLabel(item)}
+        </span>
+      </div>
+      <div class="mission-activity-copy">
+        <span>${workerRunEvidenceMeta(item) || 'runtime/model 메타데이터 없음'}</span>
+      </div>
+      ${preview
+        ? html`<div class="proof-summary-block">
+            <strong>${item.success === false || item.error || item.failure_reason ? '실패 요약' : '출력 요약'}</strong>
+            <span>${preview}</span>
+          </div>`
+        : null}
+      ${validationFailures.length > 0
+        ? html`<div class="proof-summary-block warn">
+            <strong>검증 실패</strong>
+            <span>${validationFailures.join(' · ')}</span>
+          </div>`
+        : null}
+      ${toolNames.length > 0
+        ? html`<div class="semantic-tag-row">
+            ${toolNames.map(name => html`<span class="semantic-tag">${name}</span>`)}
+          </div>`
+        : null}
     </article>
   `
 }

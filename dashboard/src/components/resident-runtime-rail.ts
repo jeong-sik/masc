@@ -1,5 +1,4 @@
 import { html } from 'htm/preact'
-import type { ComponentChildren } from 'preact'
 import { connected, eventCount } from '../sse'
 import {
   refreshDashboard,
@@ -60,7 +59,6 @@ function renderResidentRuntimeCard(
 export function SnapshotCard({ currentTab }: { currentTab: string }) {
   const liveConnected = connected.value
   const build = serverStatus.value?.build
-  const residentCards: ComponentChildren[] = []
 
   return html`
     <section class="rail-card rounded-xl">
@@ -102,13 +100,6 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
       </div>
       ${build
         ? html`<div class="mt-2.5 text-xs text-[color:var(--text-muted)]">서버 빌드 · v${build.release_version} · ${shortCommit(build.commit)}</div>`
-        : null}
-      ${residentCards.length > 0
-        ? html`
-            <div style="margin-top:12px; display:flex; flex-direction:column; gap:10px;">
-              ${residentCards}
-            </div>
-          `
         : null}
     </section>
   `

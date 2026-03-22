@@ -3,6 +3,7 @@ import type {
   DashboardProofSelection,
   DashboardProofTimelineItem,
   DashboardProofToolEvidence,
+  DashboardProofWorkerRunEvidence,
   DashboardProofVerdict,
 } from '../types'
 import { asString, asNumber, isRecord } from './common/normalize'
@@ -156,6 +157,42 @@ export function actorActivityMeta(item: DashboardProofActorContribution): string
 
 export function toolEvidenceTags(item: DashboardProofToolEvidence): string[] {
   return Array.isArray(item.tool_names) ? item.tool_names : []
+}
+
+export function workerRunEvidenceTone(item: DashboardProofWorkerRunEvidence): string {
+  if (item.trace_validated === true) return 'ok'
+  if (item.success === false || item.failure_reason || item.error) return 'bad'
+  if (item.trace_capability === 'raw') return 'ok'
+  if (item.trace_capability === 'summary_only') return 'warn'
+  return 'warn'
+}
+
+export function workerRunEvidenceLabel(item: DashboardProofWorkerRunEvidence): string {
+  if (item.trace_validated === true) return '검증됨'
+  if (item.success === false || item.failure_reason || item.error) return '실패'
+  if (item.trace_capability === 'raw') return 'raw trace'
+  if (item.trace_capability === 'summary_only') return 'summary only'
+  return item.status ?? '근거 수집'
+}
+
+export function workerRunEvidenceMeta(item: DashboardProofWorkerRunEvidence): string {
+  const parts = [
+    item.resolved_runtime ?? null,
+    item.resolved_model ?? null,
+    item.mode ?? null,
+    typeof item.tool_call_count === 'number' ? `도구 ${item.tool_call_count}` : null,
+    typeof item.record_count === 'number' ? `레코드 ${item.record_count}` : null,
+  ].filter((value): value is string => Boolean(value))
+  return parts.join(' · ')
+}
+
+export function workerRunEvidencePreview(item: DashboardProofWorkerRunEvidence): string | null {
+  return item.final_text
+    ?? item.output_preview
+    ?? item.error
+    ?? item.failure_reason
+    ?? item.stop_reason
+    ?? null
 }
 
 export function dedupeTimeline(items: DashboardProofTimelineItem[]): DedupedTimelineItem[] {

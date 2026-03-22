@@ -5,12 +5,8 @@
     Metadata (URLs, API keys, context sizes, costs) is sourced
     from OAS Provider_registry and Pricing — single source of truth.
 
-    Default/preset resolution delegates to OAS Cascade_config
-    when [config/cascade.json] is present (hot-reloadable).
-
     @since 2.117.0 — original extraction from Cascade
-    @since 2.123.0 — rewritten as OAS facade
-    @since 2.129.0 — default resolution via Cascade_config *)
+    @since 2.123.0 — rewritten as OAS facade *)
 
 (** MODEL provider discriminator. *)
 type provider =
@@ -63,14 +59,10 @@ val cascade_config_path : unit -> string option
 (** Configured default model label from env, if any. *)
 val configured_default_model_label : unit -> string option
 
-(** Preferred execution model labels.
-    Consults OAS [Cascade_config.resolve_model_strings] with
-    [config/cascade.json] when available, falling back to env-driven labels. *)
+(** Preferred execution model labels (env-driven via Provider_adapter). *)
 val default_execution_model_labels : unit -> string list
 
-(** Preferred verifier model labels.
-    Consults OAS [Cascade_config.resolve_model_strings] with
-    [config/cascade.json] when available, falling back to env-driven labels. *)
+(** Preferred verifier model labels (env-driven via Provider_adapter). *)
 val default_verifier_model_labels : unit -> string list
 
 (** {2 Filtering and resolution} *)

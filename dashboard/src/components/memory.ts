@@ -140,10 +140,12 @@ async function loadPostDetail(postId: string) {
       hearth_count: data.hearth_count,
     }
     detailComments.value = data.comments ?? []
-  } catch {
+  } catch (err) {
+    console.warn('[Board] failed to load post detail:', postId, err)
     if (detailPostId.value === postId) {
       detailPost.value = null
       detailComments.value = []
+      showToast('글을 불러오는 데 실패했습니다', 'error')
     }
   } finally {
     if (detailPostId.value === postId) {

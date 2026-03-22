@@ -484,6 +484,20 @@ a:hover {
   }
 }
 
+/* Main 2-column layout — sidebar + content */
+.dashboard-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 20px;
+  padding: 16px 20px 32px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.dashboard-main {
+  min-width: 0;
+}
+
 @media (max-width: 1200px) {
 
   .dashboard-layout {

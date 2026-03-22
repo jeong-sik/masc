@@ -44,35 +44,35 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
 
       ${ctxPct != null ? html`
         <div class="flex items-center gap-1.5 text-[length:var(--fs-sm)]">
-          <span class="agent-runtime-label">CTX</span>
-          <div class="agent-runtime-ctx-bar rounded-full">
+          <span class="text-[length:var(--fs-2xs)] text-[var(--text-muted)] uppercase tracking-wider">CTX</span>
+          <div class="w-16 h-1.5 bg-[#1a1a2e] rounded-full overflow-hidden">
             <div
               class="agent-runtime-ctx-fill rounded-full ${ctxBarClass(ctxRatio)}"
               style=${{ width: `${ctxPct}%` }}
             ></div>
           </div>
-          <span class="agent-runtime-value">${ctxPct}%</span>
+          <span class="text-[length:var(--fs-sm)] text-[var(--text-body)] tabular-nums">${ctxPct}%</span>
         </div>
       ` : null}
 
       ${generation != null ? html`
         <div class="flex items-center gap-1.5 text-[length:var(--fs-sm)]">
-          <span class="agent-runtime-label">GEN</span>
-          <span class="agent-runtime-value">${generation}</span>
+          <span class="text-[length:var(--fs-2xs)] text-[var(--text-muted)] uppercase tracking-wider">GEN</span>
+          <span class="text-[length:var(--fs-sm)] text-[var(--text-body)] tabular-nums">${generation}</span>
         </div>
       ` : null}
 
       ${model ? html`
         <div class="flex items-center gap-1.5 text-[length:var(--fs-sm)]">
-          <span class="agent-runtime-label">MODEL</span>
-          <span class="agent-runtime-value agent-runtime-model">${model}</span>
+          <span class="text-[length:var(--fs-2xs)] text-[var(--text-muted)] uppercase tracking-wider">MODEL</span>
+          <span class="text-[length:var(--fs-sm)] text-[var(--text-body)] font-mono truncate max-w-[200px]">${model}</span>
         </div>
       ` : null}
 
       ${lastTurnAge != null ? html`
         <div class="flex items-center gap-1.5 text-[length:var(--fs-sm)]">
-          <span class="agent-runtime-label">TURN</span>
-          <span class="agent-runtime-value">${formatDuration(lastTurnAge)} ago</span>
+          <span class="text-[length:var(--fs-2xs)] text-[var(--text-muted)] uppercase tracking-wider">TURN</span>
+          <span class="text-[length:var(--fs-sm)] text-[var(--text-body)] tabular-nums">${formatDuration(lastTurnAge)} ago</span>
         </div>
       ` : null}
     </div>

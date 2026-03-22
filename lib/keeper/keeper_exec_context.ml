@@ -261,11 +261,6 @@ let proactive_retry_instruction attempt ~(reason : string) =
       "Retry policy: previous attempts failed (%s). You MUST output one decisive check-in now, materially different from the last preview."
       reason
 
-let proactive_temperature attempt =
-  if attempt <= 1 then Keeper_config.keeper_proactive_temperature_low ()
-  else if attempt = 2 then Keeper_config.keeper_proactive_temperature_mid ()
-  else Keeper_config.keeper_proactive_temperature_high ()
-
 let strip_state_blocks_text (s : string) : string =
   let start_marker = "[STATE]" in
   let end_marker = "[/STATE]" in
@@ -499,13 +494,11 @@ let run_proactive_generation
         if String.trim retry_hint = "" then base_prompt
         else Printf.sprintf "%s\n\n%s" base_prompt retry_hint
       in
-      let temperature = proactive_temperature attempt in
-      let max_tokens = 1024 in
       let (agent_result, attempt_latency) = timed (fun () ->
           Oas_worker.run_named ~cascade_name:"keeper_turn"
             ~goal:prompt ~system_prompt:turn_system_prompt
             ~tools ~initial_messages:ctx_work.messages
-            ~max_turns:10 ~temperature ~max_tokens ()) in
+            ~max_turns:10 ()) in
       match agent_result with
       | Error _ -> None
       | Ok result ->

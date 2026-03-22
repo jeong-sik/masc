@@ -94,9 +94,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
         Keeper_unified_prompt.build_prompt ~meta ~observation
       in
       let base_dir = session_base_dir config in
-      (* 3. Derive parameters from keeper config (single values, no per-path split) *)
-      let temperature = Keeper_config.keeper_unified_temperature () in
-      let max_tokens = Keeper_config.keeper_unified_max_tokens () in
+      (* 3. Derive operational parameters from keeper config.
+         Inference params (temperature, max_tokens) are delegated to OAS cascade. *)
       let max_turns = Keeper_config.keeper_unified_max_turns () in
       let max_cost_usd = Keeper_config.keeper_tool_cost_max_usd () in
       (* 4. Build turn prompt callback: use our unified system prompt *)
@@ -110,7 +109,6 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
               ~max_context:primary_max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
               ~generation ~max_turns
-              ~temperature ~max_tokens
               ~max_cost_usd
               ~autonomy_filter:observation.autonomy_level
               ())

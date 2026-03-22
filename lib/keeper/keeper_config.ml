@@ -331,26 +331,8 @@ let normalize_drift_min_turn_gap (v : int) : int =
 (* Proactive turn parameters                                        *)
 (* ================================================================ *)
 
-let keeper_proactive_temperature_low () : float =
-  float_of_env_default
-    "MASC_KEEPER_PROACTIVE_TEMP_LOW"
-    ~default:0.55
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_proactive_temperature_mid () : float =
-  float_of_env_default
-    "MASC_KEEPER_PROACTIVE_TEMP_MID"
-    ~default:0.75
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_proactive_temperature_high () : float =
-  float_of_env_default
-    "MASC_KEEPER_PROACTIVE_TEMP_HIGH"
-    ~default:0.9
-    ~min_v:0.0
-    ~max_v:2.0
+(* Inference params (temperature) delegated to OAS cascade config.
+   Only non-inference operational thresholds remain here. *)
 
 let keeper_proactive_similarity_threshold () : float =
   float_of_env_default
@@ -360,36 +342,10 @@ let keeper_proactive_similarity_threshold () : float =
     ~max_v:1.0
 
 (* ================================================================ *)
-(* Keeper execution parameters (previously hardcoded)               *)
+(* Keeper execution parameters (operational, non-inference)          *)
 (* ================================================================ *)
 
-let keeper_proactive_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_PROACTIVE_MAX_TOKENS"
-    ~default:1024
-    ~min_v:128
-    ~max_v:4096
-
-let keeper_deterministic_temp () : float =
-  float_of_env_default
-    "MASC_KEEPER_DETERMINISTIC_TEMP"
-    ~default:0.3
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_reflection_temp () : float =
-  float_of_env_default
-    "MASC_KEEPER_REFLECTION_TEMP"
-    ~default:0.6
-    ~min_v:0.0
-    ~max_v:2.0
-
-let keeper_planning_temp () : float =
-  float_of_env_default
-    "MASC_KEEPER_PLANNING_TEMP"
-    ~default:0.35
-    ~min_v:0.0
-    ~max_v:2.0
+(* Inference params (temperature, max_tokens) delegated to OAS cascade. *)
 
 let keeper_batch_limit () : int =
   int_of_env_default
@@ -486,72 +442,14 @@ let keeper_max_tool_rounds () : int =
     ~min_v:1
     ~max_v:20
 
-(** Max tokens for autonomous execution MODEL calls.
-    Env: [MASC_KEEPER_AUTONOMOUS_MAX_TOKENS]. Default: 4000. *)
-let keeper_autonomous_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS"
-    ~default:4000
-    ~min_v:512
-    ~max_v:16000
-
-(** Max tokens for keeper deliberation calls.
-    Env: [MASC_KEEPER_DELIBERATION_MAX_TOKENS]. Default: 1024. *)
-let keeper_deliberation_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_DELIBERATION_MAX_TOKENS"
-    ~default:1024
-    ~min_v:256
-    ~max_v:8000
-
-(** Max tokens for explicit reply generation.
-    Env: [MASC_KEEPER_EXPLICIT_REPLY_MAX_TOKENS]. Default: 256. *)
-let keeper_explicit_reply_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_EXPLICIT_REPLY_MAX_TOKENS"
-    ~default:256
-    ~min_v:64
-    ~max_v:2048
-
-(** Max tokens for social board initial turn.
-    Env: [MASC_KEEPER_SOCIAL_INITIAL_MAX_TOKENS]. Default: 768. *)
-let keeper_social_initial_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_SOCIAL_INITIAL_MAX_TOKENS"
-    ~default:768
-    ~min_v:256
-    ~max_v:4096
-
-(** Max tokens for social board followup turns.
-    Env: [MASC_KEEPER_SOCIAL_FOLLOWUP_MAX_TOKENS]. Default: 512. *)
-let keeper_social_followup_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_SOCIAL_FOLLOWUP_MAX_TOKENS"
-    ~default:512
-    ~min_v:128
-    ~max_v:4096
+(* Inference-related max_tokens params (autonomous, deliberation,
+   explicit_reply, social_initial, social_followup, unified_temperature,
+   unified_max_tokens) have been removed. OAS cascade config now owns
+   these values. See issue #2408 Phase 3. *)
 
 (* ================================================================ *)
-(* Unified Keeper Turn parameters                                   *)
+(* Unified Keeper Turn parameters (operational only)                *)
 (* ================================================================ *)
-
-(** Temperature for unified keeper turns.
-    Env: [MASC_KEEPER_UNIFIED_TEMP]. Default: 0.4. *)
-let keeper_unified_temperature () : float =
-  float_of_env_default
-    "MASC_KEEPER_UNIFIED_TEMP"
-    ~default:0.4
-    ~min_v:0.0
-    ~max_v:2.0
-
-(** Max output tokens for unified keeper turns.
-    Env: [MASC_KEEPER_UNIFIED_MAX_TOKENS]. Default: 2048. *)
-let keeper_unified_max_tokens () : int =
-  int_of_env_default
-    "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-    ~default:2048
-    ~min_v:256
-    ~max_v:16000
 
 (** Max agent turns (tool loops) for unified keeper turns.
     Env: [MASC_KEEPER_UNIFIED_MAX_TURNS]. Default: 1000. *)

@@ -51,10 +51,8 @@ let normalize_response_text ~(text : string) ~(tool_names : string list) :
     @param user_message The user's message to the keeper
     @param cascade_name Cascade profile name for model selection
     @param generation Current generation counter
-    @param max_turns Maximum agent turns (default 3)
-    @param guardrails Optional OAS guardrails for tool safety gates
-    @param temperature MODEL temperature (default 0.3)
-    @param max_tokens Maximum output tokens (default 4096) *)
+    @param max_turns Maximum agent turns (default 100)
+    @param guardrails Optional OAS guardrails for tool safety gates *)
 let run_turn
     ~(config : Room.config)
     ~(meta : Keeper_types.keeper_meta)
@@ -69,8 +67,6 @@ let run_turn
     ~(generation : int)
     ?(max_turns : int = 100)
     ?guardrails
-    ?(temperature : float = 0.3)
-    ?(max_tokens : int = 4096)
     ?max_cost_usd
     ?on_event
     ?(autonomy_filter : string option)
@@ -170,8 +166,6 @@ let run_turn
       ~context_reducer:reducer
       ~memory
       ~max_turns
-      ~temperature
-      ~max_tokens
       ?guardrails
       ?on_event
       ~agent_ref

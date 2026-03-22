@@ -179,7 +179,7 @@ Keep it concise — max 3 sentences per step.|}
   match
     Oas_worker.run_named ~cascade_name:"keeper_autonomy"
       ~goal:prompt
-      ~max_turns:1 ~temperature:0.3 ~max_tokens:500 ()
+      ~max_turns:1 ()
   with
   | Ok result ->
     Ok (Agent_sdk.Types.text_of_content result.Oas_worker.response.content)

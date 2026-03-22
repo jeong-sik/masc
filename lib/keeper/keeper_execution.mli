@@ -126,6 +126,3 @@ val proactive_prompt_for_keeper :
 
 (** Generate retry instruction for proactive attempt. *)
 val proactive_retry_instruction : int -> reason:string -> string
-
-(** Get temperature for proactive attempt. *)
-val proactive_temperature : int -> float

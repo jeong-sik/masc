@@ -15,11 +15,11 @@ let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
-       with_read_auth (fun state _req reqd ->
+       with_token_permission_auth ~permission:Types.CanBroadcast
+         (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
-             let agent_name = json |> Yojson.Safe.Util.member "agent_name" |> Yojson.Safe.Util.to_string in
              let message = json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string in
              let config = state.Mcp_server.room_config in
              let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
@@ -34,11 +34,11 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.post "/broadcast" (fun request reqd ->
        (* POST /broadcast - Alias for autocov compatibility *)
-       with_read_auth (fun state _req reqd ->
+       with_token_permission_auth ~permission:Types.CanBroadcast
+         (fun state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let json = Yojson.Safe.from_string body_str in
-             let agent_name = json |> Yojson.Safe.Util.member "agent_name" |> Yojson.Safe.Util.to_string in
              let message = json |> Yojson.Safe.Util.member "message" |> Yojson.Safe.Util.to_string in
              let config = state.Mcp_server.room_config in
              let _ = Room.broadcast config ~from_agent:agent_name ~content:message in
@@ -201,7 +201,8 @@ let add_routes ~sw ~clock router =
 
   (* Keeper config update — POST (PATCH semantic) to update prompt/drift fields *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
-       with_read_auth (fun state req reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun state _agent_name req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            let req_path = Http.Request.path req in
            let prefix = "/api/v1/keepers/" in

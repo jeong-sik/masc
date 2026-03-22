@@ -70,6 +70,36 @@ let test_route_auth_contracts () =
     (file_contains_pattern "lib/server/server_h2_gateway_routes_cp.ml"
        {|h2_authorize_tool state ~tool_name:"masc_operator_confirm"|})
 
+let test_http_write_auth_contracts () =
+  check bool "server auth no longer accepts query token fallback" true
+    (not
+       (file_contains_pattern "lib/server/server_auth.ml"
+          {|query_param request "token"|}));
+  check bool "server auth defines token-bound permission helper" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       "let authorize_token_bound_permission_request");
+  check bool "server auth exposes token-bound route helper" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       "and with_token_permission_auth");
+  check bool "broadcast route requires token-bound broadcast permission" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       {|with_token_permission_auth ~permission:Types.CanBroadcast|});
+  check bool "keeper config update requires admin permission" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       {|with_token_permission_auth ~permission:Types.CanAdmin|});
+  check bool "board vote route requires token-bound broadcast permission" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
+       {|with_token_permission_auth ~permission:Types.CanBroadcast|});
+  check bool "board vote route overwrites voter from auth identity" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
+       {|json_upsert_string_field "voter" agent_name|});
+  check bool "board comment route overwrites author from auth identity" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_activity.ml"
+       {|json_upsert_string_field "author" agent_name|});
+  check bool "provider runs post requires admin permission" true
+    (file_contains_pattern "lib/server/server_routes_http_routes_provider_runs.ml"
+       {|with_token_permission_auth ~permission:Types.CanAdmin|})
+
 let test_input_validation_contracts () =
   (* Bug #1602: broadcast must reject empty messages *)
   check bool "broadcast validates empty message" true
@@ -173,6 +203,12 @@ let test_activity_surface_contracts () =
   check bool "room top-level module emits activity events" true
     (file_contains_pattern "lib/room.ml"
        "Activity_graph.emit config");
+  check bool "room task lifecycle emits activity events via hook" true
+    (file_contains_pattern "lib/room/room_task.ml"
+       "!Room_hooks.activity_emit_fn config");
+  check bool "room broadcast emits activity events via hook" true
+    (file_contains_pattern "lib/room/room_state.ml"
+       "!Room_hooks.activity_emit_fn config");
   check bool "board success paths emit activity events" true
     (file_contains_pattern "lib/tool_inline_dispatch_extra.ml"
        "Activity_graph.emit config");
@@ -243,6 +279,7 @@ let () =
            test_case "sync and asset contracts" `Quick test_ci_sync_and_asset_contracts;
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;
            test_case "route auth contracts" `Quick test_route_auth_contracts;
+           test_case "http write auth contracts" `Quick test_http_write_auth_contracts;
            test_case "input validation contracts" `Quick test_input_validation_contracts;
            test_case "dashboard component split contracts" `Quick test_dashboard_component_split_contracts;
            test_case "activity surface contracts" `Quick test_activity_surface_contracts;

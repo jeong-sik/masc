@@ -29,6 +29,11 @@ let activity_events_http_json ~state request =
 let activity_graph_http_json ~state request =
   Server_activity_http.graph_http_json ~deps:activity_http_deps ~state request
 
+let json_upsert_string_field name value = function
+  | `Assoc fields ->
+      `Assoc ((name, `String value) :: List.remove_assoc name fields)
+  | json -> json
+
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
@@ -157,10 +162,14 @@ let add_routes router =
 
   (* Board write APIs — used by Bevy Viewer *)
   |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+       with_token_permission_auth ~permission:Types.CanBroadcast
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
-             let args = Yojson.Safe.from_string body_str in
+             let args =
+               Yojson.Safe.from_string body_str
+               |> json_upsert_string_field "voter" agent_name
+             in
              let (ok, msg) = Tool_board.handle_tool "masc_board_vote" args in
              let status = if ok then `OK else `Bad_request in
              respond_json_with_cors ~status request reqd
@@ -177,10 +186,14 @@ let add_routes router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+       with_token_permission_auth ~permission:Types.CanBroadcast
+         (fun _state agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
            try
-             let args = Yojson.Safe.from_string body_str in
+             let args =
+               Yojson.Safe.from_string body_str
+               |> json_upsert_string_field "author" agent_name
+             in
              let (ok, msg) = Tool_board.handle_tool "masc_board_comment" args in
              let status = if ok then `Created else `Bad_request in
              respond_json_with_cors ~status request reqd

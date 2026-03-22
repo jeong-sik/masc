@@ -411,10 +411,10 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
         match spec.spawn_model with
         | Some model_name -> Some model_name
         | None ->
-            let default_model =
-              Model_spec.default_local_model_spec ()
+            let _label, model_id =
+              Oas_model_resolve.default_local_model_label_and_id ()
             in
-            Some default_model.model_id
+            Some model_id
       in
       match model_name with
       | None -> Error "local worker model resolution failed"
@@ -432,8 +432,8 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
                   Some assignment.runtime_id )
           | Error err -> Error err)
     else
-      let default_spec = Model_spec.default_local_model_spec () in
-      Ok (Model_spec.label_of_model_spec default_spec, None, None)
+      let label, _model_id = Oas_model_resolve.default_local_model_label_and_id () in
+      Ok (label, None, None)
   in
   match runtime_result with
   | Error e -> Error (spec, runtime_actor_name, e)

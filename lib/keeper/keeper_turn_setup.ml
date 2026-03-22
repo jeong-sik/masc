@@ -296,7 +296,7 @@ let ensure_keeper_exists
     (match ensure_api_keys_for_labels meta.models with
      | Error e -> Error e
      | Ok () ->
-       let primary_max_context = Model_spec.resolve_primary_max_context meta.models in
+       let primary_max_context = Oas_model_resolve.resolve_primary_max_context meta.models in
        let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
        let persona_extended =
          Keeper_types_profile.load_persona_extended name

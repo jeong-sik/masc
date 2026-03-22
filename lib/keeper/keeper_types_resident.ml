@@ -66,26 +66,9 @@ let maybe_append_keeper_fallback_models (models : string list) =
     if extra = [] then models else models @ extra
 
 (** Check API key availability using model label strings.
-    Parses labels to extract api_key_env, filtering out unparseable labels. *)
+    Delegates to Oas_model_resolve which uses OAS Provider_registry directly. *)
 let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
-  let specs = Model_spec.available_model_specs_of_strings labels in
-  if specs = [] && labels <> [] then
-    Error (Printf.sprintf "No valid/available model specs for labels: %s"
-      (String.concat ", " labels))
-  else
-    let missing =
-      List.filter_map (fun m ->
-        match m.Model_spec.api_key_env with
-        | None -> None
-        | Some env ->
-            let v = Sys.getenv_opt env |> Option.value ~default:"" in
-            if v = "" then Some env else None)
-        specs
-    in
-    match missing with
-    | [] -> Ok ()
-    | xs ->
-        Error (Printf.sprintf "Missing API key env vars: %s" (String.concat ", " xs))
+  Oas_model_resolve.ensure_api_keys_for_labels labels
 
 (** Legacy single-file metrics path (for fallback reads). *)
 let keeper_metrics_path config name =

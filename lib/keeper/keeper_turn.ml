@@ -120,7 +120,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
        | Error e -> (false, "❌ " ^ e)
        | Ok () ->
          let primary_max_context =
-           Model_spec.resolve_primary_max_context effective_models
+           Oas_model_resolve.resolve_primary_max_context effective_models
          in
             let base_dir = session_base_dir ctx.config in
             let policy_mode_learned = keeper_policy_mode_is_learned meta in

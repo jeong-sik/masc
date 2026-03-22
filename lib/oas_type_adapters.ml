@@ -1,44 +1,13 @@
 (** OAS type adapters — convert MASC model labels and Provider_config to
     OAS (Agent SDK) types.
 
-    All conversions use string model labels or OAS Provider_config.t.
-    No dependency on Model_spec.model_spec type.
+    All conversions use OAS Cascade_config and Provider_registry directly.
+    No dependency on Model_spec types or functions.
 
     @since 2.130.0
     @since 2.133.0 — Phase 1: migrated to Model_spec bridge
-    @since 2.134.0 — Phase 6: eliminated Model_spec.model_spec exposure *)
-
-(** Convert a model label string (e.g. "llama:qwen3.5") to an OAS Provider.config.
-    Parses via Model_spec internally; returns None only if parsing fails. *)
-let to_oas_provider_of_label (label : string) : Agent_sdk.Provider.config option =
-  match Model_spec.model_spec_of_string label with
-  | Error _ -> None
-  | Ok spec ->
-    let pc = Model_spec.to_provider_config spec in
-    let rn = Model_spec.registry_name_of_provider spec.provider in
-    match rn with
-    | "claude" ->
-      Some { Agent_sdk.Provider.provider = Anthropic;
-             model_id = pc.model_id;
-             api_key_env =
-               if pc.api_key <> "" then pc.api_key
-               else "ANTHROPIC_API_KEY" }
-    | "llama" ->
-      Some { provider = Local { base_url = pc.base_url };
-             model_id = pc.model_id; api_key_env = "" }
-    | "gemini" ->
-      Some { provider = OpenAICompat { base_url = pc.base_url; auth_header = None;
-               path = pc.request_path; static_token = None };
-             model_id = pc.model_id;
-             api_key_env =
-               if pc.api_key <> "" then pc.api_key
-               else "GEMINI_API_KEY" }
-    | _ ->
-      (* glm, openrouter, custom: all OpenAI_compat wire format *)
-      Some { provider = OpenAICompat { base_url = pc.base_url; auth_header = None;
-               path = pc.request_path; static_token = None };
-             model_id = pc.model_id;
-             api_key_env = pc.api_key }
+    @since 2.134.0 — Phase 6: eliminated Model_spec.model_spec exposure
+    @since 2.135.0 — Phase 7: eliminated Model_spec function calls *)
 
 (** Convert OAS Provider_config.t to OAS Provider.config for Agent Builder.
     Provider_config.t already contains resolved API key and endpoint;
@@ -77,6 +46,14 @@ let provider_config_to_oas (cfg : Llm_provider.Provider_config.t)
         path = cfg.request_path; static_token = None };
       model_id = cfg.model_id;
       api_key_env = cfg.api_key }
+
+(** Convert a model label string (e.g. "llama:qwen3.5") to an OAS Provider.config.
+    Parses via OAS Cascade_config.parse_model_string which uses
+    Provider_registry as SSOT. Returns None only if parsing fails. *)
+let to_oas_provider_of_label (label : string) : Agent_sdk.Provider.config option =
+  match Llm_provider.Cascade_config.parse_model_string label with
+  | None -> None
+  | Some pc -> Some (provider_config_to_oas pc)
 
 let to_oas_message (m : Agent_sdk.Types.message) : Agent_sdk.Types.message option =
   match m.role with System -> None | _ -> Some m

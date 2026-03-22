@@ -146,7 +146,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         </div>
       </div>
 
-      <div class="flex flex-col gap-2.5">
+      <div class="flex flex-col gap-4">
         ${filtered.map((agent: Agent) => {
           const brief = briefMap.get(agent.name)
           const keeper = findKeeper(agent.name, keeperList, keeperBriefs)
@@ -157,7 +157,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <div
-              class="roster-card rounded-md transition-all duration-200 ${isKeeper ? 'roster-card--keeper' : ''}"
+              class="roster-card rounded-md p-4 transition-all duration-200 ${isKeeper ? 'roster-card--keeper' : ''}"
               key=${agent.name}
               onClick=${() => openAgentDetail(agent.name)}
               role="button"
@@ -173,7 +173,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   activityAge=${lastActivity}
                 />
               </div>
-              <div class="flex-1 min-w-0 flex flex-col gap-[5px] justify-center">
+              <div class="flex-1 min-w-0 flex flex-col gap-2 justify-center">
                 <div class="flex items-center gap-[var(--space-sm,8px)]">
                   <strong class="text-[length:var(--fs-lg)] text-[color:var(--ff-gold-bright)] font-semibold tracking-[0.3px]">${agent.name}</strong>
                   ${isKeeper ? html`

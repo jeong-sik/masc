@@ -133,7 +133,7 @@ export function SideRail() {
       <div class="flex-1 overflow-y-auto py-4 px-3">
         <div class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] px-2 mb-2">탐색</div>
 
-        <div class="flex flex-col gap-0.5">
+        <div class="flex flex-col gap-1">
           ${DASHBOARD_SURFACES.map(surface => {
             const isActive = surface.id === currentSurface
             return html`
@@ -155,7 +155,7 @@ export function SideRail() {
           return html`
             <div class="mt-5 pt-4 mx-4 border-t border-[var(--border-slate-12)]">
               <div class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] px-2 mb-2">${currentView?.label ?? currentSurface}</div>
-              <div class="flex flex-col gap-0.5">
+              <div class="flex flex-col gap-1">
                 ${sectionItems.map(item => html`
                   <button
                     class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-left cursor-pointer border-l-2 border-t-0 border-r-0 border-b-0 border-solid text-[13px] transition-all duration-150 ${currentSection?.id === item.id ? 'border-l-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-medium' : 'border-l-transparent bg-transparent text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]'}"

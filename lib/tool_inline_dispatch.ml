@@ -261,16 +261,17 @@ let dispatch (ctx : context) ~(name : string) : result option =
             if trimmed = "" then None else Some trimmed
         | _ -> None
       in
-      let runtime_model =
+      let runtime_model_valid =
         match (spawn_agent_name, model_name) with
         | "llama", None -> Error "model is required when agent_name=llama"
         | "llama", Some raw ->
             let spec_name =
               if String.contains raw ':' then raw else "llama:" ^ raw
             in
-            Model_spec.model_spec_of_string spec_name
-        | _, Some _ -> Model_spec.default_execution_model_spec ()
-        | _, None -> Model_spec.default_execution_model_spec ()
+            (* Validate the label parses without retaining model_spec *)
+            Model_spec.model_spec_of_string spec_name |> Result.map (fun _ -> ())
+        | _ ->
+            Model_spec.default_execution_model_spec () |> Result.map (fun _ -> ())
       in
       let module U = Yojson.Safe.Util in
       let working_dir = match arguments |> U.member "working_dir" with
@@ -283,9 +284,9 @@ let dispatch (ctx : context) ~(name : string) : result option =
             Some (Team_session_types.execution_scope_of_string s)
         | _ -> None
       in
-       (match runtime_model with
+       (match runtime_model_valid with
        | Error e -> Some (false, e)
-       | Ok _runtime_model ->
+       | Ok () ->
            ignore (sw, state, execution_scope);
            let result =
              Spawn.spawn ~agent_name:spawn_agent_name

@@ -88,8 +88,8 @@ let execute_spawn_pipeline
                        | Some n -> n | None -> 10
                      in
                      let oas_result =
-                       Oas_worker.run_model
-                         ~model_spec:prepared.runtime_model
+                       Oas_worker.run_model_by_label
+                         ~model_label:(Model_spec.label_of_model_spec prepared.runtime_model)
                          ~goal:prepared.spec.spawn_prompt
                          ~system_prompt:(Printf.sprintf
                            "You are agent '%s'. Execute the task and return a clear result."

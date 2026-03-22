@@ -52,32 +52,21 @@ let worker_name_for_state (state : Mdal.loop_state) =
   let safe_loop = Room_utils.safe_filename state.loop_id |> trunc in
   sprintf "mdal-%s-%02d" safe_loop (state.current_iteration + 1)
 
-let model_provider_label = function
-  | Model_spec.Llama -> "llama"
-  | Model_spec.Claude -> "claude"
-  | Model_spec.OpenAI -> "openai"
-  | Model_spec.Gemini -> "gemini"
-  | Model_spec.Glm_cloud -> "glm"
-  | Model_spec.OpenRouter -> "openrouter"
-  | Model_spec.Custom name -> "custom:" ^ name
-
 let model_label (spec : Model_spec.model_spec) =
-  sprintf "%s:%s" (model_provider_label spec.provider) spec.model_id
+  Model_spec.label_of_model_spec spec
 
+(** Validate that the model spec uses a supported provider.
+    Rejects OpenRouter and Custom providers. *)
 let validate_model_spec (spec : Model_spec.model_spec) :
     (Model_spec.model_spec, string) result =
-  match spec.provider with
-  | Model_spec.Claude
-  | Model_spec.OpenAI
-  | Model_spec.Gemini
-  | Model_spec.Llama
-  | Model_spec.Glm_cloud -> Ok spec
-  | Model_spec.OpenRouter
-  | Model_spec.Custom _ ->
+  let provider_str = Model_spec.string_of_provider spec.provider in
+  match provider_str with
+  | "llama" | "claude" | "openai" | "gemini" | "glm_cloud" -> Ok spec
+  | _ ->
       Error
         (sprintf
            "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
-           (model_provider_label spec.provider))
+           provider_str)
 
 let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
     (Model_spec.model_spec * string, string) result =

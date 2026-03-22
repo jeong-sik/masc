@@ -420,6 +420,45 @@ let run_named
   | Ok _ -> Error (Printf.sprintf "cascade %s: response rejected by accept" cascade_name)
   | Error e -> Error e
 
+(** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
+    Parses the label into a model_spec internally. Callers do not need to hold
+    a Model_spec.model_spec value. *)
+let run_model_by_label
+    ~(model_label : string)
+    ~goal
+    ?(system_prompt = "")
+    ?(tools = [])
+    ?(max_turns = 20)
+    ?(temperature = 0.7)
+    ?(max_tokens = 4096)
+    ?(accept = fun (_ : Oas_response.api_response) -> true)
+    ?guardrails
+    ?hooks
+    ?context_reducer
+    ?memory
+    ?on_event
+    ()
+  : (run_result, string) result =
+  match Model_spec.model_spec_of_string model_label with
+  | Error msg -> Error msg
+  | Ok model_spec ->
+    match require_eio () with
+    | Error e -> Error e
+    | Ok (sw, net) ->
+        let config =
+          config_for_model ~name:"oas-label-model" ~model_spec ~system_prompt
+            ~tools ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
+            ?context_reducer ?memory
+            ~description:(Some (Printf.sprintf "model_label:%s" model_label))
+            ()
+        in
+        (match run ~sw ~net ~config ?on_event goal with
+        | Ok result when accept result.response -> Ok result
+        | Ok _ ->
+            Error
+              (Printf.sprintf "response rejected by accept from %s" model_label)
+        | Error e -> Error e)
+
 let run_model
     ~model_spec
     ~goal

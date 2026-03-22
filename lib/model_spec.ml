@@ -46,6 +46,23 @@ let string_of_provider = function
   | OpenRouter -> "openrouter"
   | Custom s -> sprintf "custom(%s)" s
 
+(** Provider name suitable for use in parseable "provider:model" labels.
+    Unlike {!string_of_provider} (display-oriented), this returns names
+    that {!model_spec_of_string} can round-trip. *)
+let label_provider = function
+  | Llama -> "llama"
+  | Claude -> "claude"
+  | OpenAI -> "openai"
+  | Gemini -> "gemini"
+  | Glm_cloud -> "glm"
+  | OpenRouter -> "openrouter"
+  | Custom _ -> "custom"
+
+(** Build a parseable "provider:model_id" label from a model_spec.
+    The result can be passed to {!model_spec_of_string} for round-trip. *)
+let label_of_model_spec (spec : model_spec) : string =
+  sprintf "%s:%s" (label_provider spec.provider) spec.model_id
+
 (* ================================================================ *)
 (* OAS Provider facade                                               *)
 (* All OAS Llm_provider references are confined to this section.     *)

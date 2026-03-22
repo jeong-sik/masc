@@ -103,7 +103,7 @@ export function WarRoomHeroStrip({
           </div>
           <div class="mt-3 text-[rgba(226,232,240,0.86)] leading-[1.55] max-w-[82ch]">${heroSummary}</div>
           ${activeSummary?.summary
-            ? html`<div class="grid gap-1 mt-2.5 p-[10px_12px] rounded-[10px] border border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-strong)] text-[13px] leading-[1.45] cmd-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
+            ? html`<div class="grid gap-1 mt-2.5 py-2.5 px-3 rounded-[10px] border border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-strong)] text-[13px] leading-[1.45] cmd-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
                 <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
                 <span>${activeSummary.summary}</span>
               </div>`
@@ -140,27 +140,27 @@ export function WarRoomHeroStrip({
         </div>
       </div>
       <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3">
-        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5">
+        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5">
           <span>워커</span>
           <strong>${workerJoined ?? 0}/${workerExpected ?? 0}</strong>
           <small>${swarmHasEvidence ? (swarm?.summary?.completed_workers ?? 0) : 0} 완료 · ${workerCardCount} 카드</small>
         </div>
-        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5">
+        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5">
           <span>런타임</span>
           <strong>${swarmHasEvidence ? (swarm?.provider?.runtime_blocker ? '막힘' : swarm?.provider?.provider_reachable ? '준비됨' : selectedSession ? displayStatus(selectedSession.status) : '확인 필요') : (selectedSession ? displayStatus(selectedSession.status) : '확인 필요')}</strong>
           <small>${swarmHasEvidence ? `설정 ${swarm?.provider?.configured_capacity ?? 'n/a'} · 실제 ${swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0} · hot ${swarm?.summary?.peak_hot_slots ?? swarm?.provider?.peak_active_slots ?? 0}` : `세션 워커 ${workerCardCount}`}</small>
         </div>
-        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 ${toneClass(blockersCount > 0 || pendingApprovals > 0 || pendingConfirmTotal > 0 ? 'warn' : 'ok')}">
+        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5 ${toneClass(blockersCount > 0 || pendingApprovals > 0 || pendingConfirmTotal > 0 ? 'warn' : 'ok')}">
           <span>압력</span>
           <strong>${blockersCount + pendingApprovals + pendingConfirmTotal}</strong>
           <small>막힘 ${blockersCount} · 승인 ${pendingApprovals} · 확인 ${pendingConfirmVisible}${pendingConfirmHidden > 0 ? `/${pendingConfirmTotal}` : ''}</small>
         </div>
-        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 ${toneClass(guidanceLayerTone(guidanceLayer))}">
+        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5 ${toneClass(guidanceLayerTone(guidanceLayer))}">
           <span>상주 판정기</span>
           <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
           <small>${guidanceFreshnessLabel(activeSummary)}${residentRuntime?.model_used ? ` · ${residentRuntime.model_used}` : ''}</small>
         </div>
-        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5">
+        <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5">
           <span>마지막 신호</span>
           <strong>${relativeTime(latestSignal)}</strong>
           <small>${latestMessage ? '메시지' : latestTrace ? '트레이스' : '대기 중'}</small>

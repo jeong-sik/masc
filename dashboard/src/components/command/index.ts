@@ -55,7 +55,7 @@ function SurfaceTabs() {
               .filter(surface => surface.group === group.id)
               .map(surface => html`
                 <button
-                  class="border border-[var(--white-12)] bg-[var(--white-4)] text-[var(--text-body)] p-[8px_14px] capitalize rounded-full cmd-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
+                  class="border border-[var(--white-12)] bg-[var(--white-4)] text-[var(--text-body)] py-2 px-3.5 capitalize rounded-full cmd-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
                   onClick=${() => {
                     setCommandPlaneSurface(surface.id)
                     navigate('operations', surfaceRouteParams(surface.id))

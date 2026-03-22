@@ -27,7 +27,7 @@ export function CommandWorkflowBanner() {
   const context = workflowContextForRoute(route.value)
   if (!context) return null
   return html`
-    <section class="rounded-[14px] border border-[rgba(34,211,238,0.26)] bg-[linear-gradient(180deg,rgba(34,211,238,0.1),var(--white-3))] p-[14px_16px] grid gap-2">
+    <section class="rounded-[14px] border border-[rgba(34,211,238,0.26)] bg-[linear-gradient(180deg,rgba(34,211,238,0.1),var(--white-3))] py-3.5 px-4 grid gap-2">
       <div class="flex gap-2 flex-wrap items-center">
         <strong>${context.source_label}</strong>
         <span class="rounded-full">${workflowActionLabel(context.action_type)}</span>
@@ -36,7 +36,7 @@ export function CommandWorkflowBanner() {
       </div>
       <div class="text-[var(--text-strong)] leading-normal">${context.summary}</div>
       ${context.payload_preview
-        ? html`<div class="p-[10px_12px] border border-[var(--white-8)] bg-[var(--white-5)] text-[var(--text-strong)] leading-[1.45] rounded-xl">${context.payload_preview}</div>`
+        ? html`<div class="py-2.5 px-3 border border-[var(--white-8)] bg-[var(--white-5)] text-[var(--text-strong)] leading-[1.45] rounded-xl">${context.payload_preview}</div>`
         : null}
     </section>
   `
@@ -49,12 +49,12 @@ export function CommandEntryStrip() {
 
   return html`
     <section class="grid grid-cols-2 gap-3">
-      <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5">
+      <article class="py-3.5 px-4 rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5">
         <span class="text-[rgba(148,163,184,0.92)] text-[11px] uppercase tracking-[0.08em]">현재 표면</span>
         <strong class="text-[var(--text-near-white)] text-lg leading-[1.2] break-words">${guide.title}</strong>
         <p class="m-0 text-[var(--frost-72)] leading-normal">${guide.description}</p>
       </article>
-      <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5">
+      <article class="py-3.5 px-4 rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5">
         <span class="text-[rgba(148,163,184,0.92)] text-[11px] uppercase tracking-[0.08em]">다음 추천</span>
         <strong class="text-[var(--text-near-white)] text-lg leading-[1.2] break-words">${recommendation.tool}</strong>
         <p class="m-0 text-[var(--frost-72)] leading-normal">${recommendation.reason}</p>
@@ -245,13 +245,13 @@ export function SummaryCards() {
   const cache = microarch?.cache
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 주의</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5 ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 주의</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5 ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] py-3.5 px-4 flex flex-col gap-1.5 ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}</small></div>
     </div>
   `
 }

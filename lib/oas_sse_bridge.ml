@@ -30,7 +30,7 @@ let relay_event = function
         ("payload", payload);
         ("ts_unix", `Float (Time_compat.now ()));
       ] in
-      (try Sse.broadcast sse_json
+      (try Sse.broadcast_to Coordinators sse_json
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Server.error "oas_sse_bridge: broadcast failed: %s"
            (Printexc.to_string exn))

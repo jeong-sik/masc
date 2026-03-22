@@ -131,7 +131,7 @@ let handle_start (ctx : context) args =
       persist_loop config state;
 
       (* Broadcast via SSE *)
-      (try Sse.broadcast (`Assoc [
+      (try Sse.broadcast_to Coordinators (`Assoc [
          ("type", `String "mdal_started");
          ("loop_id", `String loop_id);
          ("profile", `String profile.name);
@@ -307,7 +307,7 @@ let handle_iterate (ctx : context) args =
                     with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Misc.warn "tool_mdal: iter board post failed: %s" (Printexc.to_string exn));
 
                    (* Broadcast via SSE *)
-                   (try Sse.broadcast (`Assoc [
+                   (try Sse.broadcast_to Coordinators (`Assoc [
                       ("type", `String "mdal_iteration");
                       ("loop_id", `String state.loop_id);
                       ("iteration", `Int iter_num);

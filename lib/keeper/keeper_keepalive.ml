@@ -209,7 +209,7 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                      in
                      Dated_jsonl.append metrics_store snapshot;
                      (try
-                        Sse.broadcast
+                        Sse.broadcast_to Coordinators
                           (`Assoc
                             [
                               ("type", `String "keeper_heartbeat");

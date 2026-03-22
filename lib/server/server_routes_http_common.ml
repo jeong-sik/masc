@@ -368,9 +368,9 @@ let stop_sse_session = Server_mcp_transport_http.stop_sse_session
 let close_all_sse_connections =
   Server_mcp_transport_http.close_all_sse_connections
 
-let handle_get_mcp ?legacy_messages_endpoint ?(profile = Mcp_eio.Full) request reqd =
+let handle_get_mcp ?legacy_messages_endpoint ?(profile = Mcp_eio.Full) ?sse_kind request reqd =
   Server_mcp_transport_http.handle_get_mcp ~deps:mcp_transport_http_deps
-    ?legacy_messages_endpoint ~profile request reqd
+    ?legacy_messages_endpoint ~profile ?sse_kind request reqd
 
 let sse_simple_handler request reqd =
   Server_mcp_transport_http.sse_simple_handler ~deps:mcp_transport_http_deps

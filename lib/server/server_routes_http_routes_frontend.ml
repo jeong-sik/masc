@@ -108,7 +108,7 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/sse"
        (fun request reqd ->
          with_public_read (fun _state req reqd ->
-           handle_get_mcp
+           handle_get_mcp ~sse_kind:Sse.Observer
              ~legacy_messages_endpoint:(legacy_messages_endpoint_url req)
              req reqd
          ) request reqd)

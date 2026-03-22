@@ -494,7 +494,7 @@ let handle_post_mcp ~deps ?(profile = Mcp_eio.Full) request reqd =
                           ("Internal error: " ^ Printexc.to_string exn)))
 
 let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
-    request reqd =
+    ?(sse_kind = Sse.Coordinator) request reqd =
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
@@ -551,7 +551,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
             | Some info -> ignore (send_raw info event)
           in
           let client_id, event_stream, evicted =
-            Sse.register session_id ~push
+            Sse.register ~kind:sse_kind session_id ~push
               ~last_event_id:(Option.value ~default:0 last_event_id)
           in
           (match evicted with

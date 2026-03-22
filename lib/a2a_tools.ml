@@ -591,7 +591,7 @@ let notify_event ~(event_type : event_type) ~(agent : string) ~(data : Yojson.Sa
         ("method", `String "masc/event");
         ("params", event_params);
       ] in
-      Sse.broadcast mcp_notification;
+      Sse.broadcast_to Coordinators mcp_notification;
       Log.debug ~ctx:"a2a" "Event %s from %s buffered+SSE (sub: %s)"
         (show_event_type event_type) agent sub.id
     end

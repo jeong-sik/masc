@@ -225,13 +225,7 @@
 }
 
 /* --- Tool Summary View --- */
-.tool-summary {
-  padding: 8px 0;
-}
 
-.tool-summary-section {
-  margin-top: 20px;
-}
 
 .tool-summary-heading {
   font-size: var(--fs-base);

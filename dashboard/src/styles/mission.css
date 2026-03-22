@@ -434,12 +434,8 @@
 }
 
 .mission-fact-tile small {
-  display: grid;
-  gap: 4px;
 }
 
-.mission-crew-event span,
-.mission-crew-event strong,
 .mission-member-preview {
   width: 100%;
   padding: 12px;

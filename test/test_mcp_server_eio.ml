@@ -9,6 +9,8 @@ module Mcp = Masc_mcp.Mcp_server
 module Config = Masc_mcp.Config
 module Mode = Masc_mcp.Mode
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 (* ===== Test Helpers ===== *)
 
 let temp_dir () =
@@ -194,6 +196,11 @@ let result_envelope_exn response =
   match List.assoc_opt "resultEnvelope" (result_fields_exn response) with
   | Some (`Assoc fields) -> fields
   | _ -> Alcotest.fail "resultEnvelope missing"
+
+let structured_content_exn response =
+  match List.assoc_opt "structuredContent" (result_fields_exn response) with
+  | Some json -> json
+  | None -> Alcotest.fail "structuredContent missing"
 
 let workflow_next_step_names response =
   match List.assoc_opt "workflow_guidance" (result_envelope_exn response) with
@@ -1684,6 +1691,59 @@ let test_handle_request_invalid_json () =
 
   cleanup_dir base_path
 
+let test_handle_request_tools_call_cache_get_structured_content () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 116);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "masc_cache_get");
+      ("arguments", `Assoc [ ("key", `String "missing") ]);
+    ]);
+  ]) in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let structured = structured_content_exn response in
+  Alcotest.(check bool) "cache hit false" false
+    Yojson.Safe.Util.(structured |> member "hit" |> to_bool);
+  Alcotest.(check string) "cache key" "missing"
+    Yojson.Safe.Util.(structured |> member "key" |> to_string);
+  cleanup_dir base_path
+
+let test_handle_request_tools_call_board_post_structured_content () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+
+  let base_path = temp_dir () in
+  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  ignore (Masc_mcp.Room.init state.room_config ~agent_name:None);
+  let request = Yojson.Safe.to_string (`Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 117);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String "masc_board_post");
+      ("arguments", `Assoc [
+        ("content", `String "hello board");
+        ("author", `String "tester");
+      ]);
+    ]);
+  ]) in
+  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let structured = structured_content_exn response in
+  Alcotest.(check string) "board content" "hello board"
+    Yojson.Safe.Util.(structured |> member "content" |> to_string);
+  Alcotest.(check string) "board author" "tester"
+    Yojson.Safe.Util.(structured |> member "author" |> to_string);
+  cleanup_dir base_path
+
 let test_handle_request_batch_rejected () =
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
@@ -2425,6 +2485,10 @@ let eio_tests = [
     test_handle_request_tools_call_transition_done_guidance;
   "handle tools/call deprecated claim alias", `Quick,
     test_handle_request_tools_call_deprecated_claim_alias;
+  "handle tools/call cache get structured content", `Quick,
+    test_handle_request_tools_call_cache_get_structured_content;
+  "handle tools/call board post structured content", `Quick,
+    test_handle_request_tools_call_board_post_structured_content;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)

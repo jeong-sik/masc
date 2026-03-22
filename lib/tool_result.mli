@@ -26,6 +26,8 @@ type t = {
     @param tool_name The MCP tool name (e.g. ["masc_status"])
     @param start_time Wall-clock time when the handler started
     @param raw The [(success, message)] tuple from the handler *)
+val structured_payload_of_message : string -> Yojson.Safe.t option
+
 val wrap : tool_name:string -> start_time:float -> (bool * string) -> t
 
 (** [to_json t] serializes to JSON for logging and observability. *)

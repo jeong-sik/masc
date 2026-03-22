@@ -52,6 +52,24 @@ let gather_context ~(config : Research_config.repo_config) : string =
       Buffer.add_string parts (Printf.sprintf "... and %d more\n" (count - 30));
     Buffer.add_string parts "```\n\n"
   with _ -> ());
+  (* API surface from .mli files — prevents LLM from hallucinating APIs *)
+  (try
+    let _, stdout =
+      Process_eio.run_argv_with_status ~timeout_sec:10.0
+        [ "grep"; "-rn"; "^val "; config.path ^ "/lib"; "--include=*.mli" ]
+    in
+    let sigs = String.split_on_char '\n' stdout
+      |> List.filter (fun s -> String.length s > 0) in
+    let count = List.length sigs in
+    if count > 0 then begin
+      let sample = if count > 40 then List.filteri (fun i _ -> i < 40) sigs else sigs in
+      Buffer.add_string parts (Printf.sprintf "## Public API signatures (%d total, from .mli files)\n```\n" count);
+      List.iter (fun s -> Buffer.add_string parts s; Buffer.add_char parts '\n') sample;
+      if count > 40 then
+        Buffer.add_string parts (Printf.sprintf "... and %d more\n" (count - 40));
+      Buffer.add_string parts "```\n\n"
+    end
+  with _ -> ());
   (* TODOs *)
   (try
     let _, stdout =

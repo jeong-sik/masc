@@ -278,7 +278,7 @@ function CharacterPlate({ name }: { name: string }) {
       ${isKeeper ? html`
         <div class="ff-plate__stats ff-plate__stats--keeper">
           <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${ctxPct != null ? `${ctxPct}%` : '—'}</span>
+            <span class="ff-stat__value">${ctxPct != null ? `${ctxPct}%` : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">CTX</span>
           </div>
           <div class="ff-stat rounded-md">
@@ -294,26 +294,26 @@ function CharacterPlate({ name }: { name: string }) {
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">행동</span>
           </div>
         </div>
-      ` : summary ? html`
+      ` : html`
         <div class="ff-plate__stats">
           <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${summary.tasks_completed}</span>
+            <span class="ff-stat__value">${summary ? summary.tasks_completed : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">완료</span>
           </div>
           <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${summary.tasks_claimed}</span>
+            <span class="ff-stat__value">${summary ? summary.tasks_claimed : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">수임</span>
           </div>
           <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${summary.messages_sent}</span>
+            <span class="ff-stat__value">${summary ? summary.messages_sent : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">메시지</span>
           </div>
           <div class="ff-stat rounded-md">
-            <span class="ff-stat__value">${summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : '0m'}</span>
+            <span class="ff-stat__value">${summary && summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : summary ? '0m' : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">활동</span>
           </div>
         </div>
-      ` : null}
+      `}
     </div>
   `
 }

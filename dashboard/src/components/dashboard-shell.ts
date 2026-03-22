@@ -65,7 +65,7 @@ export function ConnectionStatus() {
 
 function shortCommit(commit: string | null | undefined): string {
   const value = commit?.trim()
-  if (!value) return '커밋 정보 없음'
+  if (!value) return 'dev'
   return value.length > 10 ? value.slice(0, 10) : value
 }
 
@@ -75,7 +75,7 @@ export function BuildIdentityBadge() {
   const label = build
     ? `v${build.release_version} · ${shortCommit(build.commit)}`
     : status?.version
-      ? `v${status.version} · 커밋 정보 없음`
+      ? `v${status.version} · dev`
       : '버전 정보 없음'
 
   return html`
@@ -99,7 +99,7 @@ export function BuildIdentityBadge() {
               </div>
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>커밋</span>
-                <strong class="text-[color:var(--text-strong)] text-right">${build?.commit ?? '커밋 정보 없음'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${build?.commit ?? 'git 미감지 (dev)'}</strong>
               </div>
               <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>서버 시작</span>

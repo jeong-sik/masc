@@ -52,7 +52,8 @@ function jsonHeaders(): Record<string, string> {
   }
 }
 
-export const DEFAULT_GET_TIMEOUT_MS = 15_000
+// Backend dashboard timeout is 30s. Frontend must wait longer.
+export const DEFAULT_GET_TIMEOUT_MS = 35_000
 export const DEFAULT_POST_TIMEOUT_MS = 30_000
 export const DEFAULT_MCP_TIMEOUT_MS = 60_000
 export const ROOM_TRUTH_GET_TIMEOUT_MS = 30_000

@@ -471,10 +471,6 @@ let resolve_provider_run_request ~provider ~model_opt ~prompt =
               Ok (snapshot, model))
 
 let oas_provider_config_of_spec (spec : Model_spec.model_spec) =
-  (* Use registry_name_of_provider to identify Gemini instead of
-     matching the Model_spec.provider constructor directly.
-     Migration: callers will eventually receive Provider_config.t
-     and check kind = Gemini. *)
   match Model_spec.registry_name_of_provider spec.provider with
   | "gemini" -> (
       match Provider_adapter.resolve_gemini_direct_auth () with
@@ -493,6 +489,7 @@ let execute_single_agent_run ~sw:_ ~provider ~model ~prompt =
   match label_result with
   | Error _ as error -> error
   | Ok label -> (
+      (* Validate provider is runnable before attempting the run *)
       match Model_spec.model_spec_of_string label with
       | Error message -> Error message
       | Ok spec -> (
@@ -504,7 +501,7 @@ let execute_single_agent_run ~sw:_ ~provider ~model ~prompt =
                    provider)
           | Some _provider_cfg -> (
               match
-                Oas_worker.run_model ~model_spec:spec ~goal:prompt
+                Oas_worker.run_model_by_label ~model_label:label ~goal:prompt
                   ~system_prompt:(run_system_prompt provider)
                   ~max_turns:4 ~max_tokens:2048 ~temperature:0.2 ()
               with

@@ -235,14 +235,14 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                  | [] when m.models <> [] ->
                      `Assoc [("has_checkpoint", `Bool false)]
                  | _ ->
-                     let primary =
-                       match specs with m0 :: _ -> m0 | [] -> Model_spec.llama_default
+                     let primary_max_context =
+                       Model_spec.resolve_primary_max_context m.models
                      in
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =
                        Keeper_execution.load_context_from_checkpoint
                          ~trace_id:m.trace_id
-                         ~primary_model_max_tokens:(Model_spec.max_context primary)
+                         ~primary_model_max_tokens:primary_max_context
                          ~base_dir
                      in
                      match ctx_opt with

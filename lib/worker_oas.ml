@@ -172,7 +172,7 @@ let gate_config_of_execution_scope
 let build_agent
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(meta : Worker_container_types.worker_container_meta)
-    ~(model : Model_spec.model_spec)
+    ~(provider : Oas.Provider.config)
     ~(system_prompt : string)
     ~(tools : Oas.Tool.t list)
     ~(hooks : Oas.Hooks.hooks)
@@ -181,7 +181,6 @@ let build_agent
     ?(gate_config : Eval_gate.gate_config option)
     () : (Oas.Agent.t, string) result =
   let config = agent_config_of_worker_meta meta ~system_prompt in
-  let provider = oas_provider_of_model model in
   let tool_names =
     List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
   in
@@ -265,7 +264,7 @@ let rec run_worker_via_oas
     ~(sw : Eio.Switch.t)
     ~(base_path : string)
     ~(meta : Worker_container_types.worker_container_meta)
-    ~(model : Model_spec.model_spec)
+    ~(provider : Oas.Provider.config)
     ~(system_prompt : string)
     ~(prompt : string)
     ~(tools : Oas.Tool.t list)
@@ -302,7 +301,7 @@ let rec run_worker_via_oas
     }
   in
   let* agent =
-    build_agent ~net ~meta ~model ~system_prompt ~tools ~hooks
+    build_agent ~net ~meta ~provider ~system_prompt ~tools ~hooks
       ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ?gate_config ()
   in
   let* () =
@@ -424,7 +423,7 @@ let orchestrate_workers
     ~(sw : Eio.Switch.t)
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(workers : (Worker_container_types.worker_container_meta
-                 * Model_spec.model_spec
+                 * Oas.Provider.config
                  * string (* system_prompt *)
                  * Oas.Tool.t list
                  * Oas.Raw_trace.t
@@ -436,7 +435,7 @@ let orchestrate_workers
   let ( let* ) = Result.bind in
   let rec build_agents acc = function
     | [] -> Ok (List.rev acc)
-    | (meta, model, system_prompt, tools, raw_trace, heartbeat_cbs) :: rest ->
+    | (meta, provider, system_prompt, tools, raw_trace, heartbeat_cbs) :: rest ->
       let tool_names_ref = ref [] in
       let hooks =
         {
@@ -451,7 +450,7 @@ let orchestrate_workers
         }
       in
       let* agent =
-        build_agent ~net ~meta ~model ~system_prompt ~tools ~hooks
+        build_agent ~net ~meta ~provider ~system_prompt ~tools ~hooks
           ~raw_trace ~heartbeat_callbacks:heartbeat_cbs ()
       in
       ignore tool_names_ref;

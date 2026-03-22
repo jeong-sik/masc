@@ -5,7 +5,8 @@ open Printf
 include Worker_container
 
 let run_worker_oas ~sw ~base_path ~worker_name
-    ~(model : Model_spec.model_spec) ~team_session_id
+    ~(provider : Agent_sdk.Provider.config) ~(model_id : string)
+    ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
     ?thinking_enabled ?max_turns ?worker_run_id
     ~role
@@ -27,7 +28,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
     let meta =
       make_worker_meta ~base_path ~workspace_path ~team_session_id ~worker_name
         ~mcp_session_id ~role ~selection_note ~execution_scope ~worker_class
-        ~worker_size ~effective_model:model.model_id
+        ~worker_size ~effective_model:model_id
         ~thinking_enabled ~max_turns_override:max_turns
         ~timeout_seconds:(Some timeout_sec)
     in
@@ -38,7 +39,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
           evidence_session_id_of_worker_run worker_run_id
         in
         let system_prompt =
-          default_system_prompt ~worker_name ~model_id:model.model_id
+          default_system_prompt ~worker_name ~model_id
             ?session_id:team_session_id ?role ?selection_note ()
         in
         let prompt =
@@ -70,7 +71,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
                         (match role with
                         | Some r -> r
                         | None -> "autonomous");
-                      model = model.model_id;
+                      model = model_id;
                     };
                   TeamContext team_ctx;
                   AvailableTools tool_names;
@@ -158,7 +159,7 @@ let run_worker_oas ~sw ~base_path ~worker_name
         let gate_config =
           Worker_oas.gate_config_of_execution_scope meta.execution_scope
         in
-        Worker_oas.run_worker_via_oas ~sw ~base_path ~meta ~model
+        Worker_oas.run_worker_via_oas ~sw ~base_path ~meta ~provider
           ~system_prompt ~prompt ~tools ~raw_trace ~gate_config
           ?worker_run_id ()
 
@@ -307,7 +308,7 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                         | _ -> Oas.Hooks.Continue);
                 }
               in
-              let model =
+              let resume_model =
                 let base_model = Model_spec.default_local_model_spec () in
                 let model_id =
                   if checkpoint.model <> "" then checkpoint.model
@@ -315,6 +316,8 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                 in
                 { base_model with model_id }
               in
+              let resume_provider = oas_provider_of_model resume_model in
+              let resume_model_id = resume_model.Model_spec.model_id in
               let prompt =
                 let tool_contract =
                   "Tool contract reminder: if you call masc_team_session_step \
@@ -359,9 +362,10 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                 Verifier_oas.eval_gate_to_oas_guardrails gate
               in
               let config, options =
-                build_resume_config ~worker_name ~model
+                build_resume_config ~worker_name ~provider:resume_provider
+                  ~model_id:resume_model_id
                   ~system_prompt:
-                    (default_system_prompt ~worker_name ~model_id:model.model_id
+                    (default_system_prompt ~worker_name ~model_id:resume_model_id
                        ?session_id:meta.team_session_id ?role:meta.role
                        ?selection_note:meta.selection_note ())
                   ~tools ~max_turns ~thinking_enabled ~hooks ~raw_trace
@@ -380,7 +384,10 @@ let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id
     ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
-  run_worker_oas ~sw ~base_path ~worker_name ~model ~team_session_id
+  let provider = oas_provider_of_model model in
+  let model_id = model.Model_spec.model_id in
+  run_worker_oas ~sw ~base_path ~worker_name ~provider ~model_id
+    ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
     ?thinking_enabled ?max_turns ?worker_run_id ~role
     ~selection_note ~prompt ~allowed_tools ~timeout_sec

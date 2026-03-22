@@ -203,14 +203,15 @@ let model_tool_defs_of_json = function
 
 type model_runner =
   | Stub
-  | Direct of Model_spec.model_spec
+  | Direct of string  (** model label, e.g. "llama:qwen3.5" *)
 
 let model_runner_of_string raw =
   let model = trim raw in
   let lower = String.lowercase_ascii model in
-  let direct spec =
-    match Model_spec.model_spec_of_string spec with
-    | Ok parsed -> Ok (Direct parsed)
+  let direct label =
+    (* Validate the label parses, but carry the string *)
+    match Model_spec.model_spec_of_string label with
+    | Ok _ -> Ok (Direct label)
     | Error msg -> Error msg
   in
   match lower with
@@ -241,7 +242,7 @@ let model_runner_of_string raw =
       direct (Printf.sprintf "codex-api:%s" effective)
   | value -> (
       match Model_spec.model_spec_of_string model with
-      | Ok parsed -> Ok (Direct parsed)
+      | Ok _ -> Ok (Direct model)
       | Error _ when starts_with ~prefix:"llama:" value -> direct model
       | Error _ when starts_with ~prefix:"gemini:" value -> direct model
       | Error _ when starts_with ~prefix:"claude:" value -> direct model
@@ -268,7 +269,7 @@ let call_model_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~promp
   match model_runner_of_string model with
   | Error msg -> Error msg
   | Ok Stub -> Ok (sprintf "[stub]%s" prompt)
-  | Ok (Direct spec) ->
+  | Ok (Direct model_label) ->
       let system_prompt =
         match system with
         | Some sys when trim sys <> "" -> sys
@@ -277,31 +278,35 @@ let call_model_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~promp
       let tool_defs = model_tool_defs_of_json tools in
       let result =
         if tool_defs = [] then
-          Oas_worker.run_model ~model_spec:spec ~goal:prompt ~system_prompt
+          Oas_worker.run_model_by_label ~model_label ~goal:prompt ~system_prompt
             ~max_turns:1 ~temperature:0.2 ~max_tokens:4096 ()
         else
-          Oas_worker.run_model_with_masc_tools ~model_spec:spec ~goal:prompt
-            ~system_prompt ~masc_tools:tool_defs
-            ~dispatch:(fun ~name ~args ->
-              match !tool_executor_ref with
-              | None -> (false, "native MASC tool executor unavailable")
-              | Some execute_tool ->
-                  let final_args =
-                    if starts_with ~prefix:"masc_" name then
-                      match args with
-                      | `Assoc fields when List.mem_assoc "agent_name" fields -> args
-                      | `Assoc fields ->
-                          `Assoc
-                            (("agent_name", `String runtime.agent_name) :: fields)
-                      | _ -> `Assoc [ ("agent_name", `String runtime.agent_name) ]
-                    else
-                      args
-                  in
-                  execute_tool ~sw:runtime.sw ~clock:runtime.clock
-                    ?mcp_session_id:runtime.mcp_session_id
-                    ?auth_token:runtime.auth_token runtime.mcp_state ~name
-                    ~arguments:final_args)
-            ~max_turns:1 ~temperature:0.2 ~max_tokens:4096 ()
+          (* Tool dispatch still needs model_spec for run_model_with_masc_tools *)
+          (match Model_spec.model_spec_of_string model_label with
+          | Error msg -> Error msg
+          | Ok spec ->
+            Oas_worker.run_model_with_masc_tools ~model_spec:spec ~goal:prompt
+              ~system_prompt ~masc_tools:tool_defs
+              ~dispatch:(fun ~name ~args ->
+                match !tool_executor_ref with
+                | None -> (false, "native MASC tool executor unavailable")
+                | Some execute_tool ->
+                    let final_args =
+                      if starts_with ~prefix:"masc_" name then
+                        match args with
+                        | `Assoc fields when List.mem_assoc "agent_name" fields -> args
+                        | `Assoc fields ->
+                            `Assoc
+                              (("agent_name", `String runtime.agent_name) :: fields)
+                        | _ -> `Assoc [ ("agent_name", `String runtime.agent_name) ]
+                      else
+                        args
+                    in
+                    execute_tool ~sw:runtime.sw ~clock:runtime.clock
+                      ?mcp_session_id:runtime.mcp_session_id
+                      ?auth_token:runtime.auth_token runtime.mcp_state ~name
+                      ~arguments:final_args)
+              ~max_turns:1 ~temperature:0.2 ~max_tokens:4096 ())
       in
       (match result with
       | Ok run_result ->
@@ -313,7 +318,7 @@ let call_model_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~promp
       | Error msg ->
           Error
             (Printf.sprintf "OAS model run failed (%s, timeout=%ds): %s"
-               spec.model_id timeout_sec msg))
+               model_label timeout_sec msg))
 
 let assoc_get_string_opt (json : Yojson.Safe.t) key =
   match U.member key json with

@@ -29,8 +29,15 @@ type model_spec = {
   cost_per_1k_output : float;
 }
 
-(** Human-readable provider name. *)
+(** Human-readable provider name (display-oriented, not necessarily round-trip safe). *)
 val string_of_provider : provider -> string
+
+(** Provider name for parseable labels (round-trips with {!model_spec_of_string}). *)
+val label_provider : provider -> string
+
+(** Build a parseable ["provider:model_id"] label from a model_spec.
+    The result can be passed to {!model_spec_of_string} for round-trip. *)
+val label_of_model_spec : model_spec -> string
 
 (** {2 Preset specs} *)
 

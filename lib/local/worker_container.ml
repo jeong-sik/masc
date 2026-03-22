@@ -465,6 +465,7 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
                ~on_exec ()))
   | Error e, _ | _, Error e -> Error e
 
+(** Convert a model_spec to an OAS Provider.config with fallback for Custom providers. *)
 let oas_provider_of_model (model : Model_spec.model_spec) : Oas.Provider.config =
   match Oas_type_adapters.to_oas_provider model with
   | Some config -> config
@@ -482,6 +483,15 @@ let oas_provider_of_model (model : Model_spec.model_spec) : Oas.Provider.config 
         model_id = model.model_id;
         api_key_env = Option.value ~default:"DUMMY_KEY" model.api_key_env;
       }
+
+(** Resolve provider from a model label string.
+    Parses the label into a model_spec, then converts to Provider.config.
+    Returns the provider config and model_id on success. *)
+let resolve_oas_provider_of_label (label : string) :
+    (Oas.Provider.config * string, string) result =
+  match Model_spec.model_spec_of_string label with
+  | Error msg -> Error msg
+  | Ok spec -> Ok (oas_provider_of_model spec, spec.model_id)
 
 let oas_tool_names (tools : Oas.Tool.t list) =
   List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
@@ -532,15 +542,16 @@ let append_worker_completion_log ~base_path ~team_session_id ~worker_name
       ])
 
 (** Build (config, options) for Agent.resume — the continue_worker path.
-    New workers use Worker_oas.build_agent (Builder pattern) instead. *)
-let build_resume_config ~worker_name ~model ~system_prompt ~tools ~max_turns
-    ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
+    New workers use Worker_oas.build_agent (Builder pattern) instead.
+    Accepts [~provider] + [~model_id] instead of Model_spec.model_spec. *)
+let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
+    ~max_turns ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
     ?(guardrails : Oas.Guardrails.t option) () =
   let config =
     {
       Oas.Types.default_config with
       name = worker_name;
-      model = model.Model_spec.model_id;
+      model = model_id;
       system_prompt = Some system_prompt;
       max_tokens = local_worker_max_tokens ();
       max_turns;
@@ -564,7 +575,7 @@ let build_resume_config ~worker_name ~model ~system_prompt ~tools ~max_turns
   let options =
     {
       Oas.Agent.default_options with
-      provider = Some (oas_provider_of_model model);
+      provider = Some provider;
       hooks;
       guardrails = effective_guardrails;
       raw_trace = Some raw_trace;

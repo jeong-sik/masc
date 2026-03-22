@@ -577,9 +577,9 @@ let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) 
     cache_read_input_tokens =
       a.cache_read_input_tokens + b.cache_read_input_tokens }
 
-let estimate_cost_usd (model : Model_spec.model_spec)
+let estimate_cost_usd ~(model_id : string)
     (usage : Agent_sdk.Types.api_usage) : float option =
-  let pricing = Llm_provider.Pricing.pricing_for_model model.model_id in
+  let pricing = Llm_provider.Pricing.pricing_for_model model_id in
   Some (Llm_provider.Pricing.estimate_cost ~pricing
     ~input_tokens:usage.input_tokens ~output_tokens:usage.output_tokens ())
 

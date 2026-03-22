@@ -27,7 +27,7 @@ export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['pe
         <strong>${petition.created_by || petition.origin || 'system'}</strong>
         ${petition.created_at ? html`<span><${TimeAgo} timestamp=${petition.created_at} /></span>` : null}
       </div>
-      <div class="governance-ledger-body">${petition.title}</div>
+      <div class="mt-2 text-[#d7e7ff] leading-[1.5] break-words">${petition.title}</div>
       <div class="governance-chip rounded-full-row">
         ${petition.source_refs.map(ref => html`<span class="governance-chip rounded-full">${ref}</span>`)}
       </div>
@@ -43,7 +43,7 @@ export function BriefEntry({ brief }: { brief: GovernanceCaseBrief }) {
         <strong>${brief.author}</strong>
         ${brief.created_at ? html`<span><${TimeAgo} timestamp=${brief.created_at} /></span>` : null}
       </div>
-      <div class="governance-ledger-body">${brief.summary}</div>
+      <div class="mt-2 text-[#d7e7ff] leading-[1.5] break-words">${brief.summary}</div>
       <div class="governance-chip rounded-full-row">
         ${brief.evidence_refs.map(ref => html`<span class="governance-chip rounded-full">${ref}</span>`)}
       </div>
@@ -71,7 +71,7 @@ export function DecisionDetail() {
               <div class="flex justify-between items-start gap-4 mb-3.5">
                 <div>
                   <h3>${detail.case.title}</h3>
-                  <div class="council-sub">
+                  <div class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">
                     <span>${detail.case.id}</span>
                     <span>${caseStatusLabel(detail.case.status)}</span>
                     ${detail.case.updated_at
@@ -79,11 +79,11 @@ export function DecisionDetail() {
                       : null}
                   </div>
                 </div>
-                <div class="governance-balance-grid">
-                  <span class="governance-balance"><strong>${petitions.length}</strong>건 청원</span>
-                  <span class="governance-balance"><strong>${briefs.length}</strong>건 의견</span>
-                  <span class="governance-balance"><strong>${item.confidence != null ? Math.round(item.confidence * 100) : 0}</strong>% 확신도</span>
-                  <span class="governance-balance"><strong>${orderStatusLabel(detail.execution_order?.status)}</strong></span>
+                <div class="grid grid-cols-[repeat(2,minmax(90px,1fr))] gap-2">
+                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[#c8daf7] text-[length:var(--fs-sm)]"><strong>${petitions.length}</strong>건 청원</span>
+                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[#c8daf7] text-[length:var(--fs-sm)]"><strong>${briefs.length}</strong>건 의견</span>
+                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[#c8daf7] text-[length:var(--fs-sm)]"><strong>${item.confidence != null ? Math.round(item.confidence * 100) : 0}</strong>% 확신도</span>
+                  <span class="border border-[var(--card-border)] rounded-[10px] py-2 px-2.5 bg-[var(--white-4)] text-[#c8daf7] text-[length:var(--fs-sm)]"><strong>${orderStatusLabel(detail.execution_order?.status)}</strong></span>
                 </div>
               </div>
               <div class="flex flex-col gap-2.5">

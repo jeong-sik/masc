@@ -1,23 +1,6 @@
-/* ── Council ──────────────────────────────────────────────── */
-.council-create {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
-  align-items: center;
-}
+/* MASC Dashboard -- Governance (retained: stateful variants, compound selectors, responsive) */
 
-.council-error {
-  margin-top: 10px;
-  border: 1px solid rgba(239, 68, 68, 0.35);
-  padding: 8px 10px;
-  color: #f7b6b6;
-  font-size: var(--fs-sm);
-}
-.council-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+/* ── Council Row (stateful: hover, selected, content-visibility) ── */
 
 .council-row {
   width: 100%;
@@ -44,21 +27,7 @@ button.council-row.selected {
   background: var(--accent-14);
 }
 
-.council-topic {
-  color: #e8f0ff;
-  font-size: var(--fs-md);
-  font-weight: 600;
-  word-break: break-word;
-}
-
-.council-sub {
-  margin-top: 4px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  color: #8ea9d6;
-  font-size: var(--fs-xs);
-}
+/* ── Council State badges (multi-variant) ── */
 
 .council-state {
   padding: 3px 9px;
@@ -83,17 +52,19 @@ button.council-row.selected {
   color: #ffe09b;
 }
 
-.council-detail {
-  white-space: pre-wrap;
-  border: 1px solid var(--card-border);
-  border-radius: 9px;
-  background: rgba(0, 0, 0, 0.28);
-  color: #d3e3ff;
-  padding: 12px;
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-  font-family: "IBM Plex Mono", "Fira Code", monospace;
+.council-state.negative {
+  border-color: rgba(239, 68, 68, 0.46);
+  background: rgba(239, 68, 68, 0.14);
+  color: #fecaca;
 }
+
+.council-state.neutral {
+  border-color: rgba(138, 163, 211, 0.25);
+  background: var(--white-6);
+  color: #b7cbee;
+}
+
+/* ── Governance Layout (3-column grid + responsive) ── */
 
 .governance-layout {
   display: grid;
@@ -107,12 +78,7 @@ button.council-row.selected {
   overflow-y: auto;
 }
 
-.governance-row-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
+/* ── Governance Kind chip ── */
 
 .governance-kind {
   flex: 0 0 auto;
@@ -125,19 +91,7 @@ button.council-row.selected {
   letter-spacing: 0.08em;
 }
 
-.governance-row-side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.governance-chip-row {
-  margin-top: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
+/* ── Governance Chips (multi-variant: ok, warn) ── */
 
 .governance-chip {
   padding: 3px 8px;
@@ -160,68 +114,7 @@ button.council-row.selected {
   color: #ffe09b;
 }
 
-.council-state.negative {
-  border-color: rgba(239, 68, 68, 0.46);
-  background: rgba(239, 68, 68, 0.14);
-  color: #fecaca;
-}
-
-.council-state.neutral {
-  border-color: rgba(138, 163, 211, 0.25);
-  background: var(--white-6);
-  color: #b7cbee;
-}
-
-.governance-detail-head h3 {
-  margin: 0;
-  color: #e8f0ff;
-  font-size: 18px;
-}
-
-.governance-balance-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(90px, 1fr));
-  gap: 8px;
-}
-
-.governance-balance {
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: var(--white-4);
-  color: #c8daf7;
-  font-size: var(--fs-sm);
-}
-
-.governance-summary-callout {
-  margin-bottom: 12px;
-  border: 1px solid rgba(71, 184, 255, 0.22);
-  border-radius: 10px;
-  background: rgba(71, 184, 255, 0.09);
-  color: #dcecff;
-  padding: 11px 12px;
-  line-height: 1.5;
-}
-
-.governance-ledger-row,
-.governance-activity-row {
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  background: var(--white-3h);
-  padding: 10px 11px;
-}
-
-.governance-ledger-head strong {
-  color: #e8f0ff;
-  font-size: var(--fs-sm);
-}
-
-.governance-ledger-body {
-  margin-top: 8px;
-  color: #d7e7ff;
-  line-height: 1.5;
-  word-break: break-word;
-}
+/* ── Governance Badge (multi-variant: positive, negative) ── */
 
 .governance-badge {
   padding: 2px 8px;
@@ -238,21 +131,24 @@ button.council-row.selected {
   color: #fecaca;
 }
 
-.governance-side-block h4 {
-  margin: 0;
-  color: #e8f0ff;
-  font-size: var(--fs-base);
+/* ── Ledger/Activity Rows ── */
+
+.governance-ledger-row,
+.governance-activity-row {
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--white-3h);
+  padding: 10px 11px;
 }
 
-.governance-preview {
-  margin-top: 0;
-  font-size: var(--fs-xs);
-  max-height: 180px;
-  overflow: auto;
+.governance-ledger-head strong {
+  color: #e8f0ff;
+  font-size: var(--fs-sm);
 }
+
+/* ── Responsive ── */
 
 @media (max-width: 1200px) {
-
   .governance-layout {
     grid-template-columns: 1fr;
   }
@@ -260,5 +156,4 @@ button.council-row.selected {
   .governance-inbox {
     max-height: none;
   }
-
 }

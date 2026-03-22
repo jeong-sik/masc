@@ -114,7 +114,7 @@ export function RuntimeParamsPanel() {
                     <div class="governance-surface-head">
                       <strong>${surface.id}</strong>
                       <span class="governance-chip rounded-full ${surface.risk === 'high' ? 'warn' : ''}">${surface.risk}</span>
-                      <span class="council-sub">${surface.description}</span>
+                      <span class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">${surface.description}</span>
                     </div>
                     <div class="governance-params-table">
                       ${surfaceParams.map(param => html`
@@ -126,7 +126,7 @@ export function RuntimeParamsPanel() {
                               ? html`<span class="governance-chip rounded-full warn" style="margin-left:4px">override</span>`
                               : null}
                           </span>
-                          <span class="governance-param-default council-sub">
+                          <span class="governance-param-default mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">
                             기본: ${formatParamValue(param.default)}
                           </span>
                         </div>

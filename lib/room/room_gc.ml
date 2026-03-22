@@ -7,80 +7,10 @@ open Types
 open Room_utils
 open Room_state
 
-(** Callback for force_release_task_r — set by Room after include.
-    This avoids a circular dependency: force_release_task_r is defined
-    in room.ml (task management section) and uses deeper task logic. *)
-let force_release_task_fn
-  : (config -> agent_name:string -> task_id:string -> unit -> string masc_result) ref
-  = ref (fun _config ~agent_name:_ ~task_id:_ () ->
-      Error (Types.TaskInvalidState "Room_gc: force_release_task_fn not connected"))
+(* Callback refs and types are now in Room_hooks. *)
 
-(** CP cleanup result type — mirrors Cp_cleanup.cleanup_result without
-    introducing a dependency on Cp_cleanup (which depends on Room). *)
-type cp_cleanup_result = {
-  dead_units_removed : int;
-  orphaned_units_removed : int;
-  operations_archived : int;
-  detachments_removed : int;
-  intents_removed : int;
-}
-
-let empty_cp_result = {
-  dead_units_removed = 0;
-  orphaned_units_removed = 0;
-  operations_archived = 0;
-  detachments_removed = 0;
-  intents_removed = 0;
-}
-
-(** Callback for CP cleanup — set by the module that connects Room_gc
-    and Cp_cleanup (e.g. command_plane_v2.ml or room.ml post-include).
-    This avoids a circular dependency: Cp_cleanup depends on Cp_io which
-    depends on Room, and Room includes Room_gc. *)
-let cp_cleanup_connected = ref false
-
-let cp_cleanup_fn
-  : (config -> cp_cleanup_result) ref
-  = ref (fun _config -> empty_cp_result)
-
-let stale_system_daily_sec = 12.0 *. 3600.0
-
-let board_artifact_title title =
-  let title = String.lowercase_ascii (String.trim title) in
-  String.starts_with ~prefix:"[sentinel daily]" title
-  || String.starts_with ~prefix:"[keeper daily]" title
-
-let board_artifact_author author =
-  let author = String.lowercase_ascii (String.trim author) in
-  author = "auto-researcher"
-  || String.starts_with ~prefix:"qa-" author
-  || String.starts_with ~prefix:"qwen35-probe" author
-  || ((not (String.contains author ' '))
-      && String.ends_with ~suffix:"-probe" author)
-
-let should_delete_board_artifact now (post : Board.post) =
-  let author = Board.Agent_id.to_string post.author in
-  board_artifact_author author
-  || ((String.equal (String.lowercase_ascii author) "sentinel"
-       || String.equal (String.lowercase_ascii author) "keeper")
-      && board_artifact_title post.title
-      && now -. post.updated_at >= stale_system_daily_sec)
-
-let cleanup_board_artifacts () =
-  let now = Time_compat.now () in
-  Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:5200 ()
-  |> List.fold_left
-       (fun removed (post : Board.post) ->
-         if should_delete_board_artifact now post then
-           match
-             Board_dispatch.delete_post
-               ~post_id:(Board.Post_id.to_string post.id)
-           with
-           | Ok () -> removed + 1
-           | Error _ -> removed
-         else
-           removed)
-       0
+(* Board artifact cleanup and governance purge are now in Room_hooks callbacks.
+   The actual implementations are wired by room.ml at startup. *)
 
 
 (** Update agent heartbeat - must be called periodically.
@@ -193,7 +123,7 @@ let cleanup_zombies
         | Types.Claimed { assignee; _ }
         | Types.InProgress { assignee; _ }
           when List.exists (fun (n, _) -> n = assignee) !zombie_entries ->
-            (match !force_release_task_fn config ~agent_name:"keeper-gc" ~task_id:task.id () with
+            (match !Room_hooks.force_release_task_fn config ~agent_name:"keeper-gc" ~task_id:task.id () with
              | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
              | Error e ->
                  if not (List.mem assignee !release_failed_agents) then
@@ -460,13 +390,10 @@ let gc config ?(days=7) () =
   else
     results := "✅ No team sessions to archive" :: !results;
 
-  (* 7. Hard-delete board/governance artifacts *)
-  let board_artifact_count = cleanup_board_artifacts () in
-  let governance_test_artifact_count =
-    Council.Governance_v2.purge_stale_test_cases config.base_path
-  in
-  let governance_artifact_count =
-    Council.Governance_v2.purge_stale_artifact_cases config.base_path
+  (* 7. Hard-delete board/governance artifacts (via hooks) *)
+  let board_artifact_count = !Room_hooks.cleanup_board_artifacts_fn () in
+  let governance_test_artifact_count, governance_artifact_count =
+    !Room_hooks.governance_purge_fn config.base_path
   in
   if board_artifact_count > 0 then
     results :=
@@ -484,11 +411,11 @@ let gc config ?(days=7) () =
     results := "✅ No governance artifacts" :: !results;
 
   (* 8. CP data cleanup (dead units, stale operations, orphaned detachments) *)
-  if not !cp_cleanup_connected then
+  if not !Room_hooks.cp_cleanup_connected then
     log_event config (Printf.sprintf
       "{\"type\":\"gc_warning\",\"msg\":\"cp_cleanup_fn not connected, CP cleanup skipped\",\"ts\":\"%s\"}"
       (now_iso ()));
-  let cp_result = !cp_cleanup_fn config in
+  let cp_result = !Room_hooks.cp_cleanup_fn config in
   let cp_total =
     cp_result.dead_units_removed + cp_result.orphaned_units_removed
     + cp_result.operations_archived + cp_result.detachments_removed

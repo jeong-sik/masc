@@ -275,6 +275,7 @@
    room_eio
    room_agent
    room_gc
+   room_hooks
    room_init
    room_lifecycle
    room_query

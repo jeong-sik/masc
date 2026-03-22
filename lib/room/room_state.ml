@@ -135,12 +135,11 @@ let emit_message_activity config ~from_agent ~content ~mention =
           | None -> `Null );
       ]
   in
-  let actor = Activity_graph.entity ~kind:"agent" from_agent in
+  let actor = Room_hooks.{ kind = "agent"; id = from_agent } in
   let emit ?subject ~kind ~tags () =
     try
-      ignore
-        (Activity_graph.emit config ~room_id:(activity_room_id config)
-           ~actor ?subject ~kind ~payload ~tags ())
+      !Room_hooks.activity_emit_fn config ~room_id:(activity_room_id config)
+        ~actor ?subject ~kind ~payload ~tags ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
@@ -151,7 +150,7 @@ let emit_message_activity config ~from_agent ~content ~mention =
   match mention with
   | Some target when String.trim target <> "" ->
       emit
-        ~subject:(Activity_graph.entity ~kind:"agent" target)
+        ~subject:Room_hooks.{ kind = "agent"; id = target }
         ~kind:"message.mentioned"
         ~tags:[ "message"; "mention" ] ()
   | _ -> ()

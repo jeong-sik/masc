@@ -16,12 +16,12 @@ include Cp_lifecycle_policy
    Room_gc cannot directly reference Cp_cleanup (which depends on Room via
    Cp_io -> Cp_paths -> Room), so we use a ref-based callback. *)
 let () =
-  Room_gc.cp_cleanup_connected := true;
-  Room_gc.cp_cleanup_fn :=
+  Room_hooks.cp_cleanup_connected := true;
+  Room_hooks.cp_cleanup_fn :=
     (fun config ->
       let r = Cp_cleanup.cleanup_cp config in
       {
-        Room_gc.dead_units_removed = r.Cp_cleanup.dead_units_removed;
+        Room_hooks.dead_units_removed = r.Cp_cleanup.dead_units_removed;
         orphaned_units_removed = r.Cp_cleanup.orphaned_units_removed;
         operations_archived = r.Cp_cleanup.operations_archived;
         detachments_removed = r.Cp_cleanup.detachments_removed;

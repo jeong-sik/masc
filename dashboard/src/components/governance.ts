@@ -82,7 +82,7 @@ function GovernanceSummaryStrip() {
 
 function GovernanceToolbar() {
   return html`
-    <${Card} title="청원 콘솔" class="section mb-4">
+    <${Card} title="청원 콘솔" class="mb-4">
       <div class="flex flex-col gap-3">
         <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2 items-center">
           <input
@@ -151,7 +151,7 @@ function GovernanceToolbar() {
 function DecisionInbox() {
   const items = filteredItemsByFilter(governanceFilter.value, governanceData.value?.items ?? [])
   return html`
-    <${Card} title="사건 수신함" class="section mb-4">
+    <${Card} title="사건 수신함" class="mb-4">
       <div class="flex flex-col gap-2 governance-inbox">
         ${items.length === 0
           ? html`<${EmptyState}>이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.<//>`
@@ -210,7 +210,7 @@ export function Governance() {
     <div class="flex flex-col gap-1">
       <${GovernanceSummaryStrip} />
       <${GovernanceToolbar} />
-      <div class="governance-layout">
+      <div class="grid grid-cols-1 lg:grid-cols-[1fr_1.5fr_1fr] gap-4">
         <${DecisionInbox} />
         <${DecisionDetail} />
         <${GuardrailPane}

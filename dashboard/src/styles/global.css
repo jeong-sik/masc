@@ -259,22 +259,7 @@ a:hover {
 
 /* .card, .card-title-row, .card-title — REMOVED: migrated to common/card.ts SurfaceCard */
 
-.monitor-headline {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--text-strong);
-  letter-spacing: -0.02em;
-  line-height: 1.25;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border-slate-12);
-}
-
-.monitor-subheadline {
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-  line-height: 1.5;
-  margin-top: 6px;
-}
+/* .monitor-headline, .monitor-subheadline — REMOVED: migrated to inline Tailwind */
 
 /* ── Status Badge base ─────────────────────────────────────── */
 /* State-specific colors (.active, .busy, etc.) are below;
@@ -370,7 +355,8 @@ a:hover {
   font-weight: 500;
 }
 
-.control-input,
+/* .control-input, .control-btn — REMOVED: migrated to common/button.ts + common/input.ts */
+
 .control-textarea {
   padding: 8px 12px;
   border: 1px solid var(--border-slate-16);
@@ -380,34 +366,6 @@ a:hover {
   font-size: var(--fs-base);
   line-height: 1.5;
   transition: border-color 0.15s;
-}
-
-.control-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 7px 16px;
-  border: 1px solid rgba(71, 184, 255, 0.32);
-  border-radius: 8px;
-  background: rgba(71, 184, 255, 0.14);
-  color: var(--accent);
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-  white-space: nowrap;
-}
-
-.control-btn.ghost {
-  background: var(--white-4);
-  border-color: var(--border-slate-16);
-  color: var(--text-body);
-}
-
-.control-btn.ghost:hover {
-  background: var(--white-8);
-  border-color: var(--border-slate-22);
 }
 
 .control-row {
@@ -1416,14 +1374,7 @@ tbody tr:hover {
   border-color: rgba(71, 184, 255, 0.55);
 }
 
-.control-btn:hover {
-  background: rgba(71, 184, 255, 0.27);
-}
-
-.control-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+/* .control-btn:hover/:disabled — REMOVED: migrated to common/button.ts ActionButton */
 
 /* ── Mission Status Dot ── */
 .mission-status-dot.mission-state-alive {

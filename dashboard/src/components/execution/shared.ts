@@ -2,6 +2,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { ActionButton } from '../common/button'
 import { navigate } from '../../router'
 import { keepers } from '../../store'
 import {
@@ -154,8 +155,8 @@ export function HandoffButtons({
     <div class="control-row">
       ${intervene
         ? html`
-            <button
-              class="control-btn rounded-lg ghost"
+            <${ActionButton}
+              variant="ghost"
               data-testid="execution.handoff-intervene"
               onClick=${(event: Event) => {
                 event.stopPropagation()
@@ -163,13 +164,13 @@ export function HandoffButtons({
               }}
             >
               ${intervene.label}
-            </button>
+            <//>
           `
         : null}
       ${command
         ? html`
-            <button
-              class="control-btn rounded-lg ghost"
+            <${ActionButton}
+              variant="ghost"
               data-testid="execution.handoff-command"
               onClick=${(event: Event) => {
                 event.stopPropagation()
@@ -177,7 +178,7 @@ export function HandoffButtons({
               }}
             >
               ${command.label}
-            </button>
+            <//>
           `
         : null}
     </div>

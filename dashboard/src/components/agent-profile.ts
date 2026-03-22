@@ -4,6 +4,8 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { ActionButton } from './common/button'
+import { TextInput } from './common/input'
 import { Card } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { StatusBadge } from './common/status-badge'
@@ -335,10 +337,10 @@ export function AgentProfile({ name }: { name: string }) {
   return html`
     <div class="px-1 ${isKeeper ? 'ff-profile--keeper' : ''}">
       <div class="flex gap-2 mb-3">
-        <button class="control-btn rounded-lg ghost" onClick=${() => navigate('status', { section: 'agents' })}>← 목록</button>
-        <button class="control-btn rounded-lg ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
+        <${ActionButton} variant="ghost" onClick=${() => navigate('status', { section: 'agents' })}>← 목록<//>
+        <${ActionButton} variant="ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
           ${loading.value ? '...' : '새로고침'}
-        </button>
+        <//>
       </div>
 
       ${profileError.value ? html`<div class="council-error rounded-lg">${profileError.value}</div>` : null}
@@ -448,22 +450,19 @@ export function AgentProfile({ name }: { name: string }) {
       ` : html`
         <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[rgba(10,22,40,0.8)] border border-[var(--ff-gold-15)] rounded-lg">
           <span class="text-[length:var(--fs-sm)] font-semibold text-[color:var(--ff-gold)] whitespace-nowrap">@${name}</span>
-          <input
-            class="control-input rounded-lg"
-            type="text"
+          <${TextInput}
             placeholder="메시지 입력..."
             value=${mentionText.value}
             onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
             onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention(name) }}
             disabled=${sendingMention.value}
           />
-          <button
-            class="control-btn rounded-lg"
+          <${ActionButton}
             onClick=${() => { void submitMention(name) }}
             disabled=${sendingMention.value || mentionText.value.trim() === ''}
           >
             ${sendingMention.value ? '...' : '전송'}
-          </button>
+          <//>
         </div>
       `}
     </div>

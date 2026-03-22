@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from './common/button'
 import { Card } from './common/card'
 import { EmptyState, ErrorState } from './common/feedback-state'
 import { ProvenanceStrip } from './common/provenance-strip'
@@ -109,12 +110,12 @@ export function MissionBriefingCard() {
         : null}
 
       <div class="flex gap-2 flex-wrap mt-2.5">
-        <button class="control-btn rounded-lg ghost" onClick=${() => { void refreshMissionBriefing(retryNeedsForce) }} disabled=${missionBriefingLoading.value}>
+        <${ActionButton} variant="ghost" onClick=${() => { void refreshMissionBriefing(retryNeedsForce) }} disabled=${missionBriefingLoading.value}>
           ${missionBriefingLoading.value ? '응답 기다리는 중…' : '판단 다시 읽기'}
-        </button>
-        <button class="control-btn rounded-lg ghost" onClick=${() => { void refreshMissionBriefing(true) }} disabled=${missionBriefingLoading.value}>
+        <//>
+        <${ActionButton} variant="ghost" onClick=${() => { void refreshMissionBriefing(true) }} disabled=${missionBriefingLoading.value}>
           강제 갱신
-        </button>
+        <//>
       </div>
     <//>
   `

@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from './common/button'
 import { extractAgentInfo } from './common/agent-info'
 import { linkedRecentToolsEmptyState, observedToolsEmptyState, toolAuditStateLabel } from './common/tool-audit'
 import { openAgentDetail } from './agent-detail'
@@ -179,13 +180,13 @@ export function InternalSignalCard({ item }: { item: DashboardMissionInternalSig
       <div class="flex gap-2 flex-wrap mt-2.5">
         ${action
           ? html`
-              <button class="control-btn rounded-lg ghost" onClick=${() => openActionIntervene(action, attention, '상황판 내부 신호')}>이 액션으로 개입 열기</button>
-              <button class="control-btn rounded-lg ghost" onClick=${() => openActionCommand(action, attention, '상황판 내부 신호')}>이 이슈의 원인 보기</button>
+              <${ActionButton} variant="ghost" onClick=${() => openActionIntervene(action, attention, '상황판 내부 신호')}>이 액션으로 개입 열기<//>
+              <${ActionButton} variant="ghost" onClick=${() => openActionCommand(action, attention, '상황판 내부 신호')}>이 이슈의 원인 보기<//>
             `
           : attention
             ? html`
-                <button class="control-btn rounded-lg ghost" onClick=${() => openIncidentIntervene(attention)}>이 이슈로 개입 열기</button>
-                <button class="control-btn rounded-lg ghost" onClick=${() => openIncidentCommand(attention)}>이 이슈의 원인 보기</button>
+                <${ActionButton} variant="ghost" onClick=${() => openIncidentIntervene(attention)}>이 이슈로 개입 열기<//>
+                <${ActionButton} variant="ghost" onClick=${() => openIncidentCommand(attention)}>이 이슈의 원인 보기<//>
               `
             : null}
       </div>

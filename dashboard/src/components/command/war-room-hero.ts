@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from '../common/button'
 import type {
   CommandPlaneChainOverlay,
   CommandPlaneSwarmLane,
@@ -109,15 +110,15 @@ export function WarRoomHeroStrip({
             : null}
         </div>
         <div class="flex gap-2.5 flex-wrap items-start justify-end">
-          <button class="control-btn rounded-lg ghost" onClick=${onRefresh}>새로고침</button>
+          <${ActionButton} variant="ghost" onClick=${onRefresh}>새로고침<//>
           ${wallboard
             ? html`
-                <button class="control-btn rounded-lg ghost" onClick=${onToggleFullscreen}>
+                <${ActionButton} variant="ghost" onClick=${onToggleFullscreen}>
                   ${fullscreenActive ? '전체 화면 해제' : '전체 화면'}
-                </button>
-                <button class="control-btn rounded-lg ghost" onClick=${standardView}>
+                <//>
+                <${ActionButton} variant="ghost" onClick=${standardView}>
                   표준 보기
-                </button>
+                <//>
               `
             : null}
           <${WarRoomJumpButton}

@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
+import { ActionButton } from './common/button'
 import { fetchToolMetrics, type ToolMetricsResponse, type ToolMetricsTopEntry } from '../api'
 
 const metricsData = signal<ToolMetricsResponse | null>(null)
@@ -104,13 +105,9 @@ export function ToolMetrics() {
     <div class="flex flex-col gap-4">
       <div class="flex justify-between items-center">
         <h3 class="text-[color:var(--text-strong)] text-[length:var(--fs-lg)] font-semibold m-0">도구 사용 현황</h3>
-        <button
-          class="control-btn rounded-lg ghost"
-          onClick=${() => void loadMetrics()}
-          disabled=${loading}
-        >
+        <${ActionButton} variant="ghost" onClick=${() => void loadMetrics()} disabled=${loading}>
           ${loading ? '불러오는 중...' : data ? '새로고침' : '불러오기'}
-        </button>
+        <//>
       </div>
 
       ${error ? html`<div class="px-2.5 py-3 bg-[var(--bad-12)] border border-[rgba(239,68,68,0.34)] text-[#fecaca] text-[length:var(--fs-base)] rounded-lg">${error}</div>` : null}

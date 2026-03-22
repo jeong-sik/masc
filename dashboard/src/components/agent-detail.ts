@@ -2,6 +2,8 @@
 // Sub-components: agent-detail-state, agent-detail-timeline, agent-detail-journal, agent-detail-worker
 
 import { html } from 'htm/preact'
+import { ActionButton } from './common/button'
+import { TextInput } from './common/input'
 import { Card } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { StatusBadge } from './common/status-badge'
@@ -142,10 +144,10 @@ export function AgentDetailOverlay() {
               : null}
           </div>
           <div class="flex gap-2">
-            <button class="control-btn rounded-lg ghost" onClick=${() => { void refreshAgentDetail() }} disabled=${loading.value}>
+            <${ActionButton} variant="ghost" onClick=${() => { void refreshAgentDetail() }} disabled=${loading.value}>
               ${loading.value ? '새로고침 중...' : '새로고침'}
-            </button>
-            <button class="control-btn rounded-lg ghost" onClick=${closeAgentDetail}>닫기</button>
+            <//>
+            <${ActionButton} variant="ghost" onClick=${closeAgentDetail}>닫기<//>
           </div>
         </div>
 
@@ -176,22 +178,19 @@ export function AgentDetailOverlay() {
 
         <${Card} title="직접 멘션">
           <div class="grid grid-cols-[1fr_auto] gap-2">
-            <input
-              class="control-input rounded-lg"
-              type="text"
+            <${TextInput}
               placeholder="@멘션 메시지"
               value=${mentionText.value}
               onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
               onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention() }}
               disabled=${sendingMention.value}
             />
-            <button
-              class="control-btn rounded-lg"
+            <${ActionButton}
               onClick=${() => { void submitMention() }}
               disabled=${sendingMention.value || mentionText.value.trim() === ''}
             >
               ${sendingMention.value ? '전송 중...' : '전송'}
-            </button>
+            <//>
           </div>
         <//>
       </div>

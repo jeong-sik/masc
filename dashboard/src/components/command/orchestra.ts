@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from '../common/button'
 import { EmptyState, LoadingState, ErrorState } from '../common/feedback-state'
 import { groupByKey } from '../common/collection'
 import { useEffect, useRef, useState } from 'preact/hooks'
@@ -339,43 +340,43 @@ export function OrchestraSurface() {
 
       <div class="orchestra-toolbar">
         <div class="orchestra-toolbar-group">
-          <button class="control-btn rounded-lg ghost" onClick=${applyFit}>맞춤 보기</button>
-          <button class="control-btn rounded-lg ghost" onClick=${resetView}>초기화</button>
+          <${ActionButton} variant="ghost" onClick=${applyFit}>맞춤 보기<//>
+          <${ActionButton} variant="ghost" onClick=${resetView}>초기화<//>
         </div>
         <div class="orchestra-toolbar-group">
-          <button
-            class="control-btn rounded-lg ghost"
+          <${ActionButton}
+            variant="ghost"
             onClick=${() => zoomAround(viewport.width / 2, viewport.height / 2, 1.12)}
           >
             확대
-          </button>
-          <button
-            class="control-btn rounded-lg ghost"
+          <//>
+          <${ActionButton}
+            variant="ghost"
             onClick=${() => zoomAround(viewport.width / 2, viewport.height / 2, 0.9)}
           >
             축소
-          </button>
+          <//>
           <span class="cmd-chip rounded-full">${Math.round(camera.zoom * 100)}%</span>
         </div>
         <div class="orchestra-toolbar-group">
-          <button
-            class=${`control-btn ${density === 'balanced' ? 'is-active' : 'ghost'}`}
+          <${ActionButton}
+            variant=${density === 'balanced' ? 'primary' : 'ghost'}
             onClick=${() => {
               orchestraDensity.value = 'balanced'
               orchestraSelection.value = selectedId
             }}
           >
             균형
-          </button>
-          <button
-            class=${`control-btn ${density === 'compact' ? 'is-active' : 'ghost'}`}
+          <//>
+          <${ActionButton}
+            variant=${density === 'compact' ? 'primary' : 'ghost'}
             onClick=${() => {
               orchestraDensity.value = 'compact'
               orchestraSelection.value = selectedId
             }}
           >
             집약
-          </button>
+          <//>
           <span class="cmd-chip rounded-full">${densityLabel(density)}</span>
         </div>
       </div>

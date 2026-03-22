@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from '../common/button'
 import type {
   Agent,
   CommandPlaneChainOverlay,
@@ -354,8 +355,8 @@ export function WarRoomJumpButton({
   params?: Record<string, string>
 }) {
   return html`
-    <button
-      class="control-btn rounded-lg ghost"
+    <${ActionButton}
+      variant="ghost"
       onClick=${() => {
         if (surface) {
           setCommandPlaneSurface(surface)
@@ -366,7 +367,7 @@ export function WarRoomJumpButton({
       }}
     >
       ${label}
-    </button>
+    <//>
   `
 }
 

@@ -2,6 +2,8 @@
 
 import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
+import { ActionButton } from '../common/button'
+import { TextInput } from '../common/input'
 import { SurfaceCard } from '../common/card'
 import { LoadingState } from '../common/feedback-state'
 import {
@@ -100,9 +102,9 @@ export function OpsRoomColumn() {
                 <div class="mt-1.5 whitespace-pre-wrap break-words">${item.reason}</div>
                 ${item.suggested_payload ? html`
                   <div class="flex justify-between items-center gap-3 mt-2.5 max-[880px]:flex-col max-[880px]:items-start">
-                    <button class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item); openRoomControlDisclosure() }} disabled=${operatorActionBusy.value}>
+                    <${ActionButton} variant="ghost" onClick=${() => { hydrateRecommendedAction(item); openRoomControlDisclosure() }} disabled=${operatorActionBusy.value}>
                       폼에 채우기
-                    </button>
+                    <//>
                   </div>
                 ` : null}
               </article>
@@ -147,12 +149,12 @@ export function OpsRoomColumn() {
                 </div>
                 ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[length:var(--fs-xs)] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
                 <div class="flex justify-between items-center gap-3 mt-2.5 max-[880px]:flex-col max-[880px]:items-start">
-                  <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
+                  <${ActionButton} onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
                     실행
-                  </button>
-                  <button class="control-btn ghost" onClick=${() => { void confirmPending(item.confirm_token, 'deny') }} disabled=${operatorActionBusy.value}>
+                  <//>
+                  <${ActionButton} variant="ghost" onClick=${() => { void confirmPending(item.confirm_token, 'deny') }} disabled=${operatorActionBusy.value}>
                     거부
-                  </button>
+                  <//>
                   <span class="text-[var(--text-muted)] text-[var(--fs-xs)] font-mono break-all">${item.confirm_token}</span>
                 </div>
               </article>
@@ -210,43 +212,35 @@ export function OpsRoomColumn() {
           <div class="grid gap-3 px-3.5 pb-3.5 border-t border-[var(--white-8)]">
             <label class="control-label" for="ops-broadcast">Room 방송</label>
             <div class="control-row">
-              <input
-                id="ops-broadcast"
-                class="control-input"
-                type="text"
+              <${TextInput}
                 placeholder="@agent 또는 room 전체 공지"
                 value=${broadcastMessage.value}
                 onInput=${(event: Event) => { broadcastMessage.value = (event.target as HTMLInputElement).value }}
                 onKeyDown=${(event: KeyboardEvent) => { if (event.key === 'Enter') void submitBroadcast() }}
                 disabled=${operatorActionBusy.value}
               />
-              <button class="control-btn" onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
+              <${ActionButton} onClick=${() => { void submitBroadcast() }} disabled=${operatorActionBusy.value || broadcastMessage.value.trim() === ''}>
                 보내기
-              </button>
+              <//>
             </div>
 
             <label class="control-label" for="ops-pause-reason">일시정지 / 재개</label>
             <div class="control-row items-stretch">
-              <input
-                id="ops-pause-reason"
-                class="control-input"
-                type="text"
+              <${TextInput}
                 value=${pauseReason.value}
                 onInput=${(event: Event) => { pauseReason.value = (event.target as HTMLInputElement).value }}
                 disabled=${operatorActionBusy.value}
               />
-              <button class="control-btn ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
+              <${ActionButton} variant="ghost" onClick=${() => { void submitPause() }} disabled=${operatorActionBusy.value}>
                 일시정지
-              </button>
-              <button class="control-btn ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
+              <//>
+              <${ActionButton} variant="ghost" onClick=${() => { void submitResume() }} disabled=${operatorActionBusy.value}>
                 재개
-              </button>
+              <//>
             </div>
 
             <div class="mt-0.5 text-[var(--text-muted)] text-[var(--fs-xs)] tracking-[0.05em] uppercase">작업 주입</div>
-            <input
-              class="control-input"
-              type="text"
+            <${TextInput}
               placeholder="작업 제목"
               value=${taskTitle.value}
               onInput=${(event: Event) => { taskTitle.value = (event.target as HTMLInputElement).value }}
@@ -262,7 +256,7 @@ export function OpsRoomColumn() {
             ></textarea>
             <div class="control-row items-stretch">
               <select
-                class="control-input min-w-[92px]"
+                class="rounded bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-xs px-2 py-1 min-w-[92px]"
                 value=${taskPriority.value}
                 onChange=${(event: Event) => { taskPriority.value = (event.target as HTMLSelectElement).value }}
                 disabled=${operatorActionBusy.value}
@@ -273,9 +267,9 @@ export function OpsRoomColumn() {
                 <option value="4">P4</option>
                 <option value="5">P5</option>
               </select>
-              <button class="control-btn" onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
+              <${ActionButton} onClick=${() => { void submitTaskInject() }} disabled=${operatorActionBusy.value || taskTitle.value.trim() === ''}>
                 주입
-              </button>
+              <//>
             </div>
           </div>
         </details>

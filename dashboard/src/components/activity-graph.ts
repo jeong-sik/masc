@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
+import { ActionButton } from './common/button'
 import { EmptyState, LoadingState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
 import { GraphView } from './activity-graph-view'
@@ -207,10 +208,10 @@ function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
 function EmptyActivityGraph() {
   return html`
     <div class="flex flex-col gap-5">
-      <${Card} title="활동 그래프" class="section mb-3.5" testId="activity_graph.graph">
+      <${Card} title="활동 그래프" class="mb-3.5" testId="activity_graph.graph">
         <div class="mb-3.5">
-          <h2 class="monitor-headline">활동 그래프가 비어 있습니다</h2>
-          <p class="monitor-subheadline">이 뷰는 런타임 실행 이벤트를 읽어 그래프를 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
+          <h2 class="text-[17px] font-bold text-[var(--text-strong)] tracking-tight leading-tight pb-1.5 border-b border-[var(--border-slate-12)]">활동 그래프가 비어 있습니다</h2>
+          <p class="text-sm text-[var(--text-muted)] leading-normal mt-1.5">이 뷰는 런타임 실행 이벤트를 읽어 그래프를 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
         </div>
         <${EmptyState}>
           아직 claim, broadcast, team-session, board 같은 실행 이벤트가 activity feed에 기록되지 않았습니다.
@@ -236,9 +237,9 @@ export function ActivityGraphSurface() {
   if (error && !data) {
     return html`
       <div class="flex flex-col gap-5">
-        <${Card} title="오류" class="section mb-3.5" testId="activity_graph.error">
+        <${Card} title="오류" class="mb-3.5" testId="activity_graph.error">
           <${EmptyState}>활동 그래프를 불러올 수 없습니다: ${error}<//>
-          <button class="control-btn rounded-lg ghost" onClick=${loadGraph}>다시 시도</button>
+          <${ActionButton} variant="ghost" onClick=${loadGraph}>다시 시도<//>
         <//>
       </div>
     `
@@ -255,10 +256,10 @@ export function ActivityGraphSurface() {
   return html`
     <div class="flex flex-col gap-5">
 
-      <${Card} title="활동 그래프" class="section mb-3.5" testId="activity_graph.graph">
+      <${Card} title="활동 그래프" class="mb-3.5" testId="activity_graph.graph">
         <div class="mb-3.5">
-          <h2 class="monitor-headline">실행 이벤트 관계 그래프</h2>
-          <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 최근 실행 이벤트 기준으로 시각화합니다. 노드 크기는 활동 빈도를 반영합니다.</p>
+          <h2 class="text-[17px] font-bold text-[var(--text-strong)] tracking-tight leading-tight pb-1.5 border-b border-[var(--border-slate-12)]">실행 이벤트 관계 그래프</h2>
+          <p class="text-sm text-[var(--text-muted)] leading-normal mt-1.5">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 최근 실행 이벤트 기준으로 시각화합니다. 노드 크기는 활동 빈도를 반영합니다.</p>
         </div>
         <${StatsRow} data=${data} />
         <${GraphView} data=${data} />
@@ -270,26 +271,26 @@ export function ActivityGraphSurface() {
       <//>
 
       <div class="grid grid-cols-[minmax(0,1.08fr)_minmax(0,0.96fr)_minmax(0,0.88fr)] gap-4">
-        <${Card} title="활동 주체 순위" class="section mb-3.5" testId="activity_graph.leaderboard">
+        <${Card} title="활동 주체 순위" class="mb-3.5" testId="activity_graph.leaderboard">
           <div class="mb-3.5">
-            <h2 class="monitor-headline">활동 주체 순위</h2>
-            <p class="monitor-subheadline">그래프 이벤트 빈도(weight)를 기준으로 정렬한 최근 활동 주체 순위입니다.</p>
+            <h2 class="text-[17px] font-bold text-[var(--text-strong)] tracking-tight leading-tight pb-1.5 border-b border-[var(--border-slate-12)]">활동 주체 순위</h2>
+            <p class="text-sm text-[var(--text-muted)] leading-normal mt-1.5">그래프 이벤트 빈도(weight)를 기준으로 정렬한 최근 활동 주체 순위입니다.</p>
           </div>
           <${NodeLeaderboard} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="노드 종류 분포" class="section mb-3.5" testId="activity_graph.kinds">
+        <${Card} title="노드 종류 분포" class="mb-3.5" testId="activity_graph.kinds">
           <div class="mb-3.5">
-            <h2 class="monitor-headline">노드 종류</h2>
-            <p class="monitor-subheadline">그래프에 포함된 노드를 종류별로 분류합니다.</p>
+            <h2 class="text-[17px] font-bold text-[var(--text-strong)] tracking-tight leading-tight pb-1.5 border-b border-[var(--border-slate-12)]">노드 종류</h2>
+            <p class="text-sm text-[var(--text-muted)] leading-normal mt-1.5">그래프에 포함된 노드를 종류별로 분류합니다.</p>
           </div>
           <${KindBreakdown} nodes=${data.nodes} />
         <//>
 
-        <${Card} title="최근 실행 이벤트" class="section mb-3.5" testId="activity_graph.timeline">
+        <${Card} title="최근 실행 이벤트" class="mb-3.5" testId="activity_graph.timeline">
           <div class="mb-3.5">
-            <h2 class="monitor-headline">타임라인</h2>
-            <p class="monitor-subheadline">가장 최근의 실행 이벤트를 시간순으로 보여줍니다.</p>
+            <h2 class="text-[17px] font-bold text-[var(--text-strong)] tracking-tight leading-tight pb-1.5 border-b border-[var(--border-slate-12)]">타임라인</h2>
+            <p class="text-sm text-[var(--text-muted)] leading-normal mt-1.5">가장 최근의 실행 이벤트를 시간순으로 보여줍니다.</p>
           </div>
           <${ActivityFeed} events=${[...data.timeline].reverse().slice(0, 30)} />
         <//>

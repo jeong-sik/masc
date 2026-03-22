@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from './common/button'
 import { Card } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
@@ -42,7 +43,7 @@ export function GuardrailPane({
   const order = detail?.execution_order
   return html`
     <div class="flex flex-col gap-3.5">
-      <${Card} title="판정 / 집행" class="section mb-3.5">
+      <${Card} title="판정 / 집행" class="mb-3.5">
         ${!item || !detail
           ? html`<${EmptyState}>사건을 고르면 판정과 집행 경로가 보입니다.<//>`
           : html`
@@ -69,37 +70,37 @@ export function GuardrailPane({
                       <h4>관리자 승인</h4>
                       <div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">이 집행은 고위험으로 분류되어 수동 결재가 필요합니다.</div>
                       <div class="flex gap-2">
-                        <button class="control-btn rounded-lg secondary" onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>
+                        <${ActionButton} onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>
                           ${governanceActing.value ? '처리 중...' : '승인'}
-                        </button>
-                        <button class="control-btn rounded-lg ghost" onClick=${() => respondToExecutionOrder('deny')} disabled=${governanceActing.value}>
+                        <//>
+                        <${ActionButton} variant="ghost" onClick=${() => respondToExecutionOrder('deny')} disabled=${governanceActing.value}>
                           ${governanceActing.value ? '처리 중...' : '거부'}
-                        </button>
+                        <//>
                       </div>
                     </div>
                   `
                 : null}
             `}
     <//>
-      <${Card} title="심의 입력" class="section mb-3.5">
+      <${Card} title="심의 입력" class="mb-3.5">
         ${!item
           ? html`<${EmptyState}>사건을 선택한 뒤 의견을 추가하세요.<//>`
           : html`
               <div class="flex flex-col gap-2">
                 <div class="flex flex-wrap gap-2">
                   ${(['support', 'oppose', 'neutral'] as const).map(stance => html`
-                    <button
-                      class="control-btn rounded-lg ${governanceBriefStance.value === stance ? 'is-active' : 'ghost'}"
+                    <${ActionButton}
+                      variant=${governanceBriefStance.value === stance ? 'primary' : 'ghost'}
                       onClick=${() => {
                         governanceBriefStance.value = stance
                       }}
                     >
                       ${stanceLabel(stance)}
-                    </button>
+                    <//>
                   `)}
                 </div>
                 <textarea
-                  class="control-input rounded-lg"
+                  class="rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-xs px-2 py-1.5"
                   rows=${5}
                   placeholder="이 사건에 대한 심의 의견을 입력하세요..."
                   value=${governanceBriefInput.value}
@@ -108,13 +109,12 @@ export function GuardrailPane({
                   }}
                 ></textarea>
                 <div class="flex gap-2">
-                  <button
-                    class="control-btn rounded-lg secondary"
+                  <${ActionButton}
                     onClick=${submitBrief}
                     disabled=${governanceBriefSubmitting.value || governanceBriefInput.value.trim() === ''}
                   >
                     ${governanceBriefSubmitting.value ? '기록 중...' : '의견 추가'}
-                  </button>
+                  <//>
                 </div>
               </div>
             `}

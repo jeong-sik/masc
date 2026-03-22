@@ -62,7 +62,7 @@ export function DecisionDetail() {
   return html`
     <${Card}
       title=${item ? '사건 상세' : '거버넌스 상세'}
-      class="section mb-3.5"
+      class="mb-3.5"
      
     >
       ${detailLoading.value

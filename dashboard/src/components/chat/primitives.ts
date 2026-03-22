@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { ActionButton } from '../common/button'
 import type { KeeperConversationDetails, KeeperConversationEntry } from '../../types'
 
 function timeLabel(timestamp?: string | null): string | null {
@@ -289,23 +290,21 @@ export function ChatComposer({
         disabled=${disabled}
       ></textarea>
       <div class="flex gap-2 items-center">
-        <button
-          type="button"
-          class="control-btn rounded-lg${warnClass}"
+        <${ActionButton}
+          class=${warnClass.trim() || undefined}
           onClick=${onSend}
           disabled=${disabled || streaming || draft.trim() === ''}
         >
           ${streamLabel}
-        </button>
+        <//>
         ${streaming && onAbort
           ? html`
-              <button
-                type="button"
-                class="control-btn rounded-lg ghost"
+              <${ActionButton}
+                variant="ghost"
                 onClick=${onAbort}
               >
                 중지
-              </button>
+              <//>
             `
           : null}
       </div>

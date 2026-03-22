@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from './common/button'
 import { Card } from './common/card'
 import { EmptyState, LoadingState, ErrorState } from './common/feedback-state'
 import { openAgentDetail } from './agent-detail'
@@ -109,10 +110,10 @@ export function SessionBriefCard({
         : null}
 
       <div class="flex gap-2 flex-wrap mt-2.5">
-        <button class="control-btn rounded-lg ghost" onClick=${() => openSession('intervene', brief.session_id)}>세션 개입 열기</button>
-        <button class="control-btn rounded-lg ghost" onClick=${() => openSession('command', brief.session_id)}>세션 원인 보기</button>
+        <${ActionButton} variant="ghost" onClick=${() => openSession('intervene', brief.session_id)}>세션 개입 열기<//>
+        <${ActionButton} variant="ghost" onClick=${() => openSession('command', brief.session_id)}>세션 원인 보기<//>
         ${action
-          ? html`<button class="control-btn rounded-lg ghost" onClick=${() => openActionIntervene(action, incident, '상황판 세션 요약')}>추천 액션 열기</button>`
+          ? html`<${ActionButton} variant="ghost" onClick=${() => openActionIntervene(action, incident, '상황판 세션 요약')}>추천 액션 열기<//>`
           : null}
       </div>
     </article>

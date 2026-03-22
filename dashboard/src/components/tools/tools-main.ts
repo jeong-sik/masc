@@ -29,7 +29,7 @@ export function Tools() {
 
   return html`
     <div>
-      <${Card} title="시스템 도구 목록" class="section mb-3.5">
+      <${Card} title="시스템 도구 목록" class="mb-3.5">
         <div class="mb-3.5">
           <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">시스템 도구 목록</h2>
           <p class="text-[12px] text-[var(--text-muted)] leading-relaxed">
@@ -55,7 +55,7 @@ export function Tools() {
         }
       <//>
 
-      <${Card} title="도구 사용 현황" class="section mb-3.5">
+      <${Card} title="도구 사용 현황" class="mb-3.5">
         ${usage
           ? html`
               <div class="text-[12px] text-[var(--text-muted)] mb-2">

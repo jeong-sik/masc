@@ -50,7 +50,7 @@ export function HorizonGroup({ horizon, items }: { horizon: string; items: Goal[
   if (items.length === 0) return null
   const sorted = [...items].sort((a, b) => b.priority - a.priority)
   return html`
-    <${Card} title="${horizonLabel(horizon)} 목표 (${items.length})" class="section mb-3.5">
+    <${Card} title="${horizonLabel(horizon)} 목표 (${items.length})" class="mb-3.5">
       <div class="flex flex-col gap-0.5">
         ${sorted.map(g => html`<${GoalRow} key=${g.id} goal=${g} />`)}
       </div>

@@ -5,6 +5,9 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { streamKeeperMessage, type KeeperChatStreamEvent } from '../api/keeper'
+import { ActionButton } from './common/button'
+import { TextInput } from './common/input'
+import { EmptyState } from './common/feedback-state'
 import { showToast } from './common/toast'
 
 interface ChatMessage {
@@ -74,6 +77,12 @@ async function sendChat(keeperName: string): Promise<void> {
   }
 }
 
+function msgBubble(role: string): string {
+  return role === 'user'
+    ? 'bg-[var(--accent-12)] border border-[var(--accent-20)] text-[var(--text-body)]'
+    : 'bg-[var(--white-6)] border border-[var(--card-border)] text-[var(--text-body)]'
+}
+
 export function KeeperChatPanel({ name }: { name: string }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const messages = chatMessages.value
@@ -87,58 +96,57 @@ export function KeeperChatPanel({ name }: { name: string }) {
   }, [messages.length, buffer])
 
   return html`
-    <div class="keeper-chat">
-      <div class="keeper-chat__header flex items-center justify-between py-2.5 px-3.5">
-        <span class="keeper-chat__title">@${name} 대화</span>
+    <div class="flex flex-col rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] overflow-hidden">
+      <div class="flex items-center justify-between py-2.5 px-3.5 border-b border-[var(--card-border)]">
+        <span class="text-xs font-medium text-[var(--text-strong)]">@${name} 대화</span>
         ${isStreaming ? html`
-          <button class="control-btn rounded-lg ghost keeper-chat__cancel" onClick=${cancelStream}>중단</button>
+          <${ActionButton} variant="ghost" size="sm" onClick=${cancelStream}>중단<//>
         ` : null}
       </div>
 
-      <div class="keeper-chat__messages flex-1 min-h-[200px] max-h-[400px] overflow-y-auto py-3 px-3.5 flex flex-col gap-2.5" ref=${scrollRef}>
+      <div class="flex-1 min-h-[200px] max-h-[400px] overflow-y-auto py-3 px-3.5 flex flex-col gap-2.5" ref=${scrollRef}>
         ${messages.length === 0 && !isStreaming ? html`
-          <div class="text-[var(--white-20)] text-[var(--fs-base)] text-center py-10">keeper에게 메시지를 보내세요</div>
+          <${EmptyState} class="py-10">keeper에게 메시지를 보내세요<//>
         ` : null}
 
         ${messages.map((msg, idx) => html`
-          <div key=${idx} class="keeper-chat__msg flex flex-col gap-[3px] max-w-[85%] keeper-chat__msg--${msg.role} ${msg.role === 'user' ? 'self-end' : 'self-start'}">
-            <span class="keeper-chat__role text-[var(--fs-2xs)] text-[var(--white-35)] uppercase tracking-[0.5px]">${msg.role === 'user' ? 'You' : name}</span>
-            <div class="keeper-chat__text rounded-lg">${msg.content}</div>
+          <div key=${idx} class="flex flex-col gap-[3px] max-w-[85%] ${msg.role === 'user' ? 'self-end' : 'self-start'}">
+            <span class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider ${msg.role === 'user' ? 'text-right' : ''}">${msg.role === 'user' ? 'You' : name}</span>
+            <div class="rounded-lg py-2 px-3 text-[13px] leading-relaxed ${msgBubble(msg.role)}">${msg.content}</div>
           </div>
         `)}
 
         ${isStreaming && buffer ? html`
-          <div class="keeper-chat__msg flex flex-col gap-[3px] max-w-[85%] keeper-chat__msg--assistant keeper-chat__msg--streaming self-start">
-            <span class="keeper-chat__role text-[var(--fs-2xs)] text-[var(--white-35)] uppercase tracking-[0.5px]">${name}</span>
-            <div class="keeper-chat__text rounded-lg">${buffer}<span class="keeper-chat__cursor">|</span></div>
+          <div class="flex flex-col gap-[3px] max-w-[85%] self-start">
+            <span class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">${name}</span>
+            <div class="rounded-lg py-2 px-3 text-[13px] leading-relaxed ${msgBubble('assistant')} border-[var(--accent)]">${buffer}<span class="animate-pulse text-[var(--accent)]">|</span></div>
           </div>
         ` : isStreaming ? html`
-          <div class="keeper-chat__msg flex flex-col gap-[3px] max-w-[85%] keeper-chat__msg--assistant keeper-chat__msg--streaming self-start">
-            <span class="keeper-chat__role text-[var(--fs-2xs)] text-[var(--white-35)] uppercase tracking-[0.5px]">${name}</span>
-            <div class="keeper-chat__text rounded-lg keeper-chat__text--thinking">thinking...</div>
+          <div class="flex flex-col gap-[3px] max-w-[85%] self-start">
+            <span class="text-[10px] text-[var(--text-dim)] uppercase tracking-wider">${name}</span>
+            <div class="rounded-lg py-2 px-3 text-[13px] leading-relaxed ${msgBubble('assistant')} animate-pulse">thinking...</div>
           </div>
         ` : null}
       </div>
 
-      ${chatError.value ? html`<div class="keeper-chat__error">${chatError.value}</div>` : null}
+      ${chatError.value ? html`<div class="mx-3.5 mb-2 p-2 rounded-lg bg-[rgba(239,68,68,0.08)] border border-[rgba(239,68,68,0.2)] text-xs text-[#fda4af]">${chatError.value}</div>` : null}
 
-      <div class="keeper-chat__input-row flex gap-2 py-2.5 px-3.5">
-        <input
-          class="control-input rounded-lg flex-1"
-          type="text"
+      <div class="flex gap-2 py-2.5 px-3.5 border-t border-[var(--card-border)]">
+        <${TextInput}
+          class="flex-1"
           placeholder="메시지 입력..."
           value=${chatInput.value}
           onInput=${(e: Event) => { chatInput.value = (e.target as HTMLInputElement).value }}
           onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter' && !e.shiftKey) void sendChat(name) }}
           disabled=${isStreaming}
         />
-        <button
-          class="control-btn rounded-lg shrink-0"
+        <${ActionButton}
+          variant="primary"
           onClick=${() => { void sendChat(name) }}
           disabled=${isStreaming || chatInput.value.trim() === ''}
         >
           ${isStreaming ? '...' : '전송'}
-        </button>
+        <//>
       </div>
     </div>
   `

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
+import { ActionButton } from './common/button'
 import { EmptyState, LoadingState } from './common/feedback-state'
 import { refreshTrpg, trpgLoading, trpgRoom, trpgState } from '../store'
 
@@ -49,7 +50,7 @@ export function Trpg() {
     return html`
       <${EmptyState}>
         <div style="margin-bottom: 12px;">활성 TRPG 세션이 없습니다.</div>
-        <button class="control-btn rounded-lg ghost" onClick=${() => void safeFetchTrpg()}>새로고침</button>
+        <${ActionButton} variant="ghost" onClick=${() => void safeFetchTrpg()}>새로고침<//>
       <//>
     `
   }

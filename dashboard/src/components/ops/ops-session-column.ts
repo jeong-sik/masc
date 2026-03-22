@@ -2,6 +2,8 @@
 
 import { signal } from '@preact/signals'
 import { html } from 'htm/preact'
+import { ActionButton } from '../common/button'
+import { TextInput } from '../common/input'
 import { SurfaceCard } from '../common/card'
 import {
   fetchAutoresearchStatus,
@@ -304,15 +306,15 @@ export function OpsSessionColumn() {
         ${linkedAutoresearch?.loop_id ? html`
           <label class="control-label" for="ops-autoresearch-hypothesis">Autoresearch 제어</label>
           <div class="control-row items-stretch">
-            <button class="control-btn ghost" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
+            <${ActionButton} variant="ghost" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
               상태 새로고침
-            </button>
-            <button class="control-btn" onClick=${() => { void cycleAutoresearch() }} disabled=${busy}>
+            <//>
+            <${ActionButton} onClick=${() => { void cycleAutoresearch() }} disabled=${busy}>
               1 cycle 실행
-            </button>
-            <button class="control-btn ghost" onClick=${() => { void stopAutoresearch() }} disabled=${busy}>
+            <//>
+            <${ActionButton} variant="ghost" onClick=${() => { void stopAutoresearch() }} disabled=${busy}>
               loop 중지
-            </button>
+            <//>
           </div>
           <textarea
             id="ops-autoresearch-hypothesis"
@@ -324,9 +326,9 @@ export function OpsSessionColumn() {
             disabled=${busy}
           ></textarea>
           <div class="control-row items-stretch">
-            <button class="control-btn" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
+            <${ActionButton} onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
               hypothesis 주입
-            </button>
+            <//>
             <span class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
           </div>
           ${autoresearchError.value ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">${autoresearchError.value}</div>` : null}
@@ -336,7 +338,7 @@ export function OpsSessionColumn() {
         <div class="control-row items-stretch">
           <select
             id="ops-turn-kind"
-            class="control-input min-w-[92px]"
+            class="rounded bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-xs px-2 py-1 min-w-[92px]"
             value=${teamTurnKind.value}
             onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
             disabled=${busy || !selectedSessionActionable}
@@ -346,9 +348,9 @@ export function OpsSessionColumn() {
             <option value="task">작업</option>
             <option value="worker_spawn_batch">worker 교체</option>
           </select>
-          <button class="control-btn" onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSessionActionable}>
+          <${ActionButton} onClick=${() => { void submitTeamTurn() }} disabled=${busy || !selectedSessionActionable}>
             적용
-          </button>
+          <//>
         </div>
         <div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">현재 선택: ${sessionActionLabel(teamTurnKind.value)}</div>
 
@@ -362,9 +364,7 @@ export function OpsSessionColumn() {
         ></textarea>
 
         ${teamTurnKind.value === 'task' ? html`
-          <input
-            class="control-input"
-            type="text"
+          <${TextInput}
             placeholder="주입할 작업 제목"
             value=${teamTaskTitle.value}
             onInput=${(event: Event) => { teamTaskTitle.value = (event.target as HTMLInputElement).value }}
@@ -379,7 +379,7 @@ export function OpsSessionColumn() {
             disabled=${busy || !selectedSessionActionable}
           ></textarea>
           <select
-            class="control-input min-w-[92px]"
+            class="rounded bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-xs px-2 py-1 min-w-[92px]"
             value=${teamTaskPriority.value}
             onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
             disabled=${busy || !selectedSessionActionable}
@@ -402,16 +402,14 @@ export function OpsSessionColumn() {
         ` : null}
 
         <div class="control-row items-stretch">
-          <input
-            class="control-input"
-            type="text"
+          <${TextInput}
             value=${teamStopReason.value}
             onInput=${(event: Event) => { teamStopReason.value = (event.target as HTMLInputElement).value }}
             disabled=${busy || !selectedSessionActionable}
           />
-          <button class="control-btn ghost" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSessionActionable}>
+          <${ActionButton} variant="ghost" onClick=${() => { void submitTeamStop() }} disabled=${busy || !selectedSessionActionable}>
             세션 중지
-          </button>
+          <//>
         </div>
       <//>
     </div>

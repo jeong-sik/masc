@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from './common/button'
 import { EmptyState } from './common/feedback-state'
 import { openAgentDetail } from './agent-detail'
 import { workflowActionLabel } from '../workflow-context'
@@ -114,16 +115,16 @@ export function AttentionCard({
       <div class="flex gap-2 flex-wrap mt-2.5">
         ${action
           ? html`
-              <button class="control-btn rounded-lg ghost" onClick=${() => openActionIntervene(action, incident, '상황판 주의 신호')}>
+              <${ActionButton} variant="ghost" onClick=${() => openActionIntervene(action, incident, '상황판 주의 신호')}>
                 이 액션으로 개입 열기
-              </button>
-              <button class="control-btn rounded-lg ghost" onClick=${() => openActionCommand(action, incident, '상황판 주의 신호')}>
+              <//>
+              <${ActionButton} variant="ghost" onClick=${() => openActionCommand(action, incident, '상황판 주의 신호')}>
                 원인 보기
-              </button>
+              <//>
             `
           : html`
-              <button class="control-btn rounded-lg ghost" onClick=${() => openIncidentIntervene(incident)}>이 이슈로 개입 열기</button>
-              <button class="control-btn rounded-lg ghost" onClick=${() => openIncidentCommand(incident)}>이 이슈의 원인 보기</button>
+              <${ActionButton} variant="ghost" onClick=${() => openIncidentIntervene(incident)}>이 이슈로 개입 열기<//>
+              <${ActionButton} variant="ghost" onClick=${() => openIncidentCommand(incident)}>이 이슈의 원인 보기<//>
             `}
       </div>
     </article>

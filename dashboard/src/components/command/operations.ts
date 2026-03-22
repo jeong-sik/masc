@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { ActionButton } from '../common/button'
 import { SurfaceCard } from '../common/card'
 import { EmptyState, LoadingState, ErrorState } from '../common/feedback-state'
 import type {
@@ -200,8 +201,8 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
         ? html`<div class="cmd-card rounded-xl-foot">체크포인트 ${op.checkpoint_ref}</div>`
         : null}
       <div class="flex gap-2.5 flex-wrap mt-3">
-        <button
-          class="control-btn rounded-lg ghost"
+        <${ActionButton}
+          variant="ghost"
           onClick=${() => {
             setCommandPlaneSurface('swarm')
             navigate('operations', {
@@ -212,11 +213,11 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
           }}
         >
           스웜 실시간 보기
-        </button>
+        <//>
         ${chain
           ? html`
-              <button
-                class="control-btn rounded-lg ghost"
+              <${ActionButton}
+                variant="ghost"
                 onClick=${() => {
                   focusCommandPlaneChainOperation(op.operation_id)
                   setCommandPlaneSurface('chains')
@@ -224,24 +225,24 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
                 }}
               >
                 체인 열기
-              </button>
+              <//>
             `
           : null}
         ${op.source === 'managed' && op.status === 'active'
           ? html`
-              <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(pauseKey)} onClick=${() => fire(() => pauseCommandPlaneOperation(op.operation_id))}>
+              <${ActionButton} variant="ghost" disabled=${actionDisabled(pauseKey)} onClick=${() => fire(() => pauseCommandPlaneOperation(op.operation_id))}>
                 ${actionDisabled(pauseKey) ? '일시정지 중…' : '일시정지'}
-              </button>
-              <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(recallKey)} onClick=${() => fire(() => recallCommandPlaneOperation(op.operation_id))}>
+              <//>
+              <${ActionButton} variant="ghost" disabled=${actionDisabled(recallKey)} onClick=${() => fire(() => recallCommandPlaneOperation(op.operation_id))}>
                 ${actionDisabled(recallKey) ? '회수 중…' : '회수'}
-              </button>
+              <//>
             `
           : null}
         ${op.source === 'managed' && op.status === 'paused'
           ? html`
-              <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(resumeKey)} onClick=${() => fire(() => resumeCommandPlaneOperation(op.operation_id))}>
+              <${ActionButton} variant="ghost" disabled=${actionDisabled(resumeKey)} onClick=${() => fire(() => resumeCommandPlaneOperation(op.operation_id))}>
                 ${actionDisabled(resumeKey) ? '재개 중…' : '재개'}
-              </button>
+              <//>
             `
           : null}
       </div>

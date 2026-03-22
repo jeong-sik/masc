@@ -30,7 +30,7 @@ export function ActivityRail() {
     }
   }
   return html`
-    <${Card} title="활동 타임라인" class="section mb-3.5">
+    <${Card} title="활동 타임라인" class="mb-3.5">
       <div class="flex flex-col gap-2">
         ${grouped.size === 0
           ? html`<${EmptyState}>거버넌스 활동이 아직 없습니다.<//>`
@@ -103,7 +103,7 @@ export function RuntimeParamsPanel() {
   if (params.length === 0 && !runtimeLoading.value) return null
 
   return html`
-    <${Card} title="Runtime Parameters" class="section mb-3.5">
+    <${Card} title="Runtime Parameters" class="mb-3.5">
       ${runtimeLoading.value
         ? html`<${LoadingState}>파라미터 로딩 중...<//>`
         : html`

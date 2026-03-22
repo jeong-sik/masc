@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { ActionButton } from '../common/button'
 import { EmptyState } from '../common/feedback-state'
 import type {
   CommandPlaneOrchestraEdge,
@@ -377,12 +378,11 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
         ${signalNode.suggested_surface
           ? html`
               <div class="flex gap-2.5 flex-wrap mt-3">
-                <button
-                  class="control-btn rounded-lg"
+                <${ActionButton}
                   onClick=${() => jumpTo('command', signalNode.suggested_surface, signalNode.suggested_params ?? {})}
                 >
                   추천 화면 열기
-                </button>
+                <//>
               </div>
             `
           : null}
@@ -417,12 +417,11 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
       ${(node.link_tab && (node.link_surface || Object.keys(node.link_params ?? {}).length > 0))
         ? html`
             <div class="flex gap-2.5 flex-wrap mt-3">
-              <button
-                class="control-btn rounded-lg"
+              <${ActionButton}
                 onClick=${() => jumpTo(node.link_tab ?? 'command', node.link_surface, node.link_params ?? {})}
               >
                 이 화면 열기
-              </button>
+              <//>
             </div>
           `
         : null}

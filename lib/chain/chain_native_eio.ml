@@ -281,11 +281,7 @@ let call_model_text (runtime : runtime) ~model ?system ?tools ?thinking:_ ~promp
           Oas_worker.run_model_by_label ~model_label ~goal:prompt ~system_prompt
             ~max_turns:1 ~temperature:0.2 ~max_tokens:4096 ()
         else
-          (* Tool dispatch still needs model_spec for run_model_with_masc_tools *)
-          (match Model_spec.model_spec_of_string model_label with
-          | Error msg -> Error msg
-          | Ok spec ->
-            Oas_worker.run_model_with_masc_tools ~model_spec:spec ~goal:prompt
+          (Oas_worker.run_model_with_masc_tools ~model_label ~goal:prompt
               ~system_prompt ~masc_tools:tool_defs
               ~dispatch:(fun ~name ~args ->
                 match !tool_executor_ref with

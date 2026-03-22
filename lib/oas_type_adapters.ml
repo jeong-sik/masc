@@ -1,43 +1,44 @@
-(** OAS type adapters — convert MASC model types to OAS (Agent SDK) types.
+(** OAS type adapters — convert MASC model labels and Provider_config to
+    OAS (Agent SDK) types.
 
-    Thin wrappers bridging {!Model_spec.model_spec} and {!Agent_sdk.Types.message}
-    to their OAS counterparts.  Most conversions are structural identity
-    (shared type aliases); [to_oas_provider] performs actual mapping.
-
-    Phase 1 migration: uses {!Model_spec.to_provider_config} bridge
-    where possible, with provider-specific overrides for Llama (Local)
-    and Claude (Anthropic) which need Agent_sdk.Provider-specific constructors.
+    All conversions use string model labels or OAS Provider_config.t.
+    No dependency on Model_spec.model_spec type.
 
     @since 2.130.0
-    @since 2.133.0 — Phase 1: migrated to Model_spec bridge *)
+    @since 2.133.0 — Phase 1: migrated to Model_spec bridge
+    @since 2.134.0 — Phase 6: eliminated Model_spec.model_spec exposure *)
 
-let to_oas_provider (spec : Model_spec.model_spec) : Agent_sdk.Provider.config option =
-  (* Use the Provider_config bridge for base_url, model_id, api_key *)
-  let pc = Model_spec.to_provider_config spec in
-  let rn = Model_spec.registry_name_of_provider spec.provider in
-  match rn with
-  | "claude" ->
-    Some { Agent_sdk.Provider.provider = Anthropic;
-           model_id = pc.model_id;
-           api_key_env =
-             if pc.api_key <> "" then pc.api_key
-             else "ANTHROPIC_API_KEY" }
-  | "llama" ->
-    Some { provider = Local { base_url = pc.base_url };
-           model_id = pc.model_id; api_key_env = "" }
-  | "gemini" ->
-    Some { provider = OpenAICompat { base_url = pc.base_url; auth_header = None;
-             path = pc.request_path; static_token = None };
-           model_id = pc.model_id;
-           api_key_env =
-             if pc.api_key <> "" then pc.api_key
-             else "GEMINI_API_KEY" }
-  | _ ->
-    (* glm, openrouter, custom: all OpenAI_compat wire format *)
-    Some { provider = OpenAICompat { base_url = pc.base_url; auth_header = None;
-             path = pc.request_path; static_token = None };
-           model_id = pc.model_id;
-           api_key_env = pc.api_key }
+(** Convert a model label string (e.g. "llama:qwen3.5") to an OAS Provider.config.
+    Parses via Model_spec internally; returns None only if parsing fails. *)
+let to_oas_provider_of_label (label : string) : Agent_sdk.Provider.config option =
+  match Model_spec.model_spec_of_string label with
+  | Error _ -> None
+  | Ok spec ->
+    let pc = Model_spec.to_provider_config spec in
+    let rn = Model_spec.registry_name_of_provider spec.provider in
+    match rn with
+    | "claude" ->
+      Some { Agent_sdk.Provider.provider = Anthropic;
+             model_id = pc.model_id;
+             api_key_env =
+               if pc.api_key <> "" then pc.api_key
+               else "ANTHROPIC_API_KEY" }
+    | "llama" ->
+      Some { provider = Local { base_url = pc.base_url };
+             model_id = pc.model_id; api_key_env = "" }
+    | "gemini" ->
+      Some { provider = OpenAICompat { base_url = pc.base_url; auth_header = None;
+               path = pc.request_path; static_token = None };
+             model_id = pc.model_id;
+             api_key_env =
+               if pc.api_key <> "" then pc.api_key
+               else "GEMINI_API_KEY" }
+    | _ ->
+      (* glm, openrouter, custom: all OpenAI_compat wire format *)
+      Some { provider = OpenAICompat { base_url = pc.base_url; auth_header = None;
+               path = pc.request_path; static_token = None };
+             model_id = pc.model_id;
+             api_key_env = pc.api_key }
 
 (** Convert OAS Provider_config.t to OAS Provider.config for Agent Builder.
     Provider_config.t already contains resolved API key and endpoint;

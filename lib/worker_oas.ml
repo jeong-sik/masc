@@ -118,8 +118,8 @@ let description_of_meta (meta : Worker_container_types.worker_container_meta) : 
 (* OAS Provider from MASC model_spec                                 *)
 (* ================================================================ *)
 
-(** Re-use the existing provider mapping from local_agent_eio_container. *)
-let oas_provider_of_model = Worker_container.oas_provider_of_model
+(** Re-use the existing provider mapping from worker_container. *)
+let oas_provider_of_label = Worker_container.oas_provider_of_label
 
 (* ================================================================ *)
 (* execution_scope -> gate_config                                    *)

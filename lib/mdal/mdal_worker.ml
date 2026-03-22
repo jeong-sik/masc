@@ -52,31 +52,31 @@ let worker_name_for_state (state : Mdal.loop_state) =
   let safe_loop = Room_utils.safe_filename state.loop_id |> trunc in
   sprintf "mdal-%s-%02d" safe_loop (state.current_iteration + 1)
 
-let model_label (spec : Model_spec.model_spec) =
-  Model_spec.label_of_model_spec spec
+(** Supported MDAL providers (by label prefix). *)
+let supported_mdal_providers = [ "llama"; "claude"; "openai"; "gemini"; "glm"; "codex-api" ]
 
-(** Validate that the model spec uses a supported provider.
+(** Validate that a model label uses a supported provider prefix.
     Rejects OpenRouter and Custom providers. *)
-let validate_model_spec (spec : Model_spec.model_spec) :
-    (Model_spec.model_spec, string) result =
-  let provider_str = Model_spec.string_of_provider spec.provider in
-  match provider_str with
-  | "llama" | "claude" | "openai" | "gemini" | "glm_cloud" -> Ok spec
-  | _ ->
-      Error
-        (sprintf
-           "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
-           provider_str)
+let validate_model_label (label : string) : (string, string) result =
+  match Model_spec.model_spec_of_string label with
+  | Error _ as e -> e
+  | Ok spec ->
+    let provider_str = Model_spec.string_of_provider spec.provider in
+    match provider_str with
+    | "llama" | "claude" | "openai" | "gemini" | "glm_cloud" -> Ok label
+    | _ ->
+        Error
+          (sprintf
+             "MDAL strict worker does not support provider `%s`. Use claude, openai, gemini, llama:<model>, or glm."
+             provider_str)
 
-let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
-    (Model_spec.model_spec * string, string) result =
+(** Resolve agent name + optional worker_model to a validated model label string. *)
+let resolve_model_label ~(agent : string) ~(worker_model : string option) :
+    (string, string) result =
   let parse_worker_model raw =
     match Model_spec.model_spec_of_string raw with
     | Error _ as e -> e
-    | Ok spec -> (
-        match validate_model_spec spec with
-        | Error _ as e -> e
-        | Ok valid -> Ok (valid, model_label valid))
+    | Ok _spec -> validate_model_label raw
   in
   match worker_model with
   | Some raw when String.trim raw <> "" -> parse_worker_model (String.trim raw)
@@ -85,14 +85,14 @@ let resolve_model_spec ~(agent : string) ~(worker_model : string option) :
       if String.contains normalized ':' then parse_worker_model normalized
       else
         match normalized with
-        | "claude" -> Ok (Model_spec.claude_opus, model_label Model_spec.claude_opus)
+        | "claude" -> Ok (Model_spec.label_of_model_spec Model_spec.claude_opus)
         | "openai" | "codex-api" ->
-            Ok (Model_spec.openai_default, model_label Model_spec.openai_default)
-        | "gemini" -> Ok (Model_spec.gemini_pro, model_label Model_spec.gemini_pro)
+            Ok (Model_spec.label_of_model_spec Model_spec.openai_default)
+        | "gemini" -> Ok (Model_spec.label_of_model_spec Model_spec.gemini_pro)
         | "ollama" ->
             Error (Provider_adapter.bare_ollama_migration_message ())
         | "glm" ->
-            Ok (Model_spec.glm_cloud, model_label Model_spec.glm_cloud)
+            Ok (Model_spec.label_of_model_spec Model_spec.glm_cloud)
         | "llama" ->
             Error
               "MDAL strict worker requires `worker_model` for llama providers, e.g. `llama:<model-id>`."
@@ -145,11 +145,10 @@ let run ~(sw : Eio.Switch.t) ~(config : Room.config) (state : Mdal.loop_state)
         in
         raise (Invalid_argument message)
   in
-  let model_spec =
-    match Model_spec.model_spec_of_string model_label with
-    | Ok spec -> spec
-    | Error message -> raise (Invalid_argument message)
-  in
+  (* Validate the label parses *)
+  (match Model_spec.model_spec_of_string model_label with
+   | Ok _ -> ()
+   | Error message -> raise (Invalid_argument message));
   let prompt =
     Mdal.render_worker_prompt state.profile state.history current_metric
   in
@@ -157,7 +156,7 @@ let run ~(sw : Eio.Switch.t) ~(config : Room.config) (state : Mdal.loop_state)
   match
     Worker_runtime.run_worker ~sw ~base_path:config.Room_utils.base_path
       ~room_config:(Some config)
-      ~worker_name ~model:model_spec ~team_session_id:None ~role:(Some "mdal")
+      ~worker_name ~model_label ~team_session_id:None ~role:(Some "mdal")
       ~selection_note:(Some "strict-mdal-worker")
       ~prompt ~allowed_tools:state.profile.tools_allow
       ~timeout_sec:(timeout_seconds state) ()

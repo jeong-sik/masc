@@ -89,7 +89,7 @@ let execute_spawn_pipeline
                      in
                      let oas_result =
                        Oas_worker.run_model_by_label
-                         ~model_label:(Model_spec.label_of_model_spec prepared.runtime_model)
+                         ~model_label:prepared.runtime_model_label
                          ~goal:prepared.spec.spawn_prompt
                          ~system_prompt:(Printf.sprintf
                            "You are agent '%s'. Execute the task and return a clear result."
@@ -122,7 +122,7 @@ let execute_spawn_pipeline
                            Some (`Assoc [
                              ("oas_session_id", `String result.session_id);
                              ("turns", `Int result.turns);
-                             ("model", `String prepared.runtime_model.model_id);
+                             ("model", `String prepared.runtime_model_label);
                              ("tool_names", `List (List.map (fun n -> `String n) tool_names));
                              ("tool_call_count", `Int (List.length tool_names));
                              ("input_tokens",
@@ -195,7 +195,7 @@ let execute_spawn_pipeline
                        ?requested_worker_class:prepared.spec.worker_class
                        ?requested_worker_size:(deps.worker_size_of_spec prepared.spec)
                        ?resolved_runtime:prepared.assigned_runtime
-                       ~resolved_model:prepared.runtime_model.model_id
+                       ~resolved_model:prepared.runtime_model_label
                        ?routing_reason:prepared.spec.routing_reason
                        ~tool_names:oas_tool_names
                        ~tool_call_count:oas_tool_call_count
@@ -311,7 +311,7 @@ let execute_spawn_pipeline
                          ("status", `String "completed");
                          ("trace_capability", `String (if false (* raw_trace_run unavailable *) then "raw" else "summary_only"));
                          ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
-                         ("resolved_model", `String prepared.runtime_model.model_id);
+                         ("resolved_model", `String prepared.runtime_model_label);
                          ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
                          ("tool_call_count", `Int 0);
                          ("tool_names", `List (List.map (fun name -> `String name) ([] : string list)));
@@ -355,7 +355,7 @@ let execute_spawn_pipeline
                                     ("worker_class", Option.fold ~none:`Null ~some:(fun kind -> `String (Team_session_types.worker_class_to_string kind)) prepared.spec.worker_class);
                                     ("worker_size", Option.fold ~none:`Null ~some:(fun size -> `String (Team_session_types.worker_size_to_string size)) (deps.worker_size_of_spec prepared.spec));
                                     ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
-                                    ("resolved_model", `String prepared.runtime_model.model_id);
+                                    ("resolved_model", `String prepared.runtime_model_label);
                                     ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
                                     ("ready", `Bool false);
                                   ])

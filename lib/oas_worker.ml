@@ -73,27 +73,35 @@ type run_result = {
 (* Internal: resolve provider                                        *)
 (* ================================================================ *)
 
-(** Resolve a Model_spec.model_spec to an OAS Provider.config.
+(** Resolve a model label string to an OAS Provider.config.
     Uses Oas_type_adapters as primary path. Falls back to constructing
     from Model_spec.to_provider_config bridge when the adapter returns None. *)
-let resolve_provider (spec : Model_spec.model_spec) : Oas.Provider.config =
-  match Oas_type_adapters.to_oas_provider spec with
+let resolve_provider_of_label (label : string) : Oas.Provider.config =
+  match Oas_type_adapters.to_oas_provider_of_label label with
   | Some cfg -> cfg
   | None ->
-    (* Fallback: use the migration bridge to get Provider_config.t,
-       then map to the Agent_sdk.Provider.config expected by Builder.
-       This avoids reaching into model_spec fields directly. *)
-    let pc = Model_spec.to_provider_config spec in
-    { Oas.Provider.provider =
-        Oas.Provider.OpenAICompat {
-          base_url = pc.base_url;
-          auth_header = None;
-          path = pc.request_path;
-          static_token = None;
-        };
-      model_id = pc.model_id;
-      api_key_env = pc.api_key;
-    }
+    (* Fallback: parse label, get Provider_config.t, then map to Agent_sdk. *)
+    match Model_spec.model_spec_of_string label with
+    | Ok spec ->
+      let pc = Model_spec.to_provider_config spec in
+      { Oas.Provider.provider =
+          Oas.Provider.OpenAICompat {
+            base_url = pc.base_url;
+            auth_header = None;
+            path = pc.request_path;
+            static_token = None;
+          };
+        model_id = pc.model_id;
+        api_key_env = pc.api_key;
+      }
+    | Error _ ->
+      (* Last resort: use glm as fallback provider *)
+      Oas_type_adapters.provider_config_to_oas
+        (Llm_provider.Provider_config.make
+           ~kind:Llm_provider.Provider_config.Glm
+           ~model_id:"auto"
+           ~base_url:"https://open.bigmodel.cn/api/paas/v4"
+           ~request_path:"/chat/completions" ())
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)
@@ -321,9 +329,9 @@ let resolve_cascade_providers ~cascade_name : Llm_provider.Provider_config.t lis
       Log.Misc.warn "cascade %s: configured models unavailable — retrying built-in defaults" cascade_name;
       Llm_provider.Cascade_config.parse_model_strings defaults)
 
-let config_for_model
+let config_for_label
     ~(name : string)
-    ~(model_spec : Model_spec.model_spec)
+    ~(model_label : string)
     ~(system_prompt : string)
     ~(tools : Oas.Tool.t list)
     ~(max_turns : int)
@@ -335,9 +343,13 @@ let config_for_model
     ?memory
     ~(description : string option)
     () : config =
-  let provider = resolve_provider model_spec in
+  let provider = resolve_provider_of_label model_label in
+  let model_id = match Model_spec.model_spec_of_string model_label with
+    | Ok spec -> spec.model_id
+    | Error _ -> model_label
+  in
   {
-    (default_config ~name ~provider ~model_id:model_spec.model_id
+    (default_config ~name ~provider ~model_id
        ~system_prompt ~tools)
     with
     max_turns;
@@ -421,8 +433,7 @@ let run_named
   | Error e -> Error e
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
-    Parses the label into a model_spec internally. Callers do not need to hold
-    a Model_spec.model_spec value. *)
+    Validates the label parses before attempting execution. *)
 let run_model_by_label
     ~(model_label : string)
     ~goal
@@ -439,14 +450,15 @@ let run_model_by_label
     ?on_event
     ()
   : (run_result, string) result =
+  (* Validate the label parses before proceeding *)
   match Model_spec.model_spec_of_string model_label with
   | Error msg -> Error msg
-  | Ok model_spec ->
+  | Ok _spec ->
     match require_eio () with
     | Error e -> Error e
     | Ok (sw, net) ->
         let config =
-          config_for_model ~name:"oas-label-model" ~model_spec ~system_prompt
+          config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
             ~tools ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
             ?context_reducer ?memory
             ~description:(Some (Printf.sprintf "model_label:%s" model_label))
@@ -458,40 +470,6 @@ let run_model_by_label
             Error
               (Printf.sprintf "response rejected by accept from %s" model_label)
         | Error e -> Error e)
-
-let run_model
-    ~model_spec
-    ~goal
-    ?(system_prompt = "")
-    ?(tools = [])
-    ?(max_turns = 20)
-    ?(temperature = 0.7)
-    ?(max_tokens = 4096)
-    ?(accept = fun (_ : Oas_response.api_response) -> true)
-    ?guardrails
-    ?hooks
-    ?context_reducer
-    ?memory
-    ?on_event
-    ()
-  : (run_result, string) result =
-  match require_eio () with
-  | Error e -> Error e
-  | Ok (sw, net) ->
-      let config =
-        config_for_model ~name:"oas-explicit-model" ~model_spec ~system_prompt
-          ~tools ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
-          ?context_reducer ?memory
-          ~description:(Some "model_spec:explicit")
-          ()
-      in
-      (match run ~sw ~net ~config ?on_event goal with
-      | Ok result when accept result.response -> Ok result
-      | Ok _ ->
-          Error
-            (Printf.sprintf "response rejected by accept from %s"
-               model_spec.model_id)
-      | Error e -> Error e)
 
 let run_named_with_masc_tools
     ~cascade_name
@@ -522,7 +500,7 @@ let run_named_with_masc_tools
     ?raw_trace ?on_event ()
 
 let run_model_with_masc_tools
-    ~model_spec
+    ~(model_label : string)
     ~goal
     ?(system_prompt = "")
     ~(masc_tools : Types.tool_schema list)
@@ -541,10 +519,10 @@ let run_model_with_masc_tools
   | Error e -> Error e
   | Ok (sw, net) ->
       let config =
-        config_for_model ~name:"oas-explicit-model" ~model_spec ~system_prompt
+        config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
           ~tools:[] ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
           ?memory
-          ~description:(Some "model_spec:explicit")
+          ~description:(Some (Printf.sprintf "model_label:%s" model_label))
           ()
       in
       let config = { config with raw_trace } in

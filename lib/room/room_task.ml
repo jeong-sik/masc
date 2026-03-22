@@ -761,14 +761,14 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
            | None -> false)
         | _ -> false
       ) sorted in
-      let stale_ids = List.map (fun (t : Types.task) -> t.id) stale in
-      (* Re-derive working_tasks after stale removal to prevent
-         second write_backlog from restoring archived tasks (#2237) *)
+      (* Re-derive working_tasks after stale removal so subsequent
+         write_backlog calls do not restore archived tasks. *)
       let working_tasks =
         if stale <> [] then begin
+          let stale_ids = List.map (fun (t : Types.task) -> t.id) stale in
           let remaining = List.filter (fun (t : Types.task) ->
             not (List.mem t.id stale_ids)
-          ) backlog.tasks in
+          ) working_tasks in
           write_backlog config { backlog with tasks = remaining };
           log_event config (Printf.sprintf
             "{\"type\":\"stale_task_auto_archive\",\"count\":%d,\"threshold_days\":%d,\"ts\":\"%s\"}"
@@ -776,9 +776,9 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
           let _ = broadcast config ~from_agent:"system"
             ~content:(Printf.sprintf "📦 Auto-archived %d stale Todo task(s) (>%dd old)"
               (List.length stale) stale_threshold_days) in
-          List.filter (fun (t : Types.task) ->
-            not (List.mem t.id stale_ids)) working_tasks
-        end else working_tasks
+          remaining
+        end else
+          working_tasks
       in
       let unclaimed = List.filter (fun t ->
         match t.task_status with

@@ -1,0 +1,207 @@
+/* ── Dashboard — kept: pseudo-elements, stateful selectors, hover/focus,
+   transitions, keyframes, webkit details, complex grids, table styles ── */
+
+/* ── Runtime Collapsible ── */
+.runtime-summary::-webkit-details-marker,
+.overview-section-collapsible > summary::-webkit-details-marker,
+.mission-collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+
+.runtime-summary::before {
+  content: '\25B8 ';
+  display: inline;
+}
+
+.runtime-collapsible[open] > .runtime-summary::before {
+  content: '\25BE ';
+}
+
+/* ── Collapsible Sections ── */
+.overview-section-collapsible > summary,
+.mission-collapsible-summary {
+  transition: background 0.15s;
+}
+
+.overview-section-collapsible > summary:hover,
+.mission-collapsible-summary:hover {
+  background: var(--white-4);
+}
+
+.overview-section-collapsible > summary::before {
+  content: '\25B8';
+  font-size: var(--fs-xs);
+  transition: transform 0.15s;
+  display: inline-block;
+  color: var(--text-slate);
+}
+
+.overview-section-collapsible[open] > summary::before,
+.mission-collapsible-section[open] > .mission-collapsible-summary::before {
+  transform: rotate(90deg);
+}
+
+.mission-collapsible-summary::before {
+  content: '\25B8';
+  font-size: var(--fs-xs);
+  color: var(--text-slate);
+  transition: transform 0.15s;
+  display: inline-block;
+}
+
+@media (max-width: 960px) {
+  .monitor-row-header {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+}
+
+/* ── Board post (content-visibility) ── */
+.board-post {
+  border-color: var(--card-border);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
+
+/* ── Control Dock ── */
+.control-input:focus,
+.control-textarea:focus {
+  outline: none;
+  border-color: rgba(71, 184, 255, 0.55);
+}
+
+.control-btn:hover {
+  background: rgba(71, 184, 255, 0.27);
+}
+
+.control-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Mission Status Dot ── */
+.mission-status-dot.mission-state-alive {
+  background: var(--ok, var(--ok));
+  box-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
+}
+
+/* ── Card-level dimming ── */
+.mission-crew-card.mission-state-offline,
+.mission-activity-card.mission-state-offline {
+  opacity: 0.4;
+}
+
+.mission-crew-card.mission-state-offline:hover,
+.mission-activity-card.mission-state-offline:hover,
+.mission-activity-card.mission-state-idle {
+  opacity: 0.65;
+}
+
+.mission-crew-card.mission-state-idle,
+.mission-crew-card.mission-state-idle:hover,
+.mission-activity-card.mission-state-idle:hover {
+  opacity: 0.85;
+}
+
+/* ── Tab pill (hover/active transitions) ── */
+.tab-pill {
+  transition: all 0.15s;
+}
+.tab-pill:hover {
+  border-color: var(--accent);
+  color: var(--text-strong);
+}
+
+.tab-collapsible__summary:hover {
+  color: var(--text-strong);
+}
+
+/* ── Responsive (layout) ── */
+@media (max-width: 960px) {
+  .keeper-kpis { grid-template-columns: repeat(2, 1fr); }
+  .agent-detail-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 880px) {
+  .council-create { grid-template-columns: 1fr; }
+  .control-row { grid-template-columns: 1fr; }
+  .agent-mention-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .keeper-kpis { grid-template-columns: 1fr; }
+  .metric-tip-pop {
+    left: 0;
+    transform: none;
+    min-width: 220px;
+    max-width: min(320px, calc(100vw - 56px));
+  }
+}
+
+/* ── Mitosis Ring ── */
+.mitosis-ring-bg {
+  fill: none;
+  stroke: var(--white-10);
+}
+.mitosis-ring-fg {
+  fill: none;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.5s ease-out, stroke 0.3s ease;
+}
+.mitosis-safe { stroke: var(--ok); color: var(--ok); }
+.mitosis-warn { stroke: var(--warn); color: var(--warn); }
+.mitosis-critical {
+  stroke: var(--bad); color: var(--bad);
+  animation: pulse-ring 2s infinite;
+}
+@keyframes pulse-ring {
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
+/* ── Agent card hover ── */
+.agent-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  transform: translateY(-2px);
+  border-color: var(--accent);
+}
+
+/* ── Kanban (pseudo-elements, priority variants, hover transform) ── */
+.kanban-card {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.kanban-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0;
+  width: 4px; height: 100%;
+  background: var(--text-muted);
+}
+.kanban-card.p1::before { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+.kanban-card.p2::before { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.kanban-card.p3::before { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+.kanban-card:hover {
+  transform: translateY(-4px) scale(1.01);
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 240, 255, 0.1);
+}
+
+/* ── Logs (table styling, sticky, monospace) ── */
+.logs-table thead {
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  z-index: 1;
+}
+
+.logs-module-input::placeholder {
+  color: var(--text-muted);
+}
+
+.logs-refresh-btn:hover {
+  border-color: var(--accent);
+}
+
+.logs-row:hover {
+  background: var(--white-3);
+}

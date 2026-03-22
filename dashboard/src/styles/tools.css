@@ -1,0 +1,98 @@
+/* ── Tools — kept: auto-fit grid, webkit-line-clamp, back-to-top,
+   bar-row grid, tier badges, responsive, surface-count active ── */
+
+.tool-inventory-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+/* webkit-line-clamp — not expressible in Tailwind v4 */
+.tool-inventory-desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.tool-inventory-desc:hover,
+.tool-inventory-reason:hover {
+  -webkit-line-clamp: unset;
+}
+
+.tool-inventory-reason {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Back to top — visibility/hover transitions */
+.tool-back-to-top {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: var(--z-tab-sticky);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.2s, background 0.15s;
+  pointer-events: none;
+}
+
+.tool-back-to-top.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tool-back-to-top:hover {
+  background: rgba(30, 41, 59, 0.95);
+  color: var(--text-near-white);
+}
+
+/* Surface count active state */
+.control-btn.is-active .tool-surface-count {
+  background: rgba(14, 165, 233, 0.25);
+  color: #7dd3fc;
+}
+
+/* ── Tool Metrics ── */
+.tool-metrics-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tool-metrics-sections {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 16px;
+}
+
+/* Bar chart row — complex grid template */
+.tool-bar-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--fs-sm);
+}
+
+/* ── Responsive ── */
+@media (max-width: 880px) {
+  .tool-inventory-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .tool-metrics-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tool-metrics-sections {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-bar-row {
+    grid-template-columns: minmax(100px, 0.6fr) 56px minmax(0, 1fr) 36px;
+  }
+}

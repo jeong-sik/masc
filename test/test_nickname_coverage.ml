@@ -9,7 +9,7 @@
 
 open Alcotest
 
-module Nickname = Masc_mcp.Nickname
+module Nickname = Nickname
 
 (* ============================================================
    generate Tests

@@ -12,7 +12,7 @@
 
 open Alcotest
 
-module Resilience = Masc_mcp.Resilience
+module Resilience = Resilience
 
 (* ============================================================
    Constants Tests

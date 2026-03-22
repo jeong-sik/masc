@@ -1,7 +1,6 @@
 (** Worktree Detection Tests *)
 
 open Alcotest
-open Masc_mcp
 
 (* ============================================ *)
 (* Git Root Detection Tests                     *)

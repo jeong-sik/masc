@@ -40,7 +40,7 @@ let with_test_env f =
       with_env "SUPABASE_DB_URL" "" @@ fun () ->
       with_env "SB_PG_URL" "" @@ fun () ->
       Eio_main.run @@ fun env ->
-      let config = Lib.Room_utils.default_config dir in
+      let config = Room_utils.default_config dir in
       Eio.Switch.run @@ fun sw ->
       f ~env ~sw ~config)
 

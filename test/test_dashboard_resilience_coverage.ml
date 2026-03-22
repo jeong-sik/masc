@@ -8,7 +8,7 @@
 open Alcotest
 
 module Dashboard = Masc_mcp.Dashboard
-module Resilience = Masc_mcp.Resilience
+module Resilience = Resilience
 
 (* ============================================================
    Dashboard Constants Tests

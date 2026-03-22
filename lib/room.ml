@@ -118,6 +118,11 @@ let () = Room_hooks.governance_purge_fn := (fun base_path ->
   let artifact = Council.Governance_v2.purge_stale_artifact_cases base_path in
   (test, artifact))
 
+(* Subscription auto-subscribe on join — wraps Subscriptions for room_eio *)
+let () = Room_hooks.subscribe_messages_fn := (fun ~subscriber ->
+  let _ = Subscriptions.SubscriptionStore.subscribe
+    ~subscriber ~resource:Subscriptions.Messages () in ())
+
 (* Agent status, capability registration, discovery *)
 include Room_agent
 

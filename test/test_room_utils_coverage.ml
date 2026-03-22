@@ -10,7 +10,7 @@
 
 open Alcotest
 
-module Room_utils = Masc_mcp.Room_utils
+module Room_utils = Room_utils
 module Backend = Backend
 
 let with_env name value f =

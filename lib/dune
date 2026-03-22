@@ -136,8 +136,6 @@
    activity_graph
    handover_eio
    hat
-   heartbeat
-   heartbeat_smart
    hebbian_eio
    http_server_eio
    http_server_h2
@@ -229,7 +227,6 @@
    handoff_quality
    adaptive_thresholds
    mdal_store
-   mention
    message_schema
    verification
    trace
@@ -240,7 +237,6 @@
    mitosis_handoff
    mitosis_metrics
    mode
-   nickname
    operator_approval
    operator_pending_confirm
    operator_digest
@@ -266,32 +262,8 @@
    goal_orchestrator
    goal_scheduler
    swarm_goal_loop
-   resilience
    response
    room
-   room_multi
-   room_eio
-   room_agent
-   room_gc
-   room_hooks
-   room_init
-   room_lifecycle
-   room_query
-   room_rooms
-   room_status
-   room_tempo
-   room_walph
-   room_walph_eio
-   room_git
-   room_portal
-   room_state
-   room_task
-   room_utils
-   room_vote
-   room_utils_backend_setup
-   room_utils_paths_backend
-   room_utils_ops
-   room_worktree
    run_eio
    team_context
    team_session_types
@@ -417,7 +389,6 @@
    tool_trace_hooks
    tool_permissions
    sse_room_filter
-   room_checkpoint
    tool_metrics
    tool_harness_health
    tool_inline_dispatch_types
@@ -607,9 +578,6 @@
  dashboard_http_monitoring
  dashboard_http_keeper
  dashboard_http_mdal
- room_utils_backend_setup
- room_utils_paths_backend
- room_utils_ops
  server_routes_http_common
  server_routes_http_pages
  server_routes_http_runtime
@@ -713,12 +681,6 @@
   autoresearch_codegen
   autoresearch_knowledge
   tool_autoresearch_schemas
-  room_multi
-  room_init
-  room_lifecycle
-  room_rooms
-  room_status
-  room_tempo
   dashboard_proof_events
   dashboard_proof_actors
   dashboard_proof_verdict
@@ -808,6 +770,8 @@
    masc_backend
    ;; Process execution + file locking (extracted sub-library)
    masc_process
+   ;; Room coordination (extracted sub-library)
+   masc_room
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq))
  (instrumentation (backend bisect_ppx)))

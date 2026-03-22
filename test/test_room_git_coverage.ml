@@ -12,7 +12,7 @@
 
 open Alcotest
 
-module Room_git = Masc_mcp.Room_git
+module Room_git = Room_git
 
 (* ============================================================
    git_root Tests

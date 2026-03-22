@@ -157,7 +157,7 @@ let test_cancellation_cleanup_under_load () =
 
 (** {1 Zombie Detection Under Load} *)
 
-module Resilience = Masc_mcp.Resilience
+module Resilience = Resilience
 
 let test_zombie_detection_concurrent () =
   Eio_main.run @@ fun _ ->

@@ -166,7 +166,7 @@ let test_generate_id_unique () =
    ============================================================ *)
 
 module Backend = Backend
-module Room_utils = Masc_mcp.Room_utils
+module Room_utils = Room_utils
 
 let rec rm_rf path =
   if Sys.file_exists path then

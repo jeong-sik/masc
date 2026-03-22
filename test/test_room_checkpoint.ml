@@ -1,6 +1,6 @@
 (** Tests for Room_checkpoint — snapshot and restore *)
 
-module C = Masc_mcp.Room_checkpoint
+module C = Room_checkpoint
 
 let sample_state = `Assoc [
   ("mode", `String "normal");

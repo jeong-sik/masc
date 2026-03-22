@@ -11,7 +11,7 @@ let test_confirm_rejects_expired_token () =
       let config = Room.default_config base_dir in
       ignore (Room.init config ~agent_name:(Some "operator"));
       let pending_dir = Filename.concat (Room.masc_dir config) "operator" in
-      Masc_mcp.Room_utils.mkdir_p pending_dir;
+      Room_utils.mkdir_p pending_dir;
       let path = Filename.concat pending_dir "pending_confirms.json" in
       let oc = open_out path in
       Fun.protect

@@ -1,0 +1,57 @@
+(include_subdirs no)
+(library
+ (name masc_room)
+ (public_name masc_mcp.masc_room)
+ (wrapped false)
+ (modules
+  room_hooks
+  room_utils_backend_setup
+  room_utils
+  room_utils_ops
+  room_utils_paths_backend
+  room_state
+  room_eio
+  room_agent
+  room_gc
+  room_init
+  room_lifecycle
+  room_multi
+  room_portal
+  room_query
+  room_rooms
+  room_status
+  room_task
+  room_tempo
+  room_vote
+  room_walph
+  room_walph_eio
+  room_git
+  room_worktree
+  room_checkpoint
+  mention
+  resilience
+  heartbeat
+  heartbeat_smart
+  nickname)
+ (libraries
+  masc_types
+  masc_core
+  masc_log
+  masc_backend
+  masc_eio_context
+  masc_process
+  time_compat
+  fs_compat
+  yojson
+  unix
+  str
+  eio
+  eio.unix
+  caqti
+  caqti-eio
+  caqti-eio.unix
+  caqti-driver-postgresql
+  uri
+  uuidm
+  digestif)
+ (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

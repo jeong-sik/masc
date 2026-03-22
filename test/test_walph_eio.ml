@@ -61,14 +61,14 @@ let with_test_config name f =
 (** Test: Basic state machine in Eio context *)
 let test_eio_basic_state () =
   with_test_config "basic" @@ fun _env _fs config ->
-  let state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
+  let state = Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
   check bool "not running initially" false state.running;
   check bool "not paused initially" false state.paused
 
 (** Test: Control commands work in Eio context *)
 let test_eio_control_commands () =
   with_test_config "control" @@ fun _env _fs config ->
-  let state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
+  let state = Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
 
   (* Simulate running state *)
   Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
@@ -76,24 +76,24 @@ let test_eio_control_commands () =
   );
 
   (* Test PAUSE *)
-  let _ = Masc_mcp.Room_walph_eio.walph_control config
+  let _ = Room_walph_eio.walph_control config
     ~from_agent:"tester" ~command:"PAUSE" ~args:"" () in
   check bool "paused after PAUSE" true state.paused;
 
   (* Test RESUME *)
-  let _ = Masc_mcp.Room_walph_eio.walph_control config
+  let _ = Room_walph_eio.walph_control config
     ~from_agent:"tester" ~command:"RESUME" ~args:"" () in
   check bool "not paused after RESUME" false state.paused;
 
   (* Test STOP *)
-  let _ = Masc_mcp.Room_walph_eio.walph_control config
+  let _ = Room_walph_eio.walph_control config
     ~from_agent:"tester" ~command:"STOP" ~args:"" () in
   check bool "stop requested after STOP" true state.stop_requested
 
 (** Test: Concurrent control from multiple fibers *)
 let test_eio_concurrent_control () =
   with_test_config "concurrent" @@ fun _env _fs config ->
-  let state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
+  let state = Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
 
   (* Set running *)
   Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
@@ -107,13 +107,13 @@ let test_eio_concurrent_control () =
   Eio.Fiber.both
     (fun () ->
       for _ = 1 to 10 do
-        let _ = Masc_mcp.Room_walph_eio.walph_control config
+        let _ = Room_walph_eio.walph_control config
           ~from_agent:"fiber1" ~command:"PAUSE" ~args:"" () in
         incr pause_count
       done)
     (fun () ->
       for _ = 1 to 10 do
-        let _ = Masc_mcp.Room_walph_eio.walph_control config
+        let _ = Room_walph_eio.walph_control config
           ~from_agent:"fiber2" ~command:"RESUME" ~args:"" () in
         incr resume_count
       done);
@@ -125,8 +125,8 @@ let test_eio_concurrent_control () =
 let test_eio_room_isolation () =
   with_test_config "isolation" @@ fun _env _fs config ->
   (* Now we test agent isolation within same room *)
-  let state1 = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"agent1" in
-  let state2 = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"agent2" in
+  let state1 = Room_walph_eio.get_walph_state_exn config ~agent_name:"agent1" in
+  let state2 = Room_walph_eio.get_walph_state_exn config ~agent_name:"agent2" in
 
   (* Modify state1 *)
   Eio.Mutex.use_rw ~protect:true state1.mutex (fun () ->
@@ -142,13 +142,13 @@ let test_eio_room_isolation () =
 let test_eio_cleanup () =
   with_test_config "cleanup" @@ fun _env _fs config ->
   (* Create and modify state *)
-  let state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
+  let state = Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
   Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
     state.running <- true
   );
 
   (* Remove should FAIL when running (zombie prevention) *)
-  let remove_failed = match Masc_mcp.Room_walph_eio.remove_walph_state config ~agent_name:"tester" with
+  let remove_failed = match Room_walph_eio.remove_walph_state config ~agent_name:"tester" with
     | Error _ -> true
     | Ok () -> false
   in
@@ -160,19 +160,19 @@ let test_eio_cleanup () =
   );
 
   (* Now remove should succeed *)
-  ignore (Masc_mcp.Room_walph_eio.remove_walph_state config ~agent_name:"tester");
+  ignore (Room_walph_eio.remove_walph_state config ~agent_name:"tester");
 
   (* Getting state again should return fresh state *)
-  let new_state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
+  let new_state = Room_walph_eio.get_walph_state_exn config ~agent_name:"tester" in
   check bool "new state not running" false new_state.running
 
 (** Test: 3 agents running Walph simultaneously (Phase 1 feature) *)
 let test_eio_multi_agent_walph () =
   with_test_config "multi_agent" @@ fun _env _fs config ->
   (* 3 agents get their own independent Walph states *)
-  let state_claude = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"claude" in
-  let state_codex = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"codex" in
-  let state_gemini = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"gemini" in
+  let state_claude = Room_walph_eio.get_walph_state_exn config ~agent_name:"claude" in
+  let state_codex = Room_walph_eio.get_walph_state_exn config ~agent_name:"codex" in
+  let state_gemini = Room_walph_eio.get_walph_state_exn config ~agent_name:"gemini" in
 
   (* All start as not running *)
   check bool "claude not running initially" false state_claude.running;
@@ -204,7 +204,7 @@ let test_eio_multi_agent_walph () =
   check string "gemini preset" "refactor" state_gemini.current_preset;
 
   (* Pause only claude - others unaffected *)
-  let _ = Masc_mcp.Room_walph_eio.walph_control config
+  let _ = Room_walph_eio.walph_control config
     ~from_agent:"claude" ~command:"PAUSE" ~args:"" () in
   check bool "claude paused" true state_claude.paused;
   check bool "codex not paused" false state_codex.paused;
@@ -214,7 +214,7 @@ let test_eio_multi_agent_walph () =
 let test_eio_preset_mapping () =
   with_test_config "preset" @@ fun _env _fs _config ->
   (* Test all presets map correctly *)
-  let open Masc_mcp.Room_walph_eio in
+  let open Room_walph_eio in
   check (option string) "coverage maps" (Some "walph-coverage") (get_chain_id_for_preset "coverage");
   check (option string) "refactor maps" (Some "walph-refactor") (get_chain_id_for_preset "refactor");
   check (option string) "docs maps" (Some "walph-docs") (get_chain_id_for_preset "docs");
@@ -226,8 +226,8 @@ let test_eio_preset_mapping () =
 (** Test: Multi-agent with review preset *)
 let test_eio_multi_agent_with_review () =
   with_test_config "multi_review" @@ fun _env _fs config ->
-  let state_claude = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"claude-reviewer" in
-  let state_codex = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"codex-reviewer" in
+  let state_claude = Room_walph_eio.get_walph_state_exn config ~agent_name:"claude-reviewer" in
+  let state_codex = Room_walph_eio.get_walph_state_exn config ~agent_name:"codex-reviewer" in
 
   (* Both agents run review preset simultaneously *)
   Eio.Mutex.use_rw ~protect:true state_claude.mutex (fun () ->
@@ -248,12 +248,12 @@ let test_eio_multi_agent_with_review () =
 let test_eio_list_walph_states () =
   with_test_config "list_states" @@ fun _env _fs config ->
   (* Create states for 3 agents *)
-  let _ = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-a" in
-  let _ = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-b" in
-  let _ = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-c" in
+  let _ = Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-a" in
+  let _ = Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-b" in
+  let _ = Room_walph_eio.get_walph_state_exn config ~agent_name:"agent-c" in
 
   (* List all states *)
-  let states = Masc_mcp.Room_walph_eio.list_walph_states config in
+  let states = Room_walph_eio.list_walph_states config in
   check int "3 agents in room" 3 (List.length states);
 
   (* Check agent names are present *)
@@ -265,8 +265,8 @@ let test_eio_list_walph_states () =
 (** Test: walph_status_json exposes extended counters/metadata *)
 let test_eio_status_json_fields () =
   with_test_config "status_json" @@ fun _env _fs config ->
-  let _state = Masc_mcp.Room_walph_eio.get_walph_state_exn config ~agent_name:"status-agent" in
-  let json = Masc_mcp.Room_walph_eio.walph_status_json config ~agent_name:"status-agent" in
+  let _state = Room_walph_eio.get_walph_state_exn config ~agent_name:"status-agent" in
+  let json = Room_walph_eio.walph_status_json config ~agent_name:"status-agent" in
   check bool "ok=true" true (json |> member "ok" |> to_bool);
   check string "agent field" "status-agent" (json |> member "agent" |> to_string);
   ignore (json |> member "claimed" |> to_int);
@@ -290,7 +290,7 @@ let test_eio_error_cutoff () =
     ""  (* Forces deterministic "Empty MODEL response" error path *)
   in
   let result =
-    Masc_mcp.Room_walph_eio.walph_loop config
+    Room_walph_eio.walph_loop config
       ~net:(Eio.Stdenv.net env)
       ~clock:(Eio.Stdenv.clock env)
       ~agent_name:"error-agent"
@@ -304,7 +304,7 @@ let test_eio_error_cutoff () =
   check bool "stop reason includes cutoff"
     true (contains result "max_consecutive_errors reached (2)");
 
-  let status = Masc_mcp.Room_walph_eio.walph_status_json config ~agent_name:"error-agent" in
+  let status = Room_walph_eio.walph_status_json config ~agent_name:"error-agent" in
   check int "errors=2" 2 (status |> member "errors" |> to_int);
   check int "consecutive_errors=2" 2 (status |> member "consecutive_errors" |> to_int);
   check int "released_on_error=2" 2 (status |> member "released_on_error" |> to_int);

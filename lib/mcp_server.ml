@@ -562,7 +562,21 @@ let create_state ~base_path =
 (** Create state with Eio context - required for PostgresNative backend *)
 let create_state_eio ~sw ~env ~proc_mgr ~fs ~clock ~net ~base_path =
   let config =
-    Room.default_config_eio ~sw ~env base_path
+    Room.default_config_eio ~sw ~env
+      ~on_backend_ready:(fun backend ->
+        let open Room_utils_backend_setup in
+        if Board_dispatch.jsonl_forced () then begin
+          Log.Backend.info "Board: JSONL forced by MASC_BOARD_BACKEND=jsonl";
+          Board_dispatch.init_jsonl ()
+        end else
+          match backend with
+          | PostgresNative pg ->
+              let pool = Backend.PostgresNative.get_pool pg in
+              (match Board_dispatch.init_pg pool with
+               | Ok () -> ()
+               | Error _ -> Board_dispatch.init_jsonl ())
+          | _ -> Board_dispatch.init_jsonl ())
+      base_path
     |> Room.config_with_resolved_scope
   in
   let registry = Session.create () in

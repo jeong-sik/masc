@@ -1,6 +1,5 @@
 (** Tests for @mention parsing - Stateless/Stateful/Broadcast modes *)
 
-open Masc_mcp
 
 let mention_mode_equal a b =
   match a, b with

@@ -4,7 +4,6 @@
 let () = Mirage_crypto_rng_unix.use_default ()
 
 open Alcotest
-open Masc_mcp
 
 (* ============================================================ *)
 (* Test Helpers                                                  *)

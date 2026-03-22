@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module Mention = Masc_mcp.Mention
+module Mention = Mention
 
 (* ============================================================
    mode_to_string Tests

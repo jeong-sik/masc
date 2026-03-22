@@ -354,11 +354,8 @@ let register_agent config ~name ?(capabilities=[]) () =
         { state with active_agents }
       ) in
 
-      (* Auto-subscribe to Messages for A2A communication *)
-      let _ = Subscriptions.SubscriptionStore.subscribe
-        ~subscriber:name
-        ~resource:Subscriptions.Messages
-        () in
+      (* Auto-subscribe to Messages for A2A communication (via hook) *)
+      !Room_hooks.subscribe_messages_fn ~subscriber:name;
 
       (* Log join event only for new agents, skip for re-joins *)
       if not already_active then begin

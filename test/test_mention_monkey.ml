@@ -1,6 +1,5 @@
 (** Monkey/Fuzz testing for Mention module *)
 
-open Masc_mcp
 
 (** Random string generator *)
 let random_string len =

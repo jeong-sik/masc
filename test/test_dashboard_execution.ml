@@ -33,7 +33,7 @@ let test_dashboard_execution_fixture () =
        | Some v -> Unix.putenv "MASC_STORAGE_TYPE" v
        | None -> Unix.putenv "MASC_STORAGE_TYPE" ""))
     (fun () ->
-      let config = Lib.Room_utils.default_config dir in
+      let config = Room_utils.default_config dir in
       Unix.putenv "MASC_DASHBOARD_FIXTURES_ENABLED" "true";
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
@@ -99,7 +99,7 @@ let test_dashboard_execution_live_empty_room () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Lib.Room_utils.default_config dir in
+      let config = Room_utils.default_config dir in
       Eio_main.run @@ fun env ->
       Eio.Switch.run (fun sw ->
         let json =
@@ -130,7 +130,7 @@ let test_dashboard_execution_current_room_status () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Lib.Room_utils.default_config dir in
+      let config = Room_utils.default_config dir in
       Eio_main.run @@ fun env ->
       ignore (Lib.Room.init config ~agent_name:None);
       ignore (Lib.Room.room_create config ~name:"Focus Room" ~description:None);
@@ -164,7 +164,7 @@ let test_dashboard_shell_current_room_status () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun _env ->
-      let config = Lib.Room_utils.default_config dir in
+      let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:None);
       ignore (Lib.Room.room_create config ~name:"Focus Room" ~description:None);
       ignore (Lib.Room.room_enter config ~room_id:"focus-room" ~agent_type:"claude" ());
@@ -181,7 +181,7 @@ let test_dashboard_execution_fresh_join_not_marked_stale () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Lib.Room_utils.default_config dir in
+      let config = Room_utils.default_config dir in
       Eio_main.run @@ fun env ->
       ignore (Lib.Room.init config ~agent_name:None);
       ignore (Lib.Room.join config ~agent_name:"sentinel-kind-fox" ~capabilities:["sentinel"; "housekeeping"] ());

@@ -27,7 +27,7 @@ let test_empty_governance_structure () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun _env ->
-      let config = Lib.Room_utils.default_config dir in
+      let config = Room_utils.default_config dir in
       ignore (Lib.Room.init config ~agent_name:(Some "dashboard"));
       let json =
         Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0

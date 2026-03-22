@@ -355,7 +355,10 @@ let print_startup_banner ~(config : Http.config) ~resolved_base ~base_path
   Printf.printf "   GET  /api/v1/activity/graph → Activity graph snapshot\n%!";
   Printf.printf
     "   POST /messages → legacy client->server messages (deprecated)\n%!";
-  Printf.printf "   GET  /health → Health check\n%!"
+  Printf.printf "   GET  /health → Health check\n%!";
+  if Masc_grpc_server.is_enabled () then
+    Printf.printf "   gRPC /:%d → Coordination (MASC_GRPC_ENABLED=1)\n%!"
+      (Masc_grpc_server.configured_port ())
 
 let serve ~sw ~clock ~socket ~request_handler =
   let is_cancelled exn =
@@ -530,7 +533,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_refresh_loop ~state ~sw ~clock;
       Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
-      start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
+      start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
+      (* gRPC coordination transport (opt-in via MASC_GRPC_ENABLED=1) *)
+      let tool_dispatcher _tool_name _args_json =
+        Error "gRPC tool dispatch not yet wired to MCP dispatcher"
+      in
+      Masc_grpc_server.start ~sw ~env ~room_config:state.room_config
+        ~tool_dispatcher
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

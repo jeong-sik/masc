@@ -427,6 +427,10 @@
    social
    tool_social
    transport
+   ;; gRPC coordination transport (grpc-direct)
+   masc_grpc_types
+   masc_grpc_service
+   masc_grpc_server
    udp_socket_eio
    shutdown
    supervisor

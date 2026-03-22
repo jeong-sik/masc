@@ -25,83 +25,85 @@ let emit_task_activity config ~agent_name ~task_id ~kind ~payload =
       Log.Misc.warn "task activity emit failed (%s %s): %s" kind task_id
         (Printexc.to_string exn)
 
-(** Add task *)
+(** Add task — file-locked to prevent task ID collision under concurrency *)
 let add_task config ~title ~priority ~description =
   ensure_initialized config;
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock config backlog_path (fun () ->
+    let backlog = read_backlog config in
+    let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
 
-  let backlog = read_backlog config in
-  let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
+    let new_task = {
+      id = task_id;
+      title;
+      description;
+      task_status = Todo;
+      priority;
+      files = [];
+      created_at = now_iso ();
+      worktree = None;
+      required_role = Types_core.Unassigned;
+    } in
 
-  let new_task = {
-    id = task_id;
-    title;
-    description;
-    task_status = Todo;
-    priority;
-    files = [];
-    created_at = now_iso ();
-    worktree = None;  (* Linked when worktree is created *)
-    required_role = Types_core.Unassigned;
-  } in
+    let new_backlog = {
+      tasks = backlog.tasks @ [new_task];
+      last_updated = now_iso ();
+      version = backlog.version + 1;
+    } in
+    write_backlog config new_backlog;
+    emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
+      ~payload:
+        (`Assoc
+          [
+            ("task_id", `String task_id);
+            ("title", `String title);
+            ("priority", `Int priority);
+          ]);
 
-  let new_backlog = {
-    tasks = backlog.tasks @ [new_task];
-    last_updated = now_iso ();
-    version = backlog.version + 1;
-  } in
-  write_backlog config new_backlog;
-  emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
-    ~payload:
-      (`Assoc
-        [
-          ("task_id", `String task_id);
-          ("title", `String title);
-          ("priority", `Int priority);
-        ]);
+    let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
+    Printf.sprintf "✅ Added %s: %s" task_id title)
 
-  let _ = broadcast config ~from_agent:"system" ~content:(Printf.sprintf "📋 New quest: %s" title) in
-  Printf.sprintf "✅ Added %s: %s" task_id title
-
-(** Add task with a required role constraint *)
+(** Add task with a required role constraint — file-locked *)
 let add_task_with_role config ~title ~priority ~description ~required_role =
   ensure_initialized config;
+  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  with_file_lock config backlog_path (fun () ->
+    let backlog = read_backlog config in
+    let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
 
-  let backlog = read_backlog config in
-  let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
+    let new_task = {
+      id = task_id;
+      title;
+      description;
+      task_status = Todo;
+      priority;
+      files = [];
+      created_at = now_iso ();
+      worktree = None;
+      required_role;
+    } in
 
-  let new_task = {
-    id = task_id;
-    title;
-    description;
-    task_status = Todo;
-    priority;
-    files = [];
-    created_at = now_iso ();
-    worktree = None;
-    required_role;
-  } in
+    let new_backlog = {
+      tasks = backlog.tasks @ [new_task];
+      last_updated = now_iso ();
+      version = backlog.version + 1;
+    } in
+    write_backlog config new_backlog;
+    emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
+      ~payload:
+        (`Assoc
+          [
+            ("task_id", `String task_id);
+            ("title", `String title);
+            ("priority", `Int priority);
+            ( "required_role",
+              `String (Types_core.role_to_string required_role) );
+          ]);
 
-  let new_backlog = {
-    tasks = backlog.tasks @ [new_task];
-    last_updated = now_iso ();
-    version = backlog.version + 1;
-  } in
-  write_backlog config new_backlog;
-  emit_task_activity config ~agent_name:"system" ~task_id ~kind:"task.created"
-    ~payload:
-      (`Assoc
-        [
-          ("task_id", `String task_id);
-          ("title", `String title);
-          ("priority", `Int priority);
-          ( "required_role",
-            `String (Types_core.role_to_string required_role) );
-        ]);
-
-  let role_str = Types_core.role_to_string required_role in
-  let _ = broadcast config ~from_agent:"system"
-    ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str) in
-  Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str
+    let role_str = Types_core.role_to_string required_role in
+    let _ = broadcast config ~from_agent:"system"
+      ~content:(Printf.sprintf "📋 New quest: %s (requires: %s)" title role_str) in
+    Printf.sprintf "✅ Added %s: %s (required_role: %s)" task_id title role_str)
 
 (** Add multiple tasks in a batch *)
 let batch_add_tasks config tasks =

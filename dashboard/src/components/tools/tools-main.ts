@@ -67,7 +67,7 @@ export function Tools() {
         <${ToolMetrics} />
       <//>
       ${data?.generated_at
-        ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]" class="mt-2">
+        ? html`<div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]">
             <span>생성 시각: ${data.generated_at}</span>
             <span>metrics 기준: 최근 1시간</span>
           </div>`

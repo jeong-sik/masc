@@ -66,15 +66,18 @@ interface SimpleRoute {
 }
 
 const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
-  // Agent lifecycle
-  agent_joined:   { target: 'execution' },
-  agent_left:     { target: 'execution' },
+  // Agent lifecycle (server may emit with or without "masc/" prefix)
+  agent_joined:          { target: 'execution' },
+  'masc/agent_joined':   { target: 'execution' },
+  agent_left:            { target: 'execution' },
+  'masc/agent_left':     { target: 'execution' },
   // Broadcasts
-  broadcast:      { target: 'execution' },
+  broadcast:             { target: 'execution' },
+  'masc/broadcast':      { target: 'execution' },
   // Keeper lifecycle (also triggers operator refresh via handler)
-  keeper_handoff:       { target: 'execution' },
-  keeper_compaction:    { target: 'execution' },
-  keeper_guardrail:     { target: 'execution' },
+  keeper_handoff:        { target: 'execution' },
+  keeper_compaction:     { target: 'execution' },
+  keeper_guardrail:      { target: 'execution' },
   // Client input
   client_input_approved:  { target: 'operator', debounceMs: 300 },
   client_input_rejected:  { target: 'operator', debounceMs: 300 },
@@ -108,6 +111,7 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
 
 const KEEPER_LIFECYCLE_EVENTS = new Set([
   'keeper_handoff', 'keeper_compaction', 'keeper_guardrail', 'keeper_turn_complete',
+  'masc/keeper_handoff', 'masc/keeper_compaction', 'masc/keeper_guardrail', 'masc/keeper_turn_complete',
 ])
 
 function handleKeeperHeartbeat(event: { name?: string; ts_unix?: number }): void {

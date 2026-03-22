@@ -261,7 +261,7 @@ export function ActivityGraphSurface() {
         </div>
         <${StatsRow} data=${data} />
         <${GraphView} data=${data} />
-        <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]" class="mt-2">
+        <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]">
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
           ${data.window.room_id ? html`<span>room: ${data.window.room_id}</span>` : null}

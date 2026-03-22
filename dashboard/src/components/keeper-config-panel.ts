@@ -187,7 +187,7 @@ function EditCheckbox({ field, label }: { field: keyof EditDraft; label: string 
   if (!d) return null
   const val = d[field] as boolean
   return html`
-    <div class="keeper-signal-row rounded-lg" class="mt-1">
+    <div class="keeper-signal-row rounded-lg mt-1">
       <span>${label}</span>
       <input
         type="checkbox"
@@ -203,7 +203,7 @@ function EditNumber({ field, label, min, max }: { field: keyof EditDraft; label:
   if (!d) return null
   const val = d[field] as number
   return html`
-    <div class="keeper-signal-row rounded-lg" class="mt-1">
+    <div class="keeper-signal-row rounded-lg mt-1">
       <span>${label}</span>
       <input
         type="number"

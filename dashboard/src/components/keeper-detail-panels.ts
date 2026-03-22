@@ -167,7 +167,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
   const lineColor = lastRatio > 85 ? '#ef4444' : lastRatio > 70 ? '#f59e0b' : '#22c55e'
 
   return html`
-    <div class="context-chart" class="flex items-center gap-2">
+    <div class="context-chart flex items-center gap-2">
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="background:#1a1a2e;border-radius:4px">
         <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="#666" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.7 * (H - 2 * pad)).toFixed(1)}" stroke="#666" stroke-dasharray="3,3" stroke-width="0.5"/>
@@ -229,9 +229,9 @@ export function FieldDictionary({ keeper }: { keeper: Keeper }) {
       `)}
       ${keeper.trace_id ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Trace ID</span><span class="keeper-field-key font-mono">${keeper.trace_id}</span></div>` : ''}
       ${keeper.agent_name ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Agent</span><span class="flex-1 text-right text-[#ccc]">${keeper.agent_name}</span></div>` : ''}
-      ${keeper.primary_model ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Primary Model</span><span class="font-mono" class="flex-1 text-right text-[#ccc]">${keeper.primary_model}</span></div>` : ''}
-      ${keeper.active_model ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Active Model</span><span class="font-mono" class="flex-1 text-right text-[#ccc]">${keeper.active_model}</span></div>` : ''}
-      ${keeper.next_model_hint ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Next Model Hint</span><span class="font-mono" class="flex-1 text-right text-[#ccc]">${keeper.next_model_hint}</span></div>` : ''}
+      ${keeper.primary_model ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Primary Model</span><span class="font-mono flex-1 text-right text-[#ccc]">${keeper.primary_model}</span></div>` : ''}
+      ${keeper.active_model ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Active Model</span><span class="font-mono flex-1 text-right text-[#ccc]">${keeper.active_model}</span></div>` : ''}
+      ${keeper.next_model_hint ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Next Model Hint</span><span class="font-mono flex-1 text-right text-[#ccc]">${keeper.next_model_hint}</span></div>` : ''}
       ${keeper.skill_primary ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Skill (Primary)</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_primary}</span></div>` : ''}
       ${keeper.skill_secondary ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Skill (Secondary)</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_secondary}</span></div>` : ''}
       ${keeper.skill_reason ? html`<div class="flex gap-2.5 py-1.5 border-b border-[var(--white-4)] text-[var(--fs-base)]"><span class="font-semibold min-w-[90px]">Skill Reason</span><span class="flex-1 text-right text-[#ccc]">${keeper.skill_reason}</span></div>` : ''}
@@ -295,7 +295,7 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
 }
 
 export function EquipmentList({ items }: { items: string[] }) {
-  if (items.length === 0) return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" class="text-[13px]">장비 없음</div>`
+  if (items.length === 0) return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)] text-[13px]">장비 없음</div>`
 
   return html`
     <div class="flex flex-col gap-1.5">
@@ -311,7 +311,7 @@ export function EquipmentList({ items }: { items: string[] }) {
 
 export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   const entries = Object.entries(rels)
-  if (entries.length === 0) return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" class="text-[13px]">관계 없음</div>`
+  if (entries.length === 0) return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)] text-[13px]">관계 없음</div>`
 
   return html`
     <div class="max-h-[220px] overflow-y-auto flex flex-col gap-1.5">

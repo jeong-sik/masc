@@ -21,7 +21,10 @@ import {
 } from './governance-utils'
 
 // Re-export from split files for backward compatibility.
-export { ActivityRail, GovernanceFreshnessStrip, RuntimeParamsPanel } from './governance-strips'
+// ActivityRail is now rendered inside DecisionDetail only (not in main view).
+// GovernanceFreshnessStrip was inlined into GovernanceSummaryStrip.
+// RuntimeParamsPanel was removed (use masc_set_param CLI instead).
+export { ActivityRail } from './governance-strips'
 export { DecisionDetail } from './governance-detail'
 
 export function GuardrailPane({

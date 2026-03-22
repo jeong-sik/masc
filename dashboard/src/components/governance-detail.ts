@@ -18,6 +18,7 @@ import {
   orderStatusLabel,
   stanceLabel,
 } from './governance-utils'
+import { ActivityRail } from './governance-strips'
 
 export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['petitions'][number] }) {
   return html`
@@ -96,6 +97,7 @@ export function DecisionDetail() {
                   ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">심의 의견이 아직 없습니다.</div>`
                   : briefs.map(brief => html`<${BriefEntry} key=${brief.id} brief=${brief} />`)}
               </div>
+              <${ActivityRail} />
             `}
     <//>
   `

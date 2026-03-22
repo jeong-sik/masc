@@ -3,7 +3,6 @@
 
 import './styles/global.css'
 import './styles/ui.css'
-import './styles/agent.css'
 import './styles/agent-monitor.css'
 import './styles/keeper.css'
 import './styles/board.css'

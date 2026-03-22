@@ -325,7 +325,7 @@ let require_eio () =
   | _, None -> Error "Eio net not available (running outside server context)"
 
 (** Resolve cascade provider configs via OAS Cascade_config.
-    Returns OAS Provider_config.t list directly, bypassing Model_spec. *)
+    Returns OAS Provider_config.t list directly, bypassing the old Model_spec facade. *)
 let resolve_cascade_providers ~cascade_name : Llm_provider.Provider_config.t list =
   let defaults = default_model_strings ~cascade_name in
   let config_path = default_config_path () in

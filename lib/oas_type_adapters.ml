@@ -6,7 +6,7 @@
 
     @since 2.130.0
     @since 2.133.0 — Phase 1: migrated to Model_spec bridge
-    @since 2.134.0 — Phase 6: eliminated Model_spec.model_spec exposure
+    @since 2.134.0 — Phase 6: eliminated Model_spec.model_spec exposure (legacy)
     @since 2.135.0 — Phase 7: eliminated Model_spec function calls *)
 
 (** Convert OAS Provider_config.t to OAS Provider.config for Agent Builder.

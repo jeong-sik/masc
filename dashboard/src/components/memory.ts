@@ -367,7 +367,7 @@ function PostDetail({ post }: { post: BoardPost }) {
 
   return html`
     <div>
-      <button class="back-btn rounded-lg" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
+      <button class="mb-3 border border-[var(--border-slate-30)] px-3 py-[7px] text-[length:var(--fs-sm)] text-[#bdd8ff] bg-[var(--white-3)] cursor-pointer hover:bg-[var(--white-10)] rounded-lg" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
       <${Card} title=${post.title}>
         <div class="board-detail p-5">
           <div class="post-body">
@@ -439,7 +439,7 @@ export function Memory() {
       : html`
           <div>
             <${MemorySummary} />
-            <button class="back-btn rounded-lg" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
+            <button class="mb-3 border border-[var(--border-slate-30)] px-3 py-[7px] text-[length:var(--fs-sm)] text-[#bdd8ff] bg-[var(--white-3)] cursor-pointer hover:bg-[var(--white-10)] rounded-lg" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
             ${detailLoading.value
               ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">글 불러오는 중...</div>`
               : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">글을 찾지 못했습니다</div>`}

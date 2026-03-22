@@ -1,4 +1,7 @@
-/* ── Runtime Collapsible ──────────────────────────────────── */
+/* ── Dashboard — kept: pseudo-elements, stateful selectors, hover/focus,
+   transitions, keyframes, webkit details, complex grids, table styles ── */
+
+/* ── Runtime Collapsible ── */
 .runtime-summary {
   cursor: pointer;
   color: var(--text-muted);
@@ -15,15 +18,15 @@
 }
 
 .runtime-summary::before {
-  content: '▸ ';
+  content: '\25B8 ';
   display: inline;
 }
 
 .runtime-collapsible[open] > .runtime-summary::before {
-  content: '▾ ';
+  content: '\25BE ';
 }
-/* ── Collapsible Sections ── */
 
+/* ── Collapsible Sections ── */
 .overview-section-collapsible {
   border: 1px solid var(--border-slate-12);
   border-radius: 10px;
@@ -53,7 +56,7 @@
 }
 
 .overview-section-collapsible > summary::before {
-  content: '▸';
+  content: '\25B8';
   font-size: var(--fs-xs);
   transition: transform 0.15s;
   display: inline-block;
@@ -69,6 +72,15 @@
   padding: 0 16px 12px;
 }
 
+.mission-collapsible-summary::before {
+  content: '\25B8';
+  font-size: var(--fs-xs);
+  color: var(--text-slate);
+  transition: transform 0.15s;
+  display: inline-block;
+}
+
+/* ── Monitor pills ── */
 .monitor-pill.ok {
   background: var(--ok-12);
   color: var(--ok);
@@ -90,27 +102,14 @@
   }
 }
 
+/* ── Board post (content-visibility) ── */
 .board-post {
   border-color: var(--card-border);
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
 }
 
-.back-btn {
-  margin-bottom: 12px;
-  border: 1px solid var(--border-slate-30);
-  padding: 7px 12px;
-  font-size: var(--fs-sm);
-  color: #bdd8ff;
-  background: var(--white-3);
-  cursor: pointer;
-}
-
-.back-btn:hover {
-  background: var(--white-10);
-}
-
-/* ── Control Dock ─────────────────────────────────────────── */
+/* ── Control Dock ── */
 .control-row {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -154,7 +153,7 @@
 }
 
 .control-btn:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
@@ -189,43 +188,7 @@
   color: #9fb8e1;
 }
 
-.control-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ── Mission Jump Strip ────────────────────────────────── */
-
-.mission-jump-link {
-  padding: 4px 10px;
-  border: 1px solid var(--border-slate-22);
-  background: var(--white-3);
-  color: #9fb8e1;
-  font-size: var(--fs-sm);
-  text-decoration: none;
-  transition: background 0.15s;
-}
-
-.mission-jump-link:hover {
-  background: var(--white-8);
-}
-
-/* ── Mission Collapsible Sections ──────────────────────── */
-.mission-collapsible-section {
-  border: 1px solid var(--border-slate-12);
-  border-radius: var(--radius-md, 10px);
-  overflow: hidden;
-}
-
-.mission-collapsible-summary::before {
-  content: '\25B8';
-  font-size: var(--fs-xs);
-  color: var(--text-slate);
-  transition: transform 0.15s;
-  display: inline-block;
-}
-
-/* ── Mission Status Dot (alive / idle / offline) ───────── */
+/* ── Mission Status Dot ── */
 .mission-status-dot {
   width: 8px;
   height: 8px;
@@ -239,7 +202,7 @@
   box-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
 }
 
-/* ── Card-level dimming for offline / idle ──────────────── */
+/* ── Card-level dimming ── */
 .mission-crew-card.mission-state-offline,
 .mission-activity-card.mission-state-offline {
   opacity: 0.4;
@@ -257,8 +220,7 @@
   opacity: 0.85;
 }
 
-/* ── Shared: pill bar, collapsible ── */
-
+/* ── Tab pill (hover/active transitions) ── */
 .tab-pill {
   padding: 4px 14px;
   border-radius: 16px;
@@ -294,22 +256,17 @@
   color: var(--text-strong);
 }
 
-/* ── Layout (merged from layout.css) ── */
-/* ── Responsive (components) ───────────────────────────────── */
+/* ── Responsive (layout) ── */
 @media (max-width: 960px) {
-
   .keeper-kpis { grid-template-columns: repeat(2, 1fr); }
   .agent-detail-grid { grid-template-columns: 1fr; }
-
 }
 @media (max-width: 880px) {
   .council-create { grid-template-columns: 1fr; }
   .control-row { grid-template-columns: 1fr; }
   .agent-mention-row { grid-template-columns: 1fr; }
-
 }
 @media (max-width: 600px) {
-
   .keeper-kpis { grid-template-columns: 1fr; }
   .metric-tip-pop {
     left: 0;
@@ -317,18 +274,9 @@
     min-width: 220px;
     max-width: min(320px, calc(100vw - 56px));
   }
-
 }
 
-/* Mitosis Ring Chart */
-.mitosis-ring-container {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-left: auto;
-  margin-right: 10px;
-}
+/* ── Mitosis Ring ── */
 .mitosis-ring {
   transform: rotate(-90deg);
 }
@@ -347,31 +295,20 @@
   stroke: var(--bad); color: var(--bad);
   animation: pulse-ring 2s infinite;
 }
-.mitosis-text {
-  position: absolute;
-  font-size: 0.65rem;
-  font-weight: 700;
-}
 @keyframes pulse-ring {
   0% { opacity: 1; }
   50% { opacity: 0.6; }
   100% { opacity: 1; }
 }
 
-/* Enhancements for Agent Cards */
+/* ── Agent card hover ── */
 .agent-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
   transform: translateY(-2px);
   border-color: var(--accent);
 }
 
-/* Cyberpunk Kanban Board */
-.kanban-board {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 24px;
-  align-items: start;
-}
+/* ── Kanban (pseudo-elements, priority variants, hover transform) ── */
 .kanban-header {
   font-size: 1.1rem;
   font-weight: 700;
@@ -416,22 +353,8 @@
   border-color: var(--accent);
   box-shadow: 0 4px 12px rgba(0, 240, 255, 0.1);
 }
-.kanban-assignee {
-  display: inline-flex;
-  align-items: center;
-  background: rgba(0, 240, 255, 0.1);
-  color: var(--accent);
-  padding: 4px 8px;
-  gap: 4px;
-  font-weight: 600;
-}
-.kanban-assignee::before {
-  content: "@";
-}
 
-/* ── Logs (merged from logs.css) ── */
-/* System Log Viewer */
-
+/* ── Logs (table styling, sticky, monospace) ── */
 .logs-select {
   background: var(--card);
   color: var(--text-body);
@@ -509,4 +432,3 @@
 .logs-row:hover {
   background: var(--white-3);
 }
-

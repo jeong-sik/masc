@@ -36,7 +36,7 @@ export function KanbanCard({ task }: { task: Task }) {
       ` : null}
       <div class="kanban-card rounded-xl-meta">
         ${task.created_at ? html`<${TimeAgo} timestamp=${task.created_at} />` : html`<span>-</span>`}
-        ${task.assignee ? html`<span class="kanban-assignee rounded-lg">${task.assignee}</span>` : null}
+        ${task.assignee ? html`<span class="inline-flex items-center bg-[rgba(0,240,255,0.1)] text-[color:var(--accent)] px-2 py-1 gap-1 font-semibold before:content-['@'] rounded-lg">${task.assignee}</span>` : null}
       </div>
     </div>
   `
@@ -50,7 +50,7 @@ export function TaskBacklog() {
 
   return html`
     <${Card} title="태스크 백로그" class="section mb-3.5">
-      <div class="kanban-board">
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-6 items-start">
         <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
           <div class="kanban-header todo">
             <span>할 일</span>

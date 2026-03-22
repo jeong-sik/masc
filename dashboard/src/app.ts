@@ -76,9 +76,9 @@ export function App() {
         </div>
       </header>
 
-      <div class="dashboard-layout">
+      <div class="dashboard-layout grid grid-cols-[280px_1fr] gap-5 px-5 pt-4 pb-8 max-w-[1600px] mx-auto max-[1200px]:grid-cols-1 max-[1200px]:gap-3.5">
         <${SideRail} />
-        <main class="dashboard-main">
+        <main class="min-w-0">
           <${DashboardMain} />
         </main>
       </div>

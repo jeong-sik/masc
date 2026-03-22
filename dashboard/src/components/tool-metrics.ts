@@ -116,7 +116,7 @@ export function ToolMetrics() {
       ${error ? html`<div class="px-2.5 py-3 bg-[var(--bad-12)] border border-[rgba(239,68,68,0.34)] text-[#fecaca] text-[length:var(--fs-base)] rounded-lg">${error}</div>` : null}
 
       ${data ? html`
-        <div class="tool-metrics-summary">
+        <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-2.5 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
           <div class="tool-metrics-stat">
             <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.total_calls}</span>
             <span class="stat-label">총 호출 수</span>

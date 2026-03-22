@@ -20,7 +20,7 @@ export function ToolSummaryView({ inventory }: { inventory: DashboardToolInvento
 
   return html`
     <div class="py-2">
-      <div class="tool-inventory-summary">
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-[18px]">
         <div class="flex flex-col gap-1.5 px-4 py-3.5 rounded-[14px] bg-[rgba(15,23,42,0.8)] border border-[rgba(148,163,184,0.16)]">
           <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${totalCount}</span>
           <span class="stat-label">전체 도구</span>

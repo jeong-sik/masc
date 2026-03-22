@@ -220,7 +220,7 @@ export function Command() {
   }, [])
 
   return html`
-    <section class="flex flex-col gap-[18px] command-plane-view ${wallboardMode ? 'wallboard' : ''}">
+    <section class="flex flex-col gap-[18px] ${wallboardMode ? 'p-4 rounded-[18px] command-plane-view wallboard' : ''}">
       ${wallboardMode ? null : html`
         <div class="flex justify-between gap-4 items-start">
           <div>

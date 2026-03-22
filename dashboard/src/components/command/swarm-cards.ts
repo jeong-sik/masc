@@ -11,7 +11,7 @@ import { alertBorderTone, relativeTime, toneClass } from './helpers'
 
 export function SwarmChecklistCard({ item }: { item: CommandPlaneSwarmChecklistItem }) {
   return html`
-    <article class="command-guide-card rounded-xl ${toneClass(item.status)}">
+    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card ${toneClass(item.status)}">
       <div class="flex justify-between gap-2.5 items-start">
         <strong>${item.title}</strong>
         <span class="command-chip rounded-full ${toneClass(item.status)}">${item.status}</span>
@@ -29,7 +29,7 @@ export function SwarmBlockerCard({ blocker }: { blocker: CommandPlaneSwarmBlocke
         <strong>${blocker.title}</strong>
         <span class="command-chip rounded-full ${toneClass(blocker.severity)}">${blocker.severity}</span>
       </div>
-      <div class="command-alert-meta">
+      <div class="flex justify-between items-start">
         <span>${blocker.code}</span>
         <span>next ${blocker.next_tool}</span>
       </div>
@@ -127,7 +127,7 @@ export function SwarmProofPanel({ proof }: { proof?: CommandPlaneSwarmProof }) {
           ? 'ok'
           : 'warn'
   return html`
-    <div class="command-guide-card rounded-xl ${toneClass(tone)}">
+    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card ${toneClass(tone)}">
         <div class="flex justify-between gap-2.5 items-start">
           <strong>Hot Proof / 가동 증거</strong>
           <span class="command-chip rounded-full ${toneClass(tone)}">${proof?.status ?? 'missing'}</span>

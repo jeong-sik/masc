@@ -229,7 +229,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
   }
 
   return html`
-    <article class="command-guide-card rounded-xl ${toneClass(tone)}">
+    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card ${toneClass(tone)}">
       <div class="flex justify-between gap-2.5 items-start">
         <strong>Run Resolution</strong>
         <span class="command-chip rounded-full ${toneClass(tone)}">
@@ -261,7 +261,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
         : null}
       ${pendingConfirm
         ? html`
-            <div class="command-guide-card rounded-xl warn">
+            <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card warn">
               <div class="flex justify-between gap-2.5 items-start">
                 <strong>확인 대기</strong>
                 <span class="command-chip rounded-full warn">${pendingConfirm.confirm_token}</span>

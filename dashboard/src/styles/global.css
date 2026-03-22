@@ -54,8 +54,6 @@
 
 :root {
   --bg-0: #0b1220;
-  --bg-1: #111a2e;
-  --bg-2: #16213c;
   --card: rgba(19, 29, 51, 0.82);
   --card-border: rgba(138, 163, 211, 0.2);
   --text-strong: #eaf1ff;
@@ -71,16 +69,8 @@
   --radius-sm: 10px;
   --header-h: 94px;
 
-  /* Warm accent palette */
-  --warm-amber: #f5c542;
-  --warm-rose: #e8917a;
-  --warm-lavender: #b8a4d6;
-  --warm-sage: #8dbd97;
-
   /* Agent status (soft tones) */
   --agent-working: #7ae09a;
-  --agent-idle: #b8cae8;
-  --agent-offline: #5a6478;
   --agent-busy: #f0c060;
 
   /* Tone variants */
@@ -88,64 +78,58 @@
   --warn-bright: #f97316;
 
   /* White overlay (glass morphism tints) */
-  --white-2: var(--white-2);
-  --white-3: var(--white-3);
-  --white-3h: var(--white-3h);
-  --white-4: var(--white-4);
-  --white-5: var(--white-5);
-  --white-6: var(--white-6);
-  --white-8: var(--white-8);
-  --white-10: var(--white-10);
-  --white-12: var(--white-12);
-  --white-20: var(--white-20);
-  --white-25: var(--white-25);
-  --white-30: var(--white-30);
-  --white-35: var(--white-35);
-  --white-40: var(--white-40);
-  --white-50: var(--white-50);
-  --white-55: var(--white-55);
-  --white-60: var(--white-60);
-  --white-70: var(--white-70);
-  --white-72: var(--white-72);
-
+  --white-2: rgba(255, 255, 255, 0.02);
+  --white-3: rgba(255, 255, 255, 0.03);
+  --white-3h: rgba(255, 255, 255, 0.035);
+  --white-4: rgba(255, 255, 255, 0.04);
+  --white-5: rgba(255, 255, 255, 0.05);
+  --white-6: rgba(255, 255, 255, 0.06);
+  --white-8: rgba(255, 255, 255, 0.08);
+  --white-10: rgba(255, 255, 255, 0.10);
+  --white-12: rgba(255, 255, 255, 0.12);
+  --white-20: rgba(255, 255, 255, 0.20);
+  --white-25: rgba(255, 255, 255, 0.25);
+  --white-30: rgba(255, 255, 255, 0.30);
+  --white-35: rgba(255, 255, 255, 0.35);
+  --white-40: rgba(255, 255, 255, 0.40);
+  --white-50: rgba(255, 255, 255, 0.50);
+  --white-55: rgba(255, 255, 255, 0.55);
+  --white-60: rgba(255, 255, 255, 0.60);
+  --white-70: rgba(255, 255, 255, 0.70);
+  --white-72: rgba(255, 255, 255, 0.72);
   /* Border slate (138, 163, 211) */
-  --border-slate-8: var(--border-slate-8);
-  --border-slate-12: var(--border-slate-12);
-  --border-slate-16: var(--border-slate-16);
-  --border-slate-18: var(--border-slate-18);
-  --border-slate-22: var(--border-slate-22);
-  --border-slate-35: var(--border-slate-35);
-
+  --border-slate-8: rgba(138, 163, 211, 0.08);
+  --border-slate-12: rgba(138, 163, 211, 0.12);
+  --border-slate-16: rgba(138, 163, 211, 0.16);
+  --border-slate-18: rgba(138, 163, 211, 0.18);
+  --border-slate-22: rgba(138, 163, 211, 0.22);
+  --border-slate-35: rgba(138, 163, 211, 0.35);
   /* OK / green (74, 222, 128) */
-  --ok-10: var(--ok-10);
-  --ok-12: var(--ok-12);
-  --ok-soft: var(--ok-soft);
-  --ok-22: var(--ok-22);
-  --ok-24: var(--ok-24);
-  --ok-25: var(--ok-25);
-  --ok-30: var(--ok-30);
-  --ok-35: var(--ok-35);
-  --ok-40: var(--ok-40);
-
+  --ok-10: rgba(74, 222, 128, 0.10);
+  --ok-12: rgba(74, 222, 128, 0.12);
+  --ok-soft: rgba(74, 222, 128, 0.15);
+  --ok-22: rgba(74, 222, 128, 0.22);
+  --ok-24: rgba(74, 222, 128, 0.24);
+  --ok-25: rgba(74, 222, 128, 0.25);
+  --ok-30: rgba(74, 222, 128, 0.30);
+  --ok-35: rgba(74, 222, 128, 0.35);
+  --ok-40: rgba(74, 222, 128, 0.40);
   /* Bad / red */
-  --bad-soft: var(--bad-soft);
-  --bad-12: var(--bad-12);
-
+  --bad-soft: rgba(239, 68, 68, 0.15);
+  --bad-12: rgba(239, 68, 68, 0.12);
   /* Warn / yellow (251, 191, 36) */
-  --warn-soft: var(--warn-soft);
-  --warn-12: var(--warn-12);
-
+  --warn-soft: rgba(251, 191, 36, 0.15);
+  --warn-12: rgba(251, 191, 36, 0.12);
   /* Accent / blue (71, 184, 255) */
-  --accent-8: var(--accent-8);
-  --accent-10: var(--accent-10);
-  --accent-12: var(--accent-12);
-
+  --accent-8: rgba(71, 184, 255, 0.08);
+  --accent-10: rgba(71, 184, 255, 0.10);
+  --accent-12: rgba(71, 184, 255, 0.12);
+  --accent-20: rgba(71, 184, 255, 0.20);
   /* Cyan (34, 211, 238) */
-  --cyan-12: var(--cyan-12);
-  --cyan-16: var(--cyan-16);
-
+  --cyan-12: rgba(34, 211, 238, 0.12);
+  --cyan-16: rgba(34, 211, 238, 0.16);
   /* FF gold (200, 168, 78) */
-  --ff-gold-15: var(--ff-gold-15);
+  --ff-gold-15: rgba(200, 168, 78, 0.15);
 
   /* Bad / red (248, 113, 113) */
   --bad-8: rgba(248, 113, 113, 0.08);
@@ -227,36 +211,7 @@
   --z-layout: 1;
   --z-tab-sticky: 30;
   --z-header: 40;
-  /*
-   * Overlay contract:
-   * 1) Keeper modal: 3020
-   * 2) Agent modal: 3030
-   * 3) TRPG actor modal: 3040
-   * 4) Toast: 3070
-   * 5) Tooltip: 3080
-   */
-  --z-overlay-keeper: 3020;
-  --z-overlay-agent: 3030;
-  --z-overlay-trpg-actor: 3040;
-  --z-overlay-toast: 3070;
-  --z-overlay-tooltip: 3080;
-
-  /* Breakpoint scale (used in @media max-width) */
-  /* 1450px: command warroom only */
-  /* 1200px: layout collapse (sidebar → stacked) */
-  /* 1100px: grid collapse (2-col → 1-col) */
-  /* 960px: compact cards */
-  /* 880px: mobile-first adaptations */
-  /* 768px: tablet/mobile */
-  /* 600px: small mobile */
-
-  /* Spacing tokens */
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 40px;
-  --space-2xl: 64px;
+  /* Overlay z-index: fallback values in each component (keeper:3020 agent:3030 trpg:3040 toast:3070 tooltip:3080) */
 }
 
 *,
@@ -322,20 +277,6 @@ a:hover {
   50% {
     opacity: 0.55;
   }
-}
-
-/* Main 2-column layout — sidebar + content */
-.dashboard-layout {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 20px;
-  padding: 16px 20px 32px;
-  max-width: 1600px;
-  margin: 0 auto;
-}
-
-.dashboard-main {
-  min-width: 0;
 }
 
 @media (max-width: 1200px) {

@@ -77,7 +77,7 @@ export function WarRoomBodyGrid({
   activeLane,
 }: WarRoomBodyProps) {
   return html`
-    <div class="command-warroom-grid ${wallboard ? 'wallboard' : ''}">
+    <div class="grid gap-4 items-start command-warroom-grid ${wallboard ? 'wallboard' : ''}">
       <div class="flex flex-col gap-4 min-w-0">
         <section class="card rounded-xl min-h-[240px]">
           <div class="card rounded-xl-title-row">
@@ -90,7 +90,7 @@ export function WarRoomBodyGrid({
               `
             : selectedSession
               ? html`
-                  <article class="command-guide-card rounded-xl">
+                  <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card">
                     <div class="flex justify-between gap-2.5 items-start">
                       <strong>${selectedSession.session_id}</strong>
                       <span class="command-chip rounded-full ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
@@ -180,10 +180,10 @@ export function WarRoomBodyGrid({
             ${swarmHasEvidence && swarm ? html`<${SwarmRunResolutionCard} swarm=${swarm} />` : null}
             ${blockers.length > 0
               ? blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)
-              : html`<div class="command-guide-card rounded-xl ok"><p>지금 보이는 blocker는 없습니다.</p></div>`}
+              : html`<div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card ok"><p>지금 보이는 blocker는 없습니다.</p></div>`}
             ${pendingApprovals > 0
               ? html`
-                  <article class="command-guide-card rounded-xl warn">
+                  <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card warn">
                     <div class="flex justify-between gap-2.5 items-start">
                       <strong>승인 대기</strong>
                       <span class="command-chip rounded-full warn">${pendingApprovals}</span>
@@ -194,7 +194,7 @@ export function WarRoomBodyGrid({
               : null}
             ${pendingConfirmTotal > 0
               ? html`
-                  <article class="command-guide-card rounded-xl warn">
+                  <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card warn">
                     <div class="flex justify-between gap-2.5 items-start">
                       <strong>확인 대기</strong>
                       <span class="command-chip rounded-full warn">${pendingConfirmHidden > 0 ? `${pendingConfirmVisible}/${pendingConfirmTotal}` : pendingConfirmTotal}</span>

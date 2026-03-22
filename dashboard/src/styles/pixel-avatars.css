@@ -1,41 +1,13 @@
 /* MASC Dashboard — CSS Pixel Art Avatar System
- * 8x8 CSS Grid avatars with state-based animations.
- * Each agent gets a deterministic palette from their name hash.
- * Phase 2: operational overlays (activity dot, speech bubble, blocker ring)
+ * Kept: data-attribute selectors, keyframes, compound selectors, pseudo-elements,
+ *       prefers-reduced-motion, box-shadow variants
  */
 
-.pixel-avatar {
-  display: grid;
-  grid-template: repeat(8, 1fr) / repeat(8, 1fr);
-  width: 48px;
-  height: 48px;
-  overflow: visible;
-  flex-shrink: 0;
-  image-rendering: pixelated;
-  position: relative;
-}
-
-.pixel-avatar--sm {
-  width: 32px;
-  height: 32px;
-}
-
-.pixel-avatar--lg {
-  width: 64px;
-  height: 64px;
-}
-
 .pixel-avatar--xl {
-  width: 96px;
-  height: 96px;
   box-shadow:
     0 0 0 2px var(--ff-navy),
     0 0 0 3px var(--ff-gold),
     0 2px 8px rgba(0, 0, 0, 0.4);
-}
-
-.pixel-avatar__cell {
-  /* Each cell's color is set via inline style */
 }
 
 /* State animations applied to the avatar container */
@@ -62,20 +34,20 @@
   opacity: 0.55;
 }
 
-/* ── Phase 2: Signal truth ring ────────────── */
+/* Signal truth ring */
 .pixel-avatar.signal-ring--live {
-  box-shadow: 0 0 0 2px var(--agent-working, var(--agent-working));
+  box-shadow: 0 0 0 2px var(--agent-working);
 }
 
 .pixel-avatar.signal-ring--stale {
-  box-shadow: 0 0 0 2px var(--agent-busy, var(--agent-busy));
+  box-shadow: 0 0 0 2px var(--agent-busy);
 }
 
 .pixel-avatar.signal-ring--archived {
   box-shadow: 0 0 0 2px var(--border-slate-30);
 }
 
-/* ── Phase 2: Blocker pulse ring ───────────── */
+/* Blocker pulse ring */
 .pixel-avatar--has-blocker {
   animation: blocker-pulse 1.5s ease-in-out infinite;
 }
@@ -85,7 +57,7 @@
   50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.7); }
 }
 
-/* ── Phase 2: Activity dot (top-right) ─────── */
+/* Activity dot — positioned absolute */
 .pixel-avatar__activity-dot {
   position: absolute;
   top: -2px;
@@ -98,28 +70,17 @@
 }
 
 .activity-dot--live-pulse {
-  background: var(--agent-working, var(--agent-working));
+  background: var(--agent-working);
   box-shadow: 0 0 4px rgba(122, 224, 154, 0.8);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
-.activity-dot--live {
-  background: var(--agent-working, var(--agent-working));
-}
+.activity-dot--live { background: var(--agent-working); }
+.activity-dot--stale { background: var(--agent-busy); }
+.activity-dot--inactive { background: rgba(138, 163, 211, 0.4); }
+.activity-dot--unknown { background: var(--card-border); }
 
-.activity-dot--stale {
-  background: var(--agent-busy, var(--agent-busy));
-}
-
-.activity-dot--inactive {
-  background: rgba(138, 163, 211, 0.4);
-}
-
-.activity-dot--unknown {
-  background: var(--card-border);
-}
-
-/* ── Phase 2: Speech bubble ────────────────── */
+/* Speech bubble */
 .pixel-avatar__speech-bubble {
   position: absolute;
   bottom: calc(100% + 4px);
@@ -141,7 +102,6 @@
   text-overflow: ellipsis;
 }
 
-/* Bubble triangle */
 .pixel-avatar__speech-bubble::after {
   content: '';
   position: absolute;
@@ -152,46 +112,17 @@
   border-top-color: rgba(30, 30, 40, 0.92);
 }
 
-/* Show on hover */
 .pixel-avatar:hover .pixel-avatar__speech-bubble,
 .pixel-avatar__speech-bubble.always-visible {
   opacity: 1;
 }
 
-/* Avatar name label */
-.pixel-avatar-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--space-xs, 4px);
-}
-
-.pixel-avatar-name {
-  font-size: var(--fs-2xs);
-  color: var(--text-muted);
-  text-align: center;
-  max-width: 64px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pixel-avatar-name--active {
-  color: var(--text-strong);
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .pixel-avatar[data-status] {
-    animation: none;
-  }
-  .pixel-avatar-particle {
-    display: none;
-  }
+  .pixel-avatar[data-status] { animation: none; }
+  .pixel-avatar-particle { display: none; }
   .pixel-avatar--has-blocker {
     animation: none;
     box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.6);
   }
-  .activity-dot--live-pulse {
-    animation: none;
-  }
+  .activity-dot--live-pulse { animation: none; }
 }

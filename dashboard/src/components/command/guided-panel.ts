@@ -196,7 +196,7 @@ function GuidedPanel() {
         <div class="card rounded-xl-title-row">
           <div class="card rounded-xl-title">즉시 조치</div>
         </div>
-        <div class="command-guide-card rounded-xl highlight mb-3">
+        <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card highlight mb-3">
           <div class="flex justify-between gap-2.5 items-start">
             <strong>${nextStep?.title ?? nextTool}</strong>
             <span class="command-chip rounded-full ok">${nextTool}</span>
@@ -226,7 +226,7 @@ function GuidedPanel() {
 
         ${pitfalls.length > 0
           ? html`
-              <div class="command-guide-card rounded-xl warn">
+              <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card warn">
                 <div class="flex justify-between gap-2.5 items-start">
                   <strong>자주 막히는 지점</strong>
                   <span class="command-chip rounded-full warn">${pitfalls.length}</span>
@@ -256,7 +256,7 @@ function GuidedPanel() {
             : html`
                 <div class="grid gap-3">
                   ${renderedPaths.map(path => html`
-                    <article class="command-guide-card rounded-xl">
+                    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card">
                       <div class="flex justify-between gap-2.5 items-start">
                         <strong>${path.title}</strong>
                         <span class="command-chip rounded-full">${path.id}</span>

@@ -70,26 +70,13 @@ export function toolMatchesQuery(item: DashboardToolInventoryItem, rawQuery: str
 }
 
 export function toolBadge(label: string, tone: 'default' | 'ok' | 'warn' | 'surface' = 'default') {
-  const color =
-    tone === 'ok' ? '#7dd3fc'
-      : tone === 'warn' ? '#fbbf24'
-      : tone === 'surface' ? '#c4b5fd'
-      : '#cbd5e1'
-  const background =
-    tone === 'ok' ? 'rgba(14, 165, 233, 0.18)'
-      : tone === 'warn' ? 'rgba(245, 158, 11, 0.18)'
-      : tone === 'surface' ? 'rgba(139, 92, 246, 0.18)'
-      : 'rgba(148, 163, 184, 0.16)'
+  const toneClass =
+    tone === 'ok' ? 'text-[#7dd3fc] bg-[rgba(14,165,233,0.18)]'
+      : tone === 'warn' ? 'text-[var(--warn)] bg-[var(--warn-12)]'
+      : tone === 'surface' ? 'text-[#c4b5fd] bg-[rgba(139,92,246,0.18)]'
+      : 'text-[var(--text-muted)] bg-[var(--white-8)]'
   return html`
-    <span
-      style=${{
-        fontSize: '11px',
-        color,
-        background,
-        borderRadius: '999px',
-        padding: '2px 8px',
-      }}
-    >
+    <span class="text-[11px] rounded-full px-2 py-0.5 ${toneClass}">
       ${label}
     </span>
   `

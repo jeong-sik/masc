@@ -222,14 +222,14 @@ export function Command() {
   return html`
     <section class="flex flex-col gap-[18px] ${wallboardMode ? 'p-4 rounded-[18px] cmd-plane-view wallboard' : ''}">
       ${wallboardMode ? null : html`
-        <div class="flex justify-between gap-4 items-start">
+        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex justify-between gap-4 items-start max-[880px]:flex-col">
           <div>
-            <h2>지휘면</h2>
-            <p>기본 진입은 라이브 워룸입니다. 실제 run, worker, message, trace를 먼저 보고 필요할 때만 detail surface로 내려갑니다.</p>
+            <h2 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider mb-1">지휘면</h2>
+            <p class="text-[13px] text-[var(--text-muted)] leading-relaxed max-w-[62ch]">기본 진입은 라이브 워룸입니다. 실제 run, worker, message, trace를 먼저 보고 필요할 때만 detail surface로 내려갑니다.</p>
           </div>
           <div class="flex gap-2.5 flex-wrap">
             <button
-              class="control-btn rounded-lg ghost"
+              class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
               onClick=${() => {
                 void fire(() => runCommandPlaneDispatchTick())
               }}
@@ -238,7 +238,7 @@ export function Command() {
               ${actionDisabled('dispatch:tick') ? '정리 중...' : 'Tick 실행'}
             </button>
             <button
-              class="control-btn rounded-lg ghost"
+              class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
               onClick=${() => {
                 void refreshRoomTruth()
                 void refreshCommandPlaneCurrentSurface()
@@ -253,7 +253,7 @@ export function Command() {
               ${commandPlaneLoading.value ? '새로고침 중...' : '새로고침'}
             </button>
             <button
-              class="control-btn rounded-lg ghost"
+              class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
               onClick=${() => {
                 setCommandPlaneSurface('warroom')
                 navigate('operations', { ...surfaceRouteParams('warroom'), presentation: 'wallboard' })

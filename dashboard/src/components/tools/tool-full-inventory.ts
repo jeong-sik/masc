@@ -80,49 +80,49 @@ export function FullInventoryView({
   const directCallCount = inventory.filter(item => item.direct_call_allowed).length
 
   return html`
-    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[rgba(11,18,32,0.95)] backdrop-blur-[8px] py-3 border-b border-[var(--slate-gray-12)]">
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-[18px]">
-        <div class="flex flex-col gap-1.5 px-4 py-3.5 rounded-[14px] bg-[rgba(15,23,42,0.8)] border border-[rgba(148,163,184,0.16)]">
-          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${totalCount}</span>
-          <span class="stat-label">전체 도구</span>
+    <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[rgba(11,18,32,0.95)] backdrop-blur-[8px] py-3 border-b border-[var(--card-border)]">
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4">
+        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${totalCount}</span>
+          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">전체 도구</span>
         </div>
-        <div class="flex flex-col gap-1.5 px-4 py-3.5 rounded-[14px] bg-[rgba(15,23,42,0.8)] border border-[rgba(148,163,184,0.16)]">
-          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${enabledCount}</span>
-          <span class="stat-label">활성화됨</span>
+        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${enabledCount}</span>
+          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">활성화됨</span>
         </div>
-        <div class="flex flex-col gap-1.5 px-4 py-3.5 rounded-[14px] bg-[rgba(15,23,42,0.8)] border border-[rgba(148,163,184,0.16)]">
-          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${hiddenCount}</span>
-          <span class="stat-label">숨김</span>
+        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${hiddenCount}</span>
+          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">숨김</span>
         </div>
-        <div class="flex flex-col gap-1.5 px-4 py-3.5 rounded-[14px] bg-[rgba(15,23,42,0.8)] border border-[rgba(148,163,184,0.16)]">
-          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${deprecatedCount}</span>
-          <span class="stat-label">지원 중단</span>
+        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${deprecatedCount}</span>
+          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">지원 중단</span>
         </div>
-        <div class="flex flex-col gap-1.5 px-4 py-3.5 rounded-[14px] bg-[rgba(15,23,42,0.8)] border border-[rgba(148,163,184,0.16)]">
-          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${directCallCount}</span>
-          <span class="stat-label">직접 호출</span>
+        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${directCallCount}</span>
+          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">직접 호출</span>
         </div>
-        <div class="flex flex-col gap-1.5 px-4 py-3.5 rounded-[14px] bg-[rgba(15,23,42,0.8)] border border-[rgba(148,163,184,0.16)]">
-          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${filtered.length}</span>
-          <span class="stat-label">필터 결과</span>
+        <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] flex flex-col gap-1.5">
+          <span class="text-[var(--text-strong)] text-[28px] font-bold leading-none tabular-nums">${filtered.length}</span>
+          <span class="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">필터 결과</span>
         </div>
       </div>
 
       <div class="flex flex-wrap gap-2 mb-3.5">
         ${(Object.keys(SURFACE_LABELS) as SurfaceFilter[]).map(key => html`
           <button
-            class=${`control-btn${surfaceFilter.value === key ? ' is-active' : ''}`}
+            class=${`px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer ${surfaceFilter.value === key ? 'border-[var(--accent)]/40 text-[var(--accent)] bg-[var(--accent-8)]' : 'border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] text-[var(--text-body)]'}`}
             onClick=${() => { surfaceFilter.value = key }}
           >
             ${SURFACE_LABELS[key]}
-            <span class="tool-surface-count inline-flex items-center justify-center min-w-5 h-[18px] px-[5px] text-[length:var(--fs-2xs)] font-semibold bg-[rgba(148,163,184,0.18)] text-[color:var(--text-slate)] rounded-full">${surfaceCountForFilter(inventory, key)}</span>
+            <span class="inline-flex items-center justify-center min-w-5 h-[18px] px-[5px] text-[10px] font-semibold bg-[var(--white-8)] text-[var(--text-muted)] rounded-full ml-1">${surfaceCountForFilter(inventory, key)}</span>
           </button>
         `)}
       </div>
 
       <div class="flex flex-wrap gap-2.5 items-center">
         <input
-          class="control-input rounded-lg"
+          class="w-full px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] focus:border-[var(--accent)]/50 outline-none max-w-[320px]"
           type="text"
           placeholder="도구, 문서, 권한, 대체 도구 검색..."
           value=${searchQuery.value}
@@ -131,7 +131,7 @@ export function FullInventoryView({
           }}
         />
         <select
-          class="control-select"
+          class="px-3 py-2 rounded-lg bg-[var(--white-3)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] focus:border-[var(--accent)]/50 outline-none"
           value=${categoryFilter.value}
           onChange=${(e: Event) => {
             categoryFilter.value = (e.target as HTMLSelectElement).value
@@ -140,7 +140,7 @@ export function FullInventoryView({
           <option value="all">전체 카테고리</option>
           ${categories.map(category => html`<option value=${category}>${category}</option>`)}
         </select>
-        <label class="inline-flex items-center gap-2 text-[length:var(--fs-sm)] text-[color:var(--text-slate-light)]">
+        <label class="inline-flex items-center gap-2 text-[12px] text-[var(--text-body)]">
           <input
             type="checkbox"
             checked=${enabledOnly.value}
@@ -150,7 +150,7 @@ export function FullInventoryView({
           />
           <span>활성화만</span>
         </label>
-        <label class="inline-flex items-center gap-2 text-[length:var(--fs-sm)] text-[color:var(--text-slate-light)]">
+        <label class="inline-flex items-center gap-2 text-[12px] text-[var(--text-body)]">
           <input
             type="checkbox"
             checked=${directOnly.value}
@@ -160,7 +160,7 @@ export function FullInventoryView({
           />
           <span>직접 호출만</span>
         </label>
-        <label class="inline-flex items-center gap-2 text-[length:var(--fs-sm)] text-[color:var(--text-slate-light)]">
+        <label class="inline-flex items-center gap-2 text-[12px] text-[var(--text-body)]">
           <input
             type="checkbox"
             checked=${showHidden.value}
@@ -170,7 +170,7 @@ export function FullInventoryView({
           />
           <span>숨김 표시</span>
         </label>
-        <label class="inline-flex items-center gap-2 text-[length:var(--fs-sm)] text-[color:var(--text-slate-light)]">
+        <label class="inline-flex items-center gap-2 text-[12px] text-[var(--text-body)]">
           <input
             type="checkbox"
             checked=${showDeprecated.value}
@@ -180,13 +180,17 @@ export function FullInventoryView({
           />
           <span>지원 중단 표시</span>
         </label>
-        <button class="control-btn rounded-lg ghost" onClick=${() => { void loadTools() }} disabled=${loading}>
+        <button
+          class="px-3 py-1.5 rounded-lg text-[13px] font-medium border border-[var(--card-border)] bg-[var(--white-4)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-[var(--text-body)]"
+          onClick=${() => { void loadTools() }}
+          disabled=${loading}
+        >
           ${loading ? '새로고침 중...' : '새로고침'}
         </button>
       </div>
     </div>
 
-    ${error ? html`<div class="px-2.5 py-3 bg-[var(--bad-12)] border border-[rgba(239,68,68,0.34)] text-[#fecaca] text-[length:var(--fs-base)] rounded-lg">${error}</div>` : null}
+    ${error ? html`<div class="px-3 py-2.5 bg-[var(--bad-12)] border border-[var(--bad-30)] text-[#fecaca] text-[13px] rounded-lg mt-2">${error}</div>` : null}
 
     <div ref=${listContainerRef} class="overflow-y-auto max-h-[calc(100vh-420px)] min-h-[300px]">
       ${filtered.length > 0

@@ -153,7 +153,7 @@ export function OpsSessionColumn() {
           </div>
           <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
             ${liveSessions.length === 0
-              ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">지금 바로 개입할 live team session이 없습니다.</div>`
+              ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">지금 바로 개입할 live team session이 없습니다.</div>`
               : liveSessions.map(session => renderSessionCard(session))}
           </div>
         </div>
@@ -211,7 +211,7 @@ export function OpsSessionColumn() {
                 </div>
                 <div class="mt-1.5 whitespace-pre-wrap break-words">${item.summary}</div>
               </article>
-            `) : html`<div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">이 세션의 attention item은 없습니다.</div>`}
+            `) : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">이 세션의 attention item은 없습니다.</div>`}
             ${sessionDigest.worker_cards.length > 0 ? sessionDigest.worker_cards.map(card => html`
               <article key=${`${card.actor ?? card.spawn_role ?? 'worker'}:${card.spawn_agent ?? card.runtime_pool ?? 'runtime'}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
                 <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
@@ -226,7 +226,7 @@ export function OpsSessionColumn() {
             `) : null}
           </div>
         ` : html`
-          <div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">세션을 고르면 세부 요약을 불러옵니다.</div>
+          <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">세션을 고르면 세부 요약을 불러옵니다.</div>
         `}
       </section>
 
@@ -287,17 +287,17 @@ export function OpsSessionColumn() {
                 ? html`<div class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">Warnings: ${selectedSession.linked_autoresearch.warnings.join(', ')}</div>`
                 : null}
               ${selectedSession.linked_autoresearch.error
-                ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">${selectedSession.linked_autoresearch.error}</div>`
+                ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">${selectedSession.linked_autoresearch.error}</div>`
                 : null}
             ` : null}
             ${selectedSession.recent_events && selectedSession.recent_events.length > 0 ? html`
               <pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[length:var(--fs-xs)] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(selectedSession.recent_events.slice(-3))}</pre>
             ` : null}
           </div>
-        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">먼저 세션을 하나 고르세요.</div>`}
+        ` : html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">먼저 세션을 하나 고르세요.</div>`}
 
         ${selectedSession && !selectedSessionActionable ? html`
-          <div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">이 세션은 이미 종료돼서 새 노트, 작업, 중지를 보내지 않습니다. 위의 live 세션을 선택하세요.</div>
+          <div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">이 세션은 이미 종료돼서 새 노트, 작업, 중지를 보내지 않습니다. 위의 live 세션을 선택하세요.</div>
         ` : null}
 
         ${linkedAutoresearch?.loop_id ? html`
@@ -328,7 +328,7 @@ export function OpsSessionColumn() {
             </button>
             <span class="-mt-0.5 text-[var(--text-muted)] text-[var(--fs-sm)] leading-[1.45]">canonical control은 MCP tool이고, 이 화면은 그 상태를 읽고 이어서 제어합니다.</span>
           </div>
-          ${autoresearchError.value ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--white-12)] text-[var(--text-muted)] text-[var(--fs-base)]">${autoresearchError.value}</div>` : null}
+          ${autoresearchError.value ? html`<div class="p-3 rounded-xl border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-[13px]">${autoresearchError.value}</div>` : null}
         ` : null}
 
         <label class="control-label" for="ops-turn-kind">세션 액션</label>

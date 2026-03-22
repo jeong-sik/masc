@@ -331,6 +331,20 @@ let seed_procedures_as_oas ~(memory : Agent_sdk.Memory.t)
   ) procs;
   List.length procs
 
+let dedupe_procedures_by_id (procs : Procedural_memory.procedure list) =
+  let latest_by_id = Hashtbl.create (max 16 (List.length procs)) in
+  List.iter (fun (p : Procedural_memory.procedure) ->
+    Hashtbl.replace latest_by_id p.id p
+  ) procs;
+  let seen = Hashtbl.create (Hashtbl.length latest_by_id) in
+  List.filter_map (fun (p : Procedural_memory.procedure) ->
+    if Hashtbl.mem seen p.id then None
+    else begin
+      Hashtbl.add seen p.id ();
+      Hashtbl.find_opt latest_by_id p.id
+    end
+  ) procs
+
 (** Flush OAS procedures back to [Procedural_memory].
 
     Extracts procedures from the Procedural tier that have been updated
@@ -341,13 +355,15 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
     Agent_sdk.Memory.matching_procedures memory
       ~pattern:"" ()
   in
+  let existing_raw = Procedural_memory.load_procedures ~agent_name in
+  let procedures = ref (dedupe_procedures_by_id existing_raw) in
+  let needs_rewrite = ref (List.length existing_raw <> List.length !procedures) in
   let flushed = ref 0 in
   List.iter (fun (op : Agent_sdk.Memory.procedure) ->
-    let existing = Procedural_memory.load_procedures ~agent_name in
     let updated =
       match List.find_opt (fun (p : Procedural_memory.procedure) ->
         p.id = op.id
-      ) existing with
+      ) !procedures with
       | Some old_p ->
         (* Only flush if counts changed *)
         if old_p.success_count <> op.success_count
@@ -358,7 +374,10 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
             confidence = op.confidence;
             last_applied = op.last_used;
           } in
-          Procedural_memory.save_procedure ~agent_name updated_p;
+          procedures := List.map (fun (p : Procedural_memory.procedure) ->
+            if p.id = old_p.id then updated_p else p
+          ) !procedures;
+          needs_rewrite := true;
           true
         end else false
       | None ->
@@ -374,11 +393,14 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
           created_at = Unix.gettimeofday ();
           last_applied = op.last_used;
         } in
-        Procedural_memory.save_procedure ~agent_name new_p;
+        procedures := !procedures @ [new_p];
+        needs_rewrite := true;
         true
     in
     if updated then incr flushed
   ) oas_procs;
+  if !needs_rewrite then
+    Procedural_memory.rewrite_procedures ~agent_name !procedures;
   !flushed
 
 (* ================================================================ *)

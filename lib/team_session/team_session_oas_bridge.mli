@@ -4,7 +4,8 @@
 
 module Swarm = Agent_sdk_swarm
 
-val supported_local_worker_tools : unit -> Types.tool_schema list
+val supported_local_worker_tools :
+  unit -> (Types.tool_schema list, string) result
 
 val dispatch_supported_tool :
   sw:Eio.Switch.t ->

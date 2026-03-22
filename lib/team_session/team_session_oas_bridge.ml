@@ -43,9 +43,9 @@ let supported_local_worker_tools () =
     Agent_tool_surfaces.local_worker_tool_schemas
       ~names:supported_local_worker_tool_names ()
   with
-  | Ok schemas -> schemas
+  | Ok schemas -> Ok schemas
   | Error msg ->
-      failwith
+      Error
         (Printf.sprintf
            "team_session_oas_bridge: failed to resolve worker tool schemas: %s"
            msg)

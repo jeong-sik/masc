@@ -207,9 +207,12 @@ let test_parse_verdict_unknown_defaults_to_warn () =
   | Warn _ -> ()
   | _ -> Alcotest.fail "unknown text should default to Warn"
 
-let test_parse_verdict_empty_defaults_to_pass () =
-  Alcotest.(check bool) "empty -> Pass" true
-    (Verifier_oas.parse_verdict "" = Pass)
+let test_parse_verdict_empty_defaults_to_warn () =
+  match Verifier_oas.parse_verdict "" with
+  | Warn reason ->
+    Alcotest.(check string) "empty output reason"
+      "empty verifier output" reason
+  | _ -> Alcotest.fail "empty text should default to Warn"
 
 (* ================================================================ *)
 (* should_skip (verify fast path)                                    *)
@@ -323,8 +326,8 @@ let () =
         test_parse_verdict_case_insensitive;
       Alcotest.test_case "unknown -> Warn" `Quick
         test_parse_verdict_unknown_defaults_to_warn;
-      Alcotest.test_case "empty -> Pass" `Quick
-        test_parse_verdict_empty_defaults_to_pass;
+      Alcotest.test_case "empty -> Warn" `Quick
+        test_parse_verdict_empty_defaults_to_warn;
     ]);
     ("verify_skip", [
       Alcotest.test_case "read-only skips" `Quick test_verify_skips_readonly;

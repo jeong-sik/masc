@@ -18,7 +18,8 @@
 let destructive_check_tools =
   [ "keeper_bash"; "keeper_fs_edit"; "keeper_edit"; "keeper_github" ]
 
-(** Extract command or content string from tool input JSON for screening. *)
+(** Extract command or content string from tool input JSON for screening.
+    Reads "command", "cmd" (keeper_github), or "content" keys. *)
 let extract_command_from_input (input : Yojson.Safe.t) : string =
   let open Yojson.Safe.Util in
   try

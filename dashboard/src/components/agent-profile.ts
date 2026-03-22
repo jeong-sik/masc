@@ -9,6 +9,7 @@ import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import { keeperIdentityHint } from './common/keeper-identity'
+import { EmptyState } from './common/empty-state'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
   agents,
@@ -356,7 +357,7 @@ export function AgentProfile({ name }: { name: string }) {
         ${!isKeeper ? html`
         <${Card} title="태스크 (${owned.length})" class="ff-card rounded-xl">
           ${owned.length === 0
-            ? html`<div class="empty-state">할당된 태스크 없음</div>`
+            ? html`<${EmptyState} message="할당된 태스크 없음" compact />`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
                 <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded-lg" key=${t.id}>
                   <span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${t.id}</span>
@@ -405,7 +406,7 @@ export function AgentProfile({ name }: { name: string }) {
 
         <${Card} title="타임라인" class="ff-card rounded-xl">
           ${!timeline || (timeline.events ?? []).length === 0
-            ? html`<div class="empty-state">이벤트 없음</div>`
+            ? html`<${EmptyState} message="이벤트 없음" compact />`
             : html`<div class="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
                 const detail = evt.detail as Record<string, string | undefined>
                 const title = detail.title ?? detail.content ?? ''
@@ -425,7 +426,7 @@ export function AgentProfile({ name }: { name: string }) {
 
         <${Card} title="Room 활동" class="ff-card rounded-xl">
           ${lines.length === 0
-            ? html`<div class="empty-state">관련 활동 없음</div>`
+            ? html`<${EmptyState} message="관련 활동 없음" compact />`
             : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${lines.map((line: string, idx: number) =>
                 html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[length:var(--fs-sm)] text-[#c8daf7] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
         <//>

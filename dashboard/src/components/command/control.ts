@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/empty-state'
 import type {
   CommandPlaneCapacityRow,
   CommandPlaneDecisionRecord,
@@ -113,7 +114,7 @@ export function ControlSurface() {
           ? html`<div class="flex flex-col gap-3">
               ${snapshot.decisions.decisions.map(decision => html`<${DecisionCard} decision=${decision} />`)}
             </div>`
-          : html`<div class="empty-state">지금 승인 대기 항목은 없습니다.</div>`}
+          : html`<${EmptyState} message="지금 승인 대기 항목은 없습니다." compact />`}
       </section>
 
       <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
@@ -122,7 +123,7 @@ export function ControlSurface() {
           ? html`<div class="flex flex-col gap-3">
               ${snapshot.capacity.capacity.map(row => html`<${CapacityRowCard} row=${row} />`)}
             </div>`
-          : html`<div class="empty-state">제어할 용량 행이 아직 없습니다.</div>`}
+          : html`<${EmptyState} message="제어할 용량 행이 아직 없습니다." compact />`}
       </section>
     </div>
   `

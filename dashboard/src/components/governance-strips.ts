@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState } from './common/empty-state'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { governanceToneClass } from '../lib/tone'
@@ -32,7 +33,7 @@ export function ActivityRail() {
     <${Card} title="활동 타임라인" class="section mb-3.5">
       <div class="flex flex-col gap-2">
         ${grouped.size === 0
-          ? html`<div class="empty-state">거버넌스 활동이 아직 없습니다.</div>`
+          ? html`<${EmptyState} message="거버넌스 활동이 아직 없습니다." compact />`
           : Array.from(grouped.entries()).map(([, group]) => html`
               <div class="governance-case-group rounded-lg">
                 <div class="flex items-center justify-between mb-2 gap-2">

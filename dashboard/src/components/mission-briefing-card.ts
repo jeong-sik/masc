@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
+import { EmptyState } from './common/empty-state'
 import { ProvenanceStrip } from './common/provenance-strip'
 import {
   missionBriefing,
@@ -41,8 +42,8 @@ export function MissionBriefingCard() {
         ${briefing?.refreshing ? html`<span class="cmd-chip rounded-full warn">갱신 중</span>` : null}
       </div>
 
-      ${missionBriefingError.value ? html`<div class="empty-state error">${missionBriefingError.value}</div>` : null}
-      ${briefing?.error ? html`<div class="empty-state error">${briefing.error}</div>` : null}
+      ${missionBriefingError.value ? html`<${EmptyState} message=${missionBriefingError.value} compact />` : null}
+      ${briefing?.error ? html`<${EmptyState} message=${briefing.error} compact />` : null}
       ${briefing?.summary ? html`<div class="grid gap-1">${briefing.summary}</div>` : null}
       ${briefing?.last_error && !briefing.error
         ? html`<div class="grid gap-1">최근 갱신 실패: ${briefing.last_error}</div>`
@@ -80,11 +81,9 @@ export function MissionBriefingCard() {
           `
         : (!missionBriefingLoading.value && !missionBriefingError.value && showEmpty
             ? html`
-                <div class="empty-state">
-                  ${briefing?.status === 'pending'
+                <${EmptyState} message=${briefing?.status === 'pending'
                     ? '최신 스냅샷으로 브리핑을 생성 중입니다. 마지막 성공 결과가 생기면 자동으로 다시 읽습니다.'
-                    : '판단 결과가 아직 없습니다.'}
-                </div>
+                    : '판단 결과가 아직 없습니다.'} compact />
               `
             : null)}
 

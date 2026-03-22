@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/empty-state'
 import { useEffect } from 'preact/hooks'
 import {
   commandPlaneActionError,
@@ -266,10 +267,10 @@ export function Command() {
       `}
 
       ${commandPlaneError.value
-        ? html`<div class="empty-state error">${commandPlaneError.value}</div>`
+        ? html`<${EmptyState} message=${commandPlaneError.value} compact />`
         : null}
       ${commandPlaneActionError.value
-        ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
+        ? html`<${EmptyState} message=${commandPlaneActionError.value} compact />`
         : null}
       ${wallboardMode ? null : html`<${RoomTruthStrip} />`}
       ${wallboardMode ? null : html`<${CommandWorkflowBanner} />`}

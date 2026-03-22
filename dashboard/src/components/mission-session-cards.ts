@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { Card } from './common/card'
+import { EmptyState } from './common/empty-state'
 import { openAgentDetail } from './agent-detail'
 import type {
   DashboardMissionSessionCard,
@@ -138,7 +139,7 @@ export function SessionDetailCard({
   if (error && !detail) {
     return html`
       <${Card} title="세션 상세" class="mission-list-card rounded-xl">
-        <div class="empty-state error">${error}</div>
+        <${EmptyState} message=${error} compact />
       <//>
     `
   }
@@ -174,7 +175,7 @@ export function SessionDetailCard({
                     <small class="text-[rgba(255,255,255,0.68)] leading-[1.45]">${item.actor ? `${item.actor} · ` : ''}${item.event_type ?? '이벤트'}</small>
                   </article>
                 `)
-              : html`<div class="empty-state">표시할 세션 이벤트가 없습니다.</div>`}
+              : html`<${EmptyState} message="표시할 세션 이벤트가 없습니다." compact />`}
           </div>
         </div>
 
@@ -195,7 +196,7 @@ export function SessionDetailCard({
                     </small>
                   </button>
                 `)
-              : html`<div class="empty-state">세션 참여자 미리보기가 없습니다.</div>`}
+              : html`<${EmptyState} message="세션 참여자 미리보기가 없습니다." compact />`}
           </div>
         </div>
       </div>
@@ -215,7 +216,7 @@ export function SessionDetailCard({
                     <small class="text-[rgba(255,255,255,0.7)] leading-[1.45]">${operation.detachment_status ?? operation.objective ?? '분견대 정보 없음'}</small>
                   </button>
                 `)
-              : html`<div class="empty-state">연결된 작전이 없습니다.</div>`}
+              : html`<${EmptyState} message="연결된 작전이 없습니다." compact />`}
           </div>
         </div>
 
@@ -233,7 +234,7 @@ export function SessionDetailCard({
                     <small class="text-[rgba(255,255,255,0.7)] leading-[1.45]">${keeper.current_work ?? '현재 작업 정보 없음'}</small>
                   </div>
                 `)
-              : html`<div class="empty-state">직접 연결된 키퍼는 없습니다.</div>`}
+              : html`<${EmptyState} message="직접 연결된 키퍼는 없습니다." compact />`}
           </div>
         </div>
       </div>

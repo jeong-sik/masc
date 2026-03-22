@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/empty-state'
 import { useEffect, useState } from 'preact/hooks'
 import type {
   CommandPlaneSwarmLane,
@@ -189,7 +190,7 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
 
   if (!hasLiveRun && !selectedSession) {
     if (commandPlaneSwarmLoading.value || operatorLoading.value) {
-      return html`<div class="empty-state">실시간 워룸 불러오는 중…</div>`
+      return html`<${EmptyState} message="실시간 워룸 불러오는 중…" compact />`
     }
     return html`
       <section class="card rounded-xl ${wallboard ? 'min-h-[calc(100vh-180px)]' : 'min-h-[360px]'} flex flex-col justify-center gap-[18px]">

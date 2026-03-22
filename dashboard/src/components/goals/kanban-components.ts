@@ -1,6 +1,7 @@
 // Kanban board components: KanbanCard, TaskBacklog
 
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/empty-state'
 import { Card } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { tasksByStatus } from '../../store'
@@ -57,7 +58,7 @@ export function TaskBacklog() {
             <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${todo.length}</span>
           </div>
           ${sortedTodo.length === 0
-            ? html`<div class="empty-state">대기 중인 태스크가 없습니다</div>`
+            ? html`<${EmptyState} message="대기 중인 태스크가 없습니다" compact />`
             : sortedTodo.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         </div>
         <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
@@ -66,7 +67,7 @@ export function TaskBacklog() {
             <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${inProgress.length}</span>
           </div>
           ${sortedInProgress.length === 0
-            ? html`<div class="empty-state">진행 중인 태스크가 없습니다</div>`
+            ? html`<${EmptyState} message="진행 중인 태스크가 없습니다" compact />`
             : sortedInProgress.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         </div>
         <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
@@ -75,10 +76,10 @@ export function TaskBacklog() {
             <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${done.length}</span>
           </div>
           ${sortedDone.length === 0
-            ? html`<div class="empty-state">완료된 태스크가 없습니다</div>`
+            ? html`<${EmptyState} message="완료된 태스크가 없습니다" compact />`
             : sortedDone.slice(0, 20).map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
           ${sortedDone.length > 20
-            ? html`<div class="empty-state">...외 ${sortedDone.length - 20}개 더 있음</div>`
+            ? html`<${EmptyState} message=${`...외 ${sortedDone.length - 20}개 더 있음`} compact />`
             : null}
         </div>
       </div>

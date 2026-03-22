@@ -29,21 +29,21 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
         <span class="inline-flex items-center py-1 px-[9px] text-[10px] uppercase tracking-[0.08em] rounded-full border border-solid ${liveConnected ? 'text-[#86efac] border-[var(--ok-30)] bg-[var(--ok-12)]' : 'text-[#fda4af] border-[rgba(239,68,68,0.28)] bg-[var(--bad-12)]'}">${liveConnected ? '연결됨' : '오프라인'}</span>
       </div>
       <div class="grid grid-cols-2 gap-2">
-        <div class="border border-[var(--border-slate-16)] rounded-[10px] py-2.5 px-[11px] bg-[var(--white-3)] grid gap-1">
-          <span class="text-[color:var(--text-muted)] text-[11px] tracking-[0.06em] uppercase">에이전트</span>
-          <strong class="text-[color:var(--text-strong)] text-lg leading-[1.1]">${agents.value.length}</strong>
+        <div class="border border-[var(--border-slate-16)] rounded-[10px] py-2.5 px-[11px] bg-[var(--white-3)] grid gap-0.5">
+          <span class="text-[color:var(--text-body)] text-xs tracking-[0.02em] font-medium">에이전트</span>
+          <strong class="text-[color:var(--accent)] text-lg leading-[1.1] tabular-nums">${agents.value.length}</strong>
         </div>
-        <div class="border border-[var(--border-slate-16)] rounded-[10px] py-2.5 px-[11px] bg-[var(--white-3)] grid gap-1">
-          <span class="text-[color:var(--text-muted)] text-[11px] tracking-[0.06em] uppercase">키퍼</span>
-          <strong class="text-[color:var(--text-strong)] text-lg leading-[1.1]">${keepers.value.length}</strong>
+        <div class="border border-[var(--border-slate-16)] rounded-[10px] py-2.5 px-[11px] bg-[var(--white-3)] grid gap-0.5">
+          <span class="text-[color:var(--text-body)] text-xs tracking-[0.02em] font-medium">키퍼</span>
+          <strong class="text-[color:var(--ok)] text-lg leading-[1.1] tabular-nums">${keepers.value.length}</strong>
         </div>
-        <div class="border border-[var(--border-slate-16)] rounded-[10px] py-2.5 px-[11px] bg-[var(--white-3)] grid gap-1">
-          <span class="text-[color:var(--text-muted)] text-[11px] tracking-[0.06em] uppercase">태스크</span>
-          <strong class="text-[color:var(--text-strong)] text-lg leading-[1.1]">${tasks.value.length}</strong>
+        <div class="border border-[var(--border-slate-16)] rounded-[10px] py-2.5 px-[11px] bg-[var(--white-3)] grid gap-0.5">
+          <span class="text-[color:var(--text-body)] text-xs tracking-[0.02em] font-medium">태스크</span>
+          <strong class="text-[color:var(--warn)] text-lg leading-[1.1] tabular-nums">${tasks.value.length}</strong>
         </div>
-        <div class="border border-[var(--border-slate-16)] rounded-[10px] py-2.5 px-[11px] bg-[var(--white-3)] grid gap-1">
-          <span class="text-[color:var(--text-muted)] text-[11px] tracking-[0.06em] uppercase">이벤트</span>
-          <strong class="text-[color:var(--text-strong)] text-lg leading-[1.1]">${eventCount.value}</strong>
+        <div class="border border-[var(--border-slate-16)] rounded-[10px] py-2.5 px-[11px] bg-[var(--white-3)] grid gap-0.5">
+          <span class="text-[color:var(--text-body)] text-xs tracking-[0.02em] font-medium">이벤트</span>
+          <strong class="text-[color:var(--text-strong)] text-lg leading-[1.1] tabular-nums">${eventCount.value}</strong>
         </div>
       </div>
       <div class="rail-inline-actions mt-3 grid grid-cols-2 gap-2">

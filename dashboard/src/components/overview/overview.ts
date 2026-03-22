@@ -83,11 +83,11 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
 
   return html`
     <div
-      class="hot-session-card rounded-xl rounded-lg ${s.blocker_summary ? 'border-[var(--bad)] bg-[rgba(239,68,68,0.06)]' : ''}"
+      class="hot-session-card rounded-lg p-3 border border-[var(--border-slate-16)] bg-[var(--white-3)] cursor-pointer ${s.blocker_summary ? 'border-[var(--bad)] bg-[rgba(239,68,68,0.06)]' : ''}"
       key=${s.session_id}
       onClick=${() => navigate('status', { section: 'sessions', session_id: s.session_id })}
     >
-      <div class="text-base font-semibold text-text-strong whitespace-nowrap overflow-hidden text-ellipsis">${primary}</div>
+      <div class="text-sm font-semibold text-text-strong leading-[1.35] line-clamp-2">${primary}</div>
       ${secondary ? html`<div class="hot-session-card__context">${secondary}</div>` : null}
       <div class="flex flex-wrap gap-1.5 mt-2">
         ${creator
@@ -120,7 +120,7 @@ type SessionLaneProps = {
 
 function SessionLane({ title, description, tone, sessions, emptyCopy }: SessionLaneProps) {
   return html`
-    <section class="hot-session-lane hot-session-lane--${tone}">
+    <section class="hot-session-lane hot-session-lane--${tone} rounded-lg border border-[var(--border-slate-12)] p-3.5 grid gap-3">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="flex items-center gap-2">
@@ -131,7 +131,7 @@ function SessionLane({ title, description, tone, sessions, emptyCopy }: SessionL
         </div>
       </div>
       ${sessions.length > 0
-        ? html`<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">${sessions.map(renderSessionCard)}</div>`
+        ? html`<div class="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">${sessions.map(renderSessionCard)}</div>`
         : html`<div class="grid place-items-center min-h-[116px] p-3 border border-dashed border-[var(--border-slate-18)] text-[color:var(--text-muted)] text-[length:var(--fs-sm)] text-center bg-[var(--white-2)] rounded-lg">${emptyCopy}</div>`}
     </section>
   `
@@ -205,17 +205,17 @@ function AgentPulse() {
         linkLabel="전체 보기"
         onLink=${() => navigate('status', { section: 'agents' })}
       />
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1">
+      <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
-            class="flex items-center gap-2 py-1.5 px-2.5 cursor-pointer transition-[background] duration-150 hover:bg-[var(--white-4)] rounded-xl rounded-md agent-pulse-card--${a.state}"
+            class="flex items-center gap-3 py-2.5 px-3 cursor-pointer transition-[background] duration-150 hover:bg-[var(--white-4)] rounded-lg border border-[var(--border-slate-12)] bg-[var(--white-2)] agent-pulse-card--${a.state}"
             key=${a.name}
             onClick=${() => navigate('status', { section: 'agents', agent: a.name })}
           >
-            <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${28} />
-            <div class="flex flex-col min-w-0">
-              <span class="text-sm font-semibold text-text-strong whitespace-nowrap overflow-hidden text-ellipsis">${a.koreanName ?? a.name}</span>
-              <span class="text-xs text-text-muted whitespace-nowrap overflow-hidden text-ellipsis">
+            <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${32} />
+            <div class="flex flex-col min-w-0 gap-0.5">
+              <span class="text-sm font-semibold text-text-strong">${a.koreanName ?? a.name}</span>
+              <span class="text-xs text-text-muted leading-[1.4] line-clamp-2">
                 ${stateIcon(a.state)} ${a.focus ?? a.currentTask ?? a.status}
               </span>
             </div>
@@ -233,22 +233,27 @@ export function Overview() {
   const roomHealth = snap?.summary?.room_health ?? null
 
   return html`
-    <div class="grid gap-4">
+    <div class="grid gap-5">
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
 
-      <div class="grid gap-4">
+      <section class="grid gap-5 border border-[var(--border-slate-12)] rounded-xl bg-[var(--white-2)] p-4">
         <${HotSessions} />
+      </section>
+
+      <section class="grid gap-3 border border-[var(--border-slate-12)] rounded-xl bg-[var(--white-2)] p-4">
         <${AgentPulse} />
+      </section>
 
-        <${OasPipeline} />
+      <${OasPipeline} />
 
+      <section class="grid gap-3 border border-[var(--border-slate-12)] rounded-xl bg-[var(--white-2)] p-4">
         <${HomeSectionHeader}
           label="최근 활동"
-         
+
         />
         <${NarrativeTimeline} entries=${journal} maxItems=${8} />
-      </div>
+      </section>
     </div>
   `
 }

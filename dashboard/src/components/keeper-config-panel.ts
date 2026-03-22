@@ -97,16 +97,17 @@ export function resetKeeperConfig(): void {
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--white-3)]">
-      <span class="text-xs text-[var(--text-muted)]">${label}</span>
-      <span class="text-xs font-medium text-[var(--text-strong)]">${value}</span>
+    <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
+      <span class="text-[12px] font-medium text-text-muted">${label}</span>
+      <span class="text-[12px] font-semibold text-text-strong">${value}</span>
     </div>
   `
 }
 
 function SectionHeader({ title }: { title: string }) {
   return html`
-    <div class="text-[10px] font-bold uppercase tracking-wider text-[var(--purple)] mt-4 mb-2 pb-1 border-b border-[rgba(167,139,250,0.15)]">
+    <div class="text-[11px] font-bold uppercase tracking-widest text-accent mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
+      <span class="w-1.5 h-1.5 rounded-full bg-accent/50 shadow-[0_0_8px_rgba(71,184,255,0.6)]"></span>
       ${title}
     </div>
   `
@@ -114,28 +115,28 @@ function SectionHeader({ title }: { title: string }) {
 
 function BoolBadge({ value }: { value: boolean }) {
   return value
-    ? html`<span class="text-xs font-semibold text-[#4ade80]">on</span>`
-    : html`<span class="text-xs font-semibold text-[#6b7280]">off</span>`
+    ? html`<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
+    : html`<span class="text-[11px] font-bold px-2 py-0.5 rounded-md bg-white/5 text-text-dim border border-white/10 shadow-sm">OFF</span>`
 }
 
 function ModelList({ models }: { models: string[] }) {
-  if (models.length === 0) return html`<span class="text-[11px] text-[var(--text-muted)] italic">none</span>`
+  if (models.length === 0) return html`<span class="text-[11px] text-text-muted italic">none</span>`
   return html`
-    <div class="flex flex-wrap gap-1">
-      ${models.map(m => html`<span class="inline-flex items-center py-0.5 px-2 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${m}</span>`)}
+    <div class="flex flex-wrap gap-1.5">
+      ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded-lg text-[11px] font-semibold bg-accent/10 text-accent border border-accent/20 shadow-sm hover:bg-accent/20 transition-colors cursor-default">${m}</span>`)}
     </div>
   `
 }
 
 function LongText({ text }: { text: string }) {
-  if (!text || text.trim() === '') return html`<span class="text-[11px] text-[var(--text-muted)] italic">--</span>`
+  if (!text || text.trim() === '') return html`<span class="text-[11px] text-text-muted italic">--</span>`
   const truncated = text.length > 200 ? text.slice(0, 200) + '...' : text
-  return html`<div class="text-xs text-[var(--text-body)] whitespace-pre-wrap max-h-[120px] overflow-y-auto bg-[var(--white-3)] py-2 px-3 rounded-lg mt-1 leading-relaxed">${truncated}</div>`
+  return html`<div class="text-[12px] text-text-body whitespace-pre-wrap max-h-[140px] overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-md p-3 rounded-xl mt-1.5 leading-relaxed shadow-inner hover:bg-card/60 transition-colors">${truncated}</div>`
 }
 
 const SOUL_PROFILES = ['balanced', 'safety', 'delivery', 'research', 'relationship', 'minimal'] as const
 
-const fieldStyle = 'width:100%; background:rgba(11,18,32,0.8); color:var(--text-body); border:1px solid var(--card-border); border-radius:8px; padding:8px 10px; font-size:12px; font-family:inherit; resize:vertical;'
+const fieldStyle = 'w-full bg-card/60 backdrop-blur-md text-text-strong text-[13px] border border-card-border rounded-xl py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-200 shadow-inner'
 
 // ── Edit field components ────────────────────────────────
 
@@ -150,10 +151,10 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
   if (!d) return null
   const val = d[field] as string
   return html`
-    <div class="mt-2">
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">${label}</div>
+    <div class="mt-3">
+      <div class="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">${label}</div>
       <textarea
-        style=${fieldStyle}
+        class="${fieldStyle} resize-y custom-scrollbar"
         rows=${rows}
         value=${val}
         onInput=${(e: Event) => updateDraft(field, (e.target as HTMLTextAreaElement).value)}
@@ -167,14 +168,14 @@ function EditSelect({ field, label, options }: { field: keyof EditDraft; label: 
   if (!d) return null
   const val = d[field] as string
   return html`
-    <div class="mt-2">
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">${label}</div>
+    <div class="mt-3">
+      <div class="text-[11px] font-semibold uppercase tracking-wider text-text-muted mb-1.5">${label}</div>
       <select
-        style=${fieldStyle}
+        class="${fieldStyle} appearance-none cursor-pointer hover:border-accent/30"
         value=${val}
         onChange=${(e: Event) => updateDraft(field, (e.target as HTMLSelectElement).value)}
       >
-        ${options.map(o => html`<option value=${o}>${o}</option>`)}
+        ${options.map(o => html`<option value=${o} class="bg-bg-1">${o}</option>`)}
       </select>
     </div>
   `

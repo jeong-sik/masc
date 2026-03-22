@@ -141,8 +141,11 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
 function SectionCard({ title, children }: { title: string; children: preact.ComponentChildren }) {
   return html`
-    <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)]">
-      <div class="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-3">${title}</div>
+    <div class="p-5 rounded-2xl border border-card-border bg-card/40 backdrop-blur-md shadow-sm hover:border-accent/30 hover:shadow-md transition-all duration-200">
+      <div class="text-[11px] font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
+        <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+        ${title}
+      </div>
       ${children}
     </div>
   `
@@ -156,7 +159,7 @@ export function KeeperDetailOverlay() {
 
   return html`
     <div
-      class="keeper-detail-overlay"
+      class="keeper-detail-overlay fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
       data-testid="keeper-detail-overlay"
       onClick=${(e: Event) => {
         if ((e.target as HTMLElement).classList.contains('keeper-detail-overlay')) {
@@ -164,29 +167,29 @@ export function KeeperDetailOverlay() {
         }
       }}
     >
-      <div class="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-[#111a2e] rounded-2xl border border-[var(--card-border)] p-6 shadow-2xl">
+      <div class="w-full max-w-[1100px] max-h-[90vh] overflow-y-auto bg-bg-1/95 backdrop-blur-2xl rounded-3xl border border-card-border p-8 shadow-2xl shadow-black/50 ring-1 ring-white/5 custom-scrollbar">
 
         ${'' /* ── Header ── */}
-        <div class="flex items-start justify-between mb-6">
-          <div class="flex items-center gap-3.5">
-            <span class="text-[32px] leading-none">${keeper.emoji}</span>
-            <div class="flex flex-col">
-              <div class="flex items-center gap-2.5">
-                <h2 class="m-0 text-xl font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
+        <div class="flex items-start justify-between mb-8 pb-6 border-b border-card-border/50">
+          <div class="flex items-center gap-5">
+            <div class="size-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-4xl shadow-inner">${keeper.emoji}</div>
+            <div class="flex flex-col gap-1">
+              <div class="flex items-center gap-3">
+                <h2 class="m-0 text-2xl font-bold text-text-strong tracking-tight">${keeper.name}</h2>
                 <${KeeperStatusPill} status=${keeper.status} />
                 ${keeper.model ? html`
-                  <span class="inline-flex items-center py-0.5 px-2.5 rounded-full text-[10px] font-medium bg-[var(--accent-12)] text-[#9ad9ff] border border-[rgba(71,184,255,0.25)]">${keeper.model}</span>
+                  <span class="inline-flex items-center py-1 px-3 rounded-lg text-[11px] font-semibold bg-accent/10 text-accent border border-accent/20 shadow-sm">${keeper.model}</span>
                 ` : null}
               </div>
-              ${keeper.koreanName ? html`<div class="text-[13px] text-[var(--text-muted)] mt-0.5">${keeper.koreanName}</div>` : null}
+              ${keeper.koreanName ? html`<div class="text-[14px] font-medium text-text-dim mt-1">${keeper.koreanName}</div>` : null}
             </div>
           </div>
           <button
             onClick=${() => closeKeeperDetail()}
-            class="flex items-center justify-center size-8 rounded-lg border border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)] hover:text-[var(--text-strong)] hover:bg-[var(--white-8)] transition-colors cursor-pointer text-sm"
+            class="flex items-center justify-center size-10 rounded-xl border border-transparent bg-white/5 text-text-muted hover:text-text-strong hover:bg-white/10 hover:border-white/10 transition-all duration-200 cursor-pointer shadow-sm"
             aria-label="Close"
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
+            <svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
           </button>
         </div>
 

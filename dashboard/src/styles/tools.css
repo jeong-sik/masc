@@ -136,7 +136,8 @@
   overflow: hidden;
 }
 
-.tool-inventory-desc:hover {
+.tool-inventory-desc:hover,
+.tool-inventory-reason:hover {
   -webkit-line-clamp: unset;
 }
 
@@ -168,10 +169,6 @@
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-
-.tool-inventory-reason:hover {
-  -webkit-line-clamp: unset;
 }
 
 .tool-inventory-usage-hint {
@@ -245,7 +242,8 @@
   letter-spacing: 0.3px;
 }
 
-.tool-summary-list {
+.tool-summary-list,
+.tool-bar-chart {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -409,12 +407,6 @@
 }
 
 /* ── Bar chart ──────────────────────────────────────────── */
-.tool-bar-chart {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 .tool-bar-row {
   display: grid;
   grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;

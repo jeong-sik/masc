@@ -64,7 +64,8 @@
   border-radius: 4px;
 }
 
-.oas-event-row:hover {
+.oas-event-row:hover,
+.oas-keeper-row:hover {
   background: var(--white-6, rgba(255, 255, 255, 0.03));
 }
 
@@ -74,7 +75,8 @@
   min-width: 56px;
 }
 
-.oas-event-agent {
+.oas-event-agent,
+.oas-keeper-name {
   color: var(--text-strong, #e0e0e0);
   font-weight: 500;
   min-width: 80px;
@@ -129,20 +131,6 @@
   padding: 4px 6px;
   font-size: var(--fs-xs);
   border-radius: 4px;
-}
-
-.oas-keeper-row:hover {
-  background: var(--white-6, rgba(255, 255, 255, 0.03));
-}
-
-.oas-keeper-name {
-  color: var(--text-strong, #e0e0e0);
-  font-weight: 500;
-  min-width: 80px;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .oas-keeper-gen {

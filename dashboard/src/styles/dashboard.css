@@ -14,7 +14,9 @@
   user-select: none;
 }
 
-.runtime-summary::-webkit-details-marker {
+.runtime-summary::-webkit-details-marker,
+.overview-section-collapsible > summary::-webkit-details-marker,
+.mission-collapsible-summary::-webkit-details-marker {
   display: none;
 }
 
@@ -36,7 +38,8 @@
   overflow: hidden;
 }
 
-.overview-section-collapsible > summary {
+.overview-section-collapsible > summary,
+.mission-collapsible-summary {
   padding: 12px 16px;
   font-size: var(--fs-md);
   font-weight: 600;
@@ -51,12 +54,9 @@
   transition: background 0.15s;
 }
 
-.overview-section-collapsible > summary:hover {
+.overview-section-collapsible > summary:hover,
+.mission-collapsible-summary:hover {
   background: var(--white-4);
-}
-
-.overview-section-collapsible > summary::-webkit-details-marker {
-  display: none;
 }
 
 .overview-section-collapsible > summary::before {
@@ -67,7 +67,8 @@
   color: #64748b;
 }
 
-.overview-section-collapsible[open] > summary::before {
+.overview-section-collapsible[open] > summary::before,
+.mission-collapsible-section[open] > .mission-collapsible-summary::before {
   transform: rotate(90deg);
 }
 
@@ -110,14 +111,14 @@
   }
 }
 
-
 /* Activity */
 /* Journal */
 .journal-entry {
   border-bottom-color: var(--card-border);
 }
 /* Board */
-.board-post-list {
+.board-post-list,
+.comment-thread {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -138,12 +139,6 @@
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
-}
-
-.comment-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 .comment-form input,
@@ -190,13 +185,9 @@
   gap: 6px;
 }
 
-.control-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.control-inline-meta {
+.control-actions,
+.control-inline-meta,
+.tab-pill-bar {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -340,39 +331,12 @@
   overflow: hidden;
 }
 
-.mission-collapsible-summary {
-  padding: 12px 16px;
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--text-slate-light);
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  transition: background 0.15s;
-}
-
-.mission-collapsible-summary:hover {
-  background: var(--white-4);
-}
-
-.mission-collapsible-summary::-webkit-details-marker {
-  display: none;
-}
-
 .mission-collapsible-summary::before {
   content: '\25B8';
   font-size: var(--fs-xs);
   color: #64748b;
   transition: transform 0.15s;
   display: inline-block;
-}
-
-.mission-collapsible-section[open] > .mission-collapsible-summary::before {
-  transform: rotate(90deg);
 }
 
 /* ── Mission Status Dot (alive / idle / offline) ───────── */
@@ -404,15 +368,12 @@
 }
 
 .mission-crew-card.mission-state-offline:hover,
-.mission-activity-card.mission-state-offline:hover {
-  opacity: 0.65;
-}
-
-.mission-crew-card.mission-state-idle,
+.mission-activity-card.mission-state-offline:hover,
 .mission-activity-card.mission-state-idle {
   opacity: 0.65;
 }
 
+.mission-crew-card.mission-state-idle,
 .mission-crew-card.mission-state-idle:hover,
 .mission-activity-card.mission-state-idle:hover {
   opacity: 0.85;
@@ -422,12 +383,6 @@
 .tab-unified {
   display: grid;
   gap: var(--space-md, 16px);
-}
-
-.tab-pill-bar {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 
 .tab-pill {
@@ -465,4 +420,3 @@
 .tab-collapsible__summary:hover {
   color: var(--text-strong);
 }
-

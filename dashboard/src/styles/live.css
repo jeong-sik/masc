@@ -93,19 +93,22 @@
   min-height: 0;
 }
 
-.activity-stream-head {
+.activity-stream-head,
+.focus-sidebar-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.activity-stream-head h3 {
+.activity-stream-head h3,
+.focus-sidebar-head h3 {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 600;
 }
 
-.activity-count {
+.activity-count,
+.focus-count {
   font-size: 0.75rem;
   color: rgba(255,255,255,0.4);
 }
@@ -146,7 +149,8 @@
   padding-right: 4px;
 }
 
-.activity-empty {
+.activity-empty,
+.focus-empty {
   padding: 24px;
   text-align: center;
   color: rgba(255,255,255,0.25);
@@ -228,23 +232,6 @@
   min-height: 0;
 }
 
-.focus-sidebar-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.focus-sidebar-head h3 {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-}
-
-.focus-count {
-  font-size: 0.75rem;
-  color: rgba(255,255,255,0.4);
-}
-
 .focus-sidebar-list {
   display: grid;
   gap: 6px;
@@ -252,13 +239,6 @@
   overflow-y: auto;
   max-height: 560px;
   padding-right: 4px;
-}
-
-.focus-empty {
-  padding: 24px;
-  text-align: center;
-  color: rgba(255,255,255,0.25);
-  font-size: 0.8rem;
 }
 
 .focus-agent-card {
@@ -282,7 +262,8 @@
   background: rgba(96,165,250,0.05);
 }
 
-.focus-agent-header {
+.focus-agent-header,
+.focus-agent-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -343,13 +324,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.focus-agent-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
 }
 
 .focus-activity-text {

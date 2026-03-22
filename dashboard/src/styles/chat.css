@@ -200,7 +200,8 @@
   font-size: var(--fs-sm);
 }
 
-.chat-detail-section {
+.chat-detail-section,
+.chat-composer {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -293,12 +294,6 @@
   font-size: var(--fs-xs);
   line-height: 1.55;
   color: #95f3bc;
-}
-
-.chat-composer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 .chat-composer-input {

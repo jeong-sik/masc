@@ -20,6 +20,17 @@ type run_result = {
   tools_used : string list;
 }
 
+let normalize_response_text ~(text : string) ~(tool_names : string list) :
+    (string, string) result =
+  if String.trim text <> "" then Ok text
+  else
+    match tool_names with
+    | [] -> Error "keeper turn completed with no textual reply"
+    | _ ->
+        Ok
+          (Printf.sprintf "Completed without a textual reply. Tools used: %s."
+             (String.concat ", " tool_names))
+
 (** Run a single keeper turn via OAS Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -170,14 +181,17 @@ let run_turn
         result.response.content
     in
     let usage = Keeper_exec_context.usage_of_response result.response in
-    let assistant_msg = Agent_sdk.Types.assistant_msg text in
-    Keeper_exec_context.persist_message session assistant_msg;
-    ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
-    Ok {
-      response_text = text;
-      model_used = model;
-      turn_count = result.turns;
-      tool_calls_made = List.length tool_names;
-      usage;
-      tools_used = tool_names;
-    }
+    (match normalize_response_text ~text ~tool_names with
+     | Error e -> Error e
+     | Ok response_text ->
+         let assistant_msg = Agent_sdk.Types.assistant_msg response_text in
+         Keeper_exec_context.persist_message session assistant_msg;
+         ctx_ref := Keeper_exec_context.append !ctx_ref assistant_msg;
+         Ok {
+           response_text;
+           model_used = model;
+           turn_count = result.turns;
+           tool_calls_made = List.length tool_names;
+           usage;
+           tools_used = tool_names;
+         })

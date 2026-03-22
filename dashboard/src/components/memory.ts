@@ -17,6 +17,7 @@ import {
   votePost,
   fetchBoardPost,
   commentPost,
+  createPost,
 } from '../api'
 import { navigate, navigateToPost, route } from '../router'
 import type { BoardComment, BoardPost, BoardSortMode } from '../types'
@@ -36,6 +37,10 @@ const detailPostId = signal<string | null>(null)
 const commentText = signal('')
 const commentSubmitting = signal(false)
 const hideAutomationPosts = signal(true)
+const showNewPostForm = signal(false)
+const newPostTitle = signal('')
+const newPostContent = signal('')
+const newPostSubmitting = signal(false)
 const PAGE_SIZE = 20
 const visibleLimit = signal(PAGE_SIZE)
 
@@ -187,6 +192,65 @@ async function submitComment(postId: string) {
   } finally {
     commentSubmitting.value = false
   }
+}
+
+async function submitNewPost() {
+  const title = newPostTitle.value.trim()
+  const content = newPostContent.value.trim()
+  if (!title || !content) return
+  newPostSubmitting.value = true
+  try {
+    await createPost(title, content, commentAuthor.value)
+    newPostTitle.value = ''
+    newPostContent.value = ''
+    showNewPostForm.value = false
+    showToast('글을 등록했습니다', 'success')
+    refreshBoard()
+  } catch {
+    showToast('글 등록에 실패했습니다', 'error')
+  } finally {
+    newPostSubmitting.value = false
+  }
+}
+
+function NewPostForm() {
+  if (!showNewPostForm.value) {
+    return html`
+      <button
+        class="w-full py-2.5 rounded-lg border border-dashed border-[var(--card-border)] text-[13px] text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-4)] hover:text-[var(--text-body)] transition-colors bg-transparent"
+        onClick=${() => { showNewPostForm.value = true }}
+      >+ 새 글 작성</button>
+    `
+  }
+
+  return html`
+    <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--white-3)] grid gap-3">
+      <input
+        class="w-full px-3 py-2 rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-[14px] font-medium focus:border-[rgba(71,184,255,0.5)] outline-none placeholder:text-[var(--text-muted)]"
+        type="text"
+        placeholder="제목"
+        value=${newPostTitle.value}
+        onInput=${(e: Event) => { newPostTitle.value = (e.target as HTMLInputElement).value }}
+      />
+      <textarea
+        class="w-full px-3 py-2 rounded-lg bg-[var(--white-4)] border border-[var(--card-border)] text-[var(--text-body)] text-[13px] min-h-[80px] resize-y focus:border-[rgba(71,184,255,0.5)] outline-none placeholder:text-[var(--text-muted)]"
+        placeholder="내용을 입력하세요..."
+        value=${newPostContent.value}
+        onInput=${(e: Event) => { newPostContent.value = (e.target as HTMLTextAreaElement).value }}
+      ></textarea>
+      <div class="flex gap-2 justify-end">
+        <button
+          class="px-3 py-1.5 rounded-lg text-[13px] border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]"
+          onClick=${() => { showNewPostForm.value = false; newPostTitle.value = ''; newPostContent.value = '' }}
+        >취소</button>
+        <button
+          class="px-4 py-1.5 rounded-lg text-[13px] font-medium border border-[rgba(71,184,255,0.4)] bg-[var(--accent-soft)] text-[var(--accent)] cursor-pointer hover:bg-[rgba(71,184,255,0.2)] disabled:opacity-50"
+          disabled=${newPostSubmitting.value || !newPostTitle.value.trim() || !newPostContent.value.trim()}
+          onClick=${() => { void submitNewPost() }}
+        >${newPostSubmitting.value ? '등록 중...' : '등록'}</button>
+      </div>
+    </div>
+  `
 }
 
 function SortBar() {
@@ -541,6 +605,9 @@ export function Memory() {
     <div>
       <${MemorySummary} />
       <${SortBar} />
+      <div class="mb-4">
+        <${NewPostForm} />
+      </div>
       ${boardLoading.value
         ? html`<div class="loading-state loading-pulse">메모리 피드 불러오는 중...</div>`
         : posts.length === 0

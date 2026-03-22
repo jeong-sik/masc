@@ -84,7 +84,37 @@ let gather_context ~(config : Research_config.repo_config) : string =
       Buffer.add_string parts (Printf.sprintf "## TODOs/FIXMEs (%d total)\n```\n" count);
       List.iter (fun t -> Buffer.add_string parts t; Buffer.add_char parts '\n') sample;
       Buffer.add_string parts "```\n\n"
-    end
+    end;
+    (* Code snippets around TODOs — gives LLM actual code context *)
+    let snippets_added = ref 0 in
+    let max_snippets = 3 in
+    List.iter (fun todo_line ->
+      if !snippets_added < max_snippets then begin
+        (* Parse "file:line:content" format *)
+        match String.split_on_char ':' todo_line with
+        | file :: line_str :: _ ->
+          (try
+            let line_num = int_of_string (String.trim line_str) in
+            let start_line = max 1 (line_num - 15) in
+            let end_line = line_num + 15 in
+            let file_path = Printf.sprintf "%s/%s" config.path file in
+            if Sys.file_exists file_path then begin
+              let _, snippet =
+                Process_eio.run_argv_with_status ~timeout_sec:5.0
+                  [ "sed"; "-n"; Printf.sprintf "%d,%dp" start_line end_line; file_path ]
+              in
+              if String.length snippet > 0 then begin
+                Buffer.add_string parts
+                  (Printf.sprintf "## Code around %s:%d\n```ocaml\n" file line_num);
+                Buffer.add_string parts snippet;
+                Buffer.add_string parts "```\n\n";
+                incr snippets_added
+              end
+            end
+          with _ -> ())
+        | _ -> ()
+      end
+    ) (if count > 3 then List.filteri (fun i _ -> i < 3) todos else todos)
   with _ -> ());
   Buffer.contents parts
 

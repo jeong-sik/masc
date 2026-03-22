@@ -85,7 +85,7 @@ function eventSummary(event: ActivityGraphTimelineEvent): string {
 function StatsRow({ data }: { data: ActivityGraphResponse }) {
   const s = data.stats
   return html`
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
+    <div class="stats-grid grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
       <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
         <div class="stat-label">노드</div>
         <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.node_count}</div>

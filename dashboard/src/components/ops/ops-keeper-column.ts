@@ -17,6 +17,7 @@ import {
   relativeAge,
   selectedKeeperName,
   targetTypeLabel,
+  logEntryBorderClass,
 } from './helpers'
 
 function truncateGoal(goal: string, maxLen = 60): string {
@@ -178,7 +179,7 @@ export function OpsKeeperColumn() {
           ${operatorActionLog.value.length === 0 ? html`
             <div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">이 세션에서 실행한 개입이 아직 없습니다.</div>
           ` : operatorActionLog.value.map(entry => html`
-            <article key=${entry.id} class="ops-log-entry p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${entry.outcome}">
+            <article key=${entry.id} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(entry.outcome)}">
               <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                 <strong>${actionTypeLabel(entry.action_type)}</strong>
                 <span>${entry.target_label}</span>

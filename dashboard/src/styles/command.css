@@ -297,14 +297,6 @@
 
 
 
-.command-guide-inline,
-.command-chain-node-row {
-  padding: 12px;
-  border-radius: 10px;
-  background: rgba(9,12,20,0.5);
-  border: 1px solid var(--white-6);
-}
-
 .command-step-list {
   display: flex;
   flex-direction: column;
@@ -760,25 +752,9 @@
   word-break: break-word;
 }
 
-.command-trace-detail {
-  margin: 0;
-  padding: 12px;
-  border-radius: 10px;
-  background: rgba(9,12,20,0.75);
-  color: rgba(224,242,254,0.92);
-  font-size: var(--fs-sm);
-  line-height: 1.45;
-  max-height: 220px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-
 .command-card-grid span,
 .command-guide-card p,
 .command-readiness-row p,
-.command-guide-inline,
 .command-doc-links .command-tag,
 .swarm-event-node,
 .swarm-event-body {

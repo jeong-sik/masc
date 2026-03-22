@@ -233,7 +233,7 @@ function GuidedPanel() {
                 </div>
                 <div class="command-guide-list">
                   ${pitfalls.map(pitfall => html`
-                    <article class="command-guide-inline">
+                    <article class="p-3 rounded-[10px] bg-[rgba(9,12,20,0.5)] border border-solid border-[var(--white-6)] break-words [overflow-wrap:anywhere]">
                       <strong>${pitfall.title}</strong>
                       <div>${pitfall.symptom}</div>
                       <div class="command-card rounded-xl-sub">${pitfall.fix_tool} 로 해결: ${pitfall.fix_summary}</div>

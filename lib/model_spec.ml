@@ -344,7 +344,9 @@ let resolve_cascade_labels ~name ~defaults =
         Llm_provider.Cascade_config.resolve_model_strings
           ~config_path ~name ~defaults ()
       with
+      | Eio.Cancel.Cancelled (Eio.Mutex.Poisoned _) -> defaults
       | Eio.Cancel.Cancelled _ as e -> raise e
+      | Effect.Unhandled _ | Eio.Mutex.Poisoned _ -> defaults
       | _ ->
           (* Eio.Mutex requires Eio context; gracefully fall back when
              called during module init (before Eio.main). *)

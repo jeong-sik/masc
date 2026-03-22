@@ -2058,13 +2058,11 @@ tbody tr:hover {
 
 /* ═══ UI ═══ */
 
-/* ── Toast Notifications ───────────────────────────────────── */
-.toast {
-  animation: slideIn 0.3s ease;
+/* ── Toast Notifications (styling moved to component Tailwind) ── */
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
-.toast.success { border-left: 4px solid var(--ok); }
-.toast.warning { border-left: 4px solid var(--warn); }
-.toast.error { border-left: 4px solid var(--bad); }
 
 /* ── Markdown Rendered Content ─────────────────────────────── */
 .markdown-content code {

@@ -138,7 +138,7 @@ export function SideRail() {
             const isActive = surface.id === currentSurface
             return html`
               <button
-                class="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left cursor-pointer border-0 transition-colors duration-150 ${isActive ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-transparent text-[var(--text-body)] hover:bg-[var(--white-6)]'}"
+                class="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left cursor-pointer border-l-2 border-t-0 border-r-0 border-b-0 border-solid transition-all duration-150 ${isActive ? 'border-l-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]' : 'border-l-transparent bg-transparent text-[var(--text-body)] hover:bg-[var(--white-6)] hover:border-l-[var(--white-20)]'}"
                 key=${surface.id}
                 onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
               >
@@ -153,12 +153,12 @@ export function SideRail() {
         ${(() => {
           if (sectionItems.length === 0) return null
           return html`
-            <div class="mt-5 pt-4 border-t border-[var(--white-6)]">
+            <div class="mt-5 pt-4 mx-4 border-t border-[var(--border-slate-12)]">
               <div class="text-[10px] font-medium text-[var(--text-muted)] uppercase tracking-[0.1em] px-2 mb-2">${currentView?.label ?? currentSurface}</div>
               <div class="flex flex-col gap-0.5">
                 ${sectionItems.map(item => html`
                   <button
-                    class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-left cursor-pointer border-0 text-[13px] transition-colors duration-150 ${currentSection?.id === item.id ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-medium' : 'bg-transparent text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]'}"
+                    class="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-left cursor-pointer border-l-2 border-t-0 border-r-0 border-b-0 border-solid text-[13px] transition-all duration-150 ${currentSection?.id === item.id ? 'border-l-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)] font-medium' : 'border-l-transparent bg-transparent text-[var(--text-muted)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)]'}"
                     key=${item.id}
                     onClick=${() => navigate(currentSurface, item.params)}
                   >
@@ -172,7 +172,7 @@ export function SideRail() {
       </div>
 
       <!-- Status Footer -->
-      <div class="shrink-0 border-t border-[var(--white-6)] p-3">
+      <div class="shrink-0 border-t border-[var(--border-slate-12)] p-3">
         <${SnapshotCard} currentTab=${current} />
       </div>
     </nav>

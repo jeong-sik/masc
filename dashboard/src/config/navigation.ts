@@ -9,6 +9,7 @@ export type SurfaceSectionId =
   | 'governance'
   | 'evidence'
   | 'planning'
+  | 'worktrees'
   | 'intervene'
   | 'command'
   | 'tools'
@@ -163,6 +164,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '계획',
       description: '장기 목표와 메트릭 루프를 봅니다.',
       params: { section: 'planning' },
+    },
+    {
+      id: 'worktrees',
+      label: '워크트리',
+      description: '현재 활성화된 작업 공간(Worktree)을 봅니다.',
+      params: { section: 'worktrees' },
     },
   ],
   operations: [

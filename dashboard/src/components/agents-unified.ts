@@ -65,22 +65,27 @@ export function AgentsUnified() {
   const keeperCount = agentList.filter((a: { name: string }) => kNames.has(a.name)).length
   const agentOnlyCount = totalCount - keeperCount
 
+  function chipCount(id: AgentsView): number | null {
+    if (id === 'all') return totalCount
+    if (id === 'agents') return agentOnlyCount
+    if (id === 'keepers') return keeperCount
+    return null
+  }
+
   return html`
-    <div class="grid gap-[var(--space-md,16px)]">
-      <div class="flex gap-1.5">
+    <div class="flex flex-col gap-4">
+      <div class="flex gap-1 p-1 bg-[var(--white-3)] rounded-lg w-fit">
         ${CHIPS.map(c => html`
           <button
             key=${c.id}
-            class=${`agents-chip ${currentView === c.id ? 'agents-chip--active' : ''}`}
+            class="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer border-0 ${currentView === c.id ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-body)]'}"
             onClick=${() => {
               activeView.value = c.id
               navigate('status', c.id === 'all' ? { section: 'agents' } : { section: 'agents', view: c.id })
             }}
           >
             ${c.label}
-            ${c.id === 'all' ? html`<span class="agents-chip-count rounded-lg">${totalCount}</span>` : null}
-            ${c.id === 'agents' ? html`<span class="agents-chip-count rounded-lg">${agentOnlyCount}</span>` : null}
-            ${c.id === 'keepers' ? html`<span class="agents-chip-count rounded-lg">${keeperCount}</span>` : null}
+            ${chipCount(c.id) != null ? html`<span class="text-[10px] px-1 py-px rounded bg-[var(--white-8)] tabular-nums">${chipCount(c.id)}</span>` : null}
           </button>
         `)}
       </div>

@@ -1,5 +1,5 @@
 // MASC Dashboard — Activity Tab
-// Absorbs: live + activity graph into one view. Live stream default, activity graph collapsible.
+// Live stream default, activity graph collapsible.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -10,15 +10,17 @@ const activityGraphExpanded = signal(false)
 
 export function Activity() {
   return html`
-    <div class="tab-unified grid gap-[var(--space-md,16px)]">
+    <div class="flex flex-col gap-4">
       <${Live} />
       <details
-        class="tab-collapsible rounded-lg"
+        class="rounded-lg border border-[var(--card-border)] overflow-hidden"
         open=${activityGraphExpanded.value}
         onToggle=${(e: Event) => { activityGraphExpanded.value = (e.target as HTMLDetailsElement).open }}
       >
-        <summary class="tab-collapsible__summary">활동 그래프</summary>
-        <${ActivityGraphSurface} />
+        <summary class="px-4 py-3 cursor-pointer text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-body)] transition-colors">활동 그래프</summary>
+        <div class="p-4 pt-0">
+          <${ActivityGraphSurface} />
+        </div>
       </details>
     </div>
   `

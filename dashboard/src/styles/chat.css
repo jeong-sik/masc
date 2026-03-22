@@ -175,12 +175,7 @@
   text-transform: uppercase;
 }
 
-.chat-overview-grid,
-.chat-state-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
-  gap: 8px;
-}
+/* chat-overview-grid, chat-state-grid: migrated to inline Tailwind */
 
 .chat-overview-card,
 .chat-state-card {

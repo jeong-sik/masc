@@ -36,7 +36,8 @@ let validate_metric_fn fn =
     Ok fn
 
 (** Run metric_fn shell command and parse the last float from stdout.
-    Returns Error if command fails, metric_fn is unsafe, or output is not a valid float. *)
+    Returns Error if command fails, metric_fn is unsafe, or output is not a valid float.
+    Uses Process_eio.run_argv_with_status to avoid blocking the Eio event loop. *)
 let measure_metric ~workdir ~timeout_s metric_fn =
   match validate_metric_fn metric_fn with
   | Error e -> Error e
@@ -45,14 +46,13 @@ let measure_metric ~workdir ~timeout_s metric_fn =
   let cmd = Printf.sprintf "cd %s && %s %s 2>/dev/null | tail -1"
     (Filename.quote workdir) timeout_flag metric_fn in
   let start = Time_compat.now () in
-  let ic = Unix.open_process_in cmd in
-  let output = Fun.protect ~finally:(fun () ->
-    ignore (Unix.close_process_in ic)
-  ) (fun () ->
-    try input_line ic with End_of_file -> ""
-  ) in
+  let _status, raw_output =
+    Process_eio.run_argv_with_status ~timeout_sec:(timeout_s +. 5.0)
+      ["sh"; "-c"; cmd]
+  in
   let elapsed_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
-  match float_of_string_opt (String.trim output) with
+  let output = String.trim raw_output in
+  match float_of_string_opt output with
   | Some v -> Result.ok (v, elapsed_ms)
   | None -> Result.error (Printf.sprintf "metric_fn output not a float: %S" output)
 

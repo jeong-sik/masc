@@ -617,7 +617,21 @@ let execute_delegate_pipeline
                     ~worker_run_id ~worker_name
                     ~delegate_prompt;
                   Eio.Fiber.fork ~sw:sw_bg (fun () ->
-                      ignore (run_delegate ()));
+                      try ignore (run_delegate ())
+                      with
+                      | Eio.Cancel.Cancelled _ as exn -> raise exn
+                      | exn ->
+                        let err = Printexc.to_string exn in
+                        Log.Spawn.error
+                          "background delegate failed (worker_run_id=%s, agent=%s): %s"
+                          worker_run_id worker_name err;
+                        append_delegate_event ~worker_run_id
+                          ~worker_name ~delegate_prompt
+                          ?execution_scope
+                          ~wait_mode:(Team_session_types.wait_mode_to_string wait_mode)
+                          ~trace_capability:"summary_only"
+                          ~resolved_runtime:"local"
+                          ~success:false ~error:err ());
                   Some
                     (`Assoc
                       [

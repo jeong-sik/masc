@@ -18,9 +18,27 @@ let contains_substring haystack needle =
     done;
     !found
 
+(** Shell metacharacters that indicate injection risk in metric_fn.
+    metric_fn is intentionally interpolated as a bare command (e.g. "python eval.py --metric accuracy"),
+    so we cannot quote it. Instead we reject strings containing shell metacharacters
+    that could chain or redirect commands. *)
+let dangerous_shell_chars = [';'; '|'; '&'; '`'; '$'; '('; ')'; '{'; '}'; '<'; '>'; '\n']
+
+(** Validate that metric_fn does not contain dangerous shell metacharacters.
+    Returns Ok fn on success, Error message on failure. *)
+let validate_metric_fn fn =
+  let has_danger = String.to_seq fn |> Seq.exists (fun c -> List.mem c dangerous_shell_chars) in
+  if has_danger then
+    Error (Printf.sprintf "metric_fn contains dangerous shell metacharacters: %s" fn)
+  else
+    Ok fn
+
 (** Run metric_fn shell command and parse the last float from stdout.
-    Returns Error if command fails or output is not a valid float. *)
+    Returns Error if command fails, metric_fn is unsafe, or output is not a valid float. *)
 let measure_metric ~workdir ~timeout_s metric_fn =
+  match validate_metric_fn metric_fn with
+  | Error e -> Error e
+  | Ok metric_fn ->
   let timeout_flag = Printf.sprintf "timeout %.0f" timeout_s in
   let cmd = Printf.sprintf "cd %s && %s %s 2>/dev/null | tail -1"
     (Filename.quote workdir) timeout_flag metric_fn in

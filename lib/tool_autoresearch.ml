@@ -145,7 +145,7 @@ let persisted_summary_json (summary : Autoresearch.persisted_summary) =
 let resolve_loop_id args =
   match get_string_opt args "loop_id" with
   | Some id -> Some id
-  | None -> !latest_loop_id
+  | None -> Autoresearch.with_loops_ro (fun () -> !latest_loop_id)
 
 let prepare_start_params ctx args =
   let goal = get_string args "goal" "" in
@@ -162,6 +162,10 @@ let prepare_start_params ctx args =
   else if target_file = "" then
     Error "target_file is required"
   else
+    (* Validate metric_fn early to reject shell injection before any state is created *)
+    match Autoresearch_metric.validate_metric_fn metric_fn with
+    | Error e -> Error e
+    | Ok metric_fn ->
     Ok
       {
         goal;
@@ -176,8 +180,9 @@ let prepare_start_params ctx args =
 
 let register_loop ctx state =
   Autoresearch.save_state ~base_path:ctx.base_path state;
-  Hashtbl.replace active_loops state.loop_id state;
-  latest_loop_id := Some state.loop_id;
+  Autoresearch.with_loops_rw (fun () ->
+    Hashtbl.replace active_loops state.loop_id state;
+    latest_loop_id := Some state.loop_id);
   state
 
 let setup_running_loop ctx (params : start_params) =
@@ -412,8 +417,13 @@ let handle_status ctx args =
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
   | Some id ->
-    match Hashtbl.find_opt active_loops id with
-    | Some state -> status_json ctx ~loop_id:id (Autoresearch.summary state)
+    let in_memory = Autoresearch.with_loops_ro (fun () ->
+      match Hashtbl.find_opt active_loops id with
+      | Some state -> Some (Autoresearch.summary state)
+      | None -> None)
+    in
+    match in_memory with
+    | Some json -> status_json ctx ~loop_id:id json
     | None -> (
         match Autoresearch.load_state ~base_path:ctx.base_path id with
         | Some summary -> status_json ctx ~loop_id:id (persisted_summary_json summary)
@@ -463,69 +473,90 @@ let handle_inject _ctx args =
     match resolve_loop_id args with
     | None -> `Assoc [("error", `String "No autoresearch loop running")]
     | Some id ->
-      match Hashtbl.find_opt active_loops id with
-      | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
-      | Some state ->
-        if state.status <> Autoresearch.Running then
-          `Assoc [("error", `String "Loop is not running")]
-        else begin
-          state.queued_hypothesis <- Some hypothesis;
-          Autoresearch.save_state ~base_path:_ctx.base_path state;
-          Hashtbl.replace pending_hypotheses id hypothesis;
-          `Assoc [
-            ("loop_id", `String id);
-            ("status", `String "hypothesis_queued");
-            ("hypothesis", `String hypothesis);
-            ("will_test_at_cycle", `Int (state.current_cycle + 1));
-          ]
-        end
+      Autoresearch.with_loops_rw (fun () ->
+        match Hashtbl.find_opt active_loops id with
+        | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
+        | Some state ->
+          if state.status <> Autoresearch.Running then
+            `Assoc [("error", `String "Loop is not running")]
+          else begin
+            state.queued_hypothesis <- Some hypothesis;
+            Autoresearch.save_state ~base_path:_ctx.base_path state;
+            Hashtbl.replace pending_hypotheses id hypothesis;
+            `Assoc [
+              ("loop_id", `String id);
+              ("status", `String "hypothesis_queued");
+              ("hypothesis", `String hypothesis);
+              ("will_test_at_cycle", `Int (state.current_cycle + 1));
+            ]
+          end)
 
 (** Run one experiment cycle: the real Karpathy loop turn.
     Steps: read file -> generate code change -> fresh metric before ->
-    apply change -> git commit -> metric after -> keep/discard -> persist. *)
+    apply change -> git commit -> metric after -> keep/discard -> persist.
+
+    Acquires [loops_mu] for short critical sections around Hashtbl access.
+    Long-running operations (metric measurement, code generation, git) run
+    outside the lock. *)
 let handle_cycle ctx args =
   match resolve_loop_id args with
   | None -> `Assoc [("error", `String "No autoresearch loop running")]
   | Some id ->
-    match Hashtbl.find_opt active_loops id with
-    | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
-    | Some state ->
-      if state.status <> Autoresearch.Running then
-        `Assoc [("error", `String "Loop is not running")]
-      else if not (Autoresearch.should_continue state) then begin
-        state.status <- Autoresearch.Completed;
-        Autoresearch.save_state ~base_path:ctx.base_path state;
+    (* Short critical section: look up state and check preconditions *)
+    let state_or_error = Autoresearch.with_loops_rw (fun () ->
+      match Hashtbl.find_opt active_loops id with
+      | None -> Error (Printf.sprintf "Loop %s not found" id)
+      | Some state ->
+        if state.status <> Autoresearch.Running then
+          Error "Loop is not running"
+        else if not (Autoresearch.should_continue state) then begin
+          state.status <- Autoresearch.Completed;
+          Autoresearch.save_state ~base_path:ctx.base_path state;
+          Error "completed"
+        end else
+          Ok state)
+    in
+    (match state_or_error with
+    | Error "completed" ->
+        (* Reconstruct completion JSON: re-read state under lock *)
+        let best_score, best_cycle = Autoresearch.with_loops_ro (fun () ->
+          match Hashtbl.find_opt active_loops id with
+          | Some s -> (s.best_score, s.best_cycle)
+          | None -> (0.0, 0))
+        in
         `Assoc [
           ("loop_id", `String id);
           ("status", `String "completed");
           ("reason", `String "max_cycles reached");
-          ("best_score", `Float state.best_score);
-          ("best_cycle", `Int state.best_cycle);
+          ("best_score", `Float best_score);
+          ("best_cycle", `Int best_cycle);
         ]
-      end else begin
-        let workdir = state.workdir in
-        let timeout_s = state.cycle_timeout_s in
-        let target_file = state.target_file in
-        (* 1. Read target file *)
-        match Autoresearch.validate_target_file ~workdir target_file with
-        | Error e ->
-          `Assoc [
-            ("error", `String (Printf.sprintf "target_file invalid: %s" e));
-            ("loop_id", `String id);
-          ]
-        | Ok abs_path ->
-        let file_content = Autoresearch.read_file abs_path in
-        (* 2. Generate code change: injected hypothesis > arg > MODEL *)
-        let code_result =
-          let forced_hypothesis =
+    | Error msg -> `Assoc [("error", `String msg)]
+    | Ok state ->
+      let workdir = state.workdir in
+      let timeout_s = state.cycle_timeout_s in
+      let target_file = state.target_file in
+      (* 1. Read target file *)
+      match Autoresearch.validate_target_file ~workdir target_file with
+      | Error e ->
+        `Assoc [
+          ("error", `String (Printf.sprintf "target_file invalid: %s" e));
+          ("loop_id", `String id);
+        ]
+      | Ok abs_path ->
+      let file_content = Autoresearch.read_file abs_path in
+      (* 2. Generate code change: injected hypothesis > arg > MODEL *)
+      let code_result =
+        let forced_hypothesis =
+          Autoresearch.with_loops_rw (fun () ->
             match Hashtbl.find_opt pending_hypotheses id with
             | Some h ->
                 Hashtbl.remove pending_hypotheses id;
                 state.queued_hypothesis <- None;
                 Autoresearch.save_state ~base_path:ctx.base_path state;
                 Some h
-            | None -> get_string_opt args "hypothesis"
-          in
+            | None -> get_string_opt args "hypothesis")
+        in
           let generate = get_generator id in
           (match forced_hypothesis with
            | Some h ->
@@ -681,8 +712,8 @@ let handle_cycle ctx args =
                       ("baseline", `Float state.baseline);
                       ("best_score", `Float state.best_score);
                       ("cycles_remaining", `Int (state.max_cycles - state.current_cycle));
-                    ]))
-      end
+                    ])))
+
 
 (* ================================================================ *)
 (* Dispatch                                                         *)

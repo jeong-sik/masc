@@ -122,6 +122,51 @@ let test_vote_flip = with_pg_backend (fun t ->
           Alcotest.(check int) "score after flip" (-1) score
 )
 
+(** Verify multiple distinct voters produce correct final score.
+    Before the transaction fix, concurrent SELECT+INSERT+UPDATE could
+    inflate counters when two votes raced on the same post. *)
+let test_vote_multiple_voters = with_pg_backend (fun t ->
+  match Board_pg.create_post t ~author:"pg-test-multi-voter" ~content:"pg multi vote" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      (* 3 upvotes from distinct voters *)
+      (match Board_pg.vote_post t ~voter:"pg-voter-a" ~post_id:pid ~direction:Board.Up with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok s -> Alcotest.(check int) "score after voter-a" 1 s);
+      (match Board_pg.vote_post t ~voter:"pg-voter-b" ~post_id:pid ~direction:Board.Up with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok s -> Alcotest.(check int) "score after voter-b" 2 s);
+      (match Board_pg.vote_post t ~voter:"pg-voter-c" ~post_id:pid ~direction:Board.Down with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok s -> Alcotest.(check int) "score after voter-c (down)" 1 s);
+      (* Verify final post state *)
+      (match Board_pg.get_post t ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok p ->
+           Alcotest.(check int) "final votes_up" 2 p.votes_up;
+           Alcotest.(check int) "final votes_down" 1 p.votes_down)
+)
+
+let test_vote_comment_atomic = with_pg_backend (fun t ->
+  match Board_pg.create_post t ~author:"pg-test-cv" ~content:"pg comment vote" () with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      (match Board_pg.add_comment t ~post_id:pid ~author:"pg-test-cv-a" ~content:"test" () with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok cmt ->
+           let cid = Board.Comment_id.to_string cmt.id in
+           (match Board_pg.vote_comment t ~voter:"pg-cv-1" ~comment_id:cid ~direction:Board.Up with
+            | Error e -> Alcotest.fail (Board.show_board_error e)
+            | Ok s -> Alcotest.(check int) "comment score" 1 s);
+           (* Duplicate vote returns Already_voted *)
+           (match Board_pg.vote_comment t ~voter:"pg-cv-1" ~comment_id:cid ~direction:Board.Up with
+            | Ok _ -> Alcotest.fail "Expected Already_voted"
+            | Error (Board.Already_voted _) -> ()
+            | Error e -> Alcotest.fail (Board.show_board_error e)))
+)
+
 (** {1 Stats / Search / Hearth} *)
 
 let test_stats = with_pg_backend (fun t ->
@@ -204,6 +249,8 @@ let () =
       Alcotest.test_case "upvote" `Quick test_vote_post;
       Alcotest.test_case "dedup" `Quick test_vote_dedup;
       Alcotest.test_case "flip" `Quick test_vote_flip;
+      Alcotest.test_case "multiple voters" `Quick test_vote_multiple_voters;
+      Alcotest.test_case "comment vote atomic" `Quick test_vote_comment_atomic;
     ];
     "misc", [
       Alcotest.test_case "stats" `Quick test_stats;

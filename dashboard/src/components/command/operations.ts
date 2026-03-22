@@ -71,7 +71,7 @@ function MermaidGraph({ source }: { source: string }) {
     let cancelled = false
     const host = hostRef.current
     if (!host) return undefined
-    host.innerHTML = ''
+    host.textContent = ''
     setError(null)
 
     const render = async () => {
@@ -79,7 +79,13 @@ function MermaidGraph({ source }: { source: string }) {
         const mermaid = await getMermaid()
         const { svg } = await mermaid.render(`command-chain-${incrementMermaidRenderCount()}`, source)
         if (cancelled || !hostRef.current) return
-        hostRef.current.innerHTML = svg
+        const parser = new DOMParser()
+        const doc = parser.parseFromString(svg, 'image/svg+xml')
+        const svgEl = doc.documentElement
+        if (svgEl instanceof SVGElement) {
+          hostRef.current.textContent = ''
+          hostRef.current.appendChild(svgEl)
+        }
       } catch (err) {
         if (cancelled) return
         setError(err instanceof Error ? err.message : 'Mermaid 렌더링에 실패했습니다')
@@ -89,7 +95,7 @@ function MermaidGraph({ source }: { source: string }) {
     void render()
     return () => {
       cancelled = true
-      if (hostRef.current) hostRef.current.innerHTML = ''
+      if (hostRef.current) hostRef.current.textContent = ''
     }
   }, [source])
 

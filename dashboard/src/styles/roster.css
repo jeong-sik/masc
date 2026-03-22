@@ -1,70 +1,6 @@
-/* MASC Dashboard -- Roster (retained: pseudo-elements, stateful variants, gradients) */
+/* MASC Dashboard -- Roster (stateful variants + gradients) */
 
-/* ── Roster Card — FF corner ornaments (pseudo-elements) ── */
-.roster-card::before,
-.roster-card::after {
-  content: '';
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  border-color: var(--ff-gold);
-  opacity: 0.5;
-  transition: opacity 0.2s;
-}
-
-.roster-card::before {
-  top: -1px;
-  left: -1px;
-  border-top: 2px solid;
-  border-left: 2px solid;
-}
-
-.roster-card::after {
-  bottom: -1px;
-  right: -1px;
-  border-bottom: 2px solid;
-  border-right: 2px solid;
-}
-
-.roster-card:hover {
-  background: #122040;
-  border-color: var(--ff-gold);
-  box-shadow: 0 0 12px rgba(212, 169, 75, 0.1);
-}
-
-.roster-card:hover::before,
-.roster-card:hover::after {
-  opacity: 1;
-}
-
-/* Avatar frame — pixel art portrait */
-.roster-card__avatar::after {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border: 1px solid var(--ff-border-subtle);
-  border-radius: 14px;
-  pointer-events: none;
-}
-
-/* ── Filter buttons (hover/active state) ── */
-.roster-filter-btn {
-  transition: all 0.15s;
-}
-
-.roster-filter-btn:hover {
-  background: var(--ff-gold-dim);
-  color: var(--ff-gold-bright);
-  border-color: var(--color-ff-border);
-}
-
-.roster-filter-btn.active {
-  background: var(--ff-gold-dim);
-  color: var(--ff-gold-bright);
-  border-color: var(--ff-gold);
-}
-
-/* ── Status Badges — RPG class labels ── */
+/* ── Status Badges ── */
 .roster-badge--active {
   background: rgba(61, 204, 94, 0.12);
   color: var(--ok);
@@ -81,27 +17,6 @@
   background: rgba(100, 100, 120, 0.1);
   color: #667;
   border: 1px solid rgba(100, 100, 120, 0.15);
-}
-
-/* ── Keeper inline variant — blue accent ── */
-.roster-card--keeper {
-  border-left: 3px solid #4a9ef5;
-  border-color: rgba(74, 158, 245, 0.25);
-}
-
-.roster-card--keeper:hover {
-  border-color: rgba(74, 158, 245, 0.4);
-  box-shadow: 0 0 12px rgba(74, 158, 245, 0.08);
-}
-
-.roster-card--keeper::before,
-.roster-card--keeper::after {
-  border-color: #4a9ef5;
-}
-
-/* Inline context gauge */
-.roster-card__gauge-bar {
-  transition: width 0.3s ease;
 }
 
 /* ── Pressure bar gradients ── */

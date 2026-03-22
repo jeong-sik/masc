@@ -558,6 +558,6 @@ let keeper_unified_max_tokens () : int =
 let keeper_unified_max_turns () : int =
   int_of_env_default
     "MASC_KEEPER_UNIFIED_MAX_TURNS"
-    ~default:100
+    ~default:1000
     ~min_v:1
-    ~max_v:10000
+    ~max_v:1000000

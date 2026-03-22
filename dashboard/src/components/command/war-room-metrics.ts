@@ -378,7 +378,7 @@ export function WarRoomOrchestrationRail({
   linkedAutoresearch?: OperatorLinkedAutoresearch | null
 }) {
   if (!chainOverlay && !linkedAutoresearch) {
-    return html`<div class="command-guide-card rounded-xl"><p>이 세션에 붙은 chain/autoresearch 오버레이가 아직 없습니다.</p></div>`
+    return html`<div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card"><p>이 세션에 붙은 chain/autoresearch 오버레이가 아직 없습니다.</p></div>`
   }
 
   return html`

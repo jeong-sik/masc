@@ -71,10 +71,10 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
   const source = node.unit.source ?? 'unknown'
   const connectionLabel = activeOps > 0 ? `${activeOps}개 작전 연결` : '실행 연결 없음'
   return html`
-    <div class="command-tree-node rounded-xl depth-${Math.min(depth, 3)} ${depth <= 2 ? 'border-[rgba(248,113,113,0.3)]' : ''}">
-      <div class="command-tree-head">
+    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-tree-node depth-${Math.min(depth, 3)} ${depth <= 2 ? 'border-[rgba(248,113,113,0.3)]' : ''}">
+      <div class="flex justify-between items-start">
         <div>
-          <div class="command-tree-title-row">
+          <div class="flex justify-between items-start flex-wrap gap-2">
             <strong>${node.unit.label}</strong>
             <span class="command-chip rounded-full">${unitKindLabel(node.unit.kind)}</span>
             <span class="command-chip rounded-full ${toneClass(node.health)}">${node.health ?? 'ok'}</span>
@@ -114,7 +114,7 @@ function AlertCard({ alert }: { alert: CommandPlaneAlert }) {
         <strong>${alert.title ?? alert.kind ?? alert.alert_id}</strong>
         <span class="command-chip rounded-full ${toneClass(alert.severity)}">${alert.severity ?? 'warn'}</span>
       </div>
-      <div class="command-alert-meta">
+      <div class="flex justify-between items-start">
         <span>${alert.scope_type ?? '범위'}:${alert.scope_id ?? '정보 없음'}</span>
         <span>${relativeTime(alert.timestamp)}</span>
       </div>
@@ -158,7 +158,7 @@ export function TopologySurface() {
       ${snapshot
         ? html`
             <div class="mb-3.5 p-3.5 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
-              <div class="command-tree-title-row">
+              <div class="flex justify-between items-start flex-wrap gap-2">
                 <span class="command-chip rounded-full ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
                 <span class="command-chip rounded-full">관리 유닛 ${managedUnits}</span>
                 <span class="command-chip rounded-full ${activeOps > 0 ? 'ok' : 'warn'}">활성 작전 ${activeOps}</span>

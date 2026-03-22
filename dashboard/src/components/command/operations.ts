@@ -334,7 +334,7 @@ export function ChainsSurface() {
         <div class="card rounded-xl-title-row">
           <div class="card rounded-xl-title">Chains</div>
         </div>
-        <article class="command-guide-card rounded-xl ${chainStatusTone(summary?.connection.status)}">
+        <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card ${chainStatusTone(summary?.connection.status)}">
           <div class="flex justify-between gap-2.5 items-start">
             <strong>native chain 연결</strong>
             <span class="command-chip rounded-full ${chainStatusTone(summary?.connection.status)}">${summary?.connection.status ?? 'disconnected'}</span>

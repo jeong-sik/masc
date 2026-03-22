@@ -27,7 +27,7 @@ export function CommandWorkflowBanner() {
   const context = workflowContextForRoute(route.value)
   if (!context) return null
   return html`
-    <section class="command-focus-banner">
+    <section class="rounded-[14px] border border-[rgba(34,211,238,0.26)] bg-[linear-gradient(180deg,rgba(34,211,238,0.1),var(--white-3))] p-[14px_16px] grid gap-2">
       <div class="flex gap-2 flex-wrap items-center">
         <strong>${context.source_label}</strong>
         <span class="command-chip rounded-full">${workflowActionLabel(context.action_type)}</span>
@@ -49,15 +49,15 @@ export function CommandEntryStrip() {
 
   return html`
     <section class="grid grid-cols-2 gap-3">
-      <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5 command-entry-card">
+      <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5">
         <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-[0.08em]">현재 표면</span>
-        <strong>${guide.title}</strong>
-        <p>${guide.description}</p>
+        <strong class="text-[color:var(--text-near-white)] text-lg leading-[1.2] break-words">${guide.title}</strong>
+        <p class="m-0 text-[color:var(--frost-72)] leading-normal">${guide.description}</p>
       </article>
-      <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5 command-entry-card">
+      <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5">
         <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-[0.08em]">다음 추천</span>
-        <strong>${recommendation.tool}</strong>
-        <p>${recommendation.reason}</p>
+        <strong class="text-[color:var(--text-near-white)] text-lg leading-[1.2] break-words">${recommendation.tool}</strong>
+        <p class="m-0 text-[color:var(--frost-72)] leading-normal">${recommendation.reason}</p>
       </article>
     </section>
   `
@@ -153,7 +153,7 @@ export function SummaryHero() {
       : '이 화면은 체크리스트보다 계기판에 가까워야 합니다. 아래 게이지가 지금 어디가 살아 있는지 먼저 보여줍니다.'
 
   return html`
-    <section class="command-hero grid grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)] gap-[18px] items-center command-hero-summary">
+    <section class="relative overflow-hidden border border-[rgba(103,232,249,0.16)] rounded-[18px] p-[18px] mb-4 shadow-[inset_0_1px_0_var(--white-4)] command-hero grid grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)] gap-[18px] items-center">
       <div class="relative z-[1] grid gap-2.5">
         <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">현재 지휘 상태</span>
         <h3>${headline}</h3>

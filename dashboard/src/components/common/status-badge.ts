@@ -57,10 +57,33 @@ function statusLabel(status: string): string {
   }
 }
 
+function statusDotColor(status: string): string {
+  switch (status) {
+    case 'in_progress':
+    case 'running':
+      return 'bg-[var(--warn)]'
+    case 'interrupted':
+    case 'listening':
+      return 'bg-[#38bdf8]'
+    case 'inactive':
+    case 'offline':
+      return 'bg-[#5f7199]'
+    case 'active':
+      return 'bg-[var(--ok)]'
+    case 'busy':
+    case 'stopped':
+      return 'bg-[var(--text-slate)]'
+    case 'error':
+      return 'bg-[#fb7185]'
+    default:
+      return 'bg-[var(--text-muted)]'
+  }
+}
+
 export function StatusBadge({ status, label }: StatusBadgeProps) {
   return html`
     <span class="border border-solid border-[var(--card-border)] ${status} ${status === 'offline' ? 'text-[#8da4cc]' : ''}">
-      <span class="size-1.5 rounded-full inline-block status-dot-inline ${status}"></span>
+      <span class="size-1.5 rounded-full inline-block ${statusDotColor(status)}"></span>
       ${label ?? statusLabel(status)}
     </span>
   `

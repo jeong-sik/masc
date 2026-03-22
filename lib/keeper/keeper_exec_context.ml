@@ -20,6 +20,17 @@ let usage_of_response = Inference_utils.usage_of_response
 let total_tokens = Inference_utils.total_tokens
 
 (* ================================================================ *)
+(* Checkpoint Store Delegation                                        *)
+(* ================================================================ *)
+
+let save_session_checkpoint (session : session_context) ckpt =
+  session.checkpoints <- session.checkpoints @ [ckpt];
+  Keeper_checkpoint_store.save ~session_dir:session.session_dir ckpt
+
+let load_latest_checkpoint (session : session_context) =
+  Keeper_checkpoint_store.load_latest ~session_dir:session.session_dir
+
+(* ================================================================ *)
 (* Keeper Context Lifecycle                                          *)
 (* ================================================================ *)
 

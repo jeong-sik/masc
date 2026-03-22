@@ -1,15 +1,16 @@
 (** Keeper_working_context — Working context type and pure operations.
 
     Contains the [working_context] record type and basic operations
-    (create, append, context_ratio, serialization, checkpointing,
-    session persistence) with no keeper-specific dependencies.
+    (create, append, context_ratio, serialization, checkpoint creation)
+    and session persistence (create_session, persist_message) with no
+    keeper-specific dependencies.
+
+    Checkpoint file I/O (save, load, prune) lives in
+    {!Keeper_checkpoint_store}.
 
     This module exists to break the dependency cycle: modules like
     Keeper_alerting_path and Keeper_exec_tools need the working_context
     type, but Keeper_exec_context depends on those modules.
-
-    Previously these types and functions lived in the legacy keeper context
-    module. Moved here as part of the context-manager-cleanup refactoring.
 
     @since context-manager-cleanup *)
 
@@ -313,84 +314,3 @@ let persist_message session msg =
   let line = Yojson.Safe.to_string payload ^ "\n" in
   Fs_compat.append_file path line
 
-(** Maximum number of checkpoint files to retain per session.
-    Only the latest N are kept; older ones are deleted after each save. *)
-let max_checkpoints_retained = 3
-
-let save_session_checkpoint session ckpt =
-  session.checkpoints <- session.checkpoints @ [ckpt];
-  let path = Filename.concat session.session_dir
-    (sprintf "%s.json" ckpt.checkpoint_id) in
-  let context_json =
-    try Yojson.Safe.from_string ckpt.serialized
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> `String ckpt.serialized
-  in
-  let json = `Assoc [
-    ("checkpoint_id", `String ckpt.checkpoint_id);
-    ("timestamp", `Float ckpt.timestamp);
-    ("generation", `Int ckpt.generation);
-    ("message_count", `Int ckpt.message_count);
-    ("token_count", `Int ckpt.token_count);
-    ("context", context_json);
-  ] in
-  let content = Yojson.Safe.to_string json in
-  Fs_compat.save_file path content;
-  (* Prune old checkpoints: keep only the latest max_checkpoints_retained *)
-  let dir = session.session_dir in
-  (try
-    let files = Sys.readdir dir |> Array.to_list in
-    let ckpt_files =
-      files
-      |> List.filter (fun f ->
-        let len = String.length f in
-        len > 5 && String.sub f 0 5 = "ckpt-"
-        && String.sub f (len - 5) 5 = ".json")
-      |> List.sort (fun a b -> compare b a) (* newest first *)
-    in
-    if List.length ckpt_files > max_checkpoints_retained then
-      let to_delete =
-        List.filteri (fun i _ -> i >= max_checkpoints_retained) ckpt_files
-      in
-      List.iter (fun f ->
-        let p = Filename.concat dir f in
-        (try Sys.remove p with Sys_error _ -> ())
-      ) to_delete
-  with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ())
-
-let load_latest_checkpoint session =
-  let dir = session.session_dir in
-  if not (Sys.file_exists dir) then None
-  else
-    let files = Sys.readdir dir |> Array.to_list in
-    let ckpt_files = List.filter (fun f ->
-      let len = String.length f in
-      len > 5 && String.sub f 0 5 = "ckpt-" &&
-      String.sub f (len - 5) 5 = ".json"
-    ) files in
-    match List.sort (fun a b -> compare b a) ckpt_files with
-    | [] -> None
-    | latest :: _ ->
-      let path = Filename.concat dir latest in
-      let content = Fs_compat.load_file path in
-      let json =
-        content
-        |> Inference_utils.sanitize_text_utf8
-        |> Yojson.Safe.from_string
-      in
-      let open Yojson.Safe.Util in
-      let serialized =
-        try
-          let ctx = json |> member "context" in
-          if ctx = `Null then raise Not_found;
-          Yojson.Safe.to_string ctx
-        with Eio.Cancel.Cancelled _ as e -> raise e | _ ->
-          json |> member "serialized" |> to_string
-      in
-      Some {
-        checkpoint_id = json |> member "checkpoint_id" |> to_string;
-        timestamp = json |> member "timestamp" |> to_number;
-        generation = json |> member "generation" |> to_int;
-        message_count = json |> member "message_count" |> to_int;
-        token_count = json |> member "token_count" |> to_int;
-        serialized;
-      }

@@ -8,6 +8,7 @@ import type {
   DashboardProofArtifactRef,
   DashboardProofTimelineItem,
   DashboardProofToolEvidence,
+  DashboardProofWorkerRunEvidence,
 } from '../types'
 import { prettyJson, relativeTime } from './command/helpers'
 import {
@@ -29,6 +30,7 @@ import {
   SelectionCard,
   TimelineRow,
   ToolEvidenceRow,
+  WorkerRunEvidenceRow,
 } from './proof-sections'
 
 export function Proof() {
@@ -63,10 +65,17 @@ export function Proof() {
   )
   const artifacts = safeArray<DashboardProofArtifactRef>(snapshot?.artifacts)
   const toolEvidence = safeArray<DashboardProofToolEvidence>(snapshot?.tool_evidence)
+  const workerRunEvidence = safeArray<DashboardProofWorkerRunEvidence>(snapshot?.worker_run_evidence)
   const verdict = snapshot?.proof_verdict ?? 'insufficient'
   const liveVerdict = summary?.live_verdict ?? verdict
   const historicalVerdict = summary?.historical_verdict ?? null
   const verdictBasis = summary?.verdict_basis ?? 'live'
+  const rawTraceRunCount =
+    summary?.raw_trace_run_count
+    ?? workerRunEvidence.filter(item => item.trace_capability === 'raw').length
+  const validatedWorkerRunCount =
+    summary?.validated_worker_run_count
+    ?? workerRunEvidence.filter(item => item.trace_validated === true).length
   const cpEvidence = snapshot?.cp_backing_evidence ?? null
   const traceCount = Array.isArray((cpEvidence as { traces?: { events?: unknown[] } } | null)?.traces?.events)
     ? ((cpEvidence as { traces?: { events?: unknown[] } }).traces?.events?.length ?? 0)
@@ -136,7 +145,7 @@ export function Proof() {
         </div>
       </div>
       <details class="mb-3">
-        <summary style="cursor: pointer; color: rgba(255,255,255,0.5); font-size: 13px; padding: 6px 0;">상세 지표 (${7}개)</summary>
+        <summary style="cursor: pointer; color: rgba(255,255,255,0.5); font-size: 13px; padding: 6px 0;">상세 지표 (${8}개)</summary>
         <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3" class="mt-2">
           <div class="summary-stat-card rounded-xl ${verdictTone(liveVerdict)}">
             <span>Live 판정</span>
@@ -162,6 +171,11 @@ export function Proof() {
             <span>CP 트레이스</span>
             <strong>${traceCount}</strong>
             <small>관리형 backing</small>
+          </div>
+          <div class="summary-stat-card rounded-xl ${validatedWorkerRunCount > 0 ? 'ok' : rawTraceRunCount > 0 ? 'warn' : 'warn'}">
+            <span>OAS 워커 근거</span>
+            <strong>${validatedWorkerRunCount}/${Math.max(rawTraceRunCount, workerRunEvidence.length)}</strong>
+            <small>검증됨 / 수집됨</small>
           </div>
           <div class="summary-stat-card rounded-xl ${(missingArtifacts === 0 && artifacts.length > 0) ? 'ok' : 'warn'}">
             <span>산출물</span>
@@ -244,6 +258,20 @@ export function Proof() {
           </div>
         <//>
 
+        <${Card} title="OAS 워커 근거" class="mission-list-card rounded-xl">
+          <div class="mission-section-head">
+            <h3>worker run trace는 얼마나 남아 있나</h3>
+            <p>OAS worker가 남긴 raw trace, 검증 결과, 최종 출력 요약을 바로 확인합니다.</p>
+          </div>
+          <div class="mission-list-stack">
+            ${workerRunEvidence.length > 0
+              ? workerRunEvidence.map(item => html`<${WorkerRunEvidenceRow} key=${item.worker_run_id} item=${item} />`)
+              : html`<div class="empty-state">표시할 OAS worker evidence가 없습니다. raw trace 또는 summary-only evidence가 생기면 여기에 나타납니다.</div>`}
+          </div>
+        <//>
+      </div>
+
+      <div class="mission-human-grid">
         <${Card} title="실행 근거" class="mission-list-card rounded-xl">
           <div class="grid gap-1 mb-3">
             <h3>실행 backing은 얼마나 남아 있나</h3>

@@ -259,6 +259,8 @@ export interface DashboardProofSummary {
   interaction_count?: number
   evidence_count?: number
   cp_trace_count?: number
+  raw_trace_run_count?: number
+  validated_worker_run_count?: number
 }
 
 export interface DashboardProofSelection {
@@ -315,6 +317,34 @@ export interface DashboardProofToolEvidence {
   timestamp?: string | null
 }
 
+export interface DashboardProofWorkerRunEvidence {
+  worker_run_id: string
+  worker_name?: string | null
+  status?: string | null
+  mode?: string | null
+  wait_mode?: string | null
+  trace_capability?: string | null
+  trace_validated?: boolean | null
+  validation_failures?: string[]
+  success?: boolean | null
+  execution_scope?: string | null
+  requested_worker_class?: string | null
+  requested_worker_size?: string | null
+  resolved_runtime?: string | null
+  resolved_model?: string | null
+  routing_reason?: string | null
+  tool_names?: string[]
+  tool_call_count?: number | null
+  output_preview?: string | null
+  record_count?: number | null
+  assistant_block_count?: number | null
+  final_text?: string | null
+  stop_reason?: string | null
+  failure_reason?: string | null
+  error?: string | null
+  ts_iso?: string | null
+}
+
 export interface DashboardProofArtifactRef {
   kind: string
   path: string
@@ -343,6 +373,7 @@ export interface DashboardProofResponse {
   actor_contributions?: DashboardProofActorContribution[]
   goal_binding?: Record<string, unknown>
   tool_evidence?: DashboardProofToolEvidence[]
+  worker_run_evidence?: DashboardProofWorkerRunEvidence[]
   cp_backing_evidence?: DashboardProofBackingEvidence | null
   artifacts?: DashboardProofArtifactRef[]
   raw_proof?: Record<string, unknown> | null

@@ -282,8 +282,15 @@ let default_config_path () : string option =
     All profiles are now in config/cascade.json (hot-reloadable). *)
 let default_model_strings ~cascade_name:_ =
   let llama_model = Env_config.Llama.default_model in
-  (if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else [])
-  @ [ "glm:auto" ]
+  let models =
+    if llama_model <> "" then [ Printf.sprintf "llama:%s" llama_model ] else []
+  in
+  let models =
+    match Sys.getenv_opt "ZAI_API_KEY" with
+    | Some k when k <> "" -> models @ [ "glm:auto" ]
+    | _ -> models
+  in
+  if models = [] then [ "llama:auto" ] else models
 
 (* ================================================================ *)
 (* Named model execution                                            *)

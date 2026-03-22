@@ -404,8 +404,8 @@ let _snapshot_cache : (string * Yojson.Safe.t * float) option ref = ref None
 
 let _snapshot_ttl_s =
   match Sys.getenv_opt "MASC_OPERATOR_CACHE_TTL" with
-  | Some s -> (try Float.of_string s with _ -> 5.0)
-  | None -> 5.0
+  | Some s -> (try Float.of_string s with _ -> 30.0)
+  | None -> 30.0
 
 let invalidate_snapshot_cache () = _snapshot_cache := None
 

@@ -233,7 +233,14 @@ let operator_actor_hint request =
 
 (* --- Operator proactive refresh ---
    Default (no-param) requests are served from a background-refreshed ref.
-   Parameterized requests fall back to on-demand compute with SWR cache. *)
+   Parameterized requests fall back to on-demand compute with SWR cache.
+
+   The snapshot compute can take 1-28s (command_plane_json is the bottleneck).
+   Using Proactive_refresh gives circuit breaker + exponential backoff on
+   repeated failures, matching the pattern used by execution and mission loops.
+
+   Interval: 10s (was 120s). Even if compute takes ~8s, the ref is updated
+   every ~18s worst-case, which is acceptable for dashboard SSE polling. *)
 
 let _operator_snapshot_ref : Yojson.Safe.t ref =
   ref (`Assoc [("status", `String "initializing"); ("generated_at", `String (Types.now_iso ()))])
@@ -241,35 +248,40 @@ let _operator_snapshot_ref : Yojson.Safe.t ref =
 let _operator_digest_ref : Yojson.Safe.t ref =
   ref (`Assoc [("health", `String "initializing"); ("generated_at", `String (Types.now_iso ()))])
 
-let _operator_refresh_interval_s = 120.0
+let _operator_refresh_interval_s =
+  float_of_env_default
+    "MASC_OPERATOR_REFRESH_INTERVAL_S"
+    ~default:10.0
+    ~min_v:2.0
+    ~max_v:600.0
 
 let start_operator_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
-  Eio.Fiber.fork ~sw (fun () ->
-    Log.Dashboard.info "starting operator proactive refresh loop";
-    let rec loop () =
-      let t0 = Time_compat.now () in
-      let ctx : _ Operator_control.context =
-        { config; agent_name = "dashboard"; sw; clock; proc_mgr; mcp_session_id = None }
-      in
-      (try
-        _operator_snapshot_ref :=
-          Operator_control.snapshot_json ~actor:"dashboard"
-            ~include_messages:true ~include_sessions:true ~include_keepers:true ctx;
-        (match Operator_control.digest_json ~actor:"dashboard" ctx with
-         | Ok json -> _operator_digest_ref := json
-         | Error _ -> ());
-        let dt = Time_compat.now () -. t0 in
-        Log.Dashboard.info "operator refreshed (%.1fs)" dt
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        let dt = Time_compat.now () -. t0 in
-        Log.Dashboard.warn "operator refresh failed (%.1fs): %s"
-          dt (Printexc.to_string exn));
-      Eio.Time.sleep clock _operator_refresh_interval_s;
-      loop ()
+  let compute () =
+    let ctx : _ Operator_control.context =
+      { config; agent_name = "dashboard"; sw; clock; proc_mgr; mcp_session_id = None }
     in
-    loop ())
+    let snapshot =
+      Operator_control.snapshot_json ~actor:"dashboard"
+        ~include_messages:true ~include_sessions:true ~include_keepers:true ctx
+    in
+    let digest =
+      match Operator_control.digest_json ~actor:"dashboard" ctx with
+      | Ok json -> json
+      | Error _ -> !_operator_digest_ref
+    in
+    (snapshot, digest)
+  in
+  Proactive_refresh.start ~sw ~clock
+    ~config:{ (Proactive_refresh.default_config
+                 ~label:"operator"
+                 ~interval_s:_operator_refresh_interval_s)
+              with timeout_s = 30.0 }
+    ~compute
+    ~on_result:(fun (snapshot, digest) ->
+      _operator_snapshot_ref := snapshot;
+      _operator_digest_ref := digest)
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
   let actor = operator_actor_hint request in

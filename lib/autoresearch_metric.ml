@@ -22,7 +22,9 @@ let contains_substring haystack needle =
     metric_fn is intentionally interpolated as a bare command (e.g. "python eval.py --metric accuracy"),
     so we cannot quote it. Instead we reject strings containing shell metacharacters
     that could chain or redirect commands. *)
-let dangerous_shell_chars = [';'; '|'; '&'; '`'; '$'; '('; ')'; '{'; '}'; '<'; '>'; '\n']
+let dangerous_shell_chars =
+  [';'; '|'; '&'; '`'; '$'; '('; ')'; '{'; '}'; '<'; '>'; '\n';
+   '#'; '!'; '~'; '['; ']'; '*'; '?'; '\\']
 
 (** Validate that metric_fn does not contain dangerous shell metacharacters.
     Returns Ok fn on success, Error message on failure. *)
@@ -39,7 +41,7 @@ let measure_metric ~workdir ~timeout_s metric_fn =
   match validate_metric_fn metric_fn with
   | Error e -> Error e
   | Ok metric_fn ->
-  let timeout_flag = Printf.sprintf "timeout %.0f" timeout_s in
+  let timeout_flag = Printf.sprintf "timeout %s" (Filename.quote (Printf.sprintf "%.0f" timeout_s)) in
   let cmd = Printf.sprintf "cd %s && %s %s 2>/dev/null | tail -1"
     (Filename.quote workdir) timeout_flag metric_fn in
   let start = Time_compat.now () in

@@ -273,7 +273,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     (match ensure_api_keys_for_labels requested_models with
      | Error e -> (false, e)
      | Ok () ->
-       let primary_max_context = Model_spec.resolve_primary_max_context requested_models in
+       let primary_max_context = Oas_model_resolve.resolve_primary_max_context requested_models in
        let trace_id = generate_trace_id () in
          let base_dir = session_base_dir ctx.config in
          mkdir_p base_dir;

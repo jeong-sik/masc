@@ -87,7 +87,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   | Error e -> Error e
   | Ok () ->
       let primary_max_context =
-        Model_spec.resolve_primary_max_context model_labels
+        Oas_model_resolve.resolve_primary_max_context model_labels
       in
       (* 2. Build unified prompt *)
       let system_prompt, user_message =

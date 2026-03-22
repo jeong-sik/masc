@@ -39,7 +39,7 @@ let handle_keeper_status ctx args : tool_result =
         get_bool args "include_compaction_history" (not fast)
       in
       let models = m.models in
-      let primary_max_context = Model_spec.resolve_primary_max_context models in
+      let primary_max_context = Oas_model_resolve.resolve_primary_max_context models in
       let base_dir = session_base_dir ctx.config in
          let ctx_opt =
            if include_context then

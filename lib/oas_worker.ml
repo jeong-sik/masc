@@ -76,27 +76,18 @@ type run_result = {
 (* ================================================================ *)
 
 (** Resolve a model label string to an OAS Provider.config.
-    Uses Oas_type_adapters as primary path. Falls back to constructing
-    from Model_spec.to_provider_config bridge when the adapter returns None. *)
+    Uses OAS Cascade_config.parse_model_string as primary path, which
+    resolves via Provider_registry directly. Falls back to Oas_type_adapters
+    for provider-kind dispatch, then glm as last resort. *)
 let resolve_provider_of_label (label : string) : Oas.Provider.config =
-  match Oas_type_adapters.to_oas_provider_of_label label with
-  | Some cfg -> cfg
+  (* Primary: parse via OAS Cascade_config (uses Provider_registry directly) *)
+  match Llm_provider.Cascade_config.parse_model_string label with
+  | Some pc -> Oas_type_adapters.provider_config_to_oas pc
   | None ->
-    (* Fallback: parse label, get Provider_config.t, then map to Agent_sdk. *)
-    match Model_spec.model_spec_of_string label with
-    | Ok spec ->
-      let pc = Model_spec.to_provider_config spec in
-      { Oas.Provider.provider =
-          Oas.Provider.OpenAICompat {
-            base_url = pc.base_url;
-            auth_header = None;
-            path = pc.request_path;
-            static_token = None;
-          };
-        model_id = pc.model_id;
-        api_key_env = pc.api_key;
-      }
-    | Error _ ->
+    (* Fallback: try Oas_type_adapters which handles provider alias resolution *)
+    match Oas_type_adapters.to_oas_provider_of_label label with
+    | Some cfg -> cfg
+    | None ->
       (* Last resort: use glm as fallback provider *)
       Oas_type_adapters.provider_config_to_oas
         (Llm_provider.Provider_config.make
@@ -290,8 +281,23 @@ let run_with_masc_tools
 (* Cascade profile defaults (moved from Cascade module)              *)
 (* ================================================================ *)
 
-(** Delegate to {!Model_spec.cascade_config_path}. *)
-let default_config_path = Model_spec.cascade_config_path
+(** Locate config/cascade.json via CWD or ME_ROOT.
+    Returns [Some path] when the file exists on disk.
+    Inlined from Model_spec to remove the dependency. *)
+let default_config_path () : string option =
+  let base dir name = Filename.concat (Filename.concat dir "config") name in
+  let cwd = Sys.getcwd () in
+  let me_root =
+    Sys.getenv_opt "ME_ROOT"
+    |> Option.value
+         ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp")
+  in
+  let masc_root = Filename.concat me_root "workspace/yousleepwhen/masc-mcp" in
+  let candidates =
+    [ base cwd "cascade.json";
+      base masc_root "cascade.json" ]
+  in
+  List.find_opt Sys.file_exists candidates
 
 (** Hardcoded fallback defaults — used only when cascade.json is missing
     and the cascade name has no "{name}_models" entry.
@@ -351,9 +357,13 @@ let config_for_label
     ~(description : string option)
     () : config =
   let provider = resolve_provider_of_label model_label in
-  let model_id = match Model_spec.model_spec_of_string model_label with
-    | Ok spec -> spec.model_id
-    | Error _ -> model_label
+  let model_id = match Oas_model_resolve.provider_name_of_label model_label with
+    | Some _ ->
+      (* Extract model_id portion from "provider:model_id" *)
+      (match String.index_opt model_label ':' with
+       | Some idx -> String.sub model_label (idx + 1) (String.length model_label - idx - 1) |> String.trim
+       | None -> model_label)
+    | None -> model_label
   in
   {
     (default_config ~name ~provider ~model_id
@@ -464,10 +474,11 @@ let run_model_by_label
     ?transport
     ()
   : (run_result, string) result =
-  (* Validate the label parses before proceeding *)
-  match Model_spec.model_spec_of_string model_label with
-  | Error msg -> Error msg
-  | Ok _spec ->
+  (* Validate the label parses before proceeding via OAS Cascade_config *)
+  (match Llm_provider.Cascade_config.parse_model_string model_label with
+  | None ->
+    Error (Printf.sprintf "Cannot parse model label: %s" model_label)
+  | Some _pc ->
     match require_eio () with
     | Error e -> Error e
     | Ok (sw, net) ->
@@ -488,7 +499,7 @@ let run_model_by_label
         | Ok _ ->
             Error
               (Printf.sprintf "response rejected by accept from %s" model_label)
-        | Error e -> Error e)
+        | Error e -> Error e))
 
 let run_named_with_masc_tools
     ~cascade_name

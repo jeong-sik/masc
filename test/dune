@@ -123,6 +123,11 @@
  (libraries masc_mcp alcotest eio eio_main yojson unix))
 
 (test
+ (name test_dashboard_http_core)
+ (modules test_dashboard_http_core)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
+(test
  (name test_dashboard_tools)
  (modules test_dashboard_tools)
  (libraries masc_mcp alcotest eio eio_main yojson unix))

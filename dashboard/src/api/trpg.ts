@@ -225,16 +225,28 @@ function normalizeTrpgState(
   }
 }
 
+function is404(err: unknown): boolean {
+  return err instanceof Error && 'status' in err && (err as { status: number }).status === 404
+}
+
 async function fetchTrpgEventsRaw(room?: string): Promise<unknown[]> {
   const params = room ? `?room_id=${encodeURIComponent(room)}` : ''
-  const data = await get<TrpgRawEventsResponse>(`/api/v1/trpg/events${params}`)
-  return Array.isArray(data.events) ? data.events : []
+  try {
+    const data = await get<TrpgRawEventsResponse>(`/api/v1/trpg/events${params}`)
+    return Array.isArray(data.events) ? data.events : []
+  } catch (err) {
+    if (is404(err)) return []
+    throw err
+  }
 }
 
 export async function fetchTrpgState(room?: string): Promise<TrpgState> {
   const params = room ? `?room_id=${encodeURIComponent(room)}` : ''
   const [rawState, rawEvents] = await Promise.all([
-    get<TrpgRawStateResponse>(`/api/v1/trpg/state${params}`),
+    get<TrpgRawStateResponse>(`/api/v1/trpg/state${params}`).catch(err => {
+      if (is404(err)) return { room_id: room } as TrpgRawStateResponse
+      throw err
+    }),
     fetchTrpgEventsRaw(room),
   ])
   return normalizeTrpgState(rawState, rawEvents, room)

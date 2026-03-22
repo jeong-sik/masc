@@ -167,12 +167,12 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
             <span class="w-[22px] text-center text-sm font-bold text-text-slate">${i + 1}</span>
             <div class="flex-1 flex flex-col gap-1 min-w-0">
               <span class="text-base font-semibold text-[var(--text-near-white)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
-              <div class="activity-graph-leaderboard-bar-wrap">
-                <div class="activity-graph-leaderboard-bar" style="width:${pct}%"></div>
+              <div class="h-1 rounded-sm bg-[var(--slate-gray-10)] overflow-hidden">
+                <div class="h-full rounded-sm bg-[var(--cyan)] transition-[width] duration-300 ease-in-out" style="width:${pct}%"></div>
               </div>
             </div>
             <span class="text-sm font-semibold text-text-slate-light min-w-[32px] text-right">${node.weight}</span>
-            <span class="activity-graph-leaderboard-status rounded-md ${node.status === 'offline' || node.status === 'retired' ? 'inactive' : 'active'}">${node.status}</span>
+            <span class="text-[length:var(--fs-xs)] py-0.5 px-[7px] rounded-md ${node.status === 'offline' || node.status === 'retired' ? 'text-[color:var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[color:var(--ok)] bg-[var(--ok-10)]'}">${node.status}</span>
           </div>
         `
       })}
@@ -194,7 +194,7 @@ function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
   return html`
     <div class="flex flex-wrap gap-2">
       ${sorted.map(([kind, count]) => html`
-        <div class="activity-graph-kind-chip rounded-lg" key=${kind}>
+        <div class="flex items-center gap-1.5 py-1.5 px-3 bg-[var(--panel-dark-60)] border border-[var(--slate-gray-12)] rounded-lg" key=${kind}>
           <span class="text-sm text-text-slate-light">${kindLabel(kind)}</span>
           <span class="text-base font-bold text-[var(--text-near-white)]">${count}</span>
         </div>

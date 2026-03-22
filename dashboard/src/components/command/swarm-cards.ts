@@ -83,9 +83,9 @@ export function SwarmWorkerGrid({ total }: { total: number }) {
 
   return html`
     <div class="swarm-worker-grid flex flex-wrap gap-[3px] items-center">
-      ${dots.map(() => html`<span class="swarm-worker-dot w-2 h-2 rounded-full present"></span>`)}
-      ${overflow > 0 ? html`<span class="swarm-worker-count">+${overflow}</span>` : null}
-      <span class="swarm-worker-count">(워커 ${total})</span>
+      ${dots.map(() => html`<span class="w-2 h-2 rounded-full bg-[rgba(134,160,207,0.7)]"></span>`)}
+      ${overflow > 0 ? html`<span class="text-[0.72rem] text-[color:var(--text-dim,var(--white-50))] ml-1">+${overflow}</span>` : null}
+      <span class="text-[0.72rem] text-[color:var(--text-dim,var(--white-50))] ml-1">(워커 ${total})</span>
     </div>
   `
 }
@@ -95,12 +95,12 @@ export function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEven
   const validTs = ts && !isNaN(ts.getTime()) ? ts : null
   const timeStr = validTs ? `${String(validTs.getHours()).padStart(2, '0')}:${String(validTs.getMinutes()).padStart(2, '0')}` : ''
   return html`
-    <div class="swarm-event-node">
+    <div class="flex items-start gap-2 relative py-1 text-[0.82rem]">
       <span class="swarm-event-dot ${toneClass(event.tone)}"></span>
-      <span class="swarm-event-time">${timeStr}</span>
-      <div class="swarm-event-body min-w-0 flex-1">
+      <span class="shrink-0 w-12 text-[0.72rem] text-[color:var(--text-dim,var(--white-45))]">${timeStr}</span>
+      <div class="min-w-0 flex-1">
         <strong>${event.title}</strong>
-        <span class="swarm-event-kind">${event.kind}</span>
+        <span class="text-[0.72rem] opacity-60 ml-1.5">${event.kind}</span>
         ${event.detail ? html`<div class="command-card rounded-xl-sub">${event.detail}</div>` : null}
       </div>
     </div>
@@ -109,7 +109,7 @@ export function SwarmEventNode({ event }: { event: CommandPlaneSwarmTimelineEven
 
 export function SwarmGapDot({ gap }: { gap: CommandPlaneSwarmGap }) {
   return html`
-    <div class="swarm-gap-inline flex items-center gap-1.5">
+    <div class="flex items-center gap-1.5 py-[3px] text-[0.78rem]">
       <span class="swarm-gap-dot"></span>
       <span class="command-chip rounded-full ${toneClass(gap.severity)}">${gap.code} (${gap.count})</span>
       <span class="command-card rounded-xl-sub">${gap.summary}</span>

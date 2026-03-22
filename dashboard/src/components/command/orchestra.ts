@@ -379,7 +379,7 @@ export function OrchestraSurface() {
         </div>
       </div>
 
-      <div class="orchestra-shell">
+      <div class="grid grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] gap-4 mt-4">
         <div
           ref=${hostRef}
           class="orchestra-canvas-wrap"
@@ -419,14 +419,14 @@ export function OrchestraSurface() {
               />
             </g>
           </svg>
-          <div class="orchestra-summary-strip">
-            <span class="command-chip rounded-full">세션 ${orchestra.summary?.session_count ?? 0}</span>
-            <span class="command-chip rounded-full">워커 ${orchestra.summary?.worker_count ?? 0}</span>
-            <span class="command-chip rounded-full">키퍼 ${orchestra.summary?.keeper_count ?? 0}</span>
-            <span class="command-chip rounded-full ${toneClass(orchestra.signals.some(signalNode => signalNode.tone === 'bad') ? 'bad' : orchestra.signals.length > 0 ? 'warn' : 'ok')}">
+          <div class="absolute left-3.5 right-3.5 bottom-3 flex flex-wrap gap-2 pointer-events-none">
+            <span class="command-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">세션 ${orchestra.summary?.session_count ?? 0}</span>
+            <span class="command-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">워커 ${orchestra.summary?.worker_count ?? 0}</span>
+            <span class="command-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">키퍼 ${orchestra.summary?.keeper_count ?? 0}</span>
+            <span class="command-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)] ${toneClass(orchestra.signals.some(signalNode => signalNode.tone === 'bad') ? 'bad' : orchestra.signals.length > 0 ? 'warn' : 'ok')}">
               신호 ${orchestra.summary?.signal_count ?? orchestra.signals.length}
             </span>
-            <span class="command-chip rounded-full">갱신 ${relativeTime(orchestra.generated_at)}</span>
+            <span class="command-chip rounded-full pointer-events-auto bg-[rgba(15,23,42,0.8)]">갱신 ${relativeTime(orchestra.generated_at)}</span>
           </div>
         </div>
 

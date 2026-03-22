@@ -115,7 +115,7 @@ export function ControlSurface() {
           ? html`<div class="cmd-card rounded-xl-stack">
               ${snapshot.decisions.decisions.map(decision => html`<${DecisionCard} decision=${decision} />`)}
             </div>`
-          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금 승인 대기 항목은 없습니다.</div>`}
+          : html`<div class="empty-state">지금 승인 대기 항목은 없습니다.</div>`}
       </section>
 
       <section class="card rounded-xl min-h-[240px]">
@@ -126,7 +126,7 @@ export function ControlSurface() {
           ? html`<div class="cmd-card rounded-xl-stack">
               ${snapshot.capacity.capacity.map(row => html`<${CapacityRowCard} row=${row} />`)}
             </div>`
-          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">제어할 용량 행이 아직 없습니다.</div>`}
+          : html`<div class="empty-state">제어할 용량 행이 아직 없습니다.</div>`}
       </section>
     </div>
   `

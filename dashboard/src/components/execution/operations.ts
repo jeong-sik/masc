@@ -56,7 +56,7 @@ export function OperationBriefsBody({ operationRows }: { operationRows: Dashboar
     <div class="flex flex-col gap-2.5">
       ${hasActive
         ? activeOps.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)
-        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${hasTerminal ? '진행 중인 작전이 없습니다.' : '선택된 실행과 연결된 작전이 없습니다.'}</div>`}
+        : html`<div class="empty-state">${hasTerminal ? '진행 중인 작전이 없습니다.' : '선택된 실행과 연결된 작전이 없습니다.'}</div>`}
     </div>
     ${hasTerminal
       ? html`

@@ -62,14 +62,14 @@ function HomeSectionHeader({
   onLink?: () => void
 }) {
   return html`
-    <div class="flex items-start justify-between mb-1 gap-3">
+    <div class="flex items-start justify-between mb-2 gap-3">
       <div>
-        <span class="text-text-muted text-xs tracking-[0.06em] uppercase">${label}</span>
-        ${copy ? html`<div class="mt-[3px] text-text-muted text-sm leading-[1.45]">${copy}</div>` : null}
+        <span class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">${label}</span>
+        ${copy ? html`<div class="mt-1 text-[13px] text-[var(--text-muted)] leading-[1.45]">${copy}</div>` : null}
       </div>
       <div class="inline-flex items-center gap-2 flex-wrap justify-end">
         ${linkLabel && onLink
-          ? html`<a class="text-[length:var(--fs-xs)] text-accent cursor-pointer no-underline hover:underline" onClick=${onLink}>${linkLabel}</a>`
+          ? html`<a class="text-xs text-accent cursor-pointer no-underline hover:underline" onClick=${onLink}>${linkLabel}</a>`
           : null}
       </div>
     </div>
@@ -83,28 +83,26 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
 
   return html`
     <div
-      class="hot-session-card rounded-lg p-3 border border-[var(--border-slate-16)] bg-[var(--white-3)] cursor-pointer ${s.blocker_summary ? 'border-[var(--bad)] bg-[rgba(239,68,68,0.06)]' : ''}"
+      class="hot-session-card rounded-xl p-4 border border-[var(--card-border)] bg-[var(--card)] cursor-pointer hover:border-[var(--accent)]/30 transition-colors ${s.blocker_summary ? 'border-[var(--bad)] bg-[rgba(239,68,68,0.06)]' : ''}"
       key=${s.session_id}
       onClick=${() => navigate('status', { section: 'sessions', session_id: s.session_id })}
     >
-      <div class="text-sm font-semibold text-text-strong leading-[1.35] line-clamp-2">${primary}</div>
-      ${secondary ? html`<div class="hot-session-card__context">${secondary}</div>` : null}
-      <div class="flex flex-wrap gap-1.5 mt-2">
+      <div class="text-sm font-medium text-[var(--text-strong)] leading-[1.35] line-clamp-2">${primary}</div>
+      ${secondary ? html`<div class="hot-session-card__context mt-1 text-[13px] text-[var(--text-body)]">${secondary}</div>` : null}
+      <div class="flex flex-wrap gap-1.5 mt-2.5">
         ${creator
-          ? html`<span class="inline-flex items-center min-h-5 px-2 border border-[var(--border-slate-18)] bg-[var(--border-slate-8)] text-[color:var(--text-muted)] text-[length:var(--fs-2xs)] tracking-[0.02em] rounded-full ${systemSession ? 'border-[rgba(34,197,94,0.22)] bg-[rgba(34,197,94,0.12)] text-[#b7f3c9]' : ''}">
-              ${systemSession ? '시스템' : '주체'} · ${creator}
-            </span>`
+          ? html`<span class="status-badge ${systemSession ? 'active' : ''}">${systemSession ? '시스템' : '주체'} · ${creator}</span>`
           : null}
-        ${s.status ? html`<span class="inline-flex items-center min-h-5 px-2 border border-[var(--border-slate-18)] bg-[var(--border-slate-8)] text-[color:var(--text-muted)] text-[length:var(--fs-2xs)] tracking-[0.02em] rounded-full">${statusLabel(s.status)}</span>` : null}
+        ${s.status ? html`<span class="status-badge">${statusLabel(s.status)}</span>` : null}
       </div>
-      <div class="flex gap-2 flex-wrap text-xs text-text-muted mt-2">
+      <div class="flex gap-2 flex-wrap text-xs text-[var(--text-muted)] mt-2">
         ${s.member_names?.length ? html`
           <span>${s.member_names.slice(0, 3).join(', ')}${s.member_names.length > 3 ? ` +${s.member_names.length - 3}` : ''}</span>
         ` : null}
         ${s.elapsed_sec ? html`<span>${formatDuration(s.elapsed_sec)}</span>` : null}
       </div>
       ${s.blocker_summary ? html`
-        <div class="text-xs text-bad mt-1 overflow-hidden text-ellipsis whitespace-nowrap">${s.blocker_summary}</div>
+        <div class="text-xs text-bad mt-1.5 overflow-hidden text-ellipsis whitespace-nowrap">${s.blocker_summary}</div>
       ` : null}
     </div>
   `
@@ -120,19 +118,19 @@ type SessionLaneProps = {
 
 function SessionLane({ title, description, tone, sessions, emptyCopy }: SessionLaneProps) {
   return html`
-    <section class="hot-session-lane hot-session-lane--${tone} rounded-lg border border-[var(--border-slate-12)] p-3.5 grid gap-3">
+    <section class="hot-session-lane hot-session-lane--${tone} rounded-xl border border-[var(--card-border)] p-4 grid gap-4">
       <div class="flex items-start justify-between gap-3">
         <div>
           <div class="flex items-center gap-2">
-            <h3 class="m-0 text-base font-semibold text-text-strong">${title}</h3>
-            <span class="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-[var(--white-8)] text-[color:var(--text-muted)] text-[length:var(--fs-xs)] font-semibold rounded-full">${sessions.length}</span>
+            <h3 class="m-0 text-sm font-medium text-[var(--text-strong)]">${title}</h3>
+            <span class="status-badge">${sessions.length}</span>
           </div>
-          <p class="mt-1 mb-0 text-text-muted text-sm leading-[1.45]">${description}</p>
+          <p class="mt-1 mb-0 text-[13px] text-[var(--text-muted)] leading-[1.45]">${description}</p>
         </div>
       </div>
       ${sessions.length > 0
-        ? html`<div class="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">${sessions.map(renderSessionCard)}</div>`
-        : html`<div class="grid place-items-center min-h-[116px] p-3 border border-dashed border-[var(--border-slate-18)] text-[color:var(--text-muted)] text-[length:var(--fs-sm)] text-center bg-[var(--white-2)] rounded-lg">${emptyCopy}</div>`}
+        ? html`<div class="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">${sessions.map(renderSessionCard)}</div>`
+        : html`<div class="empty-state"><span class="empty-state-desc">${emptyCopy}</span></div>`}
     </section>
   `
 }
@@ -205,17 +203,17 @@ function AgentPulse() {
         linkLabel="전체 보기"
         onLink=${() => navigate('status', { section: 'agents' })}
       />
-      <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
+      <div class="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
-            class="flex items-center gap-3 py-2.5 px-3 cursor-pointer transition-[background] duration-150 hover:bg-[var(--white-4)] rounded-lg border border-[var(--border-slate-12)] bg-[var(--white-2)] agent-pulse-card--${a.state}"
+            class="flex items-center gap-3 p-4 cursor-pointer transition-colors duration-150 hover:border-[var(--accent)]/30 rounded-xl border border-[var(--card-border)] bg-[var(--card)] agent-pulse-card--${a.state}"
             key=${a.name}
             onClick=${() => navigate('status', { section: 'agents', agent: a.name })}
           >
             <${AgentAvatar} name=${a.name} emoji=${a.emoji} size=${32} />
             <div class="flex flex-col min-w-0 gap-0.5">
-              <span class="text-sm font-semibold text-text-strong">${a.koreanName ?? a.name}</span>
-              <span class="text-xs text-text-muted leading-[1.4] line-clamp-2">
+              <span class="text-sm font-medium text-[var(--text-strong)]">${a.koreanName ?? a.name}</span>
+              <span class="text-xs text-[var(--text-muted)] leading-[1.4] line-clamp-2">
                 ${stateIcon(a.state)} ${a.focus ?? a.currentTask ?? a.status}
               </span>
             </div>
@@ -233,21 +231,21 @@ export function Overview() {
   const roomHealth = snap?.summary?.room_health ?? null
 
   return html`
-    <div class="grid gap-5">
+    <div class="grid gap-4">
       <${SituationBanner} snap=${snap} roomHealth=${roomHealth} />
       <${AttentionSpotlight} snap=${snap} />
 
-      <section class="grid gap-5 border border-[var(--border-slate-12)] rounded-xl bg-[var(--white-2)] p-4">
+      <section class="card grid gap-4">
         <${HotSessions} />
       </section>
 
-      <section class="grid gap-3 border border-[var(--border-slate-12)] rounded-xl bg-[var(--white-2)] p-4">
+      <section class="card grid gap-4">
         <${AgentPulse} />
       </section>
 
       <${OasPipeline} />
 
-      <section class="grid gap-3 border border-[var(--border-slate-12)] rounded-xl bg-[var(--white-2)] p-4">
+      <section class="card grid gap-4">
         <${HomeSectionHeader}
           label="최근 활동"
 

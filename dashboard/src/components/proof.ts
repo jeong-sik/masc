@@ -49,7 +49,7 @@ export function Proof() {
   const snapshot = proofSnapshot.value
 
   if (proofLoading.value && !snapshot) {
-    return html`<section class="flex flex-col gap-[18px]"><div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">근거 화면 불러오는 중…</div></section>`
+    return html`<section class="flex flex-col gap-[18px]"><div class="loading-state loading-pulse">근거 화면 불러오는 중…</div></section>`
   }
 
   if (proofError.value && !snapshot) {
@@ -228,7 +228,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${dedupedTimeline.length > 0
               ? dedupedTimeline.slice(0, 18).map(item => html`<${TimelineRow} key=${item.id} item=${item} />`)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">타임라인 근거가 없습니다. 에이전트 협업이 진행되면 세션과 지휘 이벤트가 여기에 나타납니다.</div>`}
+              : html`<div class="empty-state">타임라인 근거가 없습니다. 에이전트 협업이 진행되면 세션과 지휘 이벤트가 여기에 나타납니다.</div>`}
           </div>
         <//>
 
@@ -240,7 +240,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${contributions.length > 0
               ? contributions.map(item => html`<${ActorContributionRow} key=${item.actor} item=${item} />`)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">참여 흔적이 없습니다. 에이전트가 작업에 참여하면 턴, 도구 호출, 산출물이 기록됩니다.</div>`}
+              : html`<div class="empty-state">참여 흔적이 없습니다. 에이전트가 작업에 참여하면 턴, 도구 호출, 산출물이 기록됩니다.</div>`}
           </div>
         <//>
       </div>
@@ -254,7 +254,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${toolEvidence.length > 0
               ? toolEvidence.map((item, idx) => html`<${ToolEvidenceRow} key=${`${item.actor ?? 'system'}-${idx}`} item=${item} />`)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">도구 근거가 없습니다. 에이전트가 MCP 도구를 사용하면 호출 내역이 여기에 기록됩니다.</div>`}
+              : html`<div class="empty-state">도구 근거가 없습니다. 에이전트가 MCP 도구를 사용하면 호출 내역이 여기에 기록됩니다.</div>`}
           </div>
         <//>
 
@@ -294,7 +294,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${artifacts.length > 0
               ? artifacts.map(item => html`<${ArtifactRow} key=${item.path} item=${item} />`)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">산출물이 없습니다. proof/report/session 파일이 생성되면 존재 여부가 표시됩니다.</div>`}
+              : html`<div class="empty-state">산출물이 없습니다. proof/report/session 파일이 생성되면 존재 여부가 표시됩니다.</div>`}
           </div>
         <//>
       </div>

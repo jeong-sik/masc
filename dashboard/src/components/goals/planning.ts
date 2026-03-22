@@ -86,16 +86,16 @@ export function Planning() {
             <${GoalsSummary} />
             <${FilterBar} />
             ${goalsLoading.value && goals.value.length === 0
-              ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">목표 불러오는 중...</div>`
+              ? html`<div class="loading-state loading-pulse">목표 불러오는 중...</div>`
               : filteredGoals.value.length === 0
-                ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">현재 필터에 맞는 목표가 없습니다</div>`
+                ? html`<div class="empty-state">현재 필터에 맞는 목표가 없습니다</div>`
                 : html`
                     <${HorizonGroup} horizon="short" items=${grouped.short ?? []} />
                     <${HorizonGroup} horizon="mid" items=${grouped.mid ?? []} />
                     <${HorizonGroup} horizon="long" items=${grouped.long ?? []} />
                   `}
           ` : html`
-            <div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">
+            <div class="empty-state">
               장기 목표가 아직 없습니다. <code>masc_goal_upsert</code>로 단기/중기/장기 목표를 등록하면 메트릭 기반 추적이 시작됩니다.
             </div>
           `}
@@ -110,11 +110,11 @@ export function Planning() {
         </summary>
         <div>
           ${mdalLoading.value && loops.length === 0
-            ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">MDAL 루프 불러오는 중...</div>`
+            ? html`<div class="loading-state loading-pulse">MDAL 루프 불러오는 중...</div>`
             : loops.length === 0 && (mdalState === 'error' || lastMdalError.value)
-              ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">MDAL 스냅샷을 불러오지 못했습니다${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. 백엔드 상태를 확인하세요.</div>`
+              ? html`<div class="empty-state">MDAL 스냅샷을 불러오지 못했습니다${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. 백엔드 상태를 확인하세요.</div>`
               : loops.length === 0
-                ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">가동 중인 루프가 없습니다. <code>masc_mdal_start</code>로 시작할 수 있습니다.</div>`
+                ? html`<div class="empty-state">가동 중인 루프가 없습니다. <code>masc_mdal_start</code>로 시작할 수 있습니다.</div>`
                 : html`
                   <div class="grid gap-3">
                     ${loops.map(loop => html`<${LoopRow} key=${loop.loop_id} loop=${loop} />`)}

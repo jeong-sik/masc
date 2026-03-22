@@ -35,13 +35,13 @@ import { ProvenanceStrip } from './common/provenance-strip'
 export function Mission() {
   const mission = missionSnapshot.value
   if (missionLoading.value && !mission) {
-    return html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">상황판 스냅샷 불러오는 중...</div>`
+    return html`<div class="loading-state loading-pulse">상황판 스냅샷 불러오는 중...</div>`
   }
   if (missionError.value && !mission) {
-    return html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${missionError.value}</div>`
+    return html`<div class="empty-state error">${missionError.value}</div>`
   }
   if (!mission) {
-    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">상황판 스냅샷이 아직 없습니다.</div>`
+    return html`<div class="empty-state">상황판 스냅샷이 아직 없습니다.</div>`
   }
 
   const sessionRows = mission.sessions
@@ -203,7 +203,7 @@ export function Mission() {
         <div class="flex flex-col gap-4">
           ${sessionRows.length > 0
             ? sessionRows.map(row => html`<${SessionBriefCard} key=${row.session_id} brief=${row} selected=${activeSessionId === row.session_id} />`)
-            : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금 보이는 팀 세션이 없습니다.</div>`}
+            : html`<div class="empty-state">지금 보이는 팀 세션이 없습니다.</div>`}
         </div>
       <//>
 
@@ -224,7 +224,7 @@ export function Mission() {
           <div class="flex flex-col gap-4">
             ${keeperRows.length > 0
               ? keeperRows.map(row => html`<${KeeperBriefCard} key=${row.brief.name} row=${row} />`)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금 보이는 키퍼가 없습니다.</div>`}
+              : html`<div class="empty-state">지금 보이는 키퍼가 없습니다.</div>`}
           </div>
           <div class="flex gap-2 flex-wrap mt-2.5">
             <button class="control-btn rounded-lg ghost" onClick=${() => navigate('status', { section: 'sessions' })}>세션 보기</button>
@@ -251,7 +251,7 @@ export function Mission() {
                     <div>${row.recent_output_preview}</div>
                   </div>
                 `)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">선택된 세션에서 바로 읽을 최근 출력이 없습니다.</div>`}
+              : html`<div class="empty-state">선택된 세션에서 바로 읽을 최근 출력이 없습니다.</div>`}
             ${keeperOutputRows.length > 0
               ? keeperOutputRows.map(row => html`
                   <div class="grid gap-1">
@@ -275,7 +275,7 @@ export function Mission() {
           <div class="p-3.5 rounded-xl border border-[var(--white-8)] bg-[linear-gradient(180deg,var(--white-6),var(--white-3))] grid gap-3">
             ${attentionQueue.length > 0
               ? attentionQueue.map(item => html`<${AttentionCard} key=${item.id} item=${item} selected=${activeSelectedAttentionId === item.id} sessionLookup=${sessionLookup} />`)
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금 세션 단위 주의 대기열은 비어 있습니다.</div>`}
+              : html`<div class="empty-state">지금 세션 단위 주의 대기열은 비어 있습니다.</div>`}
           </div>
         <//>
       </details>

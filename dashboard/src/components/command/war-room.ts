@@ -189,7 +189,7 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
 
   if (!hasLiveRun && !selectedSession) {
     if (commandPlaneSwarmLoading.value || operatorLoading.value) {
-      return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">실시간 워룸 불러오는 중…</div>`
+      return html`<div class="empty-state">실시간 워룸 불러오는 중…</div>`
     }
     return html`
       <section class="card rounded-xl ${wallboard ? 'min-h-[calc(100vh-180px)]' : 'min-h-[360px]'} flex flex-col justify-center gap-[18px]">

@@ -169,7 +169,7 @@ export function TopologySurface() {
         : null}
       ${snapshot && snapshot.topology.units.length > 0
         ? html`${snapshot.topology.units.map(node => html`<${TopologyNode} node=${node} />`)}`
-        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금은 실시간 에이전트나 관리 유닛 기준으로 그릴 지휘 계층이 없습니다.</div>`}
+        : html`<div class="empty-state">지금은 실시간 에이전트나 관리 유닛 기준으로 그릴 지휘 계층이 없습니다.</div>`}
     </section>
   `
 }
@@ -185,7 +185,7 @@ export function AlertsSurface() {
         ? html`<div class="cmd-card rounded-xl-stack">
             ${snapshot.alerts.alerts.map(alert => html`<${AlertCard} alert=${alert} />`)}
           </div>`
-        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금 올라온 지휘면 경보는 없습니다.</div>`}
+        : html`<div class="empty-state">지금 올라온 지휘면 경보는 없습니다.</div>`}
     </section>
   `
 }
@@ -201,7 +201,7 @@ export function TraceSurface() {
         ? html`<div class="flex flex-col gap-3">
             ${snapshot.traces.events.map(event => html`<${TraceRow} event=${event} />`)}
           </div>`
-        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">최근 트레이스 이벤트가 없습니다.</div>`}
+        : html`<div class="empty-state">최근 트레이스 이벤트가 없습니다.</div>`}
     </section>
   `
 }

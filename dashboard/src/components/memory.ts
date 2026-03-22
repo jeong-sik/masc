@@ -221,26 +221,26 @@ function MemorySummary() {
   const grouped = splitVisiblePosts(boardPosts.value)
   const visibleCount = grouped.human.length + grouped.operations.length
   return html`
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2.5 mb-3">
-      <div class="board-summary-item flex flex-col gap-1">
-        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">보이는 글</span>
-        <strong>${visibleCount}</strong>
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-4 mb-4">
+      <div class="flex flex-col gap-1 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <span class="text-xs text-[var(--text-muted)] tracking-wider uppercase font-medium">보이는 글</span>
+        <strong class="text-lg font-semibold text-[var(--text-strong)]">${visibleCount}</strong>
       </div>
-      <div class="board-summary-item flex flex-col gap-1">
-        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">정렬</span>
-        <strong>${sortLabel}</strong>
+      <div class="flex flex-col gap-1 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <span class="text-xs text-[var(--text-muted)] tracking-wider uppercase font-medium">정렬</span>
+        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${sortLabel}</strong>
       </div>
-      <div class="board-summary-item flex flex-col gap-1">
-        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">잡음 필터</span>
-        <strong>${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 숨김` : '분리된 레인 표시'}</strong>
+      <div class="flex flex-col gap-1 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <span class="text-xs text-[var(--text-muted)] tracking-wider uppercase font-medium">잡음 필터</span>
+        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 숨김` : '분리된 레인 표시'}</strong>
       </div>
-      <div class="board-summary-item flex flex-col gap-1">
-        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">시스템 글 정책</span>
-        <strong>${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 레인 표시'}</strong>
+      <div class="flex flex-col gap-1 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <span class="text-xs text-[var(--text-muted)] tracking-wider uppercase font-medium">시스템 글 정책</span>
+        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 레인 표시'}</strong>
       </div>
-      <div class="board-summary-item flex flex-col gap-1">
-        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">최근 갱신</span>
-        <strong>${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : '아직 불러오지 않음'}</strong>
+      <div class="flex flex-col gap-1 p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)]">
+        <span class="text-xs text-[var(--text-muted)] tracking-wider uppercase font-medium">최근 갱신</span>
+        <strong class="text-[13px] font-semibold text-[var(--text-strong)]">${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : '아직 불러오지 않음'}</strong>
       </div>
     </div>
   `
@@ -258,7 +258,7 @@ function PostCard({ post }: { post: BoardPost }) {
   }
 
   return html`
-    <div class="board-post rounded-xl" onClick=${() => navigateToPost(post.id)}>
+    <div class="board-post rounded-xl p-4 border border-[var(--card-border)] bg-[var(--card)] hover:border-[var(--accent)]/30 transition-colors" onClick=${() => navigateToPost(post.id)}>
       <div class="vote-column">
         <button class="vote-btn upvote" onClick=${(event: Event) => handleVote('up', event)}>▲</button>
         <span class="vote-count">${post.votes ?? 0}</span>
@@ -267,15 +267,15 @@ function PostCard({ post }: { post: BoardPost }) {
       <div class="post-content">
         <div class="grid gap-2">
             <div class="post-title-row">
-              <div class="text-[#e8f0ff]">${post.title}</div>
-              <div class="post-chip-row">
-                ${isUpdated(post) ? html`<span class="board-meta-chip rounded-full">수정됨</span>` : null}
-                ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip rounded-full">${boardPostKind(post)}</span>` : null}
-                ${post.hearth ? html`<span class="board-meta-chip rounded-full">${post.hearth}</span>` : null}
-                ${post.visibility ? html`<span class="board-meta-chip rounded-full">${post.visibility}</span>` : null}
+              <div class="text-sm font-medium text-[var(--text-strong)]">${post.title}</div>
+              <div class="post-chip-row flex gap-1.5 flex-wrap">
+                ${isUpdated(post) ? html`<span class="status-badge">수정됨</span>` : null}
+                ${boardPostKind(post) !== 'human' ? html`<span class="status-badge">${boardPostKind(post)}</span>` : null}
+                ${post.hearth ? html`<span class="status-badge">${post.hearth}</span>` : null}
+                ${post.visibility ? html`<span class="status-badge">${post.visibility}</span>` : null}
               </div>
             </div>
-          <div class="flex gap-2.5 items-center flex-wrap text-[length:var(--fs-xs)] text-[#90a4cc]">
+          <div class="flex gap-2.5 items-center flex-wrap text-xs text-[var(--text-muted)]">
             <span>작성자 <a class="author-link cursor-pointer underline" onClick=${(e: Event) => { e.stopPropagation(); navigate('status', { section: 'agents', agent: post.author }) }}>${post.author}</a></span>
             <span><${TimeAgo} timestamp=${post.created_at} /></span>
             ${isUpdated(post) ? html`<span>수정 <${TimeAgo} timestamp=${post.updated_at} /></span>` : null}
@@ -283,7 +283,7 @@ function PostCard({ post }: { post: BoardPost }) {
             <span>투표 ${post.votes ?? 0}</span>
           </div>
         </div>
-        <div class="text-[color:var(--text-body)] text-[length:var(--fs-base)] leading-[1.6]">${previewText(stripStateBlocks(post.body))}</div>
+        <div class="text-[13px] text-[var(--text-body)] leading-[1.6] mt-2">${previewText(stripStateBlocks(post.body))}</div>
       </div>
     </div>
   `
@@ -319,7 +319,7 @@ function CommentItem({ comment }: { comment: BoardComment }) {
 }
 
 function CommentThread({ comments }: { comments: BoardComment[] }) {
-  if (comments.length === 0) return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)] text-[13px]">아직 댓글이 없습니다</div>`
+  if (comments.length === 0) return html`<div class="empty-state">아직 댓글이 없습니다</div>`
 
   return html`
     <div class="comment-thread flex flex-col gap-2">
@@ -369,23 +369,23 @@ function PostDetail({ post }: { post: BoardPost }) {
 
   return html`
     <div>
-      <button class="mb-3 border border-[var(--border-slate-30)] px-3 py-[7px] text-[length:var(--fs-sm)] text-[#bdd8ff] bg-[var(--white-3)] cursor-pointer hover:bg-[var(--white-10)] rounded-lg" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
+      <button class="control-btn ghost mb-4" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
       <${Card} title=${post.title}>
-        <div class="board-detail p-5">
-          <div class="post-body">
+        <div class="board-detail">
+          <div class="post-body text-[13px] text-[var(--text-body)] leading-[1.6]">
             <${Markdown} text=${stripStateBlocks(post.body)} />
           </div>
-          <div class="flex gap-2.5 items-center flex-wrap mt-3 text-[length:var(--fs-xs)] text-[#90a4cc]">
+          <div class="flex gap-2.5 items-center flex-wrap mt-4 text-xs text-[var(--text-muted)]">
             <span><a class="author-link cursor-pointer underline" onClick=${() => navigate('status', { section: 'agents', agent: post.author })}>${post.author}</a></span>
             <${TimeAgo} timestamp=${post.created_at} />
             <span>${post.votes ?? 0} votes</span>
           </div>
           ${(post.hearth || post.visibility || post.expires_at)
             ? html`
-                <div class="post-chip-row mt-2">
-                  ${post.hearth ? html`<span class="board-meta-chip rounded-full">${post.hearth}</span>` : null}
-                  ${post.visibility ? html`<span class="board-meta-chip rounded-full">${post.visibility}</span>` : null}
-                  ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip rounded-full">${boardPostKind(post)}</span>` : null}
+                <div class="flex gap-1.5 flex-wrap mt-3">
+                  ${post.hearth ? html`<span class="status-badge">${post.hearth}</span>` : null}
+                  ${post.visibility ? html`<span class="status-badge">${post.visibility}</span>` : null}
+                  ${boardPostKind(post) !== 'human' ? html`<span class="status-badge">${boardPostKind(post)}</span>` : null}
                   ${expiryChip(post)}
                 </div>
               `
@@ -412,7 +412,7 @@ function PostDetail({ post }: { post: BoardPost }) {
 
       <${Card} title="댓글">
         ${detailLoading.value
-          ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">댓글 불러오는 중...</div>`
+          ? html`<div class="loading-state loading-pulse">댓글 불러오는 중...</div>`
           : html`<${CommentThread} comments=${detailComments.value} />`}
         <${CommentForm} postId=${post.id} />
       <//>
@@ -441,10 +441,10 @@ export function Memory() {
       : html`
           <div>
             <${MemorySummary} />
-            <button class="mb-3 border border-[var(--border-slate-30)] px-3 py-[7px] text-[length:var(--fs-sm)] text-[#bdd8ff] bg-[var(--white-3)] cursor-pointer hover:bg-[var(--white-10)] rounded-lg" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
+            <button class="control-btn ghost mb-4" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
             ${detailLoading.value
-              ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">글 불러오는 중...</div>`
-              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">글을 찾지 못했습니다</div>`}
+              ? html`<div class="loading-state loading-pulse">글 불러오는 중...</div>`
+              : html`<div class="empty-state">글을 찾지 못했습니다</div>`}
           </div>
         `
   }
@@ -454,18 +454,18 @@ export function Memory() {
       <${MemorySummary} />
       <${SortBar} />
       ${boardLoading.value
-        ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">메모리 피드 불러오는 중...</div>`
+        ? html`<div class="loading-state loading-pulse">메모리 피드 불러오는 중...</div>`
         : posts.length === 0
-          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다.</div>`
+          ? html`<div class="empty-state">아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다.</div>`
           : html`
-              <${Card} title="사람이 쓴 글" class="section mb-3.5">
-                <div class="board-post rounded-xl-list flex flex-col gap-2">
+              <${Card} title="사람이 쓴 글" class="mb-4">
+                <div class="flex flex-col gap-4">
                   ${grouped.human.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                 </div>
                 ${grouped.human.length > visibleLimit.value ? html`
-                  <div class="text-center py-3">
+                  <div class="text-center py-4">
                     <button
-                      class="control-btn rounded-lg ghost"
+                      class="control-btn ghost"
                       onClick=${() => { visibleLimit.value = visibleLimit.value + PAGE_SIZE }}
                     >
                       더 보기 (${grouped.human.length - visibleLimit.value}개 남음)
@@ -475,8 +475,8 @@ export function Memory() {
               <//>
               ${grouped.operations.length > 0
                 ? html`
-                    <${Card} title="자동화 · 시스템" class="section mb-3.5">
-                      <div class="board-post rounded-xl-list flex flex-col gap-2">
+                    <${Card} title="자동화 · 시스템" class="mb-4">
+                      <div class="flex flex-col gap-4">
                         ${grouped.operations.map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                       </div>
                     <//>

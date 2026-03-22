@@ -249,7 +249,7 @@ export function KeeperDetailOverlay() {
                     ${keeper.memory_recent_note}
                   </div>
                 `
-                : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)] text-xs">No recent memory note</div>`}
+                : html`<div class="empty-state">No recent memory note</div>`}
             </div>
           <//>
         </div>

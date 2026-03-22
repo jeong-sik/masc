@@ -27,7 +27,7 @@ const LazyLabSurface = lazy(async () => ({ default: (await import('./lab-unified
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
 function lazyTabFallback(label: string) {
-  return html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">${label} 불러오는 중...</div>`
+  return html`<div class="loading-state loading-pulse">${label} 불러오는 중...</div>`
 }
 
 function formatDisconnectDuration(): string {
@@ -222,7 +222,7 @@ export function TabContent() {
 
 export function DashboardMain() {
   if (dashboardLoading.value && !connected.value && !roomTruthInitializing.value) {
-    return html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">대시보드 불러오는 중...</div>`
+    return html`<div class="loading-state loading-pulse">대시보드 불러오는 중...</div>`
   }
 
   const routeLabel = [

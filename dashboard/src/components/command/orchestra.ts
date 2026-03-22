@@ -215,13 +215,13 @@ export function OrchestraSurface() {
   }, [])
 
   if (commandPlaneOrchestraLoading.value && !orchestra) {
-    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">오케스트라 맵 불러오는 중…</div></section>`
+    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state">오케스트라 맵 불러오는 중…</div></section>`
   }
   if (commandPlaneOrchestraError.value) {
-    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneOrchestraError.value}</div></section>`
+    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state error">${commandPlaneOrchestraError.value}</div></section>`
   }
   if (!orchestra) {
-    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">오케스트라 맵 데이터가 아직 없습니다.</div></section>`
+    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state">오케스트라 맵 데이터가 아직 없습니다.</div></section>`
   }
 
   const density = orchestraDensity.value

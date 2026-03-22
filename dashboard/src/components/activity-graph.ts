@@ -116,7 +116,7 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 
 function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
   if (events.length === 0) {
-    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">최근 실행 이벤트가 없습니다.</div>`
+    return html`<div class="empty-state">최근 실행 이벤트가 없습니다.</div>`
   }
   return html`
     <div class="flex flex-col gap-2.5">
@@ -153,7 +153,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
     .slice(0, 15)
 
   if (agentNodes.length === 0) {
-    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">활동 집계에 포함된 에이전트가 없습니다.</div>`
+    return html`<div class="empty-state">활동 집계에 포함된 에이전트가 없습니다.</div>`
   }
 
   const maxWeight = agentNodes[0]?.weight ?? 1
@@ -188,7 +188,7 @@ function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1])
 
   if (sorted.length === 0) {
-    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">분석할 노드 종류가 없습니다.</div>`
+    return html`<div class="empty-state">분석할 노드 종류가 없습니다.</div>`
   }
 
   return html`
@@ -211,7 +211,7 @@ function EmptyActivityGraph() {
           <h2 class="monitor-headline">활동 그래프가 비어 있습니다</h2>
           <p class="monitor-subheadline">이 뷰는 런타임 실행 이벤트를 읽어 그래프를 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
         </div>
-        <div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">
+        <div class="empty-state">
           아직 claim, broadcast, team-session, board 같은 실행 이벤트가 activity feed에 기록되지 않았습니다.
         </div>
       <//>
@@ -229,14 +229,14 @@ export function ActivityGraphSurface() {
   const loading = graphLoading.value
 
   if (loading && !data) {
-    return html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">활동 그래프 불러오는 중...</div>`
+    return html`<div class="loading-state loading-pulse">활동 그래프 불러오는 중...</div>`
   }
 
   if (error && !data) {
     return html`
       <div class="flex flex-col gap-5">
         <${Card} title="오류" class="section mb-3.5" testId="activity_graph.error">
-          <div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">활동 그래프를 불러올 수 없습니다: ${error}</div>
+          <div class="empty-state">활동 그래프를 불러올 수 없습니다: ${error}</div>
           <button class="control-btn rounded-lg ghost" onClick=${loadGraph}>다시 시도</button>
         <//>
       </div>
@@ -244,7 +244,7 @@ export function ActivityGraphSurface() {
   }
 
   if (!data) {
-    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">활동 데이터가 없습니다.</div>`
+    return html`<div class="empty-state">활동 데이터가 없습니다.</div>`
   }
 
   if ((data.stats.event_count ?? 0) === 0) {

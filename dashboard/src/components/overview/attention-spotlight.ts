@@ -73,28 +73,26 @@ export function AttentionSpotlight({ snap }: AttentionSpotlightProps) {
   if (items.length === 0) return null
 
   return html`
-    <div class="flex flex-col gap-1">
+    <div class="flex flex-col gap-2">
       <div class="flex items-start justify-between mb-1 gap-3">
         <div>
-          <span class="text-text-muted text-xs tracking-[0.06em] uppercase">주의 항목</span>
-          <div class="mt-[3px] text-text-muted text-sm leading-[1.45]">지금 바로 확인할 blocker와 attention 신호만 상단에 압축합니다.</div>
-        </div>
-        <div class="inline-flex items-center gap-2 flex-wrap justify-end">
+          <span class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">주의 항목</span>
+          <div class="mt-1 text-[13px] text-[var(--text-muted)] leading-[1.45]">지금 바로 확인할 blocker와 attention 신호만 상단에 압축합니다.</div>
         </div>
       </div>
       ${items.map(item => html`
-        <div class="attention-spotlight__card ${toneClass(item.severity)}" key=${item.id}>
+        <div class="attention-spotlight__card ${toneClass(item.severity)} rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex overflow-hidden" key=${item.id}>
           <div class="w-1 shrink-0 attention-spotlight__bar" />
-          <div class="grid gap-1.5 p-[10px_14px] min-w-0">
-            <span class="text-text-strong text-base font-medium leading-[1.4]">
+          <div class="grid gap-1.5 p-4 min-w-0">
+            <span class="text-sm font-medium text-[var(--text-strong)] leading-[1.4]">
               ${trimText(item.summary, 100)}
             </span>
             <div class="flex gap-1.5 flex-wrap items-center">
               ${item.relatedNames.map(name => html`
-                <span class="py-0.5 px-2 bg-[var(--white-6)] border border-[var(--white-8)] text-[length:var(--fs-xs)] text-[color:var(--warm-amber,#f5c542)] font-medium rounded-full" key=${name}>${name}</span>
+                <span class="status-badge" key=${name}>${name}</span>
               `)}
               ${item.lastSeen ? html`
-                <span class="text-text-muted text-xs">${relativeTime(item.lastSeen)}</span>
+                <span class="text-xs text-[var(--text-muted)]">${relativeTime(item.lastSeen)}</span>
               ` : null}
             </div>
           </div>

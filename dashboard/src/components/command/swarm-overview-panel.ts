@@ -52,7 +52,7 @@ export function SwarmOverviewPanel() {
               <div class="cmd-card rounded-xl-stack">
                 ${lanes.length > 0
                   ? lanes.map(lane => html`<${SwarmLaneStrip} lane=${lane} />`)
-                  : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">활성 스웜 레인이 없습니다.</div>`}
+                  : html`<div class="empty-state">활성 스웜 레인이 없습니다.</div>`}
               </div>
 
               <div class="cmd-card rounded-xl-stack">
@@ -89,7 +89,7 @@ export function SwarmOverviewPanel() {
               </div>
             </div>
           `
-        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">스웜 상태를 아직 불러오지 못했습니다.</div>`}
+        : html`<div class="empty-state">스웜 상태를 아직 불러오지 못했습니다.</div>`}
     </section>
   `
 }

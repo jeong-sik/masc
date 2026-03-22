@@ -295,7 +295,7 @@ export function TrpgStats({ stats }: { stats: TrpgCharacterStats }) {
 }
 
 export function EquipmentList({ items }: { items: string[] }) {
-  if (items.length === 0) return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)] text-[13px]">장비 없음</div>`
+  if (items.length === 0) return html`<div class="empty-state">장비 없음</div>`
 
   return html`
     <div class="flex flex-col gap-1.5">
@@ -311,7 +311,7 @@ export function EquipmentList({ items }: { items: string[] }) {
 
 export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   const entries = Object.entries(rels)
-  if (entries.length === 0) return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)] text-[13px]">관계 없음</div>`
+  if (entries.length === 0) return html`<div class="empty-state">관계 없음</div>`
 
   return html`
     <div class="max-h-[220px] overflow-y-auto flex flex-col gap-1.5">

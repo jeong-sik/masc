@@ -241,19 +241,30 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
   let shell_ref = ref (`Assoc []) in
   let execution_ref = ref (`Assoc []) in
   let command_ref = ref (`Assoc []) in
+  let fiber_with_timeout label f fallback =
+    try
+      match Eio.Time.with_timeout clock 5.0 (fun () -> Ok (f ())) with
+      | Ok v -> v
+      | Error `Timeout ->
+        Log.Dashboard.warn "room-truth fiber %s timed out (5s)" label;
+        fallback
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      Log.Dashboard.warn "room-truth fiber %s failed: %s" label (Printexc.to_string exn);
+      fallback
+  in
   Eio.Fiber.all [
-    (fun () -> shell_ref := dashboard_shell_http_json config);
-    (fun () -> execution_ref := dashboard_execution_http_json ~state ~sw ~clock request);
+    (fun () -> shell_ref := fiber_with_timeout "shell"
+      (fun () -> dashboard_shell_http_json config) (`Assoc []));
+    (fun () -> execution_ref := fiber_with_timeout "execution"
+      (fun () -> dashboard_execution_http_json ~state ~sw ~clock request) (`Assoc []));
     (fun () ->
-      command_ref :=
-        if Room.is_initialized config then
-          (try
-            Dashboard_cache.get_or_compute "command_summary" ~ttl:3.0 (fun () ->
+      command_ref := fiber_with_timeout "command"
+        (fun () ->
+          if Room.is_initialized config then
+            Dashboard_cache.get_or_compute "command_summary" ~ttl:15.0 (fun () ->
               Server_command_plane_http.command_plane_summary_http_json ~state)
-          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            Log.Dashboard.warn "command_plane_summary: %s" (Printexc.to_string exn);
-            `Assoc [])
-        else `Assoc []);
+          else `Assoc [])
+        (`Assoc []));
   ];
   let shell_json = !shell_ref in
   let execution_json = !execution_ref in
@@ -278,7 +289,8 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
         ("attention_summary", `Assoc [ ("count", `Int (if has_warn then 1 else 0)); ("provenance", `String "derived") ]);
         ("recommendation_summary", `Assoc [ ("count", `Int 0); ("provenance", `String "derived") ]);
         ("pending_confirm_summary",
-          Operator_control.pending_confirm_summary_json config);
+          Dashboard_cache.get_or_compute "pending_confirm_summary" ~ttl:10.0 (fun () ->
+            Operator_control.pending_confirm_summary_json config));
       ]
   in
   let execution_queue =
@@ -286,15 +298,16 @@ let dashboard_room_truth_http_json ~state ~sw ~clock request =
     | `List items -> items
     | _ -> []
   in
-  let execution_session_briefs = json_list_field "session_briefs" execution_json in
-  let execution_operation_briefs = json_list_field "operation_briefs" execution_json in
+  let take_n n lst = if List.length lst <= n then lst else List.filteri (fun i _ -> i < n) lst in
+  let execution_session_briefs = json_list_field "session_briefs" execution_json |> take_n 20 in
+  let execution_operation_briefs = json_list_field "operation_briefs" execution_json |> take_n 20 in
   let execution_worker_support =
-    json_list_field "worker_support_briefs" execution_json
+    json_list_field "worker_support_briefs" execution_json |> take_n 10
   in
   let execution_continuity =
-    json_list_field "continuity_briefs" execution_json
+    json_list_field "continuity_briefs" execution_json |> take_n 10
   in
-  let execution_keepers = json_list_field "keepers" execution_json in
+  let execution_keepers = json_list_field "keepers" execution_json |> take_n 20 in
   let top_queue =
     match execution_queue with
     | head :: _ -> head

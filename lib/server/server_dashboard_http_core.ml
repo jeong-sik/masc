@@ -590,7 +590,7 @@ let provider_capacity_json () : Yojson.Safe.t =
   `Assoc []
 
 let dashboard_shell_http_json (config : Room.config) : Yojson.Safe.t =
-  Dashboard_cache.get_or_compute "shell" ~ttl:2.0 (fun () ->
+  Dashboard_cache.get_or_compute "shell" ~ttl:15.0 (fun () ->
     let agents = dashboard_agents_safe config in
   let tasks = dashboard_tasks_safe config in
   let keepers_json = keepers_dashboard_json ~compact:true config in

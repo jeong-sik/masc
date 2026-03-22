@@ -17,17 +17,55 @@
 .agent-runtime-ctx-fill.bad { background: var(--bad-light); }
 
 /* ── Live Timeline ─────────────────────────────────────────── */
+.agent-live-filter-bar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .agent-live-chip {
+  padding: 3px 10px;
+  font-size: var(--fs-xs);
+  border: 1px solid var(--white-10);
+  background: var(--white-4);
+  color: var(--text-dim);
+  cursor: pointer;
   transition: all 0.15s;
 }
 
 .agent-live-chip:hover {
   border-color: rgba(200, 168, 78, 0.6);
-  color: var(--text-body, var(--text-body));
+  background: var(--white-8);
+  color: var(--text-body);
+}
+
+.agent-live-chip--active {
+  border-color: rgba(200, 168, 78, 0.5);
+  background: rgba(200, 168, 78, 0.12);
+  color: var(--ff-gold-bright, #e8d48b);
 }
 
 .agent-live-autoscroll {
+  padding: 2px 8px;
+  font-size: var(--fs-2xs);
+  border: 1px solid var(--white-10);
+  background: var(--white-4);
+  color: var(--text-dim);
+  cursor: pointer;
   transition: all 0.15s;
+}
+
+.agent-live-autoscroll--on {
+  border-color: rgba(34, 197, 94, 0.4);
+  color: var(--ok);
+}
+
+.agent-event-rate {
+  padding: 2px 8px;
+  font-size: var(--fs-2xs);
+  background: var(--white-4);
+  border: 1px solid var(--white-8);
+  color: var(--text-muted);
 }
 
 /* Event kind badge variants */

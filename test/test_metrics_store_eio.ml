@@ -185,7 +185,8 @@ let test_generate_id () =
   print_endline "✓ test_generate_id passed"
 
 let () =
-  print_endline "\n=== Metrics_store_eio Tests (Pure Sync) ===\n";
+  Eio_main.run @@ fun _env ->
+  print_endline "\n=== Metrics_store_eio Tests ===\n";
   test_create_metric ();
   test_complete_metric ();
   test_record_and_get ();

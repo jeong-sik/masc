@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/empty-state'
 import type {
   CommandPlaneChainOverlay,
   CommandPlaneSwarmBlocker,
@@ -103,7 +104,7 @@ export function WarRoomBodyGrid({
                     </div>
                   </article>
                 `
-              : html`<div class="empty-state">보이는 레인이 아직 없습니다.</div>`}
+              : html`<${EmptyState} message="보이는 레인이 아직 없습니다." compact />`}
         </section>
 
         <section class="card rounded-xl min-h-[240px]">
@@ -121,7 +122,7 @@ export function WarRoomBodyGrid({
             ? html`<div class="cmd-card rounded-xl-stack">
                 ${workers.map(worker => html`<${WarRoomWorkerCard} worker=${worker} />`)}
               </div>`
-            : html`<div class="empty-state">활성 워커 카드가 아직 없습니다.</div>`}
+            : html`<${EmptyState} message="활성 워커 카드가 아직 없습니다." compact />`}
         </section>
       </div>
 
@@ -134,7 +135,7 @@ export function WarRoomBodyGrid({
             ? html`<div class="flex flex-col gap-3">
                 ${feedItems.map(item => html`<${WarRoomFeedCard} item=${item} />`)}
               </div>`
-            : html`<div class="empty-state">메시지, chain, autoresearch, attention feed가 아직 없습니다.</div>`}
+            : html`<${EmptyState} message="메시지, chain, autoresearch, attention feed가 아직 없습니다." compact />`}
         </section>
 
         <section class="card rounded-xl min-h-[240px]">
@@ -145,7 +146,7 @@ export function WarRoomBodyGrid({
             ? html`<div class="flex flex-col gap-3">
                 ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
               </div>`
-            : html`<div class="empty-state">실행 범위 트레이스 이벤트가 아직 없습니다.</div>`}
+            : html`<${EmptyState} message="실행 범위 트레이스 이벤트가 아직 없습니다." compact />`}
         </section>
       </div>
 
@@ -158,7 +159,7 @@ export function WarRoomBodyGrid({
             ? html`<div class="grid grid-cols-1 gap-3">
                 ${agentViews.map(item => html`<${WarRoomPresenceCard} item=${item} />`)}
               </div>`
-            : html`<div class="empty-state">가시적인 active agent가 아직 없습니다.</div>`}
+            : html`<${EmptyState} message="가시적인 active agent가 아직 없습니다." compact />`}
         </section>
 
         <section class="card rounded-xl min-h-[240px]">
@@ -169,7 +170,7 @@ export function WarRoomBodyGrid({
             ? html`<div class="grid grid-cols-1 gap-3">
                 ${keeperViews.map(item => html`<${WarRoomPresenceCard} item=${item} />`)}
               </div>`
-            : html`<div class="empty-state">가시적인 keeper/runtime 카드가 아직 없습니다.</div>`}
+            : html`<${EmptyState} message="가시적인 keeper/runtime 카드가 아직 없습니다." compact />`}
         </section>
 
         <section class="card rounded-xl min-h-[240px]">

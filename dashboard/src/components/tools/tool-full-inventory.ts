@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback } from 'preact/hooks'
 import { VirtualList } from '../common/virtual-list'
+import { EmptyState } from '../common/empty-state'
 import { route } from '../../router'
 import type { DashboardToolInventoryItem } from '../../api'
 import { InventoryRow } from './tool-inventory-row'
@@ -201,7 +202,7 @@ export function FullInventoryView({
             getKey=${(item: DashboardToolInventoryItem) => item.name}
             className="flex flex-col gap-3"
           />`
-        : html`<div class="empty-state">조건에 맞는 도구가 없습니다.</div>`}
+        : html`<${EmptyState} message="조건에 맞는 도구가 없습니다." compact />`}
     </div>
 
     <button

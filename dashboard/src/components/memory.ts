@@ -5,6 +5,7 @@ import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { showToast } from './common/toast'
+import { EmptyState } from './common/empty-state'
 import { stripStateBlocks } from '../keeper-message'
 import {
   boardPosts,
@@ -446,7 +447,7 @@ function CommentItem({ comment }: { comment: BoardComment }) {
 }
 
 function CommentThread({ comments }: { comments: BoardComment[] }) {
-  if (comments.length === 0) return html`<div class="empty-state text-[13px] text-[var(--text-muted)]">아직 댓글이 없습니다</div>`
+  if (comments.length === 0) return html`<${EmptyState} message="아직 댓글이 없습니다" compact />`
 
   const INITIAL_SHOW = 3
   const [expanded, setExpanded] = useState(false)
@@ -614,7 +615,7 @@ export function Memory() {
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
               ? html`<div class="loading-state loading-pulse">글 불러오는 중...</div>`
-              : html`<div class="empty-state">글을 찾지 못했습니다</div>`}
+              : html`<${EmptyState} message="글을 찾지 못했습니다" compact />`}
           </div>
         `
   }
@@ -629,7 +630,7 @@ export function Memory() {
       ${boardLoading.value
         ? html`<div class="loading-state loading-pulse">메모리 피드 불러오는 중...</div>`
         : posts.length === 0
-          ? html`<div class="empty-state">아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다.</div>`
+          ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
           : html`
               <${Card} title="사람이 쓴 글" class="mb-4">
                 <div class="flex flex-col gap-2">

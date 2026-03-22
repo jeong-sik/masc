@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { Card } from '../common/card'
 import { StatusBadge } from '../common/status-badge'
 import { TimeAgo } from '../common/time-ago'
+import { FilterChips } from '../common/filter-chips'
 import { goals } from '../../store'
 import type { Goal } from '../../types'
 import {
@@ -59,29 +60,22 @@ export function HorizonGroup({ horizon, items }: { horizon: string; items: Goal[
 }
 
 export function FilterBar() {
+  const horizonChips = (['all', 'short', 'mid', 'long'] as HorizonFilter[]).map(h => ({
+    key: h, label: h === 'all' ? '전체' : horizonLabel(h),
+  }))
+  const statusChips = (['all', 'active', 'completed', 'paused'] as StatusFilter[]).map(s => ({
+    key: s, label: statusFilterLabel(s),
+  }))
+
   return html`
     <div class="flex gap-4 flex-wrap mt-3">
-      <div class="flex items-center gap-1">
-        <label class="text-[length:var(--fs-xs)] text-[color:var(--text-dim)] mr-1">범위</label>
-        ${(['all', 'short', 'mid', 'long'] as HorizonFilter[]).map(h => html`
-          <button
-            class="goal-filter-btn rounded-xl ${horizonFilter.value === h ? 'active' : ''}"
-            onClick=${() => { horizonFilter.value = h }}
-          >
-            ${h === 'all' ? '전체' : horizonLabel(h)}
-          </button>
-        `)}
+      <div class="flex items-center gap-1.5">
+        <label class="text-[length:var(--fs-xs)] text-[color:var(--text-dim)]">범위</label>
+        <${FilterChips} chips=${horizonChips} active=${horizonFilter} />
       </div>
-      <div class="flex items-center gap-1">
-        <label class="text-[length:var(--fs-xs)] text-[color:var(--text-dim)] mr-1">상태</label>
-        ${(['all', 'active', 'completed', 'paused'] as StatusFilter[]).map(s => html`
-          <button
-            class="goal-filter-btn rounded-xl ${statusFilter.value === s ? 'active' : ''}"
-            onClick=${() => { statusFilter.value = s }}
-          >
-            ${statusFilterLabel(s)}
-          </button>
-        `)}
+      <div class="flex items-center gap-1.5">
+        <label class="text-[length:var(--fs-xs)] text-[color:var(--text-dim)]">상태</label>
+        <${FilterChips} chips=${statusChips} active=${statusFilter} />
       </div>
     </div>
   `

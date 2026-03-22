@@ -1,6 +1,7 @@
 // 실행 표면 — 세션 카드 및 본문
 
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/empty-state'
 import { TimeAgo } from '../common/time-ago'
 import type { DashboardExecutionSessionBrief } from '../../types'
 import {
@@ -69,7 +70,7 @@ export function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecu
     <div class="flex flex-col gap-2.5">
       ${hasActive
         ? activeSessions.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)
-        : html`<div class="empty-state">${hasTerminal ? '진행 중인 세션이 없습니다.' : '선택된 실행과 연결된 세션이 없습니다.'}</div>`}
+        : html`<${EmptyState} message=${hasTerminal ? '진행 중인 세션이 없습니다.' : '선택된 실행과 연결된 세션이 없습니다.'} compact />`}
     </div>
     ${hasTerminal
       ? html`

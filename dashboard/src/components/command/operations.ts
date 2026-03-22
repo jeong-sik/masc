@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/empty-state'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type {
   ChainHistoryEventSummary,
@@ -101,7 +102,7 @@ function MermaidGraph({ source }: { source: string }) {
 
   return html`
     <div class="mt-3 min-h-[160px]">
-      ${error ? html`<div class="empty-state error">${error}</div>` : null}
+      ${error ? html`<${EmptyState} message=${error} compact />` : null}
       <div class="overflow-auto rounded-[10px] p-3 bg-[rgba(9,12,20,0.7)] cmd-chain-graph" ref=${hostRef}></div>
     </div>
   `
@@ -292,7 +293,7 @@ export function OperationsSurface() {
           ? html`<div class="cmd-card rounded-xl-stack">
               ${snapshot.operations.operations.map(card => html`<${OperationCard} card=${card} />`)}
             </div>`
-          : html`<div class="empty-state">관리형 또는 투영된 작전이 없습니다.</div>`}
+          : html`<${EmptyState} message="관리형 또는 투영된 작전이 없습니다." compact />`}
       </section>
       <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
         <div class="pb-2 border-b border-[var(--card-border)] mb-3">
@@ -302,7 +303,7 @@ export function OperationsSurface() {
           ? html`<div class="cmd-card rounded-xl-stack">
               ${snapshot.detachments.detachments.map(card => html`<${DetachmentCard} card=${card} />`)}
             </div>`
-          : html`<div class="empty-state">투영된 분견대가 없습니다.</div>`}
+          : html`<${EmptyState} message="투영된 분견대가 없습니다." compact />`}
       </section>
     </div>
   `
@@ -350,11 +351,11 @@ export function ChainsSurface() {
         </article>
 
         ${commandPlaneChainError.value
-          ? html`<div class="empty-state error">${commandPlaneChainError.value}</div>`
+          ? html`<${EmptyState} message=${commandPlaneChainError.value} compact />`
           : null}
 
         ${commandPlaneChainLoading.value && !summary
-          ? html`<div class="empty-state">체인 오버레이 불러오는 중…</div>`
+          ? html`<${EmptyState} message="체인 오버레이 불러오는 중…" compact />`
           : overlays.length > 0
             ? html`
                 <div class="flex flex-col gap-3 mt-3.5">
@@ -367,7 +368,7 @@ export function ChainsSurface() {
                   `)}
                 </div>
               `
-            : html`<div class="empty-state">체인 기반 작전이 아직 없습니다.</div>`}
+            : html`<${EmptyState} message="체인 기반 작전이 아직 없습니다." compact />`}
 
         <div class="flex flex-col gap-3 mt-3.5">
           <div class="flex justify-between gap-2.5 items-start">
@@ -380,7 +381,7 @@ export function ChainsSurface() {
                   ${summary.recent_history.slice(0, 6).map(item => html`<${ChainHistoryRow} item=${item} />`)}
                 </div>
               `
-            : html`<div class="empty-state">최근 체인 이력이 없습니다.</div>`}
+            : html`<${EmptyState} message="최근 체인 이력이 없습니다." compact />`}
         </div>
       </section>
 
@@ -423,7 +424,7 @@ export function ChainsSurface() {
                       <${MermaidGraph} source=${selectedOverlay.mermaid} />
                     </div>
                   `
-                : html`<div class="empty-state">기록된 Mermaid 그래프가 아직 없습니다.</div>`}
+                : html`<${EmptyState} message="기록된 Mermaid 그래프가 아직 없습니다." compact />`}
 
               <div class="mt-3.5 p-3.5 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
                 <div class="flex justify-between gap-2.5 items-start">
@@ -435,9 +436,9 @@ export function ChainsSurface() {
                   </span>
                 </div>
                 ${commandPlaneChainRunLoading.value
-                  ? html`<div class="empty-state">실행 상세 불러오는 중…</div>`
+                  ? html`<${EmptyState} message="실행 상세 불러오는 중…" compact />`
                   : commandPlaneChainRunError.value
-                    ? html`<div class="empty-state error">${commandPlaneChainRunError.value}</div>`
+                    ? html`<${EmptyState} message=${commandPlaneChainRunError.value} compact />`
                     : run && run.nodes.length > 0
                       ? html`
                           <div class="cmd-card rounded-xl-grid">
@@ -453,10 +454,10 @@ export function ChainsSurface() {
                             ${run.nodes.map(node => html`<${ChainRunNodeRow} node=${node} />`)}
                           </div>
                         `
-                      : html`<div class="empty-state">이 작전의 run-store 상세는 아직 없습니다.</div>`}
+                      : html`<${EmptyState} message="이 작전의 run-store 상세는 아직 없습니다." compact />`}
               </div>
             `
-          : html`<div class="empty-state">그래프와 실행 상세를 보려면 체인 기반 작전을 고르세요.</div>`}
+          : html`<${EmptyState} message="그래프와 실행 상세를 보려면 체인 기반 작전을 고르세요." compact />`}
       </section>
     </div>
   `

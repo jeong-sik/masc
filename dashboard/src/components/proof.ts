@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
+import { EmptyState } from './common/empty-state'
 import { route } from '../router'
 import { proofError, proofLoading, proofSnapshot, refreshProofSnapshot } from '../proof-store'
 import type {
@@ -232,7 +233,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${dedupedTimeline.length > 0
               ? dedupedTimeline.slice(0, 18).map(item => html`<${TimelineRow} key=${item.id} item=${item} />`)
-              : html`<div class="empty-state">타임라인 근거가 없습니다. 에이전트 협업이 진행되면 세션과 지휘 이벤트가 여기에 나타납니다.</div>`}
+              : html`<${EmptyState} message="타임라인 근거가 없습니다. 에이전트 협업이 진행되면 세션과 지휘 이벤트가 여기에 나타납니다." compact />`}
           </div>
         <//>
 
@@ -244,7 +245,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${contributions.length > 0
               ? contributions.map(item => html`<${ActorContributionRow} key=${item.actor} item=${item} />`)
-              : html`<div class="empty-state">참여 흔적이 없습니다. 에이전트가 작업에 참여하면 턴, 도구 호출, 산출물이 기록됩니다.</div>`}
+              : html`<${EmptyState} message="참여 흔적이 없습니다. 에이전트가 작업에 참여하면 턴, 도구 호출, 산출물이 기록됩니다." compact />`}
           </div>
         <//>
       </div>
@@ -258,7 +259,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${toolEvidence.length > 0
               ? toolEvidence.map((item, idx) => html`<${ToolEvidenceRow} key=${`${item.actor ?? 'system'}-${idx}`} item=${item} />`)
-              : html`<div class="empty-state">도구 근거가 없습니다. 에이전트가 MCP 도구를 사용하면 호출 내역이 여기에 기록됩니다.</div>`}
+              : html`<${EmptyState} message="도구 근거가 없습니다. 에이전트가 MCP 도구를 사용하면 호출 내역이 여기에 기록됩니다." compact />`}
           </div>
         <//>
 
@@ -270,7 +271,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${workerRunEvidence.length > 0
               ? workerRunEvidence.map(item => html`<${WorkerRunEvidenceRow} key=${item.worker_run_id} item=${item} />`)
-              : html`<div class="empty-state">표시할 OAS worker evidence가 없습니다. raw trace 또는 summary-only evidence가 생기면 여기에 나타납니다.</div>`}
+              : html`<${EmptyState} message="표시할 OAS worker evidence가 없습니다. raw trace 또는 summary-only evidence가 생기면 여기에 나타납니다." compact />`}
           </div>
         <//>
       </div>
@@ -298,7 +299,7 @@ export function Proof() {
           <div class="flex flex-col gap-3">
             ${artifacts.length > 0
               ? artifacts.map(item => html`<${ArtifactRow} key=${item.path} item=${item} />`)
-              : html`<div class="empty-state">산출물이 없습니다. proof/report/session 파일이 생성되면 존재 여부가 표시됩니다.</div>`}
+              : html`<${EmptyState} message="산출물이 없습니다. proof/report/session 파일이 생성되면 존재 여부가 표시됩니다." compact />`}
           </div>
         <//>
       </div>

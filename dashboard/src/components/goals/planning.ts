@@ -1,6 +1,7 @@
 // Planning main component — orchestrates goals, MDAL, and kanban views
 
 import { html } from 'htm/preact'
+import { EmptyState } from '../common/empty-state'
 import {
   goals,
   goalsLoading,
@@ -88,16 +89,14 @@ export function Planning() {
             ${goalsLoading.value && goals.value.length === 0
               ? html`<div class="loading-state loading-pulse">목표 불러오는 중...</div>`
               : filteredGoals.value.length === 0
-                ? html`<div class="empty-state">현재 필터에 맞는 목표가 없습니다</div>`
+                ? html`<${EmptyState} message="현재 필터에 맞는 목표가 없습니다" compact />`
                 : html`
                     <${HorizonGroup} horizon="short" items=${grouped.short ?? []} />
                     <${HorizonGroup} horizon="mid" items=${grouped.mid ?? []} />
                     <${HorizonGroup} horizon="long" items=${grouped.long ?? []} />
                   `}
           ` : html`
-            <div class="empty-state">
-              장기 목표가 아직 없습니다. <code class="px-1 py-0.5 rounded bg-[var(--white-8)] text-[var(--text-body)] text-[11px]">masc_goal_upsert</code>로 단기/중기/장기 목표를 등록하면 메트릭 기반 추적이 시작됩니다.
-            </div>
+            <${EmptyState} message="장기 목표가 아직 없습니다. masc_goal_upsert로 등록하면 메트릭 기반 추적이 시작됩니다." />
           `}
         </div>
       </details>
@@ -112,9 +111,9 @@ export function Planning() {
           ${mdalLoading.value && loops.length === 0
             ? html`<div class="loading-state loading-pulse">MDAL 루프 불러오는 중...</div>`
             : loops.length === 0 && (mdalState === 'error' || lastMdalError.value)
-              ? html`<div class="empty-state">MDAL 스냅샷을 불러오지 못했습니다${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. 백엔드 상태를 확인하세요.</div>`
+              ? html`<${EmptyState} message="MDAL 스냅샷을 불러오지 못했습니다${lastMdalError.value ? `: ${lastMdalError.value}` : ''}. 백엔드 상태를 확인하세요." />`
               : loops.length === 0
-                ? html`<div class="empty-state">가동 중인 루프가 없습니다. <code class="px-1 py-0.5 rounded bg-[var(--white-8)] text-[var(--text-body)] text-[11px]">masc_mdal_start</code>로 시작할 수 있습니다.</div>`
+                ? html`<${EmptyState} message="가동 중인 루프가 없습니다. masc_mdal_start로 시작할 수 있습니다." />`
                 : html`
                   <div class="grid gap-3">
                     ${loops.map(loop => html`<${LoopRow} key=${loop.loop_id} loop=${loop} />`)}

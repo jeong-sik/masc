@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { Card } from './common/card'
+import { EmptyState } from './common/empty-state'
 import { navigate } from '../router'
 import {
   missionError,
@@ -38,10 +39,10 @@ export function Mission() {
     return html`<div class="loading-state loading-pulse">상황판 스냅샷 불러오는 중...</div>`
   }
   if (missionError.value && !mission) {
-    return html`<div class="empty-state error">${missionError.value}</div>`
+    return html`<${EmptyState} message=${missionError.value} compact />`
   }
   if (!mission) {
-    return html`<div class="empty-state">상황판 스냅샷이 아직 없습니다.</div>`
+    return html`<${EmptyState} message="상황판 스냅샷이 아직 없습니다." compact />`
   }
 
   const sessionRows = mission.sessions

@@ -17,6 +17,7 @@ let raw_schemas : tool_schema list =
   @ Tool_schemas_auth.schemas
   @ Tool_schemas_portal.schemas
   @ Tool_schemas_worktree.schemas
+  @ Tool_schemas_fire_task.schemas
   @ Tool_task.schemas
   @ Tool_suspend.schemas
   @ Tool_cost.schemas

@@ -126,6 +126,7 @@ let () =
   register_module_tag ~schemas:Tool_voice.schemas ~tag:Mod_voice;
   register_module_tag ~schemas:Tool_portal.schemas ~tag:Mod_portal;
   register_module_tag ~schemas:Tool_worktree.schemas ~tag:Mod_worktree;
+  register_module_tag ~schemas:Tool_fire_task.schemas ~tag:Mod_fire_task;
   register_module_tag ~schemas:Tool_code_swarm.schemas ~tag:Mod_code_swarm;
   register_module_tag ~schemas:Tool_goals.schemas ~tag:Mod_goals;
   register_module_tag ~schemas:Tool_auth.schemas ~tag:Mod_auth;

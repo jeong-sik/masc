@@ -447,6 +447,8 @@ let execute_tool_eio ~sw ~clock ?mcp_session_id ?auth_token state ~name ~argumen
         Tool_portal.dispatch { Tool_portal.config; agent_name } ~name ~args:arguments
     | Mod_worktree ->
         Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args:arguments
+    | Mod_fire_task ->
+        Tool_fire_task.dispatch { Tool_fire_task.config; agent_name; sw } ~name ~args:arguments
     | Mod_code_swarm ->
         Tool_code_swarm.dispatch { Tool_code_swarm.config; agent_name } ~name ~args:arguments
     | Mod_code ->

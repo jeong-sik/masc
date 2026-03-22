@@ -160,6 +160,7 @@ type module_tag =
   | Mod_autoresearch
   | Mod_model_catalog
   | Mod_shard
+  | Mod_fire_task
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
 let tag_registry_initialized = ref false

@@ -19,7 +19,7 @@ import {
 
 export function GoalRow({ goal }: { goal: Goal }) {
   return html`
-    <div class="goal-row">
+    <div class="goal-row rounded-lg">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <span class="goal-horizon-badge" style="color:${horizonColor(goal.horizon)}">
@@ -27,7 +27,7 @@ export function GoalRow({ goal }: { goal: Goal }) {
           </span>
           <span class="goal-title">${goal.title}</span>
         </div>
-        <div class="goal-meta">
+        <div class="flex gap-2.5 flex-wrap mt-1 text-[length:var(--fs-xs)] text-[var(--text-dim)]">
           <span class="text-amber-500 tracking-[1px]" title="Priority ${goal.priority}">${priorityStars(goal.priority)}</span>
           ${goal.metric ? html`<span class="text-cyan">${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}</span>` : null}
           ${goal.due_date ? html`<span class="text-[var(--bad-light)]">Due: <${TimeAgo} timestamp=${goal.due_date} /></span>` : null}
@@ -36,7 +36,7 @@ export function GoalRow({ goal }: { goal: Goal }) {
           <div class="goal-review-note">${goal.last_review_note}</div>
         ` : null}
       </div>
-      <div class="goal-row-right">
+      <div class="goal-row rounded-lg-right">
         <${StatusBadge} status=${goal.status} />
         <div class="goal-updated">
           <${TimeAgo} timestamp=${goal.updated_at} />
@@ -51,7 +51,7 @@ export function HorizonGroup({ horizon, items }: { horizon: string; items: Goal[
   const sorted = [...items].sort((a, b) => b.priority - a.priority)
   return html`
     <${Card} title="${horizonLabel(horizon)} 목표 (${items.length})" class="section mb-3.5">
-      <div class="goal-list">
+      <div class="flex flex-col gap-0.5">
         ${sorted.map(g => html`<${GoalRow} key=${g.id} goal=${g} />`)}
       </div>
     <//>
@@ -60,23 +60,23 @@ export function HorizonGroup({ horizon, items }: { horizon: string; items: Goal[
 
 export function FilterBar() {
   return html`
-    <div class="goal-filters">
-      <div class="goal-filter-group">
+    <div class="flex gap-4 flex-wrap mt-3">
+      <div class="flex items-center gap-1">
         <label class="goal-filter-label">범위</label>
         ${(['all', 'short', 'mid', 'long'] as HorizonFilter[]).map(h => html`
           <button
-            class="goal-filter-btn ${horizonFilter.value === h ? 'active' : ''}"
+            class="goal-filter-btn rounded-xl ${horizonFilter.value === h ? 'active' : ''}"
             onClick=${() => { horizonFilter.value = h }}
           >
             ${h === 'all' ? '전체' : horizonLabel(h)}
           </button>
         `)}
       </div>
-      <div class="goal-filter-group">
+      <div class="flex items-center gap-1">
         <label class="goal-filter-label">상태</label>
         ${(['all', 'active', 'completed', 'paused'] as StatusFilter[]).map(s => html`
           <button
-            class="goal-filter-btn ${statusFilter.value === s ? 'active' : ''}"
+            class="goal-filter-btn rounded-xl ${statusFilter.value === s ? 'active' : ''}"
             onClick=${() => { statusFilter.value = s }}
           >
             ${statusFilterLabel(s)}
@@ -97,27 +97,27 @@ export function GoalsSummary() {
   }
   return html`
     <div class="goal-summary">
-      <div class="goal-summary-item">
+      <div class="goal-summary-item rounded-lg">
         <div class="goal-summary-value">${all.length}</div>
         <div class="goal-summary-label">전체</div>
       </div>
-      <div class="goal-summary-item">
+      <div class="goal-summary-item rounded-lg">
         <div class="goal-summary-value" class="text-[var(--ok)]">${active}</div>
         <div class="goal-summary-label">진행 중</div>
       </div>
-      <div class="goal-summary-item">
+      <div class="goal-summary-item rounded-lg">
         <div class="goal-summary-value" class="text-[var(--text-dim)]">${completed}</div>
         <div class="goal-summary-label">완료</div>
       </div>
-      <div class="goal-summary-item">
+      <div class="goal-summary-item rounded-lg">
         <div class="goal-summary-value" style="color:${horizonColor('short')}">${byHorizon.short}</div>
         <div class="goal-summary-label">단기</div>
       </div>
-      <div class="goal-summary-item">
+      <div class="goal-summary-item rounded-lg">
         <div class="goal-summary-value" style="color:${horizonColor('mid')}">${byHorizon.mid}</div>
         <div class="goal-summary-label">중기</div>
       </div>
-      <div class="goal-summary-item">
+      <div class="goal-summary-item rounded-lg">
         <div class="goal-summary-value" style="color:${horizonColor('long')}">${byHorizon.long}</div>
         <div class="goal-summary-label">장기</div>
       </div>

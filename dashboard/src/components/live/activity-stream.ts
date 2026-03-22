@@ -26,7 +26,7 @@ function FilterBar() {
       ${FILTER_OPTIONS.map(opt => html`
         <button
           key=${opt.kind}
-          class="activity-filter-btn ${opt.cssClass} ${active.has(opt.kind) ? 'active' : ''}"
+          class="activity-filter-btn rounded-md ${opt.cssClass} ${active.has(opt.kind) ? 'active' : ''}"
           onClick=${() => toggleLiveFilter(opt.kind)}
         >
           ${opt.label}
@@ -40,7 +40,7 @@ export function ActivityStream() {
   const entries = filteredJournal.value
 
   return html`
-    <div class="activity-stream">
+    <div class="grid gap-2.5 grid-rows-[auto_auto_1fr] min-h-0">
       <div class="activity-stream-head">
         <h3>Activity Stream</h3>
         <span class="text-xs text-[rgba(255,255,255,0.4)]">${entries.length} events</span>
@@ -52,14 +52,14 @@ export function ActivityStream() {
           : entries.map((entry, i) => html`
             <div
               key=${`${entry.timestamp}-${i}`}
-              class="activity-item ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
+              class="activity-item rounded-lg ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
             >
-              <div class="activity-item-head">
-                <span class="activity-kind-chip ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
+              <div class="activity-item rounded-lg-head">
+                <span class="activity-kind-chip rounded ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
                 <span class="activity-agent">${entry.agent}</span>
                 <span class="activity-time">${formatTimeAgo(entry.timestamp)}</span>
               </div>
-              <div class="activity-item-text">${entry.text}</div>
+              <div class="activity-item rounded-lg-text">${entry.text}</div>
             </div>
           `)}
       </div>

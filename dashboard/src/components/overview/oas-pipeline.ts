@@ -47,12 +47,12 @@ function OasKeeperBars() {
   const entries = [...snapshots.values()].sort((a, b) => b.timestamp - a.timestamp)
 
   return html`
-    <div class="oas-keeper-list">
+    <div class="flex flex-col gap-1">
       ${entries.map(snap => {
         const pct = Math.round(snap.context_ratio * 100)
         const barClass = pct > 70 ? 'bar--warn' : pct > 50 ? 'bar--mid' : 'bar--ok'
         return html`
-          <div class="oas-keeper-row" key=${snap.keeper_name}>
+          <div class="oas-keeper-row rounded" key=${snap.keeper_name}>
             <span class="oas-keeper-name">${snap.keeper_name}</span>
             <span class="oas-keeper-gen">gen ${snap.generation}</span>
             <div class="oas-keeper-bar-wrap">
@@ -74,9 +74,9 @@ function OasRawEventList() {
   }
 
   return html`
-    <div class="oas-event-list">
+    <div class="flex flex-col gap-0.5">
       ${events.slice(0, 15).map((ev, i) => html`
-        <div class="oas-event-row" key=${i}>
+        <div class="oas-event-row rounded" key=${i}>
           <span class="oas-event-ts">${formatTs(ev.timestamp)}</span>
           <span class="oas-event-agent">${ev.agent_name}</span>
           <span class="oas-event-type">${ev.type}</span>
@@ -94,8 +94,8 @@ export function OasPipeline() {
   const eventLabel = `${health.totalEvents}건`
 
   return html`
-    <div class="oas-pipeline">
-      <div class="oas-pipeline__header">
+    <div class="oas-pipeline rounded-lg">
+      <div class="flex justify-between items-center mb-3">
         <span class="oas-pipeline__title">실행 흐름</span>
         <div class="home-section-actions">
           <span class="oas-pipeline__count">${eventLabel}</span>

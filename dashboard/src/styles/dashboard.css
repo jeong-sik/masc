@@ -69,16 +69,6 @@
   padding: 0 16px 12px;
 }
 
-.monitor-pill {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 3px 8px;
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
 .monitor-pill.ok {
   background: var(--ok-12);
   color: var(--ok);
@@ -100,30 +90,15 @@
   }
 }
 
-.board-post-list,
-.comment-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .board-post {
   border-color: var(--card-border);
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
 }
 
-.post-meta {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
 .back-btn {
   margin-bottom: 12px;
   border: 1px solid var(--border-slate-30);
-  border-radius: 8px;
   padding: 7px 12px;
   font-size: var(--fs-sm);
   color: #bdd8ff;
@@ -136,36 +111,15 @@
 }
 
 /* ── Control Dock ─────────────────────────────────────────── */
-.control-label {
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
 .control-row {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 6px;
 }
 
-.control-actions,
-.control-inline-meta,
-.tab-pill-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.control-status-copy {
-  color: #d5e5fb;
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-}
-
 .control-input,
 .control-textarea {
   width: 100%;
-  border-radius: 8px;
   border: 1px solid rgba(138, 163, 211, 0.28);
   background: var(--white-4);
   color: #d3e3ff;
@@ -187,7 +141,6 @@
 
 .control-btn {
   border: 1px solid rgba(71, 184, 255, 0.45);
-  border-radius: 8px;
   background: var(--accent-18);
   color: #c9ebff;
   padding: 8px 12px;
@@ -229,27 +182,7 @@
   background: rgba(59, 18, 24, 0.45);
   color: #ffd6d6;
 }
-.keeper-status-console {
-  margin: 8px 0 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid var(--card-border);
-  background: rgba(2, 10, 24, 0.82);
-  color: #9ad8b6;
-  font-size: var(--fs-sm);
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: "Fira Code", monospace;
-  max-height: 240px;
-  overflow: auto;
-}
 
-.keeper-conversation-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 .control-btn.ghost {
   border-color: var(--border-slate-35);
   background: var(--white-5);
@@ -262,15 +195,9 @@
 }
 
 /* ── Mission Jump Strip ────────────────────────────────── */
-.mission-jump-strip {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
 
 .mission-jump-link {
   padding: 4px 10px;
-  border-radius: 999px;
   border: 1px solid var(--border-slate-22);
   background: var(--white-3);
   color: #9fb8e1;
@@ -330,11 +257,7 @@
   opacity: 0.85;
 }
 
-/* ── Shared: tab-unified, pill bar, collapsible ── */
-.tab-unified {
-  display: grid;
-  gap: var(--space-md, 16px);
-}
+/* ── Shared: pill bar, collapsible ── */
 
 .tab-pill {
   padding: 4px 14px;
@@ -358,7 +281,6 @@
 
 .tab-collapsible {
   border: 1px solid var(--card-border, var(--white-6));
-  border-radius: 8px;
 }
 .tab-collapsible__summary {
   padding: 8px 12px;
@@ -440,7 +362,6 @@
 .agent-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
   transform: translateY(-2px);
-  transition: all 0.2s ease;
   border-color: var(--accent);
 }
 
@@ -450,15 +371,6 @@
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 24px;
   align-items: start;
-}
-.kanban-column {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  background: rgba(10, 15, 29, 0.5);
-  border-radius: var(--radius-lg);
-  padding: 20px;
-  border: 1px solid var(--accent-10);
 }
 .kanban-header {
   font-size: 1.1rem;
@@ -474,12 +386,6 @@
 .kanban-header.inprogress .kanban-badge { background: var(--accent-soft); color: var(--accent); }
 .kanban-header.done .kanban-badge { background: rgba(0, 255, 157, 0.15); color: var(--ok); }
 
-.kanban-badge {
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 0.8rem;
-  font-weight: bold;
-}
 .kanban-card {
   background: var(--card);
   backdrop-filter: blur(8px);
@@ -510,72 +416,26 @@
   border-color: var(--accent);
   box-shadow: 0 4px 12px rgba(0, 240, 255, 0.1);
 }
-.kanban-card-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--text-strong);
-  line-height: 1.4;
-  margin-left: 8px;
-}
-.kanban-card-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  margin-left: 8px;
-}
 .kanban-assignee {
   display: inline-flex;
   align-items: center;
   background: rgba(0, 240, 255, 0.1);
   color: var(--accent);
   padding: 4px 8px;
-  border-radius: 8px;
   gap: 4px;
   font-weight: 600;
 }
 .kanban-assignee::before {
   content: "@";
-  opacity: 0.7;
-}
-
-.memory-note {
-  font-style: italic;
-  color: var(--accent);
 }
 
 /* ── Logs (merged from logs.css) ── */
 /* System Log Viewer */
 
-.logs-viewer {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  height: 100%;
-  min-height: 0;
-}
-
-.logs-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.5rem 0;
-  flex-shrink: 0;
-}
-
-.logs-filters {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
 .logs-select {
   background: var(--card);
   color: var(--text-body);
   border: 1px solid var(--card-border);
-  border-radius: 4px;
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
   font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
@@ -585,7 +445,6 @@
   background: var(--card);
   color: var(--text-body);
   border: 1px solid var(--card-border);
-  border-radius: 4px;
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
   font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
@@ -596,26 +455,10 @@
   color: var(--text-muted);
 }
 
-.logs-actions {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-.logs-auto-label {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  cursor: pointer;
-}
-
 .logs-refresh-btn {
   background: var(--card);
   color: var(--text-body);
   border: 1px solid var(--card-border);
-  border-radius: 4px;
   padding: 0.2rem 0.6rem;
   font-size: 0.75rem;
   font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
@@ -626,20 +469,10 @@
   border-color: var(--accent);
 }
 
-.logs-error {
-  padding: 0.5rem;
-  background: rgba(224, 80, 80, 0.15);
-  border: 1px solid #e05050;
-  border-radius: 4px;
-  color: #e05050;
-  font-size: 0.8rem;
-}
-
 .logs-table-wrap {
   flex: 1;
   overflow: auto;
   border: 1px solid var(--card-border);
-  border-radius: 4px;
   background: var(--card);
 }
 
@@ -671,24 +504,6 @@
   padding: 0.2rem 0.5rem;
   border-bottom: 1px solid var(--white-4);
   vertical-align: top;
-}
-
-.logs-col-ts {
-  width: 11rem;
-  white-space: nowrap;
-  color: var(--text-muted);
-}
-
-.logs-col-level {
-  width: 3.5rem;
-  white-space: nowrap;
-  font-weight: 600;
-}
-
-.logs-col-module {
-  width: 8rem;
-  white-space: nowrap;
-  color: var(--accent);
 }
 
 .logs-row:hover {

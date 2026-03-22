@@ -111,7 +111,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
       `)}
       ${hasMore ? html`
         <button
-          class="narrative-timeline__load-more"
+          class="narrative-timeline__load-more rounded-md"
           onClick=${() => { expandedItems.value += baseLimit }}
         >
           더 보기 (${totalAvailable - limit}건 남음)

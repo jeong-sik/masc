@@ -107,8 +107,8 @@ function expiryChip(post: BoardPost) {
   if (!post.expires_at) return null
   const expiresAtMs = Date.parse(post.expires_at)
   if (!Number.isFinite(expiresAtMs)) return null
-  if (expiresAtMs <= Date.now()) return html`<span class="board-meta-chip">만료됨</span>`
-  return html`<span class="board-meta-chip">만료까지 <${TimeAgo} timestamp=${post.expires_at} /></span>`
+  if (expiresAtMs <= Date.now()) return html`<span class="board-meta-chip rounded-full">만료됨</span>`
+  return html`<span class="board-meta-chip rounded-full">만료까지 <${TimeAgo} timestamp=${post.expires_at} /></span>`
 }
 
 async function loadPostDetail(postId: string) {
@@ -177,7 +177,7 @@ function SortBar() {
       <div class="board-controls">
         ${SORT_MODES.map(mode => html`
           <button
-            class="board-sort-btn ${current === mode.id ? 'active' : ''}"
+            class="board-sort-btn rounded-lg transition-all duration-200 ${current === mode.id ? 'active' : ''}"
             onClick=${() => {
               boardSortMode.value = mode.id
               visibleLimit.value = PAGE_SIZE
@@ -190,7 +190,7 @@ function SortBar() {
       </div>
       <div class="board-toolbar-actions">
         <button
-          class="control-btn ghost ${hideAutomationPosts.value ? 'is-active' : ''}"
+          class="control-btn rounded-lg ghost ${hideAutomationPosts.value ? 'is-active' : ''}"
           onClick=${() => {
             hideAutomationPosts.value = !hideAutomationPosts.value
           }}
@@ -198,7 +198,7 @@ function SortBar() {
           ${hideLabel}
         </button>
         <button
-          class="control-btn ghost ${boardExcludeSystem.value ? 'is-active' : ''}"
+          class="control-btn rounded-lg ghost ${boardExcludeSystem.value ? 'is-active' : ''}"
           onClick=${() => {
             boardExcludeSystem.value = !boardExcludeSystem.value
             refreshBoard()
@@ -206,7 +206,7 @@ function SortBar() {
         >
           ${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 글 표시 중'}
         </button>
-        <button class="control-btn ghost" onClick=${refreshBoard} disabled=${boardLoading.value}>
+        <button class="control-btn rounded-lg ghost" onClick=${refreshBoard} disabled=${boardLoading.value}>
           ${boardLoading.value ? '새로고침 중...' : '새로고침'}
         </button>
       </div>
@@ -256,7 +256,7 @@ function PostCard({ post }: { post: BoardPost }) {
   }
 
   return html`
-    <div class="board-post" onClick=${() => navigateToPost(post.id)}>
+    <div class="board-post rounded-xl" onClick=${() => navigateToPost(post.id)}>
       <div class="vote-column">
         <button class="vote-btn upvote" onClick=${(event: Event) => handleVote('up', event)}>▲</button>
         <span class="vote-count">${post.votes ?? 0}</span>
@@ -267,13 +267,13 @@ function PostCard({ post }: { post: BoardPost }) {
             <div class="post-title-row">
               <div class="text-[#e8f0ff]">${post.title}</div>
               <div class="post-chip-row">
-                ${isUpdated(post) ? html`<span class="board-meta-chip">수정됨</span>` : null}
-                ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip">${boardPostKind(post)}</span>` : null}
-                ${post.hearth ? html`<span class="board-meta-chip">${post.hearth}</span>` : null}
-                ${post.visibility ? html`<span class="board-meta-chip">${post.visibility}</span>` : null}
+                ${isUpdated(post) ? html`<span class="board-meta-chip rounded-full">수정됨</span>` : null}
+                ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip rounded-full">${boardPostKind(post)}</span>` : null}
+                ${post.hearth ? html`<span class="board-meta-chip rounded-full">${post.hearth}</span>` : null}
+                ${post.visibility ? html`<span class="board-meta-chip rounded-full">${post.visibility}</span>` : null}
               </div>
             </div>
-          <div class="post-meta">
+          <div class="post-meta flex gap-2.5 items-center flex-wrap">
             <span>작성자 <a class="author-link" class="cursor-pointer underline" onClick=${(e: Event) => { e.stopPropagation(); navigate('status', { section: 'agents', agent: post.author }) }}>${post.author}</a></span>
             <span><${TimeAgo} timestamp=${post.created_at} /></span>
             ${isUpdated(post) ? html`<span>수정 <${TimeAgo} timestamp=${post.updated_at} /></span>` : null}
@@ -288,12 +288,12 @@ function PostCard({ post }: { post: BoardPost }) {
 }
 
 function CommentThread({ comments }: { comments: BoardComment[] }) {
-  if (comments.length === 0) return html`<div class="empty-state" class="text-[13px]">아직 댓글이 없습니다</div>`
+  if (comments.length === 0) return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" class="text-[13px]">아직 댓글이 없습니다</div>`
 
   return html`
-    <div class="comment-thread">
+    <div class="comment-thread flex flex-col gap-2">
       ${comments.map(comment => html`
-        <div key=${comment.id} class="board-comment">
+        <div key=${comment.id} class="board-comment rounded-lg">
           <span class="comment-author"><a class="author-link" class="cursor-pointer underline" onClick=${() => navigate('status', { section: 'agents', agent: comment.author })}>${comment.author}</a></span>
           <span class="comment-time"><${TimeAgo} timestamp=${comment.created_at} /></span>
           <div class="comment-text">${comment.content}</div>
@@ -344,13 +344,13 @@ function PostDetail({ post }: { post: BoardPost }) {
 
   return html`
     <div>
-      <button class="back-btn" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
+      <button class="back-btn rounded-lg" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
       <${Card} title=${post.title}>
         <div class="board-detail p-5">
           <div class="post-body">
             <${Markdown} text=${stripStateBlocks(post.body)} />
           </div>
-          <div class="post-meta" class="mt-3">
+          <div class="post-meta flex gap-2.5 items-center flex-wrap mt-3">
             <span><a class="author-link" class="cursor-pointer underline" onClick=${() => navigate('status', { section: 'agents', agent: post.author })}>${post.author}</a></span>
             <${TimeAgo} timestamp=${post.created_at} />
             <span>${post.votes ?? 0} votes</span>
@@ -358,9 +358,9 @@ function PostDetail({ post }: { post: BoardPost }) {
           ${(post.hearth || post.visibility || post.expires_at)
             ? html`
                 <div class="post-chip-row" class="mt-2">
-                  ${post.hearth ? html`<span class="board-meta-chip">${post.hearth}</span>` : null}
-                  ${post.visibility ? html`<span class="board-meta-chip">${post.visibility}</span>` : null}
-                  ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip">${boardPostKind(post)}</span>` : null}
+                  ${post.hearth ? html`<span class="board-meta-chip rounded-full">${post.hearth}</span>` : null}
+                  ${post.visibility ? html`<span class="board-meta-chip rounded-full">${post.visibility}</span>` : null}
+                  ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip rounded-full">${boardPostKind(post)}</span>` : null}
                   ${expiryChip(post)}
                 </div>
               `
@@ -387,7 +387,7 @@ function PostDetail({ post }: { post: BoardPost }) {
 
       <${Card} title="댓글">
         ${detailLoading.value
-          ? html`<div class="loading-indicator">댓글 불러오는 중...</div>`
+          ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">댓글 불러오는 중...</div>`
           : html`<${CommentThread} comments=${detailComments.value} />`}
         <${CommentForm} postId=${post.id} />
       <//>
@@ -416,10 +416,10 @@ export function Memory() {
       : html`
           <div>
             <${MemorySummary} />
-            <button class="back-btn" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
+            <button class="back-btn rounded-lg" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
             ${detailLoading.value
-              ? html`<div class="loading-indicator">글 불러오는 중...</div>`
-              : html`<div class="empty-state">글을 찾지 못했습니다</div>`}
+              ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">글 불러오는 중...</div>`
+              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">글을 찾지 못했습니다</div>`}
           </div>
         `
   }
@@ -429,18 +429,18 @@ export function Memory() {
       <${MemorySummary} />
       <${SortBar} />
       ${boardLoading.value
-        ? html`<div class="loading-indicator">메모리 피드 불러오는 중...</div>`
+        ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">메모리 피드 불러오는 중...</div>`
         : posts.length === 0
-          ? html`<div class="empty-state">아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다.</div>`
+          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다.</div>`
           : html`
               <${Card} title="사람이 쓴 글" class="section mb-3.5">
-                <div class="board-post-list">
+                <div class="board-post rounded-xl-list flex flex-col gap-2">
                   ${grouped.human.slice(0, visibleLimit.value).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                 </div>
                 ${grouped.human.length > visibleLimit.value ? html`
                   <div class="text-center py-3">
                     <button
-                      class="control-btn ghost"
+                      class="control-btn rounded-lg ghost"
                       onClick=${() => { visibleLimit.value = visibleLimit.value + PAGE_SIZE }}
                     >
                       더 보기 (${grouped.human.length - visibleLimit.value}개 남음)
@@ -451,7 +451,7 @@ export function Memory() {
               ${grouped.operations.length > 0
                 ? html`
                     <${Card} title="자동화 · 시스템" class="section mb-3.5">
-                      <div class="board-post-list">
+                      <div class="board-post rounded-xl-list flex flex-col gap-2">
                         ${grouped.operations.map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
                       </div>
                     <//>

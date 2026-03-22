@@ -26,7 +26,7 @@ export function FocusSidebar() {
   const selected = selectedAgentName.value
 
   return html`
-    <div class="focus-sidebar">
+    <div class="grid gap-2.5 grid-rows-[auto_1fr] min-h-0">
       <div class="focus-sidebar-head">
         <h3>Agents</h3>
         <span class="text-xs text-[rgba(255,255,255,0.4)]">${list.length} active</span>
@@ -37,7 +37,7 @@ export function FocusSidebar() {
           : list.map(agent => html`
             <div
               key=${agent.name}
-              class="focus-agent-card ${selected === agent.name ? 'focus-agent-selected' : ''}"
+              class="focus-agent-card rounded-xl transition-colors duration-200 ${selected === agent.name ? 'focus-agent-selected' : ''}"
               onClick=${() => openAgentDetail(agent.name)}
             >
               <div class="focus-agent-header">
@@ -45,13 +45,13 @@ export function FocusSidebar() {
                   ${agent.emoji ? html`<span class="text-[0.95rem]">${agent.emoji}</span>` : null}
                   ${agent.koreanName ?? agent.name}
                 </span>
-                <span class="focus-pressure-badge ${pressureClass(agent.pressure)}">
+                <span class="focus-pressure-badge rounded-md ${pressureClass(agent.pressure)}">
                   ${pressureLabel(agent.pressure)}
-                  ${agent.assignedCount > 0 ? html` <span class="focus-task-count">${agent.assignedCount}</span>` : null}
+                  ${agent.assignedCount > 0 ? html` <span class="focus-task-count rounded">${agent.assignedCount}</span>` : null}
                 </span>
               </div>
               ${agent.currentTask
-                ? html`<div class="focus-current-task">${agent.currentTask}</div>`
+                ? html`<div class="focus-current-task rounded-md">${agent.currentTask}</div>`
                 : null}
               <div class="focus-agent-footer">
                 ${agent.lastActivityText

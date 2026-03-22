@@ -12,11 +12,11 @@ export function AgentJournalStream({ agentName }: { agentName: string }) {
   return html`
     <${Card} title="실시간 활동 스트림">
       ${entries.length === 0
-        ? html`<div class="empty-state">관련 이벤트 없음</div>`
+        ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">관련 이벤트 없음</div>`
         : html`
-            <div class="agent-journal-stream">
+            <div class="flex flex-col gap-0.5 max-h-[280px] overflow-y-auto">
               ${entries.map((entry: JournalEntry, idx: number) => html`
-                <div class="agent-journal-entry" key=${idx}>
+                <div class="agent-journal-entry rounded" key=${idx}>
                   <span class="agent-journal-kind">${journalKindIcon(entry)}</span>
                   <span class="agent-journal-type">${entry.eventType}</span>
                   <span class="agent-journal-text">${compactCopy(entry.text, 120) ?? ''}</span>

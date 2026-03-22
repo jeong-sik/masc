@@ -45,9 +45,9 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
       ${ctxPct != null ? html`
         <div class="agent-runtime-metric">
           <span class="agent-runtime-label">CTX</span>
-          <div class="agent-runtime-ctx-bar">
+          <div class="agent-runtime-ctx-bar rounded-full">
             <div
-              class="agent-runtime-ctx-fill ${ctxBarClass(ctxRatio)}"
+              class="agent-runtime-ctx-fill rounded-full ${ctxBarClass(ctxRatio)}"
               style=${{ width: `${ctxPct}%` }}
             ></div>
           </div>

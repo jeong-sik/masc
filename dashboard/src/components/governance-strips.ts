@@ -30,11 +30,11 @@ export function ActivityRail() {
   }
   return html`
     <${Card} title="활동 타임라인" class="section mb-3.5">
-      <div class="governance-activity-list">
+      <div class="flex flex-col gap-2">
         ${grouped.size === 0
-          ? html`<div class="empty-state">거버넌스 활동이 아직 없습니다.</div>`
+          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">거버넌스 활동이 아직 없습니다.</div>`
           : Array.from(grouped.entries()).map(([, group]) => html`
-              <div class="governance-case-group">
+              <div class="governance-case-group rounded-lg">
                 <div class="governance-case-header">
                   <span class="governance-case-topic">${group.topic}</span>
                   <${LifecycleProgress} events=${group.events} />
@@ -42,7 +42,7 @@ export function ActivityRail() {
                 <div class="governance-case-events">
                   ${group.events.map((event: GovernanceTimelineEvent) => html`
                     <div class="governance-activity-row">
-                      <span class="governance-badge ${governanceToneClass(event.kind)}">${activityKindLabel(event.kind)}</span>
+                      <span class="governance-badge rounded-full ${governanceToneClass(event.kind)}">${activityKindLabel(event.kind)}</span>
                       <span class="governance-event-summary">${event.summary || ''}</span>
                       ${event.created_at ? html`<span class="governance-event-time"><${TimeAgo} timestamp=${event.created_at} /></span>` : null}
                     </div>
@@ -104,7 +104,7 @@ export function RuntimeParamsPanel() {
   return html`
     <${Card} title="Runtime Parameters" class="section mb-3.5">
       ${runtimeLoading.value
-        ? html`<div class="loading-indicator">파라미터 로딩 중...</div>`
+        ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">파라미터 로딩 중...</div>`
         : html`
             <div class="governance-params-surfaces">
               ${surfaces.map((surface: RuntimeParamsSurface) => {
@@ -113,7 +113,7 @@ export function RuntimeParamsPanel() {
                   <div class="governance-surface-group">
                     <div class="governance-surface-head">
                       <strong>${surface.id}</strong>
-                      <span class="governance-chip ${surface.risk === 'high' ? 'warn' : ''}">${surface.risk}</span>
+                      <span class="governance-chip rounded-full ${surface.risk === 'high' ? 'warn' : ''}">${surface.risk}</span>
                       <span class="council-sub">${surface.description}</span>
                     </div>
                     <div class="governance-params-table">
@@ -123,7 +123,7 @@ export function RuntimeParamsPanel() {
                           <span class="governance-param-value">
                             ${formatParamValue(param.current)}
                             ${param.has_override
-                              ? html`<span class="governance-chip warn" style="margin-left:4px">override</span>`
+                              ? html`<span class="governance-chip rounded-full warn" style="margin-left:4px">override</span>`
                               : null}
                           </span>
                           <span class="governance-param-default council-sub">

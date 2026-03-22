@@ -32,7 +32,7 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
       ? row.recentTools.join(', ')
       : toolAuditStateLabel(observedToolsEmptyState(row.keeper, row.brief.tool_audit_source))
   return html`
-    <article class="mission-activity-card ${toneClass(row.brief.status ?? row.agent?.status)}">
+    <article class="mission-activity-card rounded-xl ${toneClass(row.brief.status ?? row.agent?.status)}">
       <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => openAgentDetail(row.brief.agent_name)}>
         <div class="flex justify-between gap-2.5 items-start">
           <div class="flex gap-2.5 items-start">
@@ -42,7 +42,7 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
               <span>${info.model !== info.nickname ? `${info.model} · ` : ''}${info.nickname}</span>
             </div>
           </div>
-          <span class="command-chip ${toneClass(row.brief.status ?? row.agent?.status)}">${statusLabel(row.brief.status ?? row.agent?.status)}</span>
+          <span class="command-chip rounded-full ${toneClass(row.brief.status ?? row.agent?.status)}">${statusLabel(row.brief.status ?? row.agent?.status)}</span>
         </div>
 
         <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
@@ -102,7 +102,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
       : toolAuditStateLabel(linkedRecentToolsEmptyState(row.keeper))
 
   return html`
-    <article class="mission-activity-card ${toneClass(row.brief.status ?? row.keeper?.status)} ${liveStateClass(row.brief.status, row.keeper?.status)}">
+    <article class="mission-activity-card rounded-xl ${toneClass(row.brief.status ?? row.keeper?.status)} ${liveStateClass(row.brief.status, row.keeper?.status)}">
       <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => {
         const keeper: Keeper = row.keeper ?? {
           name: row.brief.name,
@@ -121,7 +121,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
               ${row.keeper?.koreanName ? html`<span>${row.keeper.koreanName}</span>` : null}
             </div>
           </div>
-          <span class="command-chip ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
+          <span class="command-chip rounded-full ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
         </div>
 
         <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
@@ -167,9 +167,9 @@ export function InternalSignalCard({ item }: { item: DashboardMissionInternalSig
   const action = item.action ?? null
   const attention = item.attention ?? null
   return html`
-    <article class="mission-action-card ${toneClass(item.severity)}">
+    <article class="mission-action-card rounded-xl ${toneClass(item.severity)}">
       <div class="flex justify-between gap-2 items-start flex-wrap">
-        <span class="command-chip ${toneClass(item.severity)}">
+        <span class="command-chip rounded-full ${toneClass(item.severity)}">
           ${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? '내부 신호'}
         </span>
         <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
@@ -179,13 +179,13 @@ export function InternalSignalCard({ item }: { item: DashboardMissionInternalSig
       <div class="flex gap-2 flex-wrap mt-2.5">
         ${action
           ? html`
-              <button class="control-btn ghost" onClick=${() => openActionIntervene(action, attention, '상황판 내부 신호')}>이 액션으로 개입 열기</button>
-              <button class="control-btn ghost" onClick=${() => openActionCommand(action, attention, '상황판 내부 신호')}>이 이슈의 원인 보기</button>
+              <button class="control-btn rounded-lg ghost" onClick=${() => openActionIntervene(action, attention, '상황판 내부 신호')}>이 액션으로 개입 열기</button>
+              <button class="control-btn rounded-lg ghost" onClick=${() => openActionCommand(action, attention, '상황판 내부 신호')}>이 이슈의 원인 보기</button>
             `
           : attention
             ? html`
-                <button class="control-btn ghost" onClick=${() => openIncidentIntervene(attention)}>이 이슈로 개입 열기</button>
-                <button class="control-btn ghost" onClick=${() => openIncidentCommand(attention)}>이 이슈의 원인 보기</button>
+                <button class="control-btn rounded-lg ghost" onClick=${() => openIncidentIntervene(attention)}>이 이슈로 개입 열기</button>
+                <button class="control-btn rounded-lg ghost" onClick=${() => openIncidentCommand(attention)}>이 이슈의 원인 보기</button>
               `
             : null}
       </div>

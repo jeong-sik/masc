@@ -30,13 +30,13 @@ export function CommandWorkflowBanner() {
     <section class="command-focus-banner">
       <div class="command-focus-head">
         <strong>${context.source_label}</strong>
-        <span class="command-chip">${workflowActionLabel(context.action_type)}</span>
-        <span class="command-chip">${workflowTargetLabel(context)}</span>
-        <span class="command-chip">${workflowCommandSurfaceLabel(route.value.params.surface ?? 'warroom')}</span>
+        <span class="command-chip rounded-full">${workflowActionLabel(context.action_type)}</span>
+        <span class="command-chip rounded-full">${workflowTargetLabel(context)}</span>
+        <span class="command-chip rounded-full">${workflowCommandSurfaceLabel(route.value.params.surface ?? 'warroom')}</span>
       </div>
       <div class="text-[rgba(255,255,255,0.84)] leading-normal">${context.summary}</div>
       ${context.payload_preview
-        ? html`<div class="command-focus-preview">${context.payload_preview}</div>`
+        ? html`<div class="command-focus-preview rounded-xl">${context.payload_preview}</div>`
         : null}
     </section>
   `
@@ -49,13 +49,13 @@ export function CommandEntryStrip() {
 
   return html`
     <section class="command-entry-strip">
-      <article class="command-entry-card">
-        <span class="command-entry-label">현재 표면</span>
+      <article class="command-entry-card rounded-xl">
+        <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-[0.08em]">현재 표면</span>
         <strong>${guide.title}</strong>
         <p>${guide.description}</p>
       </article>
-      <article class="command-entry-card">
-        <span class="command-entry-label">다음 추천</span>
+      <article class="command-entry-card rounded-xl">
+        <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-[0.08em]">다음 추천</span>
         <strong>${recommendation.tool}</strong>
         <p>${recommendation.reason}</p>
       </article>
@@ -77,9 +77,9 @@ function GraphicGauge({
   color: string
 }) {
   return html`
-    <article class="command-gauge-card">
+    <article class="grid grid-cols-[88px_minmax(0,1fr)] gap-3 items-center p-3 rounded-2xl bg-[rgba(255,255,255,0.045)] border border-solid border-[var(--white-8)] min-w-0">
       <div class="command-gauge-ring" style=${gaugeStyle(percent, color)}>
-        <div class="command-gauge-core">
+        <div class="w-full h-full rounded-full bg-[rgba(8,14,28,0.92)] border border-solid border-[var(--white-6)] grid place-items-center content-center text-center">
           <strong>${value}</strong>
           <span>${Math.round(clampPercent(percent))}%</span>
         </div>
@@ -111,7 +111,7 @@ function SignalRail({
         <span>${label}</span>
         <strong>${value}</strong>
       </div>
-      <div class="command-signal-bar">
+      <div class="command-signal-bar rounded-full">
         <span class="${toneClass(tone)}" style=${`width: ${Math.max(8, Math.round(clampPercent(percent)))}%`}></span>
       </div>
       <small>${detail}</small>
@@ -155,14 +155,14 @@ export function SummaryHero() {
   return html`
     <section class="command-hero command-hero-summary">
       <div class="command-hero-copy">
-        <span class="command-hero-kicker">현재 지휘 상태</span>
+        <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">현재 지휘 상태</span>
         <h3>${headline}</h3>
         <p>${subcopy}</p>
         <div class="command-hero-badges">
-        <span class="command-chip ${toneClass(activeOps > 0 ? 'ok' : 'warn')}">활성 작전 ${activeOps}</span>
-          <span class="command-chip ${toneClass(movingLanes > 0 ? 'ok' : activeLanes > 0 ? 'warn' : 'warn')}">이동 레인 ${movingLanes}/${Math.max(activeLanes, movingLanes)}</span>
-          <span class="command-chip ${toneClass(badAlerts > 0 ? 'bad' : warnAlerts > 0 ? 'warn' : 'ok')}">치명 알림 ${badAlerts}</span>
-          <span class="command-chip ${toneClass(pendingApprovals > 0 ? 'warn' : 'ok')}">승인 대기 ${pendingApprovals}</span>
+        <span class="command-chip rounded-full ${toneClass(activeOps > 0 ? 'ok' : 'warn')}">활성 작전 ${activeOps}</span>
+          <span class="command-chip rounded-full ${toneClass(movingLanes > 0 ? 'ok' : activeLanes > 0 ? 'warn' : 'warn')}">이동 레인 ${movingLanes}/${Math.max(activeLanes, movingLanes)}</span>
+          <span class="command-chip rounded-full ${toneClass(badAlerts > 0 ? 'bad' : warnAlerts > 0 ? 'warn' : 'ok')}">치명 알림 ${badAlerts}</span>
+          <span class="command-chip rounded-full ${toneClass(pendingApprovals > 0 ? 'warn' : 'ok')}">승인 대기 ${pendingApprovals}</span>
         </div>
       </div>
 
@@ -245,13 +245,13 @@ export function SummaryCards() {
   const cache = microarch?.cache
   return html`
     <div class="command-summary-grid">
-      <div class="monitor-stat-card"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
-      <div class="monitor-stat-card"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
-      <div class="monitor-stat-card"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
-      <div class="monitor-stat-card ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 주의</small></div>
-      <div class="monitor-stat-card"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
-      <div class="monitor-stat-card ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
-      <div class="monitor-stat-card ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}</small></div>
+      <div class="monitor-stat-card rounded-xl"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
+      <div class="monitor-stat-card rounded-xl"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
+      <div class="monitor-stat-card rounded-xl"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
+      <div class="monitor-stat-card rounded-xl ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 주의</small></div>
+      <div class="monitor-stat-card rounded-xl"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
+      <div class="monitor-stat-card rounded-xl ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
+      <div class="monitor-stat-card rounded-xl ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}</small></div>
     </div>
   `
 }

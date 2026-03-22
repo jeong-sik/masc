@@ -53,7 +53,7 @@ function SurfaceTabs() {
               .filter(surface => surface.group === group.id)
               .map(surface => html`
                 <button
-                  class="command-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
+                  class="command-surface-tab rounded-full ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
                   onClick=${() => {
                     setCommandPlaneSurface(surface.id)
                     navigate('operations', surfaceRouteParams(surface.id))
@@ -229,7 +229,7 @@ export function Command() {
           </div>
           <div class="panel-actions">
             <button
-              class="control-btn ghost"
+              class="control-btn rounded-lg ghost"
               onClick=${() => {
                 void fire(() => runCommandPlaneDispatchTick())
               }}
@@ -238,7 +238,7 @@ export function Command() {
               ${actionDisabled('dispatch:tick') ? '정리 중...' : 'Tick 실행'}
             </button>
             <button
-              class="control-btn ghost"
+              class="control-btn rounded-lg ghost"
               onClick=${() => {
                 void refreshRoomTruth()
                 void refreshCommandPlaneCurrentSurface()
@@ -253,7 +253,7 @@ export function Command() {
               ${commandPlaneLoading.value ? '새로고침 중...' : '새로고침'}
             </button>
             <button
-              class="control-btn ghost"
+              class="control-btn rounded-lg ghost"
               onClick=${() => {
                 setCommandPlaneSurface('warroom')
                 navigate('operations', { ...surfaceRouteParams('warroom'), presentation: 'wallboard' })
@@ -266,10 +266,10 @@ export function Command() {
       `}
 
       ${commandPlaneError.value
-        ? html`<div class="empty-state error">${commandPlaneError.value}</div>`
+        ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneError.value}</div>`
         : null}
       ${commandPlaneActionError.value
-        ? html`<div class="empty-state error">${commandPlaneActionError.value}</div>`
+        ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneActionError.value}</div>`
         : null}
       ${wallboardMode ? null : html`<${RoomTruthStrip} />`}
       ${wallboardMode ? null : html`<${CommandWorkflowBanner} />`}

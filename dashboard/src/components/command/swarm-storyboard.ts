@@ -41,7 +41,7 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
           : 26
 
   return html`
-    <article class="swarm-lane-strip ${toneClass(tone)}">
+    <article class="swarm-lane-strip transition-colors duration-200 ${toneClass(tone)}">
       <div class="swarm-lane-head flex items-center justify-between gap-2">
         <div class="swarm-lane-head-left flex items-center gap-2 min-w-0">
           <span class="swarm-motion-dot inline-block rounded-full shrink-0 w-2.5 h-2.5 ${lane.motion_state}"></span>
@@ -50,14 +50,14 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
             <strong>${lane.label}</strong>
           </div>
         </div>
-        <div class="command-tag-row">
-          <span class="command-chip ${toneClass(tone)}">${lane.phase}</span>
-          <span class="command-chip ${toneClass(tone)}">${lane.motion_state}</span>
-          <span class="command-chip">${relativeTime(lane.last_movement_at)}</span>
+        <div class="command-tag rounded-full-row">
+          <span class="command-chip rounded-full ${toneClass(tone)}">${lane.phase}</span>
+          <span class="command-chip rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
+          <span class="command-chip rounded-full">${relativeTime(lane.last_movement_at)}</span>
         </div>
       </div>
       <p class="swarm-lane-reason">${lane.movement_reason}</p>
-      <div class="swarm-lane-track">
+      <div class="swarm-lane-track rounded-full">
         <span class="${toneClass(tone)}" style=${`width:${progressPercent}%`}></span>
       </div>
       <div class="swarm-lane-details flex flex-col gap-1.5 mt-2">
@@ -86,12 +86,12 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
           : null}
       </div>
       ${lane.blockers.length > 0
-        ? html`<div class="swarm-lane-blockers">막힘: ${lane.blockers.join(' · ')}</div>`
+        ? html`<div class="swarm-lane-blockers rounded-md">막힘: ${lane.blockers.join(' · ')}</div>`
         : null}
       ${lane.hard_flags.length > 0
         ? html`
             <div class="swarm-lane-flags flex flex-wrap gap-1 mt-1">
-              ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<span class="command-chip ${toneClass(flag.severity)}">${flag.code}</span>`)}
+              ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<span class="command-chip rounded-full ${toneClass(flag.severity)}">${flag.code}</span>`)}
             </div>
           `
         : null}
@@ -110,10 +110,10 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
         const operations = lane.counts.operations ?? 0
         const detachments = lane.counts.detachments ?? 0
         return html`
-          <article class="swarm-story-card ${toneClass(tone)}">
+          <article class="swarm-story-card rounded-xl ${toneClass(tone)}">
             <div class="swarm-story-topline flex justify-between gap-1.5 flex-wrap">
-              <span class="command-chip ${toneClass(tone)}">${lane.motion_state}</span>
-              <span class="command-chip">${lane.phase}</span>
+              <span class="command-chip rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
+              <span class="command-chip rounded-full">${lane.phase}</span>
             </div>
             <strong>${lane.label}</strong>
             <p>${lane.current_step}</p>
@@ -229,10 +229,10 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
   }
 
   return html`
-    <article class="command-guide-card ${toneClass(tone)}">
+    <article class="command-guide-card rounded-xl ${toneClass(tone)}">
       <div class="command-guide-head">
         <strong>Run Resolution</strong>
-        <span class="command-chip ${toneClass(tone)}">
+        <span class="command-chip rounded-full ${toneClass(tone)}">
           ${runResolutionLabel(resolution?.status ?? recommendation?.recommended_kind ?? null)}
         </span>
       </div>
@@ -241,7 +241,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
           ? `이 run은 ${resolution.decided_by}가 ${relativeTime(resolution.decided_at)}에 soft abandon 처리했습니다. ${resolution.reason}`
           : recommendation?.reason ?? '이 run에 대한 별도 resolution recommendation은 아직 없습니다.'}
       </p>
-      <div class="command-card-grid">
+      <div class="command-card rounded-xl-grid">
         <span>Run</span><span>${runId}</span>
         <span>Provenance</span><span><${ProvenanceChip} item=${{ kind: recommendation?.provenance ?? 'recorded' }} /></span>
         <span>Engine</span><span>${recommendation?.decision_engine ?? 'operator_record'}</span>
@@ -249,27 +249,27 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
       </div>
       ${recommendation?.evidence
         ? html`
-            <div class="command-tag-row">
-              <span class="command-tag">joined ${recommendation.evidence.joined_workers ?? 0}</span>
-              <span class="command-tag">trace ${recommendation.evidence.trace_events ?? 0}</span>
-              <span class="command-tag">message ${recommendation.evidence.message_events ?? 0}</span>
+            <div class="command-tag rounded-full-row">
+              <span class="command-tag rounded-full">joined ${recommendation.evidence.joined_workers ?? 0}</span>
+              <span class="command-tag rounded-full">trace ${recommendation.evidence.trace_events ?? 0}</span>
+              <span class="command-tag rounded-full">message ${recommendation.evidence.message_events ?? 0}</span>
               ${recommendation.evidence.runtime_blocker
-                ? html`<span class="command-tag ${toneClass('bad')}">${recommendation.evidence.runtime_blocker}</span>`
+                ? html`<span class="command-tag rounded-full ${toneClass('bad')}">${recommendation.evidence.runtime_blocker}</span>`
                 : null}
             </div>
           `
         : null}
       ${pendingConfirm
         ? html`
-            <div class="command-guide-card warn">
+            <div class="command-guide-card rounded-xl warn">
               <div class="command-guide-head">
                 <strong>확인 대기</strong>
-                <span class="command-chip warn">${pendingConfirm.confirm_token}</span>
+                <span class="command-chip rounded-full warn">${pendingConfirm.confirm_token}</span>
               </div>
               ${pendingConfirm.preview ? html`<pre class="command-trace-detail">${previewText(pendingConfirm.preview)}</pre>` : null}
               <div class="command-action-row">
-                <button class="control-btn" onClick=${() => { void confirmPending('confirm') }} disabled=${operatorActionBusy.value}>확인 실행</button>
-                <button class="control-btn ghost" onClick=${() => { void confirmPending('deny') }} disabled=${operatorActionBusy.value}>취소</button>
+                <button class="control-btn rounded-lg" onClick=${() => { void confirmPending('confirm') }} disabled=${operatorActionBusy.value}>확인 실행</button>
+                <button class="control-btn rounded-lg ghost" onClick=${() => { void confirmPending('deny') }} disabled=${operatorActionBusy.value}>취소</button>
               </div>
             </div>
           `

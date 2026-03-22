@@ -83,27 +83,27 @@ export function FullInventoryView({
     <div class="tool-inventory-sticky-header">
       <div class="tool-inventory-summary">
         <div class="tool-inventory-stat">
-          <span class="stat-value">${totalCount}</span>
+          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${totalCount}</span>
           <span class="stat-label">전체 도구</span>
         </div>
         <div class="tool-inventory-stat">
-          <span class="stat-value">${enabledCount}</span>
+          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${enabledCount}</span>
           <span class="stat-label">활성화됨</span>
         </div>
         <div class="tool-inventory-stat">
-          <span class="stat-value">${hiddenCount}</span>
+          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${hiddenCount}</span>
           <span class="stat-label">숨김</span>
         </div>
         <div class="tool-inventory-stat">
-          <span class="stat-value">${deprecatedCount}</span>
+          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${deprecatedCount}</span>
           <span class="stat-label">지원 중단</span>
         </div>
         <div class="tool-inventory-stat">
-          <span class="stat-value">${directCallCount}</span>
+          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${directCallCount}</span>
           <span class="stat-label">직접 호출</span>
         </div>
         <div class="tool-inventory-stat">
-          <span class="stat-value">${filtered.length}</span>
+          <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${filtered.length}</span>
           <span class="stat-label">필터 결과</span>
         </div>
       </div>
@@ -115,14 +115,14 @@ export function FullInventoryView({
             onClick=${() => { surfaceFilter.value = key }}
           >
             ${SURFACE_LABELS[key]}
-            <span class="tool-surface-count">${surfaceCountForFilter(inventory, key)}</span>
+            <span class="tool-surface-count rounded-full">${surfaceCountForFilter(inventory, key)}</span>
           </button>
         `)}
       </div>
 
       <div class="tool-inventory-filters">
         <input
-          class="control-input"
+          class="control-input rounded-lg"
           type="text"
           placeholder="도구, 문서, 권한, 대체 도구 검색..."
           value=${searchQuery.value}
@@ -180,13 +180,13 @@ export function FullInventoryView({
           />
           <span>지원 중단 표시</span>
         </label>
-        <button class="control-btn ghost" onClick=${() => { void loadTools() }} disabled=${loading}>
+        <button class="control-btn rounded-lg ghost" onClick=${() => { void loadTools() }} disabled=${loading}>
           ${loading ? '새로고침 중...' : '새로고침'}
         </button>
       </div>
     </div>
 
-    ${error ? html`<div class="tool-metrics-error">${error}</div>` : null}
+    ${error ? html`<div class="tool-metrics-error rounded-lg">${error}</div>` : null}
 
     <div ref=${listContainerRef} class="tool-inventory-virtual-container">
       ${filtered.length > 0
@@ -197,7 +197,7 @@ export function FullInventoryView({
             getKey=${(item: DashboardToolInventoryItem) => item.name}
             className="tool-inventory-list"
           />`
-        : html`<div class="empty-state">조건에 맞는 도구가 없습니다.</div>`}
+        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">조건에 맞는 도구가 없습니다.</div>`}
     </div>
 
     <button

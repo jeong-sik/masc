@@ -12,34 +12,34 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
 
   return html`
     <${Card} title="Worker Status">
-      <div class="agent-worker-brief">
-        <div class="agent-worker-brief__row">
-          <span class="agent-worker-brief__label">State</span>
+      <div class="flex flex-col gap-1.5">
+        <div class="flex items-baseline gap-2 text-[length:var(--fs-sm)]">
+          <span class="text-[length:var(--fs-xs)] text-[var(--text-muted)] min-w-[60px] shrink-0">State</span>
           <${StatusBadge} status=${worker.state} />
         </div>
         ${worker.focus ? html`
-          <div class="agent-worker-brief__row">
-            <span class="agent-worker-brief__label">Focus</span>
+          <div class="flex items-baseline gap-2 text-[length:var(--fs-sm)]">
+            <span class="text-[length:var(--fs-xs)] text-[var(--text-muted)] min-w-[60px] shrink-0">Focus</span>
             <span>${worker.focus}</span>
           </div>
         ` : null}
         ${worker.recent_output_preview ? html`
-          <div class="agent-worker-brief__row">
-            <span class="agent-worker-brief__label">Output</span>
+          <div class="flex items-baseline gap-2 text-[length:var(--fs-sm)]">
+            <span class="text-[length:var(--fs-xs)] text-[var(--text-muted)] min-w-[60px] shrink-0">Output</span>
             <span class="agent-worker-brief__preview">${compactCopy(worker.recent_output_preview, 200)}</span>
           </div>
         ` : null}
         ${worker.related_session_id ? html`
-          <div class="agent-worker-brief__row">
-            <span class="agent-worker-brief__label">Session</span>
+          <div class="flex items-baseline gap-2 text-[length:var(--fs-sm)]">
+            <span class="text-[length:var(--fs-xs)] text-[var(--text-muted)] min-w-[60px] shrink-0">Session</span>
             <span class="font-mono" style="font-size: 11px">${worker.related_session_id}</span>
           </div>
         ` : null}
         ${worker.last_signal_at ? html`
-          <div class="agent-worker-brief__row">
-            <span class="agent-worker-brief__label">Signal</span>
+          <div class="flex items-baseline gap-2 text-[length:var(--fs-sm)]">
+            <span class="text-[length:var(--fs-xs)] text-[var(--text-muted)] min-w-[60px] shrink-0">Signal</span>
             <${TimeAgo} timestamp=${worker.last_signal_at} />
-            ${worker.signal_truth ? html`<span class="pill">${worker.signal_truth}</span>` : null}
+            ${worker.signal_truth ? html`<span class="pill rounded-full">${worker.signal_truth}</span>` : null}
           </div>
         ` : null}
       </div>

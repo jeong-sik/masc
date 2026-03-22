@@ -35,16 +35,16 @@ export function SelectionCard({
     && summary?.historical_verdict === 'proven'
     && summary?.live_verdict !== 'proven'
   return html`
-    <div class="command-guide-card ${selectionTone(selection)}">
+    <div class="command-guide-card rounded-xl ${selectionTone(selection)}">
       <div class="command-guide-head">
         <strong>${selectionLabel(selection)}</strong>
-        <span class="command-chip ${selectionTone(selection)}">${selection.mode ?? 'none'}</span>
+        <span class="command-chip rounded-full ${selectionTone(selection)}">${selection.mode ?? 'none'}</span>
       </div>
       <p>${selection.reason ?? '근거 컨텍스트 선택 정보가 없습니다.'}</p>
       ${historicalStronger
         ? html`<p>선택된 최신 세션은 과거 proof가 더 강하고 현재 live evidence는 더 약합니다.</p>`
         : null}
-      <div class="command-card-grid">
+      <div class="command-card rounded-xl-grid">
         <span>선택된 세션</span><span>${selection.selected_session_id ?? '없음'}</span>
         <span>작성자</span><span>${selection.selected_created_by ?? '없음'}</span>
         <span>선택된 목표</span><span>${selection.selected_goal ?? '없음'}</span>
@@ -56,8 +56,8 @@ export function SelectionCard({
 
 export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) {
   return html`
-    <article class="command-card proof-artifact-row">
-      <div class="command-card-head">
+    <article class="command-card rounded-xl proof-artifact-row">
+      <div class="command-card rounded-xl-head">
         <div>
           <strong>${item.summary ?? item.event_type ?? '도구 근거'}</strong>
           <div class="command-meta-line">
@@ -65,7 +65,7 @@ export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) 
             <span>${item.event_type ?? 'event'}</span>
           </div>
         </div>
-        <span class="command-chip">${relativeTime(item.timestamp ?? null)}</span>
+        <span class="command-chip rounded-full">${relativeTime(item.timestamp ?? null)}</span>
       </div>
       ${(() => {
         const tags = toolEvidenceTags(item)
@@ -81,8 +81,8 @@ export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) 
 
 export function TimelineRow({ item }: { item: DedupedTimelineItem }) {
   return html`
-    <article class="command-card proof-timeline-row">
-      <div class="command-card-head">
+    <article class="command-card rounded-xl proof-timeline-row">
+      <div class="command-card rounded-xl-head">
         <div>
           <strong>${item.summary ?? item.event_type ?? '이벤트'}</strong>
           <div class="command-meta-line">
@@ -91,7 +91,7 @@ export function TimelineRow({ item }: { item: DedupedTimelineItem }) {
             <span>${item.actor ?? '시스템'}</span>
           </div>
         </div>
-        <span class="command-chip">${relativeTime(item.timestamp)}</span>
+        <span class="command-chip rounded-full">${relativeTime(item.timestamp)}</span>
       </div>
       ${item.sources.length > 1
         ? html`<div class="semantic-tag-row">
@@ -119,7 +119,7 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
             <span>${lastSeen ? relativeTime(lastSeen) : '기록 없음'}</span>
           </div>
         </div>
-        <span class="command-chip ${actorActivityTone(item)}">
+        <span class="command-chip rounded-full ${actorActivityTone(item)}">
           ${actorActivityLabel(item)}
         </span>
       </div>
@@ -127,19 +127,19 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
         <span>${actorActivityMeta(item)}</span>
       </div>
       ${item.activity_detail
-        ? html`<div class="proof-summary-block">
+        ? html`<div class="proof-summary-block rounded-xl">
             <strong>현재 해석</strong>
             <span>${item.activity_detail}</span>
           </div>`
         : null}
       ${eventSummary
-        ? html`<div class="proof-summary-block">
+        ? html`<div class="proof-summary-block rounded-xl">
             <strong>최근 흔적</strong>
             <span>${eventSummary}</span>
           </div>`
         : null}
       ${requestPreview && item.activity_state !== 'acted'
-        ? html`<div class="proof-summary-block">
+        ? html`<div class="proof-summary-block rounded-xl">
             <strong>최근 요청</strong>
             <span>${requestPreview}</span>
           </div>`
@@ -167,15 +167,15 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
 
 export function ArtifactRow({ item }: { item: DashboardProofArtifactRef }) {
   return html`
-    <article class="command-card proof-artifact-row">
-      <div class="command-card-head">
+    <article class="command-card rounded-xl proof-artifact-row">
+      <div class="command-card rounded-xl-head">
         <div>
           <strong>${item.kind}</strong>
           <div class="command-meta-line">
             <span>${compactPath(item.path)}</span>
           </div>
         </div>
-        <span class="command-chip ${item.exists ? 'ok' : 'warn'}">${item.exists ? '존재함' : '없음'}</span>
+        <span class="command-chip rounded-full ${item.exists ? 'ok' : 'warn'}">${item.exists ? '존재함' : '없음'}</span>
       </div>
     </article>
   `

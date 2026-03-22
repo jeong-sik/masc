@@ -121,7 +121,7 @@ export function KeeperDiagnosticSummary({
   }, [keeper?.name])
 
   if (!keeper) {
-    return html`<div class="control-status-copy">Select a keeper to inspect direct reply state.</div>`
+    return html`<div class="control-status-copy text-[#d5e5fb] text-[length:var(--fs-sm)] leading-[1.5]">Select a keeper to inspect direct reply state.</div>`
   }
 
   const detail = keeperStatusDetails.value[keeper.name]
@@ -129,31 +129,31 @@ export function KeeperDiagnosticSummary({
   const busy = keeperHydrating.value[keeper.name]
 
   return html`
-    <div class="control-result-box">
-      <div class="control-inline-meta">
+    <div class="py-[10px] px-3 rounded-[10px] border border-solid border-[rgba(138,163,211,0.24)] bg-[rgba(5,14,31,0.55)]">
+      <div class="control-inline-meta flex flex-wrap gap-1.5">
         ${continuityStateLabel(diagnostic?.continuity_state)
-          ? html`<span class="pill">${continuityStateLabel(diagnostic?.continuity_state)}</span>`
+          ? html`<span class="pill rounded-full">${continuityStateLabel(diagnostic?.continuity_state)}</span>`
           : null}
-        <span class="pill">${diagnostic?.health_state ?? 'unknown'}</span>
-        <span class="pill">${quietReasonLabel(diagnostic?.quiet_reason)}</span>
-        <span class="pill">next ${nextActionLabel(diagnostic?.next_action_path ?? 'direct_message')}</span>
-        ${busy ? html`<span class="pill">refreshing</span>` : null}
+        <span class="pill rounded-full">${diagnostic?.health_state ?? 'unknown'}</span>
+        <span class="pill rounded-full">${quietReasonLabel(diagnostic?.quiet_reason)}</span>
+        <span class="pill rounded-full">next ${nextActionLabel(diagnostic?.next_action_path ?? 'direct_message')}</span>
+        ${busy ? html`<span class="pill rounded-full">refreshing</span>` : null}
       </div>
-      <div class="control-status-copy">
+      <div class="control-status-copy text-[#d5e5fb] text-[length:var(--fs-sm)] leading-[1.5]">
         ${diagnostic?.continuity_summary
           ?? diagnostic?.summary
           ?? 'Keeper diagnostic summary is not available yet. Probe or open the detail overlay to inspect current runtime state.'}
       </div>
-      <div class="control-status-copy">
+      <div class="control-status-copy text-[#d5e5fb] text-[length:var(--fs-sm)] leading-[1.5]">
         Reply: ${diagnostic?.last_reply_status ?? 'unknown'}
         ${diagnostic?.last_reply_at ? html` · ${formatTime(diagnostic.last_reply_at)}` : null}
         ${diagnostic?.next_eligible_at_s ? html` · next eligible ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
       </div>
       ${diagnostic?.last_error
-        ? html`<div class="control-status-copy text-[#ffb4b4]">${diagnostic.last_error}</div>`
+        ? html`<div class="control-status-copy text-[#ffb4b4] text-[length:var(--fs-sm)] leading-[1.5]">${diagnostic.last_error}</div>`
         : null}
       ${showRawStatus
-        ? html`<pre class="keeper-status-console">${detail?.rawText ?? 'No keeper status loaded yet.'}</pre>`
+        ? html`<pre class="mt-2 py-[10px] px-3 rounded-[10px] border border-solid border-[var(--card-border)] bg-[rgba(2,10,24,0.82)] text-[#9ad8b6] text-[length:var(--fs-sm)] leading-[1.55] whitespace-pre-wrap break-words font-[family:'Fira_Code',monospace] max-h-[240px] overflow-auto">${detail?.rawText ?? 'No keeper status loaded yet.'}</pre>`
         : null}
     </div>
   `
@@ -201,11 +201,11 @@ export function KeeperConversationPanel({
   }
 
   return html`
-    <div class="keeper-conversation-shell">
+    <div class="keeper-conversation-shell flex flex-col gap-2.5">
       <div class="flex justify-end">
         <button
           type="button"
-          class="control-btn ghost"
+          class="control-btn rounded-lg ghost"
           onClick=${() => { setShowMetadata(!showMetadata) }}
         >
           ${showMetadata ? '메타 숨기기' : '메타 표시'}
@@ -226,7 +226,7 @@ export function KeeperConversationPanel({
         onSend=${() => { void submit() }}
         onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
       />
-      ${error ? html`<div class="control-status-copy text-[#ffb4b4]">${error}</div>` : null}
+      ${error ? html`<div class="control-status-copy text-[#ffb4b4] text-[length:var(--fs-sm)] leading-[1.5]">${error}</div>` : null}
     </div>
   `
 }
@@ -248,7 +248,7 @@ export function KeeperRuntimeActions({
   const canRecover = diagnostic?.recoverable ?? recommended === 'recover'
 
   return html`
-    <div class="control-actions">
+    <div class="control-actions flex flex-wrap gap-1.5">
       <button
         class=${`control-btn ghost ${recommended === 'probe' ? 'is-active' : ''}`}
         onClick=${() => {

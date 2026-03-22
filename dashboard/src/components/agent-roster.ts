@@ -125,10 +125,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       <div class="roster-header mb-6">
         <h2 class="roster-title">${keeperFilter === 'keeper-only' ? '키퍼' : keeperFilter === 'agent-only' ? '에이전트' : '에이전트'} (${filtered.length})</h2>
         <p class="agent-page__subtitle">${keeperFilter === 'keeper-only' ? '키퍼 런타임이 있는 에이전트' : keeperFilter === 'agent-only' ? '키퍼 런타임이 없는 에이전트' : '등록된 에이전트 — keeper 런타임이 있으면 컨텍스트 게이지 표시'}</p>
-        <div class="roster-controls">
+        <div class="flex gap-[var(--space-md,16px)] items-center flex-wrap">
           <input
             type="text"
-            class="roster-search"
+            class="roster-search rounded transition-colors duration-200"
             placeholder="이름 검색..."
             value=${search}
             onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
@@ -147,7 +147,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         </div>
       </div>
 
-      <div class="roster-list">
+      <div class="flex flex-col gap-2.5">
         ${filtered.map((agent: Agent) => {
           const brief = briefMap.get(agent.name)
           const keeper = findKeeper(agent.name, keeperList, keeperBriefs)
@@ -158,7 +158,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <div
-              class="roster-card ${isKeeper ? 'roster-card--keeper' : ''}"
+              class="roster-card rounded-xl rounded-md transition-all duration-200 ${isKeeper ? 'roster-card--keeper' : ''}"
               key=${agent.name}
               onClick=${() => openAgentDetail(agent.name)}
               role="button"
@@ -175,7 +175,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 />
               </div>
               <div class="roster-card__info">
-                <div class="roster-card__header">
+                <div class="flex items-center gap-[var(--space-sm,8px)]">
                   <strong class="roster-card__name">${agent.name}</strong>
                   ${isKeeper ? html`
                     <span class="roster-card__keeper-tag">keeper</span>
@@ -189,7 +189,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </div>
 
                 ${isKeeper && ctxPct != null ? html`
-                  <div class="roster-card__gauge">
+                  <div class="flex items-center gap-2">
                     <div class="roster-card__gauge-track">
                       <div
                         class="roster-card__gauge-bar ${pressureClass(keeper.context_ratio)}"
@@ -218,7 +218,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           `
         })}
         ${filtered.length === 0 ? html`
-          <div class="roster-empty">조건에 맞는 에이전트가 없습니다.</div>
+          <div class="roster-empty rounded-md">조건에 맞는 에이전트가 없습니다.</div>
         ` : null}
       </div>
     </div>

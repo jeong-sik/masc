@@ -10,10 +10,10 @@ const activityGraphExpanded = signal(false)
 
 export function Activity() {
   return html`
-    <div class="tab-unified">
+    <div class="tab-unified grid gap-[var(--space-md,16px)]">
       <${Live} />
       <details
-        class="tab-collapsible"
+        class="tab-collapsible rounded-lg"
         open=${activityGraphExpanded.value}
         onToggle=${(e: Event) => { activityGraphExpanded.value = (e.target as HTMLDetailsElement).open }}
       >

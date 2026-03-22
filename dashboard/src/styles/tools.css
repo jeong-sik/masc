@@ -60,7 +60,6 @@
   min-width: 20px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 999px;
   font-size: var(--fs-2xs);
   font-weight: 600;
   background: rgba(148, 163, 184, 0.18);
@@ -236,7 +235,6 @@
   letter-spacing: 0.3px;
 }
 
-.tool-summary-list,
 .tool-bar-chart {
   display: flex;
   flex-direction: column;
@@ -248,7 +246,6 @@
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  border-radius: 8px;
   background: var(--panel-dark-60);
   border: 1px solid var(--slate-gray-8);
 }
@@ -270,18 +267,6 @@
   white-space: nowrap;
 }
 /* ── Tool Metrics (P4 Phase 4.5) ──────────────────────────── */
-.tool-metrics {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.tool-metrics-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
 .tool-metrics-title {
   color: var(--text-strong);
   font-size: var(--fs-lg);
@@ -291,7 +276,6 @@
 
 .tool-metrics-error {
   padding: 10px 12px;
-  border-radius: 8px;
   background: var(--bad-12);
   border: 1px solid rgba(239, 68, 68, 0.34);
   color: #fecaca;
@@ -347,23 +331,10 @@
 }
 
 /* ── Tier distribution ──────────────────────────────────── */
-.tier-dist {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.tier-dist-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .tier-dist-label {
   display: inline-block;
   min-width: 72px;
   padding: 2px 8px;
-  border-radius: 4px;
   font-size: var(--fs-xs);
   font-weight: 600;
   text-align: center;

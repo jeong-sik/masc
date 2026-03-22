@@ -91,31 +91,31 @@ export function KeeperChatPanel({ name }: { name: string }) {
       <div class="keeper-chat__header">
         <span class="keeper-chat__title">@${name} 대화</span>
         ${isStreaming ? html`
-          <button class="control-btn ghost keeper-chat__cancel" onClick=${cancelStream}>중단</button>
+          <button class="control-btn rounded-lg ghost keeper-chat__cancel" onClick=${cancelStream}>중단</button>
         ` : null}
       </div>
 
       <div class="keeper-chat__messages" ref=${scrollRef}>
         ${messages.length === 0 && !isStreaming ? html`
-          <div class="keeper-chat__empty">keeper에게 메시지를 보내세요</div>
+          <div class="text-[var(--white-20)] text-[var(--fs-base)] text-center py-10">keeper에게 메시지를 보내세요</div>
         ` : null}
 
         ${messages.map((msg, idx) => html`
-          <div key=${idx} class="keeper-chat__msg keeper-chat__msg--${msg.role} ${msg.role === 'user' ? 'self-end' : 'self-start'}">
-            <span class="keeper-chat__role">${msg.role === 'user' ? 'You' : name}</span>
-            <div class="keeper-chat__text">${msg.content}</div>
+          <div key=${idx} class="keeper-chat__msg flex flex-col gap-[3px] max-w-[85%] keeper-chat__msg--${msg.role} ${msg.role === 'user' ? 'self-end' : 'self-start'}">
+            <span class="keeper-chat__role text-[var(--fs-2xs)] text-[var(--white-35)] uppercase tracking-[0.5px]">${msg.role === 'user' ? 'You' : name}</span>
+            <div class="keeper-chat__text rounded-lg">${msg.content}</div>
           </div>
         `)}
 
         ${isStreaming && buffer ? html`
-          <div class="keeper-chat__msg keeper-chat__msg--assistant keeper-chat__msg--streaming self-start">
-            <span class="keeper-chat__role">${name}</span>
-            <div class="keeper-chat__text">${buffer}<span class="keeper-chat__cursor">|</span></div>
+          <div class="keeper-chat__msg flex flex-col gap-[3px] max-w-[85%] keeper-chat__msg--assistant keeper-chat__msg--streaming self-start">
+            <span class="keeper-chat__role text-[var(--fs-2xs)] text-[var(--white-35)] uppercase tracking-[0.5px]">${name}</span>
+            <div class="keeper-chat__text rounded-lg">${buffer}<span class="keeper-chat__cursor">|</span></div>
           </div>
         ` : isStreaming ? html`
-          <div class="keeper-chat__msg keeper-chat__msg--assistant keeper-chat__msg--streaming self-start">
-            <span class="keeper-chat__role">${name}</span>
-            <div class="keeper-chat__text keeper-chat__text--thinking">thinking...</div>
+          <div class="keeper-chat__msg flex flex-col gap-[3px] max-w-[85%] keeper-chat__msg--assistant keeper-chat__msg--streaming self-start">
+            <span class="keeper-chat__role text-[var(--fs-2xs)] text-[var(--white-35)] uppercase tracking-[0.5px]">${name}</span>
+            <div class="keeper-chat__text rounded-lg keeper-chat__text--thinking">thinking...</div>
           </div>
         ` : null}
       </div>
@@ -124,7 +124,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
 
       <div class="keeper-chat__input-row">
         <input
-          class="control-input flex-1"
+          class="control-input rounded-lg flex-1"
           type="text"
           placeholder="메시지 입력..."
           value=${chatInput.value}
@@ -133,7 +133,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
           disabled=${isStreaming}
         />
         <button
-          class="control-btn shrink-0"
+          class="control-btn rounded-lg shrink-0"
           onClick=${() => { void sendChat(name) }}
           disabled=${isStreaming || chatInput.value.trim() === ''}
         >

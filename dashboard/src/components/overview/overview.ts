@@ -83,7 +83,7 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
 
   return html`
     <div
-      class="hot-session-card ${s.blocker_summary ? 'hot-session-card--critical' : ''}"
+      class="hot-session-card rounded-xl rounded-lg ${s.blocker_summary ? 'border-[var(--bad)] bg-[rgba(239,68,68,0.06)]' : ''}"
       key=${s.session_id}
       onClick=${() => navigate('status', { section: 'sessions', session_id: s.session_id })}
     >
@@ -91,11 +91,11 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
       ${secondary ? html`<div class="hot-session-card__context">${secondary}</div>` : null}
       <div class="flex flex-wrap gap-1.5 mt-2">
         ${creator
-          ? html`<span class="hot-session-card__chip ${systemSession ? 'hot-session-card__chip--system' : ''}">
+          ? html`<span class="hot-session-card__chip rounded-full ${systemSession ? 'border-[rgba(34,197,94,0.22)] bg-[rgba(34,197,94,0.12)] text-[#b7f3c9]' : ''}">
               ${systemSession ? '시스템' : '주체'} · ${creator}
             </span>`
           : null}
-        ${s.status ? html`<span class="hot-session-card__chip">${statusLabel(s.status)}</span>` : null}
+        ${s.status ? html`<span class="hot-session-card__chip rounded-full">${statusLabel(s.status)}</span>` : null}
       </div>
       <div class="flex gap-2 flex-wrap text-xs text-text-muted mt-2">
         ${s.member_names?.length ? html`
@@ -125,14 +125,14 @@ function SessionLane({ title, description, tone, sessions, emptyCopy }: SessionL
         <div>
           <div class="flex items-center gap-2">
             <h3 class="m-0 text-base font-semibold text-text-strong">${title}</h3>
-            <span class="hot-session-lane__count">${sessions.length}</span>
+            <span class="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-[var(--white-8)] text-[color:var(--text-muted)] text-[length:var(--fs-xs)] font-semibold rounded-full">${sessions.length}</span>
           </div>
           <p class="mt-1 mb-0 text-text-muted text-sm leading-[1.45]">${description}</p>
         </div>
       </div>
       ${sessions.length > 0
-        ? html`<div class="hot-sessions__grid">${sessions.map(renderSessionCard)}</div>`
-        : html`<div class="hot-session-lane__empty">${emptyCopy}</div>`}
+        ? html`<div class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-2">${sessions.map(renderSessionCard)}</div>`
+        : html`<div class="grid place-items-center min-h-[116px] p-3 border border-dashed border-[var(--border-slate-18)] text-[color:var(--text-muted)] text-[length:var(--fs-sm)] text-center bg-[var(--white-2)] rounded-lg">${emptyCopy}</div>`}
     </section>
   `
 }
@@ -164,7 +164,7 @@ function HotSessions() {
         linkLabel="전체 보기"
         onLink=${() => navigate('status', { section: 'sessions' })}
       />
-      <div class="hot-sessions__lanes">
+      <div class="grid grid-cols-2 max-[960px]:grid-cols-1 gap-3">
         <${SessionLane}
           title="사용자 작업"
           description="사람이 직접 연 협업 세션과 지금 손대고 있는 일입니다."
@@ -208,7 +208,7 @@ function AgentPulse() {
       <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
-            class="agent-pulse-card agent-pulse-card--${a.state}"
+            class="agent-pulse-card rounded-xl rounded-md agent-pulse-card--${a.state}"
             key=${a.name}
             onClick=${() => navigate('status', { section: 'agents', agent: a.name })}
           >

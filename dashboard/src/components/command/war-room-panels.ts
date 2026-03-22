@@ -78,25 +78,25 @@ function warRoomMarkerLabel(marker: string): string {
 
 export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
   return html`
-    <article class="command-card p-3 warroom-worker-card ${toneClass(sessionStatusTone(worker.status))}">
-      <div class="command-card-head">
+    <article class="command-card rounded-xl p-3 warroom-worker-card ${toneClass(sessionStatusTone(worker.status))}">
+      <div class="command-card rounded-xl-head">
         <div>
           <strong>${worker.name}</strong>
-          <div class="command-card-sub">${worker.role} · ${worker.lane}</div>
+          <div class="command-card rounded-xl-sub">${worker.role} · ${worker.lane}</div>
         </div>
-        <span class="command-chip ${toneClass(sessionStatusTone(worker.status))}">${displayStatus(worker.status)}</span>
+        <span class="command-chip rounded-full ${toneClass(sessionStatusTone(worker.status))}">${displayStatus(worker.status)}</span>
       </div>
-      <div class="command-card-grid">
+      <div class="command-card rounded-xl-grid">
         <span>출처</span><span>${warRoomSourceLabel(worker.source)}</span>
         <span>과업</span><span>${worker.task}</span>
         <span>최근 신호</span><span>${worker.heartbeat}</span>
         <span>근거</span><span>${worker.detail}</span>
       </div>
-      <div class="command-tag-row mt-2.5">
-        ${worker.markers.map(marker => html`<span class="command-tag">${warRoomMarkerLabel(marker)}</span>`)}
+      <div class="command-tag rounded-full-row mt-2.5">
+        ${worker.markers.map(marker => html`<span class="command-tag rounded-full">${warRoomMarkerLabel(marker)}</span>`)}
       </div>
       ${worker.note
-        ? html`<div class="command-card-foot">${truncate(worker.note, 220)}</div>`
+        ? html`<div class="command-card rounded-xl-foot">${truncate(worker.note, 220)}</div>`
         : null}
     </article>
   `
@@ -104,38 +104,38 @@ export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
 
 export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
   return html`
-    <article class="command-card p-3 warroom-presence-card ${item.tone}">
-      <div class="command-card-head">
+    <article class="command-card rounded-xl p-3 warroom-presence-card ${item.tone}">
+      <div class="command-card rounded-xl-head">
         <div>
           <strong>${item.name}</strong>
-          <div class="command-card-sub">${item.role} · ${item.source}</div>
+          <div class="command-card rounded-xl-sub">${item.role} · ${item.source}</div>
         </div>
-        <span class="command-chip ${item.tone}">${item.status}</span>
+        <span class="command-chip rounded-full ${item.tone}">${item.status}</span>
       </div>
-      <div class="command-card-grid">
+      <div class="command-card rounded-xl-grid">
         <span>현재 과업</span><span>${item.task}</span>
         <span>최근 신호</span><span>${item.signal}</span>
         <span>근거</span><span>${item.detail}</span>
       </div>
-      <div class="command-tag-row">
-        ${item.chips.map(chip => html`<span class="command-tag">${chip}</span>`)}
+      <div class="command-tag rounded-full-row">
+        ${item.chips.map(chip => html`<span class="command-tag rounded-full">${chip}</span>`)}
       </div>
-      ${item.note ? html`<div class="command-card-foot">${truncate(item.note, 200)}</div>` : null}
+      ${item.note ? html`<div class="command-card rounded-xl-foot">${truncate(item.note, 200)}</div>` : null}
     </article>
   `
 }
 
 export function WarRoomFeedCard({ item }: { item: WarRoomFeedItem }) {
   return html`
-    <article class="command-trace-row warroom-feed-card ${item.tone}">
+    <article class="command-trace-row warroom-feed-card rounded-xl ${item.tone}">
       <div class="command-trace-main">
         <div class="command-trace-head">
           <strong>${item.title}</strong>
-          <span class="command-chip ${item.tone}">${item.timestamp ? relativeTime(item.timestamp) : item.source}</span>
+          <span class="command-chip rounded-full ${item.tone}">${item.timestamp ? relativeTime(item.timestamp) : item.source}</span>
         </div>
-        <div class="command-card-sub">${item.meta}</div>
+        <div class="command-card rounded-xl-sub">${item.meta}</div>
       </div>
-      <div class="warroom-feed-detail">${item.detail}</div>
+      <div class="text-[rgba(226,232,240,0.86)] leading-[1.55] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${item.detail}</div>
     </article>
   `
 }

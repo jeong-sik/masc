@@ -28,8 +28,8 @@ export function WorkerSupportRow({
   testId: string
 }) {
   return html`
-    <button class="monitor-row p-3.5 ${row.tone} state-${row.state}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
-      <div class="monitor-row-header">
+    <button class="monitor-row rounded-xl p-3.5 ${row.tone} state-${row.state}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
+      <div class="monitor-row rounded-xl-header">
         <span class="agent-emoji">${row.emoji ?? ''}</span>
         <div class="min-w-0">
           <div class="monitor-name-line">
@@ -39,7 +39,7 @@ export function WorkerSupportRow({
           <div class="monitor-note">${row.note}</div>
         </div>
         <${StatusBadge} status=${row.status ?? 'unknown'} />
-        <span class="monitor-pill ${row.tone} state-${row.state}">${agentStateLabel(row.state)}</span>
+        <span class="monitor-pill ${row.tone} state-${row.state} inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em]">${agentStateLabel(row.state)}</span>
       </div>
 
       <div class="monitor-meta">

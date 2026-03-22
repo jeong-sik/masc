@@ -363,21 +363,21 @@ export function OrchestraNodeLayer({
 
 export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOrchestraResponse }) {
   const selected = selectedTarget(orchestra)
-  if (!selected) return html`<aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card"><div class="empty-state">선택 가능한 대상이 아직 없습니다.</div></aside>`
+  if (!selected) return html`<aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card rounded-xl"><div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">선택 가능한 대상이 아직 없습니다.</div></aside>`
   if (selected.type === 'signal') {
     const signalNode = selected.value
     return html`
-      <aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card ${toneClass(signalNode.tone)}">
-        <div class="card-title-row">
-          <div class="card-title">${signalNode.label}</div>
-          <span class="command-chip ${toneClass(signalNode.tone)}">${orchestraNodeKindLabel(signalNode.kind)}</span>
+      <aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card rounded-xl ${toneClass(signalNode.tone)}">
+        <div class="card rounded-xl-title-row">
+          <div class="card rounded-xl-title">${signalNode.label}</div>
+          <span class="command-chip rounded-full ${toneClass(signalNode.tone)}">${orchestraNodeKindLabel(signalNode.kind)}</span>
         </div>
         <p>${signalNode.detail ?? '세부 설명이 없습니다.'}</p>
         ${signalNode.suggested_surface
           ? html`
               <div class="command-action-row">
                 <button
-                  class="control-btn"
+                  class="control-btn rounded-lg"
                   onClick=${() => jumpTo('command', signalNode.suggested_surface, signalNode.suggested_params ?? {})}
                 >
                   추천 화면 열기
@@ -393,12 +393,12 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
   const relatedSignals = orchestra.signals.filter(signalNode => signalNode.source_id === node.id || signalNode.target_id === node.id)
   const relatedEdges = orchestra.edges.filter(edge => edge.source === node.id || edge.target === node.id)
   return html`
-    <aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card ${toneClass(node.tone)}">
-      <div class="card-title-row">
-        <div class="card-title">${node.label}</div>
-        <span class="command-chip ${toneClass(node.tone)}">${orchestraNodeKindLabel(node.kind)}</span>
+    <aside class="orchestra-drawer flex flex-col gap-3 min-h-[720px] card rounded-xl ${toneClass(node.tone)}">
+      <div class="card rounded-xl-title-row">
+        <div class="card rounded-xl-title">${node.label}</div>
+        <span class="command-chip rounded-full ${toneClass(node.tone)}">${orchestraNodeKindLabel(node.kind)}</span>
       </div>
-      ${node.subtitle ? html`<p class="command-card-sub">${node.subtitle}</p>` : null}
+      ${node.subtitle ? html`<p class="command-card rounded-xl-sub">${node.subtitle}</p>` : null}
       <div class="orchestra-fact-list flex flex-col gap-2">
         ${node.facts.map(factRow => html`
           <div class="orchestra-fact-row flex justify-between gap-3 py-2 px-2.5 rounded-[10px]">
@@ -408,16 +408,16 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
         `)}
       </div>
       ${relatedSignals.length > 0 ? html`
-        <div class="command-tag-row">
-          ${relatedSignals.map(signalNode => html`<span class="command-chip ${toneClass(signalNode.tone)}">${signalNode.label}</span>`)}
+        <div class="command-tag rounded-full-row">
+          ${relatedSignals.map(signalNode => html`<span class="command-chip rounded-full ${toneClass(signalNode.tone)}">${signalNode.label}</span>`)}
         </div>
       ` : null}
-      <div class="command-card-sub">연결 ${relatedEdges.length}개 · 근거 ${node.provenance}</div>
+      <div class="command-card rounded-xl-sub">연결 ${relatedEdges.length}개 · 근거 ${node.provenance}</div>
       ${(node.link_tab && (node.link_surface || Object.keys(node.link_params ?? {}).length > 0))
         ? html`
             <div class="command-action-row">
               <button
-                class="control-btn"
+                class="control-btn rounded-lg"
                 onClick=${() => jumpTo(node.link_tab ?? 'command', node.link_surface, node.link_params ?? {})}
               >
                 이 화면 열기

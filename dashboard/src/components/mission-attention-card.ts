@@ -37,14 +37,14 @@ export function AttentionCard({
   const action = item.top_action ?? null
 
   return html`
-    <article class="mission-attention-card ${toneClass(action?.severity ?? item.severity)} ${selected ? 'is-selected' : ''}">
+    <article class="mission-attention-card rounded-xl ${toneClass(action?.severity ?? item.severity)} ${selected ? 'is-selected' : ''}">
       <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => toggleAttention(item.id)}>
         <div class="flex justify-between gap-2 items-start flex-wrap">
           <div>
             <strong>${item.summary}</strong>
             <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</div>
           </div>
-          <span class="command-chip ${toneClass(action?.severity ?? item.severity)}">${action ? actionModeLabel(action) : item.severity}</span>
+          <span class="command-chip rounded-full ${toneClass(action?.severity ?? item.severity)}">${action ? actionModeLabel(action) : item.severity}</span>
         </div>
 
         <div class="grid grid-cols-2 gap-2.5">
@@ -86,7 +86,7 @@ export function AttentionCard({
                 `)}
               </div>
             `
-          : html`<div class="empty-state">직접 연결된 세션이 아직 없습니다.</div>`}
+          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">직접 연결된 세션이 아직 없습니다.</div>`}
 
         ${item.related_agent_names.length > 0
           ? html`
@@ -113,16 +113,16 @@ export function AttentionCard({
       <div class="flex gap-2 flex-wrap mt-2.5">
         ${action
           ? html`
-              <button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, '상황판 주의 신호')}>
+              <button class="control-btn rounded-lg ghost" onClick=${() => openActionIntervene(action, incident, '상황판 주의 신호')}>
                 이 액션으로 개입 열기
               </button>
-              <button class="control-btn ghost" onClick=${() => openActionCommand(action, incident, '상황판 주의 신호')}>
+              <button class="control-btn rounded-lg ghost" onClick=${() => openActionCommand(action, incident, '상황판 주의 신호')}>
                 원인 보기
               </button>
             `
           : html`
-              <button class="control-btn ghost" onClick=${() => openIncidentIntervene(incident)}>이 이슈로 개입 열기</button>
-              <button class="control-btn ghost" onClick=${() => openIncidentCommand(incident)}>이 이슈의 원인 보기</button>
+              <button class="control-btn rounded-lg ghost" onClick=${() => openIncidentIntervene(incident)}>이 이슈로 개입 열기</button>
+              <button class="control-btn rounded-lg ghost" onClick=${() => openIncidentCommand(incident)}>이 이슈의 원인 보기</button>
             `}
       </div>
     </article>

@@ -295,14 +295,6 @@ a:hover {
 
 /* Header */
 
-.version-badge {
-  font-size: 11px;
-  padding: 2px 9px;
-  border-radius: 999px;
-  border: 1px solid rgba(71, 184, 255, 0.35);
-  background: var(--accent-soft);
-  color: #9ad9ff;
-}
 
 .build-badge-trigger {
   cursor: pointer;
@@ -323,32 +315,10 @@ a:hover {
   gap: 8px;
 }
 
-.build-badge-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.build-badge-row strong {
-  color: var(--text-strong);
-  text-align: right;
-}
-
-.rail-build-hint {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-.kpi-value {
-  color: var(--text-strong);
-  font-size: 17px;
-  line-height: 1.1;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum";
-}
+/* build-badge-row → Tailwind (flex justify-between gap-3 text-xs text-[color:var(--text-muted)]) */
+/* build-badge-row strong → Tailwind (text-[color:var(--text-strong)] text-right) */
+/* rail-build-hint → Tailwind (mt-2.5 text-xs text-[color:var(--text-muted)]) */
+/* kpi-value → Tailwind (text-[color:var(--text-strong)] text-[17px] leading-[1.1] font-semibold tabular-nums) */
 
 /* Main layout */
 .dashboard-rail {
@@ -376,12 +346,8 @@ a:hover {
   padding: 14px;
 }
 
-.rail-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
+/* rail-card-head → Tailwind (flex items-center justify-between gap-3) */
+/* rail-card-head h3 → Tailwind (mb-0) */
 
 .rail-card h3 {
   color: var(--text-strong);
@@ -391,14 +357,9 @@ a:hover {
   margin-bottom: 10px;
 }
 
-.rail-card-head h3 {
-  margin-bottom: 0;
-}
-
 .rail-section-chip {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
   padding: 4px 9px;
   font-size: 10px;
   text-transform: uppercase;
@@ -419,11 +380,7 @@ a:hover {
   border-color: rgba(239, 68, 68, 0.28);
   background: var(--bad-12);
 }
-.rail-tab-list {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 6px;
-}
+/* rail-tab-list → Tailwind (grid grid-cols-1 gap-1.5) */
 
 .rail-tab-btn {
   border: 1px solid var(--card-border);
@@ -450,23 +407,9 @@ a:hover {
   background: var(--white-10);
 }
 
-.rail-tab-copy {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.rail-tab-copy strong {
-  color: var(--text-strong);
-  font-size: 13px;
-  line-height: 1.3;
-}
-
-.rail-tab-copy span {
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.4;
-}
+/* rail-tab-copy → Tailwind (min-w-0 grid gap-0.5) */
+/* rail-tab-copy strong → Tailwind (text-[color:var(--text-strong)] text-[13px] leading-[1.3]) */
+/* rail-tab-copy span → Tailwind (text-[color:var(--text-muted)] text-[11px] leading-[1.4]) */
 
 .rail-tab-btn.active .rail-tab-copy span {
   color: #c7dcf7;
@@ -476,73 +419,11 @@ a:hover {
   margin-top: 14px;
 }
 
-.rail-view-note {
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid var(--card-border);
-  display: grid;
-  gap: 4px;
-}
-
-.rail-view-note-label,
-.rail-stat-card span {
-  color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.rail-view-note strong {
-  color: var(--text-strong);
-  font-size: 14px;
-}
-
-.rail-view-note p {
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-/* ── Compact Rail (Phase 2) ── */
-
-.rail-card-compact {
-  padding: 10px 12px;
-}
-
-.rail-card-compact .rail-tab-btn {
-  padding: 6px 8px;
-  gap: 6px;
-}
-
-.rail-card-compact .rail-tab-btn strong {
-  font-size: 13px;
-}
-.rail-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.rail-stat-card {
-  border: 1px solid var(--border-slate-16);
-  border-radius: 10px;
-  padding: 10px 11px;
-  background: var(--white-3);
-  display: grid;
-  gap: 4px;
-}
-
-.rail-stat-card strong {
-  color: var(--text-strong);
-  font-size: 18px;
-  line-height: 1.1;
-}
-.rail-inline-actions {
-  margin-top: 12px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
+/* rail-view-note, rail-view-note-label, rail-stat-card span/strong → Tailwind */
+/* rail-card-compact → Tailwind (py-2.5 px-3) */
+/* rail-stat-grid → Tailwind (grid grid-cols-2 gap-2) */
+/* rail-stat-card → Tailwind inline */
+/* rail-inline-actions → Tailwind (mt-3 grid grid-cols-2 gap-2) */
 .rail-refresh-btn {
   width: 100%;
   border: 1px solid rgba(71, 184, 255, 0.4);
@@ -558,57 +439,14 @@ a:hover {
   background: var(--accent-20);
 }
 
-.rail-secondary-btn {
-  width: 100%;
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  padding: 9px 11px;
-  background: var(--white-4);
-  color: var(--text-body);
-  font-size: 12px;
-  cursor: pointer;
-}
+/* rail-secondary-btn → Tailwind (w-full border border-[var(--card-border)] rounded-[10px] py-[9px] px-[11px] bg-[var(--white-4)] text-[color:var(--text-body)] text-xs cursor-pointer) */
 
 /* Core cards and sections */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
+/* stats-grid → Tailwind (grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4) */
 
-.stat-card {
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-md);
-  background: var(--card);
-  padding: 15px 14px;
-}
-
-.stat-value {
-  margin-top: 6px;
-  color: var(--text-strong);
-  font-size: 30px;
-  font-weight: 700;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum";
-}
-
-.section h2 {
-  color: var(--text-strong);
-  font-size: 14px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin-bottom: 10px;
-}
-
-.empty-state {
-  text-align: center;
-  border: 1px dashed var(--card-border);
-  border-radius: 10px;
-  padding: 22px 16px;
-  color: var(--text-muted);
-}
+/* stat-card → Tailwind (border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5) */
+/* stat-value → Tailwind (mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums) */
+/* empty-state base → Tailwind (text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]) */
 
 .empty-state.ok {
   border-color: var(--ok-30);
@@ -618,20 +456,10 @@ a:hover {
 .loading-indicator {
   text-align: center;
   border: 1px dashed var(--card-border);
-  border-radius: 12px;
   padding: 48px 16px;
   color: var(--text-muted);
 }
 
-.loading-banner {
-  text-align: center;
-  padding: 6px 16px;
-  background: rgba(230, 167, 0, 0.12);
-  border-bottom: 1px solid rgba(230, 167, 0, 0.3);
-  color: #e6a700;
-  font-size: 0.8rem;
-  flex-shrink: 0;
-}
 
 @keyframes fadeSlide {
   from {
@@ -802,7 +630,6 @@ a:hover {
   padding: 2px 8px;
   min-width: 80px;
   border: 1px solid var(--card-border);
-  border-radius: 999px;
   background: var(--white-4);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
@@ -811,7 +638,6 @@ a:hover {
 .pill {
   font-size: var(--fs-2xs);
   padding: 2px 8px;
-  border-radius: 999px;
   border: 1px solid rgba(71, 184, 255, 0.36);
   background: var(--accent-12);
   color: #9ad9ff;
@@ -820,7 +646,6 @@ a:hover {
 .ctx-bar {
   height: 6px;
   margin-top: 6px;
-  border-radius: 999px;
   overflow: hidden;
   background: var(--white-10);
 }
@@ -828,7 +653,6 @@ a:hover {
 .ctx-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--accent), var(--ok));
-  border-radius: 999px;
   transition: width 0.25s ease;
 }
 

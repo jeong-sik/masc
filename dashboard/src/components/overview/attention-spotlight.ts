@@ -91,7 +91,7 @@ export function AttentionSpotlight({ snap }: AttentionSpotlightProps) {
             </span>
             <div class="flex gap-1.5 flex-wrap items-center">
               ${item.relatedNames.map(name => html`
-                <span class="attention-spotlight__chip" key=${name}>${name}</span>
+                <span class="attention-spotlight__chip rounded-full" key=${name}>${name}</span>
               `)}
               ${item.lastSeen ? html`
                 <span class="text-text-muted text-xs">${relativeTime(item.lastSeen)}</span>

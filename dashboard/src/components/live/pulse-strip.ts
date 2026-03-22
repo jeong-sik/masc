@@ -18,14 +18,14 @@ export function PulseStrip() {
 
   if (pulses.length === 0) {
     return html`
-      <div class="pulse-strip">
+      <div class="pulse-strip rounded-xl">
         <span class="text-[rgba(255,255,255,0.3)] text-[0.8rem]">연결된 에이전트 없음</span>
       </div>
     `
   }
 
   return html`
-    <div class="pulse-strip">
+    <div class="pulse-strip rounded-xl">
       ${pulses.map(p => html`
         <button
           key=${p.name}

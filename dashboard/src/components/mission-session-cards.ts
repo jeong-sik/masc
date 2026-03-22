@@ -32,7 +32,7 @@ export function SessionBriefCard({
   const plannedCount = brief.planned_count ?? brief.member_names.length
 
   return html`
-    <article class="mission-crew-card ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)} ${liveStateClass(brief.status, brief.health)} ${selected ? 'is-selected' : ''}">
+    <article class="mission-crew-card rounded-xl ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)} ${liveStateClass(brief.status, brief.health)} ${selected ? 'is-selected' : ''}">
       <button class="w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer" onClick=${() => toggleSession(brief.session_id)}>
         <div class="flex justify-between gap-2 items-start flex-wrap">
           <div>
@@ -42,7 +42,7 @@ export function SessionBriefCard({
             </div>
             <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           </div>
-          <span class="command-chip ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
+          <span class="command-chip rounded-full ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
         </div>
 
         <div class="grid grid-cols-2 gap-2.5">
@@ -108,10 +108,10 @@ export function SessionBriefCard({
         : null}
 
       <div class="flex gap-2 flex-wrap mt-2.5">
-        <button class="control-btn ghost" onClick=${() => openSession('intervene', brief.session_id)}>세션 개입 열기</button>
-        <button class="control-btn ghost" onClick=${() => openSession('command', brief.session_id)}>세션 원인 보기</button>
+        <button class="control-btn rounded-lg ghost" onClick=${() => openSession('intervene', brief.session_id)}>세션 개입 열기</button>
+        <button class="control-btn rounded-lg ghost" onClick=${() => openSession('command', brief.session_id)}>세션 원인 보기</button>
         ${action
-          ? html`<button class="control-btn ghost" onClick=${() => openActionIntervene(action, incident, '상황판 세션 요약')}>추천 액션 열기</button>`
+          ? html`<button class="control-btn rounded-lg ghost" onClick=${() => openActionIntervene(action, incident, '상황판 세션 요약')}>추천 액션 열기</button>`
           : null}
       </div>
     </article>
@@ -129,16 +129,16 @@ export function SessionDetailCard({
 }) {
   if (loading && !detail) {
     return html`
-      <${Card} title="세션 상세" class="mission-list-card">
-        <div class="loading-indicator">세션 상세 불러오는 중...</div>
+      <${Card} title="세션 상세" class="mission-list-card rounded-xl">
+        <div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">세션 상세 불러오는 중...</div>
       <//>
     `
   }
 
   if (error && !detail) {
     return html`
-      <${Card} title="세션 상세" class="mission-list-card">
-        <div class="empty-state error">${error}</div>
+      <${Card} title="세션 상세" class="mission-list-card rounded-xl">
+        <div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${error}</div>
       <//>
     `
   }
@@ -149,7 +149,7 @@ export function SessionDetailCard({
 
   const session = detail.session
   return html`
-    <${Card} title="세션 상세" class="mission-list-card">
+    <${Card} title="세션 상세" class="mission-list-card rounded-xl">
       <div class="grid gap-1 mb-3">
         <h3 class="m-0 text-[var(--text-strong)] text-lg">${session.goal}</h3>
         <p class="m-0 text-[rgba(255,255,255,0.68)] leading-normal">${session.session_id}${session.room ? ` · ${session.room}` : ''}</p>
@@ -161,7 +161,7 @@ export function SessionDetailCard({
         <div class="grid gap-2.5">
           <div class="flex justify-between gap-2 items-start flex-wrap">
             <strong>타임라인</strong>
-            <span class="command-chip">${detail.timeline.length}</span>
+            <span class="command-chip rounded-full">${detail.timeline.length}</span>
           </div>
           <div class="flex flex-col gap-2.5">
             ${detail.timeline.length > 0
@@ -174,14 +174,14 @@ export function SessionDetailCard({
                     <small class="text-[rgba(255,255,255,0.68)] leading-[1.45]">${item.actor ? `${item.actor} · ` : ''}${item.event_type ?? '이벤트'}</small>
                   </article>
                 `)
-              : html`<div class="empty-state">표시할 세션 이벤트가 없습니다.</div>`}
+              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">표시할 세션 이벤트가 없습니다.</div>`}
           </div>
         </div>
 
         <div class="grid gap-2.5">
           <div class="flex justify-between gap-2 items-start flex-wrap">
             <strong>참여자</strong>
-            <span class="command-chip">${detail.participants.length}</span>
+            <span class="command-chip rounded-full">${detail.participants.length}</span>
           </div>
           <div class="flex flex-col gap-3 compact">
             ${detail.participants.length > 0
@@ -195,7 +195,7 @@ export function SessionDetailCard({
                     </small>
                   </button>
                 `)
-              : html`<div class="empty-state">세션 참여자 미리보기가 없습니다.</div>`}
+              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">세션 참여자 미리보기가 없습니다.</div>`}
           </div>
         </div>
       </div>
@@ -204,7 +204,7 @@ export function SessionDetailCard({
         <div class="grid gap-2.5">
           <div class="flex justify-between gap-2 items-start flex-wrap">
             <strong>연결된 작전</strong>
-            <span class="command-chip">${detail.operations.length}</span>
+            <span class="command-chip rounded-full">${detail.operations.length}</span>
           </div>
           <div class="flex flex-col gap-2 mt-2.5">
             ${detail.operations.length > 0
@@ -215,14 +215,14 @@ export function SessionDetailCard({
                     <small class="text-[rgba(255,255,255,0.7)] leading-[1.45]">${operation.detachment_status ?? operation.objective ?? '분견대 정보 없음'}</small>
                   </button>
                 `)
-              : html`<div class="empty-state">연결된 작전이 없습니다.</div>`}
+              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">연결된 작전이 없습니다.</div>`}
           </div>
         </div>
 
         <div class="grid gap-2.5">
           <div class="flex justify-between gap-2 items-start flex-wrap">
             <strong>연속성 관찰</strong>
-            <span class="command-chip">${detail.keepers.length}</span>
+            <span class="command-chip rounded-full">${detail.keepers.length}</span>
           </div>
           <div class="flex flex-col gap-2 mt-2.5">
             ${detail.keepers.length > 0
@@ -233,7 +233,7 @@ export function SessionDetailCard({
                     <small class="text-[rgba(255,255,255,0.7)] leading-[1.45]">${keeper.current_work ?? '현재 작업 정보 없음'}</small>
                   </div>
                 `)
-              : html`<div class="empty-state">직접 연결된 키퍼는 없습니다.</div>`}
+              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">직접 연결된 키퍼는 없습니다.</div>`}
           </div>
         </div>
       </div>

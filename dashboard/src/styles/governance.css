@@ -9,14 +9,11 @@
 .council-error {
   margin-top: 10px;
   border: 1px solid rgba(239, 68, 68, 0.35);
-  border-radius: 8px;
   padding: 8px 10px;
   color: #f7b6b6;
   font-size: var(--fs-sm);
 }
-.council-list,
-.governance-side-block,
-.governance-activity-list {
+.council-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -64,7 +61,6 @@ button.council-row.selected {
 }
 
 .council-state {
-  border-radius: 999px;
   padding: 3px 9px;
   font-size: var(--fs-xs);
   text-transform: lowercase;
@@ -99,18 +95,6 @@ button.council-row.selected {
   font-family: "IBM Plex Mono", "Fira Code", monospace;
 }
 
-.governance-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.governance-filter-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .governance-layout {
   display: grid;
   grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.45fr) minmax(280px, 1fr);
@@ -132,7 +116,6 @@ button.council-row.selected {
 
 .governance-kind {
   flex: 0 0 auto;
-  border-radius: 999px;
   padding: 2px 8px;
   border: 1px solid var(--border-slate-22);
   background: var(--white-6);
@@ -157,7 +140,6 @@ button.council-row.selected {
 }
 
 .governance-chip {
-  border-radius: 999px;
   padding: 3px 8px;
   border: 1px solid var(--card-border);
   background: var(--white-5);
@@ -188,14 +170,6 @@ button.council-row.selected {
   border-color: rgba(138, 163, 211, 0.25);
   background: var(--white-6);
   color: #b7cbee;
-}
-
-.governance-detail-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 14px;
 }
 
 .governance-detail-head h3 {
@@ -229,27 +203,12 @@ button.council-row.selected {
   line-height: 1.5;
 }
 
-.governance-ledger {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .governance-ledger-row,
 .governance-activity-row {
   border: 1px solid var(--card-border);
   border-radius: 10px;
   background: var(--white-3h);
   padding: 10px 11px;
-}
-
-.governance-ledger-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  color: #9ab3de;
-  font-size: var(--fs-xs);
 }
 
 .governance-ledger-head strong {
@@ -265,7 +224,6 @@ button.council-row.selected {
 }
 
 .governance-badge {
-  border-radius: 999px;
   padding: 2px 8px;
   font-size: var(--fs-2xs);
   text-transform: lowercase;
@@ -278,12 +236,6 @@ button.council-row.selected {
   border-color: rgba(239, 68, 68, 0.44);
   background: var(--bad-12);
   color: #fecaca;
-}
-
-.governance-side-column {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
 }
 
 .governance-side-block h4 {

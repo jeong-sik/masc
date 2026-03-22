@@ -21,22 +21,22 @@ export function KanbanCard({ task }: { task: Task }) {
   const hasDescription = Boolean(task.description)
 
   return html`
-    <div class="kanban-card ${pClass}">
-      <div class="kanban-card-header">
-        <span class="priority-badge priority-badge--${pClass}">${priorityLabel(p)}</span>
-        <div class="kanban-card-title">${task.title}</div>
+    <div class="kanban-card rounded-xl ${pClass}">
+      <div class="kanban-card rounded-xl-header">
+        <span class="priority-badge rounded priority-badge--${pClass}">${priorityLabel(p)}</span>
+        <div class="kanban-card rounded-xl-title">${task.title}</div>
       </div>
       ${hasDescription ? html`
         <div
-          class="task-description-preview ${isExpanded ? 'task-description-preview--expanded' : ''}"
+          class="task-description-preview transition-colors duration-150 ${isExpanded ? 'task-description-preview--expanded' : ''}"
           onClick=${() => toggleTaskExpand(task.id)}
         >
           ${isExpanded ? task.description : truncate(task.description ?? '', 80)}
         </div>
       ` : null}
-      <div class="kanban-card-meta">
+      <div class="kanban-card rounded-xl-meta">
         ${task.created_at ? html`<${TimeAgo} timestamp=${task.created_at} />` : html`<span>-</span>`}
-        ${task.assignee ? html`<span class="kanban-assignee">${task.assignee}</span>` : null}
+        ${task.assignee ? html`<span class="kanban-assignee rounded-lg">${task.assignee}</span>` : null}
       </div>
     </div>
   `
@@ -51,34 +51,34 @@ export function TaskBacklog() {
   return html`
     <${Card} title="태스크 백로그" class="section mb-3.5">
       <div class="kanban-board">
-        <div class="kanban-column">
+        <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
           <div class="kanban-header todo">
             <span>할 일</span>
-            <span class="kanban-badge">${todo.length}</span>
+            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${todo.length}</span>
           </div>
           ${sortedTodo.length === 0
-            ? html`<div class="empty-state" class="opacity-50">대기 중인 태스크가 없습니다</div>`
+            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" class="opacity-50">대기 중인 태스크가 없습니다</div>`
             : sortedTodo.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         </div>
-        <div class="kanban-column">
+        <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
           <div class="kanban-header inprogress">
             <span>진행 중</span>
-            <span class="kanban-badge">${inProgress.length}</span>
+            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${inProgress.length}</span>
           </div>
           ${sortedInProgress.length === 0
-            ? html`<div class="empty-state" class="opacity-50">진행 중인 태스크가 없습니다</div>`
+            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" class="opacity-50">진행 중인 태스크가 없습니다</div>`
             : sortedInProgress.map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
         </div>
-        <div class="kanban-column">
+        <div class="flex flex-col gap-4 bg-[rgba(10,15,29,0.5)] rounded-[var(--radius-lg)] p-5 border border-solid border-[var(--accent-10)]">
           <div class="kanban-header done">
             <span>완료</span>
-            <span class="kanban-badge">${done.length}</span>
+            <span class="kanban-badge px-2.5 py-1 rounded-xl text-[0.8rem] font-bold">${done.length}</span>
           </div>
           ${sortedDone.length === 0
-            ? html`<div class="empty-state" class="opacity-50">완료된 태스크가 없습니다</div>`
+            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" class="opacity-50">완료된 태스크가 없습니다</div>`
             : sortedDone.slice(0, 20).map(t => html`<${KanbanCard} key=${t.id} task=${t} />`)}
           ${sortedDone.length > 20
-            ? html`<div class="empty-state" class="opacity-50">...외 ${sortedDone.length - 20}개 더 있음</div>`
+            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" class="opacity-50">...외 ${sortedDone.length - 20}개 더 있음</div>`
             : null}
         </div>
       </div>

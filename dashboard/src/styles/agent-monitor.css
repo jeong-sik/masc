@@ -85,7 +85,6 @@
 
 .agent-live-chip {
   padding: 3px 10px;
-  border-radius: 12px;
   border: 1px solid var(--ff-border-subtle);
   background: none;
   color: var(--text-muted, var(--text-muted));
@@ -120,12 +119,10 @@
   padding: 2px 8px;
   background: var(--accent-10);
   border: 1px solid var(--accent-20);
-  border-radius: 8px;
 }
 
 .agent-live-autoscroll {
   padding: 2px 8px;
-  border-radius: 8px;
   border: 1px solid var(--ff-border-subtle);
   background: none;
   color: var(--text-muted);
@@ -157,7 +154,6 @@
   gap: 6px;
   padding: 4px 8px;
   font-size: var(--fs-sm);
-  border-radius: 4px;
   transition: background 0.1s;
 }
 

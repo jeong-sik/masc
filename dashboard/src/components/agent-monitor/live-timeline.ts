@@ -131,7 +131,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
           ${FILTER_CHIPS.map(chip => html`
             <button
               key=${chip.key}
-              class="agent-live-chip ${activeFilter.value === chip.key ? 'agent-live-chip--active' : ''}"
+              class="agent-live-chip rounded-xl ${activeFilter.value === chip.key ? 'agent-live-chip--active' : ''}"
               onClick=${() => { activeFilter.value = chip.key }}
             >
               ${chip.label}
@@ -139,10 +139,10 @@ export function AgentLiveTimeline({ name }: { name: string }) {
           `)}
         </div>
         <div class="agent-live-meta">
-          <span class="agent-event-rate">${eventsPerMin}/min</span>
+          <span class="agent-event-rate rounded-lg">${eventsPerMin}/min</span>
           <span class="text-text-muted">${filtered.length} events</span>
           <button
-            class="agent-live-autoscroll ${autoScroll.value ? 'agent-live-autoscroll--on' : ''}"
+            class="agent-live-autoscroll rounded-lg ${autoScroll.value ? 'agent-live-autoscroll--on' : ''}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
             title=${autoScroll.value ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
           >
@@ -153,15 +153,15 @@ export function AgentLiveTimeline({ name }: { name: string }) {
 
       <div class="agent-live-stream" ref=${scrollRef}>
         ${filtered.length === 0
-          ? html`<div class="empty-state">필터에 맞는 이벤트 없음</div>`
+          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">필터에 맞는 이벤트 없음</div>`
           : filtered.map((entry: JournalEntry, idx: number) => html`
-              <div class="agent-live-event" key=${idx}>
+              <div class="agent-live-event rounded" key=${idx}>
                 <span class="agent-event-badge ${eventKindBadgeClass(entry.eventType)}">
                   ${eventKindLabel(entry.eventType)}
                 </span>
-                <span class="agent-live-event-text">${compactText(entry.text)}</span>
+                <span class="agent-live-event rounded-text">${compactText(entry.text)}</span>
                 ${entry.timestamp ? html`
-                  <span class="agent-live-event-time"><${TimeAgo} timestamp=${entry.timestamp} /></span>
+                  <span class="agent-live-event rounded-time"><${TimeAgo} timestamp=${entry.timestamp} /></span>
                 ` : null}
               </div>
             `)}

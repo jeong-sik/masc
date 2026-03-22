@@ -38,7 +38,7 @@ export function Tools() {
               : '필수 도구와 사용 현황 요약입니다.'}
           </p>
           <button
-            class="control-btn ghost"
+            class="control-btn rounded-lg ghost"
             class="mt-2"
             onClick=${() => { showFullInventory.value = !showFullInventory.value }}
           >

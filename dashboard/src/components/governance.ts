@@ -45,7 +45,7 @@ function GovernanceSummaryStrip() {
 
   return html`
     ${isStale ? html`
-      <div class="governance-stale-warning">
+      <div class="governance-stale-warning rounded-md">
         모든 열린 케이스가 ${formatAgeSummary(oldestAge)} 이상 경과됨.
         ${lastActivityAge != null ? html` 마지막 활동: ${formatAgeSummary(lastActivityAge)} 전.` : null}
         테스트 잔재일 가능성이 높습니다.
@@ -79,10 +79,10 @@ function GovernanceSummaryStrip() {
 function GovernanceToolbar() {
   return html`
     <${Card} title="청원 콘솔" class="section mb-3.5">
-      <div class="governance-toolbar">
+      <div class="flex flex-col gap-3">
         <div class="council-create">
           <input
-            class="control-input"
+            class="control-input rounded-lg"
             type="text"
             placeholder="청원 제목을 입력하세요..."
             value=${governanceTopicInput.value}
@@ -95,17 +95,17 @@ function GovernanceToolbar() {
             disabled=${governanceStarting.value}
           />
           <button
-            class="control-btn secondary"
+            class="control-btn rounded-lg secondary"
             onClick=${submitPetition}
             disabled=${governanceStarting.value || governanceTopicInput.value.trim() === ''}
           >
             ${governanceStarting.value ? '접수 중...' : '청원 접수'}
           </button>
-          <button class="control-btn ghost" onClick=${refreshGovernance} disabled=${governanceLoading.value}>
+          <button class="control-btn rounded-lg ghost" onClick=${refreshGovernance} disabled=${governanceLoading.value}>
             ${governanceLoading.value ? '새로고침 중...' : '새로고침'}
           </button>
         </div>
-        <div class="governance-filter-row">
+        <div class="flex flex-wrap gap-2">
           ${(
             [
               ['open', '진행 중'],
@@ -116,7 +116,7 @@ function GovernanceToolbar() {
             ] as Array<[GovernanceFilter, string]>
           ).map(([key, label]) => html`
             <button
-              class="control-btn ${governanceFilter.value === key ? 'is-active' : 'ghost'}"
+              class="control-btn rounded-lg ${governanceFilter.value === key ? 'is-active' : 'ghost'}"
               onClick=${async () => {
                 governanceFilter.value = key
                 await refreshGovernance()
@@ -126,7 +126,7 @@ function GovernanceToolbar() {
             </button>
           `)}
         </div>
-        ${governanceError.value ? html`<div class="council-error">${governanceError.value}</div>` : null}
+        ${governanceError.value ? html`<div class="council-error rounded-lg">${governanceError.value}</div>` : null}
       </div>
     <//>
   `
@@ -138,7 +138,7 @@ function DecisionInbox() {
     <${Card} title="사건 수신함" class="section mb-3.5">
       <div class="council-list governance-inbox">
         ${items.length === 0
-          ? html`<div class="empty-state">이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.</div>`
+          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">이 필터에 해당하는 사건이 없습니다. 청원을 접수하거나 필터를 변경해 보세요.</div>`
           : items.map(item => {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`
@@ -148,7 +148,7 @@ function DecisionInbox() {
                 >
                   <div class="min-w-0">
                     <div class="governance-row-head">
-                      <span class="governance-kind">${kindLabel(item.kind)}</span>
+                      <span class="governance-kind rounded-full">${kindLabel(item.kind)}</span>
                       <span class="council-topic">${item.topic}</span>
                     </div>
                     <div class="council-sub">
@@ -157,20 +157,20 @@ function DecisionInbox() {
                         ? html`<span><${TimeAgo} timestamp=${item.last_activity_at} /></span>`
                         : null}
                     </div>
-                    <div class="governance-chip-row">
-                      ${item.origin ? html`<span class="governance-chip text-[#95a9cd]">${item.origin}</span>` : null}
-                      ${item.risk_class ? html`<span class="governance-chip">${item.risk_class}</span>` : null}
-                      ${item.provenance ? html`<span class="governance-chip">${item.provenance}</span>` : null}
+                    <div class="governance-chip rounded-full-row">
+                      ${item.origin ? html`<span class="governance-chip rounded-full text-[#95a9cd]">${item.origin}</span>` : null}
+                      ${item.risk_class ? html`<span class="governance-chip rounded-full">${item.risk_class}</span>` : null}
+                      ${item.provenance ? html`<span class="governance-chip rounded-full">${item.provenance}</span>` : null}
                       ${item.status === 'needs_human_gate'
-                        ? html`<span class="governance-chip warn">관리자 승인 필요</span>`
+                        ? html`<span class="governance-chip rounded-full warn">관리자 승인 필요</span>`
                         : null}
                       ${item.status === 'executed'
-                        ? html`<span class="governance-chip ok">집행 완료</span>`
+                        ? html`<span class="governance-chip rounded-full ok">집행 완료</span>`
                         : null}
                     </div>
                   </div>
                   <div class="governance-row-side">
-                    <span class="council-state ${governanceToneClass(item.status)}">${caseStatusLabel(item.status)}</span>
+                    <span class="council-state rounded-full ${governanceToneClass(item.status)}">${caseStatusLabel(item.status)}</span>
                     <span class="governance-vote-meter">${item.brief_count ?? 0}건</span>
                   </div>
                 </button>

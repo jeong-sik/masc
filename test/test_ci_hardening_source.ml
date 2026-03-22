@@ -81,6 +81,12 @@ let test_http_write_auth_contracts () =
   check bool "server auth exposes token-bound route helper" true
     (file_contains_pattern "lib/server/server_auth.ml"
        "and with_token_permission_auth");
+  check bool "server auth defines same-origin browser guard" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       "let ensure_same_origin_browser_request");
+  check bool "tool auth enforces same-origin when no bearer token" true
+    (file_contains_pattern "lib/server/server_auth.ml"
+       "else ensure_same_origin_browser_request request");
   check bool "broadcast route requires token-bound broadcast permission" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        {|with_token_permission_auth ~permission:Types.CanBroadcast|});

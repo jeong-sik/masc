@@ -175,6 +175,58 @@ let agent_from_request request =
            | Some v -> Some (decode v)
            | None -> Option.map decode (query_param request "agent_name"))
 
+let effective_port_of_uri (uri : Uri.t) =
+  match Uri.port uri with
+  | Some port -> Some port
+  | None -> (
+      match Uri.scheme uri with
+      | Some "http" -> Some 80
+      | Some "https" -> Some 443
+      | _ -> None)
+
+let host_port_of_origin origin =
+  try
+    let uri = Uri.of_string origin in
+    match Uri.host uri with
+    | None -> None
+    | Some host ->
+        Some
+          ( String.trim host |> String.lowercase_ascii,
+            effective_port_of_uri uri )
+  with _ -> None
+
+let host_port_of_request request =
+  match Httpun.Headers.get request.Httpun.Request.headers "host" with
+  | None -> None
+  | Some host_header -> (
+      try
+        let uri = Uri.of_string ("http://" ^ host_header) in
+        match Uri.host uri with
+        | None -> None
+        | Some host ->
+            Some
+              ( String.trim host |> String.lowercase_ascii,
+                effective_port_of_uri uri )
+      with _ -> None)
+
+let ensure_same_origin_browser_request request :
+    (unit, Types.masc_error) result =
+  match Httpun.Headers.get request.Httpun.Request.headers "origin" with
+  | None -> Ok ()
+  | Some origin -> (
+      match host_port_of_origin origin, host_port_of_request request with
+      | Some (origin_host, origin_port), Some (request_host, request_port)
+        when String.equal origin_host request_host
+             && origin_port = request_port ->
+          Ok ()
+      | _ ->
+          Error
+            (Types.Forbidden
+               {
+                 agent = "browser";
+                 action = "cross-origin HTTP mutation";
+               }))
+
 let http_status_of_auth_error = function
   | Types.Unauthorized _ | Types.InvalidToken _ | Types.TokenExpired _ -> `Unauthorized
   | Types.Forbidden _ -> `Forbidden
@@ -310,7 +362,15 @@ let authorize_tool_request ~base_path ~tool_name request :
     (unit, Types.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
-  match ensure_strict_http_token_auth ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg with
+  match
+    if Option.is_some token then Ok ()
+    else ensure_same_origin_browser_request request
+  with
+  | Error err -> Error err
+  | Ok () ->
+      (match ensure_strict_http_token_auth
+               ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
+       with
   | Error msg -> Error (Types.Unauthorized msg)
   | Ok auth_cfg -> (
       match resolve_agent_name_for_auth ~base_path request ~token with
@@ -325,7 +385,7 @@ let authorize_tool_request ~base_path ~tool_name request :
               (Types.Unauthorized
                  "Agent name required (X-MASC-Agent or token-bound credential)")
           else
-            Auth.authorize_tool base_path ~agent_name ~token ~tool_name)
+            Auth.authorize_tool base_path ~agent_name ~token ~tool_name))
 
 let authorize_token_bound_permission_request ~base_path ~permission request :
     (string, Types.masc_error) result =

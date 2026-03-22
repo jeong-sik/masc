@@ -507,6 +507,7 @@
    context_compact_oas
    verifier_oas
    procedural_memory
+   procedure_tool_materializer
    oas_events
    oas_worker
    tool_council_oas

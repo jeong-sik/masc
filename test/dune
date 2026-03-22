@@ -998,3 +998,15 @@
  (name test_chain_utils_coverage)
  (modules test_chain_utils_coverage)
  (libraries masc_mcp alcotest str yojson))
+
+; Procedure-to-Tool materializer tests (unit)
+(test
+ (name test_procedure_materializer)
+ (modules test_procedure_materializer)
+ (libraries masc_mcp alcotest yojson))
+
+; Procedure-to-Tool materializer tests (integration with filesystem)
+(test
+ (name test_procedure_materializer_integration)
+ (modules test_procedure_materializer_integration)
+ (libraries masc_mcp alcotest yojson unix))

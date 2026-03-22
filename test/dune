@@ -879,6 +879,12 @@
  (modules test_tool_hooks)
  (libraries masc_mcp alcotest yojson))
 
+; Governance Pipeline — risk-based approval gates (Plan 2.2)
+(test
+ (name test_governance_pipeline)
+ (modules test_governance_pipeline)
+ (libraries masc_mcp alcotest eio eio_main yojson unix))
+
 ; Tool Trace Hooks — trace span correlation (Harness Sprint 2)
 (test
  (name test_tool_trace_hooks)

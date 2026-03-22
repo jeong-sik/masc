@@ -23,34 +23,8 @@
   }
 }
 
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-
-  & h2 {
-    margin: 0 0 6px;
-    font-size: 24px;
-  }
-
-  & p {
-    margin: 0;
-    color: rgba(255,255,255,0.66);
-    line-height: 1.5;
-  }
-}
-
-.panel-actions,
-.command-surface-tabs {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-
-  & span:nth-child(odd) {
-    color: rgba(255,255,255,0.48);
-  }
-}
+/* panel-header: migrated to inline Tailwind (flex justify-between gap-4 items-start) */
+/* panel-actions: migrated to inline Tailwind (flex gap-2.5 flex-wrap) */
 
 .monitor-stat-card {
   background: var(--white-4);
@@ -96,16 +70,7 @@
   gap: 8px;
 }
 
-.command-focus-head {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-
-  & strong {
-    color: var(--text-strong);
-  }
-}
+/* command-focus-head: migrated to inline Tailwind (flex gap-2 flex-wrap items-center) */
 
 .command-focus-preview {
   padding: 10px 12px;
@@ -115,11 +80,7 @@
   line-height: 1.45;
 }
 
-.command-entry-strip {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
+/* command-entry-strip: migrated to inline Tailwind (grid grid-cols-2 gap-3) */
 
 .command-entry-card {
   padding: 14px 16px;
@@ -143,12 +104,7 @@
   }
 }
 
-
-.command-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
-}
+/* command-summary-grid: migrated to inline Tailwind */
 
 .command-hero {
   position: relative;
@@ -204,13 +160,7 @@
   }
 }
 
-
-.command-hero-badges,
-.command-tab-group-items {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
+/* command-hero-badges, command-tab-group-items: migrated to inline Tailwind (flex flex-wrap gap-2) */
 
 .command-guided-layout {
   display: grid;
@@ -218,12 +168,7 @@
   gap: 16px;
 }
 
-.command-guide-list,
-.command-trace-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+/* command-guide-list, command-trace-stack: migrated to inline Tailwind (flex flex-col gap-3) */
 
 .command-guide-card,
 .command-tree-node {
@@ -253,11 +198,7 @@
   line-height: 1.5;
 }
 
-.command-readiness-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+/* command-readiness-list: migrated to inline Tailwind (flex flex-col gap-2.5) */
 
 .command-readiness-row {
   display: flex;
@@ -286,40 +227,9 @@
   }
 }
 
-.command-readiness-title-row,
-.command-guide-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: flex-start;
-}
-
-
-
-.command-step-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-
-  &.compact {
-    gap: 6px;
-  }
-}
-
-.command-step-row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: baseline;
-}
-
-.command-doc-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
+/* command-readiness-title-row, command-guide-head: migrated to inline Tailwind */
+/* command-step-list, command-step-row: migrated to inline Tailwind */
+/* command-doc-links: migrated to inline Tailwind */
 
 .command-section-stack {
   display: flex;
@@ -331,16 +241,8 @@
   }
 }
 
-.command-surface-tabs.grouped {
-  flex-direction: column;
-  gap: 12px;
-}
-
-.command-tab-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
+/* command-surface-tabs.grouped: migrated to inline Tailwind */
+/* command-tab-group: migrated to inline Tailwind (flex flex-col gap-1.5) */
 
 .command-tab-group-label {
   font-size: var(--fs-xs);
@@ -428,12 +330,7 @@
   }
 }
 
-.command-warroom-column {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
+/* command-warroom-column: migrated to inline Tailwind (flex flex-col gap-4 min-w-0) */
 
 .command-warroom-empty {
   min-height: 360px;
@@ -448,32 +345,9 @@
   }
 }
 
-.command-warroom-empty-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-width: 520px;
-
-  & strong {
-    font-size: 26px;
-  }
-}
-
-
-.command-warroom-hero-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: flex-end;
-}
-
-.warroom-orchestration-grid,
-.warroom-presence-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-}
+/* command-warroom-empty-copy: migrated to inline Tailwind (flex flex-col gap-2.5 max-w-[520px]) */
+/* command-warroom-hero-actions: migrated to inline Tailwind */
+/* warroom-orchestration-grid, warroom-presence-grid: migrated to inline Tailwind (grid grid-cols-1 gap-3) */
 
 .warroom-orchestration-card,
 .warroom-presence-card,
@@ -526,8 +400,7 @@
 .command-hero-summary,
 .command-guided-layout,
 .command-surface-grid,
-.command-grid,
-.command-summary-grid {
+.command-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -537,14 +410,14 @@
 
 }
 
-.command-card-stack,
-.command-chain-list,
-.command-chain-history {
+.command-card-stack {
   display: flex;
   flex-direction: column;
   gap: 12px;
   margin-top: 14px;
 }
+
+/* command-chain-list, command-chain-history: migrated to inline Tailwind */
 
 .command-card,
 .command-alert,
@@ -581,12 +454,7 @@
   word-break: break-word;
 }
 
-.command-action-row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-}
+/* command-action-row: migrated to inline Tailwind (flex gap-2.5 flex-wrap mt-3) */
 
 .command-chain-item {
   width: 100%;
@@ -661,7 +529,6 @@
 .command-chip.warn,
 .command-chip.bad,
 .command-chip.muted,
-.command-tree-meta,
 .command-tag-row {
   display: flex;
   gap: 8px;
@@ -670,6 +537,8 @@
   color: var(--white-56);
   font-size: var(--fs-sm);
 }
+
+/* command-tree-meta: migrated to inline Tailwind */
 
 .command-warroom-guidance {
   display: grid;
@@ -703,14 +572,7 @@
   }
 }
 
-.command-tree-children {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 12px;
-  padding-left: 16px;
-  border-left: 1px solid var(--white-8);
-}
+/* command-tree-children: migrated to inline Tailwind */
 
 .command-trace-row {
   display: grid;
@@ -726,14 +588,12 @@
 
 .command-guide-card p,
 .command-readiness-row p,
-.command-doc-links .command-tag,
 .swarm-event-node,
 .swarm-event-body {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
-/* ── Command Gauge (merged from command-gauge.css) ── */
 /* ── Command Gauge + Signal ───────────────────────────────── */
 
 .command-gauge-grid {
@@ -768,11 +628,7 @@
   margin-top: 4px;
 }
 
-.command-gauge-copy {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
+/* command-gauge-copy: migrated to inline Tailwind (grid gap-1 min-w-0) */
 
 .command-gauge-copy span {
   color: rgba(191, 219, 254, 0.92);
@@ -806,12 +662,7 @@
 .command-signal-rail.warn { border-color: var(--warn-20); }
 .command-signal-rail.bad { border-color: rgba(248,113,113,0.22); }
 
-.command-signal-copy {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
+/* command-signal-copy: migrated to inline Tailwind (flex items-baseline justify-between gap-2.5) */
 
 .command-signal-copy span {
   color: rgba(148, 163, 184, 0.9);

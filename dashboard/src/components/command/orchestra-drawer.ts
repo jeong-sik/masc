@@ -375,7 +375,7 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
         <p>${signalNode.detail ?? '세부 설명이 없습니다.'}</p>
         ${signalNode.suggested_surface
           ? html`
-              <div class="command-action-row">
+              <div class="flex gap-2.5 flex-wrap mt-3">
                 <button
                   class="control-btn rounded-lg"
                   onClick=${() => jumpTo('command', signalNode.suggested_surface, signalNode.suggested_params ?? {})}
@@ -415,7 +415,7 @@ export function OrchestraDetailDrawer({ orchestra }: { orchestra: CommandPlaneOr
       <div class="command-card rounded-xl-sub">연결 ${relatedEdges.length}개 · 근거 ${node.provenance}</div>
       ${(node.link_tab && (node.link_surface || Object.keys(node.link_params ?? {}).length > 0))
         ? html`
-            <div class="command-action-row">
+            <div class="flex gap-2.5 flex-wrap mt-3">
               <button
                 class="control-btn rounded-lg"
                 onClick=${() => jumpTo(node.link_tab ?? 'command', node.link_surface, node.link_params ?? {})}

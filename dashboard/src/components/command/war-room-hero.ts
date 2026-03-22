@@ -108,7 +108,7 @@ export function WarRoomHeroStrip({
               </div>`
             : null}
         </div>
-        <div class="command-warroom-hero-actions">
+        <div class="flex gap-2.5 flex-wrap items-start justify-end">
           <button class="control-btn rounded-lg ghost" onClick=${onRefresh}>새로고침</button>
           ${wallboard
             ? html`

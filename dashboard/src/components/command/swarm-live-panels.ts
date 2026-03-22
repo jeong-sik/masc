@@ -130,7 +130,7 @@ export function SwarmLivePanels() {
                 ? html`<div class="command-card rounded-xl-sub">${swarm.provider.detail}</div>`
                 : null}
               ${swarm.provider.timeline.length > 0
-                ? html`<div class="command-trace-stack">
+                ? html`<div class="flex flex-col gap-3">
                     ${swarm.provider.timeline.slice(-12).map(sample => html`
                       <article class="command-trace-row">
                         <div class="command-trace-main">
@@ -164,7 +164,7 @@ export function SwarmLivePanels() {
           <div class="card rounded-xl-title">최근 메시지</div>
         </div>
         ${swarm && swarm.recent_messages.length > 0
-          ? html`<div class="command-trace-stack">
+          ? html`<div class="flex flex-col gap-3">
               ${swarm.recent_messages.map(message => html`
                 <article class="command-trace-row">
                   <div class="command-trace-main">
@@ -186,7 +186,7 @@ export function SwarmLivePanels() {
           <div class="card rounded-xl-title">최근 트레이스 이벤트</div>
         </div>
         ${swarm && swarm.recent_trace_events.length > 0
-          ? html`<div class="command-trace-stack">
+          ? html`<div class="flex flex-col gap-3">
               ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
             </div>`
           : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">run 범위 trace event가 아직 없습니다.</div>`}

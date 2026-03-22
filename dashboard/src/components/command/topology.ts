@@ -83,7 +83,7 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
             ${policy?.frozen ? html`<span class="command-chip rounded-full warn">동결됨</span>` : null}
             ${policy?.kill_switch ? html`<span class="command-chip rounded-full bad">킬 스위치</span>` : null}
           </div>
-          <div class="command-tree-meta">
+          <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
             <span>ID ${node.unit.unit_id}</span>
             <span>리더 ${node.unit.leader_id ?? '미지정'} / ${node.leader_status ?? '확인 필요'}</span>
             <span>편성 ${rosterLive}/${rosterTotal}</span>
@@ -99,7 +99,7 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
         </div>
       </div>
       ${node.children.length > 0
-        ? html`<div class="command-tree-children">
+        ? html`<div class="flex flex-col gap-2.5 mt-3 pl-4 border-l border-[var(--white-8)]">
             ${node.children.map(child => html`<${TopologyNode} node=${child} depth=${depth + 1} />`)}
           </div>`
         : null}
@@ -198,7 +198,7 @@ export function TraceSurface() {
         <div class="card rounded-xl-title">최근 트레이스</div>
       </div>
       ${snapshot && snapshot.traces.events.length > 0
-        ? html`<div class="command-trace-stack">
+        ? html`<div class="flex flex-col gap-3">
             ${snapshot.traces.events.map(event => html`<${TraceRow} event=${event} />`)}
           </div>`
         : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">최근 트레이스 이벤트가 없습니다.</div>`}

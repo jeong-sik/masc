@@ -162,10 +162,12 @@ let add_routes router =
               respond_json_with_cors ~status request reqd body)
        ) request reqd)
 
-  (* Board write APIs — used by Bevy Viewer *)
+  (* Board write APIs — used by dashboard + Bevy Viewer.
+     Uses with_tool_auth to allow localhost browser requests without token. *)
   |> Http.Router.post "/api/v1/tools/masc_board_vote" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanBroadcast
-         (fun _state agent_name _req reqd ->
+       with_tool_auth ~tool_name:"masc_board_vote"
+         (fun _state _req reqd ->
+         let agent_name = Option.bind (Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent") (fun s -> if s = "" then None else Some s) |> Option.value ~default:"dashboard" in
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args =
@@ -188,8 +190,9 @@ let add_routes router =
        ) request reqd)
 
   |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
-       with_token_permission_auth ~permission:Types.CanBroadcast
-         (fun _state agent_name _req reqd ->
+       with_tool_auth ~tool_name:"masc_board_comment"
+         (fun _state _req reqd ->
+         let agent_name = Option.bind (Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent") (fun s -> if s = "" then None else Some s) |> Option.value ~default:"dashboard" in
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args =

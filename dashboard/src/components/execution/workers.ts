@@ -36,7 +36,7 @@ export function WorkerSupportRow({
       <div class="monitor-row rounded-xl-header">
         <span class="agent-emoji">${row.emoji ?? ''}</span>
         <div class="min-w-0">
-          <div class="monitor-name-line">
+          <div class="flex items-center gap-2 flex-wrap">
             <span class="monitor-title">${row.name}</span>
             ${row.korean_name ? html`<span class="monitor-sub">${row.korean_name}</span>` : null}
           </div>
@@ -48,7 +48,7 @@ export function WorkerSupportRow({
           : null}
       </div>
 
-      <div class="monitor-meta">
+      <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]">
         ${row.last_signal_at ? html`<span>신호 <${TimeAgo} timestamp=${row.last_signal_at} /></span>` : html`<span>최근 신호 없음</span>`}
         <span>${signalTruthLabel(row.signal_truth)} · ${evidenceSourceLabel(row.evidence_source)}</span>
         ${typeof row.last_signal_age_sec === 'number' ? html`<span>${row.last_signal_age_sec}s ago</span>` : null}

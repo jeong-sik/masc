@@ -34,7 +34,7 @@ export function ToastContainer() {
   if (items.length === 0) return null
 
   return html`
-    <div class="toast-container">
+    <div class="fixed top-5 right-5 z-[var(--z-overlay-toast,3070)] flex flex-col gap-2">
       ${items.map(t => html`
         <div key=${t.id} class="toast ${t.type}" onClick=${() => dismissToast(t.id)}>
           ${t.message}

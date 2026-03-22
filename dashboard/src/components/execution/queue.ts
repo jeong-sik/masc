@@ -57,7 +57,7 @@ export function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutio
       <h2 class="monitor-headline">개입이 필요한 실행</h2>
       <p class="monitor-subheadline">진행 중인 세션과 작전 중 막힌 항목을 보여줍니다.${hasTerminal ? ' 종료된 항목은 하단에 접혀 있습니다.' : ''}</p>
     </div>
-    <div class="monitor-alert-list">
+    <div class="flex flex-col gap-2.5">
       ${hasActive
         ? activeItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)
         : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금은 개입이 필요한 실행이 없습니다.</div>`}
@@ -66,7 +66,7 @@ export function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutio
       ? html`
           <details class="mt-1" data-testid="execution.queue-terminal">
             <summary class="runtime-summary">종료된 항목 ${terminalItems.length}건</summary>
-            <div class="monitor-alert-list">
+            <div class="flex flex-col gap-2.5">
               ${terminalItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)}
             </div>
           </details>

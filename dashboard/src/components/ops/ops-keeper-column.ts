@@ -47,7 +47,7 @@ export function OpsKeeperColumn() {
   return html`
     <div class="flex flex-col gap-4 min-w-0">
       <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel ops-keeper-section">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">Keeper 개입</div>
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">장기 실행 중인 keeper를 고르고 바로 probe나 방향 수정 메시지를 보냅니다.</p>
@@ -115,7 +115,7 @@ export function OpsKeeperColumn() {
       </section>
 
       <section class="card flex flex-col gap-3 min-h-0 ops-lane-panel">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">선택한 Keeper 액션</div>
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">선택한 keeper에만 직접 메시지를 보내서 probe, 수정, 재지시를 합니다.</p>
@@ -143,7 +143,7 @@ export function OpsKeeperColumn() {
       </section>
 
       <section class="card flex flex-col gap-3 min-h-0">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">액션</div>
           <span style="font-size:0.75rem;opacity:0.5">${availableActions.length}개</span>
         </div>
@@ -172,7 +172,7 @@ export function OpsKeeperColumn() {
       </section>
 
       <section class="card flex flex-col gap-3 min-h-0">
-        <div class="card-title-row">
+        <div class="flex items-start justify-between gap-3 mb-[15px]">
           <div class="card-title">최근 개입 로그</div>
         </div>
         <div class="flex flex-col gap-2">

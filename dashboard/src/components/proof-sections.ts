@@ -75,7 +75,7 @@ export function ToolEvidenceRow({ item }: { item: DashboardProofToolEvidence }) 
       ${(() => {
         const tags = toolEvidenceTags(item)
         return tags.length > 0
-          ? html`<div class="semantic-tag-row">
+          ? html`<div class="flex flex-wrap gap-1.5 mb-3">
               ${tags.map(name => html`<span class="semantic-tag">${name}</span>`)}
             </div>`
           : null
@@ -118,7 +118,7 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
           </div>`
         : null}
       ${toolNames.length > 0
-        ? html`<div class="semantic-tag-row">
+        ? html`<div class="flex flex-wrap gap-1.5 mb-3">
             ${toolNames.map(name => html`<span class="semantic-tag">${name}</span>`)}
           </div>`
         : null}
@@ -141,7 +141,7 @@ export function TimelineRow({ item }: { item: DedupedTimelineItem }) {
         <span class="command-chip rounded-full">${relativeTime(item.timestamp)}</span>
       </div>
       ${item.sources.length > 1
-        ? html`<div class="semantic-tag-row">
+        ? html`<div class="flex flex-wrap gap-1.5 mb-3">
             ${item.sources.map(source => html`<span class="semantic-tag">${source}</span>`)}
           </div>`
         : null}
@@ -204,7 +204,7 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
           </div>`
         : null}
       ${Array.isArray(item.recent_tool_names) && item.recent_tool_names.length > 0
-        ? html`<div class="semantic-tag-row">
+        ? html`<div class="flex flex-wrap gap-1.5 mb-3">
             ${item.recent_tool_names.map(name => html`<span class="semantic-tag">${name}</span>`)}
           </div>`
         : null}

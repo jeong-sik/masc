@@ -118,7 +118,7 @@ export function Execution() {
     && operationRowsAll.length === 0
 
   return html`
-    <div class="agents-monitor">
+    <div class="flex flex-col gap-5">
       <${RoomTruthStrip} />
       <${Card}
         title="주의 항목"
@@ -160,7 +160,7 @@ export function Execution() {
          
           testId="execution.worker-support"
         >
-          <div class="monitor-list">
+          <div class="flex flex-col gap-2.5">
             ${workerSupportRows.length === 0
               ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">참여 에이전트가 없습니다.</div>`
               : workerSupportRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.worker-card" />`)}
@@ -173,7 +173,7 @@ export function Execution() {
          
           testId="execution.continuity"
         >
-          <div class="monitor-list">
+          <div class="flex flex-col gap-2.5">
             ${continuityRows.length === 0
               ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">연속성 경고 없음</div>`
               : continuityRows.map(row => html`<${ContinuityRow} key=${row.name} row=${row} />`)}
@@ -186,7 +186,7 @@ export function Execution() {
          
           testId="execution.offline-workers"
         >
-          <div class="monitor-list">
+          <div class="flex flex-col gap-2.5">
             ${offlineRows.length === 0
               ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">오프라인 에이전트 없음</div>`
               : offlineRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.offline-worker-card" />`)}

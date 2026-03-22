@@ -88,7 +88,7 @@ export function GovernanceFreshnessStrip() {
   const itemCount = data.items?.length ?? 0
   const activityCount = data.activity?.length ?? 0
   return html`
-    <div class="monitor-meta" style="margin-top:4px;margin-bottom:8px">
+    <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]" style="margin-top:4px;margin-bottom:8px">
       <span>데이터 범위: 진행 중 ${itemCount}건</span>
       <span>최근 활동: ${activityCount}건</span>
       ${data.generated_at ? html`<span>생성 시각: ${data.generated_at}</span>` : null}

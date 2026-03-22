@@ -320,7 +320,7 @@ export async function refreshDashboard(): Promise<void> {
     await Promise.all([refreshShell(), refreshExecution()])
     lastDashboardRefreshAt.value = new Date().toISOString()
   } catch (err) {
-    console.error('Dashboard refresh error:', err)
+    console.warn('[Dashboard] refresh error:', err)
   } finally {
     dashboardLoading.value = false
   }
@@ -406,7 +406,7 @@ export async function refreshShell(): Promise<void> {
       providerCapacity.value = data.providers as unknown as ProviderCapacity
     }
   } catch (err) {
-    console.error('Dashboard shell fetch error:', err)
+    console.warn('[Dashboard] shell fetch error:', err)
     showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
   }
 }
@@ -416,7 +416,7 @@ export async function refreshAgentActivity(): Promise<void> {
     const data = await fetchAgentActivity(24)
     agentActivity.value = data.agents ?? []
   } catch (err) {
-    console.error('Agent activity fetch error:', err)
+    console.warn('[Dashboard] agent activity fetch error:', err)
   }
 }
 
@@ -475,7 +475,7 @@ export async function refreshExecution(opts?: { force?: boolean }): Promise<void
     lastExecutionRefreshAt.value = Date.now()
     lastDashboardRefreshAt.value = new Date().toISOString()
   } catch (err) {
-    console.error('Dashboard execution fetch error:', err)
+    console.warn('[Dashboard] execution fetch error:', err)
     showToast('실행 데이터 로드 실패', 'error', 5000)
   }
 }
@@ -498,7 +498,7 @@ export async function refreshMessages(): Promise<void> {
       .filter((row): row is Message => row !== null)
     messages.value = mergeMessages(current, incoming)
   } catch (err) {
-    console.error('Messages selective fetch error:', err)
+    console.warn('[Dashboard] messages fetch error:', err)
   }
 }
 
@@ -509,7 +509,8 @@ export async function refreshBoard(): Promise<void> {
     boardPosts.value = data.posts ?? []
     lastBoardRefreshAt.value = new Date().toISOString()
   } catch (err) {
-    console.error('Board fetch error:', err)
+    console.warn('[Board] fetch error:', err)
+    showToast('게시판을 불러오지 못했습니다', 'error')
   } finally {
     boardLoading.value = false
   }
@@ -523,7 +524,7 @@ export async function refreshTrpg(): Promise<void> {
     const data = await fetchTrpgState(room)
     trpgState.value = data
   } catch (err) {
-    console.error('TRPG fetch error:', err)
+    console.warn('[TRPG] fetch error:', err)
   } finally {
     trpgLoading.value = false
   }
@@ -540,7 +541,7 @@ export async function refreshGoals(): Promise<void> {
     lastGoalsRefreshAt.value = new Date().toISOString()
     lastMdalRefreshAt.value = new Date().toISOString()
   } catch (err) {
-    console.error('Planning fetch error:', err)
+    console.warn('[Planning] fetch error:', err)
     mdalSnapshotState.value = 'error'
     lastMdalError.value = err instanceof Error ? err.message : String(err)
   } finally {

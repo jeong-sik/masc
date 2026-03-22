@@ -779,6 +779,18 @@
  (modules test_mitosis_metrics)
  (libraries masc_mcp alcotest str yojson))
 
+; Transport Observability Metrics (SSE, gRPC, agent health)
+(test
+ (name test_transport_metrics)
+ (modules test_transport_metrics)
+ (libraries masc_mcp alcotest str yojson))
+
+; Adaptive snapshot cache TTL based on broadcast latency
+(test
+ (name test_adaptive_cache_ttl)
+ (modules test_adaptive_cache_ttl)
+ (libraries masc_mcp alcotest str yojson))
+
 ; Adaptive Thresholds — P2-1 EMA-based threshold learning
 (test
  (name test_adaptive_thresholds)

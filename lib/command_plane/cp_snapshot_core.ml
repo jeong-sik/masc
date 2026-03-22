@@ -76,15 +76,31 @@ let topology_summary_to_json (s : topology_summary) =
 
 (* TTL-based cache for build_snapshot_state.
    Avoids re-reading 2500+ JSON files on every call.
-   Default TTL: 30s — dashboard refreshes at this cadence anyway. *)
+   Default TTL: 30s — dashboard refreshes at this cadence anyway.
+   Adaptive: when broadcast latency exceeds 0.5s the TTL doubles to 60s,
+   reducing snapshot rebuild frequency under load. *)
 let _cp_state_cache : (float * snapshot_state) option ref = ref None
-let _cp_cache_ttl_s = 30.0
+let _cp_cache_base_ttl_s = 30.0
+let _cp_cache_high_ttl_s = 60.0
+let _cp_broadcast_latency_threshold_s = 0.5
+
+let _cp_cache_ttl_s =
+  let avg_broadcast_latency () =
+    let sum = Prometheus.metric_value_or_zero "masc_sse_broadcast_duration_seconds" () in
+    let count = Prometheus.metric_value_or_zero "masc_sse_broadcast_duration_seconds_count" () in
+    if count > 0.0 then sum /. count else 0.0
+  in
+  fun () ->
+    if avg_broadcast_latency () > _cp_broadcast_latency_threshold_s then
+      _cp_cache_high_ttl_s
+    else
+      _cp_cache_base_ttl_s
 
 let build_snapshot_state ?sessions config =
   let now = Time_compat.now () in
   (* Cache hit: within TTL and no explicit sessions override *)
   (match sessions, !_cp_state_cache with
-   | None, Some (cached_at, cached_state) when now -. cached_at < _cp_cache_ttl_s ->
+   | None, Some (cached_at, cached_state) when now -. cached_at < _cp_cache_ttl_s () ->
        cached_state
    | _ ->
   let agents, managed_units, units, source = topology_units config in

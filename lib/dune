@@ -429,6 +429,7 @@
    social
    tool_social
    transport
+   transport_metrics
    ;; gRPC coordination transport (grpc-direct)
    masc_grpc_types
    masc_grpc_service

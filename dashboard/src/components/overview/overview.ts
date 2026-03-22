@@ -12,6 +12,7 @@ import { AttentionSpotlight } from './attention-spotlight'
 import { NarrativeTimeline } from './narrative-timeline'
 import { OasPipeline } from './oas-pipeline'
 import { AgentAvatar } from './agent-avatar'
+import { TransportHealthPanel } from '../transport-health'
 import type { ObservatoryAgent } from '../../observatory-store'
 import type { DashboardMissionSessionBrief } from '../../types'
 
@@ -246,6 +247,10 @@ export function Overview() {
       </div>
 
       <${OasPipeline} />
+
+      <div class="p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)]">
+        <${TransportHealthPanel} />
+      </div>
 
       <div class="p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)]">
         <${HomeSectionHeader} label="최근 활동" />

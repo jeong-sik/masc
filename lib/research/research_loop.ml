@@ -429,7 +429,7 @@ let run ~(config : Research_config.t) : experiment_entry list =
           entry.id entry.hypothesis.description
           (Research_metric.status_to_string entry.metric.status)
           (entry.metric.test_pass_rate *. 100.0) in
-        ignore msg  (* TODO: integrate with Room.broadcast when wired up *)
+        Log.Server.info "%s" msg
       with _ -> ())
   done;
 

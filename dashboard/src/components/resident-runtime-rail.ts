@@ -36,7 +36,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
       </div>
 
       <!-- Compact stat rows -->
-      <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+      <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
         <div class="flex items-center justify-between">
           <span class="text-[var(--text-muted)]">에이전트</span>
           <strong class="text-[var(--accent)] tabular-nums">${agents.value.length}</strong>

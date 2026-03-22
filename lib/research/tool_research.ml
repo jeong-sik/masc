@@ -24,7 +24,11 @@ Results logged to research_results.tsv.";
         ]);
         ("cascade_name", `Assoc [
           ("type", `String "string");
-          ("description", `String "LLM cascade name (default: llama)");
+          ("description", `String "LLM model name (default: llama)");
+        ]);
+        ("llm_url", `Assoc [
+          ("type", `String "string");
+          ("description", `String "OpenAI-compatible LLM endpoint URL (default: env RESEARCH_LLM_URL or http://127.0.0.1:8085/v1/chat/completions)");
         ]);
       ]);
       ("required", `List []);
@@ -61,6 +65,9 @@ let dispatch (ctx : context) ~name ~args : (bool * string) option =
       Yojson.Safe.Util.(member "cascade_name" args |> to_string_option)
       |> Option.value ~default:"llama"
     in
+    let llm_url =
+      Yojson.Safe.Util.(member "llm_url" args |> to_string_option)
+    in
     let config = Research_config.default
       ~repo:(Research_config.default_repo_config ~path:repo_path ())
       ()
@@ -70,6 +77,10 @@ let dispatch (ctx : context) ~name ~args : (bool * string) option =
       cascade_name;
       results_file = Printf.sprintf "%s/research_results.tsv" repo_path;
     } in
+    let config = match llm_url with
+      | Some url -> { config with llm_url = url }
+      | None -> config
+    in
     let results = Research_loop.run ~config in
     let kept = List.filter (fun (e : Research_loop.experiment_entry) ->
       e.metric.status = Research_metric.Keep) results in

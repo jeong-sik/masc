@@ -180,16 +180,23 @@ let generate_hypothesis ~(config : Research_config.t)
     ("max_tokens", `Int 4096);
   ] in
   let body = Yojson.Safe.to_string payload in
-  let url = "http://127.0.0.1:8085/v1/chat/completions" in
+  let url = config.llm_url in
+  let timeout_str = Printf.sprintf "%.0f" config.llm_timeout_sec in
+  Log.Server.info "research: calling LLM at %s (timeout=%ss)" url timeout_str;
   try
-    let argv = [
-      "curl"; "-s"; "-X"; "POST"; url;
-      "-H"; "Content-Type: application/json";
-      "-d"; body;
-      "--max-time"; "120";
-    ] in
+    let auth_headers =
+      if config.llm_api_key <> "" then
+        [ "-H"; Printf.sprintf "Authorization: Bearer %s" config.llm_api_key ]
+      else []
+    in
+    let argv =
+      [ "curl"; "-s"; "-X"; "POST"; url;
+        "-H"; "Content-Type: application/json" ]
+      @ auth_headers
+      @ [ "-d"; body; "--max-time"; timeout_str ]
+    in
     let status, stdout =
-      Process_eio.run_argv_with_status ~timeout_sec:130.0 argv
+      Process_eio.run_argv_with_status ~timeout_sec:(config.llm_timeout_sec +. 10.0) argv
     in
     let exit_code = match status with Unix.WEXITED c -> c | _ -> 1 in
     if String.length (String.trim stdout) = 0 then begin

@@ -422,34 +422,38 @@ let vote_post t ~voter ~post_id ~direction =
   | Ok pid ->
   let pid_str = Post_id.to_string pid in
   let dir_str = vote_direction_to_string direction in
-  (* All vote operations in single connection for consistency *)
+  (* All vote operations in a single transaction for atomicity.
+     Without this, concurrent votes can both read "no existing vote"
+     then both INSERT + increment, inflating the counter. *)
   let result = Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    (* Verify post exists *)
-    let* post_opt = C.find_opt get_post_q pid_str in
-    match post_opt with
-    | None -> Ok (Error (Post_not_found post_id))
-    | Some post_row ->
-    (* Check existing vote *)
-    let* existing = C.find_opt get_vote_q ("post", pid_str, voter) in
-    match existing with
-    | Some d when d = dir_str ->
-        Ok (Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
-          voter dir_str post_id)))
-    | Some _ ->
-        (* Flip vote: upsert + counter update atomically *)
-        let now = Time_compat.now () in
-        let* () = C.exec upsert_vote_q ("post", pid_str, voter, (dir_str, now)) in
-        let* () = C.exec (if dir_str = "up" then flip_to_up_post_q else flip_to_down_post_q) pid_str in
-        let* score = C.find get_post_score_q pid_str in
-        Ok (Ok (score, Some post_row))
-    | None ->
-        (* New vote: insert + counter update *)
-        let now = Time_compat.now () in
-        let* () = C.exec upsert_vote_q ("post", pid_str, voter, (dir_str, now)) in
-        let* () = C.exec (if dir_str = "up" then inc_up_post_q else inc_down_post_q) pid_str in
-        let* score = C.find get_post_score_q pid_str in
-        Ok (Ok (score, Some post_row))
+    C.with_transaction (fun () ->
+      (* Verify post exists *)
+      let* post_opt = C.find_opt get_post_q pid_str in
+      match post_opt with
+      | None -> Ok (Error (Post_not_found post_id))
+      | Some post_row ->
+      (* Check existing vote *)
+      let* existing = C.find_opt get_vote_q ("post", pid_str, voter) in
+      match existing with
+      | Some d when d = dir_str ->
+          Ok (Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
+            voter dir_str post_id)))
+      | Some _ ->
+          (* Flip vote: upsert + counter update atomically *)
+          let now = Time_compat.now () in
+          let* () = C.exec upsert_vote_q ("post", pid_str, voter, (dir_str, now)) in
+          let* () = C.exec (if dir_str = "up" then flip_to_up_post_q else flip_to_down_post_q) pid_str in
+          let* score = C.find get_post_score_q pid_str in
+          Ok (Ok (score, Some post_row))
+      | None ->
+          (* New vote: insert + counter update *)
+          let now = Time_compat.now () in
+          let* () = C.exec upsert_vote_q ("post", pid_str, voter, (dir_str, now)) in
+          let* () = C.exec (if dir_str = "up" then inc_up_post_q else inc_down_post_q) pid_str in
+          let* score = C.find get_post_score_q pid_str in
+          Ok (Ok (score, Some post_row))
+    )
   ) t.pool in
   match result with
   | Error err -> Error (caqti_err err)
@@ -485,32 +489,34 @@ let vote_comment t ~voter ~comment_id ~direction =
   let dir_str = vote_direction_to_string direction in
   let result = Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
-    (* Get comment author (also verifies existence) *)
-    let* author_opt = C.find_opt comment_author_q cid_str in
-    match author_opt with
-    | None ->
-        Ok (Error (Comment_not_found comment_id))
-    | Some author_name ->
-    (* Check existing vote *)
-    let* existing = C.find_opt get_vote_q ("comment", cid_str, voter) in
-    match existing with
-    | Some d when d = dir_str ->
-        Ok (Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
-          voter dir_str comment_id)))
-    | Some _ ->
-        (* Flip vote *)
-        let now = Time_compat.now () in
-        let* () = C.exec upsert_vote_q ("comment", cid_str, voter, (dir_str, now)) in
-        let* () = C.exec (if dir_str = "up" then flip_to_up_comment_q else flip_to_down_comment_q) cid_str in
-        let* score = C.find get_comment_score_q cid_str in
-        Ok (Ok (score, author_name))
-    | None ->
-        (* New vote *)
-        let now = Time_compat.now () in
-        let* () = C.exec upsert_vote_q ("comment", cid_str, voter, (dir_str, now)) in
-        let* () = C.exec (if dir_str = "up" then inc_up_comment_q else inc_down_comment_q) cid_str in
-        let* score = C.find get_comment_score_q cid_str in
-        Ok (Ok (score, author_name))
+    C.with_transaction (fun () ->
+      (* Get comment author (also verifies existence) *)
+      let* author_opt = C.find_opt comment_author_q cid_str in
+      match author_opt with
+      | None ->
+          Ok (Error (Comment_not_found comment_id))
+      | Some author_name ->
+      (* Check existing vote *)
+      let* existing = C.find_opt get_vote_q ("comment", cid_str, voter) in
+      match existing with
+      | Some d when d = dir_str ->
+          Ok (Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
+            voter dir_str comment_id)))
+      | Some _ ->
+          (* Flip vote *)
+          let now = Time_compat.now () in
+          let* () = C.exec upsert_vote_q ("comment", cid_str, voter, (dir_str, now)) in
+          let* () = C.exec (if dir_str = "up" then flip_to_up_comment_q else flip_to_down_comment_q) cid_str in
+          let* score = C.find get_comment_score_q cid_str in
+          Ok (Ok (score, author_name))
+      | None ->
+          (* New vote *)
+          let now = Time_compat.now () in
+          let* () = C.exec upsert_vote_q ("comment", cid_str, voter, (dir_str, now)) in
+          let* () = C.exec (if dir_str = "up" then inc_up_comment_q else inc_down_comment_q) cid_str in
+          let* score = C.find get_comment_score_q cid_str in
+          Ok (Ok (score, author_name))
+    )
   ) t.pool in
   match result with
   | Error err -> Error (caqti_err err)

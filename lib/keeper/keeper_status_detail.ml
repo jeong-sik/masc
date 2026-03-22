@@ -40,14 +40,14 @@ let handle_keeper_status ctx args : tool_result =
       in
       let models = m.models in
       let specs = Model_spec.available_model_specs_of_strings models in
-      let primary = match specs with m0 :: _ -> m0 | [] -> Model_spec.default_local_model_spec () in
+      let primary_max_context = Model_spec.resolve_primary_max_context models in
       let base_dir = session_base_dir ctx.config in
          let ctx_opt =
            if include_context then
              let (_session, ctx_opt) =
                load_context_from_checkpoint
                  ~trace_id:m.trace_id
-                 ~primary_model_max_tokens:primary.max_context
+                 ~primary_model_max_tokens:primary_max_context
                  ~base_dir
              in
              ctx_opt
@@ -96,10 +96,11 @@ let handle_keeper_status ctx args : tool_result =
            compaction_policy_of_keeper m
          in
 
-         let models_resolved = `List (List.map (fun (s : Model_spec.model_spec) ->
+         let open Model_spec in
+         let models_resolved = `List (List.map (fun s ->
            let pricing = Llm_provider.Pricing.pricing_for_model s.model_id in
            `Assoc [
-             ("provider", `String s.model_id);
+             ("provider", `String (string_of_provider s.provider));
              ("model_id", `String s.model_id);
              ("max_context", `Int s.max_context);
              ("api_key_env", match s.api_key_env with None -> `Null | Some k -> `String k);

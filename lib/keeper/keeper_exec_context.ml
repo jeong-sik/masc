@@ -444,14 +444,14 @@ let looks_fragmentary_history_text (raw : string) : bool =
     hard_fragment || short_unterminated || trailing_connector
 
 let run_proactive_generation
-    ~(specs : Model_spec.model_spec list)
-    ~(primary : Model_spec.model_spec)
+    ~(model_labels : string list)
     ~(config : Room.config)
     ~(ctx_work : working_context)
     ~(meta : keeper_meta)
     ~(continuity_snapshot : keeper_state_snapshot option)
     ~(continuity_summary : string)
     ~(idle_seconds : int) : proactive_generation_result option =
+  let primary_model_id = Model_spec.resolve_primary_model_id model_labels in
   let base_prompt =
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
   in
@@ -487,7 +487,7 @@ let run_proactive_generation
       Some {
         reply = proactive_fallback_reply ~meta ~idle_seconds;
         usage = usage_acc;
-        model_used = primary.model_id;
+        model_used = primary_model_id;
         latency_ms = latency_acc;
         attempts = max_attempts;
         total_cost_usd = cost_acc;
@@ -510,12 +510,14 @@ let run_proactive_generation
       | Error _ -> None
       | Ok result ->
           let resp = result.Oas_worker.response in
-          let used_model =
-            model_spec_for_used specs resp.model
-            |> Option.value ~default:primary
+          let used_model_id =
+            Model_spec.find_model_id_for_used ~labels:model_labels
+              ~model_used:resp.model
           in
           let attempt_usage = usage_of_response resp in
-          let attempt_cost_usd = cost_usd_of_usage attempt_usage used_model in
+          let attempt_cost_usd =
+            cost_usd_of_usage attempt_usage ~model_id:used_model_id
+          in
           let attempt_content =
             let c = String.trim (Agent_sdk.Types.text_of_content resp.content) in
             let tool_names = List.filter_map (function

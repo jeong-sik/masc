@@ -273,12 +273,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     (match ensure_api_keys_for_labels requested_models with
      | Error e -> (false, e)
      | Ok () ->
-       let specs = Model_spec.available_model_specs_of_strings requested_models in
+       let primary_max_context = Model_spec.resolve_primary_max_context requested_models in
        let trace_id = generate_trace_id () in
-       let primary = match specs with
-         | m :: _ -> m
-         | [] -> Model_spec.default_local_model_spec ()
-       in
          let base_dir = session_base_dir ctx.config in
          mkdir_p base_dir;
          let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
@@ -300,7 +296,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                ~persona_extended
                ()
          in
-         let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary.max_context in
+         let ctx0 = Keeper_exec_context.create ~system_prompt ~max_tokens:primary_max_context in
          (try ignore (save_checkpoint session ctx0 ~generation:0)
           with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn ~label:"save_checkpoint (init) failed" exn);
          let meta = {

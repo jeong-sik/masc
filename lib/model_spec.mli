@@ -93,3 +93,22 @@ val default_local_model_spec : unit -> model_spec
 (** Load cascade profile from OAS config file.
     Returns model label strings (e.g. ["llama:qwen3.5"; "glm:glm-4.7"]). *)
 val load_cascade_profile : config_path:string -> name:string -> string list
+
+(** {2 Convenience accessors (no model_spec in caller)} *)
+
+(** Resolve model labels to the primary model's [max_context].
+    Returns the default local model's max_context when no label resolves. *)
+val resolve_primary_max_context : string list -> int
+
+(** Resolve model labels to the primary model's [model_id].
+    Returns the default local model's model_id when no label resolves. *)
+val resolve_primary_model_id : string list -> string
+
+(** Find the model_id that matches [model_used] from a label list.
+    Strips [:latest] suffix before comparison.
+    Returns the default local model's model_id when no match is found. *)
+val find_model_id_for_used : labels:string list -> model_used:string -> string
+
+(** Estimate cost in USD from token usage and a model_id string.
+    Delegates to OAS [Llm_provider.Pricing]. *)
+val cost_usd_of_model_id : model_id:string -> input_tokens:int -> output_tokens:int -> float

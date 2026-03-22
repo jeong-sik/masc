@@ -15,15 +15,15 @@ open Keeper_exec_context [@@warning "-33"]
 let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
-  let specs = Model_spec.available_model_specs_of_strings meta.models in
-  let primary =
-    match specs with p :: _ -> p | [] -> Model_spec.default_local_model_spec ()
+  let used_model_id =
+    Model_spec.find_model_id_for_used ~labels:meta.models
+      ~model_used:result.model_used
   in
-  let used_model =
-    model_spec_for_used specs result.model_used
-    |> Option.value ~default:primary
+  let turn_cost =
+    Model_spec.cost_usd_of_model_id ~model_id:used_model_id
+      ~input_tokens:result.usage.input_tokens
+      ~output_tokens:result.usage.output_tokens
   in
-  let turn_cost = cost_usd_of_usage result.usage used_model in
   let has_tool_calls = result.tools_used <> [] in
   let has_text =
     String.trim result.response_text <> ""
@@ -76,11 +76,8 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
   match ensure_api_keys_for_labels model_labels with
   | Error e -> Error e
   | Ok () ->
-      let specs = Model_spec.available_model_specs_of_strings model_labels in
-      let primary =
-        match specs with
-        | p :: _ -> p
-        | [] -> Model_spec.default_local_model_spec ()
+      let primary_max_context =
+        Model_spec.resolve_primary_max_context model_labels
       in
       (* 2. Build unified prompt *)
       let system_prompt, user_message =
@@ -100,7 +97,7 @@ let run_unified_turn ~(config : Room.config) ~(meta : keeper_meta)
       let run_result, latency_ms =
         Keeper_exec_context.timed (fun () ->
             Keeper_agent_run.run_turn ~config ~meta ~base_dir
-              ~max_context:primary.max_context ~build_turn_prompt
+              ~max_context:primary_max_context ~build_turn_prompt
               ~user_message ~cascade_name:"keeper_unified"
               ~generation ~max_turns
               ~temperature ~max_tokens

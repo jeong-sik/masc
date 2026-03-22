@@ -159,7 +159,7 @@
 
 .tool-inventory-meta strong,
 .tool-inventory-links strong {
-  color: #e2e8f0;
+  color: var(--text-slate-light);
 }
 
 .tool-inventory-reason {
@@ -262,7 +262,7 @@
 .tool-summary-name {
   font-size: var(--fs-base);
   font-weight: 500;
-  color: #e2e8f0;
+  color: var(--text-slate-light);
   min-width: 180px;
   flex-shrink: 0;
 }

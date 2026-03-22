@@ -64,7 +64,7 @@
   font-size: var(--fs-xs);
   transition: transform 0.15s;
   display: inline-block;
-  color: #64748b;
+  color: var(--text-slate);
 }
 
 .overview-section-collapsible[open] > summary::before,
@@ -92,12 +92,12 @@
 
 .monitor-pill.ok {
   background: rgba(74, 222, 128, 0.12);
-  color: #86efac;
+  color: var(--ok);
 }
 
 .monitor-pill.warn {
   background: rgba(251, 191, 36, 0.14);
-  color: #fcd34d;
+  color: var(--warn);
 }
 
 .monitor-pill.bad {
@@ -334,7 +334,7 @@
 .mission-collapsible-summary::before {
   content: '\25B8';
   font-size: var(--fs-xs);
-  color: #64748b;
+  color: var(--text-slate);
   transition: transform 0.15s;
   display: inline-block;
 }

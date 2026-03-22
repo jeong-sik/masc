@@ -60,7 +60,7 @@
   font-size: var(--fs-sm);
   transition: all 0.2s;
 }
-.board-sort-btn:hover { background: var(--white-8); color: #ccc; }
+.board-sort-btn:hover { background: var(--white-8); color: var(--text-slate-light); }
 .board-sort-btn.active {
   background: rgba(74,222,128,0.15);
   color: var(--ok);
@@ -102,11 +102,11 @@
   padding: 2px;
   transition: color 0.2s;
 }
-.vote-btn:hover { color: #ccc; }
+.vote-btn:hover { color: var(--text-slate-light); }
 .vote-btn.upvote:hover, .vote-btn.upvote.active { color: #ff4500; }
 .vote-btn.downvote:hover, .vote-btn.downvote.active { color: #7193ff; }
 .vote-btn.animate { animation: votePop 0.3s ease; }
-.vote-count { font-size: var(--fs-md); font-weight: bold; color: #ccc; }
+.vote-count { font-size: var(--fs-md); font-weight: bold; color: var(--text-slate-light); }
 
 /* Post content */
 .post-content {

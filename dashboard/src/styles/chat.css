@@ -196,7 +196,7 @@
   border: 1px solid rgba(138, 163, 211, 0.16);
   background:
     linear-gradient(180deg, rgba(7, 17, 37, 0.9), rgba(4, 12, 28, 0.82));
-  color: #b8cae8;
+  color: var(--agent-idle);
   font-size: var(--fs-sm);
 }
 
@@ -309,7 +309,7 @@
 /* ── Stream Warning (60s+ elapsed) ─────────────────────── */
 .control-btn.chat-stream-warning {
   border-color: rgba(251, 191, 36, 0.5);
-  color: #fcd34d;
+  color: var(--warn);
   animation: chatWarnPulse 2s ease-in-out infinite;
 }
 

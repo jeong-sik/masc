@@ -14,7 +14,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border-bottom: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
   background: rgba(10, 22, 40, 0.6);
 }
 
@@ -91,12 +91,12 @@
 
 .keeper-chat__msg--assistant .keeper-chat__text {
   background: rgba(200, 168, 78, 0.08);
-  border: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
   color: var(--text-body, var(--text-body));
 }
 
 .keeper-chat__msg--streaming .keeper-chat__text {
-  border-color: rgba(200, 168, 78, 0.25);
+  border-color: var(--ff-gold-dim);
 }
 
 .keeper-chat__text--thinking {
@@ -126,7 +126,7 @@
   display: flex;
   gap: 8px;
   padding: 10px 14px;
-  border-top: 1px solid var(--ff-border-subtle, rgba(200, 168, 78, 0.12));
+  border-top: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
   background: rgba(10, 22, 40, 0.6);
 }
 

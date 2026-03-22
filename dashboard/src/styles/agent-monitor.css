@@ -12,7 +12,7 @@
     rgba(10, 22, 40, 0.85) 0%,
     rgba(16, 28, 48, 0.7) 100%
   );
-  border: 1px solid rgba(200, 168, 78, 0.12);
+  border: 1px solid var(--ff-border-subtle);
   border-radius: var(--radius-sm, 10px);
   margin-bottom: 12px;
   flex-wrap: wrap;
@@ -97,7 +97,7 @@
 .agent-live-chip {
   padding: 3px 10px;
   border-radius: 12px;
-  border: 1px solid rgba(200, 168, 78, 0.12);
+  border: 1px solid var(--ff-border-subtle);
   background: none;
   color: var(--text-muted, var(--text-muted));
   font-size: var(--fs-xs);
@@ -111,7 +111,7 @@
 }
 
 .agent-live-chip--active {
-  background: rgba(200, 168, 78, 0.25);
+  background: var(--ff-gold-dim);
   border-color: var(--ff-gold);
   color: var(--ff-gold-bright);
 }
@@ -141,7 +141,7 @@
 .agent-live-autoscroll {
   padding: 2px 8px;
   border-radius: 8px;
-  border: 1px solid rgba(200, 168, 78, 0.12);
+  border: 1px solid var(--ff-border-subtle);
   background: none;
   color: var(--text-muted);
   font-size: var(--fs-2xs);

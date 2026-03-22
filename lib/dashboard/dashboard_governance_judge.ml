@@ -309,12 +309,15 @@ let prompt_for_facts facts_json =
      Facts:\n%s"
     (Yojson.Safe.to_string facts_json)
 
-let compute_judgments ~base_path:_ ~factual_json =
+let compute_judgments
+    ~(masc_tools : Types.tool_schema list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~factual_json =
   let _timeout_sec = Env_config.Inference.dashboard_governance_judge_timeout_seconds in
   let prompt = prompt_for_facts factual_json in
   match
-    Oas_worker.run_named ~cascade_name:"governance_judge"
-      ~goal:prompt ~max_turns:1
+    Oas_worker.run_named_with_masc_tools ~cascade_name:"governance_judge"
+      ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
       ~temperature:0.2 ~max_tokens:4096 ()
   with
   | Error message -> Error message
@@ -348,10 +351,13 @@ let append_judgments base_path judgments =
   let store = get_judgments_store base_path in
   List.iter (fun json -> Dated_jsonl.append store json) judgments
 
-let refresh_once ~base_path ~build_facts =
+let refresh_once
+    ~(masc_tools : Types.tool_schema list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~base_path ~build_facts =
   let st = get_state base_path in
   with_lock st (fun () -> st.refreshing <- true);
-  match compute_judgments ~base_path ~factual_json:(build_facts ()) with
+  match compute_judgments ~masc_tools ~dispatch ~factual_json:(build_facts ()) with
   | Ok (model_used, generated_at, expires_at, judgments) ->
       append_judgments base_path judgments;
       with_lock st (fun () ->
@@ -372,7 +378,10 @@ let refresh_once ~base_path ~build_facts =
           st.judge_online <- false;
           st.last_error <- Some message)
 
-let start ~sw ~clock ~base_path ~build_facts () =
+let start ~sw ~clock ~base_path
+    ~(masc_tools : Types.tool_schema list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~build_facts () =
   let st = get_state base_path in
   let should_start =
     with_lock st (fun () ->
@@ -384,7 +393,7 @@ let start ~sw ~clock ~base_path ~build_facts () =
   if should_start then
     Eio.Fiber.fork_daemon ~sw (fun () ->
         let rec loop () =
-          refresh_once ~base_path ~build_facts;
+          refresh_once ~masc_tools ~dispatch ~base_path ~build_facts;
           Eio.Time.sleep clock (float_of_int (interval_sec ()));
           loop ()
         in

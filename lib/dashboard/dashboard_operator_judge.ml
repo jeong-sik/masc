@@ -52,9 +52,9 @@ let enabled () =
   match Sys.getenv_opt "MASC_OPERATOR_JUDGE_ENABLED" with
   | Some raw -> (
       match String.lowercase_ascii (String.trim raw) with
-      | "1" | "true" | "yes" | "on" -> true
-      | _ -> false)
-  | None -> false
+      | "0" | "false" | "no" | "off" -> false
+      | _ -> true)
+  | None -> true
 
 let interval_sec () =
   match Sys.getenv_opt "MASC_OPERATOR_JUDGE_INTERVAL_SEC" with
@@ -273,12 +273,15 @@ let parse_session_judgment ~config ~generated_at ~generated_at_unix ~model_used 
       | _ -> None)
   | _ -> None
 
-let compute_judgments ~facts_json =
+let compute_judgments
+    ~(masc_tools : Types.tool_schema list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~facts_json =
   let _timeout_sec = Env_config.Inference.operator_judge_timeout_seconds in
   let prompt = prompt_for_facts facts_json in
   match
-    Oas_worker.run_named ~cascade_name:"operator_judge"
-      ~goal:prompt ~max_turns:1
+    Oas_worker.run_named_with_masc_tools ~cascade_name:"operator_judge"
+      ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
       ~temperature:0.2 ~max_tokens:4096 ()
   with
   | Error message -> Error message
@@ -292,10 +295,13 @@ let compute_judgments ~facts_json =
       | exn ->
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
-let refresh_once ~(config : Room.config) ~build_facts =
+let refresh_once
+    ~(masc_tools : Types.tool_schema list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~(config : Room.config) ~build_facts =
   let st = get_state config.base_path in
   with_lock st (fun () -> st.refreshing <- true);
-  match compute_judgments ~facts_json:(build_facts ()) with
+  match compute_judgments ~masc_tools ~dispatch ~facts_json:(build_facts ()) with
   | Error message ->
       with_lock st (fun () ->
           st.refreshing <- false;
@@ -332,7 +338,10 @@ let refresh_once ~(config : Room.config) ~build_facts =
           st.model_used <- Some model_used;
           st.last_error <- None)
 
-let start ~sw ~clock ~(config : Room.config) ~build_facts () =
+let start ~sw ~clock ~(config : Room.config)
+    ~(masc_tools : Types.tool_schema list)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+    ~build_facts () =
   let st = get_state config.base_path in
   let should_start =
     with_lock st (fun () ->
@@ -344,7 +353,7 @@ let start ~sw ~clock ~(config : Room.config) ~build_facts () =
   if should_start then
     Eio.Fiber.fork_daemon ~sw (fun () ->
         let rec loop () =
-          refresh_once ~config ~build_facts;
+          refresh_once ~masc_tools ~dispatch ~config ~build_facts;
           Eio.Time.sleep clock (float_of_int (interval_sec ()));
           loop ()
         in

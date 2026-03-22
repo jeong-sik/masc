@@ -232,9 +232,44 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
   | exn ->
     Log.Server.error "subsystem orchestrator failed to start: %s"
       (Printexc.to_string exn));
+  (* Build read-only tool surface shared by both judges. *)
+  let judge_tool_names =
+    [ "masc_status"; "masc_tasks"; "masc_agents"; "masc_board_list" ]
+  in
+  let judge_masc_tools =
+    match
+      Agent_tool_surfaces.local_worker_tool_schemas ~names:judge_tool_names ()
+    with
+    | Ok schemas -> schemas
+    | Error _ -> []
+  in
+  let judge_dispatch ~(name : string) ~(args : Yojson.Safe.t) : bool * string =
+    let config = state.room_config in
+    let agent_name = "operator-judge" in
+    let ctx_room : Tool_room.context = { config; agent_name } in
+    let ctx_task : Tool_task.context = { config; agent_name } in
+    let ctx_agent : Tool_agent.context = { config; agent_name } in
+    match name with
+    | "masc_status" -> (
+        match Tool_room.dispatch ctx_room ~name ~args with
+        | Some result -> result
+        | None -> (false, "masc_status: dispatch failed"))
+    | "masc_tasks" -> (
+        match Tool_task.dispatch ctx_task ~name ~args with
+        | Some result -> result
+        | None -> (false, "masc_tasks: dispatch failed"))
+    | "masc_agents" -> (
+        match Tool_agent.dispatch ctx_agent ~name ~args with
+        | Some result -> result
+        | None -> (false, "masc_agents: dispatch failed"))
+    | "masc_board_list" ->
+        Tool_board.handle_tool name args
+    | _ -> (false, Printf.sprintf "judge: tool '%s' not allowed" name)
+  in
   fork_subsystem "governance_judge" (fun () ->
     Dashboard_governance_judge.start ~sw ~clock
       ~base_path:state.room_config.base_path
+      ~masc_tools:judge_masc_tools ~dispatch:judge_dispatch
       ~build_facts:(fun () ->
         Dashboard_governance.factual_snapshot_json
           ~base_path:state.room_config.base_path)
@@ -251,6 +286,7 @@ let start_resident_loops ~sw ~clock ~net:_net ~domain_mgr ~proc_mgr
       }
     in
     Dashboard_operator_judge.start ~sw ~clock ~config:state.room_config
+      ~masc_tools:judge_masc_tools ~dispatch:judge_dispatch
       ~build_facts:(fun () ->
         Operator_control.snapshot_json ~actor:"operator-judge" ~view:"summary"
           ~include_messages:false ~include_keepers:false operator_judge_ctx)

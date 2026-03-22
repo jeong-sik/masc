@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
@@ -447,9 +448,26 @@ function CommentItem({ comment }: { comment: BoardComment }) {
 function CommentThread({ comments }: { comments: BoardComment[] }) {
   if (comments.length === 0) return html`<div class="empty-state text-[13px] text-[var(--text-muted)]">아직 댓글이 없습니다</div>`
 
+  const INITIAL_SHOW = 3
+  const [expanded, setExpanded] = useState(false)
+  const hiddenCount = comments.length - INITIAL_SHOW
+  const visible = expanded || comments.length <= INITIAL_SHOW ? comments : comments.slice(-INITIAL_SHOW)
+
   return html`
     <div class="flex flex-col gap-2">
-      ${comments.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} />`)}
+      ${!expanded && hiddenCount > 0 ? html`
+        <button
+          class="text-[12px] text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1"
+          onClick=${() => setExpanded(true)}
+        >이전 댓글 ${hiddenCount}개 더 보기</button>
+      ` : null}
+      ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} />`)}
+      ${expanded && hiddenCount > 0 ? html`
+        <button
+          class="text-[12px] text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 text-left py-1"
+          onClick=${() => setExpanded(false)}
+        >접기</button>
+      ` : null}
     </div>
   `
 }

@@ -28,6 +28,7 @@ type t = {
 (* Result monad binding operator for Caqti operations *)
 let (let*) = Result.bind
 
+
 let namespaced_key namespace key =
   if namespace = "" then key
   else namespace ^ ":" ^ key
@@ -189,9 +190,11 @@ let cleanup_pubsub_limit_q =
      DELETE FROM masc_pubsub WHERE id IN (SELECT id FROM ranked WHERE rn > $1) RETURNING 1\
    ) SELECT COUNT(*)::int FROM deleted"
 
-(* Helper to convert Caqti_error to our error type *)
+(* Helper to convert Caqti_error to our error type — logs every PG failure *)
 let caqti_error_to_masc err =
-  OperationFailed (Caqti_error.show err)
+  let msg = Caqti_error.show err in
+  Log.Backend.error "[PG] %s" msg;
+  OperationFailed msg
 
 (* WARNING: create requires an Eio.Switch context.
    This is a blocking workaround - in production, create should be called
@@ -214,9 +217,13 @@ let create_eio ~sw ~env (cfg : config) : (t, error) result =
         | None -> 10
       in
       let pool_config = Caqti_pool_config.create ~max_size:max_pool () in
+      Log.Backend.info "[PG] connecting pool (max_size=%d)..." max_pool;
       match Caqti_eio_unix.connect_pool ~sw ~stdenv:env ~pool_config uri with
-      | Error err -> Error (caqti_error_to_masc err)
+      | Error err ->
+          Log.Backend.error "[PG] pool creation failed: %s" (Caqti_error.show err);
+          Error (caqti_error_to_masc err)
       | Ok pool ->
+          Log.Backend.info "[PG] pool created, initializing schema...";
           (* Initialize schema if needed *)
           let init_result = Caqti_eio.Pool.use (fun conn ->
             let module C = (val conn : Caqti_eio.CONNECTION) in
@@ -228,8 +235,12 @@ let create_eio ~sw ~env (cfg : config) : (t, error) result =
             Ok ()
           ) pool in
           (match init_result with
-           | Error err -> Error (caqti_error_to_masc err)
-           | Ok () -> Ok { pool; namespace = cfg.cluster_name; clock = env#clock; _sw = sw })
+           | Error err ->
+               Log.Backend.error "[PG] schema init failed: %s" (Caqti_error.show err);
+               Error (caqti_error_to_masc err)
+           | Ok () ->
+               Log.Backend.info "[PG] connected and schema ready";
+               Ok { pool; namespace = cfg.cluster_name; clock = env#clock; _sw = sw })
 
 (** Lightweight pool creation for use in a different Eio domain.
     Skips schema initialization (assumed already done by the main pool).
@@ -286,7 +297,9 @@ let exists t ~key =
   ) t.pool with
   | Ok (Some _) -> true
   | Ok None -> false
-  | Error _ -> false
+  | Error err ->
+    Log.Backend.error "[PG:exists] %s" (Caqti_error.show err);
+    false
 
 let list_keys t ~prefix =
   let nprefix = namespaced_key t.namespace prefix in

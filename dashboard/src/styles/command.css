@@ -1,5 +1,6 @@
 /* ── Command Plane ─────────────────────────────────────────── */
 
+/* wallboard: multi-stop radial+linear gradient */
 .command-plane-view.wallboard {
   background:
     radial-gradient(circle at top left, var(--cyan-12), transparent 22%),
@@ -8,6 +9,7 @@
   box-shadow: inset 0 1px 0 var(--white-5);
 }
 
+/* stat-card child element styles (20+ instances across files) */
 .monitor-stat-card.highlight {
   border-color: rgba(34,211,238,0.34);
   box-shadow: 0 0 0 1px var(--cyan-16);
@@ -24,25 +26,12 @@
 .monitor-stat-card strong { font-size: 28px; line-height: 1; }
 .monitor-stat-card small { color: var(--white-50); font-size: var(--fs-sm); }
 
-.command-focus-banner {
-  background: linear-gradient(180deg, rgba(34,211,238,0.1), var(--white-3));
-}
-
-.command-entry-card strong {
-  color: var(--text-near-white);
-  font-size: 18px;
-  line-height: 1.2;
-  word-break: break-word;
-}
-.command-entry-card p { margin: 0; color: var(--frost-72); line-height: 1.5; }
-
+/* hero: multi-stop gradient + ::before pseudo-element */
 .command-hero {
   background:
     radial-gradient(circle at top right, rgba(103,232,249,0.16), transparent 34%),
     radial-gradient(circle at bottom left, rgba(244,114,182,0.12), transparent 28%),
     linear-gradient(180deg, rgba(8,16,34,0.94), rgba(8,14,28,0.88));
-  box-shadow: inset 0 1px 0 var(--white-4);
-
   &:before {
     content: "";
     position: absolute;
@@ -55,22 +44,7 @@
   }
 }
 
-.command-hero-copy h3 {
-  margin: 0;
-  font-size: 28px;
-  line-height: 1.1;
-  color: #f5fbff;
-  letter-spacing: -0.02em;
-}
-.command-hero-copy p {
-  margin: 0;
-  max-width: 60ch;
-  color: rgba(226, 232, 240, 0.76);
-  line-height: 1.6;
-}
-
-.command-tree-node.depth-3 { background: var(--white-3); }
-
+/* guide-card variants (8 files, gradient on highlight) */
 .command-guide-card.highlight {
   border-color: rgba(34,211,238,0.32);
   background: linear-gradient(180deg, var(--cyan-12), var(--white-3));
@@ -80,19 +54,21 @@
 .command-guide-card.bad {
   border-color: rgba(248,113,113,0.24);
 }
-.command-guide-card p { margin: 10px 0 0; color: var(--white-82); line-height: 1.5; }
+.command-guide-card p {
+  margin: 10px 0 0;
+  color: var(--white-82);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 
+/* readiness-row tone variants + child p */
 .command-readiness-row.warn { border-color: var(--warn-soft); }
 .command-readiness-row.ok { border-color: var(--ok-22); }
 .command-readiness-row.bad { border-color: var(--bad-soft); }
-.command-readiness-row p { margin: 8px 0 0; color: var(--white-82); line-height: 1.5; }
+.command-readiness-row p { margin: 8px 0 0; color: var(--white-82); line-height: 1.5; overflow-wrap: anywhere; word-break: break-word; }
 
-.command-surface-tab.active {
-  background: var(--cyan-16);
-  color: #67e8f9;
-  border-color: rgba(34,211,238,0.38);
-}
-
+/* warroom-strip: multi-stop gradient */
 .command-warroom-strip {
   background:
     radial-gradient(circle at top left, var(--cyan-16), transparent 32%),
@@ -101,12 +77,7 @@
 .command-warroom-strip.warn { border-color: rgba(251,191,36,0.32); }
 .command-warroom-strip.wallboard { padding: 22px; border-radius: 22px; }
 
-.command-warroom-strip-head strong {
-  display: block;
-  font-size: 24px;
-  line-height: 1.15;
-}
-
+/* warroom-grid: complex fractional grid-template-columns */
 .command-warroom-grid {
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.05fr) minmax(320px, 0.9fr);
   &.wallboard {
@@ -114,6 +85,7 @@
   }
 }
 
+/* warroom cards: linear-gradient background + tone variants */
 .warroom-orchestration-card,
 .warroom-presence-card,
 .warroom-feed-card {
@@ -123,7 +95,6 @@
   &.warn { border-color: rgba(251,191,36,0.22); }
   &.bad { border-color: rgba(248,113,113,0.26); }
 }
-
 .warroom-presence-card.ok,
 .warroom-presence-card.warn,
 .warroom-presence-card.bad,
@@ -134,21 +105,20 @@
 
 @media (max-width: 1450px) {
   .command-warroom-grid,
-  .command-warroom-grid.wallboard,
-  .command-hero-summary {
+  .command-warroom-grid.wallboard {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 1100px) {
   .command-warroom-grid,
-  .command-warroom-grid.wallboard,
-  .command-hero-summary {
+  .command-warroom-grid.wallboard {
     grid-template-columns: minmax(0, 1fr);
   }
   .command-warroom-strip { position: static; }
 }
 
+/* alert child p */
 .command-alert p {
   margin: 10px 0 0;
   color: var(--white-78);
@@ -157,14 +127,7 @@
   word-break: break-word;
 }
 
-.command-chain-item.selected {
-  border-color: rgba(34,211,238,0.38);
-  box-shadow: 0 0 0 1px rgba(34,211,238,0.2) inset;
-  background: linear-gradient(180deg, var(--cyan-12), var(--white-3));
-}
-
-.command-chain-graph svg { display: block; min-width: 100%; height: auto; }
-
+/* chip + tag: used in 14+ files, 60+ instances */
 .command-chip,
 .command-tag {
   display: inline-flex;
@@ -180,34 +143,15 @@
   &.muted { background: var(--white-6); color: var(--white-35); }
 }
 
-.command-chip.ok,
-.command-chip.warn,
-.command-chip.bad,
-.command-chip.muted,
-.command-tag-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-  color: var(--white-56);
-  font-size: var(--fs-sm);
-}
-
+/* warroom-guidance tone variants */
 .command-warroom-guidance strong { color: rgba(255,255,255,0.96); }
 .command-warroom-guidance.ok { border-color: var(--ok-35); background: var(--ok-8); }
 .command-warroom-guidance.warn { border-color: var(--warn-30); background: rgba(251,191,36,0.08); }
 .command-warroom-guidance.bad { border-color: var(--bad-30); background: var(--bad-8); }
 
-.command-guide-card p,
-.command-readiness-row p,
-.swarm-event-node,
-.swarm-event-body {
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
 /* ── Command Gauge + Signal ───────────────────────────────── */
 
+/* gauge-ring: conic-gradient with CSS variables */
 .command-gauge-ring {
   width: 88px;
   height: 88px;
@@ -217,27 +161,12 @@
   box-shadow: inset 0 0 0 1px var(--white-4);
 }
 
-.command-gauge-core strong,
-.command-signal-copy strong {
-  color: var(--text-near-white);
-  font-size: 18px;
-  line-height: 1.1;
-}
-.command-gauge-core span { color: rgba(148, 163, 184, 0.88); font-size: var(--fs-xs); margin-top: 4px; }
-.command-gauge-copy span { color: rgba(191, 219, 254, 0.92); font-size: var(--fs-sm); letter-spacing: 0.08em; text-transform: uppercase; }
-.command-gauge-copy small { color: rgba(226, 232, 240, 0.7); line-height: 1.5; }
-
+/* signal-rail tone variants */
 .command-signal-rail.ok { border-color: var(--ok-18); }
 .command-signal-rail.warn { border-color: var(--warn-20); }
 .command-signal-rail.bad { border-color: rgba(248,113,113,0.22); }
 
-.command-signal-copy span {
-  color: rgba(148, 163, 184, 0.9);
-  font-size: var(--fs-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
+/* signal-bar: linear-gradient fills */
 .command-signal-bar span {
   display: block;
   height: 100%;
@@ -249,5 +178,4 @@
 .command-signal-bar span.bad {
   background: linear-gradient(90deg, rgba(248,113,113,0.9), rgba(244,63,94,0.9));
 }
-
 .command-signal-rail small { color: rgba(226, 232, 240, 0.66); line-height: 1.5; }

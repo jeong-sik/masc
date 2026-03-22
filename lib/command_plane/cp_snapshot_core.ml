@@ -74,25 +74,17 @@ let topology_summary_to_json (s : topology_summary) =
       ("operation_status_counts", operation_status_counts_to_json s.operation_status_counts);
     ]
 
-(* mtime-based cache for build_snapshot_state.
-   CP files change infrequently; avoid re-reading + re-parsing on every call. *)
+(* TTL-based cache for build_snapshot_state.
+   Avoids re-reading 2500+ JSON files on every call.
+   Default TTL: 30s — dashboard refreshes at this cadence anyway. *)
 let _cp_state_cache : (float * snapshot_state) option ref = ref None
-
-let cp_files_max_mtime config =
-  let paths = [
-    units_path config; operations_path config;
-    intents_path config; detachments_path config;
-    decisions_path config;
-  ] in
-  List.fold_left (fun acc path ->
-    try max acc (Unix.stat path).Unix.st_mtime
-    with Unix.Unix_error _ -> acc) 0.0 paths
+let _cp_cache_ttl_s = 30.0
 
 let build_snapshot_state ?sessions config =
-  let current_mtime = cp_files_max_mtime config in
-  (* Cache hit: same mtime and no explicit sessions override *)
+  let now = Time_compat.now () in
+  (* Cache hit: within TTL and no explicit sessions override *)
   (match sessions, !_cp_state_cache with
-   | None, Some (cached_mtime, cached_state) when cached_mtime = current_mtime ->
+   | None, Some (cached_at, cached_state) when now -. cached_at < _cp_cache_ttl_s ->
        cached_state
    | _ ->
   let agents, managed_units, units, source = topology_units config in
@@ -125,7 +117,7 @@ let build_snapshot_state ?sessions config =
     child_map;
     unit_lookup;
   } in
-  _cp_state_cache := Some (current_mtime, state);
+  _cp_state_cache := Some (now, state);
   state)
 
 let topology_json_from_state (state : snapshot_state) =

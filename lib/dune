@@ -19,6 +19,7 @@
    auto_responder
    auth
    board
+   board_types
    board_core
    board_votes
    board_pg
@@ -339,6 +340,7 @@
    tool_team_session_routing
    tool_team_session_routing_workers
    tool_team_session_step
+   tool_team_session_step_spawn
    tool_team_session_step_exec
    tool_team_session_step_types
    team_session_plan

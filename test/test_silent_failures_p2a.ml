@@ -182,15 +182,8 @@ let test_source_main_keeper_bootstrap () =
       [ "bin/main_eio.ml"; "lib/server/server_runtime_bootstrap.ml" ]
       {|[main] keeper bootstrap failed:|})
 
-let test_source_metrics_fd_close () =
-  check bool "metrics_store_eio.ml has fd close logging"
-    true (file_contains_pattern "lib/metrics_store_eio.ml"
-      {|fd close failed:|})
-
-let test_source_metrics_fd_unlock () =
-  check bool "metrics_store_eio.ml has fd unlock logging"
-    true (file_contains_pattern "lib/metrics_store_eio.ml"
-      {|fd unlock failed:|})
+(* MA-H2a/H2b removed: metrics_store_eio.ml migrated to Eio-native I/O (PR #2260),
+   eliminating Unix fd close/unlock paths and their logging. *)
 
 let test_source_model_token_parse () =
   check bool "model_spec.ml keeps model parsing source"
@@ -259,10 +252,7 @@ let () =
     "source_high_priority", [
       test_case "MA-H1: keeper bootstrap logging present"
         `Quick test_source_main_keeper_bootstrap;
-      test_case "MA-H2a: metrics fd close logging present"
-        `Quick test_source_metrics_fd_close;
-      test_case "MA-H2b: metrics fd unlock logging present"
-        `Quick test_source_metrics_fd_unlock;
+      (* MA-H2a/H2b removed: Eio-native migration PR #2260 eliminated fd paths *)
       test_case "MA-H3: model spec parse source present"
         `Quick test_source_model_token_parse;
       test_case "MA-H4: keeper proactive logging present"

@@ -308,12 +308,55 @@ let handle_governance_report ctx args =
   let json = report_to_json report in
   (true, Yojson.Safe.pretty_to_string json)
 
+(* Handle masc_audit_trail — query audit entries linked by trace_id *)
+let handle_audit_trail ctx args =
+  let trace_id = get_string_opt args "trace_id" in
+  let agent_filter = get_string_opt args "agent_id" in
+  let action_type_filter = get_string_opt args "action_type" in
+  let since_hours = get_float args "since_hours" 168.0 in
+  let limit = get_int args "limit" 100 in
+  let since_ts = Time_compat.now () -. (since_hours *. 3600.0) in
+  let entries = Audit_log.read_entries ctx.config in
+  let filtered =
+    entries
+    |> List.filter (fun (e : Audit_log.audit_entry) -> e.timestamp >= since_ts)
+    |> List.filter (fun (e : Audit_log.audit_entry) ->
+        match trace_id with
+        | Some tid -> e.trace_id = Some tid
+        | None -> true)
+    |> List.filter (fun (e : Audit_log.audit_entry) ->
+        match agent_filter with
+        | Some a -> String.equal e.agent_id a
+        | None -> true)
+    |> List.filter (fun (e : Audit_log.audit_entry) ->
+        match action_type_filter with
+        | Some at -> String.equal (Audit_log.action_to_string e.action) at
+        | None -> true)
+    |> List.sort (fun (a : Audit_log.audit_entry) (b : Audit_log.audit_entry) ->
+        Float.compare b.timestamp a.timestamp)
+  in
+  let limited =
+    let rec take n xs = match xs with
+      | [] -> []
+      | _ when n <= 0 -> []
+      | x :: rest -> x :: take (n - 1) rest
+    in
+    take limit filtered
+  in
+  let json = `Assoc [
+    ("count", `Int (List.length limited));
+    ("trace_id_filter", match trace_id with Some t -> `String t | None -> `Null);
+    ("entries", `List (List.map Audit_log.entry_to_json limited));
+  ] in
+  (true, Yojson.Safe.pretty_to_string json)
+
 (* Dispatch handler *)
 let dispatch ctx ~name ~args =
   match name with
   | "masc_audit_query" -> Some (handle_audit_query ctx args)
   | "masc_audit_stats" -> Some (handle_audit_stats ctx args)
   | "masc_governance_report" -> Some (handle_governance_report ctx args)
+  | "masc_audit_trail" -> Some (handle_audit_trail ctx args)
   | _ -> None
 
 let schemas : Types.tool_schema list = [
@@ -395,6 +438,41 @@ Pair with masc_governance_set to configure audit policies, or masc_governance_st
         ("until", `Assoc [
           ("type", `String "string");
           ("description", `String "End of period as Unix timestamp string (optional, defaults to now)");
+        ]);
+      ]);
+    ];
+  };
+
+  (* masc_audit_trail *)
+  {
+    name = "masc_audit_trail";
+    description = "Query the audit trail by trace_id to follow a governance decision chain from pending_confirm through approval or rejection. \
+Use when investigating why a specific action was approved, denied, or expired. \
+Pair with masc_operator_confirm to see the original pending_confirm, or masc_governance_report for aggregate views.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("trace_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Trace ID linking a governance decision chain. Returns all audit entries sharing this trace_id.");
+        ]);
+        ("agent_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by agent who performed the action (optional).");
+        ]);
+        ("action_type", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Filter by action type string, e.g. governance_decision:confirm (optional).");
+        ]);
+        ("since_hours", `Assoc [
+          ("type", `String "number");
+          ("description", `String "Only show entries from last N hours (default: 168, i.e. 7 days).");
+          ("default", `Float 168.0);
+        ]);
+        ("limit", `Assoc [
+          ("type", `String "integer");
+          ("description", `String "Maximum entries to return (default: 100).");
+          ("default", `Int 100);
         ]);
       ]);
     ];

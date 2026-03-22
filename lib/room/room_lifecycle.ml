@@ -186,28 +186,35 @@ let join_in_room config ~room_id ~agent_name ?(agent_type_override=None) ~capabi
     Filename.concat (agents_dir scoped) (safe_filename nickname ^ ".json")
   in
   if Sys.file_exists agent_file_dedup then begin
-    let existing_json = read_json scoped agent_file_dedup in
-    (match agent_of_yojson existing_json with
-     | Ok existing_agent ->
-         let is_inactive = existing_agent.status = Inactive in
-         let updated = { existing_agent with
-           status = Active;
-           last_seen = now_iso ();
-           capabilities;
-         } in
-         write_json scoped agent_file_dedup (agent_to_yojson updated);
-         if is_inactive then begin
-           let _ = update_state scoped (fun s ->
-             let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
-             { s with active_agents = agents }
-           ) in
-           let _ = broadcast scoped ~from_agent:nickname
-                     ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname room_id) in
-           log_event scoped (Printf.sprintf
-             "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
-             room_id nickname (now_iso ()))
-         end
-     | Error _ -> ());
+    (* Lock the agent file to prevent race with heartbeat writes.
+       read-modify-write must be atomic; without this lock, a concurrent
+       heartbeat can update current_task/status between our read and write,
+       and the rejoin write would silently discard those changes. *)
+    let was_inactive = with_file_lock scoped agent_file_dedup (fun () ->
+      let existing_json = read_json scoped agent_file_dedup in
+      match agent_of_yojson existing_json with
+      | Ok existing_agent ->
+          let is_inactive = existing_agent.status = Inactive in
+          let updated = { existing_agent with
+            status = Active;
+            last_seen = now_iso ();
+            capabilities;
+          } in
+          write_json scoped agent_file_dedup (agent_to_yojson updated);
+          is_inactive
+      | Error _ -> false
+    ) in
+    if was_inactive then begin
+      let _ = update_state scoped (fun s ->
+        let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
+        { s with active_agents = agents }
+      ) in
+      let _ = broadcast scoped ~from_agent:nickname
+                ~content:(Printf.sprintf "👋 %s rejoined room %s" nickname room_id) in
+      log_event scoped (Printf.sprintf
+        "{\"type\":\"agent_join\",\"room_id\":\"%s\",\"agent\":\"%s\",\"rejoin\":true,\"ts\":\"%s\"}"
+        room_id nickname (now_iso ()))
+    end;
     Printf.sprintf "✅ %s already in room %s (last_seen updated)" nickname room_id
   end else begin
     let session_id = generate_session_id () in

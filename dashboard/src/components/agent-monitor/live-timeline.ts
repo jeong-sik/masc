@@ -5,6 +5,8 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useRef, useMemo } from 'preact/hooks'
 import { TimeAgo } from '../common/time-ago'
+import { FilterChips } from '../common/filter-chips'
+import { EmptyState } from '../common/empty-state'
 import { journal } from '../../sse'
 import type { JournalEntry, JournalEventType } from '../../types'
 
@@ -127,19 +129,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center justify-between gap-2 flex-wrap">
-        <div class="flex gap-1.5 flex-wrap">
-          ${FILTER_CHIPS.map(chip => html`
-            <button
-              key=${chip.key}
-              class="px-2.5 py-1 text-[length:var(--fs-xs)] rounded-xl border cursor-pointer transition-all duration-150 ${activeFilter.value === chip.key
-                ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
-                : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'}"
-              onClick=${() => { activeFilter.value = chip.key }}
-            >
-              ${chip.label}
-            </button>
-          `)}
-        </div>
+        <${FilterChips} chips=${FILTER_CHIPS} active=${activeFilter} />
         <div class="flex items-center gap-2 text-[length:var(--fs-xs)]">
           <span class="px-2 py-0.5 rounded-lg bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)] text-[length:var(--fs-2xs)]">${eventsPerMin}/min</span>
           <span class="text-[var(--text-muted)]">${filtered.length} events</span>
@@ -157,7 +147,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
 
       <div class="flex flex-col gap-0.5 max-h-[320px] overflow-y-auto" ref=${scrollRef}>
         ${filtered.length === 0
-          ? html`<div class="empty-state">필터에 맞는 이벤트 없음</div>`
+          ? html`<${EmptyState} message="필터에 맞는 이벤트 없음" compact />`
           : filtered.map((entry: JournalEntry, idx: number) => html`
               <div class="flex items-baseline gap-1.5 py-1 px-2 text-[length:var(--fs-sm)] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
                 <span class="agent-event-badge ${eventKindBadgeClass(entry.eventType)}">

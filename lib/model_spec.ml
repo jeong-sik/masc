@@ -429,3 +429,35 @@ let default_local_model_spec () =
     Returns model label strings (e.g. ["llama:qwen3.5"; "glm:glm-4.7"]). *)
 let load_cascade_profile ~config_path ~name : string list =
   Llm_provider.Cascade_config.load_profile ~config_path ~name
+
+(* ================================================================ *)
+(* Convenience accessors — callers need scalar values, not model_spec *)
+(* ================================================================ *)
+
+let resolve_primary_spec labels =
+  match available_model_specs_of_strings labels with
+  | p :: _ -> p
+  | [] -> default_local_model_spec ()
+
+let resolve_primary_max_context labels =
+  (resolve_primary_spec labels).max_context
+
+let resolve_primary_model_id labels =
+  (resolve_primary_spec labels).model_id
+
+let find_model_id_for_used ~labels ~model_used =
+  let specs = available_model_specs_of_strings labels in
+  let used =
+    if String.ends_with ~suffix:":latest" model_used then
+      String.sub model_used 0 (String.length model_used - String.length ":latest")
+    else model_used
+  in
+  match List.find_opt (fun (m : model_spec) ->
+    m.model_id = model_used || m.model_id = used
+  ) specs with
+  | Some m -> m.model_id
+  | None -> (resolve_primary_spec labels).model_id
+
+let cost_usd_of_model_id ~model_id ~input_tokens ~output_tokens =
+  let pricing = Llm_provider.Pricing.pricing_for_model model_id in
+  Llm_provider.Pricing.estimate_cost ~pricing ~input_tokens ~output_tokens ()

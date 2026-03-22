@@ -91,16 +91,14 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
                  let metrics_store =
                    keeper_metrics_store ctx.config meta_current.name
                  in
-                 let primary_model =
-                   match Model_spec.available_model_specs_of_strings meta_current.models with
-                   | primary :: _ -> primary
-                   | [] -> Model_spec.default_local_model_spec ()
+                 let primary_max_context =
+                   Model_spec.resolve_primary_max_context meta_current.models
                  in
                  let base_dir = session_base_dir ctx.config in
                  let _session, ctx_opt =
                    load_context_from_checkpoint
                      ~trace_id:meta_current.trace_id
-                     ~primary_model_max_tokens:primary_model.max_context
+                     ~primary_model_max_tokens:primary_max_context
                      ~base_dir
                  in
                  (match ctx_opt with

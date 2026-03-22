@@ -125,13 +125,15 @@ export function AgentLiveTimeline({ name }: { name: string }) {
   }, [filtered.length])
 
   return html`
-    <div class="agent-live-timeline">
+    <div class="flex flex-col gap-2">
       <div class="flex items-center justify-between gap-2 flex-wrap">
-        <div class="agent-live-filter-bar">
+        <div class="flex gap-1.5 flex-wrap">
           ${FILTER_CHIPS.map(chip => html`
             <button
               key=${chip.key}
-              class="agent-live-chip rounded-xl ${activeFilter.value === chip.key ? 'agent-live-chip--active' : ''}"
+              class="px-2.5 py-1 text-[length:var(--fs-xs)] rounded-xl border cursor-pointer transition-all duration-150 ${activeFilter.value === chip.key
+                ? 'border-[rgba(200,168,78,0.5)] bg-[rgba(200,168,78,0.12)] text-[#e8d48b]'
+                : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:border-[rgba(200,168,78,0.4)]'}"
               onClick=${() => { activeFilter.value = chip.key }}
             >
               ${chip.label}
@@ -139,10 +141,12 @@ export function AgentLiveTimeline({ name }: { name: string }) {
           `)}
         </div>
         <div class="flex items-center gap-2 text-[length:var(--fs-xs)]">
-          <span class="agent-event-rate rounded-lg">${eventsPerMin}/min</span>
-          <span class="text-text-muted">${filtered.length} events</span>
+          <span class="px-2 py-0.5 rounded-lg bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)] text-[length:var(--fs-2xs)]">${eventsPerMin}/min</span>
+          <span class="text-[var(--text-muted)]">${filtered.length} events</span>
           <button
-            class="agent-live-autoscroll rounded-lg ${autoScroll.value ? 'agent-live-autoscroll--on' : ''}"
+            class="px-2 py-0.5 rounded-lg text-[length:var(--fs-2xs)] border cursor-pointer transition-all duration-150 ${autoScroll.value
+              ? 'border-[rgba(34,197,94,0.4)] text-[var(--ok)] bg-[var(--white-4)]'
+              : 'border-[var(--white-10)] text-[var(--text-dim)] bg-[var(--white-4)]'}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
             title=${autoScroll.value ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
           >
@@ -159,9 +163,9 @@ export function AgentLiveTimeline({ name }: { name: string }) {
                 <span class="agent-event-badge ${eventKindBadgeClass(entry.eventType)}">
                   ${eventKindLabel(entry.eventType)}
                 </span>
-                <span class="agent-live-event-text">${compactText(entry.text)}</span>
+                <span class="flex-1 text-[#c8daf7] truncate">${compactText(entry.text)}</span>
                 ${entry.timestamp ? html`
-                  <span class="agent-live-event-time"><${TimeAgo} timestamp=${entry.timestamp} /></span>
+                  <span class="text-[var(--text-dim)] text-[length:var(--fs-xs)] whitespace-nowrap"><${TimeAgo} timestamp=${entry.timestamp} /></span>
                 ` : null}
               </div>
             `)}

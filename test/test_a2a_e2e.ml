@@ -14,6 +14,12 @@ open Masc_mcp
 (* Initialize crypto RNG for subscription ID generation *)
 let () = Encryption.initialize ()
 
+(* Wire Room_hooks for subscribe — needed because Room module side-effects
+   may not execute in test binaries that don't reference Room directly. *)
+let () = Room_hooks.subscribe_messages_fn := (fun ~subscriber ->
+  let _ = Subscriptions.SubscriptionStore.subscribe
+    ~subscriber ~resource:Subscriptions.Messages () in ())
+
 (** {1 Test Setup} *)
 
 (** Recursive directory cleanup *)

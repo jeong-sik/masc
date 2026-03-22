@@ -138,7 +138,14 @@ let run_turn
   let hooks = Keeper_hooks_oas.make_hooks
     ~config ~meta_ref ~session ~ctx_ref ~generation ?max_cost_usd
     ?autonomy_filter () in
-  let memory = Memory_oas_bridge.create_memory ~agent_name ~session_id:meta.trace_id () in
+  let base_dir = Filename.concat config.base_path ".masc" in
+  let memory =
+    Memory_oas_bridge.create_memory
+      ~agent_name
+      ~base_dir
+      ~session_id:meta.trace_id
+      ()
+  in
   ignore (Memory_oas_bridge.seed_institution ~memory ~config);
   ignore (Memory_oas_bridge.seed_procedures ~memory ~agent_name:"_global" ~limit:5);
   ignore (Memory_oas_bridge.seed_memory_bank ~memory ~agent_name ~limit:10);

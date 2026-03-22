@@ -6,8 +6,17 @@
 
     @since 2.96.0 *)
 
-(** Drain interval: how often we poll the Event_bus subscription. *)
-let drain_interval_s = 2.0
+(** Drain interval: how often we poll the Event_bus subscription.
+    Lower default keeps the dashboard close to real-time, while staying
+    runtime-tunable for quieter deployments. *)
+let drain_interval_s () =
+  match Sys.getenv_opt "MASC_OAS_SSE_DRAIN_INTERVAL_SEC" with
+  | Some raw -> (
+      try
+        let parsed = float_of_string raw in
+        Float.min 5.0 (Float.max 0.05 parsed)
+      with Failure _ -> 0.25)
+  | None -> 0.25
 
 (** Prefix for events we relay. *)
 let masc_prefix = "masc:"
@@ -29,6 +38,7 @@ let relay_event = function
 
 (** Background fiber: drain events and relay to SSE. *)
 let start ~sw ~clock ~bus =
+  let interval_s = drain_interval_s () in
   let sub = Agent_sdk.Event_bus.subscribe bus
     ~filter:(function
       | Agent_sdk.Event_bus.Custom (name, _) ->
@@ -38,9 +48,9 @@ let start ~sw ~clock ~bus =
   in
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
-      Eio.Time.sleep clock drain_interval_s;
       let events = Agent_sdk.Event_bus.drain sub in
       List.iter relay_event events;
+      Eio.Time.sleep clock interval_s;
       loop ()
     in
     loop ())

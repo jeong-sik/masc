@@ -43,18 +43,30 @@ let content_of_json (json : Yojson.Safe.t) : string =
 let generate_session_id () =
   Printf.sprintf "%d" (int_of_float (Unix.gettimeofday ()))
 
+(** Resolve the JSONL fallback root for OAS memory.
+
+    Preference order:
+    1. Explicit [base_dir]
+    2. Room-scoped [.masc] under [config.base_path]
+    3. Legacy global [ME_ROOT/.masc] fallback *)
+let resolve_base_dir ?(base_dir : string option) ?(config : Room_utils.config option) () =
+  match base_dir, config with
+  | Some dir, _ -> dir
+  | None, Some cfg -> Filename.concat cfg.base_path ".masc"
+  | None, None -> Filename.concat (Env_config.me_root ()) ".masc"
+
 (** Create an OAS [long_term_backend].
 
     If a PG pool is available (via [Board_dispatch.get_pg_pool]),
     uses [Memory_pg] for persistent storage scoped by [agent_name].
     Otherwise falls back to session-based JSONL files under
     [.masc/memory/<agent_name>/<session_id>.jsonl]. *)
-let make_backend ~(agent_name : string) ~(session_id : string)
+let make_backend ?base_dir ~(agent_name : string) ~(session_id : string) ()
   : Agent_sdk.Memory.long_term_backend =
   match Board_dispatch.get_pg_pool () with
   | Some pool -> Memory_pg.make_backend ~pool ~agent_name
   | None ->
-    let base_dir = Env_config.me_root () ^ "/.masc" in
+    let base_dir = resolve_base_dir ?base_dir () in
     Log.MemoryJsonl.info "Using JSONL fallback for %s (session=%s)"
       agent_name session_id;
     Memory_jsonl.make_backend ~base_dir ~agent_name ~session_id
@@ -63,13 +75,14 @@ let make_backend ~(agent_name : string) ~(session_id : string)
 
     Uses PostgreSQL long_term_backend when available, JSONL fallback otherwise.
     @param session_id Session identifier; defaults to timestamp-based ID. *)
-let create_memory ~(agent_name : string) ?(session_id : string option)
+let create_memory ~(agent_name : string) ?(base_dir : string option)
+    ?(session_id : string option)
     () : Agent_sdk.Memory.t =
   let sid = match session_id with
     | Some s -> s
     | None -> generate_session_id ()
   in
-  let backend = make_backend ~agent_name ~session_id:sid in
+  let backend = make_backend ?base_dir ~agent_name ~session_id:sid () in
   Agent_sdk.Memory.create ~long_term:backend ()
 
 (** Format institutional memory as a JSON value suitable for
@@ -252,11 +265,11 @@ let institution_episode_of_oas ~(agent_name : string)
   }
 
 let persisted_episode_ids () =
+  let seen = Hashtbl.create 128 in
   Institution_eio.load_recent_episodes_jsonl ~limit:max_int
-  |> List.fold_left
-       (fun seen (episode : Institution_eio.episode) ->
-         if List.mem episode.id seen then seen else episode.id :: seen)
-       []
+  |> List.iter (fun (episode : Institution_eio.episode) ->
+         Hashtbl.replace seen episode.id ());
+  seen
 
 (** Pre-seed the Episodic tier.
 
@@ -283,8 +296,9 @@ let flush_episodes ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int =
   Agent_sdk.Memory.recall_episodes memory ~limit:max_int ()
   |> List.fold_left
        (fun flushed (episode : Agent_sdk.Memory.episode) ->
-         if List.mem episode.id persisted_ids then flushed
+         if Hashtbl.mem persisted_ids episode.id then flushed
          else (
+           Hashtbl.replace persisted_ids episode.id ();
            Fs_compat.append_jsonl path
              (Institution_eio.episode_to_json
                 (institution_episode_of_oas ~agent_name episode));
@@ -420,11 +434,17 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
     @param episode_limit default 50
     @param procedure_limit default 20 *)
 let create_memory_full ~(agent_name : string)
+    ?(base_dir : string option)
     ?(session_id : string option)
     ?(config : Room_utils.config option)
     ?(episode_limit = 50) ?(procedure_limit = 20)
     () : Agent_sdk.Memory.t =
-  let memory = create_memory ~agent_name ?session_id () in
+  let base_dir =
+    match base_dir with
+    | Some _ -> base_dir
+    | None -> Some (resolve_base_dir ?config ())
+  in
+  let memory = create_memory ~agent_name ?base_dir ?session_id () in
   let _episode_count =
     seed_episodes ~memory ~agent_name ~limit:episode_limit
   in

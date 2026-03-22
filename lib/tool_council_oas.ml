@@ -272,7 +272,7 @@ let handle_route _ctx args =
       ]) decision.agents));
   ])
 
-let handle_execute _ctx args =
+let handle_execute ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
@@ -282,7 +282,12 @@ let handle_execute _ctx args =
        Include: (1) your reasoning, (2) identified risks, (3) recommended action. \
        Be concise and actionable." in
     let agent_name = "council-deliberation" in
-    let memory = Memory_oas_bridge.create_memory_full ~agent_name () in
+    let memory =
+      Memory_oas_bridge.create_memory_full
+        ~agent_name
+        ~config:(room_config_of_ctx ctx)
+        ()
+    in
     match Oas_worker.run_named
       ~cascade_name:"governance_judge" ~goal:topic ~system_prompt ~memory ()
     with
@@ -297,7 +302,7 @@ let handle_execute _ctx args =
       ])
     | Error e -> json_err (Printf.sprintf "Deliberation failed: %s" e)
 
-let handle_execute_dry_run _ctx args =
+let handle_execute_dry_run ctx args =
   let topic = get_string args "topic" "" in
   if topic = "" then json_err "topic is required"
   else
@@ -307,7 +312,12 @@ let handle_execute_dry_run _ctx args =
        Produce: (1) impact analysis, (2) risks and mitigations, (3) what WOULD happen if executed. \
        This is analysis only — no actions will be taken." in
     let agent_name = "council-dry-run" in
-    let memory = Memory_oas_bridge.create_memory_full ~agent_name () in
+    let memory =
+      Memory_oas_bridge.create_memory_full
+        ~agent_name
+        ~config:(room_config_of_ctx ctx)
+        ()
+    in
     match Oas_worker.run_named
       ~cascade_name:"governance_judge" ~goal:topic ~system_prompt ~memory ()
     with

@@ -154,6 +154,7 @@ export function updateOasKeeperSnapshot(snapshot: OasKeeperSnapshot): void {
     if (oldest) next.delete(oldest)
   }
   oasKeeperSnapshots.value = next
+  oasLastKeeperTick.value = Date.now()
   oasTotalEvents.value++
 }
 

@@ -368,6 +368,95 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
+    case 'oas:masc:keeper:resident_lifecycle': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentName = (p.agent_name as string) ?? ''
+      const lifecycleEvent = (p.event as string) ?? undefined
+      const detail = (p.detail as string) ?? undefined
+      pushOasAgentEvent({
+        type: 'keeper_resident_lifecycle',
+        agent_name: agentName,
+        event: lifecycleEvent,
+        detail,
+        timestamp:
+          typeof p.timestamp === 'number'
+            ? p.timestamp
+            : (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000),
+      })
+      addTypedJournalEntry(
+        agentName,
+        `Resident ${[lifecycleEvent, detail].filter(Boolean).join(' · ') || 'lifecycle'}`,
+        'oas',
+        'oas_event',
+        {
+          narrativeText:
+            `${actorLabel(agentName)} resident lifecycle 이벤트`
+            + ([lifecycleEvent, detail].filter(Boolean).length > 0
+              ? ` (${[lifecycleEvent, detail].filter(Boolean).join(' · ')})`
+              : ''),
+        },
+      )
+      break
+    }
+    case 'oas:masc:trust_updated': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentA = (p.agent_a as string) ?? ''
+      const agentB = (p.agent_b as string) ?? ''
+      const trustScore = typeof p.trust_score === 'number' ? p.trust_score : undefined
+      pushOasAgentEvent({
+        type: 'trust_updated',
+        agent_name: agentA,
+        secondary_agent: agentB,
+        trust_score: trustScore,
+        timestamp:
+          typeof p.timestamp === 'number'
+            ? p.timestamp
+            : (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000),
+      })
+      addTypedJournalEntry(
+        agentA,
+        `Trust ${agentB}${trustScore != null ? ` · ${trustScore.toFixed(2)}` : ''}`,
+        'oas',
+        'oas_event',
+        {
+          narrativeText:
+            `${actorLabel(agentA)}와 ${actorLabel(agentB)} 사이 trust score가 갱신되었습니다`
+            + (trustScore != null ? ` (${trustScore.toFixed(2)})` : ''),
+        },
+      )
+      break
+    }
+    case 'oas:masc:reputation_changed': {
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const agentName = (p.agent_name as string) ?? ''
+      const oldScore = typeof p.old_score === 'number' ? p.old_score : undefined
+      const newScore = typeof p.new_score === 'number' ? p.new_score : undefined
+      const trend = (p.trend as string) ?? undefined
+      pushOasAgentEvent({
+        type: 'reputation_changed',
+        agent_name: agentName,
+        old_score: oldScore,
+        new_score: newScore,
+        trend,
+        timestamp:
+          typeof p.timestamp === 'number'
+            ? p.timestamp
+            : (typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000),
+      })
+      addTypedJournalEntry(
+        agentName,
+        `Reputation${oldScore != null && newScore != null ? ` ${oldScore.toFixed(2)} → ${newScore.toFixed(2)}` : ''}${trend ? ` · ${trend}` : ''}`,
+        'oas',
+        'oas_event',
+        {
+          narrativeText:
+            `${actorLabel(agentName)} reputation이 갱신되었습니다`
+            + (oldScore != null && newScore != null ? ` (${oldScore.toFixed(2)} → ${newScore.toFixed(2)})` : '')
+            + (trend ? `, trend=${trend}` : ''),
+        },
+      )
+      break
+    }
     case 'oas:masc:keeper:tick': {
       const now = Date.now()
       if (oasLastKeeperTick.value === null || now - oasLastKeeperTick.value > 100) {

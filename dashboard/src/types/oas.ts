@@ -1,14 +1,27 @@
 // OAS (Open Agent SDK) Event types for dashboard monitoring
 
 export interface OasAgentEvent {
-  type: 'selected' | 'decision' | 'action_executed'
+  type:
+    | 'selected'
+    | 'decision'
+    | 'action_executed'
+    | 'keeper_resident_lifecycle'
+    | 'trust_updated'
+    | 'reputation_changed'
   agent_name: string
+  secondary_agent?: string
   action?: string
   trigger?: string
   trigger_reason?: string
+  event?: string
+  detail?: string
   thompson_score?: number
   final_score?: number
   success?: boolean
+  trust_score?: number
+  old_score?: number
+  new_score?: number
+  trend?: string
   timestamp: number
 }
 

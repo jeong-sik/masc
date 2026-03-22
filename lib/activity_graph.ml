@@ -336,9 +336,14 @@ let emit config ~room_id ?actor ?subject ?(tags = []) ~kind ~payload () =
   List.iter
     (fun (session_id, client) ->
       if value.seq > client.last_seq && client_matches client value then
-        match client.push encoded with
-        | () -> client.last_seq <- value.seq
-        | exception _ -> failed := session_id :: !failed)
+        (try
+          client.push encoded;
+          client.last_seq <- value.seq
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Misc.warn "SSE push failed for %s: %s" session_id (Printexc.to_string exn);
+            failed := session_id :: !failed))
     snapshot;
   List.iter unregister !failed;
   value

@@ -76,7 +76,7 @@ let parse_geval_response (text : string) :
             else trimmed)
   in
   match Yojson.Safe.from_string json_str with
-  | exception _ -> Error (Printf.sprintf "invalid JSON: %s" json_str)
+  | exception (Yojson.Json_error msg) -> Error (Printf.sprintf "invalid JSON (%s): %s" msg json_str)
   | json ->
       let open Yojson.Safe.Util in
       (try

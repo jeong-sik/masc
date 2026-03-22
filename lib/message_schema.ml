@@ -169,10 +169,10 @@ let validate ?(mode=Permissive) raw_message =
            | Strict -> Error (Printf.sprintf "Schema validation failed: %s" reason)
            | Warn -> Ok (Freeform raw_message)
            | Permissive -> Ok (Freeform raw_message))
-  | exception _ ->
-      match mode with
+  | exception (Yojson.Json_error _) ->
+      (match mode with
       | Strict -> Error "Message must be valid JSON in strict mode"
-      | Warn | Permissive -> Ok (Freeform raw_message)
+      | Warn | Permissive -> Ok (Freeform raw_message))
 
 let message_type_string = function
   | TaskUpdate _ -> "task_update"
@@ -311,13 +311,13 @@ let validate_envelope ?(mode=Permissive) raw_json =
                Ok { sender = "unknown"; timestamp = Time_compat.now ();
                     sequence = 0; channel = "freeform";
                     message = Freeform raw_json })
-  | exception _ ->
-      match mode with
+  | exception (Yojson.Json_error _) ->
+      (match mode with
       | Strict -> Error "Envelope must be valid JSON in strict mode"
       | _ ->
           Ok { sender = "unknown"; timestamp = Time_compat.now ();
                sequence = 0; channel = "freeform";
-               message = Freeform raw_json }
+               message = Freeform raw_json })
 
 let roundtrip msg =
   let json = to_json msg in

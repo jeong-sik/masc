@@ -726,20 +726,8 @@ let claim_next_r config ~agent_name ?(exclude_task_ids=[]) ?(stale_threshold_day
       (* Starvation prevention: Calculate effective priority
          Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
       let now = Time_compat.now () in
-      let parse_time iso =
-        try
-          (* Parse ISO 8601: 2026-01-05T12:30:00Z *)
-          Scanf.sscanf iso "%d-%d-%dT%d:%d:%d"
-            (fun y mo d h mi _ ->
-              let tm = { Unix.tm_sec = 0; tm_min = mi; tm_hour = h;
-                         tm_mday = d; tm_mon = mo - 1; tm_year = y - 1900;
-                         tm_wday = 0; tm_yday = 0; tm_isdst = false } in
-              let local_epoch, _ = Unix.mktime tm in
-              let utc_as_local, _ = Unix.mktime (Unix.gmtime local_epoch) in
-              let tz_offset = local_epoch -. utc_as_local in
-              Some (local_epoch +. tz_offset))
-        with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
-      in
+      (* Reuse canonical UTC parser from Types_core *)
+      let parse_time = Types_core.parse_iso8601_opt in
       let effective_priority (task : Types.task) =
         let age_hours =
           match parse_time task.created_at with

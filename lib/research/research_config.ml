@@ -44,6 +44,10 @@ let default ?(repo = default_repo_config ()) () : t =
        CRITICAL: Only use functions that appear in the 'Public API signatures' section. \
        Do NOT invent module names or function names. If a function does not appear \
        in the .mli signatures provided, it does not exist. \
+       The 'Code around' sections show actual code near TODOs — use this to write \
+       precise patches that fit the existing style and indentation. \
+       The 'patch' field should contain the COMPLETE new content for the target file, \
+       or a unified diff (starting with '---'). \
        Respond ONLY with a JSON object: \
        {\"description\": \"...\", \"target_file\": \"...\", \"rationale\": \"...\", \"patch\": \"...\"}";
   }

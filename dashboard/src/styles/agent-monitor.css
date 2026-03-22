@@ -1,82 +1,23 @@
 /* ── Agent Monitor — runtime strip + live timeline ──────────── */
 
 /* ── Runtime Strip ─────────────────────────────────────────── */
-
 .agent-runtime-strip {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 16px;
   background: linear-gradient(
     90deg,
     rgba(10, 22, 40, 0.85) 0%,
     rgba(16, 28, 48, 0.7) 100%
   );
-  border: 1px solid var(--ff-border-subtle);
-  border-radius: var(--radius-sm, 10px);
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-/* agent-runtime-metric: migrated to inline Tailwind (flex items-center gap-1.5 text-[length:var(--fs-sm)]) */
-
-.agent-runtime-label {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  font-family: var(--font-mono, monospace);
-  color: rgba(200, 168, 78, 0.5);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.agent-runtime-value {
-  color: var(--text-body, var(--text-body));
-  font-family: var(--font-mono, monospace);
-  font-size: var(--fs-sm);
-}
-
-.agent-runtime-model {
-  max-width: 160px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Context ratio mini bar */
-.agent-runtime-ctx-bar {
-  width: 60px;
-  height: 6px;
-  background: var(--white-6);
-  border-radius: 3px;
-  overflow: hidden;
 }
 
 .agent-runtime-ctx-fill {
-  height: 100%;
-  background: var(--ok);
-  border-radius: 3px;
   transition: width 0.3s ease;
 }
 
-.agent-runtime-ctx-fill.warn {
-  background: var(--warn);
-}
-
-.agent-runtime-ctx-fill.bad {
-  background: var(--bad-light);
-}
+.agent-runtime-ctx-fill.warn { background: var(--warn); }
+.agent-runtime-ctx-fill.bad { background: var(--bad-light); }
 
 /* ── Live Timeline ─────────────────────────────────────────── */
-
-/* Filter chips row */
-
 .agent-live-chip {
-  padding: 3px 10px;
-  border: 1px solid var(--ff-border-subtle);
-  background: none;
-  color: var(--text-muted, var(--text-muted));
-  font-size: var(--fs-xs);
-  cursor: pointer;
   transition: all 0.15s;
 }
 
@@ -85,105 +26,16 @@
   color: var(--text-body, var(--text-body));
 }
 
-.agent-live-chip--active {
-  background: var(--ff-gold-dim);
-  border-color: var(--ff-gold);
-  color: var(--ff-gold-bright);
-}
-
-.agent-event-rate {
-  font-family: var(--font-mono, monospace);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--accent);
-  padding: 2px 8px;
-  background: var(--accent-10);
-  border: 1px solid var(--accent-20);
-}
-
 .agent-live-autoscroll {
-  padding: 2px 8px;
-  border: 1px solid var(--ff-border-subtle);
-  background: none;
-  color: var(--text-muted);
-  font-size: var(--fs-2xs);
-  font-family: var(--font-mono, monospace);
-  cursor: pointer;
   transition: all 0.15s;
 }
 
-.agent-live-autoscroll--on {
-  background: var(--ok-10);
-  border-color: var(--ok-25);
-  color: var(--ok);
-}
-
-/* agent-live-event: migrated to inline Tailwind (flex items-baseline gap-1.5 ...) */
-
-/* Event kind badge */
-.agent-event-badge {
-  font-size: 9px;
-  font-weight: 700;
-  font-family: var(--font-mono, monospace);
-  padding: 1px 5px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  min-width: 32px;
-  text-align: center;
-  text-transform: uppercase;
-}
-
-.agent-event-badge--heartbeat {
-  background: var(--ok-12);
-  color: var(--ok);
-}
-
-.agent-event-badge--lifecycle {
-  background: var(--accent-12);
-  color: var(--accent);
-}
-
-.agent-event-badge--keeper {
-  background: var(--ff-gold-15);
-  color: var(--ff-gold-bright);
-}
-
-.agent-event-badge--error {
-  background: rgba(248, 113, 113, 0.14);
-  color: var(--bad-light);
-}
-
-.agent-event-badge--broadcast {
-  background: rgba(167, 139, 250, 0.12);
-  color: var(--purple, var(--purple));
-}
-
-.agent-event-badge--task {
-  background: var(--warn-12);
-  color: var(--warn, var(--warn));
-}
-
-.agent-event-badge--board {
-  background: var(--cyan-12);
-  color: var(--cyan, var(--cyan));
-}
-
-.agent-event-badge--default {
-  background: var(--border-slate-12);
-  color: var(--text-muted, var(--text-muted));
-}
-
-.agent-live-event-text {
-  color: var(--text-body);
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-.agent-live-event-time {
-  font-size: var(--fs-2xs);
-  color: var(--text-muted, var(--text-muted));
-  flex-shrink: 0;
-}
+/* Event kind badge variants */
+.agent-event-badge--heartbeat { background: var(--ok-12); color: var(--ok); }
+.agent-event-badge--lifecycle { background: var(--accent-12); color: var(--accent); }
+.agent-event-badge--keeper { background: var(--ff-gold-15); color: var(--ff-gold-bright); }
+.agent-event-badge--error { background: rgba(248, 113, 113, 0.14); color: var(--bad-light); }
+.agent-event-badge--broadcast { background: rgba(167, 139, 250, 0.12); color: var(--purple, var(--purple)); }
+.agent-event-badge--task { background: var(--warn-12); color: var(--warn, var(--warn)); }
+.agent-event-badge--board { background: var(--cyan-12); color: var(--cyan, var(--cyan)); }
+.agent-event-badge--default { background: var(--border-slate-12); color: var(--text-muted, var(--text-muted)); }

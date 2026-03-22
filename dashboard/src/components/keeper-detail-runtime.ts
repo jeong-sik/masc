@@ -180,7 +180,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <span class="text-[11px] text-[var(--text-slate)]">Currently permitted tools for this keeper runtime.</span>
         <div class="flex flex-wrap gap-1.5">
           ${allowedTools.length > 0
-            ? allowedTools.map(tool => html`<span class="pill rounded-full">${tool}</span>`)
+            ? allowedTools.map(tool => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${tool}</span>`)
             : html`<span class="text-xs text-[var(--text-dim)]">${allowlistFallback}</span>`}
         </div>
       </div>
@@ -189,7 +189,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <span class="text-[11px] text-[var(--text-slate)]">Recent execution evidence from heartbeat or runtime telemetry.</span>
         <div class="flex flex-wrap gap-1.5">
           ${observedTools.length > 0
-            ? observedTools.map(tool => html`<span class="pill rounded-full">${tool}</span>`)
+            ? observedTools.map(tool => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${tool}</span>`)
             : html`<span class="text-xs text-[var(--text-dim)]">${observedFallback}</span>`}
         </div>
       </div>
@@ -209,7 +209,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <span class="text-xs text-[var(--text-dim)]">Keeper recent tools</span>
         <div class="flex flex-wrap gap-1.5">
           ${recentTools.length > 0
-            ? recentTools.map(tool => html`<span class="pill rounded-full">${tool}</span>`)
+            ? recentTools.map(tool => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${tool}</span>`)
             : html`<span class="text-xs text-[var(--text-dim)]">${linkedRecentFallback}</span>`}
         </div>
       </div>
@@ -218,7 +218,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
             <div class="flex flex-col gap-2 mt-2">
               <span class="text-xs text-[var(--text-dim)]">Window top tools</span>
               <div class="flex flex-wrap gap-1.5">
-                ${topTools.map(tool => html`<span class="pill rounded-full">${tool}</span>`)}
+                ${topTools.map(tool => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${tool}</span>`)}
               </div>
             </div>
           `
@@ -227,7 +227,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <span class="text-xs text-[var(--text-dim)]">Capabilities</span>
         <div class="flex flex-wrap gap-1.5">
           ${capabilities.length > 0
-            ? capabilities.map(capability => html`<span class="pill rounded-full">${capability}</span>`)
+            ? capabilities.map(capability => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${capability}</span>`)
             : html`<span class="text-xs text-[var(--text-dim)]">등록된 capability 없음</span>`}
         </div>
       </div>
@@ -235,7 +235,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
         <span class="text-xs text-[var(--text-dim)]">Available actions nearby</span>
         <div class="flex flex-wrap gap-1.5">
           ${actions.length > 0
-            ? actions.map(action => html`<span class="pill rounded-full">${actionDescriptorLabel(action.action_type)}</span>`)
+            ? actions.map(action => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${actionDescriptorLabel(action.action_type)}</span>`)
             : html`<span class="text-xs text-[var(--text-dim)]">operator action 광고 없음</span>`}
         </div>
       </div>

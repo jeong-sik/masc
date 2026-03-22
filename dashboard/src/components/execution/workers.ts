@@ -32,9 +32,9 @@ export function WorkerSupportRow({
   const effectiveStatus = row.state === 'offline' ? 'offline' : (row.status ?? 'unknown')
 
   return html`
-    <button class="monitor-row rounded-xl p-3.5 ${row.tone} state-${row.state}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
+    <button class="monitor-row rounded-xl p-3.5 ${row.tone} state-${row.state} ${row.state === 'offline' ? 'opacity-35 border-[rgba(85,85,85,0.15)] bg-[rgba(0,0,0,0.08)] hover:opacity-55' : ''}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
       <div class="monitor-row rounded-xl-header">
-        <span class="agent-emoji">${row.emoji ?? ''}</span>
+        <span class="agent-emoji ${row.state === 'offline' ? 'grayscale' : ''}">${row.emoji ?? ''}</span>
         <div class="min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="monitor-title">${row.name}</span>
@@ -44,7 +44,7 @@ export function WorkerSupportRow({
         </div>
         <${StatusBadge} status=${effectiveStatus} />
         ${row.state !== 'offline' || effectiveStatus !== 'offline'
-          ? html`<span class="monitor-pill ${row.tone} state-${row.state} inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em]">${agentStateLabel(row.state)}</span>`
+          ? html`<span class="monitor-pill ${row.tone} state-${row.state} inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em] ${row.state === 'offline' ? 'bg-[rgba(85,85,85,0.2)] text-[var(--text-dim)] line-through' : ''}">${agentStateLabel(row.state)}</span>`
           : null}
       </div>
 

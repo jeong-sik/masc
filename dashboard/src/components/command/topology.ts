@@ -125,9 +125,9 @@ function AlertCard({ alert }: { alert: CommandPlaneAlert }) {
 
 export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
   return html`
-    <article class="command-trace-row">
-      <div class="command-trace-main">
-        <div class="command-trace-head">
+    <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3.5">
+      <div class="min-w-0 [overflow-wrap:anywhere] break-words">
+        <div class="flex justify-between items-start">
           <strong>${event.event_type}</strong>
           <span class="command-chip rounded-full">${event.source ?? 'control_plane'}</span>
           <span class="command-chip rounded-full">${relativeTime(event.timestamp)}</span>
@@ -157,7 +157,7 @@ export function TopologySurface() {
       </div>
       ${snapshot
         ? html`
-            <div class="command-topology-explainer rounded-xl">
+            <div class="mb-3.5 p-3.5 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
               <div class="command-tree-title-row">
                 <span class="command-chip rounded-full ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
                 <span class="command-chip rounded-full">관리 유닛 ${managedUnits}</span>

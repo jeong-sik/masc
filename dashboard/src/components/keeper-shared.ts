@@ -132,12 +132,12 @@ export function KeeperDiagnosticSummary({
     <div class="py-[10px] px-3 rounded-[10px] border border-solid border-[rgba(138,163,211,0.24)] bg-[rgba(5,14,31,0.55)]">
       <div class="control-inline-meta flex flex-wrap gap-1.5">
         ${continuityStateLabel(diagnostic?.continuity_state)
-          ? html`<span class="pill rounded-full">${continuityStateLabel(diagnostic?.continuity_state)}</span>`
+          ? html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${continuityStateLabel(diagnostic?.continuity_state)}</span>`
           : null}
-        <span class="pill rounded-full">${diagnostic?.health_state ?? 'unknown'}</span>
-        <span class="pill rounded-full">${quietReasonLabel(diagnostic?.quiet_reason)}</span>
-        <span class="pill rounded-full">next ${nextActionLabel(diagnostic?.next_action_path ?? 'direct_message')}</span>
-        ${busy ? html`<span class="pill rounded-full">refreshing</span>` : null}
+        <span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${diagnostic?.health_state ?? 'unknown'}</span>
+        <span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${quietReasonLabel(diagnostic?.quiet_reason)}</span>
+        <span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">next ${nextActionLabel(diagnostic?.next_action_path ?? 'direct_message')}</span>
+        ${busy ? html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">refreshing</span>` : null}
       </div>
       <div class="control-status-copy text-[#d5e5fb] text-[length:var(--fs-sm)] leading-[1.5]">
         ${diagnostic?.continuity_summary

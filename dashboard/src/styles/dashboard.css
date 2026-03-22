@@ -2,15 +2,6 @@
    transitions, keyframes, webkit details, complex grids, table styles ── */
 
 /* ── Runtime Collapsible ── */
-.runtime-summary {
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  padding: 6px 0;
-  list-style: none;
-  user-select: none;
-}
-
 .runtime-summary::-webkit-details-marker,
 .overview-section-collapsible > summary::-webkit-details-marker,
 .mission-collapsible-summary::-webkit-details-marker {
@@ -27,26 +18,8 @@
 }
 
 /* ── Collapsible Sections ── */
-.overview-section-collapsible {
-  border: 1px solid var(--border-slate-12);
-  border-radius: 10px;
-  margin-top: 12px;
-  overflow: hidden;
-}
-
 .overview-section-collapsible > summary,
 .mission-collapsible-summary {
-  padding: 12px 16px;
-  font-size: var(--fs-md);
-  font-weight: 600;
-  color: var(--text-slate-light);
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--white-2);
   transition: background 0.15s;
 }
 
@@ -68,32 +41,12 @@
   transform: rotate(90deg);
 }
 
-.overview-section-collapsible > :not(summary) {
-  padding: 0 16px 12px;
-}
-
 .mission-collapsible-summary::before {
   content: '\25B8';
   font-size: var(--fs-xs);
   color: var(--text-slate);
   transition: transform 0.15s;
   display: inline-block;
-}
-
-/* ── Monitor pills ── */
-.monitor-pill.ok {
-  background: var(--ok-12);
-  color: var(--ok);
-}
-
-.monitor-pill.warn {
-  background: rgba(251, 191, 36, 0.14);
-  color: var(--warn);
-}
-
-.monitor-pill.bad {
-  background: var(--bad-15);
-  color: #fca5a5;
 }
 
 @media (max-width: 960px) {
@@ -110,42 +63,10 @@
 }
 
 /* ── Control Dock ── */
-.control-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 6px;
-}
-
-.control-input,
-.control-textarea {
-  width: 100%;
-  border: 1px solid rgba(138, 163, 211, 0.28);
-  background: var(--white-4);
-  color: #d3e3ff;
-  padding: 8px 10px;
-  font-size: var(--fs-base);
-  font-family: inherit;
-}
-
 .control-input:focus,
 .control-textarea:focus {
   outline: none;
   border-color: rgba(71, 184, 255, 0.55);
-}
-
-.control-textarea {
-  min-height: 60px;
-  resize: vertical;
-}
-
-.control-btn {
-  border: 1px solid rgba(71, 184, 255, 0.45);
-  background: var(--accent-18);
-  color: #c9ebff;
-  padding: 8px 12px;
-  font-size: var(--fs-sm);
-  cursor: pointer;
-  white-space: nowrap;
 }
 
 .control-btn:hover {
@@ -157,46 +78,7 @@
   cursor: not-allowed;
 }
 
-.control-btn.is-active {
-  border-color: var(--ok-48);
-  background: var(--ok-soft);
-  color: #b4f5ca;
-}
-
-.control-btn.secondary {
-  border-color: var(--ok-48);
-  background: rgba(74, 222, 128, 0.17);
-  color: #b4f5ca;
-}
-
-.control-result-box {
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(138, 163, 211, 0.24);
-  background: rgba(5, 14, 31, 0.55);
-}
-
-.control-result-box.is-error {
-  border-color: rgba(239, 68, 68, 0.38);
-  background: rgba(59, 18, 24, 0.45);
-  color: #ffd6d6;
-}
-
-.control-btn.ghost {
-  border-color: var(--border-slate-35);
-  background: var(--white-5);
-  color: #9fb8e1;
-}
-
 /* ── Mission Status Dot ── */
-.mission-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: #7f9ccc;
-}
-
 .mission-status-dot.mission-state-alive {
   background: var(--ok, var(--ok));
   box-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
@@ -222,36 +104,13 @@
 
 /* ── Tab pill (hover/active transitions) ── */
 .tab-pill {
-  padding: 4px 14px;
-  border-radius: 16px;
-  border: 1px solid var(--card-border, var(--white-10));
-  background: none;
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  cursor: pointer;
   transition: all 0.15s;
 }
 .tab-pill:hover {
   border-color: var(--accent);
   color: var(--text-strong);
 }
-.tab-pill--active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
 
-.tab-collapsible {
-  border: 1px solid var(--card-border, var(--white-6));
-}
-.tab-collapsible__summary {
-  padding: 8px 12px;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
 .tab-collapsible__summary:hover {
   color: var(--text-strong);
 }
@@ -277,9 +136,6 @@
 }
 
 /* ── Mitosis Ring ── */
-.mitosis-ring {
-  transform: rotate(-90deg);
-}
 .mitosis-ring-bg {
   fill: none;
   stroke: var(--white-10);
@@ -309,33 +165,9 @@
 }
 
 /* ── Kanban (pseudo-elements, priority variants, hover transform) ── */
-.kanban-header {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--text-strong);
-  margin-bottom: 4px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  text-shadow: 0 0 10px var(--white-20);
-}
-.kanban-header.todo .kanban-badge { background: var(--white-10); color: var(--text-body); }
-.kanban-header.inprogress .kanban-badge { background: var(--accent-soft); color: var(--accent); }
-.kanban-header.done .kanban-badge { background: rgba(0, 255, 157, 0.15); color: var(--ok); }
-
 .kanban-card {
-  background: var(--card);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-  position: relative;
-  overflow: hidden;
 }
 .kanban-card::before {
   content: "";
@@ -355,58 +187,6 @@
 }
 
 /* ── Logs (table styling, sticky, monospace) ── */
-.logs-select {
-  background: var(--card);
-  color: var(--text-body);
-  border: 1px solid var(--card-border);
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
-}
-
-.logs-module-input {
-  background: var(--card);
-  color: var(--text-body);
-  border: 1px solid var(--card-border);
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
-  width: 10rem;
-}
-
-.logs-module-input::placeholder {
-  color: var(--text-muted);
-}
-
-.logs-refresh-btn {
-  background: var(--card);
-  color: var(--text-body);
-  border: 1px solid var(--card-border);
-  padding: 0.2rem 0.6rem;
-  font-size: 0.75rem;
-  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
-  cursor: pointer;
-}
-
-.logs-refresh-btn:hover {
-  border-color: var(--accent);
-}
-
-.logs-table-wrap {
-  flex: 1;
-  overflow: auto;
-  border: 1px solid var(--card-border);
-  background: var(--card);
-}
-
-.logs-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.72rem;
-  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
-  line-height: 1.4;
-}
-
 .logs-table thead {
   position: sticky;
   top: 0;
@@ -414,19 +194,12 @@
   z-index: 1;
 }
 
-.logs-table th {
-  padding: 0.3rem 0.5rem;
-  text-align: left;
-  border-bottom: 1px solid var(--card-border);
+.logs-module-input::placeholder {
   color: var(--text-muted);
-  font-weight: 500;
-  white-space: nowrap;
 }
 
-.logs-table td {
-  padding: 0.2rem 0.5rem;
-  border-bottom: 1px solid var(--white-4);
-  vertical-align: top;
+.logs-refresh-btn:hover {
+  border-color: var(--accent);
 }
 
 .logs-row:hover {

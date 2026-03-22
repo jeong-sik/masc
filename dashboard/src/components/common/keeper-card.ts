@@ -72,14 +72,14 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
   const buttonClass =
     variant === 'mission'
       ? 'w-full p-0 border-0 bg-transparent text-inherit grid gap-3 text-left cursor-pointer'
-      : `monitor-row p-3.5 ${toneClass}${model.stateClass ? ` state-${model.stateClass}` : ''}`
+      : `monitor-row p-3.5 ${toneClass}${model.stateClass ? ` state-${model.stateClass}` : ''}${model.stateClass === 'offline' ? ' opacity-35 border-[rgba(85,85,85,0.15)] bg-[rgba(0,0,0,0.08)] hover:opacity-55' : ''}`
 
   return html`
     <article class=${wrapperClass}>
       <button class=${buttonClass} data-testid=${testId} onClick=${onClick}>
         <div class=${variant === 'mission' ? 'flex justify-between gap-2.5 items-start' : 'monitor-row-header'}>
           <div class=${variant === 'mission' ? 'flex gap-2.5 items-start' : 'min-w-0'}>
-            <span class="agent-emoji">${model.emoji ?? ''}</span>
+            <span class="agent-emoji ${model.stateClass === 'offline' ? 'grayscale' : ''}">${model.emoji ?? ''}</span>
             <div>
               <div class=${variant === 'mission' ? '' : 'monitor-name-line'}>
                 <strong class=${variant === 'mission' ? '' : 'monitor-title'}>${model.name}</strong>

@@ -1,110 +1,11 @@
 /* ── Agent List (Overview) ─────────────────────────────────── */
-/* ── Live Agent / Keeper Cards ─────────────────────────────── */
-/* ── Agents Tab Grid ───────────────────────────────────────── */
-.agent-card {
-  padding: 15px;
-  background: var(--white-4);
-  border-radius: 10px;
-  border: 1px solid var(--white-8);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  width: 100%;
-}
 .agent-card:hover { border-color: var(--white-20); }
-.agent-card .agent-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.agent-card .agent-emoji { font-size: 24px; }
-.agent-card .agent-name { font-size: var(--fs-lg); font-weight: 600; }
-/* ── Agent Journal Stream (Phase 2) ───────────────────────── */
-/* agent-journal-entry, agent-timeline-event: layout+hover migrated to inline Tailwind */
-
-.agent-journal-kind {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  font-family: var(--font-mono, monospace);
-  background: var(--border-slate-12);
-  color: var(--text-muted);
-  width: 16px;
-  height: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-.agent-journal-type {
-  font-size: var(--fs-2xs);
-  font-family: var(--font-mono, monospace);
-  color: rgba(71, 184, 255, 0.7);
-  flex-shrink: 0;
-}
-
-.agent-journal-text,
-.agent-timeline-detail {
-  color: var(--text-body);
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
-/* ── Agent Worker Brief ───────────────────────────────────── */
-.agent-worker-brief__preview {
-  color: var(--text-body);
-  font-style: italic;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 400px;
-}
-
-/* ── Agent Timeline Section (Phase 3) ─────────────────────── */
-.agent-timeline-type {
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  color: var(--text-strong);
-  flex-shrink: 0;
-  min-width: 80px;
-}
 
 /* ── Agents Unified Tab (chip toggle) ────────── */
 .agents-chip {
-  padding: 4px 14px;
-  border-radius: 16px;
-  border: 1px solid var(--card-border, var(--white-10));
-  background: none;
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  cursor: pointer;
   transition: all 0.15s;
 }
 .agents-chip:hover {
   border-color: var(--accent);
   color: var(--text-strong);
 }
-.agents-chip--active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.agents-chip-count {
-  display: inline-block;
-  font-size: var(--fs-2xs);
-  min-width: 18px;
-  text-align: center;
-  padding: 1px 5px;
-  margin-left: 4px;
-  background: var(--white-12);
-  color: inherit;
-}
-.agents-chip--active .agents-chip-count {
-  background: var(--white-25);
-}
-

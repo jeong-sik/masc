@@ -39,7 +39,7 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
           <div class="flex items-baseline gap-2 text-[length:var(--fs-sm)]">
             <span class="text-[length:var(--fs-xs)] text-[var(--text-muted)] min-w-[60px] shrink-0">Signal</span>
             <${TimeAgo} timestamp=${worker.last_signal_at} />
-            ${worker.signal_truth ? html`<span class="pill rounded-full">${worker.signal_truth}</span>` : null}
+            ${worker.signal_truth ? html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${worker.signal_truth}</span>` : null}
           </div>
         ` : null}
       </div>

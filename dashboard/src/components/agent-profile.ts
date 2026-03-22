@@ -244,7 +244,7 @@ function CharacterPlate({ name }: { name: string }) {
           <div class="flex items-center gap-2 mt-0.5">
             <span class="text-[length:var(--fs-xs)] font-bold text-[color:var(--ff-gold)] tracking-[1px] w-7">CTX</span>
             <div class="h-1.5 mt-1.5 rounded-full overflow-hidden bg-[var(--white-10)]" style="flex:1">
-              <div class="ctx-fill rounded-full ${ctxBarClass(ctxRatio)}" style=${{ width: `${ctxPct}%` }}></div>
+              <div class="h-full rounded-full transition-[width] duration-[250ms] ease-[ease] motion-reduce:transition-none ${ctxBarClass(ctxRatio) === 'warn' ? 'bg-linear-to-r from-[var(--warn)] to-[var(--warn-bright)]' : ctxBarClass(ctxRatio) === 'bad' ? 'bg-linear-to-r from-[var(--bad)] to-[var(--warn-bright)]' : 'bg-linear-to-r from-[var(--accent)] to-[var(--ok)]'}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
             <span class="text-[length:var(--fs-sm)] tabular-nums text-[color:var(--text-strong)] min-w-9 text-right">${ctxPct}%</span>
           </div>
@@ -359,7 +359,7 @@ export function AgentProfile({ name }: { name: string }) {
             ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">할당된 태스크 없음</div>`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
                 <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded-lg" key=${t.id}>
-                  <span class="pill rounded-full">${t.id}</span>
+                  <span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${t.id}</span>
                   <span class="flex-1 text-[#d7e7ff]">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
                 </div>
@@ -434,7 +434,7 @@ export function AgentProfile({ name }: { name: string }) {
           <${Card} title="태스크 이력" class="ff-card rounded-xl col-span-full">
             <div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5" key=${row.taskId}>
-                <div class="mb-2"><span class="pill rounded-full">${row.taskId}</span></div>
+                <div class="mb-2"><span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${row.taskId}</span></div>
                 <pre class="m-0 whitespace-pre-wrap text-[length:var(--fs-sm)] leading-[1.5] text-[#cfe0ff] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || 'No history yet'}</pre>
               </div>
             `)}</div>

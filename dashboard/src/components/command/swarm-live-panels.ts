@@ -34,7 +34,7 @@ export function SwarmLivePanels() {
   const expectedCtx = swarm?.provider?.expected_ctx ?? 'n/a'
 
   return html`
-    <div class="command-surface-grid">
+    <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
       <section class="card rounded-xl min-h-[240px]">
         <div class="card rounded-xl-title-row">
           <div class="card rounded-xl-title">스웜 라이브 런</div>
@@ -56,11 +56,11 @@ export function SwarmLivePanels() {
                     이 화면은 swarm-live의 사회 truth 자체가 아니라, 실험적 오케스트레이션을 읽기 위한 파생 관찰면입니다.
                   </div>
                   <div class="command-summary-grid">
-                    <div class="monitor-stat-card rounded-xl"><span>실행 런</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room 정보 없음'}</small></div>
-                    <div class="monitor-stat-card rounded-xl"><span>워커</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0}개 가동 · ${swarm.summary?.completed_workers ?? 0}개 완료</small></div>
-                    <div class="monitor-stat-card rounded-xl"><span>런타임</span><strong>${runtimeState}</strong><small>slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
-                    <div class="monitor-stat-card rounded-xl"><span>고동시성</span><strong>${swarm.summary?.pass_hot_concurrency ? '통과' : '확인 필요'}</strong><small>${swarm.provider?.slot_url ?? 'slot 정보 없음'}</small></div>
-                    <div class="monitor-stat-card rounded-xl"><span>종단 점검</span><strong>${swarm.summary?.pass_end_to_end ? '통과' : '확인 필요'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
+                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>실행 런</span><strong>${swarm.run_id ?? runId ?? 'swarm-live'}</strong><small>${swarm.room_id ?? 'room 정보 없음'}</small></div>
+                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>워커</span><strong>${swarm.summary?.joined_workers ?? 0}/${swarm.summary?.expected_workers ?? 0}</strong><small>${swarm.summary?.live_workers ?? 0}개 가동 · ${swarm.summary?.completed_workers ?? 0}개 완료</small></div>
+                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>런타임</span><strong>${runtimeState}</strong><small>slots ${actualSlots}/${expectedSlots} · ctx ${actualCtx}/${expectedCtx}</small></div>
+                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>고동시성</span><strong>${swarm.summary?.pass_hot_concurrency ? '통과' : '확인 필요'}</strong><small>${swarm.provider?.slot_url ?? 'slot 정보 없음'}</small></div>
+                    <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>종단 점검</span><strong>${swarm.summary?.pass_end_to_end ? '통과' : '확인 필요'}</strong><small>${swarm.recommended_next_tool ?? 'masc_observe_traces'}</small></div>
                   </div>
                   <div class="command-card rounded-xl-grid">
                     <span>작전</span><span>${swarm.operation?.operation_id ?? operationId ?? '없음'}</span>
@@ -132,9 +132,9 @@ export function SwarmLivePanels() {
               ${swarm.provider.timeline.length > 0
                 ? html`<div class="flex flex-col gap-3">
                     ${swarm.provider.timeline.slice(-12).map(sample => html`
-                      <article class="command-trace-row">
-                        <div class="command-trace-main">
-                          <div class="command-trace-head">
+                      <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3.5">
+                        <div class="min-w-0 [overflow-wrap:anywhere] break-words">
+                          <div class="flex justify-between items-start">
                             <strong>${sample.active_slots} active</strong>
                             <span class="command-chip rounded-full">${relativeTime(sample.timestamp)}</span>
                           </div>
@@ -166,9 +166,9 @@ export function SwarmLivePanels() {
         ${swarm && swarm.recent_messages.length > 0
           ? html`<div class="flex flex-col gap-3">
               ${swarm.recent_messages.map(message => html`
-                <article class="command-trace-row">
-                  <div class="command-trace-main">
-                    <div class="command-trace-head">
+                <article class="grid grid-cols-[minmax(0,1fr)_minmax(220px,0.9fr)] gap-3.5">
+                  <div class="min-w-0 [overflow-wrap:anywhere] break-words">
+                    <div class="flex justify-between items-start">
                       <strong>${message.from}</strong>
                       <span class="command-chip rounded-full">${relativeTime(message.timestamp)}</span>
                     </div>

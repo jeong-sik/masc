@@ -1,31 +1,8 @@
 /* MASC Dashboard -- Live Monitor (retained: animations, stateful variants, compound selectors) */
 
 /* ── Pulse Strip ── */
-
-.pulse-strip {
-  display: flex;
-  gap: 8px;
-  padding: 12px 16px;
-  background: var(--white-2);
-  border: 1px solid var(--white-6);
-  overflow-x: auto;
-  align-items: center;
-  min-height: 56px;
-}
-
 .pulse-bubble {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  border: 1.5px solid transparent;
-  background: var(--white-4);
-  cursor: pointer;
   transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
-  min-width: 56px;
-  flex-shrink: 0;
 }
 
 .pulse-bubble:hover {
@@ -48,24 +25,8 @@
   50% { box-shadow: 0 0 8px 2px var(--ok-12); }
 }
 
-/* ── Live Panels ── */
-
-.live-panels {
-  display: grid;
-  grid-template-columns: 3fr 2fr;
-  gap: 16px;
-  min-height: 480px;
-}
-
 /* ── Activity Stream ── */
-
 .activity-filter-btn {
-  padding: 3px 10px;
-  border: 1px solid var(--white-10);
-  background: transparent;
-  color: var(--white-40);
-  font-size: 0.72rem;
-  cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
@@ -80,19 +41,7 @@
 .activity-filter-btn.live-event-keeper.active { border-color: rgba(168,85,247,0.4); color: #a855f7; }
 .activity-filter-btn.live-event-system.active { border-color: var(--white-20); color: var(--white-70); }
 
-.activity-stream-list {
-  display: grid;
-  gap: 4px;
-  align-content: start;
-  overflow-y: auto;
-  max-height: 520px;
-  padding-right: 4px;
-}
-
 .activity-item {
-  padding: 8px 12px;
-  background: var(--white-2);
-  border-left: 3px solid transparent;
   transition: background 0.15s;
 }
 
@@ -114,30 +63,14 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-.activity-kind-chip {
-  font-size: 0.65rem;
-  padding: 1px 6px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
 .activity-kind-chip.live-event-broadcast { background: var(--blue-400-15); color: var(--accent); }
 .activity-kind-chip.live-event-task { background: var(--ok-soft); color: var(--ok); }
 .activity-kind-chip.live-event-keeper { background: rgba(168,85,247,0.15); color: #a855f7; }
 .activity-kind-chip.live-event-system { background: var(--white-6); color: var(--white-50); }
 
 /* ── Focus Sidebar ── */
-
 .focus-agent-card {
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--white-2);
-  border: 1px solid var(--white-6);
-  cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
-  display: grid;
-  gap: 4px;
 }
 
 .focus-agent-card:hover {
@@ -150,44 +83,7 @@
   background: rgba(96,165,250,0.05);
 }
 
-.focus-pressure-badge {
-  font-size: 0.65rem;
-  padding: 2px 8px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.focus-pressure-calm {
-  background: var(--white-5);
-  color: var(--white-45);
-}
-
-.focus-pressure-normal {
-  background: var(--ok-10);
-  color: var(--ok);
-}
-
-.focus-pressure-hot {
-  background: var(--warn-12);
-  color: var(--warn);
-}
-
-.focus-agent-footer .time-ago {
-  font-size: 0.68rem;
-  color: var(--white-30);
-  flex-shrink: 0;
-}
-
 /* ── Live Stat Dot ── */
-
-.live-stat-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
 .live-stat-dot.connected {
   background: var(--ok);
   box-shadow: 0 0 4px rgba(74,222,128,0.6);
@@ -198,7 +94,6 @@
 }
 
 /* ── Responsive ── */
-
 @media (max-width: 1100px) {
   .live-panels {
     grid-template-columns: 1fr;

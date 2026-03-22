@@ -131,7 +131,7 @@ export function KeeperDetailOverlay() {
               ${keeper.koreanName ? html`<div class="text-[13px] text-[var(--text-dim)]">${keeper.koreanName}</div>` : null}
             </div>
             <${StatusBadge} status=${keeper.status} />
-            ${keeper.model ? html`<span class="pill rounded-full">${keeper.model}</span>` : null}
+            ${keeper.model ? html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">${keeper.model}</span>` : null}
           </div>
           <button
             onClick=${() => closeKeeperDetail()}

@@ -191,7 +191,7 @@ function GuidedPanel() {
   )
 
   return html`
-    <div class="command-guided-layout">
+    <div class="grid grid-cols-[minmax(0,1.06fr)_minmax(0,0.94fr)] gap-4">
       <section class="card rounded-xl min-h-[240px]">
         <div class="card rounded-xl-title-row">
           <div class="card rounded-xl-title">즉시 조치</div>
@@ -211,7 +211,7 @@ function GuidedPanel() {
 
         <div class="flex flex-col gap-2.5">
           ${readiness.map(item => html`
-            <article class="command-readiness-row rounded-xl ${toneClass(item.tone)}">
+            <article class="flex flex-col gap-2.5 p-3.5 border border-[var(--white-8)] bg-[var(--white-3)] rounded-xl command-readiness-row ${toneClass(item.tone)}">
               <div>
                 <div class="flex justify-between gap-2.5 items-start">
                   <strong>${item.title}</strong>

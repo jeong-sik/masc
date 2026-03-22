@@ -1,19 +1,7 @@
 /* MASC Dashboard -- Governance (retained: stateful variants, compound selectors, responsive) */
 
 /* ── Council Row (stateful: hover, selected, content-visibility) ── */
-
 .council-row {
-  width: 100%;
-  border: 1px solid var(--card-border);
-  border-radius: 9px;
-  background: var(--white-3);
-  color: inherit;
-  padding: 9px 10px;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  align-items: center;
-  text-align: left;
   content-visibility: auto;
   contain-intrinsic-size: auto 48px;
 }
@@ -28,16 +16,6 @@ button.council-row.selected {
 }
 
 /* ── Council State badges (multi-variant) ── */
-
-.council-state {
-  padding: 3px 9px;
-  font-size: var(--fs-xs);
-  text-transform: lowercase;
-  border: 1px solid rgba(138, 163, 211, 0.25);
-  background: var(--white-6);
-  color: #b7cbee;
-}
-
 .council-state.open,
 .council-state.positive {
   border-color: var(--ok-48);
@@ -58,49 +36,7 @@ button.council-row.selected {
   color: #fecaca;
 }
 
-.council-state.neutral {
-  border-color: rgba(138, 163, 211, 0.25);
-  background: var(--white-6);
-  color: #b7cbee;
-}
-
-/* ── Governance Layout (3-column grid + responsive) ── */
-
-.governance-layout {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.45fr) minmax(280px, 1fr);
-  gap: 14px;
-  align-items: start;
-}
-
-.governance-inbox {
-  max-height: 72vh;
-  overflow-y: auto;
-}
-
-/* ── Governance Kind chip ── */
-
-.governance-kind {
-  flex: 0 0 auto;
-  padding: 2px 8px;
-  border: 1px solid var(--border-slate-22);
-  background: var(--white-6);
-  color: #a9c3ee;
-  font-size: var(--fs-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
 /* ── Governance Chips (multi-variant: ok, warn) ── */
-
-.governance-chip {
-  padding: 3px 8px;
-  border: 1px solid var(--card-border);
-  background: var(--white-5);
-  color: #b8cdec;
-  font-size: var(--fs-2xs);
-}
-
 .governance-chip.ok,
 .governance-badge.positive {
   border-color: var(--ok-40);
@@ -114,40 +50,14 @@ button.council-row.selected {
   color: #ffe09b;
 }
 
-/* ── Governance Badge (multi-variant: positive, negative) ── */
-
-.governance-badge {
-  padding: 2px 8px;
-  font-size: var(--fs-2xs);
-  text-transform: lowercase;
-  border: 1px solid var(--border-slate-22);
-  background: var(--white-5);
-  color: #b7cbee;
-}
-
+/* ── Governance Badge (multi-variant: negative) ── */
 .governance-badge.negative {
   border-color: rgba(239, 68, 68, 0.44);
   background: var(--bad-12);
   color: #fecaca;
 }
 
-/* ── Ledger/Activity Rows ── */
-
-.governance-ledger-row,
-.governance-activity-row {
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  background: var(--white-3h);
-  padding: 10px 11px;
-}
-
-.governance-ledger-head strong {
-  color: #e8f0ff;
-  font-size: var(--fs-sm);
-}
-
 /* ── Responsive ── */
-
 @media (max-width: 1200px) {
   .governance-layout {
     grid-template-columns: 1fr;

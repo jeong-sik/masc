@@ -123,7 +123,7 @@ function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-[#666]">none</span>`
   return html`
     <div class="flex flex-wrap gap-1">
-      ${models.map(m => html`<span class="pill rounded-full" style="font-size:11px;">${m}</span>`)}
+      ${models.map(m => html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full" style="font-size:11px;">${m}</span>`)}
     </div>
   `
 }

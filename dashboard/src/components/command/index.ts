@@ -47,13 +47,13 @@ function SurfaceTabs() {
     <div class="command-surface-tabs flex-col gap-3">
       ${COMMAND_SURFACE_GROUPS.map(group => html`
         <div class="flex flex-col gap-1.5" key=${group.id}>
-          <span class="command-tab-group-label">${group.label}</span>
+          <span class="text-[length:var(--fs-xs)] font-semibold text-[color:var(--white-40)] uppercase tracking-[0.04em] pl-1">${group.label}</span>
           <div class="flex flex-wrap gap-2">
             ${COMMAND_SURFACE_META
               .filter(surface => surface.group === group.id)
               .map(surface => html`
                 <button
-                  class="command-surface-tab rounded-full ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
+                  class="border border-[var(--white-12)] bg-[var(--white-4)] text-[color:var(--white-72)] p-[8px_14px] capitalize rounded-full command-surface-tab ${commandPlaneSurface.value === surface.id ? 'active' : ''}"
                   onClick=${() => {
                     setCommandPlaneSurface(surface.id)
                     navigate('operations', surfaceRouteParams(surface.id))
@@ -220,7 +220,7 @@ export function Command() {
   }, [])
 
   return html`
-    <section class="dashboard-panel command-plane-view ${wallboardMode ? 'wallboard' : ''}">
+    <section class="flex flex-col gap-[18px] command-plane-view ${wallboardMode ? 'wallboard' : ''}">
       ${wallboardMode ? null : html`
         <div class="flex justify-between gap-4 items-start">
           <div>

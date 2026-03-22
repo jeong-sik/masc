@@ -36,7 +36,7 @@ export function CommandWorkflowBanner() {
       </div>
       <div class="text-[rgba(255,255,255,0.84)] leading-normal">${context.summary}</div>
       ${context.payload_preview
-        ? html`<div class="command-focus-preview rounded-xl">${context.payload_preview}</div>`
+        ? html`<div class="p-[10px_12px] border border-[var(--white-8)] bg-[var(--white-5)] text-[color:var(--text-strong)] leading-[1.45] rounded-xl">${context.payload_preview}</div>`
         : null}
     </section>
   `
@@ -49,12 +49,12 @@ export function CommandEntryStrip() {
 
   return html`
     <section class="grid grid-cols-2 gap-3">
-      <article class="command-entry-card rounded-xl">
+      <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5 command-entry-card">
         <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-[0.08em]">현재 표면</span>
         <strong>${guide.title}</strong>
         <p>${guide.description}</p>
       </article>
-      <article class="command-entry-card rounded-xl">
+      <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5 command-entry-card">
         <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-[0.08em]">다음 추천</span>
         <strong>${recommendation.tool}</strong>
         <p>${recommendation.reason}</p>
@@ -106,12 +106,12 @@ function SignalRail({
   tone: string
 }) {
   return html`
-    <article class="command-signal-rail ${toneClass(tone)}">
+    <article class="p-3.5 rounded-[14px] bg-[var(--white-3h)] border border-[var(--white-8)] grid gap-2.5 command-signal-rail ${toneClass(tone)}">
       <div class="flex items-baseline justify-between gap-2.5">
         <span>${label}</span>
         <strong>${value}</strong>
       </div>
-      <div class="command-signal-bar rounded-full">
+      <div class="relative h-2 overflow-hidden bg-[var(--white-6)] rounded-full command-signal-bar">
         <span class="${toneClass(tone)}" style=${`width: ${Math.max(8, Math.round(clampPercent(percent)))}%`}></span>
       </div>
       <small>${detail}</small>
@@ -153,8 +153,8 @@ export function SummaryHero() {
       : '이 화면은 체크리스트보다 계기판에 가까워야 합니다. 아래 게이지가 지금 어디가 살아 있는지 먼저 보여줍니다.'
 
   return html`
-    <section class="command-hero command-hero-summary">
-      <div class="command-hero-copy">
+    <section class="command-hero grid grid-cols-[minmax(0,1.1fr)_minmax(300px,0.9fr)] gap-[18px] items-center command-hero-summary">
+      <div class="relative z-[1] grid gap-2.5">
         <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">현재 지휘 상태</span>
         <h3>${headline}</h3>
         <p>${subcopy}</p>
@@ -166,7 +166,7 @@ export function SummaryHero() {
         </div>
       </div>
 
-      <div class="command-gauge-grid">
+      <div class="relative z-[1] grid grid-cols-2 gap-3">
         <${GraphicGauge}
           label="관리 단위 범위"
           value=${`${managedUnits}/${Math.max(totalUnits, managedUnits)}`}
@@ -197,7 +197,7 @@ export function SummaryHero() {
         />
       </div>
     </section>
-    <div class="command-signal-grid">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(210px,1fr))] gap-3 mb-4">
       <${SignalRail}
         label="승인 대기열"
         value=${`${pendingApprovals}건 대기`}
@@ -245,13 +245,13 @@ export function SummaryCards() {
   const cache = microarch?.cache
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
-      <div class="monitor-stat-card rounded-xl"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
-      <div class="monitor-stat-card rounded-xl"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
-      <div class="monitor-stat-card rounded-xl"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
-      <div class="monitor-stat-card rounded-xl ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 주의</small></div>
-      <div class="monitor-stat-card rounded-xl"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
-      <div class="monitor-stat-card rounded-xl ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
-      <div class="monitor-stat-card rounded-xl ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 주의</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
+      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 monitor-stat-card ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}</small></div>
     </div>
   `
 }

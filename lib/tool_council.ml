@@ -323,6 +323,63 @@ let handle_execute_dry_run _ctx args =
     in
     (true, Council.ExecutorApi.dry_run ~topic ~result)
 
+(** Submit an explicit ruling on a governance case.
+    Allows agents and operators to approve/deny/dismiss pending cases. *)
+let handle_governance_rule ctx args =
+  let case_id = get_string args "case_id" "" in
+  let decision = get_string args "decision" "" in
+  let summary = get_string args "summary" "" in
+  if String.trim case_id = "" || String.trim decision = "" || String.trim summary = "" then
+    (false, "case_id, decision (approve|deny|dismiss), and summary are required")
+  else
+    let decision_lower = String.lowercase_ascii decision in
+    match decision_lower with
+    | "approve" | "deny" | "dismiss" ->
+        let now = Time_compat.now () in
+        let status_str = match decision_lower with
+          | "approve" -> "approved"
+          | "deny" -> "denied"
+          | "dismiss" -> "dismissed"
+          | _ -> "denied"
+        in
+        let auto_exec = match decision_lower with
+          | "approve" -> "ready_auto_execute"
+          | _ -> "none"
+        in
+        let evidence_refs = get_string_list args "evidence_refs" in
+        let confidence = match Yojson.Safe.Util.member "confidence" args with
+          | `Float f -> f
+          | `Int n -> float_of_int n
+          | _ -> 0.9
+        in
+        let ruling : GV2.ruling = {
+          id = GV2.generate_id "ruling";
+          case_id;
+          status = status_str;
+          summary;
+          confidence;
+          provenance = "agent_explicit";
+          generated_at = now;
+          expires_at = None;
+          keeper_name = ctx.agent_name;
+          model_used = None;
+          risk_class = GV2.Low;
+          evidence_refs;
+          recommended_action = None;
+          auto_execution_state = auto_exec;
+        } in
+        (match GV2.save_ruling ctx.base_path ruling with
+         | Ok updated_case ->
+             let json = `Assoc [
+               ("ruling", ruling_json ruling);
+               ("case_status", `String (GV2.case_status_to_string updated_case.status));
+               ("case_id", `String case_id);
+             ] in
+             (true, Yojson.Safe.pretty_to_string json)
+         | Error msg -> (false, msg))
+    | other ->
+        (false, Printf.sprintf "invalid decision %S: must be approve, deny, or dismiss" other)
+
 (** Delegated handlers from {!Tool_council_feed}. *)
 let handle_governance_feed = Tool_council_feed.handle_governance_feed
 let handle_runtime_params = Tool_council_feed.handle_runtime_params
@@ -340,6 +397,7 @@ let dispatch ctx ~name ~args : result option =
   | "masc_cases" -> Some (handle_cases ctx args)
   | "masc_case_status" -> Some (handle_case_status ctx args)
   | "masc_ruling_status" -> Some (handle_ruling_status ctx args)
+  | "masc_governance_rule" -> Some (handle_governance_rule ctx args)
   | "masc_execution_orders" -> Some (handle_execution_orders ctx args)
   | "masc_governance_status" -> Some (handle_governance_status ctx args)
   | "masc_governance_feed" -> Some (handle_governance_feed ctx args)

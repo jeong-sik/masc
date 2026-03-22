@@ -27,6 +27,7 @@ type t = {
   pool: (Caqti_eio.connection, Caqti_error.t) Caqti_eio.Pool.t;
   mutable running: bool;
   mutable last_seen_id: int;
+  mutable consecutive_errors: int;
 }
 
 (** Query to fetch and delete pending messages atomically *)
@@ -43,7 +44,7 @@ let fetch_messages_q =
 
 (** Create a new listener *)
 let create pool =
-  { pool; running = false; last_seen_id = 0 }
+  { pool; running = false; last_seen_id = 0; consecutive_errors = 0 }
 
 (** Parse board event JSON and create SSE-friendly format *)
 let event_to_sse_json message_str =
@@ -59,7 +60,9 @@ let event_to_sse_json message_str =
     Log.BoardListener.error "Failed to parse event: %s" message_str;
     None
 
-(** Poll for new messages and broadcast via SSE *)
+(** Poll for new messages and broadcast via SSE.
+    Returns [Ok n] on success (n = events processed),
+    or [Error msg] on failure. *)
 let poll_and_broadcast t =
   match Caqti_eio.Pool.use (fun conn ->
     let module C = (val conn : Caqti_eio.CONNECTION) in
@@ -76,10 +79,9 @@ let poll_and_broadcast t =
           | None -> ()
         end
       ) messages;
-      List.length messages
+      Ok (List.length messages)
   | Error err ->
-      Log.BoardListener.error "Poll error: %s" (Caqti_error.show err);
-      0
+      Error (Caqti_error.show err)
 
 (** Start the listener loop (call from Eio fiber) *)
 let start t =
@@ -87,11 +89,21 @@ let start t =
   Log.BoardListener.info "Started (poll_interval=%.1fs, channel=%s)"
     poll_interval_s channel;
   while t.running do
-    let count = poll_and_broadcast t in
-    if count > 0 then
-      Log.BoardListener.info "Processed %d events" count;
-    (* Sleep between polls *)
-    Eio_unix.sleep poll_interval_s
+    (match poll_and_broadcast t with
+     | Ok count ->
+         t.consecutive_errors <- 0;
+         if count > 0 then
+           Log.BoardListener.info "Processed %d events" count;
+         Eio_unix.sleep poll_interval_s
+     | Error msg ->
+         t.consecutive_errors <- t.consecutive_errors + 1;
+         if t.consecutive_errors mod 5 = 0 then
+           Log.BoardListener.error "Poll error (consecutive=%d): %s"
+             t.consecutive_errors msg;
+         let backoff =
+           Float.min (0.5 *. Float.pow 2.0 (Float.of_int t.consecutive_errors)) 30.0
+         in
+         Eio_unix.sleep backoff)
   done;
   Log.BoardListener.info "Stopped"
 

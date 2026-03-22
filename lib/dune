@@ -533,19 +533,9 @@
    procedural_memory
    oas_events
    oas_worker
-   tool_mitosis_oas
    tool_council_oas
    oas_sse_bridge
-   tool_schemas_plan
- tool_schemas_portal
- tool_schemas_worktree
- tool_schemas_auth
- tool_schemas_agent
- tool_schemas_room
- tool_schemas_control
- tool_schemas_a2a
- tool_schemas_misc
- env_config_core
+   env_config_core
    env_config_runtime
    env_config_governance
    env_config_keeper
@@ -578,10 +568,6 @@
    tool_schemas_inline_episodes
    tool_schemas_inline_convo
    tool_schemas_inline
-   ;; godsplit-phase1: file split sub-modules
-   tool_council_schemas
-   keeper_status_bridge
-   server_dashboard_http_core
 )
 (private_modules
  dashboard_http_keeper_metrics

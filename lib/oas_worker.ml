@@ -36,6 +36,7 @@ type config = {
   memory : Oas.Memory.t option;
   named_cascade : Oas.Api.named_cascade option;
   initial_messages : Oas.Types.message list;
+  raw_trace : Oas.Raw_trace.t option;
 }
 
 let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
@@ -53,6 +54,7 @@ let default_config ~name ~provider ~model_id ~system_prompt ~tools : config =
     memory = None;
     named_cascade = None;
     initial_messages = [];
+    raw_trace = None;
   }
 
 (* ================================================================ *)
@@ -64,6 +66,7 @@ type run_result = {
   checkpoint : Oas.Checkpoint.t option;
   session_id : string;
   turns : int;
+  trace_ref : Oas.Raw_trace.run_ref option;
 }
 
 (* ================================================================ *)
@@ -153,6 +156,10 @@ let build
     | Some m -> Oas.Builder.with_memory m builder
     | None -> builder
   in
+  let builder = match config.raw_trace with
+    | Some raw_trace -> Oas.Builder.with_raw_trace raw_trace builder
+    | None -> builder
+  in
   let builder = match config.named_cascade with
     | Some nc -> Oas.Builder.with_named_cascade nc builder
     | None -> builder
@@ -221,9 +228,10 @@ let run
         ~detail:(Printf.sprintf "session=%s" session_id)
     ) config.event_bus;
     let turns = (Oas.Agent.state agent).turn_count in
+    let trace_ref = Oas.Agent.last_raw_trace_run agent in
     Oas.Agent.close agent;
     (match result with
-    | Ok response -> Ok { response; checkpoint; session_id; turns }
+    | Ok response -> Ok { response; checkpoint; session_id; turns; trace_ref }
     | Error err ->
       Error (Printf.sprintf "Agent run failed: %s" (Oas.Error.to_string err)))
   with
@@ -456,6 +464,7 @@ let run_named_with_masc_tools
     ?guardrails
     ?hooks
     ?memory
+    ?raw_trace
     ?on_event
     ()
   : (run_result, string) result =
@@ -479,6 +488,7 @@ let run_named_with_masc_tools
           ~description:(Some (Printf.sprintf "cascade:%s" cascade_name))
           ()
       in
+      let config = { config with raw_trace } in
       match run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event goal with
       | Ok result -> Ok result
       | Error e when rest <> [] ->
@@ -501,6 +511,7 @@ let run_model_with_masc_tools
     ?guardrails
     ?hooks
     ?memory
+    ?raw_trace
     ?on_event
     ()
   : (run_result, string) result =
@@ -514,5 +525,6 @@ let run_model_with_masc_tools
           ~description:(Some "model_spec:explicit")
           ()
       in
+      let config = { config with raw_trace } in
       run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event
         goal

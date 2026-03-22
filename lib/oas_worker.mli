@@ -23,6 +23,7 @@ type run_result = {
   checkpoint : Oas.Checkpoint.t option;
   session_id : string;
   turns : int;
+  trace_ref : Oas.Raw_trace.run_ref option;
 }
 
 (** Locate config/cascade.json via CWD or ME_ROOT. *)
@@ -79,6 +80,7 @@ val run_named_with_masc_tools :
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
+  ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   unit ->
   (run_result, string) result
@@ -95,6 +97,7 @@ val run_model_with_masc_tools :
   ?guardrails:Oas.Guardrails.t ->
   ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
+  ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   unit ->
   (run_result, string) result

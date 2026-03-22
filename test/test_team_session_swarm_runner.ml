@@ -132,6 +132,90 @@ let test_apply_exhausted_result () =
   Alcotest.(check string) "stop_reason exhausted"
     "swarm_exhausted" (Option.get updated.stop_reason)
 
+let test_apply_partial_result () =
+  let session = make_test_session "s-partial" in
+  let result : Swarm.Swarm_types.swarm_result = {
+    iterations = [
+      {
+        Swarm.Swarm_types.iteration = 1;
+        metric_value = Some 0.5;
+        agent_results = [
+          ( "agent-ok",
+            Swarm.Swarm_types.Done_ok
+              {
+                elapsed = 1.0;
+                text = "done";
+                telemetry = Swarm.Swarm_types.empty_telemetry;
+              } );
+          ( "agent-err",
+            Swarm.Swarm_types.Done_error
+              {
+                elapsed = 1.5;
+                error = "boom";
+                telemetry = Swarm.Swarm_types.empty_telemetry;
+              } );
+        ];
+        elapsed = 2.0;
+        timestamp = Time_compat.now ();
+        trace_refs = [];
+      };
+    ];
+    final_metric = Some 0.5;
+    converged = false;
+    total_elapsed = 2.0;
+    total_usage = { Agent_sdk.Types.total_input_tokens = 0;
+      total_output_tokens = 0; total_cache_creation_input_tokens = 0;
+      total_cache_read_input_tokens = 0; api_calls = 0;
+      estimated_cost_usd = 0.0 };
+  } in
+  let updated = Team_session_oas_bridge.apply_swarm_result session result in
+  Alcotest.(check string) "status interrupted"
+    "interrupted" (Team_session_types.status_to_string updated.status);
+  Alcotest.(check string) "stop_reason partial"
+    "swarm_partial_completion" (Option.get updated.stop_reason)
+
+let test_apply_all_agents_failed_result () =
+  let session = make_test_session "s-all-failed" in
+  let result : Swarm.Swarm_types.swarm_result = {
+    iterations = [
+      {
+        Swarm.Swarm_types.iteration = 1;
+        metric_value = Some 0.0;
+        agent_results = [
+          ( "agent-1",
+            Swarm.Swarm_types.Done_error
+              {
+                elapsed = 1.0;
+                error = "first";
+                telemetry = Swarm.Swarm_types.empty_telemetry;
+              } );
+          ( "agent-2",
+            Swarm.Swarm_types.Done_error
+              {
+                elapsed = 1.1;
+                error = "second";
+                telemetry = Swarm.Swarm_types.empty_telemetry;
+              } );
+        ];
+        elapsed = 2.1;
+        timestamp = Time_compat.now ();
+        trace_refs = [];
+      };
+    ];
+    final_metric = Some 0.0;
+    converged = false;
+    total_elapsed = 2.1;
+    total_usage = { Agent_sdk.Types.total_input_tokens = 0;
+      total_output_tokens = 0; total_cache_creation_input_tokens = 0;
+      total_cache_read_input_tokens = 0; api_calls = 0;
+      estimated_cost_usd = 0.0 };
+  } in
+  let updated = Team_session_oas_bridge.apply_swarm_result session result in
+  Alcotest.(check string) "status failed"
+    "failed" (Team_session_types.status_to_string updated.status);
+  Alcotest.(check string) "stop_reason all agents failed"
+    "swarm_all_agents_failed" (Option.get updated.stop_reason)
+
 let test_apply_updates_stopped_at () =
   let session = make_test_session "s-ts" in
   Alcotest.(check bool) "initially no stopped_at"
@@ -243,6 +327,10 @@ let () =
         test_apply_converged_result;
       Alcotest.test_case "exhausted result" `Quick
         test_apply_exhausted_result;
+      Alcotest.test_case "partial result" `Quick
+        test_apply_partial_result;
+      Alcotest.test_case "all agents failed result" `Quick
+        test_apply_all_agents_failed_result;
       Alcotest.test_case "updates stopped_at" `Quick
         test_apply_updates_stopped_at;
     ];

@@ -24,7 +24,7 @@ They do. The gap is that the bridge is still lossy.
 ### What remains
 
 - preserve more `planned_worker` metadata in swarm entries
-- extend telemetry beyond usage/turn_count so swarm outputs carry trace refs too
+- preserve richer telemetry semantics beyond the current `trace_ref`/usage/turn_count baseline when the swarm runner needs more operator-facing detail
 - decide whether the current single-pass success-ratio convergence policy should become a richer multi-iteration strategy
 - replace the current room-init `resource_check` with a broader runtime-health probe if needed
 - decide whether session-level budget needs token/cost enforcement beyond the current `duration_seconds` wall-clock budget

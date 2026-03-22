@@ -227,7 +227,11 @@ let test_session_to_swarm_config_health_contract () =
 (* ================================================================ *)
 
 let test_supported_local_worker_tools_present () =
-  let schemas = Team_session_oas_bridge.supported_local_worker_tools () in
+  let schemas =
+    match Team_session_oas_bridge.supported_local_worker_tools () with
+    | Ok schemas -> schemas
+    | Error message -> Alcotest.failf "expected schemas, got error: %s" message
+  in
   let names =
     List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
   in

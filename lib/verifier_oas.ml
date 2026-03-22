@@ -111,7 +111,7 @@ let parse_verdict (text : string) : verdict =
   else
     (* If model doesn't follow format, treat as warning *)
     if String.length trimmed > 0 then Warn trimmed
-    else Pass
+    else Warn "empty verifier output"
 
 (* ================================================================ *)
 (* Verification Prompt                                              *)

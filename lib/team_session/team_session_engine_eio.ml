@@ -193,17 +193,20 @@ let start_session ~sw ~(clock : _ Eio.Time.clock) ~(config : Room.config)
        Running and accepts manual steps via masc_team_session_step. *)
     if session.planned_workers <> [] then
       Eio.Fiber.fork ~sw (fun () ->
-        let masc_tools = Team_session_oas_bridge.supported_local_worker_tools () in
         let result =
-          Team_session_swarm_runner.run_swarm ~sw ~clock ~config
-            ~session_id ~masc_tools
-            ~dispatch:(Team_session_oas_bridge.dispatch_supported_tool
-              ~sw ~clock ~config)
+          match Team_session_oas_bridge.supported_local_worker_tools () with
+          | Ok masc_tools ->
+            Team_session_swarm_runner.run_swarm ~sw ~clock ~config
+              ~session_id ~masc_tools
+              ~dispatch:(Team_session_oas_bridge.dispatch_supported_tool
+                ~sw ~clock ~config)
+          | Error reason -> Error reason
         in
         match result with
         | Ok _session ->
           with_runtimes_lock (fun () -> Hashtbl.remove runtimes session_id)
         | Error reason ->
+          Log.Session.error "team-session swarm startup failed: %s" reason;
           ignore (finalize_session ~config ~session_id
             ~final_status:Team_session_types.Failed ~reason
             ~generate_report:true);
@@ -680,20 +683,21 @@ let recover_running_sessions ~sw ~(clock : _ Eio.Time.clock)
                     @ checkpoint_detail @ event_context));
               (* Phase C-2c: reconnect also uses swarm runner *)
               Eio.Fiber.fork ~sw (fun () ->
-                let masc_tools =
-                  Team_session_oas_bridge.supported_local_worker_tools ()
-                in
                 let result =
-                  Team_session_swarm_runner.run_swarm ~sw ~clock ~config
-                    ~session_id:session.session_id ~masc_tools
-                    ~dispatch:(Team_session_oas_bridge.dispatch_supported_tool
-                      ~sw ~clock ~config)
+                  match Team_session_oas_bridge.supported_local_worker_tools () with
+                  | Ok masc_tools ->
+                    Team_session_swarm_runner.run_swarm ~sw ~clock ~config
+                      ~session_id:session.session_id ~masc_tools
+                      ~dispatch:(Team_session_oas_bridge.dispatch_supported_tool
+                        ~sw ~clock ~config)
+                  | Error reason -> Error reason
                 in
                 match result with
                 | Ok _s ->
                   with_runtimes_lock (fun () ->
                     Hashtbl.remove runtimes session.session_id)
                 | Error reason ->
+                  Log.Session.error "team-session swarm restart failed: %s" reason;
                   ignore (finalize_session ~config ~session_id:session.session_id
                     ~final_status:Team_session_types.Failed ~reason
                     ~generate_report:true);

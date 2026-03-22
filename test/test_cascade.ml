@@ -199,6 +199,106 @@ let test_classification_uses_llama_first () =
   check bool "classification starts with llama:" true
     (String.length first > 6 && String.sub first 0 6 = "llama:")
 
+module Cascade_inference = Masc_mcp.Cascade_inference
+
+(* ── Cascade inference parameter tests ──────────────── *)
+
+let test_inference_empty () =
+  let e = Cascade_inference.empty in
+  check (option (float 0.01)) "no temperature" None e.temperature;
+  check (option int) "no max_tokens" None e.max_tokens
+
+let test_inference_read_float () =
+  let json = `Assoc [("t", `Float 0.5)] in
+  let v = Cascade_inference.read_float_field json "t" in
+  check (option (float 0.01)) "reads 0.5" (Some 0.5) v
+
+let test_inference_read_float_from_int () =
+  let json = `Assoc [("t", `Int 1)] in
+  let v = Cascade_inference.read_float_field json "t" in
+  check (option (float 0.01)) "reads 1.0" (Some 1.0) v
+
+let test_inference_read_float_missing () =
+  let json = `Assoc [] in
+  let v = Cascade_inference.read_float_field json "missing" in
+  check (option (float 0.01)) "None" None v
+
+let test_inference_read_int () =
+  let json = `Assoc [("n", `Int 4096)] in
+  let v = Cascade_inference.read_int_field json "n" in
+  check (option int) "reads 4096" (Some 4096) v
+
+let test_inference_read_int_missing () =
+  let json = `Assoc [] in
+  let v = Cascade_inference.read_int_field json "missing" in
+  check (option int) "None" None v
+
+(* ── Cascade inference parameter tests ───────────────────
+   Use for_json for deterministic filesystem-independent tests. *)
+
+let sample_cascade_json = Yojson.Safe.from_string {|{
+  "default_models": ["llama:auto"],
+  "keeper_unified_temperature": 0.4,
+  "keeper_unified_max_tokens": 2048,
+  "keeper_autonomy_temperature": 0.3,
+  "keeper_autonomy_max_tokens": 500,
+  "keeper_turn_max_tokens": 1024,
+  "default_temperature": 0.77,
+  "default_max_tokens": 999
+}|}
+
+let test_inference_for_json_named () =
+  let params = Cascade_inference.for_json ~name:"keeper_unified" sample_cascade_json in
+  check (option (float 0.01)) "temperature" (Some 0.4) params.temperature;
+  check (option int) "max_tokens" (Some 2048) params.max_tokens
+
+let test_inference_for_json_named_autonomy () =
+  let params = Cascade_inference.for_json ~name:"keeper_autonomy" sample_cascade_json in
+  check (option (float 0.01)) "temperature" (Some 0.3) params.temperature;
+  check (option int) "max_tokens" (Some 500) params.max_tokens
+
+let test_inference_for_json_partial () =
+  (* keeper_turn has max_tokens but no temperature — falls back to default_temperature *)
+  let params = Cascade_inference.for_json ~name:"keeper_turn" sample_cascade_json in
+  check (option (float 0.01)) "temperature falls to default" (Some 0.77) params.temperature;
+  check (option int) "max_tokens" (Some 1024) params.max_tokens
+
+let test_inference_for_json_unknown_falls_to_default () =
+  let params = Cascade_inference.for_json ~name:"nonexistent_xyz" sample_cascade_json in
+  check (option (float 0.01)) "default temperature" (Some 0.77) params.temperature;
+  check (option int) "default max_tokens" (Some 999) params.max_tokens
+
+let test_inference_for_json_no_defaults () =
+  let json = Yojson.Safe.from_string {|{"default_models": ["llama:auto"]}|} in
+  let params = Cascade_inference.for_json ~name:"unknown" json in
+  check (option (float 0.01)) "no temperature" None params.temperature;
+  check (option int) "no max_tokens" None params.max_tokens
+
+let test_inference_for_json_named_overrides_default () =
+  let json = Yojson.Safe.from_string {|{
+    "default_temperature": 0.77,
+    "named_temperature": 0.11,
+    "default_max_tokens": 999,
+    "named_max_tokens": 555
+  }|} in
+  let params = Cascade_inference.for_json ~name:"named" json in
+  check (option (float 0.01)) "named temperature wins" (Some 0.11) params.temperature;
+  check (option int) "named max_tokens wins" (Some 555) params.max_tokens
+
+let test_inference_resolve_temperature_fallback () =
+  (* resolve_temperature with a cascade_name that doesn't exist in config
+     — exercises the fallback path regardless of cascade.json location *)
+  let v = Cascade_inference.resolve_temperature
+      ~cascade_name:"nonexistent_test_xyz_12345"
+      ~fallback:(fun () -> 0.33) in
+  check (float 0.01) "fallback temperature" 0.33 v
+
+let test_inference_resolve_max_tokens_fallback () =
+  let v = Cascade_inference.resolve_max_tokens
+      ~cascade_name:"nonexistent_test_xyz_12345"
+      ~fallback:(fun () -> 42) in
+  check int "fallback max_tokens" 42 v
+
 let () =
   run "cascade"
     [
@@ -230,5 +330,36 @@ let () =
             test_briefing_non_empty;
           test_case "classification uses llama first" `Quick
             test_classification_uses_llama_first;
+        ] );
+      ( "inference_params",
+        [
+          test_case "empty has no values" `Quick
+            test_inference_empty;
+          test_case "read_float_field parses float" `Quick
+            test_inference_read_float;
+          test_case "read_float_field parses int as float" `Quick
+            test_inference_read_float_from_int;
+          test_case "read_float_field returns None for missing" `Quick
+            test_inference_read_float_missing;
+          test_case "read_int_field parses int" `Quick
+            test_inference_read_int;
+          test_case "read_int_field returns None for missing" `Quick
+            test_inference_read_int_missing;
+          test_case "for_json named cascade" `Quick
+            test_inference_for_json_named;
+          test_case "for_json keeper_autonomy" `Quick
+            test_inference_for_json_named_autonomy;
+          test_case "for_json partial falls to default" `Quick
+            test_inference_for_json_partial;
+          test_case "for_json unknown falls to default" `Quick
+            test_inference_for_json_unknown_falls_to_default;
+          test_case "for_json no defaults returns empty" `Quick
+            test_inference_for_json_no_defaults;
+          test_case "for_json named overrides default" `Quick
+            test_inference_for_json_named_overrides_default;
+          test_case "resolve_temperature fallback" `Quick
+            test_inference_resolve_temperature_fallback;
+          test_case "resolve_max_tokens fallback" `Quick
+            test_inference_resolve_max_tokens_fallback;
         ] );
     ]

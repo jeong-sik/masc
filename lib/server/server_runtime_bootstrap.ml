@@ -577,6 +577,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_refresh_loop ~state ~sw ~clock;
       Server_command_plane_http_support.start_cp_summary_refresh_loop ~state ~sw ~clock;
+      Server_command_plane_http_support.start_cp_snapshot_refresh_loop ~state ~sw ~clock;
       start_resident_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state;
       (* gRPC coordination transport (opt-in via MASC_GRPC_ENABLED=1) *)
       let tool_dispatcher _tool_name _args_json =

@@ -95,7 +95,18 @@ let command_plane_summary_http_json ~state:_ =
      The background refresh loop populates the ref within one interval (120s). *)
   !_cp_summary_ref
 
-let command_plane_snapshot_http_json ~state =
+(* --- Command-plane snapshot proactive cache ---
+   Same pattern as the summary cache above, but with a shorter interval (5s)
+   because SSE clients poll this endpoint.  Without caching, N concurrent SSE
+   connections each trigger a full build_snapshot_state + JSON serialization,
+   turning a single ~200ms computation into N * 200ms of redundant I/O. *)
+
+let _cp_snapshot_ref : Yojson.Safe.t ref =
+  ref (`Assoc [("generated_at", `String (Types.now_iso ())); ("status", `String "initializing")])
+
+let _cp_snapshot_refresh_interval_s = 5.0
+
+let compute_cp_snapshot ~state =
   let config = state.Mcp_server.room_config in
   let snapshot = Command_plane_v2.snapshot_json config in
   let swarm_status =
@@ -104,6 +115,18 @@ let command_plane_snapshot_http_json ~state =
     else Swarm_status.empty_json
   in
   assoc_add "swarm_status" swarm_status snapshot
+
+let start_cp_snapshot_refresh_loop ~state ~sw ~clock =
+  Proactive_refresh.start ~sw ~clock
+    ~config:{ (Proactive_refresh.default_config
+                 ~label:"cp-snapshot"
+                 ~interval_s:_cp_snapshot_refresh_interval_s)
+              with timeout_s = 10.0 }
+    ~compute:(fun () -> compute_cp_snapshot ~state)
+    ~on_result:(fun snapshot -> _cp_snapshot_ref := snapshot)
+
+let command_plane_snapshot_http_json ~state:_ =
+  !_cp_snapshot_ref
 
 let command_plane_topology_http_json ~state =
   Command_plane_v2.topology_json state.Mcp_server.room_config

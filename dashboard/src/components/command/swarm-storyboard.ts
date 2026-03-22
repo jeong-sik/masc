@@ -47,7 +47,7 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
         <div class="flex items-center gap-2 min-w-0">
           <span class="swarm-motion-dot inline-block rounded-full shrink-0 w-2.5 h-2.5 ${lane.motion_state}"></span>
           <div>
-            <span class="block mb-1 text-[rgba(125,211,252,0.78)] text-[length:var(--fs-2xs)] tracking-[0.1em] uppercase">${lane.kind} · ${lane.source_of_truth}</span>
+            <span class="block mb-1 text-[rgba(125,211,252,0.78)] text-[10px] tracking-[0.1em] uppercase">${lane.kind} · ${lane.source_of_truth}</span>
             <strong class="text-[color:var(--text-near-white)] text-[16px] leading-[1.25]">${lane.label}</strong>
           </div>
         </div>
@@ -116,11 +116,11 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
               <span class="rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
               <span class="rounded-full">${lane.phase}</span>
             </div>
-            <strong class="text-[color:var(--text-near-white)] text-[length:var(--fs-lg)] leading-[1.3]">${lane.label}</strong>
+            <strong class="text-[color:var(--text-near-white)] text-xl leading-[1.3]">${lane.label}</strong>
             <p class="m-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.current_step}</p>
             <div class="flex gap-2 flex-wrap">
               ${[`워커 ${workers}`, `작전 ${operations}`, `실행체 ${detachments}`].map(t => html`
-                <span class="inline-flex items-center py-1 px-2 bg-[var(--white-6)] text-[rgba(191,219,254,0.9)] text-[length:var(--fs-xs)]">${t}</span>
+                <span class="inline-flex items-center py-1 px-2 bg-[var(--white-6)] text-[rgba(191,219,254,0.9)] text-[11px]">${t}</span>
               `)}
             </div>
             <small class="m-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.movement_reason}</small>
@@ -267,7 +267,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
                 <strong>확인 대기</strong>
                 <span class="rounded-full warn">${pendingConfirm.confirm_token}</span>
               </div>
-              ${pendingConfirm.preview ? html`<pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[length:var(--fs-sm)] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${previewText(pendingConfirm.preview)}</pre>` : null}
+              ${pendingConfirm.preview ? html`<pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[13px] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${previewText(pendingConfirm.preview)}</pre>` : null}
               <div class="flex gap-2.5 flex-wrap mt-3">
                 <${ActionButton} onClick=${() => { void confirmPending('confirm') }} disabled=${operatorActionBusy.value}>확인 실행<//>
                 <${ActionButton} variant="ghost" onClick=${() => { void confirmPending('deny') }} disabled=${operatorActionBusy.value}>취소<//>

@@ -52,7 +52,7 @@ export function ConnectionStatus() {
     : `재연결 중...${formatDisconnectDuration()}`
 
   return html`
-    <div class="flex items-center gap-2 text-[length:var(--fs-sm)] whitespace-nowrap ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}">
+    <div class="flex items-center gap-2 text-[13px] whitespace-nowrap ${isConnected ? 'text-[#9af3ba]' : 'text-[#f7b7b7]'}">
       <span class="size-[9px] rounded-full inline-block ${isConnected ? 'bg-[var(--ok)] shadow-[0_0_9px_rgba(74,222,128,0.8)]' : 'bg-[var(--bad)]'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`

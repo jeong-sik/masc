@@ -134,9 +134,9 @@ function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
                 </div>
                 <div class="monitor-note">${eventSummary(event)}</div>
               </div>
-              <span class="monitor-pill ok inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em]">${eventKindLabel(event.kind)}</span>
+              <span class="monitor-pill ok inline-flex items-center rounded-full px-2 py-[3px] text-[11px] uppercase tracking-[0.06em]">${eventKindLabel(event.kind)}</span>
             </div>
-            <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]">
+            <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[13px]">
               <span>${event.room_id}</span>
               ${event.ts_iso ? html`<span><${TimeAgo} timestamp=${event.ts_iso} /></span>` : null}
               ${event.tags.length > 0 ? html`<span>${event.tags.join(', ')}</span>` : null}
@@ -174,7 +174,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
               </div>
             </div>
             <span class="text-sm font-semibold text-text-slate-light min-w-[32px] text-right">${node.weight}</span>
-            <span class="text-[length:var(--fs-xs)] py-0.5 px-[7px] rounded-md ${node.status === 'offline' || node.status === 'retired' ? 'text-[color:var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[color:var(--ok)] bg-[var(--ok-10)]'}">${node.status}</span>
+            <span class="text-[11px] py-0.5 px-[7px] rounded-md ${node.status === 'offline' || node.status === 'retired' ? 'text-[color:var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[color:var(--ok)] bg-[var(--ok-10)]'}">${node.status}</span>
           </div>
         `
       })}
@@ -263,7 +263,7 @@ export function ActivityGraphSurface() {
         </div>
         <${StatsRow} data=${data} />
         <${GraphView} data=${data} />
-        <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[length:var(--fs-sm)]">
+        <div class="flex flex-wrap gap-x-3 gap-y-2 mt-2.5 text-[var(--text-muted)] text-[13px]">
           <span>생성 시각: ${data.generated_at}</span>
           <span>데이터 범위: 최근 ${data.window.limit}건 이벤트</span>
           ${data.window.room_id ? html`<span>room: ${data.window.room_id}</span>` : null}

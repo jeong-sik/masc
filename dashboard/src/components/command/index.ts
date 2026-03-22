@@ -49,7 +49,7 @@ function SurfaceTabs() {
     <div class="cmd-surface-tabs flex-col gap-3">
       ${COMMAND_SURFACE_GROUPS.map(group => html`
         <div class="flex flex-col gap-1.5" key=${group.id}>
-          <span class="text-[length:var(--fs-xs)] font-semibold text-[color:var(--white-40)] uppercase tracking-[0.04em] pl-1">${group.label}</span>
+          <span class="text-[11px] font-semibold text-[color:var(--white-40)] uppercase tracking-[0.04em] pl-1">${group.label}</span>
           <div class="flex flex-wrap gap-2">
             ${COMMAND_SURFACE_META
               .filter(surface => surface.group === group.id)

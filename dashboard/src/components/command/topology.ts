@@ -84,7 +84,7 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
             ${policy?.frozen ? html`<span class="rounded-full warn">동결됨</span>` : null}
             ${policy?.kill_switch ? html`<span class="rounded-full bad">킬 스위치</span>` : null}
           </div>
-          <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
+          <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[13px]">
             <span>ID ${node.unit.unit_id}</span>
             <span>리더 ${node.unit.leader_id ?? '미지정'} / ${node.leader_status ?? '확인 필요'}</span>
             <span>편성 ${rosterLive}/${rosterTotal}</span>
@@ -139,7 +139,7 @@ export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
           ${event.actor ? ` · ${event.actor}` : ''}
         </div>
       </div>
-      <pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[length:var(--fs-sm)] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${prettyJson(event.detail)}</pre>
+      <pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[13px] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${prettyJson(event.detail)}</pre>
     </article>
   `
 }

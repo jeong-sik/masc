@@ -42,29 +42,29 @@ export function SessionBriefCard({
               <div class="mission-status-dot ${liveStateClass(brief.status, brief.health)} ${dotStateBg(liveStateClass(brief.status, brief.health))}"></div>
               <strong>${brief.goal}</strong>
             </div>
-            <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
+            <div class="text-[rgba(255,255,255,0.52)] text-[13px]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           </div>
           <span class="rounded-full ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
         </div>
 
         <div class="grid grid-cols-2 gap-2.5">
           <div class="p-3 rounded-xl bg-[var(--white-4)] border border-[var(--white-6)] grid gap-1">
-            <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">멤버</span>
+            <span class="text-[rgba(255,255,255,0.52)] text-[11px] tracking-[0.08em] uppercase">멤버</span>
             <strong class="text-[var(--text-strong)] text-lg">${brief.member_names.length}</strong>
             <small class="grid gap-1">${brief.member_names.slice(0, 3).join(', ') || '없음'}</small>
           </div>
           <div class="p-3 rounded-xl bg-[var(--white-4)] border border-[var(--white-6)] grid gap-1">
-            <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">가동 시간</span>
+            <span class="text-[rgba(255,255,255,0.52)] text-[11px] tracking-[0.08em] uppercase">가동 시간</span>
             <strong class="text-[var(--text-strong)] text-lg">${formatDuration(brief.elapsed_sec)}</strong>
             <small class="grid gap-1">${brief.started_at ? `${relativeTime(brief.started_at)} 시작` : '시작 시각 없음'}</small>
           </div>
           <div class="p-3 rounded-xl bg-[var(--white-4)] border border-[var(--white-6)] grid gap-1">
-            <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">최근 흐름</span>
+            <span class="text-[rgba(255,255,255,0.52)] text-[11px] tracking-[0.08em] uppercase">최근 흐름</span>
             <strong class="text-[var(--text-strong)] text-lg">${brief.last_event_at ? relativeTime(brief.last_event_at) : '기록 없음'}</strong>
             <small class="grid gap-1">${brief.communication_summary ?? '요약 없음'}</small>
           </div>
           <div class="p-3 rounded-xl bg-[var(--white-4)] border border-[var(--white-6)] grid gap-1">
-            <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">충원 상태</span>
+            <span class="text-[rgba(255,255,255,0.52)] text-[11px] tracking-[0.08em] uppercase">충원 상태</span>
             <strong class="text-[var(--text-strong)] text-lg">${liveCount}/${brief.required_count || 1}</strong>
             <small class="grid gap-1">live · seen ${seenCount} · planned ${plannedCount}</small>
           </div>
@@ -84,7 +84,7 @@ export function SessionBriefCard({
         ? html`
             <div class="flex gap-2 flex-wrap mt-2.5">
               ${brief.operation_badges.slice(0, 3).map(operation => html`
-                <span class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.76)] text-[length:var(--fs-sm)] leading-[1.35]">
+                <span class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.76)] text-[13px] leading-[1.35]">
                   ${operation.operation_id} · ${statusLabel(operation.status)}${operation.stage ? ` · ${operation.stage}` : ''}
                 </span>
               `)}

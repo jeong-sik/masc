@@ -46,7 +46,7 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
           <span class="rounded-full ${toneClass(row.brief.status ?? row.agent?.status)}">${statusLabel(row.brief.status ?? row.agent?.status)}</span>
         </div>
 
-        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]">
           <span>어디서 · ${row.where}</span>
           <span>누구와 · ${who}</span>
           <span>주의 신호 · ${row.brief.related_attention_count}</span>
@@ -61,7 +61,7 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
 
       <details class="pt-1 border-t border-[var(--white-6)]">
         <summary>최근 흐름</summary>
-        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]">
           ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : html`<span>최근 사건 요약 없음</span>`}
           <span>관련 세션 · ${row.brief.related_session_id ?? '없음'}</span>
         </div>
@@ -78,7 +78,7 @@ export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
               <strong>${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'}</strong>
             </div>
           </div>
-          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]">
             <span>최근 도구 · ${recentToolsLabel}</span>
           </div>
         </details>
@@ -125,7 +125,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
           <span class="rounded-full ${toneClass(row.brief.status ?? row.keeper?.status)}">${statusLabel(row.brief.status ?? row.keeper?.status)}</span>
         </div>
 
-        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]">
           <span>최근 하트비트 · ${row.keeper?.last_heartbeat ? relativeTime(row.keeper.last_heartbeat) : '기록 없음'}</span>
           <span>${continuity || '연속성 정보 없음'}</span>
         </div>
@@ -139,7 +139,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
 
       <details class="pt-1 border-t border-[var(--white-6)]">
         <summary>연속성 상세</summary>
-        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+        <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]">
           <span>에이전트 · ${row.brief.agent_name ?? row.keeper?.agent_name ?? '기록 없음'}</span>
           ${row.recentEvent ? html`<span>최근 일 · ${row.recentEvent}</span>` : null}
         </div>
@@ -155,7 +155,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
               <strong>${row.recentOutput ?? '표시 가능한 최근 응답이 없습니다'}</strong>
             </div>
           </div>
-          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]">
             <span>최근 도구 · ${recentToolsLabel}</span>
           </div>
         </details>
@@ -173,7 +173,7 @@ export function InternalSignalCard({ item }: { item: DashboardMissionInternalSig
         <span class="rounded-full ${toneClass(item.severity)}">
           ${item.signal_type === 'action' && action ? workflowActionLabel(action.action_type) : attention?.kind ?? '내부 신호'}
         </span>
-        <span class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
+        <span class="text-[rgba(255,255,255,0.52)] text-[13px]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
       </div>
       <p class="m-0 text-[rgba(255,255,255,0.8)] leading-normal">${item.summary}</p>
       ${action ? html`<div class="py-2.5 px-3 rounded-xl bg-[var(--white-5)] border border-[var(--white-8)] text-[var(--text-strong)] leading-[1.45]">${action.reason}</div>` : null}

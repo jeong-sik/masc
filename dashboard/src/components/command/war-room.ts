@@ -198,7 +198,7 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
           <div class="card rounded-xl-title">실시간 워룸</div>
         </div>
         <div class="flex flex-col gap-2.5 max-w-[520px]">
-          <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">Narrative Playback</span>
+          <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[11px] tracking-[0.08em] uppercase">Narrative Playback</span>
           <strong>지금 붙잡을 live swarm 또는 team session이 없습니다</strong>
           <p>chain, autoresearch, worker wallboard는 활성 작전 또는 세션이 생기면 자동으로 붙습니다. 지금은 drill-down surface로 이동하는 편이 맞습니다.</p>
         </div>

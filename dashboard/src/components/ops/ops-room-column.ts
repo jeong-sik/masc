@@ -75,14 +75,14 @@ export function OpsRoomColumn() {
         </div>
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
         <article class="ops-guidance-card p-3 rounded-xl border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-2 ${guidanceLayerTone(guidanceLayer)}">
-          <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
+          <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[11px]">
             <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
             <span>${residentRuntime?.keeper_name ?? roomDigest?.judgment_owner ?? 'judge 없음'}</span>
           </div>
           <div class="text-[var(--text-strong)] leading-[1.5]">
             ${activeSummary?.summary ?? '현재 active guidance 요약이 없습니다. fallback queue만 표시합니다.'}
           </div>
-          <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
+          <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[11px]">
             <span>authoritative ${roomDigest?.authoritative_judgment_available ? 'yes' : 'no'}</span>
             <span>${guidanceFreshnessLabel(activeSummary)}</span>
             ${residentRuntime?.model_used ? html`<span>${residentRuntime.model_used}</span>` : null}
@@ -94,7 +94,7 @@ export function OpsRoomColumn() {
           <div class="flex flex-col gap-2">
             ${activeRecommendedActions.map(item => html`
               <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(item.severity)}">
-                <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                <div class="text-[11px] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                   <span>${deliveryModeLabel(item.confirm_required)}</span>
@@ -128,7 +128,7 @@ export function OpsRoomColumn() {
           <div class="flex flex-col gap-2">
             ${confirmRequiredActions.map(item => html`
               <article key=${`${item.action_type}:${item.target_type}`} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
-                <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                <div class="text-[11px] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}</span>
                   <span>${deliveryModeLabel(item.confirm_required)}</span>
@@ -139,15 +139,15 @@ export function OpsRoomColumn() {
           </div>
         ` : null}
         ${pendingConfirms.length > 0 ? html`
-          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
+          <div class="flex items-center justify-between gap-2.5 text-[13px] text-[var(--text-muted)]">
             ${pendingConfirms.map(item => html`
               <article key=${item.confirm_token} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
-                <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[var(--fs-xs)]">
+                <div class="flex flex-wrap gap-2 text-[var(--text-muted)] text-[11px]">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                   <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
                 </div>
-                ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[length:var(--fs-xs)] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
+                ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-xl bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[11px] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
                 <div class="flex justify-between items-center gap-3 mt-2.5 max-[880px]:flex-col max-[880px]:items-start">
                   <${ActionButton} onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
                     실행
@@ -155,7 +155,7 @@ export function OpsRoomColumn() {
                   <${ActionButton} variant="ghost" onClick=${() => { void confirmPending(item.confirm_token, 'deny') }} disabled=${operatorActionBusy.value}>
                     거부
                   <//>
-                  <span class="text-[var(--text-muted)] text-[var(--fs-xs)] font-mono break-all">${item.confirm_token}</span>
+                  <span class="text-[var(--text-muted)] text-[11px] font-mono break-all">${item.confirm_token}</span>
                 </div>
               </article>
             `)}
@@ -204,7 +204,7 @@ export function OpsRoomColumn() {
           open=${room.paused ? true : undefined}
         >
           <summary class="ops-control-summary list-none cursor-pointer grid gap-1 p-3 px-3.5">
-            <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 room 제어</span>
+            <span class="text-[#9fe6b5] text-[10px] tracking-[0.08em] uppercase">고급 room 제어</span>
             <strong>${room.paused ? '지금은 room이 멈춰 있어 재개 동선이 열려 있습니다.' : '방송 · 일시정지/재개 · 작업 주입'}</strong>
             <span>${room.paused ? '운영 점검 후 재개하거나 공지를 보내세요.' : 'room 전체에 영향 주는 액션만 이 안에 넣었습니다.'}</span>
           </summary>
@@ -239,7 +239,7 @@ export function OpsRoomColumn() {
               <//>
             </div>
 
-            <div class="mt-0.5 text-[var(--text-muted)] text-[var(--fs-xs)] tracking-[0.05em] uppercase">작업 주입</div>
+            <div class="mt-0.5 text-[var(--text-muted)] text-[11px] tracking-[0.05em] uppercase">작업 주입</div>
             <${TextInput}
               placeholder="작업 제목"
               value=${taskTitle.value}
@@ -281,10 +281,10 @@ export function OpsRoomColumn() {
         </div>
         <p class="text-[12px] text-[var(--text-muted)] leading-[1.45]">room 맥락은 참고만 하고, 실제 판단은 위의 개입 큐 기준으로 합니다.</p>
         ${roomFeed.length > 0 ? html`
-          <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-[var(--text-muted)]">
+          <div class="flex items-center justify-between gap-2.5 text-[13px] text-[var(--text-muted)]">
             ${roomFeed.map(message => html`
               <article key=${message.seq ?? message.id ?? message.timestamp} class="p-3 rounded-xl bg-[var(--white-3)] border border-[var(--white-8)]">
-                <div class="text-[var(--fs-xs)] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                <div class="text-[11px] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${message.from}</strong>
                   <span>${message.timestamp}</span>
                 </div>

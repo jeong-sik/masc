@@ -94,12 +94,12 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
                 <${MitosisRing} ratio=${model.contextRatio ?? 0} size=${34} stroke=${4} />
                 <${StatusBadge} status=${model.statusRaw ?? 'unknown'} />
                 ${model.pipelineStage ? html`<${PipelineStageBadge} stage=${model.pipelineStage} />` : null}
-                ${model.stateLabel ? html`<span class="monitor-pill ${toneClass} inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em]">${model.stateLabel}</span>` : null}
+                ${model.stateLabel ? html`<span class="monitor-pill ${toneClass} inline-flex items-center rounded-full px-2 py-[3px] text-[11px] uppercase tracking-[0.06em]">${model.stateLabel}</span>` : null}
               `
             : html`<span class="rounded-full ${toneClass}">${model.statusLabel}</span>`}
         </div>
 
-        <div class=${variant === 'mission' ? 'flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]' : 'monitor-meta'}>
+        <div class=${variant === 'mission' ? 'flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]' : 'monitor-meta'}>
           ${model.lastActivityAt
             ? html`<span>최근 활동 <${TimeAgo} timestamp=${model.lastActivityAt} /></span>`
             : html`<span>${model.lastActivityFallback ?? '최근 활동 없음'}</span>`}
@@ -127,7 +127,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
         ? html`
             <details class="pt-1 border-t border-[var(--white-6)] mt-2">
               <summary>${model.disclosureLabel ?? '세부 정보'}</summary>
-              <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+              <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]">
                 ${model.recentEvent ? html`<span>최근 일 · ${model.recentEvent}</span>` : null}
                 ${model.routeSummary ? html`<span>route · ${model.routeSummary}</span>` : null}
                 ${model.auditSource ? html`<span>audit · ${model.auditSource}</span>` : null}
@@ -149,7 +149,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
                 : null}
               ${(model.recentTools?.length ?? 0) > 0 || (model.allowedTools?.length ?? 0) > 0
                 ? html`
-                    <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[length:var(--fs-sm)] leading-[1.45]">
+                    <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]">
                       <span>최근 도구 · ${renderToolSummary(model.recentTools)}</span>
                       <span>허용 도구 · ${renderToolSummary(model.allowedTools)}</span>
                     </div>

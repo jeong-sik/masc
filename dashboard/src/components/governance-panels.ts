@@ -49,14 +49,14 @@ export function GuardrailPane({
           : html`
               <div class="flex flex-col gap-2">
                 <h4>판정</h4>
-                <div class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">
+                <div class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[11px]">
                   <span>${caseStatusLabel(ruling?.status || 'pending')}</span>
                   <span>${confidenceText(ruling?.confidence)}</span>
                   ${ruling?.generated_at ? html`<span><${TimeAgo} timestamp=${ruling.generated_at} /></span>` : null}
                 </div>
                 ${ruling?.summary
                   ? html`<div class="mb-3 border border-[rgba(71,184,255,0.22)] rounded-[10px] bg-[rgba(71,184,255,0.09)] text-[#dcecff] py-[11px] px-3 leading-[1.5]">${ruling.summary}</div>`
-                  : html`<div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">아직 판정이 생성되지 않았습니다.</div>`}
+                  : html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">아직 판정이 생성되지 않았습니다.</div>`}
                 <div class="governance-chip rounded-full-row">
                   ${item.provenance ? html`<span class="governance-chip rounded-full">${item.provenance}</span>` : null}
                   ${item.risk_class ? html`<span class="governance-chip rounded-full">${item.risk_class}</span>` : null}
@@ -68,7 +68,7 @@ export function GuardrailPane({
                 ? html`
                     <div class="flex flex-col gap-2">
                       <h4>관리자 승인</h4>
-                      <div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">이 집행은 고위험으로 분류되어 수동 결재가 필요합니다.</div>
+                      <div class="text-[#c8daf7] text-[13px] leading-[1.45]">이 집행은 고위험으로 분류되어 수동 결재가 필요합니다.</div>
                       <div class="flex gap-2">
                         <${ActionButton} onClick=${() => respondToExecutionOrder('confirm')} disabled=${governanceActing.value}>
                           ${governanceActing.value ? '처리 중...' : '승인'}
@@ -129,15 +129,15 @@ export function ActionRequestCard({ order }: { order: GovernanceExecutionOrder |
   return html`
     <div class="flex flex-col gap-2">
       <h4>집행 명령</h4>
-      <div class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[length:var(--fs-xs)]">
+      <div class="mt-1 flex flex-wrap gap-2 text-[#8ea9d6] text-[11px]">
         <span>${request.resolved_tool || request.action_kind || request.target_type || 'action'}</span>
         <span>${orderStatusLabel(order.status)}</span>
       </div>
-      ${request.target_type ? html`<div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">대상 ${request.target_type}${request.target_id ? `:${request.target_id}` : ''}</div>` : null}
-      ${request.reason ? html`<div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">${request.reason}</div>` : null}
-      ${request.payload_preview ? html`<pre class="whitespace-pre-wrap border border-[var(--card-border)] rounded-[9px] bg-[rgba(0,0,0,0.28)] text-[#d3e3ff] p-3 text-[length:var(--fs-sm)] leading-[1.5] font-mono mt-0 text-[length:var(--fs-xs)] max-h-[180px] overflow-auto">${serializePreview(request.payload_preview)}</pre>` : null}
-      ${order.execution_ref ? html`<div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">결과 참조 ${order.execution_ref}</div>` : null}
-      ${order.result_summary ? html`<div class="text-[#c8daf7] text-[length:var(--fs-sm)] leading-[1.45]">${order.result_summary}</div>` : null}
+      ${request.target_type ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">대상 ${request.target_type}${request.target_id ? `:${request.target_id}` : ''}</div>` : null}
+      ${request.reason ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">${request.reason}</div>` : null}
+      ${request.payload_preview ? html`<pre class="whitespace-pre-wrap border border-[var(--card-border)] rounded-[9px] bg-[rgba(0,0,0,0.28)] text-[#d3e3ff] p-3 text-[13px] leading-[1.5] font-mono mt-0 text-[11px] max-h-[180px] overflow-auto">${serializePreview(request.payload_preview)}</pre>` : null}
+      ${order.execution_ref ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">결과 참조 ${order.execution_ref}</div>` : null}
+      ${order.result_summary ? html`<div class="text-[#c8daf7] text-[13px] leading-[1.45]">${order.result_summary}</div>` : null}
     </div>
   `
 }

@@ -139,7 +139,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
             </button>
           `)}
         </div>
-        <div class="flex items-center gap-2 text-[length:var(--fs-xs)]">
+        <div class="flex items-center gap-2 text-[11px]">
           <span class="agent-event-rate rounded-lg">${eventsPerMin}/min</span>
           <span class="text-text-muted">${filtered.length} events</span>
           <button
@@ -156,7 +156,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
         ${filtered.length === 0
           ? html`<${EmptyState}>필터에 맞는 이벤트 없음<//>`
           : filtered.map((entry: JournalEntry, idx: number) => html`
-              <div class="flex items-baseline gap-1.5 py-1 px-2 text-[length:var(--fs-sm)] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
+              <div class="flex items-baseline gap-1.5 py-1 px-2 text-[13px] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
                 <span class="agent-event-badge ${eventKindBadgeClass(entry.eventType)}">
                   ${eventKindLabel(entry.eventType)}
                 </span>

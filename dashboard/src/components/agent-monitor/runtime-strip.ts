@@ -38,12 +38,12 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
 
   return html`
     <div class="agent-runtime-strip">
-      <div class="flex items-center gap-1.5 text-[length:var(--fs-sm)]">
+      <div class="flex items-center gap-1.5 text-[13px]">
         <${PipelineStageBadge} stage=${stage} />
       </div>
 
       ${ctxPct != null ? html`
-        <div class="flex items-center gap-1.5 text-[length:var(--fs-sm)]">
+        <div class="flex items-center gap-1.5 text-[13px]">
           <span class="agent-runtime-label">CTX</span>
           <div class="agent-runtime-ctx-bar rounded-full">
             <div
@@ -56,21 +56,21 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
       ` : null}
 
       ${generation != null ? html`
-        <div class="flex items-center gap-1.5 text-[length:var(--fs-sm)]">
+        <div class="flex items-center gap-1.5 text-[13px]">
           <span class="agent-runtime-label">GEN</span>
           <span class="agent-runtime-value">${generation}</span>
         </div>
       ` : null}
 
       ${model ? html`
-        <div class="flex items-center gap-1.5 text-[length:var(--fs-sm)]">
+        <div class="flex items-center gap-1.5 text-[13px]">
           <span class="agent-runtime-label">MODEL</span>
           <span class="agent-runtime-value agent-runtime-model">${model}</span>
         </div>
       ` : null}
 
       ${lastTurnAge != null ? html`
-        <div class="flex items-center gap-1.5 text-[length:var(--fs-sm)]">
+        <div class="flex items-center gap-1.5 text-[13px]">
           <span class="agent-runtime-label">TURN</span>
           <span class="agent-runtime-value">${formatDuration(lastTurnAge)} ago</span>
         </div>

@@ -71,7 +71,7 @@ export function MissionBriefingCard() {
                         <details class="pt-1 border-t border-[var(--white-6)] mt-2">
                           <summary>근거 보기</summary>
                           <div class="flex gap-2 flex-wrap mt-2.5">
-                            ${section.evidence.map(item => html`<span class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.76)] text-[length:var(--fs-sm)] leading-[1.35]">${item}</span>`)}
+                            ${section.evidence.map(item => html`<span class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.76)] text-[13px] leading-[1.35]">${item}</span>`)}
                           </div>
                         </details>
                       `

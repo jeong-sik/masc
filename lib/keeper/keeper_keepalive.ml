@@ -71,7 +71,9 @@ let run_heartbeat_loop ~proactive_warmup_sec (ctx : _ context)
             in
             (try
                let synced = ensure_keeper_room_presence ctx.config meta_current in
-               ignore (write_meta ctx.config synced)
+               (match write_meta ctx.config synced with
+                | Ok () -> ()
+                | Error e -> Log.Keeper.warn "write_meta failed (heartbeat): %s" e)
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->
@@ -391,7 +393,9 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context)
          (Printexc.to_string exn));
     (try
        let synced = ensure_keeper_room_presence ctx.config m in
-       ignore (write_meta ctx.config synced)
+       (match write_meta ctx.config synced with
+        | Ok () -> ()
+        | Error e -> Log.Keeper.warn "write_meta failed (bootstrap): %s" e)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->

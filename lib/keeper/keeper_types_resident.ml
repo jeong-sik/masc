@@ -65,7 +65,7 @@ let maybe_append_keeper_fallback_models (models : string list) =
     in
     if extra = [] then models else models @ extra
 
-(** Check API key availability using model label strings (no model_spec needed).
+(** Check API key availability using model label strings.
     Parses labels to extract api_key_env, filtering out unparseable labels. *)
 let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
   let specs = Model_spec.available_model_specs_of_strings labels in
@@ -74,8 +74,8 @@ let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
       (String.concat ", " labels))
   else
     let missing =
-      List.filter_map (fun (m : Model_spec.model_spec) ->
-        match m.api_key_env with
+      List.filter_map (fun m ->
+        match m.Model_spec.api_key_env with
         | None -> None
         | Some env ->
             let v = Sys.getenv_opt env |> Option.value ~default:"" in

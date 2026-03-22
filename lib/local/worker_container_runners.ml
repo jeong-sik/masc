@@ -308,16 +308,14 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
                         | _ -> Oas.Hooks.Continue);
                 }
               in
-              let resume_model =
-                let base_model = Model_spec.default_local_model_spec () in
-                let model_id =
-                  if checkpoint.model <> "" then checkpoint.model
-                  else meta.effective_model
-                in
-                { base_model with model_id }
+              let resume_model_id =
+                if checkpoint.model <> "" then checkpoint.model
+                else meta.effective_model
               in
-              let resume_provider = oas_provider_of_model resume_model in
-              let resume_model_id = resume_model.Model_spec.model_id in
+              let resume_label =
+                Printf.sprintf "llama:%s" resume_model_id
+              in
+              let resume_provider = oas_provider_of_label resume_label in
               let prompt =
                 let tool_contract =
                   "Tool contract reminder: if you call masc_team_session_step \
@@ -378,14 +376,17 @@ let continue_worker ?worker_run_id ~sw ~base_path ~room_config ~worker_name
               Worker_oas.run_existing_worker_agent ~sw ~base_path ~meta ~prompt
                 ~workspace_path ~raw_trace ?worker_run_id ~tool_names_ref agent)))
 
-let run_worker ~sw ~base_path ~worker_name ~model ~team_session_id
+let run_worker ~sw ~base_path ~worker_name ~model_label ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope
     ?thinking_enabled ?max_turns ?worker_run_id ~role
     ~selection_note
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
-  let provider = oas_provider_of_model model in
-  let model_id = model.Model_spec.model_id in
+  let provider = oas_provider_of_label model_label in
+  let model_id = match Model_spec.model_spec_of_string model_label with
+    | Ok spec -> spec.model_id
+    | Error _ -> model_label
+  in
   run_worker_oas ~sw ~base_path ~worker_name ~provider ~model_id
     ~team_session_id
     ~room_config ?working_dir ?worker_class ?worker_size ?execution_scope

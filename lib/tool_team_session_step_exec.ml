@@ -195,7 +195,7 @@ let append_spawn_requested_event (env : _ step_env) ~worker_run_id prepared =
           ("worker_backend", if env.deps.is_local_spawn_agent prepared.spec.spawn_agent then `String "local" else `Null);
           ("wait_mode", `String (Team_session_types.wait_mode_to_string env.wait_mode));
           ("resolved_runtime", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.assigned_runtime);
-          ("resolved_model", `String prepared.runtime_model.model_id);
+          ("resolved_model", `String prepared.runtime_model_label);
           ("routing_reason", Option.fold ~none:`Null ~some:(fun s -> `String s) prepared.spec.routing_reason);
           ("ts_iso", `String (Types.now_iso ()));
         ])
@@ -405,7 +405,7 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
     else
       None
   in
-  let runtime_model =
+  let runtime_result =
     if env.deps.is_local_spawn_agent spec.spawn_agent then
       let model_name =
         match spec.spawn_model with
@@ -426,23 +426,24 @@ let prepare_spawn (env : _ step_env) (spec : spawn_spec) =
           with
           | Ok assignment ->
               Ok
-                ( Local_runtime_pool.model_spec_of_assignment
+                ( Local_runtime_pool.model_label_of_assignment
                     assignment,
                   Some assignment.lease,
                   Some assignment.runtime_id )
           | Error err -> Error err)
     else
-      Ok (Model_spec.default_local_model_spec (), None, None)
+      let default_spec = Model_spec.default_local_model_spec () in
+      Ok (Model_spec.label_of_model_spec default_spec, None, None)
   in
-  match runtime_model with
+  match runtime_result with
   | Error e -> Error (spec, runtime_actor_name, e)
-  | Ok (runtime_model, runtime_lease, assigned_runtime) ->
+  | Ok (runtime_model_label, runtime_lease, assigned_runtime) ->
       Ok
         {
           worker_run_id = env.deps.make_worker_run_id ();
           spec;
           runtime_actor_name;
-          runtime_model;
+          runtime_model_label;
           runtime_lease;
           assigned_runtime;
         }

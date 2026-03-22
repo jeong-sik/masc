@@ -494,12 +494,9 @@ let release (lease : lease) ~success ?error ?latency_ms () =
         updated.total_success updated.total_failure
         (Option.value ~default:"" (trim_opt error))
 
-let model_spec_of_assignment (assignment : assignment) =
-  {
-    Model_spec.llama_default with
-    model_id = assignment.model_name;
-    api_url = assignment.base_url;
-  }
+(** Return a parseable model label (e.g. "llama:qwen3.5") for an assignment. *)
+let model_label_of_assignment (assignment : assignment) : string =
+  Printf.sprintf "llama:%s" assignment.model_name
 
 let snapshot_to_yojson (snapshot : runtime_snapshot) =
   `Assoc

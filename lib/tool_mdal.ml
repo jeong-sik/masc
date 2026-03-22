@@ -75,10 +75,10 @@ let handle_start (ctx : context) args =
     in
     let resolved_worker_model =
       match
-        Mdal_worker.resolve_model_spec ~agent:profile.agent
+        Mdal_worker.resolve_model_label ~agent:profile.agent
           ~worker_model:worker_model_arg
       with
-      | Ok (_spec, label) -> label
+      | Ok label -> label
       | Error msg -> invalid_arg msg
     in
     let profile = { profile with tools_allow = runtime_tools } in

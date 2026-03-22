@@ -39,7 +39,6 @@ let handle_keeper_status ctx args : tool_result =
         get_bool args "include_compaction_history" (not fast)
       in
       let models = m.models in
-      let specs = Model_spec.available_model_specs_of_strings models in
       let primary_max_context = Model_spec.resolve_primary_max_context models in
       let base_dir = session_base_dir ctx.config in
          let ctx_opt =
@@ -96,17 +95,20 @@ let handle_keeper_status ctx args : tool_result =
            compaction_policy_of_keeper m
          in
 
-         let models_resolved = `List (List.map (fun (s : Model_spec.model_spec) ->
-           let pricing = Model_spec.pricing_of_spec s in
-           `Assoc [
-             ("provider", `String (Model_spec.string_of_provider s.provider));
-             ("model_id", `String s.model_id);
-             ("max_context", `Int (Model_spec.max_context s));
-             ("api_key_env", match s.api_key_env with None -> `Null | Some k -> `String k);
-             ("cost_per_million_input", `Float pricing.input_per_million);
-             ("cost_per_million_output", `Float pricing.output_per_million);
-           ]
-         ) specs) in
+         let models_resolved = `List (List.filter_map (fun label ->
+           match Model_spec.model_spec_of_string label with
+           | Error _ -> None
+           | Ok s ->
+             let pricing = Model_spec.pricing_of_spec s in
+             Some (`Assoc [
+               ("provider", `String (Model_spec.string_of_provider s.provider));
+               ("model_id", `String s.model_id);
+               ("max_context", `Int (Model_spec.max_context s));
+               ("api_key_env", match s.api_key_env with None -> `Null | Some k -> `String k);
+               ("cost_per_million_input", `Float pricing.input_per_million);
+               ("cost_per_million_output", `Float pricing.output_per_million);
+             ])
+         ) models) in
 
          let metrics_store = keeper_metrics_store ctx.config m.name in
          let metrics_path = keeper_metrics_path ctx.config m.name in

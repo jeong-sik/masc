@@ -470,14 +470,19 @@ let resolve_provider_run_request ~provider ~model_opt ~prompt =
             else
               Ok (snapshot, model))
 
-let oas_provider_config_of_spec (spec : Model_spec.model_spec) =
-  match Model_spec.registry_name_of_provider spec.provider with
-  | "gemini" -> (
-      match Provider_adapter.resolve_gemini_direct_auth () with
-      | Provider_adapter.Gemini_api_key -> Oas_type_adapters.to_oas_provider spec
-      | Provider_adapter.Gemini_vertex_adc _ -> None
-      | Provider_adapter.Gemini_auth_missing _ -> None)
-  | _ -> Oas_type_adapters.to_oas_provider spec
+(** Check if a model label is runnable (has provider config + Gemini auth check). *)
+let is_label_runnable (label : string) : bool =
+  match Model_spec.model_spec_of_string label with
+  | Error _ -> false
+  | Ok spec ->
+    let rn = Model_spec.registry_name_of_provider spec.provider in
+    match rn with
+    | "gemini" -> (
+        match Provider_adapter.resolve_gemini_direct_auth () with
+        | Provider_adapter.Gemini_api_key -> true
+        | Provider_adapter.Gemini_vertex_adc _ -> false
+        | Provider_adapter.Gemini_auth_missing _ -> false)
+    | _ -> Oas_type_adapters.to_oas_provider_of_label label <> None
 
 let run_system_prompt provider =
   Printf.sprintf
@@ -489,25 +494,24 @@ let execute_single_agent_run ~sw:_ ~provider ~model ~prompt =
   match label_result with
   | Error _ as error -> error
   | Ok label -> (
-      (* Validate provider is runnable before attempting the run *)
+      (* Validate label parses *)
       match Model_spec.model_spec_of_string label with
       | Error message -> Error message
-      | Ok spec -> (
-          match oas_provider_config_of_spec spec with
-          | None ->
-              Error
-                (Printf.sprintf
-                   "Provider '%s' is not runnable in dashboard single-agent mode"
-                   provider)
-          | Some _provider_cfg -> (
-              match
-                Oas_worker.run_model_by_label ~model_label:label ~goal:prompt
-                  ~system_prompt:(run_system_prompt provider)
-                  ~max_turns:4 ~max_tokens:2048 ~temperature:0.2 ()
-              with
-              | Ok result ->
-                  Ok (response_text_of_api_response result.response)
-              | Error error -> Error error )))
+      | Ok _spec ->
+        if not (is_label_runnable label) then
+          Error
+            (Printf.sprintf
+               "Provider '%s' is not runnable in dashboard single-agent mode"
+               provider)
+        else (
+          match
+            Oas_worker.run_model_by_label ~model_label:label ~goal:prompt
+              ~system_prompt:(run_system_prompt provider)
+              ~max_turns:4 ~max_tokens:2048 ~temperature:0.2 ()
+          with
+          | Ok result ->
+              Ok (response_text_of_api_response result.response)
+          | Error error -> Error error))
 
 let start_run ~sw ~provider ~model_opt ~prompt =
   match resolve_provider_run_request ~provider ~model_opt ~prompt with

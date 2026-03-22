@@ -84,7 +84,7 @@ type prepared_spawn = Tool_team_session_step.prepared_spawn = {
   worker_run_id : string;
   spec : spawn_spec;
   runtime_actor_name : string option;
-  runtime_model : Model_spec.model_spec;
+  runtime_model_label : string;
   runtime_lease : Local_runtime_pool.lease option;
   assigned_runtime : string option;
 }

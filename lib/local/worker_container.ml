@@ -465,33 +465,45 @@ let build_local_shell_tools ~room_config ~worker_name ~execution_scope ~workdir 
                ~on_exec ()))
   | Error e, _ | _, Error e -> Error e
 
-(** Convert a model_spec to an OAS Provider.config with fallback for Custom providers. *)
-let oas_provider_of_model (model : Model_spec.model_spec) : Oas.Provider.config =
-  match Oas_type_adapters.to_oas_provider model with
+(** Convert a model label to an OAS Provider.config.
+    Falls back to OpenAICompat for unrecognized labels. *)
+let oas_provider_of_label (label : string) : Oas.Provider.config =
+  match Oas_type_adapters.to_oas_provider_of_label label with
   | Some config -> config
   | None ->
-      (* Fallback for Custom providers — use OpenAICompat with model's api_url *)
-      {
-        Oas.Provider.provider =
+    (* Fallback: parse label to extract api_url, model_id etc. *)
+    match Model_spec.model_spec_of_string label with
+    | Ok spec ->
+      let pc = Model_spec.to_provider_config spec in
+      { Oas.Provider.provider =
           Oas.Provider.OpenAICompat
             {
-              base_url = model.api_url;
+              base_url = pc.base_url;
               auth_header = None;
               path = "/v1/chat/completions";
               static_token = None;
             };
-        model_id = model.model_id;
-        api_key_env = Option.value ~default:"DUMMY_KEY" model.api_key_env;
+        model_id = pc.model_id;
+        api_key_env = if pc.api_key <> "" then pc.api_key else "DUMMY_KEY";
       }
+    | Error _ ->
+      (* Last resort: treat label as model_id with glm defaults *)
+      { Oas.Provider.provider =
+          Oas.Provider.OpenAICompat
+            { base_url = "https://open.bigmodel.cn/api/paas/v4";
+              auth_header = None;
+              path = "/chat/completions";
+              static_token = None };
+        model_id = label;
+        api_key_env = "DUMMY_KEY" }
 
 (** Resolve provider from a model label string.
-    Parses the label into a model_spec, then converts to Provider.config.
     Returns the provider config and model_id on success. *)
 let resolve_oas_provider_of_label (label : string) :
     (Oas.Provider.config * string, string) result =
   match Model_spec.model_spec_of_string label with
   | Error msg -> Error msg
-  | Ok spec -> Ok (oas_provider_of_model spec, spec.model_id)
+  | Ok spec -> Ok (oas_provider_of_label label, spec.model_id)
 
 let oas_tool_names (tools : Oas.Tool.t list) =
   List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
@@ -543,7 +555,7 @@ let append_worker_completion_log ~base_path ~team_session_id ~worker_name
 
 (** Build (config, options) for Agent.resume — the continue_worker path.
     New workers use Worker_oas.build_agent (Builder pattern) instead.
-    Accepts [~provider] + [~model_id] instead of Model_spec.model_spec. *)
+    Accepts [~provider] + [~model_id] as resolved values. *)
 let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
     ~max_turns ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
     ?(guardrails : Oas.Guardrails.t option) () =

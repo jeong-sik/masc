@@ -1,17 +1,14 @@
 (** Oas_worker — Unified entry point for OAS-based MASC tool modules.
 
     Callers either pass a [cascade_name] string for configured fallback
-    selection, a [model_label] string for {!run_model_by_label}, or an
-    explicit {!Model_spec.model_spec} when the runtime must honor a
-    concrete provider/model choice. Internal [config] / [build] / [run]
-    are implementation details and not exported.
+    selection or a [model_label] string for {!run_model_by_label}.
+    All public APIs accept string model labels; no [Model_spec.model_spec]
+    type is exposed.
 
-    Prefer {!run_named} (cascade) or {!run_model_by_label} (explicit model
-    as string) over {!run_model} (requires Model_spec.model_spec).
-
-    @since Phase 1 — MASC→OAS migration
+    @since Phase 1 — MASC->OAS migration
     @since Phase 4 — public API restricted to named cascade functions
     @since Phase 5 — run_model_by_label added (string-based API)
+    @since Phase 6 — Model_spec.model_spec type fully eliminated from API
     @since Phase 8 — Cascade module deleted, defaults moved here *)
 
 module Oas = Agent_sdk
@@ -52,28 +49,9 @@ val run_named :
   (run_result, string) result
 
 (** Run a single Agent.run() using a model label string (e.g. "llama:qwen3.5").
-    Parses the label internally. Callers do not need Model_spec.model_spec. *)
+    Validates the label parses before attempting execution. *)
 val run_model_by_label :
   model_label:string ->
-  goal:string ->
-  ?system_prompt:string ->
-  ?tools:Oas.Tool.t list ->
-  ?max_turns:int ->
-  ?temperature:float ->
-  ?max_tokens:int ->
-  ?accept:(Oas_response.api_response -> bool) ->
-  ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.hooks ->
-  ?context_reducer:Oas.Context_reducer.t ->
-  ?memory:Oas.Memory.t ->
-  ?on_event:(Oas.Types.sse_event -> unit) ->
-  unit ->
-  (run_result, string) result
-
-(** Run a single Agent.run() with an explicit Model_spec.model_spec.
-    Prefer {!run_model_by_label} for new code. *)
-val run_model :
-  model_spec:Model_spec.model_spec ->
   goal:string ->
   ?system_prompt:string ->
   ?tools:Oas.Tool.t list ->
@@ -107,7 +85,7 @@ val run_named_with_masc_tools :
   (run_result, string) result
 
 val run_model_with_masc_tools :
-  model_spec:Model_spec.model_spec ->
+  model_label:string ->
   goal:string ->
   ?system_prompt:string ->
   masc_tools:Types.tool_schema list ->

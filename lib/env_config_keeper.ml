@@ -2,7 +2,7 @@ open Env_config_core
 
 module Endpoints = struct
   (** @deprecated MODEL-MCP server URL - no longer used.
-      Use {!Oas_worker.run_named} or {!Oas_worker.run_model} instead. *)
+      Use {!Oas_worker.run_named} or {!Oas_worker.run_model_by_label} instead. *)
   let model_mcp_url =
     get_string ~default:"" "MODEL_MCP_URL"  (* Default empty - not used *)
 

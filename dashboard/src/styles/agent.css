@@ -12,7 +12,7 @@
   text-align: left;
   width: 100%;
 }
-.agent-card:hover { border-color: rgba(255,255,255,0.2); }
+.agent-card:hover { border-color: var(--white-20); }
 .agent-card .agent-header {
   display: flex;
   align-items: center;
@@ -50,7 +50,7 @@
   font-size: var(--fs-2xs);
   font-weight: 600;
   font-family: var(--font-mono, monospace);
-  background: rgba(138, 163, 211, 0.12);
+  background: var(--border-slate-12);
   color: var(--text-muted);
   width: 16px;
   height: 16px;
@@ -146,7 +146,7 @@
 .agents-chip {
   padding: 4px 14px;
   border-radius: 16px;
-  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.1));
+  border: 1px solid var(--card-border, var(--white-10));
   background: none;
   color: var(--text-muted);
   font-size: var(--fs-sm);
@@ -170,10 +170,10 @@
   padding: 1px 5px;
   margin-left: 4px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--white-12);
   color: inherit;
 }
 .agents-chip--active .agents-chip-count {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--white-25);
 }
 

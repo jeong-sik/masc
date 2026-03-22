@@ -25,7 +25,7 @@
 /* ── Collapsible Sections ── */
 
 .overview-section-collapsible {
-  border: 1px solid rgba(138, 163, 211, 0.12);
+  border: 1px solid var(--border-slate-12);
   border-radius: 10px;
   margin-top: 12px;
   overflow: hidden;
@@ -43,7 +43,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
   transition: background 0.15s;
 }
 
@@ -80,7 +80,7 @@
 }
 
 .monitor-pill.ok {
-  background: rgba(74, 222, 128, 0.12);
+  background: var(--ok-12);
   color: var(--ok);
 }
 
@@ -207,7 +207,7 @@
 
 .control-btn.is-active {
   border-color: rgba(74, 222, 128, 0.48);
-  background: rgba(74, 222, 128, 0.15);
+  background: var(--ok-soft);
   color: #b4f5ca;
 }
 
@@ -251,7 +251,7 @@
   gap: 10px;
 }
 .control-btn.ghost {
-  border-color: rgba(138, 163, 211, 0.35);
+  border-color: var(--border-slate-35);
   background: var(--white-5);
   color: #9fb8e1;
 }
@@ -271,7 +271,7 @@
 .mission-jump-link {
   padding: 4px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(138, 163, 211, 0.22);
+  border: 1px solid var(--border-slate-22);
   background: var(--white-3);
   color: #9fb8e1;
   font-size: var(--fs-sm);
@@ -285,7 +285,7 @@
 
 /* ── Mission Collapsible Sections ──────────────────────── */
 .mission-collapsible-section {
-  border: 1px solid rgba(138, 163, 211, 0.12);
+  border: 1px solid var(--border-slate-12);
   border-radius: var(--radius-md, 10px);
   overflow: hidden;
 }
@@ -339,7 +339,7 @@
 .tab-pill {
   padding: 4px 14px;
   border-radius: 16px;
-  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.1));
+  border: 1px solid var(--card-border, var(--white-10));
   background: none;
   color: var(--text-muted);
   font-size: var(--fs-sm);
@@ -357,7 +357,7 @@
 }
 
 .tab-collapsible {
-  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--card-border, var(--white-6));
   border-radius: 8px;
 }
 .tab-collapsible__summary {

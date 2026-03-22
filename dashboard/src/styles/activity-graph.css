@@ -117,7 +117,7 @@
 
 .activity-graph-leaderboard-status.active {
   color: var(--ok);
-  background: rgba(74, 222, 128, 0.1);
+  background: var(--ok-10);
 }
 
 .activity-graph-leaderboard-status.inactive {

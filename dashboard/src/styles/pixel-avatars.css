@@ -133,7 +133,7 @@
   padding: 3px 8px;
   border-radius: 6px;
   background: rgba(30, 30, 40, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-12);
   color: var(--text-strong);
   font-size: var(--fs-2xs);
   line-height: 1.3;

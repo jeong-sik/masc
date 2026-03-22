@@ -1,9 +1,9 @@
 /* Keeper Chat Panel — FF-themed conversation UI */
 
 .keeper-chat {
-  border: 1px solid var(--ff-border, rgba(200, 168, 78, 0.35));
+  border: 1px solid var(--ff-border, var(--color-ff-border));
   border-radius: var(--radius-md, 12px);
-  background: var(--ff-panel, rgba(10, 22, 40, 0.92));
+  background: var(--ff-panel, var(--color-ff-panel));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -42,7 +42,7 @@
 }
 
 .keeper-chat__empty {
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--white-20);
   font-size: var(--fs-base);
   text-align: center;
   padding: 40px 0;
@@ -57,7 +57,7 @@
 
 .keeper-chat__role {
   font-size: var(--fs-2xs);
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-35);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -76,8 +76,8 @@
 }
 
 .keeper-chat__msg--user .keeper-chat__text {
-  background: rgba(71, 184, 255, 0.12);
-  border: 1px solid rgba(71, 184, 255, 0.2);
+  background: var(--accent-12);
+  border: 1px solid var(--accent-20);
   color: var(--text-body, var(--text-body));
 }
 
@@ -92,7 +92,7 @@
 }
 
 .keeper-chat__text--thinking {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--white-30);
   font-style: italic;
 }
 

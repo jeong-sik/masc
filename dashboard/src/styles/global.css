@@ -506,7 +506,7 @@ a:hover {
 }
 
 .rail-refresh-btn:hover {
-  background: rgba(71, 184, 255, 0.2);
+  background: var(--accent-20);
 }
 
 .rail-secondary-btn {

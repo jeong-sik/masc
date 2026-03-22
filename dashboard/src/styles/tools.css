@@ -230,7 +230,7 @@
 .tool-summary-heading {
   font-size: var(--fs-base);
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-60);
   margin: 0 0 10px 0;
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -263,7 +263,7 @@
 
 .tool-summary-desc {
   font-size: var(--fs-sm);
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-40);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -292,7 +292,7 @@
 .tool-metrics-error {
   padding: 10px 12px;
   border-radius: 8px;
-  background: rgba(239, 68, 68, 0.12);
+  background: var(--bad-12);
   border: 1px solid rgba(239, 68, 68, 0.34);
   color: #fecaca;
   font-size: var(--fs-base);

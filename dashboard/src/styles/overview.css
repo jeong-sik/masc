@@ -11,8 +11,8 @@
   gap: 12px;
   padding: 14px 18px;
   border-radius: 6px;
-  background: rgba(10, 22, 40, 0.92);
-  border: 1px solid var(--border-subtle, rgba(200, 168, 78, 0.15));
+  background: var(--color-ff-panel);
+  border: 1px solid var(--border-subtle, var(--ff-gold-15));
   border-left: 3px solid var(--ok);
   font-size: var(--fs-md);
   font-weight: 500;
@@ -55,7 +55,7 @@
   animation: fadeSlide 0.3s ease both;
 }
 
-.attention-spotlight__card.ok { border-color: rgba(74, 222, 128, 0.3); }
+.attention-spotlight__card.ok { border-color: var(--ok-30); }
 .attention-spotlight__card.warn { border-color: rgba(251, 191, 36, 0.3); }
 .attention-spotlight__card.bad { border-color: rgba(248, 113, 113, 0.3); }
 
@@ -138,7 +138,7 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   padding-bottom: 2px;
-  border-bottom: 1px solid rgba(138, 163, 211, 0.08);
+  border-bottom: 1px solid var(--border-slate-8);
 }
 
 .narrative-group__events {
@@ -164,7 +164,7 @@
   color: var(--text-muted);
   font-size: var(--fs-xs);
   padding: 4px 8px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
   border-radius: 4px;
   margin-top: 2px;
   line-height: 1.4;
@@ -176,7 +176,7 @@
   padding: 8px;
   margin-top: 4px;
   background: none;
-  border: 1px dashed var(--card-border, rgba(255, 255, 255, 0.1));
+  border: 1px dashed var(--card-border, var(--white-10));
   border-radius: 6px;
   color: var(--text-muted);
   font-size: var(--fs-xs);
@@ -298,7 +298,7 @@
   gap: 10px;
   padding: 12px;
   border-radius: 10px;
-  border: 1px solid rgba(138, 163, 211, 0.12);
+  border: 1px solid var(--border-slate-12);
   background: rgba(10, 22, 40, 0.44);
 }
 
@@ -340,7 +340,7 @@
   height: 24px;
   padding: 0 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-8);
   color: var(--text-muted);
   font-size: var(--fs-xs);
   font-weight: 600;
@@ -359,11 +359,11 @@
   min-height: 116px;
   padding: 12px;
   border-radius: 8px;
-  border: 1px dashed rgba(138, 163, 211, 0.18);
+  border: 1px dashed var(--border-slate-18);
   color: var(--text-muted);
   font-size: var(--fs-sm);
   text-align: center;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
 }
 
 .hot-sessions__grid {
@@ -374,7 +374,7 @@
 
 .hot-session-card {
   background: var(--white-3);
-  border: 1px solid var(--card-border, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--card-border, var(--white-8));
   border-radius: 8px;
   padding: 10px 12px;
   cursor: pointer;
@@ -417,8 +417,8 @@
   min-height: 20px;
   padding: 0 8px;
   border-radius: 999px;
-  border: 1px solid rgba(138, 163, 211, 0.18);
-  background: rgba(138, 163, 211, 0.08);
+  border: 1px solid var(--border-slate-18);
+  background: var(--border-slate-8);
   color: var(--text-muted);
   font-size: var(--fs-2xs);
   letter-spacing: 0.02em;
@@ -468,7 +468,7 @@
   transition: background 0.15s;
 }
 .agent-pulse-card:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-4);
 }
 .agent-pulse-card--working {
   border-left: 2px solid var(--ok);
@@ -616,7 +616,7 @@
 
 .activity-graph-leaderboard-status.active {
   color: var(--ok);
-  background: rgba(74, 222, 128, 0.1);
+  background: var(--ok-10);
 }
 
 .activity-graph-leaderboard-status.inactive {

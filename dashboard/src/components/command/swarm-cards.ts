@@ -83,7 +83,7 @@ export function SwarmWorkerGrid({ total }: { total: number }) {
 
   return html`
     <div class="swarm-worker-grid flex flex-wrap gap-[3px] items-center">
-      ${dots.map(() => html`<span class="swarm-worker-dot present"></span>`)}
+      ${dots.map(() => html`<span class="swarm-worker-dot w-2 h-2 rounded-full present"></span>`)}
       ${overflow > 0 ? html`<span class="swarm-worker-count">+${overflow}</span>` : null}
       <span class="swarm-worker-count">(워커 ${total})</span>
     </div>

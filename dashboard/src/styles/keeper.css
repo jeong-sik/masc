@@ -13,7 +13,7 @@
 }
 .keeper-detail {
   background: #1a1a2e;
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--white-12);
   border-radius: 16px;
   width: 90vw;
   max-width: 1100px;
@@ -57,7 +57,7 @@
   font-size: var(--fs-base);
   margin-bottom: 10px;
 }
-.keeper-field-search:focus { outline: none; border-color: rgba(74,222,128,0.4); }
+.keeper-field-search:focus { outline: none; border-color: var(--ok-40); }
 .keeper-field-row {
   display: flex;
   gap: 10px;
@@ -79,7 +79,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 7px 9px;
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--border-slate-18);
   border-radius: 8px;
   background: var(--white-3);
   font-size: var(--fs-sm);
@@ -95,7 +95,7 @@
   margin-top: 10px;
   border: 1px solid var(--card-border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
   padding: 10px;
   font-size: var(--fs-sm);
   color: #cfe0ff;
@@ -125,14 +125,14 @@
   font-size: var(--fs-xs);
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(74,222,128,0.12);
+  background: var(--ok-12);
   color: var(--ok);
 }
 
 /* ── Keeper Comms Section (chat + diagnostics) ────────── */
 .keeper-comms-section {
   margin-top: 20px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--white-10);
   padding-top: 20px;
 }
 
@@ -203,9 +203,9 @@
 /* ── Keeper Chat Panel (merged from keeper-chat.css) ────── */
 
 .keeper-chat {
-  border: 1px solid var(--ff-border, rgba(200, 168, 78, 0.35));
+  border: 1px solid var(--ff-border, var(--color-ff-border));
   border-radius: var(--radius-md, 12px);
-  background: var(--ff-panel, rgba(10, 22, 40, 0.92));
+  background: var(--ff-panel, var(--color-ff-panel));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -244,7 +244,7 @@
 }
 
 .keeper-chat__empty {
-  color: rgba(255, 255, 255, 0.2);
+  color: var(--white-20);
   font-size: var(--fs-base);
   text-align: center;
   padding: 40px 0;
@@ -259,7 +259,7 @@
 
 .keeper-chat__role {
   font-size: var(--fs-2xs);
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-35);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -278,8 +278,8 @@
 }
 
 .keeper-chat__msg--user .keeper-chat__text {
-  background: rgba(71, 184, 255, 0.12);
-  border: 1px solid rgba(71, 184, 255, 0.2);
+  background: var(--accent-12);
+  border: 1px solid var(--accent-20);
   color: var(--text-body, var(--text-body));
 }
 
@@ -294,7 +294,7 @@
 }
 
 .keeper-chat__text--thinking {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--white-30);
   font-style: italic;
 }
 

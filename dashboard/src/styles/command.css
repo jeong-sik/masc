@@ -10,8 +10,8 @@
     padding: 24px;
     border-radius: 24px;
     background:
-      radial-gradient(circle at top left, rgba(34,211,238,0.12), transparent 22%),
-      radial-gradient(circle at top right, rgba(74,222,128,0.1), transparent 24%),
+      radial-gradient(circle at top left, var(--cyan-12), transparent 22%),
+      radial-gradient(circle at top right, var(--ok-10), transparent 24%),
       linear-gradient(180deg, rgba(3,7,18,0.98), rgba(8,14,28,0.96));
     box-shadow: inset 0 1px 0 var(--white-5);
   }
@@ -64,11 +64,11 @@
 
   &.highlight {
     border-color: rgba(34,211,238,0.34);
-    box-shadow: 0 0 0 1px rgba(34,211,238,0.16);
+    box-shadow: 0 0 0 1px var(--cyan-16);
   }
 
   & span {
-    color: rgba(255,255,255,0.6);
+    color: var(--white-60);
     font-size: var(--fs-sm);
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -83,7 +83,7 @@
   }
 
   & small {
-    color: rgba(255,255,255,0.5);
+    color: var(--white-50);
     font-size: var(--fs-sm);
   }
 }
@@ -131,8 +131,8 @@
 .command-entry-card {
   padding: 14px 16px;
   border-radius: 14px;
-  border: 1px solid rgba(138, 163, 211, 0.16);
-  background: rgba(255,255,255,0.035);
+  border: 1px solid var(--border-slate-16);
+  background: var(--white-3h);
   display: grid;
   gap: 6px;
 
@@ -183,7 +183,7 @@
     width: 220px;
     height: 220px;
     border-radius: 50%;
-    background: radial-gradient(circle, rgba(74,222,128,0.12), transparent 62%);
+    background: radial-gradient(circle, var(--ok-12), transparent 62%);
     pointer-events: none;
   }
 }
@@ -266,7 +266,7 @@
 
 .command-guide-card.highlight {
   border-color: rgba(34,211,238,0.32);
-  background: linear-gradient(180deg, rgba(34,211,238,0.12), var(--white-3));
+  background: linear-gradient(180deg, var(--cyan-12), var(--white-3));
 }
 
 .command-guide-card.ok,
@@ -297,15 +297,15 @@
   background: var(--white-3);
 
   &.warn {
-    border-color: rgba(251,191,36,0.24);
+    border-color: var(--warn-soft);
   }
 
   &.ok {
-    border-color: rgba(74,222,128,0.22);
+    border-color: var(--ok-22);
   }
 
   &.bad {
-    border-color: rgba(248,113,113,0.28);
+    border-color: var(--bad-soft);
   }
 
   & p {
@@ -388,22 +388,22 @@
 .command-tab-group-label {
   font-size: var(--fs-xs);
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-40);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding-left: 4px;
 }
 
 .command-surface-tab {
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--white-12);
   background: var(--white-4);
-  color: rgba(255,255,255,0.72);
+  color: var(--white-72);
   border-radius: 999px;
   padding: 8px 14px;
   text-transform: capitalize;
 
   &.active {
-    background: rgba(34,211,238,0.16);
+    background: var(--cyan-16);
     color: #67e8f9;
     border-color: rgba(34,211,238,0.38);
   }
@@ -427,7 +427,7 @@
   border-radius: 18px;
   border: 1px solid var(--white-8);
   background:
-    radial-gradient(circle at top left, rgba(34,211,238,0.16), transparent 32%),
+    radial-gradient(circle at top left, var(--cyan-16), transparent 32%),
     linear-gradient(135deg, rgba(7,10,18,0.94), rgba(12,18,30,0.94));
   backdrop-filter: blur(18px);
 
@@ -529,11 +529,11 @@
 .warroom-presence-card,
 .warroom-feed-card {
   background:
-    linear-gradient(180deg, var(--white-5), rgba(255,255,255,0.035));
+    linear-gradient(180deg, var(--white-5), var(--white-3h));
   border-color: rgba(148,163,184,0.18);
 
   &.ok {
-    border-color: rgba(74,222,128,0.24);
+    border-color: var(--ok-24);
   }
 
   &.warn {
@@ -681,7 +681,7 @@
   &.selected {
     border-color: rgba(34,211,238,0.38);
     box-shadow: 0 0 0 1px rgba(34,211,238,0.2) inset;
-    background: linear-gradient(180deg, rgba(34,211,238,0.12), var(--white-3));
+    background: linear-gradient(180deg, var(--cyan-12), var(--white-3));
   }
 }
 
@@ -719,7 +719,7 @@
   color: rgba(255,255,255,0.86);
 
   &.ok {
-    background: rgba(74,222,128,0.15);
+    background: var(--ok-soft);
     color: var(--ok);
   }
 
@@ -735,7 +735,7 @@
 
   &.muted {
     background: var(--white-6);
-    color: rgba(255,255,255,0.35);
+    color: var(--white-35);
   }
 }
 
@@ -770,7 +770,7 @@
   }
 
   &.ok {
-    border-color: rgba(74,222,128,0.35);
+    border-color: var(--ok-35);
     background: rgba(74,222,128,0.08);
   }
 

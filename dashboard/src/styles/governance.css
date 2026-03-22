@@ -76,7 +76,7 @@ button.council-row.selected {
 .council-state.open,
 .council-state.positive {
   border-color: rgba(74, 222, 128, 0.48);
-  background: rgba(74, 222, 128, 0.15);
+  background: var(--ok-soft);
   color: #b4f5ca;
 }
 
@@ -134,7 +134,7 @@ button.council-row.selected {
   flex: 0 0 auto;
   border-radius: 999px;
   padding: 2px 8px;
-  border: 1px solid rgba(138, 163, 211, 0.22);
+  border: 1px solid var(--border-slate-22);
   background: var(--white-6);
   color: #a9c3ee;
   font-size: var(--fs-2xs);
@@ -167,14 +167,14 @@ button.council-row.selected {
 
 .governance-chip.ok,
 .governance-badge.positive {
-  border-color: rgba(74, 222, 128, 0.4);
-  background: rgba(74, 222, 128, 0.12);
+  border-color: var(--ok-40);
+  background: var(--ok-12);
   color: #b4f5ca;
 }
 
 .governance-chip.warn {
   border-color: rgba(251, 191, 36, 0.4);
-  background: rgba(251, 191, 36, 0.12);
+  background: var(--warn-12);
   color: #ffe09b;
 }
 
@@ -239,7 +239,7 @@ button.council-row.selected {
 .governance-activity-row {
   border: 1px solid var(--card-border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.035);
+  background: var(--white-3h);
   padding: 10px 11px;
 }
 
@@ -269,14 +269,14 @@ button.council-row.selected {
   padding: 2px 8px;
   font-size: var(--fs-2xs);
   text-transform: lowercase;
-  border: 1px solid rgba(138, 163, 211, 0.22);
+  border: 1px solid var(--border-slate-22);
   background: var(--white-5);
   color: #b7cbee;
 }
 
 .governance-badge.negative {
   border-color: rgba(239, 68, 68, 0.44);
-  background: rgba(239, 68, 68, 0.12);
+  background: var(--bad-12);
   color: #fecaca;
 }
 

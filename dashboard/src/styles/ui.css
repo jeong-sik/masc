@@ -62,7 +62,7 @@
   margin: 0;
   padding: 8px;
   border-radius: 12px;
-  border: 1px solid rgba(138, 163, 211, 0.22);
+  border: 1px solid var(--border-slate-22);
   background: rgba(17, 26, 46, 0.8);
   backdrop-filter: blur(8px);
 }
@@ -70,12 +70,12 @@
 .main-tab-btn {
   border: 1px solid transparent;
   color: #99aed8;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
   font-weight: 500;
 
   &:hover {
     color: #d6e5ff;
-    border-color: rgba(138, 163, 211, 0.35);
+    border-color: var(--border-slate-35);
   }
 
   &.active {
@@ -132,7 +132,7 @@ button.agent-card {
 .room-truth-strip-loading,
 .room-truth-strip-error {
   border-radius: 14px;
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--border-slate-18);
   background: rgba(19, 29, 51, 0.72);
   padding: 12px 14px;
   color: #9db4de;
@@ -145,7 +145,7 @@ button.agent-card {
 
 .room-truth-card {
   border-radius: 14px;
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--border-slate-18);
   background:
     linear-gradient(180deg, rgba(40, 56, 92, 0.34), rgba(19, 29, 51, 0.9)),
     var(--card);
@@ -226,7 +226,7 @@ button.agent-card {
 button.monitor-alert,
 button.monitor-row {
   width: 100%;
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--border-slate-18);
   background: var(--white-4);
   color: inherit;
   font: inherit;
@@ -237,7 +237,7 @@ button.monitor-row {
 
   &:hover {
     transform: translateY(-1px);
-    border-color: rgba(138, 163, 211, 0.35);
+    border-color: var(--border-slate-35);
     background: var(--white-6);
   }
 
@@ -328,7 +328,7 @@ button.monitor-alert.bad,
   padding: 2px 8px;
   border-radius: 999px;
 }
-.status-badge.active { background: rgba(74,222,128,0.15); color: var(--ok); }
+.status-badge.active { background: var(--ok-soft); color: var(--ok); }
 .status-badge.busy { background: rgba(251,191,36,0.15); color: var(--warn); }
 .status-badge.listening { background: rgba(56,189,248,0.15); color: #38bdf8; }
 .status-badge.idle { background: rgba(136,136,136,0.15); color: var(--text-dim); }
@@ -338,7 +338,7 @@ button.monitor-alert.bad,
   background: rgba(251,191,36,0.15); color: var(--warn);
 }
 .status-badge.done, .status-badge.completed {
-  background: rgba(74,222,128,0.15); color: var(--ok);
+  background: var(--ok-soft); color: var(--ok);
 }
 .status-badge.running { background: rgba(251,191,36,0.15); color: var(--warn); }
 .status-badge.interrupted { background: rgba(56,189,248,0.15); color: #38bdf8; }

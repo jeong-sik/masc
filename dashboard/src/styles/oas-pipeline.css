@@ -62,7 +62,7 @@
 
 .oas-event-row:hover,
 .oas-keeper-row:hover {
-  background: var(--white-6, rgba(255, 255, 255, 0.03));
+  background: var(--white-6, var(--white-3));
 }
 
 .oas-event-ts {
@@ -190,7 +190,7 @@
 
 .pipeline-stage-label {
   font-size: var(--fs-2xs);
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-35);
   letter-spacing: 0.04em;
   margin-left: 4px;
   white-space: nowrap;
@@ -314,7 +314,7 @@
 .pipeline-stage-badge.stage-proactive {
   color: rgba(74, 222, 128, 0.95);
   background: rgba(74, 222, 128, 0.14);
-  border-color: rgba(74, 222, 128, 0.25);
+  border-color: var(--ok-25);
 }
 
 .pipeline-stage-badge.stage-offline {

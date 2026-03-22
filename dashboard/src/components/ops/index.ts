@@ -156,18 +156,18 @@ export function Ops() {
   ]
 
   return html`
-    <section class="ops-view">
-      <div class="ops-header card">
+    <section class="flex flex-col gap-4">
+      <div class="flex justify-between items-start gap-4 max-[880px]:flex-col card">
         <div>
           <div class="card-title-row">
             <div class="card-title">개입</div>
           </div>
-          <h2 class="ops-heading">방, 세션, 키퍼를 바로 조정하는 화면</h2>
-          <p class="ops-subheading">
+          <h2 class="text-text-strong text-2xl leading-[1.2]">방, 세션, 키퍼를 바로 조정하는 화면</h2>
+          <p class="mt-1.5 text-text-muted text-[var(--fs-base)] max-w-[62ch]">
             읽는 화면이 아니라 행동하는 화면입니다. 방, 세션, 키퍼를 나눠 보고 바로 개입합니다.
           </p>
         </div>
-        <div class="ops-toolbar">
+        <div class="flex items-end gap-2.5 flex-wrap max-[880px]:w-full">
           <label class="control-label" for="ops-actor">개입 ID</label>
           <input
             id="ops-actor"
@@ -196,14 +196,14 @@ export function Ops() {
       <${RoomTruthStrip} />
       ${workflowContext ? html`
         <section class="ops-banner ${workflowReady ? 'info' : 'warn'} grid gap-2">
-          <div class="ops-handoff-head">
+          <div class="flex gap-2 flex-wrap items-center text-[rgba(255,255,255,0.72)]">
             <strong>${workflowContext.source_label}</strong>
             <span>${workflowActionLabel(workflowContext.action_type)}</span>
             <span>${workflowTargetLabel(workflowContext)}</span>
           </div>
-          <div class="ops-handoff-body">${workflowContext.summary}</div>
+          <div class="text-[rgba(255,255,255,0.84)] leading-[1.5]">${workflowContext.summary}</div>
           ${workflowContext.payload_preview ? html`<div class="ops-handoff-preview">${workflowContext.payload_preview}</div>` : null}
-          <div class="ops-handoff-meta">
+          <div class="text-[rgba(255,255,255,0.58)] text-[var(--fs-sm)]">
             ${workflowReady
               ? '추천 액션 기준으로 대상 선택과 입력값을 미리 맞춰 두었습니다.'
               : '대상이 현재 snapshot에 없습니다. 일반 개입 화면으로 열렸고, 실제 대상 선택은 수동으로 해야 합니다.'}
@@ -253,8 +253,8 @@ export function Ops() {
         if (actions.length === 0) return null
         return html`
           <section class="ops-action-guide">
-            <h3 class="ops-action-guide-title">지금 할 수 있는 것</h3>
-            <div class="ops-action-guide-list">
+            <h3 class="text-[var(--fs-base)] font-semibold text-[rgba(255,255,255,0.6)] mb-2.5">지금 할 수 있는 것</h3>
+            <div class="flex flex-col gap-2">
               ${actions.slice(0, 3).map(action => html`
                 <button class="ops-action-guide-item ${action.tone}" onClick=${action.onClick}>
                   <strong class="font-semibold">${action.label}</strong>
@@ -274,9 +274,9 @@ export function Ops() {
         <div class="ops-priority-grid">
           ${priorityCards.map(card => html`
             <div key=${card.key} class="ops-priority-card ${card.tone}">
-              <span class="ops-priority-label">${card.label}</span>
+              <span class="text-text-muted text-[var(--fs-xs)] uppercase tracking-[0.06em]">${card.label}</span>
               <strong>${card.value}</strong>
-              <div class="ops-priority-detail">${card.detail}</div>
+              <div class="text-[#9ab1d7] text-[var(--fs-sm)] leading-[1.45]">${card.detail}</div>
             </div>
           `)}
         </div>

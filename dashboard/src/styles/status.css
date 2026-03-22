@@ -94,7 +94,7 @@
   padding: 2px 8px;
   border-radius: 999px;
   border: 1px solid rgba(71, 184, 255, 0.36);
-  background: rgba(71, 184, 255, 0.12);
+  background: var(--accent-12);
   color: #9ad9ff;
   white-space: nowrap;
 }

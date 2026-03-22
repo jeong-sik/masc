@@ -4,7 +4,7 @@
   display: flex;
   gap: 8px;
   padding: 12px 16px;
-  background: rgba(255,255,255,0.02);
+  background: var(--white-2);
   border: 1px solid var(--white-6);
   border-radius: 12px;
   overflow-x: auto;
@@ -12,10 +12,7 @@
   min-height: 56px;
 }
 
-.pulse-strip-empty {
-  color: rgba(255,255,255,0.3);
-  font-size: 0.8rem;
-}
+/* pulse-strip-empty: inlined as Tailwind */
 
 .pulse-bubble {
   display: flex;
@@ -37,7 +34,7 @@
 }
 
 .pulse-working {
-  border-color: rgba(74,222,128,0.35);
+  border-color: var(--ok-35);
   animation: livePulse 2s ease-in-out infinite;
 }
 
@@ -59,7 +56,7 @@
 
 .pulse-name {
   font-size: 0.65rem;
-  color: rgba(255,255,255,0.55);
+  color: var(--white-55);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -67,8 +64,8 @@
 }
 
 @keyframes livePulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.25); }
-  50% { box-shadow: 0 0 8px 2px rgba(74,222,128,0.12); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
+  50% { box-shadow: 0 0 8px 2px var(--ok-12); }
 }
 
 /* ── Live Panels (Activity + Focus) ──────────────────── */
@@ -106,7 +103,7 @@
 .activity-count,
 .focus-count {
   font-size: 0.75rem;
-  color: rgba(255,255,255,0.4);
+  color: var(--white-40);
 }
 
 .activity-filter-bar {
@@ -119,7 +116,7 @@
   border-radius: 6px;
   border: 1px solid var(--white-10);
   background: transparent;
-  color: rgba(255,255,255,0.4);
+  color: var(--white-40);
   font-size: 0.72rem;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -127,14 +124,14 @@
 
 .activity-filter-btn.active {
   color: rgba(255,255,255,0.85);
-  border-color: rgba(255,255,255,0.2);
+  border-color: var(--white-20);
   background: var(--white-6);
 }
 
 .activity-filter-btn.live-event-broadcast.active { border-color: rgba(96,165,250,0.4); color: var(--accent); }
-.activity-filter-btn.live-event-task.active { border-color: rgba(74,222,128,0.4); color: var(--ok); }
+.activity-filter-btn.live-event-task.active { border-color: var(--ok-40); color: var(--ok); }
 .activity-filter-btn.live-event-keeper.active { border-color: rgba(168,85,247,0.4); color: #a855f7; }
-.activity-filter-btn.live-event-system.active { border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7); }
+.activity-filter-btn.live-event-system.active { border-color: var(--white-20); color: var(--white-70); }
 
 .activity-stream-list {
   display: grid;
@@ -149,14 +146,14 @@
 .focus-empty {
   padding: 24px;
   text-align: center;
-  color: rgba(255,255,255,0.25);
+  color: var(--white-25);
   font-size: 0.8rem;
 }
 
 .activity-item {
   padding: 8px 12px;
   border-radius: 8px;
-  background: rgba(255,255,255,0.02);
+  background: var(--white-2);
   border-left: 3px solid transparent;
   transition: background 0.15s;
 }
@@ -196,25 +193,25 @@
 }
 
 .activity-kind-chip.live-event-broadcast { background: rgba(96,165,250,0.15); color: var(--accent); }
-.activity-kind-chip.live-event-task { background: rgba(74,222,128,0.15); color: var(--ok); }
+.activity-kind-chip.live-event-task { background: var(--ok-soft); color: var(--ok); }
 .activity-kind-chip.live-event-keeper { background: rgba(168,85,247,0.15); color: #a855f7; }
-.activity-kind-chip.live-event-system { background: var(--white-6); color: rgba(255,255,255,0.5); }
+.activity-kind-chip.live-event-system { background: var(--white-6); color: var(--white-50); }
 
 .activity-agent {
   font-size: 0.75rem;
-  color: rgba(255,255,255,0.6);
+  color: var(--white-60);
   font-weight: 500;
 }
 
 .activity-time {
   font-size: 0.7rem;
-  color: rgba(255,255,255,0.3);
+  color: var(--white-30);
   margin-left: auto;
 }
 
 .activity-item-text {
   font-size: 0.8rem;
-  color: rgba(255,255,255,0.7);
+  color: var(--white-70);
   line-height: 1.4;
   word-break: break-word;
 }
@@ -240,7 +237,7 @@
 .focus-agent-card {
   padding: 10px 12px;
   border-radius: 10px;
-  background: rgba(255,255,255,0.02);
+  background: var(--white-2);
   border: 1px solid var(--white-6);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
@@ -290,12 +287,12 @@
 }
 
 .focus-pressure-normal {
-  background: rgba(74,222,128,0.1);
+  background: var(--ok-10);
   color: var(--ok);
 }
 
 .focus-pressure-hot {
-  background: rgba(251,191,36,0.12);
+  background: var(--warn-12);
   color: var(--warn);
 }
 
@@ -308,7 +305,7 @@
 
 .focus-current-task {
   font-size: 0.75rem;
-  color: rgba(255,255,255,0.55);
+  color: var(--white-55);
   padding: 3px 8px;
   background: var(--white-3);
   border-radius: 6px;
@@ -320,7 +317,7 @@
 
 .focus-activity-text {
   font-size: 0.72rem;
-  color: rgba(255,255,255,0.4);
+  color: var(--white-40);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -330,12 +327,12 @@
 
 .focus-no-activity {
   font-style: italic;
-  color: rgba(255,255,255,0.25);
+  color: var(--white-25);
 }
 
 .focus-agent-footer .time-ago {
   font-size: 0.68rem;
-  color: rgba(255,255,255,0.3);
+  color: var(--white-30);
   flex-shrink: 0;
 }
 
@@ -373,7 +370,7 @@
   gap: 12px;
   align-items: center;
   font-size: 0.8rem;
-  color: rgba(255,255,255,0.5);
+  color: var(--white-50);
 }
 
 .live-stat {

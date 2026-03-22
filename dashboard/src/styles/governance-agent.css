@@ -106,7 +106,7 @@
 .agent-history-row {
   border: 1px solid var(--card-border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--white-2);
   padding: 10px;
 }
 
@@ -152,7 +152,7 @@
       rgba(10, 22, 40, 0.95) 0%,
       rgba(16, 28, 52, 0.88) 100%
     );
-  border: 1px solid rgba(200, 168, 78, 0.15);
+  border: 1px solid var(--ff-gold-15);
   box-shadow:
     0 0 20px rgba(200, 168, 78, 0.04),
     inset 0 1px 0 rgba(200, 168, 78, 0.08);
@@ -192,7 +192,7 @@
   font-size: var(--fs-md);
   font-weight: 700;
   color: var(--accent);
-  background: rgba(71, 184, 255, 0.1);
+  background: var(--accent-10);
   border: 1px solid rgba(71, 184, 255, 0.25);
   border-radius: 4px;
   padding: 1px 6px;
@@ -210,7 +210,7 @@
   font-family: "IBM Plex Mono", monospace;
   font-size: var(--fs-xs);
   color: var(--text-muted);
-  background: rgba(71, 184, 255, 0.08);
+  background: var(--accent-8);
   border: 1px solid rgba(71, 184, 255, 0.15);
   border-radius: 4px;
   padding: 1px 5px;
@@ -235,7 +235,7 @@
 
 .ff-plate__signal--live {
   color: var(--ok);
-  background: rgba(74, 222, 128, 0.1);
+  background: var(--ok-10);
   border: 1px solid rgba(74, 222, 128, 0.2);
 }
 
@@ -291,7 +291,7 @@
 .ff-plate__worker-state {
   font-size: var(--fs-xs);
   color: var(--accent);
-  background: rgba(71, 184, 255, 0.08);
+  background: var(--accent-8);
   padding: 1px 5px;
   border-radius: 3px;
 }
@@ -361,7 +361,7 @@
   padding: 10px 14px;
   border-radius: 8px;
   background: rgba(10, 22, 40, 0.8);
-  border: 1px solid rgba(200, 168, 78, 0.15);
+  border: 1px solid var(--ff-gold-15);
 
   & .control-input {
     flex: 1;
@@ -416,13 +416,13 @@
 }
 
 .ff-relation-count {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-50);
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
 
 .ff-interests {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--white-6);
   padding-top: 8px;
 }
 
@@ -435,7 +435,7 @@
 
 .ff-interest-tag {
   background: rgba(255, 215, 0, 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-70);
   padding: 2px 8px;
   border-radius: 3px;
   font-size: var(--fs-xs);

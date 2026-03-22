@@ -44,7 +44,7 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
     <article class="swarm-lane-strip ${toneClass(tone)}">
       <div class="swarm-lane-head flex items-center justify-between gap-2">
         <div class="swarm-lane-head-left flex items-center gap-2 min-w-0">
-          <span class="swarm-motion-dot ${lane.motion_state}"></span>
+          <span class="swarm-motion-dot inline-block rounded-full shrink-0 w-2.5 h-2.5 ${lane.motion_state}"></span>
           <div>
             <span class="swarm-lane-kicker">${lane.kind} · ${lane.source_of_truth}</span>
             <strong>${lane.label}</strong>
@@ -60,14 +60,14 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
       <div class="swarm-lane-track">
         <span class="${toneClass(tone)}" style=${`width:${progressPercent}%`}></span>
       </div>
-      <div class="swarm-lane-details">
-        <div class="swarm-lane-row">
+      <div class="swarm-lane-details flex flex-col gap-1.5 mt-2">
+        <div class="swarm-lane-row flex items-center gap-1.5">
           <span class="swarm-lane-row-label">Step</span>
           <span>${lane.current_step}</span>
         </div>
         ${totalWorkers > 0
           ? html`
-              <div class="swarm-lane-row">
+              <div class="swarm-lane-row flex items-center gap-1.5">
                 <span class="swarm-lane-row-label">워커</span>
                 <${SwarmWorkerGrid} total=${totalWorkers} />
               </div>
@@ -75,9 +75,9 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
           : null}
         ${totalOps > 0
           ? html`
-              <div class="swarm-lane-row">
+              <div class="swarm-lane-row flex items-center gap-1.5">
                 <span class="swarm-lane-row-label">흐름</span>
-                <div class="swarm-mini-bar">
+                <div class="swarm-mini-bar flex-1 h-1 rounded-sm overflow-hidden">
                   <div class="swarm-mini-bar-fill" style="width: ${totalOps > 0 ? Math.round((ops / totalOps) * 100) : 0}%; background: var(--${tone === 'bad' ? 'bad' : tone === 'warn' ? 'warn' : 'ok'})"></div>
                 </div>
                 <span class="swarm-worker-count">작전 ${ops} · 실행체 ${dets}</span>
@@ -117,7 +117,7 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
             </div>
             <strong>${lane.label}</strong>
             <p>${lane.current_step}</p>
-            <div class="swarm-story-strip">
+            <div class="swarm-story-strip flex gap-2 flex-wrap">
               <span>워커 ${workers}</span>
               <span>작전 ${operations}</span>
               <span>실행체 ${detachments}</span>
@@ -149,15 +149,15 @@ export function SwarmHealthBar({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
 
   return html`
     <div>
-      <div class="swarm-health-bar">
+      <div class="swarm-health-bar flex h-2 rounded overflow-hidden">
         ${segments.filter(s => s.count > 0).map(s => html`
           <div class="swarm-health-seg ${s.key}" style="flex: ${s.count}"></div>
         `)}
       </div>
-      <div class="swarm-health-labels">
+      <div class="swarm-health-labels flex gap-4">
         ${segments.filter(s => s.count > 0).map(s => html`
           <span class="swarm-health-label flex items-center gap-1">
-            <span class="swarm-health-swatch" style="background: ${s.color}"></span>
+            <span class="swarm-health-swatch w-2 h-2 rounded-sm inline-block" style="background: ${s.color}"></span>
             ${s.count} ${s.key}
           </span>
         `)}

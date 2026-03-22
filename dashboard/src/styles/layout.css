@@ -83,7 +83,7 @@
   background: rgba(10, 15, 29, 0.5);
   border-radius: var(--radius-lg);
   padding: 20px;
-  border: 1px solid rgba(71, 184, 255, 0.1);
+  border: 1px solid var(--accent-10);
 }
 .kanban-header {
   font-size: 1.1rem;
@@ -93,7 +93,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  text-shadow: 0 0 10px rgba(255,255,255,0.2);
+  text-shadow: 0 0 10px var(--white-20);
 }
 .kanban-header.todo .kanban-badge { background: var(--white-10); color: var(--text-body); }
 .kanban-header.inprogress .kanban-badge { background: var(--accent-soft); color: var(--accent); }

@@ -59,7 +59,7 @@
   background: var(--white-6);
   border: 1px solid var(--white-10);
   border-radius: 8px;
-  color: #e0e0e0;
+  color: var(--text-near-white);
   font-size: var(--fs-base);
   margin-bottom: 10px;
 }

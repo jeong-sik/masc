@@ -81,6 +81,10 @@
   --agent-offline: #5a6478;
   --agent-busy: #f0c060;
 
+  /* Tone variants */
+  --bad-light: #f87171;
+  --warn-bright: #f97316;
+
   /* White overlay (glass morphism tints) */
   --white-3: rgba(255, 255, 255, 0.03);
   --white-4: rgba(255, 255, 255, 0.04);

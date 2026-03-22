@@ -68,7 +68,7 @@
 }
 
 .agent-runtime-ctx-fill.bad {
-  background: #f87171;
+  background: var(--bad-light);
 }
 
 /* ── Live Timeline ─────────────────────────────────────────── */
@@ -210,7 +210,7 @@
 
 .agent-event-badge--error {
   background: rgba(248, 113, 113, 0.14);
-  color: #f87171;
+  color: var(--bad-light);
 }
 
 .agent-event-badge--broadcast {

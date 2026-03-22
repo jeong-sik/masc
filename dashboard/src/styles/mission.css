@@ -26,7 +26,11 @@
   gap: 6px;
 }
 
-.mission-context-item span {
+.mission-context-item span,
+.mission-stat-label,
+.mission-fact-tile span,
+.mission-io-item span,
+.mission-activity-focus span {
   color: rgba(255,255,255,0.52);
   font-size: var(--fs-xs);
   letter-spacing: 0.08em;
@@ -57,24 +61,21 @@
 .mission-stat-card.warn { border-color: rgba(251,191,36,0.24); }
 .mission-stat-card.bad { border-color: rgba(248,113,113,0.28); }
 
-.mission-stat-label {
-  color: rgba(255,255,255,0.52);
-  font-size: var(--fs-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .mission-stat-value {
   color: var(--text-strong);
   font-size: 26px;
   line-height: 1;
 }
 
-.mission-stat-detail {
+.mission-stat-detail,
+.mission-crew-event small,
+.mission-timeline-row small {
   color: rgba(255,255,255,0.68);
   line-height: 1.45;
 }
-.mission-list-stack {
+.mission-list-stack,
+.mission-list-stack,
+.mission-activity-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -105,7 +106,8 @@
 .mission-action-card.warn { border-color: rgba(251,191,36,0.24); }
 
 .mission-action-card.bad { border-color: rgba(248,113,113,0.28); }
-.mission-action-card p {
+.mission-action-card p,
+.mission-briefing-section p {
   margin: 0;
   color: rgba(255,255,255,0.8);
   line-height: 1.5;
@@ -119,7 +121,9 @@
   line-height: 1.45;
 }
 
-.proof-summary-stack {
+.proof-summary-stack,
+.proof-kv-block,
+.mission-detail-column {
   display: grid;
   gap: 10px;
 }
@@ -143,18 +147,15 @@
   background: rgba(248,113,113,0.08);
 }
 
-.proof-summary-block strong {
+.proof-summary-block strong,
+.mission-link-row strong,
+.mission-member-preview strong {
   color: var(--text-strong);
 }
 
 .proof-summary-block span {
   color: rgba(255,255,255,0.8);
   line-height: 1.5;
-}
-
-.proof-kv-block {
-  display: grid;
-  gap: 10px;
 }
 
 .proof-kv-grid {
@@ -170,12 +171,15 @@
   text-transform: uppercase;
 }
 
-.proof-kv-grid > strong {
+.proof-kv-grid > strong,
+.mission-io-item strong,
+.mission-activity-focus strong {
   color: var(--text-strong);
   line-height: 1.45;
 }
 
-.mission-card-actions {
+.mission-card-actions,
+.mission-pill-row {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -240,7 +244,8 @@
   border-color: rgba(74,222,128,0.22);
 }
 
-.mission-briefing-section.watch {
+.mission-briefing-section.watch,
+.mission-briefing-gap.warn {
   border-color: rgba(251,191,36,0.24);
 }
 
@@ -249,11 +254,6 @@
   border-color: rgba(248,113,113,0.28);
 }
 
-.mission-briefing-section p {
-  margin: 0;
-  color: rgba(255,255,255,0.8);
-  line-height: 1.5;
-}
 .mission-briefing-gaps {
   margin-top: 12px;
 }
@@ -265,10 +265,6 @@
   background: var(--white-3);
   display: grid;
   gap: 8px;
-}
-
-.mission-briefing-gap.warn {
-  border-color: rgba(251,191,36,0.24);
 }
 
 .mission-briefing-gap p {
@@ -291,12 +287,6 @@
 }
 
 .mission-lane-stack,
-.mission-list-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 .mission-attention-card {
   padding: 14px;
   border-radius: 14px;
@@ -373,25 +363,15 @@
   cursor: pointer;
 }
 
-.mission-link-row strong {
-  color: var(--text-strong);
-}
-
 .mission-link-row span,
-.mission-link-row small {
+.mission-link-row small,
+.mission-activity-focus small {
   color: rgba(255,255,255,0.7);
   line-height: 1.45;
 }
 
 .mission-link-row.static {
   cursor: default;
-}
-
-.mission-pill-row {
-  margin-top: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
 }
 
 .mission-pill {
@@ -436,7 +416,10 @@
 .mission-crew-card.warn { border-color: rgba(251,191,36,0.24); }
 .mission-crew-card.bad { border-color: rgba(248,113,113,0.28); }
 
-.mission-fact-grid {
+.mission-fact-grid,
+.mission-member-preview-grid,
+.mission-io-stack,
+.proof-io-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
@@ -451,13 +434,6 @@
   gap: 4px;
 }
 
-.mission-fact-tile span {
-  color: rgba(255,255,255,0.52);
-  font-size: var(--fs-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .mission-fact-tile strong {
   color: var(--text-strong);
   font-size: 18px;
@@ -465,35 +441,14 @@
 
 .mission-fact-tile small,
 .mission-inline-note,
-.mission-crew-event small {
-  color: rgba(255,255,255,0.68);
-  line-height: 1.45;
-}
-
-.mission-crew-event {
+.mission-crew-event,
+.mission-activity-focus {
   display: grid;
   gap: 4px;
 }
 
 .mission-crew-event span,
-.mission-io-item span {
-  color: rgba(255,255,255,0.52);
-  font-size: var(--fs-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .mission-crew-event strong,
-.mission-io-item strong {
-  color: var(--text-strong);
-  line-height: 1.45;
-}
-.mission-member-preview-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
 .mission-member-preview {
   width: 100%;
   padding: 12px;
@@ -506,21 +461,11 @@
   color: inherit;
 }
 
-.mission-member-preview strong {
-  color: var(--text-strong);
-}
-
 .mission-member-preview span,
 .mission-member-preview small {
   color: rgba(255,255,255,0.72);
   line-height: 1.45;
 }
-.mission-activity-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 .mission-activity-card {
   width: 100%;
   padding: 14px;
@@ -572,47 +517,14 @@
   line-height: 1.45;
 }
 
-.mission-activity-focus {
-  display: grid;
-  gap: 4px;
-}
-
-.mission-activity-focus span {
-  color: rgba(255,255,255,0.52);
-  font-size: var(--fs-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.mission-activity-focus strong {
-  color: var(--text-strong);
-  line-height: 1.45;
-}
-
-.mission-activity-focus small {
-  color: rgba(255,255,255,0.7);
-  line-height: 1.45;
-}
-
-.mission-io-stack {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.mission-io-item {
+.mission-io-item,
+.mission-timeline-row {
   padding: 12px;
   border-radius: 12px;
   background: var(--white-3);
   border: 1px solid var(--white-6);
   display: grid;
   gap: 4px;
-}
-
-.proof-io-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
 }
 
 .proof-timeline-row .semantic-tag-row {
@@ -631,29 +543,10 @@
   margin-top: 12px;
 }
 
-.mission-detail-column {
-  display: grid;
-  gap: 10px;
-}
-
 .mission-timeline-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.mission-timeline-row {
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid var(--white-6);
-  background: var(--white-3);
-  display: grid;
-  gap: 4px;
-}
-
-.mission-timeline-row small {
-  color: rgba(255,255,255,0.68);
-  line-height: 1.45;
 }
 
 @media (max-width: 1100px) {
@@ -674,4 +567,3 @@
   }
 
 }
-

@@ -25,7 +25,7 @@
 }
 
 .situation-banner--warn {
-  border-left-color: var(--gold, #c8a84e);
+  border-left-color: var(--gold, var(--ff-gold));
 }
 
 .situation-banner--bad {

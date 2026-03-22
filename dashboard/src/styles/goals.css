@@ -18,7 +18,7 @@
 .goal-summary-value {
   font-size: 20px;
   font-weight: 700;
-  color: #e0e0e0;
+  color: var(--text-near-white);
 }
 
 .goal-summary-label {
@@ -59,7 +59,7 @@
 
 .goal-filter-btn:hover {
   background: var(--white-10);
-  color: #e0e0e0;
+  color: var(--text-near-white);
 }
 
 .goal-filter-btn.active {
@@ -168,7 +168,7 @@
 .goal-title {
   font-size: var(--fs-base);
   font-weight: 500;
-  color: #e0e0e0;
+  color: var(--text-near-white);
 }
 
 .goal-horizon-badge {
@@ -197,7 +197,7 @@
 }
 
 .goal-due {
-  color: #f87171;
+  color: var(--bad-light);
 }
 
 .goal-review-note {
@@ -248,7 +248,7 @@
 
 .priority-badge--p1 {
   background: rgba(248, 113, 113, 0.2);
-  color: #f87171;
+  color: var(--bad-light);
   border: 1px solid rgba(248, 113, 113, 0.35);
 }
 

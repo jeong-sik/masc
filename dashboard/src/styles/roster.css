@@ -408,7 +408,7 @@
 }
 
 .pressure--orange {
-  background: linear-gradient(90deg, #c65d0a, #f97316);
+  background: linear-gradient(90deg, #c65d0a, var(--warn-bright));
 }
 
 .pressure--red {

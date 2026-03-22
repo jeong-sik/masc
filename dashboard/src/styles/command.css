@@ -769,7 +769,7 @@
 .command-chip.bad,
 .command-tag.bad {
   background: rgba(248,113,113,0.16);
-  color: #f87171;
+  color: var(--bad-light);
 }
 
 .command-chip.muted,

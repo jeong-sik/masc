@@ -190,9 +190,10 @@ let run_server ~sw ~env ~host ~port ~base_path =
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
-  with exn ->
-    Log.Server.error "[main] keeper bootstrap failed: %s" (Printexc.to_string exn);
-    raise exn
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Server.error "[main] keeper bootstrap failed (continuing without keepers): %s" (Printexc.to_string exn)
 
 (** CLI options *)
 let port =

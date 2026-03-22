@@ -153,13 +153,6 @@
   line-height: 1.5;
 }
 
-.planning-loop-good {
-  color: #9af3ba;
-}
-
-.planning-loop-bad {
-  color: #fda4af;
-}
 .goal-row-main {
   flex: 1;
   min-width: 0;
@@ -190,14 +183,6 @@
 .goal-priority {
   color: #f59e0b;
   letter-spacing: 1px;
-}
-
-.goal-metric {
-  color: var(--cyan);
-}
-
-.goal-due {
-  color: var(--bad-light);
 }
 
 .goal-review-note {

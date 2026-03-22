@@ -1,9 +1,5 @@
 /* ── Command Swarm + Orchestra ────────────────────────────── */
 
-.command-swarm-summary {
-  margin-top: 12px;
-}
-
 .swarm-storyboard {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -27,13 +23,6 @@
 .swarm-story-card.warn { border-color: rgba(251,191,36,0.24); }
 .swarm-story-card.bad { border-color: rgba(248,113,113,0.24); }
 
-.swarm-story-topline {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
 .swarm-story-card strong {
   color: var(--text-near-white);
   font-size: var(--fs-lg);
@@ -45,12 +34,6 @@
   margin: 0;
   color: rgba(226,232,240,0.72);
   line-height: 1.5;
-}
-
-.swarm-story-strip {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 .swarm-story-strip span {
@@ -72,10 +55,6 @@
 
 .command-swarm-layout.compact {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.orchestra-surface {
-  overflow: hidden;
 }
 
 .orchestra-shell {
@@ -102,13 +81,6 @@
   inset: 0;
   background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 18%, transparent 82%, rgba(255,255,255,0.02));
   pointer-events: none;
-}
-
-.orchestra-canvas {
-  display: block;
-  width: 100%;
-  height: auto;
-  min-height: 720px;
 }
 
 .orchestra-grid {
@@ -139,10 +111,6 @@
 .orchestra-edge.animated {
   stroke-dasharray: 10 10;
   animation: orchestraFlow 3.2s linear infinite;
-}
-
-.orchestra-node {
-  cursor: pointer;
 }
 
 .orchestra-node-body,
@@ -256,25 +224,7 @@
   background: rgba(15,23,42,0.8);
 }
 
-.orchestra-drawer {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 720px;
-}
-
-.orchestra-fact-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .orchestra-fact-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border-radius: 10px;
   background: var(--white-3);
   border: 1px solid var(--white-6);
 }
@@ -303,10 +253,6 @@
 
 /* ── SwarmHealthBar ────────────────────────────── */
 .swarm-health-bar {
-  display: flex;
-  height: 8px;
-  border-radius: 4px;
-  overflow: hidden;
   background: var(--white-6);
   margin-top: 12px;
 }
@@ -319,24 +265,10 @@
 .swarm-health-seg.stalled { background: var(--bad); }
 .swarm-health-seg.terminal { background: #556; }
 .swarm-health-labels {
-  display: flex;
-  gap: 1rem;
   font-size: 0.75rem;
   color: var(--text-dim, rgba(255,255,255,0.5));
   margin-top: 6px;
 }
-.swarm-health-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.swarm-health-swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  display: inline-block;
-}
-
 /* ── SwarmLaneStrip ────────────────────────────── */
 .swarm-lane-strip {
   padding: 0.75rem 1rem;
@@ -348,19 +280,6 @@
 .swarm-lane-strip.ok { border-left-color: var(--ok); }
 .swarm-lane-strip.warn { border-left-color: var(--warn); }
 .swarm-lane-strip.bad { border-left-color: var(--bad); }
-.swarm-lane-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.swarm-lane-head-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
 .swarm-lane-kicker {
   display: block;
   margin-bottom: 4px;
@@ -374,13 +293,6 @@
   color: var(--text-near-white);
   font-size: 16px;
   line-height: 1.25;
-}
-.swarm-motion-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
 }
 .swarm-motion-dot.moving { animation: workingPulse 1.5s ease-in-out infinite; background: var(--ok); }
 .swarm-motion-dot.stalled { animation: warnBlink 1s ease-in-out infinite; background: var(--bad); }
@@ -417,16 +329,9 @@
 }
 
 .swarm-lane-details {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
   font-size: 0.82rem;
 }
 .swarm-lane-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   color: var(--text-dim, rgba(255,255,255,0.55));
 }
 .swarm-lane-row-label {
@@ -438,15 +343,7 @@
   opacity: 0.6;
 }
 .swarm-worker-grid {
-  display: flex;
-  flex-wrap: wrap;
   gap: 3px;
-  align-items: center;
-}
-.swarm-worker-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
 }
 .swarm-worker-dot.present { background: rgba(134,160,207,0.7); }
 .swarm-worker-count {
@@ -455,11 +352,7 @@
   margin-left: 4px;
 }
 .swarm-mini-bar {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
   background: var(--white-8);
-  overflow: hidden;
 }
 .swarm-mini-bar-fill {
   height: 100%;
@@ -476,13 +369,6 @@
   color: var(--bad);
   margin-top: 4px;
 }
-.swarm-lane-flags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-}
-
 /* ── SwarmEventRail ────────────────────────────── */
 .swarm-event-rail {
   border-left: 2px solid var(--card-border, var(--white-10));
@@ -516,19 +402,12 @@
   font-size: 0.72rem;
   color: var(--text-dim, rgba(255,255,255,0.45));
 }
-.swarm-event-body {
-  min-width: 0;
-  flex: 1;
-}
 .swarm-event-kind {
   font-size: 0.72rem;
   opacity: 0.6;
   margin-left: 6px;
 }
 .swarm-gap-inline {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   padding: 3px 0;
   font-size: 0.78rem;
 }

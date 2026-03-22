@@ -49,7 +49,7 @@ export function OperationBriefsBody({ operationRows }: { operationRows: Dashboar
   const hasTerminal = terminalOps.length > 0
 
   return html`
-    <div class="monitor-section-head">
+    <div class="mb-3.5">
       <h2 class="monitor-headline">영향받는 작전</h2>
       <p class="monitor-subheadline">지휘 평면 작전의 막힘과 다음 도구만 얇게 보여주고, 자세한 근거는 원인 화면으로 넘깁니다.</p>
     </div>
@@ -60,7 +60,7 @@ export function OperationBriefsBody({ operationRows }: { operationRows: Dashboar
     </div>
     ${hasTerminal
       ? html`
-          <details class="runtime-collapsible" data-testid="execution.operations-terminal">
+          <details class="mt-1" data-testid="execution.operations-terminal">
             <summary class="runtime-summary">종료된 작전 ${terminalOps.length}건</summary>
             <div class="monitor-list">
               ${terminalOps.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)}

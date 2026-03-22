@@ -21,6 +21,7 @@ import {
   openActionIntervene,
   openActionCommand,
   liveStateClass,
+  dotStateBg,
 } from './mission-utils'
 
 export function AgentBriefCard({ row }: { row: EnrichedAgentRow }) {
@@ -113,7 +114,7 @@ export function KeeperBriefCard({ row }: { row: EnrichedKeeperRow }) {
       }}>
         <div class="mission-activity-head">
           <div class="mission-activity-title">
-            <div class="mission-status-dot ${liveStateClass(row.brief.status, row.keeper?.status)}"></div>
+            <div class="mission-status-dot ${liveStateClass(row.brief.status, row.keeper?.status)} ${dotStateBg(liveStateClass(row.brief.status, row.keeper?.status))}"></div>
             <span class="agent-emoji">${row.keeper?.emoji ?? ''}</span>
             <div>
               <strong>${row.brief.name}</strong>

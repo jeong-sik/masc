@@ -43,9 +43,9 @@ export function MissionBriefingCard() {
 
       ${missionBriefingError.value ? html`<div class="empty-state error">${missionBriefingError.value}</div>` : null}
       ${briefing?.error ? html`<div class="empty-state error">${briefing.error}</div>` : null}
-      ${briefing?.summary ? html`<div class="mission-inline-note">${briefing.summary}</div>` : null}
+      ${briefing?.summary ? html`<div class="grid gap-1">${briefing.summary}</div>` : null}
       ${briefing?.last_error && !briefing.error
-        ? html`<div class="mission-inline-note">최근 갱신 실패: ${briefing.last_error}</div>`
+        ? html`<div class="grid gap-1">최근 갱신 실패: ${briefing.last_error}</div>`
         : null}
 
       ${briefing && briefing.sections.length > 0

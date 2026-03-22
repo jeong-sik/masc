@@ -46,9 +46,8 @@
 }
 .mitosis-safe { stroke: var(--ok); color: var(--ok); }
 .mitosis-warn { stroke: var(--warn); color: var(--warn); }
-.mitosis-critical { 
+.mitosis-critical {
   stroke: var(--bad); color: var(--bad);
-  
   animation: pulse-ring 2s infinite;
 }
 .mitosis-text {
@@ -57,9 +56,9 @@
   font-weight: 700;
 }
 @keyframes pulse-ring {
-  0% {  }
-  50% {  }
-  100% {  }
+  0% { opacity: 1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 1; }
 }
 
 /* Enhancements for Agent Cards */
@@ -85,7 +84,6 @@
   border-radius: var(--radius-lg);
   padding: 20px;
   border: 1px solid rgba(71, 184, 255, 0.1);
-  
 }
 .kanban-header {
   font-size: 1.1rem;
@@ -98,8 +96,8 @@
   text-shadow: 0 0 10px rgba(255,255,255,0.2);
 }
 .kanban-header.todo .kanban-badge { background: var(--white-10); color: var(--text-body); }
-.kanban-header.inprogress .kanban-badge { background: var(--accent-soft); color: var(--accent);  }
-.kanban-header.done .kanban-badge { background: rgba(0, 255, 157, 0.15); color: var(--ok);  }
+.kanban-header.inprogress .kanban-badge { background: var(--accent-soft); color: var(--accent); }
+.kanban-header.done .kanban-badge { background: rgba(0, 255, 157, 0.15); color: var(--ok); }
 
 .kanban-badge {
   padding: 4px 10px;
@@ -167,11 +165,7 @@
   opacity: 0.7;
 }
 
-/* Activity Feed */
-/* Overview HUD Layout */
 .memory-note {
   font-style: italic;
   color: var(--accent);
 }
-
-/* Keeper Inner Info Styles */

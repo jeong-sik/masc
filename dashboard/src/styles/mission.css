@@ -74,7 +74,6 @@
   line-height: 1.45;
 }
 .mission-list-stack,
-.mission-list-stack,
 .mission-activity-list {
   display: flex;
   flex-direction: column;
@@ -121,12 +120,7 @@
   line-height: 1.45;
 }
 
-.proof-summary-stack,
-.proof-kv-block,
-.mission-detail-column {
-  display: grid;
-  gap: 10px;
-}
+
 
 .proof-summary-block {
   display: grid;
@@ -439,10 +433,7 @@
   font-size: 18px;
 }
 
-.mission-fact-tile small,
-.mission-inline-note,
-.mission-crew-event,
-.mission-activity-focus {
+.mission-fact-tile small {
   display: grid;
   gap: 4px;
 }

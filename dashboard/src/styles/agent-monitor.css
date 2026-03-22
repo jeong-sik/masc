@@ -134,10 +134,6 @@
   border-radius: 8px;
 }
 
-.agent-live-count {
-  color: var(--text-muted, var(--text-muted));
-}
-
 .agent-live-autoscroll {
   padding: 2px 8px;
   border-radius: 8px;

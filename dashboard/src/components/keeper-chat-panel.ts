@@ -101,19 +101,19 @@ export function KeeperChatPanel({ name }: { name: string }) {
         ` : null}
 
         ${messages.map((msg, idx) => html`
-          <div key=${idx} class="keeper-chat__msg keeper-chat__msg--${msg.role}">
+          <div key=${idx} class="keeper-chat__msg keeper-chat__msg--${msg.role} ${msg.role === 'user' ? 'self-end' : 'self-start'}">
             <span class="keeper-chat__role">${msg.role === 'user' ? 'You' : name}</span>
             <div class="keeper-chat__text">${msg.content}</div>
           </div>
         `)}
 
         ${isStreaming && buffer ? html`
-          <div class="keeper-chat__msg keeper-chat__msg--assistant keeper-chat__msg--streaming">
+          <div class="keeper-chat__msg keeper-chat__msg--assistant keeper-chat__msg--streaming self-start">
             <span class="keeper-chat__role">${name}</span>
             <div class="keeper-chat__text">${buffer}<span class="keeper-chat__cursor">|</span></div>
           </div>
         ` : isStreaming ? html`
-          <div class="keeper-chat__msg keeper-chat__msg--assistant keeper-chat__msg--streaming">
+          <div class="keeper-chat__msg keeper-chat__msg--assistant keeper-chat__msg--streaming self-start">
             <span class="keeper-chat__role">${name}</span>
             <div class="keeper-chat__text keeper-chat__text--thinking">thinking...</div>
           </div>
@@ -124,7 +124,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
 
       <div class="keeper-chat__input-row">
         <input
-          class="control-input keeper-chat__input"
+          class="control-input flex-1"
           type="text"
           placeholder="메시지 입력..."
           value=${chatInput.value}
@@ -133,7 +133,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
           disabled=${isStreaming}
         />
         <button
-          class="control-btn keeper-chat__send"
+          class="control-btn shrink-0"
           onClick=${() => { void sendChat(name) }}
           disabled=${isStreaming || chatInput.value.trim() === ''}
         >

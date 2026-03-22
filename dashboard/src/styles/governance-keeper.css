@@ -54,18 +54,12 @@
   margin-top: 4px;
 }
 
-.metric-tip-pop code {
-  color: #9ad9ff;
-}
-
 .metric-tip:hover .metric-tip-pop,
 .metric-tip:focus .metric-tip-pop,
 .metric-tip:focus-within .metric-tip-pop {
   display: block;
 }
 
-/* ── Core keeper card (6 key metrics) ───────────────────── */
-/* ── Keeper detail tabs ──────────────────────────────────── */
 /* --- Governance staleness warning --- */
 .governance-stale-warning {
   padding: 10px 14px;

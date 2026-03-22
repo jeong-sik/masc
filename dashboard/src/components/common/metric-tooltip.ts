@@ -19,8 +19,8 @@ export function MetricTooltip({ metric }: MetricTooltipProps) {
       <span class="metric-tip-pop" role="tooltip">
         <strong>${def.label}</strong>
         <span>${def.description}</span>
-        ${def.formula ? html`<span><code>formula:</code> ${def.formula}</span>` : null}
-        <span><code>source:</code> ${def.sourcePath}</span>
+        ${def.formula ? html`<span><code class="text-[#9ad9ff]">formula:</code> ${def.formula}</span>` : null}
+        <span><code class="text-[#9ad9ff]">source:</code> ${def.sourcePath}</span>
         ${def.interpretation ? html`<span>${def.interpretation}</span>` : null}
       </span>
     </span>

@@ -32,10 +32,6 @@
   flex-wrap: wrap;
 }
 
-.ops-actor-input {
-  min-width: 180px;
-}
-
 .ops-banner {
   border-radius: 12px;
   padding: 12px 14px;
@@ -60,10 +56,7 @@
   color: #cffafe;
 }
 
-.ops-handoff-banner {
-  display: grid;
-  gap: 8px;
-}
+
 
 .ops-handoff-head {
   display: flex;
@@ -151,10 +144,6 @@
 
 .ops-action-guide-item:hover {
   filter: brightness(1.15);
-}
-
-.ops-action-guide-item strong {
-  font-weight: 600;
 }
 
 .ops-action-guide-item span {
@@ -278,14 +267,6 @@
   font-size: var(--fs-xs);
   letter-spacing: 0.05em;
   text-transform: uppercase;
-}
-
-.ops-split-row {
-  align-items: stretch;
-}
-
-.ops-select {
-  min-width: 92px;
 }
 
 .ops-context-note {

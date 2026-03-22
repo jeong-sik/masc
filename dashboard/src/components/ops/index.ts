@@ -171,7 +171,7 @@ export function Ops() {
           <label class="control-label" for="ops-actor">개입 ID</label>
           <input
             id="ops-actor"
-            class="control-input ops-actor-input"
+            class="control-input ops-actor-input min-w-[180px]"
             type="text"
             value=${actorName.value}
             onInput=${(event: Event) => persistActorName((event.target as HTMLInputElement).value)}
@@ -195,7 +195,7 @@ export function Ops() {
       ${operatorDigestError.value ? html`<section class="ops-banner error">${operatorDigestError.value}</section>` : null}
       <${RoomTruthStrip} />
       ${workflowContext ? html`
-        <section class="ops-banner ${workflowReady ? 'info' : 'warn'} ops-handoff-banner">
+        <section class="ops-banner ${workflowReady ? 'info' : 'warn'} grid gap-2">
           <div class="ops-handoff-head">
             <strong>${workflowContext.source_label}</strong>
             <span>${workflowActionLabel(workflowContext.action_type)}</span>
@@ -257,7 +257,7 @@ export function Ops() {
             <div class="ops-action-guide-list">
               ${actions.slice(0, 3).map(action => html`
                 <button class="ops-action-guide-item ${action.tone}" onClick=${action.onClick}>
-                  <strong>${action.label}</strong>
+                  <strong class="font-semibold">${action.label}</strong>
                   <span>${action.desc}</span>
                 </button>
               `)}
@@ -267,7 +267,7 @@ export function Ops() {
       })()}
 
       <section class="card">
-        <div class="monitor-section-head">
+        <div class="mb-3.5">
           <h2 class="monitor-headline">개입 우선순위</h2>
           <p class="monitor-subheadline">지금 가장 먼저 손댈 대상이 방인지, 세션인지, 키퍼인지 먼저 좁힙니다.</p>
         </div>

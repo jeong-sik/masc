@@ -38,10 +38,6 @@
   contain-intrinsic-size: auto 48px;
 }
 
-button.council-row {
-  cursor: pointer;
-}
-
 button.council-row:hover {
   background: var(--white-8);
 }
@@ -49,10 +45,6 @@ button.council-row:hover {
 button.council-row.selected {
   border-color: rgba(71, 184, 255, 0.5);
   background: rgba(71, 184, 255, 0.14);
-}
-
-.council-row-main {
-  min-width: 0;
 }
 
 .council-topic {
@@ -131,10 +123,6 @@ button.council-row.selected {
   overflow-y: auto;
 }
 
-.governance-decision-row {
-  gap: 12px;
-}
-
 .governance-row-head {
   display: flex;
   align-items: center;
@@ -159,11 +147,6 @@ button.council-row.selected {
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
-}
-
-.governance-vote-meter {
-  color: #8ea9d6;
-  font-size: var(--fs-xs);
 }
 
 .governance-chip-row {
@@ -193,10 +176,6 @@ button.council-row.selected {
   border-color: rgba(251, 191, 36, 0.4);
   background: rgba(251, 191, 36, 0.12);
   color: #ffe09b;
-}
-
-.governance-chip.dim {
-  color: #95a9cd;
 }
 
 .council-state.negative {
@@ -301,10 +280,6 @@ button.council-row.selected {
   color: #fecaca;
 }
 
-.governance-badge.neutral {
-  color: #b7cbee;
-}
-
 .governance-side-column {
   display: flex;
   flex-direction: column;
@@ -315,12 +290,6 @@ button.council-row.selected {
   margin: 0;
   color: #e8f0ff;
   font-size: var(--fs-base);
-}
-
-.governance-side-line {
-  color: #c8daf7;
-  font-size: var(--fs-sm);
-  line-height: 1.45;
 }
 
 .governance-preview {

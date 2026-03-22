@@ -14,6 +14,7 @@ import {
   openActionIntervene,
   openSession,
   liveStateClass,
+  dotStateBg,
 } from './mission-utils'
 
 export function SessionBriefCard({
@@ -36,7 +37,7 @@ export function SessionBriefCard({
         <div class="mission-card-head">
           <div>
             <div style="display:flex;align-items:center;gap:8px">
-              <div class="mission-status-dot ${liveStateClass(brief.status, brief.health)}"></div>
+              <div class="mission-status-dot ${liveStateClass(brief.status, brief.health)} ${dotStateBg(liveStateClass(brief.status, brief.health))}"></div>
               <strong>${brief.goal}</strong>
             </div>
             <div class="mission-card-target">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
@@ -68,10 +69,10 @@ export function SessionBriefCard({
         </div>
       </button>
 
-      ${brief.blocker_summary ? html`<div class="mission-inline-note">막힘 · ${brief.blocker_summary}</div>` : null}
-      ${brief.counts_basis ? html`<div class="mission-inline-note">관측 기준 · ${brief.counts_basis}</div>` : null}
+      ${brief.blocker_summary ? html`<div class="grid gap-1">막힘 · ${brief.blocker_summary}</div>` : null}
+      ${brief.counts_basis ? html`<div class="grid gap-1">관측 기준 · ${brief.counts_basis}</div>` : null}
 
-      <div class="mission-crew-event">
+      <div class="grid gap-1">
         <span>최근 사건</span>
         <strong>${brief.last_event_summary ?? '최근 세션 이벤트가 없습니다.'}</strong>
         <small>${brief.last_event_at ? relativeTime(brief.last_event_at) : '시각 없음'}</small>
@@ -154,10 +155,10 @@ export function SessionDetailCard({
         <p>${session.session_id}${session.room ? ` · ${session.room}` : ''}</p>
       </div>
 
-      ${error ? html`<div class="mission-inline-note">${error}</div>` : null}
+      ${error ? html`<div class="grid gap-1">${error}</div>` : null}
 
       <div class="mission-detail-grid">
-        <div class="mission-detail-column">
+        <div class="grid gap-2.5">
           <div class="mission-card-head">
             <strong>타임라인</strong>
             <span class="command-chip">${detail.timeline.length}</span>
@@ -177,7 +178,7 @@ export function SessionDetailCard({
           </div>
         </div>
 
-        <div class="mission-detail-column">
+        <div class="grid gap-2.5">
           <div class="mission-card-head">
             <strong>참여자</strong>
             <span class="command-chip">${detail.participants.length}</span>
@@ -200,7 +201,7 @@ export function SessionDetailCard({
       </div>
 
       <div class="mission-detail-grid">
-        <div class="mission-detail-column">
+        <div class="grid gap-2.5">
           <div class="mission-card-head">
             <strong>연결된 작전</strong>
             <span class="command-chip">${detail.operations.length}</span>
@@ -218,7 +219,7 @@ export function SessionDetailCard({
           </div>
         </div>
 
-        <div class="mission-detail-column">
+        <div class="grid gap-2.5">
           <div class="mission-card-head">
             <strong>연속성 관찰</strong>
             <span class="command-chip">${detail.keepers.length}</span>

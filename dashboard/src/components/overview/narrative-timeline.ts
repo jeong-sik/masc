@@ -98,9 +98,9 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
           <div class="narrative-group__label">${group.label}</div>
           <div class="narrative-group__events">
             ${group.events.map(event => html`
-              <div class="narrative-event" key=${event.timestamp}>
+              <div class="py-1" key=${event.timestamp}>
                 <span class="narrative-event__text">${event.text}</span>
-                <details class="narrative-event__raw">
+                <details class="narrative-event__raw mt-0.5">
                   <summary>원본</summary>
                   <span>${event.raw}</span>
                 </details>

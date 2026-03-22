@@ -215,13 +215,13 @@ export function OrchestraSurface() {
   }, [])
 
   if (commandPlaneOrchestraLoading.value && !orchestra) {
-    return html`<section class="card command-section"><div class="empty-state">오케스트라 맵 불러오는 중…</div></section>`
+    return html`<section class="card min-h-[240px]"><div class="empty-state">오케스트라 맵 불러오는 중…</div></section>`
   }
   if (commandPlaneOrchestraError.value) {
-    return html`<section class="card command-section"><div class="empty-state error">${commandPlaneOrchestraError.value}</div></section>`
+    return html`<section class="card min-h-[240px]"><div class="empty-state error">${commandPlaneOrchestraError.value}</div></section>`
   }
   if (!orchestra) {
-    return html`<section class="card command-section"><div class="empty-state">오케스트라 맵 데이터가 아직 없습니다.</div></section>`
+    return html`<section class="card min-h-[240px]"><div class="empty-state">오케스트라 맵 데이터가 아직 없습니다.</div></section>`
   }
 
   const density = orchestraDensity.value
@@ -328,7 +328,7 @@ export function OrchestraSurface() {
   }
 
   return html`
-    <section class="card command-section orchestra-surface">
+    <section class="card min-h-[240px] overflow-hidden">
       <div class="card-title-row">
         <div class="card-title">오케스트라 맵</div>
       </div>

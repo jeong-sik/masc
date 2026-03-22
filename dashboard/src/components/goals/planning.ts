@@ -79,7 +79,7 @@ export function Planning() {
       <details class="overview-section-collapsible" open=${hasGoals}>
         <summary>
           목표 파이프라인
-          <span class="monitor-pill">${goals.value.length}</span>
+          <span class="monitor-pill ml-auto">${goals.value.length}</span>
         </summary>
         <div>
           ${hasGoals ? html`
@@ -106,7 +106,7 @@ export function Planning() {
       <details class="overview-section-collapsible" open=${hasLoops}>
         <summary>
           MDAL 루프
-          <span class="monitor-pill">${loops.length}</span>
+          <span class="monitor-pill ml-auto">${loops.length}</span>
         </summary>
         <div>
           ${mdalLoading.value && loops.length === 0

@@ -143,10 +143,10 @@ function DecisionInbox() {
               const selected = selectedDecisionKey.value === itemKey(item)
               return html`
                 <button
-                  class="council-row governance-decision-row ${selected ? 'selected' : ''}"
+                  class="council-row gap-3 cursor-pointer ${selected ? 'selected' : ''}"
                   onClick=${() => selectDecision(item)}
                 >
-                  <div class="council-row-main">
+                  <div class="min-w-0">
                     <div class="governance-row-head">
                       <span class="governance-kind">${kindLabel(item.kind)}</span>
                       <span class="council-topic">${item.topic}</span>
@@ -158,7 +158,7 @@ function DecisionInbox() {
                         : null}
                     </div>
                     <div class="governance-chip-row">
-                      ${item.origin ? html`<span class="governance-chip dim">${item.origin}</span>` : null}
+                      ${item.origin ? html`<span class="governance-chip text-[#95a9cd]">${item.origin}</span>` : null}
                       ${item.risk_class ? html`<span class="governance-chip">${item.risk_class}</span>` : null}
                       ${item.provenance ? html`<span class="governance-chip">${item.provenance}</span>` : null}
                       ${item.status === 'needs_human_gate'

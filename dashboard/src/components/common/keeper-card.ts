@@ -72,13 +72,13 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
   const buttonClass =
     variant === 'mission'
       ? 'mission-card-select'
-      : `monitor-row ${toneClass}${model.stateClass ? ` state-${model.stateClass}` : ''}`
+      : `monitor-row p-3.5 ${toneClass}${model.stateClass ? ` state-${model.stateClass}` : ''}`
 
   return html`
     <article class=${wrapperClass}>
       <button class=${buttonClass} data-testid=${testId} onClick=${onClick}>
         <div class=${variant === 'mission' ? 'mission-activity-head' : 'monitor-row-header'}>
-          <div class=${variant === 'mission' ? 'mission-activity-title' : 'monitor-row-title'}>
+          <div class=${variant === 'mission' ? 'mission-activity-title' : 'min-w-0'}>
             <span class="agent-emoji">${model.emoji ?? ''}</span>
             <div>
               <div class=${variant === 'mission' ? '' : 'monitor-name-line'}>
@@ -109,7 +109,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
           <span>컨텍스트 ${formatContext(model.contextRatio)}</span>
         </div>
 
-        <div class=${variant === 'mission' ? 'mission-activity-focus' : 'monitor-focus'}>
+        <div class=${variant === 'mission' ? 'grid gap-1' : 'monitor-focus'}>
           ${variant === 'mission'
             ? html`
                 <span>무엇을</span>
@@ -119,7 +119,7 @@ export function KeeperCard({ model, onClick, variant, testId }: KeeperCardProps)
         </div>
 
         ${model.summary
-          ? html`<div class=${variant === 'mission' ? 'mission-inline-note' : 'monitor-footnote'}>${model.summary}</div>`
+          ? html`<div class=${variant === 'mission' ? 'grid gap-1' : 'monitor-footnote'}>${model.summary}</div>`
           : null}
       </button>
 

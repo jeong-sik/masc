@@ -104,7 +104,7 @@ export function OasPipeline() {
 
       <${OasSummaryLines} />
 
-      <div class="oas-pipeline__section">
+      <div class="mb-2.5">
         <div class="oas-section-label">키퍼 컨텍스트</div>
         <${OasKeeperBars} />
       </div>

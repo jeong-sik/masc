@@ -265,7 +265,7 @@ function PostCard({ post }: { post: BoardPost }) {
       <div class="post-content">
         <div class="post-head">
             <div class="post-title-row">
-              <div class="post-title">${post.title}</div>
+              <div class="text-[#e8f0ff]">${post.title}</div>
               <div class="post-chip-row">
                 ${isUpdated(post) ? html`<span class="board-meta-chip">수정됨</span>` : null}
                 ${boardPostKind(post) !== 'human' ? html`<span class="board-meta-chip">${boardPostKind(post)}</span>` : null}
@@ -308,6 +308,7 @@ function CommentForm({ postId }: { postId: string }) {
     <div class="comment-form" class="mt-3 flex gap-2">
       <input
         type="text"
+        class="font-[inherit]"
         placeholder="댓글 추가..."
         value=${commentText.value}
         onInput=${(event: Event) => { commentText.value = (event.target as HTMLInputElement).value }}
@@ -316,6 +317,7 @@ function CommentForm({ postId }: { postId: string }) {
         disabled=${commentSubmitting.value}
       />
       <button
+        class="font-[inherit]"
         onClick=${() => submitComment(postId)}
         disabled=${commentSubmitting.value || commentText.value.trim() === ''}
         style="padding:8px 16px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222,128,0.3); border-radius:8px; color:#4ade80; cursor:pointer; font-size:13px;"
@@ -344,7 +346,7 @@ function PostDetail({ post }: { post: BoardPost }) {
     <div>
       <button class="back-btn" onClick=${() => navigate('work', { section: 'board' })}>← 게시판으로 돌아가기</button>
       <${Card} title=${post.title}>
-        <div class="board-detail">
+        <div class="board-detail p-5">
           <div class="post-body">
             <${Markdown} text=${stripStateBlocks(post.body)} />
           </div>

@@ -269,10 +269,6 @@
   background: linear-gradient(180deg, rgba(34,211,238,0.12), var(--white-3));
 }
 
-.command-guide-card.focus {
-  box-shadow: 0 0 0 1px rgba(34,211,238,0.16);
-}
-
 .command-guide-card.ok,
 .command-guide-card.warn,
 .command-guide-card.bad {
@@ -283,10 +279,6 @@
   margin: 10px 0 0;
   color: rgba(255,255,255,0.82);
   line-height: 1.5;
-}
-
-.command-next-step-card {
-  margin-bottom: 12px;
 }
 
 .command-readiness-list {
@@ -331,10 +323,7 @@
   align-items: flex-start;
 }
 
-.command-path-grid {
-  display: grid;
-  gap: 12px;
-}
+
 
 .command-guide-inline,
 .command-chain-node-row {
@@ -556,10 +545,6 @@
   }
 }
 
-.warroom-orchestration-card {
-  min-height: 220px;
-}
-
 .warroom-presence-card.ok,
 .warroom-presence-card.warn,
 .warroom-presence-card.bad,
@@ -574,10 +559,6 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-}
-
-.warroom-worker-card .command-tag-row {
-  margin-top: 10px;
 }
 
 @media (max-width: 1450px) {
@@ -613,10 +594,6 @@
 
 }
 
-.command-section {
-  min-height: 240px;
-}
-
 .command-card-stack,
 .command-chain-list,
 .command-chain-history {
@@ -624,10 +601,6 @@
   flex-direction: column;
   gap: 12px;
   margin-top: 14px;
-}
-
-.command-card.compact {
-  padding: 12px;
 }
 
 .command-card,
@@ -720,10 +693,6 @@
   border: 1px solid var(--white-8);
 }
 
-.command-chain-graph-shell {
-  margin-top: 12px;
-  min-height: 160px;
-}
 
 .command-chain-graph {
   overflow: auto;
@@ -736,11 +705,6 @@
     min-width: 100%;
     height: auto;
   }
-}
-
-.command-chain-history-row,
-.error-text {
-  color: #fca5a5;
 }
 
 .command-chip,
@@ -830,16 +794,6 @@
   border-left: 1px solid var(--white-8);
 }
 
-.command-tree-node.depth-1,
-.command-tree-node.depth-2,
-.command-alert.bad {
-  border-color: rgba(248,113,113,0.3);
-}
-
-.command-alert.warn {
-  border-color: rgba(251,191,36,0.26);
-}
-
 .command-trace-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 0.9fr);
@@ -865,10 +819,6 @@
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .command-card-grid span,

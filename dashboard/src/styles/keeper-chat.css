@@ -55,14 +55,6 @@
   max-width: 85%;
 }
 
-.keeper-chat__msg--user {
-  align-self: flex-end;
-}
-
-.keeper-chat__msg--assistant {
-  align-self: flex-start;
-}
-
 .keeper-chat__role {
   font-size: var(--fs-2xs);
   color: rgba(255, 255, 255, 0.35);
@@ -128,14 +120,6 @@
   padding: 10px 14px;
   border-top: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
   background: rgba(10, 22, 40, 0.6);
-}
-
-.keeper-chat__input {
-  flex: 1;
-}
-
-.keeper-chat__send {
-  flex-shrink: 0;
 }
 
 /* Scrollbar */

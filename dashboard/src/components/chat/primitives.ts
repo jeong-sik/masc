@@ -282,7 +282,7 @@ export function ChatComposer({
   return html`
     <div class="chat-composer">
       <textarea
-        class="control-textarea chat-composer-input"
+        class="control-textarea min-h-[72px]"
         placeholder=${placeholder}
         value=${draft}
         onInput=${(event: Event) => { onDraftChange((event.target as HTMLTextAreaElement).value) }}

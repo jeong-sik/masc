@@ -5,7 +5,7 @@ import type {
   CommandPlaneTreeNode,
 } from '../../types'
 import { commandPlaneSnapshot } from '../../command-store'
-import { prettyJson, relativeTime, toneClass, unitKindLabel } from './helpers'
+import { alertBorderTone, prettyJson, relativeTime, toneClass, unitKindLabel } from './helpers'
 
 function topologySourceLabel(source?: string) {
   switch (source) {
@@ -71,7 +71,7 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
   const source = node.unit.source ?? 'unknown'
   const connectionLabel = activeOps > 0 ? `${activeOps}개 작전 연결` : '실행 연결 없음'
   return html`
-    <div class="command-tree-node depth-${Math.min(depth, 3)}">
+    <div class="command-tree-node depth-${Math.min(depth, 3)} ${depth <= 2 ? 'border-[rgba(248,113,113,0.3)]' : ''}">
       <div class="command-tree-head">
         <div>
           <div class="command-tree-title-row">
@@ -109,7 +109,7 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
 
 function AlertCard({ alert }: { alert: CommandPlaneAlert }) {
   return html`
-    <article class="command-alert ${toneClass(alert.severity)}">
+    <article class="command-alert ${toneClass(alert.severity)} ${alertBorderTone(toneClass(alert.severity))}">
       <div class="command-card-head">
         <strong>${alert.title ?? alert.kind ?? alert.alert_id}</strong>
         <span class="command-chip ${toneClass(alert.severity)}">${alert.severity ?? 'warn'}</span>
@@ -151,7 +151,7 @@ export function TopologySurface() {
   const managedUnits = summary?.managed_unit_count ?? 0
   const activeOps = summary?.active_operation_count ?? 0
   return html`
-    <section class="card command-section">
+    <section class="card min-h-[240px]">
       <div class="card-title-row">
         <div class="card-title">지휘 계층</div>
       </div>
@@ -177,7 +177,7 @@ export function TopologySurface() {
 export function AlertsSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
-    <section class="card command-section">
+    <section class="card min-h-[240px]">
       <div class="card-title-row">
         <div class="card-title">경보</div>
       </div>
@@ -193,7 +193,7 @@ export function AlertsSurface() {
 export function TraceSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
-    <section class="card command-section">
+    <section class="card min-h-[240px]">
       <div class="card-title-row">
         <div class="card-title">최근 트레이스</div>
       </div>

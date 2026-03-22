@@ -41,10 +41,6 @@
   animation: livePulse 2s ease-in-out infinite;
 }
 
-.pulse-idle {
-  border-color: var(--white-10);
-}
-
 .pulse-stale {
   border-color: rgba(239,68,68,0.3);
   opacity: 0.6;
@@ -276,10 +272,6 @@
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-.focus-emoji {
-  font-size: 0.95rem;
 }
 
 .focus-pressure-badge {

@@ -64,7 +64,7 @@ export function OpsKeeperColumn() {
             >
               <div class="ops-entity-title-row">
                 <strong>${keeper.name}</strong>
-                <span class="status-badge ${keeper.status ?? 'idle'}">${displayStatus(keeper.status)}</span>
+                <span class="border border-solid border-[var(--card-border)] ${keeper.status ?? 'idle'} ${keeper.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(keeper.status)}</span>
                 <span
                   class="ops-detail-link"
                   title="키퍼 상세 보기"
@@ -101,7 +101,7 @@ export function OpsKeeperColumn() {
                 <article key=${agent.name} class="ops-entity-card">
                   <div class="ops-entity-title-row">
                     <strong>${agent.name}</strong>
-                    <span class="status-badge ${agent.status ?? 'idle'}">${displayStatus(agent.status)}</span>
+                    <span class="border border-solid border-[var(--card-border)] ${agent.status ?? 'idle'} ${agent.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(agent.status)}</span>
                   </div>
                   <div class="ops-entity-meta">
                     <span>persistent</span>

@@ -12,7 +12,7 @@ export function Live() {
   const isConnected = connected.value
 
   return html`
-    <div class="live-monitor">
+    <div class="grid gap-4">
       <div class="live-header">
         <h2>라이브 모니터</h2>
         <div class="live-header-stats">

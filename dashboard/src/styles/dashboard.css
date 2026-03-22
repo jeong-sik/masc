@@ -1,10 +1,4 @@
-/* ── Health Strip (traffic-light compact) ──────────────────── */
-/* ── StatCard delta + sparkline ────────────────────────────── */
 /* ── Runtime Collapsible ──────────────────────────────────── */
-.runtime-collapsible {
-  margin-top: 4px;
-}
-
 .runtime-summary {
   cursor: pointer;
   color: var(--text-muted);
@@ -28,7 +22,6 @@
 .runtime-collapsible[open] > .runtime-summary::before {
   content: '▾ ';
 }
-/* ── Hero Section (Phase 1) ── */
 /* ── Collapsible Sections ── */
 
 .overview-section-collapsible {
@@ -72,10 +65,6 @@
   transform: rotate(90deg);
 }
 
-.overview-section-collapsible > summary .monitor-pill {
-  margin-left: auto;
-}
-
 .overview-section-collapsible > :not(summary) {
   padding: 0 16px 12px;
 }
@@ -111,12 +100,6 @@
   }
 }
 
-/* Activity */
-/* Journal */
-.journal-entry {
-  border-bottom-color: var(--card-border);
-}
-/* Board */
 .board-post-list,
 .comment-thread {
   display: flex;
@@ -130,20 +113,11 @@
   contain-intrinsic-size: auto 120px;
 }
 
-.post-title {
-  color: #e8f0ff;
-}
-
 .post-meta {
   display: flex;
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
-}
-
-.comment-form input,
-.comment-form button {
-  font-family: inherit;
 }
 
 .back-btn {
@@ -159,17 +133,6 @@
 
 .back-btn:hover {
   background: var(--white-10);
-}
-
-/* ── Density Modes (Agents + Board) ───────────────────────── */
-/* Tasks */
-/* Status badges */
-.status-badge {
-  border: 1px solid var(--card-border);
-}
-
-.status-badge.offline {
-  color: #8da4cc;
 }
 
 /* ── Control Dock ─────────────────────────────────────────── */
@@ -197,10 +160,6 @@
   color: #d5e5fb;
   font-size: var(--fs-sm);
   line-height: 1.5;
-}
-
-.control-error-copy {
-  color: #ffb4b4;
 }
 
 .control-input,
@@ -351,14 +310,6 @@
 .mission-status-dot.mission-state-alive {
   background: var(--ok, var(--ok));
   box-shadow: 0 0 4px rgba(74, 222, 128, 0.5);
-}
-
-.mission-status-dot.mission-state-idle {
-  background: var(--warn, var(--warn));
-}
-
-.mission-status-dot.mission-state-offline {
-  background: #555;
 }
 
 /* ── Card-level dimming for offline / idle ──────────────── */

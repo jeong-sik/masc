@@ -223,7 +223,7 @@ export function OpsRoomColumn() {
             </div>
 
             <label class="control-label" for="ops-pause-reason">일시정지 / 재개</label>
-            <div class="control-row ops-split-row">
+            <div class="control-row items-stretch">
               <input
                 id="ops-pause-reason"
                 class="control-input"
@@ -257,9 +257,9 @@ export function OpsRoomColumn() {
               onInput=${(event: Event) => { taskDescription.value = (event.target as HTMLTextAreaElement).value }}
               disabled=${operatorActionBusy.value}
             ></textarea>
-            <div class="control-row ops-split-row">
+            <div class="control-row items-stretch">
               <select
-                class="control-input ops-select"
+                class="control-input min-w-[92px]"
                 value=${taskPriority.value}
                 onChange=${(event: Event) => { taskPriority.value = (event.target as HTMLSelectElement).value }}
                 disabled=${operatorActionBusy.value}

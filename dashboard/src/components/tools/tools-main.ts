@@ -30,7 +30,7 @@ export function Tools() {
   return html`
     <div>
       <${Card} title="시스템 도구 목록" class="section">
-        <div class="monitor-section-head">
+        <div class="mb-3.5">
           <h2 class="monitor-headline">시스템 도구 목록</h2>
           <p class="monitor-subheadline">
             ${showFullInventory.value

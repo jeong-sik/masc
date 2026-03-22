@@ -120,8 +120,3 @@
 .ctx-fill.bad {
   background: linear-gradient(90deg, var(--bad), var(--warn-bright));
 }
-
-/* Legacy alias for older code */
-.container {
-  width: 100%;
-}

@@ -39,10 +39,6 @@
   50% { border-color: rgba(251, 191, 36, 0.50); }
 }
 
-/* Working agents: green glow pulse */
-/* Watching agents: subtle accent border */
-/* Quiet agents: dimmed, desaturated */
-/* Offline agents: strongly dimmed, grayscale emoji */
 button.monitor-row.state-offline {
   opacity: 0.35;
   border-color: rgba(85, 85, 85, 0.15);
@@ -55,8 +51,6 @@ button.monitor-row.state-offline:hover {
   opacity: 0.55;
 }
 
-/* Warn-tone blink for quiet+bad rows */
-/* Monitor pill state variants */
 .monitor-pill.state-offline {
   background: rgba(85, 85, 85, 0.20);
   color: var(--text-dim);
@@ -69,4 +63,3 @@ button.monitor-row.state-offline:hover {
   grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.96fr) minmax(0, 0.88fr);
   gap: 16px;
 }
-

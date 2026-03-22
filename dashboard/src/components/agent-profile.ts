@@ -220,16 +220,16 @@ function CharacterPlate({ name }: { name: string }) {
           activityAge=${lastActivity}
           signalTruth=${signalTruth}
         />
-        ${isKeeper ? html`<div class="ff-plate__class-tag">KEEPER</div>` : null}
+        ${isKeeper ? html`<div class="text-[9px] font-bold tracking-[1.5px] text-[color:var(--ff-gold)] uppercase text-center">KEEPER</div>` : null}
       </div>
 
       <div class="ff-plate__info">
         <div class="ff-plate__name-row">
           <h2 class="ff-plate__name">
-            ${agentEmoji ? html`<span class="ff-plate__emoji">${agentEmoji}</span>` : ''}
+            ${agentEmoji ? html`<span class="text-[1.4em]">${agentEmoji}</span>` : ''}
             ${displayName}
           </h2>
-          ${koreanName ? html`<span class="ff-plate__sub">(${koreanName})</span>` : ''}
+          ${koreanName ? html`<span class="text-[length:var(--fs-base)] text-[color:var(--text-muted)]">(${koreanName})</span>` : ''}
           ${generation != null ? html`<span class="ff-plate__level">Lv.${generation}</span>` : null}
         </div>
 
@@ -252,11 +252,11 @@ function CharacterPlate({ name }: { name: string }) {
 
         <div class="ff-plate__status-line">
           ${currentWork
-            ? html`<span class="ff-plate__work">${currentWork}</span>`
-            : html`<span class="ff-plate__work ff-plate__work--idle">대기 중</span>`
+            ? html`<span class="text-[length:var(--fs-base)] text-[#c8daf7]">${currentWork}</span>`
+            : html`<span class="text-[length:var(--fs-base)] text-[#c8daf7] ff-plate__work--idle">대기 중</span>`
           }
           ${workerState ? html`<span class="ff-plate__worker-state">${workerState}</span>` : null}
-          ${workerFocus ? html`<span class="ff-plate__worker-focus">${workerFocus}</span>` : null}
+          ${workerFocus ? html`<span class="text-[length:var(--fs-xs)] text-[#9ab3de]">${workerFocus}</span>` : null}
         </div>
 
         ${lastSeenAt || lastActivity != null ? html`
@@ -279,38 +279,38 @@ function CharacterPlate({ name }: { name: string }) {
         <div class="ff-plate__stats ff-plate__stats--keeper">
           <div class="ff-stat">
             <span class="ff-stat__value">${ctxPct != null ? `${ctxPct}%` : '—'}</span>
-            <span class="ff-stat__label">CTX</span>
+            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">CTX</span>
           </div>
           <div class="ff-stat">
             <span class="ff-stat__value">${generation ?? 0}</span>
-            <span class="ff-stat__label">세대</span>
+            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">세대</span>
           </div>
           <div class="ff-stat">
             <span class="ff-stat__value">${keeper.turn_count ?? 0}</span>
-            <span class="ff-stat__label">턴</span>
+            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">턴</span>
           </div>
           <div class="ff-stat">
             <span class="ff-stat__value">${keeper.autonomous_action_count ?? 0}</span>
-            <span class="ff-stat__label">행동</span>
+            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">행동</span>
           </div>
         </div>
       ` : summary ? html`
         <div class="ff-plate__stats">
           <div class="ff-stat">
             <span class="ff-stat__value">${summary.tasks_completed}</span>
-            <span class="ff-stat__label">완료</span>
+            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">완료</span>
           </div>
           <div class="ff-stat">
             <span class="ff-stat__value">${summary.tasks_claimed}</span>
-            <span class="ff-stat__label">수임</span>
+            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">수임</span>
           </div>
           <div class="ff-stat">
             <span class="ff-stat__value">${summary.messages_sent}</span>
-            <span class="ff-stat__label">메시지</span>
+            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">메시지</span>
           </div>
           <div class="ff-stat">
             <span class="ff-stat__value">${summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : '0m'}</span>
-            <span class="ff-stat__label">활동</span>
+            <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">활동</span>
           </div>
         </div>
       ` : null}
@@ -431,10 +431,10 @@ export function AgentProfile({ name }: { name: string }) {
         <//>
 
         ${taskHistories.value.length > 0 ? html`
-          <${Card} title="태스크 이력" class="ff-card ff-card--wide">
+          <${Card} title="태스크 이력" class="ff-card col-span-full">
             <div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`
               <div class="agent-history-row" key=${row.taskId}>
-                <div class="agent-history-head"><span class="pill">${row.taskId}</span></div>
+                <div class="mb-2"><span class="pill">${row.taskId}</span></div>
                 <pre class="agent-history-pre">${row.text || 'No history yet'}</pre>
               </div>
             `)}</div>

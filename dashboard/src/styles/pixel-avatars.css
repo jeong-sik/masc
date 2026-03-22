@@ -163,7 +163,6 @@
   opacity: 1;
 }
 
-/* Top 5 active agents always show */
 /* Avatar name label */
 .pixel-avatar-wrap {
   display: flex;
@@ -185,8 +184,6 @@
 .pixel-avatar-name--active {
   color: var(--text-strong);
 }
-
-/* Particle effect for working agents */
 
 @media (prefers-reduced-motion: reduce) {
   .pixel-avatar[data-status] {

@@ -166,8 +166,6 @@
   line-height: 1.6;
 }
 
-/* Post flair badges */
-
 /* Board detail */
 .board-detail { padding: 20px; }
 .board-detail .post-body { font-size: var(--fs-md); line-height: 1.7; margin: 15px 0; }

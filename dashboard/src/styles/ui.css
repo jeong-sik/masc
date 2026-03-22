@@ -122,8 +122,6 @@ button.agent-card {
   }
 }
 
-button.agent:hover,
-/* Agents */
 .room-truth-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -205,10 +203,6 @@ button.agent:hover,
   color: var(--text-muted);
 }
 
-.monitor-section-head {
-  margin-bottom: 14px;
-}
-
 .monitor-headline {
   margin: 0;
   font-size: 18px;
@@ -272,19 +266,11 @@ button.monitor-alert.bad,
   padding: 12px 14px;
 }
 
-.monitor-row {
-  padding: 14px;
-}
-
 .monitor-row-header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 10px;
-}
-
-.monitor-row-title {
-  min-width: 0;
 }
 
 .monitor-name-line {

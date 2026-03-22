@@ -22,7 +22,7 @@ function FilterBar() {
   const active = liveFilters.value
 
   return html`
-    <div class="activity-filter-bar">
+    <div class="flex gap-1.5">
       ${FILTER_OPTIONS.map(opt => html`
         <button
           key=${opt.kind}

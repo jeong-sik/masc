@@ -244,7 +244,7 @@ export function Mission() {
           <div class="mission-list-stack">
             ${focusSessionOutputs.length > 0
               ? focusSessionOutputs.slice(0, 4).map(row => html`
-                  <div class="mission-inline-note">
+                  <div class="grid gap-1">
                     <strong>${row.agent_name ?? 'unknown actor'}</strong>
                     ${row.role ? html` · ${row.role}` : null}
                     ${row.status ? html` · ${statusLabel(row.status)}` : null}
@@ -254,7 +254,7 @@ export function Mission() {
               : html`<div class="empty-state">선택된 세션에서 바로 읽을 최근 출력이 없습니다.</div>`}
             ${keeperOutputRows.length > 0
               ? keeperOutputRows.map(row => html`
-                  <div class="mission-inline-note">
+                  <div class="grid gap-1">
                     <strong>${row.brief.name}</strong>
                     <div>${row.recentOutput}</div>
                   </div>

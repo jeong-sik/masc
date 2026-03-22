@@ -28,10 +28,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.oas-pipeline__section {
-  margin-bottom: 10px;
-}
-
 .oas-section-label {
   font-size: var(--fs-xs);
   font-weight: 500;
@@ -102,16 +98,6 @@
 .badge--comment { background: #1a2a3a; color: var(--accent); }
 .badge--upvote { background: #3a3a1a; color: #facc15; }
 .badge--skip { background: #2a2a2a; color: var(--text-dim); }
-
-.oas-event-trigger {
-  color: var(--text-muted, #666);
-  font-size: var(--fs-2xs);
-}
-
-.oas-event-ok {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-}
 
 .oas-event-ok.ok { color: var(--ok); }
 .oas-event-ok.fail { color: var(--bad-light); }

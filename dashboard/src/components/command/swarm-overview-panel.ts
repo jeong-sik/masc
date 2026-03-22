@@ -32,14 +32,14 @@ export function SwarmOverviewPanel() {
   const compactLayout = lanes.length <= 1
 
   return html`
-    <section class="card command-section">
+    <section class="card min-h-[240px]">
       <div class="card-title-row">
         <div class="card-title">스웜</div>
       </div>
       ${swarm
         ? html`
             <${SwarmStoryboard} lanes=${lanes} />
-            <div class="command-summary-grid command-swarm-summary">
+            <div class="command-summary-grid mt-3">
               <div class="monitor-stat-card"><span>활성 레인</span><strong>${overview?.active_lanes ?? 0}</strong><small>${overview?.moving_lanes ?? 0}개 이동 중</small></div>
               <div class="monitor-stat-card"><span>정체</span><strong>${overview?.stalled_lanes ?? 0}</strong><small>${overview?.projected_lanes ?? 0}개 예상 레인</small></div>
               <div class="monitor-stat-card"><span>마지막 이동</span><strong>${relativeTime(overview?.last_movement_at)}</strong><small>${swarm.generated_at ? `스냅샷 ${relativeTime(swarm.generated_at)}` : '방금 스냅샷'}</small></div>
@@ -56,7 +56,7 @@ export function SwarmOverviewPanel() {
               </div>
 
               <div class="command-card-stack">
-                <div class="command-guide-card highlight ${focusKey === 'recommendation' ? 'focus' : ''}">
+                <div class="command-guide-card highlight ${focusKey === 'recommendation' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
                   <div class="command-guide-head">
                     <strong>${recommendation?.label ?? '운영자 상태 확인'}</strong>
                     <span class="command-chip">${recommendation?.lane_id ?? '전체'}</span>
@@ -67,7 +67,7 @@ export function SwarmOverviewPanel() {
 
                 <${SwarmProofPanel} proof=${proof} />
 
-                <div class="command-guide-card ${gaps.length > 0 ? 'warn' : 'ok'} ${focusKey === 'gaps' ? 'focus' : ''}">
+                <div class="command-guide-card ${gaps.length > 0 ? 'warn' : 'ok'} ${focusKey === 'gaps' ? 'shadow-[0_0_0_1px_rgba(34,211,238,0.16)]' : ''}">
                   <div class="command-guide-head">
                     <strong>핵심 공백</strong>
                     <span class="command-chip ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>

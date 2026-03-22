@@ -28,10 +28,10 @@ export function WorkerSupportRow({
   testId: string
 }) {
   return html`
-    <button class="monitor-row ${row.tone} state-${row.state}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
+    <button class="monitor-row p-3.5 ${row.tone} state-${row.state}" data-testid=${testId} onClick=${() => openAgentDetail(row.name)}>
       <div class="monitor-row-header">
         <span class="agent-emoji">${row.emoji ?? ''}</span>
-        <div class="monitor-row-title">
+        <div class="min-w-0">
           <div class="monitor-name-line">
             <span class="monitor-title">${row.name}</span>
             ${row.korean_name ? html`<span class="monitor-sub">${row.korean_name}</span>` : null}

@@ -23,7 +23,7 @@ export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['pe
   return html`
     <div class="governance-ledger-row">
       <div class="governance-ledger-head">
-        <span class="governance-badge neutral">청원</span>
+        <span class="governance-badge text-[#b7cbee]">청원</span>
         <strong>${petition.created_by || petition.origin || 'system'}</strong>
         ${petition.created_at ? html`<span><${TimeAgo} timestamp=${petition.created_at} /></span>` : null}
       </div>

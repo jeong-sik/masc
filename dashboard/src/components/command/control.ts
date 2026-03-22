@@ -46,7 +46,7 @@ function DecisionCard({ decision }: { decision: CommandPlaneDecisionRecord }) {
         <span>결정 ID</span><span>${decision.decision_id}</span>
         <span>요청자</span><span>${decision.requested_by ?? '알 수 없음'}</span>
         <span>출처</span><span>${decision.source ?? 'managed'}</span>
-        <span>트레이스</span><span class="mono">${decision.trace_id}</span>
+        <span>트레이스</span><span class="font-mono">${decision.trace_id}</span>
         <span>생성 시각</span><span>${relativeTime(decision.created_at)}</span>
         <span>이유</span><span>${decision.reason ?? '정보 없음'}</span>
       </div>
@@ -75,7 +75,7 @@ function CapacityRowCard({ row }: { row: CommandPlaneCapacityRow }) {
   const killSwitch = !!unit.policy?.kill_switch
   const utilization = Math.round((row.utilization ?? 0) * 100)
   return html`
-    <article class="command-card compact">
+    <article class="command-card p-3">
       <div class="command-card-head">
         <div>
           <strong>${unit.label}</strong>
@@ -107,7 +107,7 @@ export function ControlSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <div class="command-surface-grid">
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">승인 대기</div>
         </div>
@@ -118,7 +118,7 @@ export function ControlSurface() {
           : html`<div class="empty-state">지금 승인 대기 항목은 없습니다.</div>`}
       </section>
 
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">유닛 제어</div>
         </div>

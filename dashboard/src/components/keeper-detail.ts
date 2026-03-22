@@ -82,7 +82,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
       <div class="keeper-comms-layout">
         ${'' /* Chat takes full width — the primary interaction surface */}
-        <div class="keeper-comms-chat">
+        <div class="w-full">
           <${KeeperConversationPanel}
             keeperName=${keeper.name}
             placeholder="이 키퍼에게 직접 프롬프트"

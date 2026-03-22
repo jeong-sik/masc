@@ -182,7 +182,7 @@ export function Proof() {
             <h3>핵심 증명</h3>
             <p>결론, 왜 아직 부족한지, 다음에 무엇을 남겨야 하는지만 먼저 봅니다.</p>
           </div>
-          <div class="proof-summary-stack">
+          <div class="grid gap-2.5">
             ${reasonLines.map((line, idx) => html`
               <article class="proof-summary-block ${idx === 1 && verdict !== 'proven' ? verdictTone(verdict) : ''}">
                 <strong>${idx === 0 ? '지금 결론' : idx === 1 ? '왜 이렇게 판정됐나' : '다음 보강 포인트'}</strong>

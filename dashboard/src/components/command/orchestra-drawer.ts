@@ -327,7 +327,7 @@ export function OrchestraNodeLayer({
           <g
             key=${node.id}
             data-orchestra-node="true"
-            class=${`orchestra-node room ${toneClass(node.tone)} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
+            class=${`orchestra-node room cursor-pointer ${toneClass(node.tone)} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
             onClick=${() => onSelect(node.id)}
           >
             <title>${node.label}</title>
@@ -344,7 +344,7 @@ export function OrchestraNodeLayer({
         <g
           key=${node.id}
           data-orchestra-node="true"
-          class=${`orchestra-node ${visualClass} ${toneClass(node.tone)} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
+          class=${`orchestra-node ${visualClass} cursor-pointer ${toneClass(node.tone)} ${selected ? 'selected' : ''} ${focused ? 'focused' : ''}`}
           onClick=${() => onSelect(node.id)}
         >
           <title>${node.label}${node.subtitle ? ` — ${node.subtitle}` : ''}${node.status ? ` (${node.status})` : ''}</title>

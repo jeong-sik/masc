@@ -8,7 +8,7 @@ function pulseStateClass(state: PulseState): string {
   switch (state) {
     case 'working': return 'pulse-working'
     case 'stale': return 'pulse-stale'
-    default: return 'pulse-idle'
+    default: return 'border-[var(--white-10)]'
   }
 }
 

@@ -59,7 +59,7 @@ function statusLabel(status: string): string {
 
 export function StatusBadge({ status, label }: StatusBadgeProps) {
   return html`
-    <span class="status-badge ${status}">
+    <span class="border border-solid border-[var(--card-border)] ${status} ${status === 'offline' ? 'text-[#8da4cc]' : ''}">
       <span class="status-dot-inline ${status}"></span>
       ${label ?? statusLabel(status)}
     </span>

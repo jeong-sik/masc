@@ -92,7 +92,7 @@ export function LogViewer() {
         </div>
 
         <div class="logs-actions">
-          <span class="logs-total">${(logTotal.value ?? 0).toLocaleString()}건</span>
+          <span class="tabular-nums">${(logTotal.value ?? 0).toLocaleString()}건</span>
           <label class="logs-auto-label">
             <input
               type="checkbox"
@@ -119,7 +119,7 @@ export function LogViewer() {
               <th class="logs-col-ts">timestamp</th>
               <th class="logs-col-level">level</th>
               <th class="logs-col-module">module</th>
-              <th class="logs-col-msg">message</th>
+              <th class="break-words">message</th>
             </tr>
           </thead>
           <tbody>
@@ -130,7 +130,7 @@ export function LogViewer() {
                   ${entry.level}
                 </td>
                 <td class="logs-col-module">${entry.module}</td>
-                <td class="logs-col-msg">${entry.message}</td>
+                <td class="break-words">${entry.message}</td>
               </tr>
             `)}
           </tbody>

@@ -192,11 +192,11 @@ function GuidedPanel() {
 
   return html`
     <div class="command-guided-layout">
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">즉시 조치</div>
         </div>
-        <div class="command-guide-card highlight command-next-step-card">
+        <div class="command-guide-card highlight mb-3">
           <div class="command-guide-head">
             <strong>${nextStep?.title ?? nextTool}</strong>
             <span class="command-chip ok">${nextTool}</span>
@@ -245,7 +245,7 @@ function GuidedPanel() {
           : null}
       </section>
 
-      <section class="card command-section">
+      <section class="card min-h-[240px]">
         <div class="card-title-row">
           <div class="card-title">운영 경로</div>
         </div>
@@ -254,7 +254,7 @@ function GuidedPanel() {
           : commandPlaneHelpError.value
             ? html`<div class="empty-state error">${commandPlaneHelpError.value}</div>`
             : html`
-                <div class="command-path-grid">
+                <div class="grid gap-3">
                   ${renderedPaths.map(path => html`
                     <article class="command-guide-card">
                       <div class="command-guide-head">

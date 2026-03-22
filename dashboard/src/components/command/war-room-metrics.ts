@@ -385,7 +385,7 @@ export function WarRoomOrchestrationRail({
     <div class="warroom-orchestration-grid">
       ${chainOverlay
         ? html`
-            <article class="command-card warroom-orchestration-card">
+            <article class="command-card warroom-orchestration-card min-h-[220px]">
               <div class="command-card-head">
                 <div>
                   <strong>Chain Orchestration</strong>
@@ -411,7 +411,7 @@ export function WarRoomOrchestrationRail({
         : null}
       ${linkedAutoresearch
         ? html`
-            <article class="command-card warroom-orchestration-card">
+            <article class="command-card warroom-orchestration-card min-h-[220px]">
               <div class="command-card-head">
                 <div>
                   <strong>Autoresearch Loop</strong>

@@ -46,7 +46,7 @@ function TaskSummary({ task }: { task: Task }) {
 function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   return html`
     <div class="agent-history-row">
-      <div class="agent-history-head">
+      <div class="mb-2">
         <span class="pill">${row.taskId}</span>
       </div>
       <pre class="agent-history-pre">${row.text || 'No task history yet'}</pre>
@@ -108,12 +108,12 @@ export function AgentDetailOverlay() {
                 <h2 class="m-0 flex items-baseline gap-2">
                   ${displayName}
                   ${koreanName ? html`<span class="text-xs text-[var(--text-dim)]">(${koreanName})</span>` : ''}
-                  ${secondaryLabel ? html`<span class="mono" class="text-xs text-[var(--text-dim)]">${secondaryLabel}</span>` : ''}
+                  ${secondaryLabel ? html`<span class="font-mono" class="text-xs text-[var(--text-dim)]">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div class="flex items-center gap-2 mt-1 flex-wrap">
                   <${StatusBadge} status=${headerStatus} />
                   ${isArchivedParticipant ? html`<span class="pill">archived session participant</span>` : null}
-                  ${agent?.model ? html`<span class="mono" class="text-xs bg-[#2a2a4a] px-1.5 py-0.5 rounded">${agent.model}</span>` : ''}
+                  ${agent?.model ? html`<span class="font-mono" class="text-xs bg-[#2a2a4a] px-1.5 py-0.5 rounded">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-[var(--text-dim)]">${missionBrief.archived_reason}</span>`
                     : null}

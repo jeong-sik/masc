@@ -29,8 +29,8 @@ export function GoalRow({ goal }: { goal: Goal }) {
         </div>
         <div class="goal-meta">
           <span class="goal-priority" title="Priority ${goal.priority}">${priorityStars(goal.priority)}</span>
-          ${goal.metric ? html`<span class="goal-metric">${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}</span>` : null}
-          ${goal.due_date ? html`<span class="goal-due">Due: <${TimeAgo} timestamp=${goal.due_date} /></span>` : null}
+          ${goal.metric ? html`<span class="text-cyan">${goal.metric}${goal.target_value ? ` \u2192 ${goal.target_value}` : ''}</span>` : null}
+          ${goal.due_date ? html`<span class="text-[var(--bad-light)]">Due: <${TimeAgo} timestamp=${goal.due_date} /></span>` : null}
         </div>
         ${goal.last_review_note ? html`
           <div class="goal-review-note">${goal.last_review_note}</div>

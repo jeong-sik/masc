@@ -127,7 +127,7 @@ export function OpsSessionColumn() {
     >
       <div class="ops-entity-title-row">
         <strong>${session.session_id}</strong>
-        <span class="status-badge ${session.status ?? 'idle'}">${displayStatus(session.status)}</span>
+        <span class="border border-solid border-[var(--card-border)] ${session.status ?? 'idle'} ${session.status === 'offline' ? 'text-[#8da4cc]' : ''}">${displayStatus(session.status)}</span>
       </div>
       <div class="ops-entity-meta">
         <span>${Math.round(session.progress_pct ?? 0)}%</span>
@@ -301,7 +301,7 @@ export function OpsSessionColumn() {
 
         ${linkedAutoresearch?.loop_id ? html`
           <label class="control-label" for="ops-autoresearch-hypothesis">Autoresearch 제어</label>
-          <div class="control-row ops-split-row">
+          <div class="control-row items-stretch">
             <button class="control-btn ghost" onClick=${() => { void refreshAutoresearch() }} disabled=${busy}>
               상태 새로고침
             </button>
@@ -321,7 +321,7 @@ export function OpsSessionColumn() {
             onInput=${(event: Event) => { autoresearchHypothesis.value = (event.target as HTMLTextAreaElement).value }}
             disabled=${busy}
           ></textarea>
-          <div class="control-row ops-split-row">
+          <div class="control-row items-stretch">
             <button class="control-btn" onClick=${() => { void injectHypothesis() }} disabled=${busy || !autoresearchHypothesis.value.trim()}>
               hypothesis 주입
             </button>
@@ -331,10 +331,10 @@ export function OpsSessionColumn() {
         ` : null}
 
         <label class="control-label" for="ops-turn-kind">세션 액션</label>
-        <div class="control-row ops-split-row">
+        <div class="control-row items-stretch">
           <select
             id="ops-turn-kind"
-            class="control-input ops-select"
+            class="control-input min-w-[92px]"
             value=${teamTurnKind.value}
             onChange=${(event: Event) => { teamTurnKind.value = (event.target as HTMLSelectElement).value as typeof teamTurnKind.value }}
             disabled=${busy || !selectedSessionActionable}
@@ -377,7 +377,7 @@ export function OpsSessionColumn() {
             disabled=${busy || !selectedSessionActionable}
           ></textarea>
           <select
-            class="control-input ops-select"
+            class="control-input min-w-[92px]"
             value=${teamTaskPriority.value}
             onChange=${(event: Event) => { teamTaskPriority.value = (event.target as HTMLSelectElement).value }}
             disabled=${busy || !selectedSessionActionable}
@@ -399,7 +399,7 @@ export function OpsSessionColumn() {
           ></textarea>
         ` : null}
 
-        <div class="control-row ops-split-row">
+        <div class="control-row items-stretch">
           <input
             class="control-input"
             type="text"

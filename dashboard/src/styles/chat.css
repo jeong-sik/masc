@@ -296,10 +296,6 @@
   color: #95f3bc;
 }
 
-.chat-composer-input {
-  min-height: 72px;
-}
-
 .chat-composer-actions {
   display: flex;
   gap: 8px;

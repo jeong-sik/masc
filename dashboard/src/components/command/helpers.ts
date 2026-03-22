@@ -26,6 +26,12 @@ import { prettyJson, displayStatus } from '../../lib/status-label'
 
 export { relativeTime, formatElapsed, toneClass, chainStatusTone, sessionStatusTone, expiryTone, prettyJson, displayStatus }
 
+export function alertBorderTone(tone: string): string {
+  if (tone === 'warn') return 'border-[rgba(251,191,36,0.26)]'
+  if (tone === 'bad') return 'border-[rgba(248,113,113,0.3)]'
+  return ''
+}
+
 export function deadlineLabel(iso?: string | null): string {
   if (!iso) return '정보 없음'
   const ts = Date.parse(iso)

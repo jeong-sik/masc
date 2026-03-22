@@ -190,7 +190,7 @@ export function KeyValueGrid({
 }) {
   if (rows.length === 0) return null
   return html`
-    <div class="proof-kv-block">
+    <div class="grid gap-2.5">
       ${title ? html`<strong>${title}</strong>` : null}
       <div class="proof-kv-grid">
         ${rows.map(row => html`

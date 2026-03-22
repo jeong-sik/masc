@@ -42,7 +42,7 @@ export function FocusSidebar() {
             >
               <div class="focus-agent-header">
                 <span class="focus-agent-name">
-                  ${agent.emoji ? html`<span class="focus-emoji">${agent.emoji}</span>` : null}
+                  ${agent.emoji ? html`<span class="text-[0.95rem]">${agent.emoji}</span>` : null}
                   ${agent.koreanName ?? agent.name}
                 </span>
                 <span class="focus-pressure-badge ${pressureClass(agent.pressure)}">

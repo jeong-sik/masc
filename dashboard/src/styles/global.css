@@ -77,8 +77,6 @@
   --warm-lavender: #b8a4d6;
   --warm-sage: #8dbd97;
 
-  /* FF Character Sheet theme */
-
   /* Agent status (soft tones) */
   --agent-working: #7ae09a;
   --agent-idle: #b8cae8;
@@ -90,12 +88,64 @@
   --warn-bright: #f97316;
 
   /* White overlay (glass morphism tints) */
-  --white-3: rgba(255, 255, 255, 0.03);
-  --white-4: rgba(255, 255, 255, 0.04);
-  --white-5: rgba(255, 255, 255, 0.05);
-  --white-6: rgba(255, 255, 255, 0.06);
-  --white-8: rgba(255, 255, 255, 0.08);
-  --white-10: rgba(255, 255, 255, 0.1);
+  --white-2: var(--white-2);
+  --white-3: var(--white-3);
+  --white-3h: var(--white-3h);
+  --white-4: var(--white-4);
+  --white-5: var(--white-5);
+  --white-6: var(--white-6);
+  --white-8: var(--white-8);
+  --white-10: var(--white-10);
+  --white-12: var(--white-12);
+  --white-20: var(--white-20);
+  --white-25: var(--white-25);
+  --white-30: var(--white-30);
+  --white-35: var(--white-35);
+  --white-40: var(--white-40);
+  --white-50: var(--white-50);
+  --white-55: var(--white-55);
+  --white-60: var(--white-60);
+  --white-70: var(--white-70);
+  --white-72: var(--white-72);
+
+  /* Border slate (138, 163, 211) */
+  --border-slate-8: var(--border-slate-8);
+  --border-slate-12: var(--border-slate-12);
+  --border-slate-16: var(--border-slate-16);
+  --border-slate-18: var(--border-slate-18);
+  --border-slate-22: var(--border-slate-22);
+  --border-slate-35: var(--border-slate-35);
+
+  /* OK / green (74, 222, 128) */
+  --ok-10: var(--ok-10);
+  --ok-12: var(--ok-12);
+  --ok-soft: var(--ok-soft);
+  --ok-22: var(--ok-22);
+  --ok-24: var(--ok-24);
+  --ok-25: var(--ok-25);
+  --ok-30: var(--ok-30);
+  --ok-35: var(--ok-35);
+  --ok-40: var(--ok-40);
+
+  /* Bad / red */
+  --bad-soft: var(--bad-soft);
+  --bad-12: var(--bad-12);
+
+  /* Warn / yellow (251, 191, 36) */
+  --warn-soft: var(--warn-soft);
+  --warn-12: var(--warn-12);
+
+  /* Accent / blue (71, 184, 255) */
+  --accent-8: var(--accent-8);
+  --accent-10: var(--accent-10);
+  --accent-12: var(--accent-12);
+
+  /* Cyan (34, 211, 238) */
+  --cyan-12: var(--cyan-12);
+  --cyan-16: var(--cyan-16);
+
+  /* FF gold (200, 168, 78) */
+  --ff-gold-15: var(--ff-gold-15);
 
   /* Font-size scale */
   --fs-2xs: 10px;
@@ -237,13 +287,6 @@ a:hover {
   font-size: 12px;
   color: var(--text-muted);
 }
-.kpi-label {
-  color: var(--text-muted);
-  font-size: 12px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
 .kpi-value {
   color: var(--text-strong);
   font-size: 17px;
@@ -308,19 +351,19 @@ a:hover {
   letter-spacing: 0.08em;
   color: var(--text-body);
   background: var(--white-6);
-  border: 1px solid rgba(138, 163, 211, 0.18);
+  border: 1px solid var(--border-slate-18);
 }
 
 .rail-section-chip.ok {
   color: #86efac;
-  border-color: rgba(74, 222, 128, 0.3);
-  background: rgba(74, 222, 128, 0.12);
+  border-color: var(--ok-30);
+  background: var(--ok-12);
 }
 
 .rail-section-chip.bad {
   color: #fda4af;
   border-color: rgba(239, 68, 68, 0.28);
-  background: rgba(239, 68, 68, 0.12);
+  background: var(--bad-12);
 }
 .rail-tab-list {
   display: grid;
@@ -384,12 +427,6 @@ a:hover {
   margin-top: 14px;
 }
 
-.rail-group-label {
-  color: var(--text-strong);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 .rail-view-note {
   margin-top: 14px;
   padding-top: 10px;
@@ -438,7 +475,7 @@ a:hover {
 }
 
 .rail-stat-card {
-  border: 1px solid rgba(138, 163, 211, 0.16);
+  border: 1px solid var(--border-slate-16);
   border-radius: 10px;
   padding: 10px 11px;
   background: var(--white-3);
@@ -461,7 +498,7 @@ a:hover {
   width: 100%;
   border: 1px solid rgba(71, 184, 255, 0.4);
   border-radius: 10px;
-  background: rgba(71, 184, 255, 0.12);
+  background: var(--accent-12);
   color: #d7efff;
   padding: 9px 11px;
   font-size: 12px;
@@ -498,13 +535,6 @@ a:hover {
   padding: 15px 14px;
 }
 
-.stat-label {
-  color: var(--text-muted);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .stat-value {
   margin-top: 6px;
   color: var(--text-strong);
@@ -535,7 +565,7 @@ a:hover {
 }
 
 .empty-state.ok {
-  border-color: rgba(74, 222, 128, 0.3);
+  border-color: var(--ok-30);
   color: var(--text-muted, var(--text-muted));
 }
 

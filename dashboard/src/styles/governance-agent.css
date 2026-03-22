@@ -110,10 +110,6 @@
   padding: 10px;
 }
 
-.agent-history-head {
-  margin-bottom: 8px;
-}
-
 .agent-history-pre {
   margin: 0;
   white-space: pre-wrap;
@@ -169,15 +165,6 @@
   gap: 6px;
 }
 
-.ff-plate__class-tag {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: var(--ff-gold);
-  text-transform: uppercase;
-  text-align: center;
-}
-
 .ff-plate__info {
   display: flex;
   flex-direction: column;
@@ -199,15 +186,6 @@
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.ff-plate__emoji {
-  font-size: 1.4em;
-}
-
-.ff-plate__sub {
-  font-size: var(--fs-base);
-  color: var(--text-muted);
 }
 
 .ff-plate__level {
@@ -305,11 +283,6 @@
   flex-wrap: wrap;
 }
 
-.ff-plate__work {
-  font-size: var(--fs-base);
-  color: #c8daf7;
-}
-
 .ff-plate__work--idle {
   color: #6b7fa0;
   font-style: italic;
@@ -321,11 +294,6 @@
   background: rgba(71, 184, 255, 0.08);
   padding: 1px 5px;
   border-radius: 3px;
-}
-
-.ff-plate__worker-focus {
-  font-size: var(--fs-xs);
-  color: #9ab3de;
 }
 
 .ff-plate__meta-line {
@@ -362,12 +330,6 @@
   color: var(--text-strong);
 }
 
-.ff-stat__label {
-  font-size: var(--fs-2xs);
-  color: var(--ff-gold);
-  letter-spacing: 0.5px;
-}
-
 /* --- Grid and Cards --- */
 
 .ff-profile__grid {
@@ -375,10 +337,6 @@
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   margin-bottom: 14px;
-}
-
-.ff-card--wide {
-  grid-column: 1 / -1;
 }
 
 /* Timeline events - compact FF style */
@@ -463,21 +421,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-.ff-relation-time {
-  color: rgba(255, 255, 255, 0.35);
-  font-size: var(--fs-xs);
-}
-
 .ff-interests {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding-top: 8px;
-}
-
-.ff-interests-label {
-  font-size: var(--fs-xs);
-  color: rgba(255, 255, 255, 0.4);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
 .ff-interests-tags {

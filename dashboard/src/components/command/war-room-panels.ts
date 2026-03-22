@@ -78,7 +78,7 @@ function warRoomMarkerLabel(marker: string): string {
 
 export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
   return html`
-    <article class="command-card compact warroom-worker-card ${toneClass(sessionStatusTone(worker.status))}">
+    <article class="command-card p-3 warroom-worker-card ${toneClass(sessionStatusTone(worker.status))}">
       <div class="command-card-head">
         <div>
           <strong>${worker.name}</strong>
@@ -92,7 +92,7 @@ export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
         <span>최근 신호</span><span>${worker.heartbeat}</span>
         <span>근거</span><span>${worker.detail}</span>
       </div>
-      <div class="command-tag-row">
+      <div class="command-tag-row mt-2.5">
         ${worker.markers.map(marker => html`<span class="command-tag">${warRoomMarkerLabel(marker)}</span>`)}
       </div>
       ${worker.note
@@ -104,7 +104,7 @@ export function WarRoomWorkerCard({ worker }: { worker: WarRoomWorkerView }) {
 
 export function WarRoomPresenceCard({ item }: { item: WarRoomPresenceView }) {
   return html`
-    <article class="command-card compact warroom-presence-card ${item.tone}">
+    <article class="command-card p-3 warroom-presence-card ${item.tone}">
       <div class="command-card-head">
         <div>
           <strong>${item.name}</strong>

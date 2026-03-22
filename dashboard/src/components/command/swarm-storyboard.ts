@@ -42,8 +42,8 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
 
   return html`
     <article class="swarm-lane-strip ${toneClass(tone)}">
-      <div class="swarm-lane-head">
-        <div class="swarm-lane-head-left">
+      <div class="swarm-lane-head flex items-center justify-between gap-2">
+        <div class="swarm-lane-head-left flex items-center gap-2 min-w-0">
           <span class="swarm-motion-dot ${lane.motion_state}"></span>
           <div>
             <span class="swarm-lane-kicker">${lane.kind} · ${lane.source_of_truth}</span>
@@ -90,7 +90,7 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
         : null}
       ${lane.hard_flags.length > 0
         ? html`
-            <div class="swarm-lane-flags">
+            <div class="swarm-lane-flags flex flex-wrap gap-1 mt-1">
               ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<span class="command-chip ${toneClass(flag.severity)}">${flag.code}</span>`)}
             </div>
           `
@@ -111,7 +111,7 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
         const detachments = lane.counts.detachments ?? 0
         return html`
           <article class="swarm-story-card ${toneClass(tone)}">
-            <div class="swarm-story-topline">
+            <div class="swarm-story-topline flex justify-between gap-1.5 flex-wrap">
               <span class="command-chip ${toneClass(tone)}">${lane.motion_state}</span>
               <span class="command-chip">${lane.phase}</span>
             </div>
@@ -156,7 +156,7 @@ export function SwarmHealthBar({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
       </div>
       <div class="swarm-health-labels">
         ${segments.filter(s => s.count > 0).map(s => html`
-          <span class="swarm-health-label">
+          <span class="swarm-health-label flex items-center gap-1">
             <span class="swarm-health-swatch" style="background: ${s.color}"></span>
             ${s.count} ${s.key}
           </span>

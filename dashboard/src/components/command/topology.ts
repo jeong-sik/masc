@@ -138,7 +138,7 @@ export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
           ${event.actor ? ` · ${event.actor}` : ''}
         </div>
       </div>
-      <pre class="command-trace-detail">${prettyJson(event.detail)}</pre>
+      <pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[length:var(--fs-sm)] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${prettyJson(event.detail)}</pre>
     </article>
   `
 }

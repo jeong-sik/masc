@@ -140,7 +140,7 @@ function ChainHistoryRow({ item }: { item: ChainHistoryEventSummary }) {
 
 function ChainRunNodeRow({ node }: { node: CommandPlaneChainRunNode }) {
   return html`
-    <article class="command-chain-node-row">
+    <article class="p-3 rounded-[10px] bg-[rgba(9,12,20,0.5)] border border-solid border-[var(--white-6)]">
       <div class="command-guide-head">
         <strong>${node.id}</strong>
         <span class="command-chip rounded-full ${chainStatusTone(node.status)}">${node.status ?? '확인 필요'}</span>

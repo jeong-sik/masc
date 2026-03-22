@@ -178,19 +178,6 @@
 }
 
 
-.ops-log-entry.preview {
-  border-color: rgba(251, 191, 36, 0.26);
-}
-
-.ops-log-entry.confirmed,
-.ops-log-entry.executed {
-  border-color: rgba(74, 222, 128, 0.26);
-}
-
-.ops-log-entry.error {
-  border-color: rgba(239, 68, 68, 0.26);
-}
-
 @media (max-width: 1200px) {
 
   .command-entry-strip {

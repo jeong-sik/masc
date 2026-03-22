@@ -73,7 +73,7 @@ export function SwarmOverviewPanel() {
                     <span class="command-chip rounded-full ${toneClass(gaps.some(gap => gap.severity === 'bad') ? 'bad' : gaps.length > 0 ? 'warn' : 'ok')}">${gaps.length}</span>
                   </div>
                   ${gaps.length > 0
-                    ? html`<div class="swarm-event-rail">${gaps.slice(0, 4).map(gap => html`<${SwarmGapDot} gap=${gap} />`)}</div>`
+                    ? html`<div class="border-l-2 border-[var(--card-border,var(--white-10))] pl-4 flex flex-col gap-0.5">${gaps.slice(0, 4).map(gap => html`<${SwarmGapDot} gap=${gap} />`)}</div>`
                     : html`<p>지금 보이는 핵심 공백은 없습니다.</p>`}
                 </div>
 
@@ -83,7 +83,7 @@ export function SwarmOverviewPanel() {
                     <span class="command-chip rounded-full">${timeline.length}</span>
                   </div>
                   ${timeline.length > 0
-                    ? html`<div class="swarm-event-rail">${timeline.map(event => html`<${SwarmEventNode} event=${event} />`)}</div>`
+                    ? html`<div class="border-l-2 border-[var(--card-border,var(--white-10))] pl-4 flex flex-col gap-0.5">${timeline.map(event => html`<${SwarmEventNode} event=${event} />`)}</div>`
                     : html`<p>붙어 있는 최근 이동 이벤트가 아직 없습니다.</p>`}
                 </div>
               </div>

@@ -89,7 +89,7 @@ export function OpsRoomColumn() {
         ` : activeRecommendedActions.length > 0 ? html`
           <div class="flex flex-col gap-2">
             ${activeRecommendedActions.map(item => html`
-              <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="ops-log-entry p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${item.severity}">
+              <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(item.severity)}">
                 <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>

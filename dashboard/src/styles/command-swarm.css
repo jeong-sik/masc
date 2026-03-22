@@ -362,13 +362,6 @@
   margin-top: 4px;
 }
 /* ── SwarmEventRail ────────────────────────────── */
-.swarm-event-rail {
-  border-left: 2px solid var(--card-border, var(--white-10));
-  padding-left: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
 .swarm-event-node {
   display: flex;
   align-items: flex-start;

@@ -86,7 +86,7 @@ export function SnapshotCard({ currentTab }: { currentTab: string }) {
           <strong class="text-[color:var(--text-strong)] text-lg leading-[1.1]">${eventCount.value}</strong>
         </div>
       </div>
-      <div class="mt-3 grid grid-cols-2 gap-2">
+      <div class="rail-inline-actions mt-3 grid grid-cols-2 gap-2">
         <button
           class="rail-refresh-btn"
           onClick=${() => {
@@ -140,7 +140,7 @@ export function InterveneRailCard() {
           <strong class="text-[color:var(--text-strong)] text-lg leading-[1.1]">${keeperCount}</strong>
         </div>
       </div>
-      <div class="mt-3 grid grid-cols-2 gap-2">
+      <div class="rail-inline-actions mt-3 grid grid-cols-2 gap-2">
         <button
           class="rail-refresh-btn"
           onClick=${() => {

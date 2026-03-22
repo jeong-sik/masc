@@ -1,28 +1,10 @@
 /* MASC Dashboard -- OAS Pipeline (retained: stateful variants, animations, compound selectors) */
 
-/* ── Event/Keeper Row hover ── */
-.oas-event-row:hover,
-.oas-keeper-row:hover {
-  background: var(--white-6, var(--white-3));
-}
-
 /* ── Event Badge variants ── */
 .badge--post { background: #1a3a2a; color: var(--ok); }
 .badge--comment { background: #1a2a3a; color: var(--accent); }
 .badge--upvote { background: #3a3a1a; color: #facc15; }
 .badge--skip { background: #2a2a2a; color: var(--text-dim); }
-
-.oas-event-ok.ok { color: var(--ok); }
-.oas-event-ok.fail { color: var(--bad-light); }
-
-/* ── Keeper context bars ── */
-.oas-keeper-bar {
-  transition: width 0.3s ease;
-}
-
-.bar--ok { background: var(--ok); }
-.bar--mid { background: #facc15; }
-.bar--warn { background: var(--bad-light); }
 
 /* ── Pipeline Stage Indicator ── */
 .pipeline-stage-label {

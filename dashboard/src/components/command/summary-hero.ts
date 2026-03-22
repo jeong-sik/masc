@@ -28,8 +28,8 @@ export function CommandWorkflowBanner() {
   const context = workflowContextForRoute(route.value)
   if (!context) return null
   return html`
-    <section class="rounded-[14px] border border-[rgba(34,211,238,0.26)] bg-[linear-gradient(180deg,rgba(34,211,238,0.1),var(--white-3))] p-[14px_16px] grid gap-2">
-      <div class="flex gap-2 flex-wrap items-center">
+    <section class="rounded-xl border border-[rgba(34,211,238,0.26)] bg-[linear-gradient(180deg,rgba(34,211,238,0.1),var(--white-3))] p-4 grid gap-3">
+      <div class="flex gap-3 flex-wrap items-center">
         <strong>${context.source_label}</strong>
         <span class="cmd-chip rounded-full">${workflowActionLabel(context.action_type)}</span>
         <span class="cmd-chip rounded-full">${workflowTargetLabel(context)}</span>
@@ -37,7 +37,7 @@ export function CommandWorkflowBanner() {
       </div>
       <div class="text-[rgba(255,255,255,0.84)] leading-normal">${context.summary}</div>
       ${context.payload_preview
-        ? html`<div class="p-[10px_12px] border border-[var(--white-8)] bg-[var(--white-5)] text-[color:var(--text-strong)] leading-[1.45] rounded-xl">${context.payload_preview}</div>`
+        ? html`<div class="py-3 px-3 border border-[var(--white-8)] bg-[var(--white-5)] text-[color:var(--text-strong)] leading-snug rounded-xl">${context.payload_preview}</div>`
         : null}
     </section>
   `
@@ -50,12 +50,12 @@ export function CommandEntryStrip() {
 
   return html`
     <section class="grid grid-cols-2 gap-3">
-      <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5">
+      <article class="p-4 rounded-xl border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-2">
         <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-[0.08em]">현재 표면</span>
         <strong class="text-[color:var(--text-near-white)] text-lg leading-[1.2] break-words">${guide.title}</strong>
         <p class="m-0 text-[color:var(--frost-72)] leading-normal">${guide.description}</p>
       </article>
-      <article class="p-[14px_16px] rounded-[14px] border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-1.5">
+      <article class="p-4 rounded-xl border border-[var(--border-slate-16)] bg-[var(--white-3h)] grid gap-2">
         <span class="text-[rgba(148,163,184,0.92)] text-[length:var(--fs-xs)] uppercase tracking-[0.08em]">다음 추천</span>
         <strong class="text-[color:var(--text-near-white)] text-lg leading-[1.2] break-words">${recommendation.tool}</strong>
         <p class="m-0 text-[color:var(--frost-72)] leading-normal">${recommendation.reason}</p>

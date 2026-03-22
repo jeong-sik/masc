@@ -30,6 +30,10 @@
   --color-agent-idle: #b8cae8;
   --color-agent-offline: #5a6478;
   --color-agent-busy: #f0c060;
+
+  /* Tone variants */
+  --bad-light: #f87171;
+  --warn-bright: #f97316;
   --radius-lg: 16px;
   --radius-md: 12px;
   --radius-sm: 10px;
@@ -80,6 +84,10 @@
   --agent-idle: #b8cae8;
   --agent-offline: #5a6478;
   --agent-busy: #f0c060;
+
+  /* Tone variants */
+  --bad-light: #f87171;
+  --warn-bright: #f97316;
 
   /* White overlay (glass morphism tints) */
   --white-3: rgba(255, 255, 255, 0.03);

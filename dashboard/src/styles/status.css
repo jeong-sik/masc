@@ -47,7 +47,7 @@
 }
 
 .status-dot.warn {
-  background: #f97316;
+  background: var(--warn-bright);
 }
 
 .status-dot.inactive,
@@ -114,11 +114,11 @@
 }
 
 .ctx-fill.warn {
-  background: linear-gradient(90deg, var(--warn), #f97316);
+  background: linear-gradient(90deg, var(--warn), var(--warn-bright));
 }
 
 .ctx-fill.bad {
-  background: linear-gradient(90deg, var(--bad), #f97316);
+  background: linear-gradient(90deg, var(--bad), var(--warn-bright));
 }
 
 /* Legacy alias for older code */

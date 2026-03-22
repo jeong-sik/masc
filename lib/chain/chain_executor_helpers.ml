@@ -497,6 +497,23 @@ let maybe_summarize_and_rotate = Chain_conversation.maybe_summarize_and_rotate
 (** Type of execution function callback *)
 type exec_fn = Chain_conversation.exec_fn
 
+(** Judge/evaluator call routed through OAS cascade pipeline.
+    Uses cascade_name "chain_judge" so inference parameters
+    (temperature, max_tokens, model selection) come from
+    config/cascade.json rather than being hardcoded. #2408 *)
+let judge_call ~prompt () : (string, string) result =
+  match
+    Oas_worker.run_named ~cascade_name:"chain_judge"
+      ~goal:prompt ~max_turns:1 ()
+  with
+  | Ok run_result ->
+    let text =
+      Oas_response.text_of_response run_result.Oas_worker.response
+      |> String.trim
+    in
+    if text <> "" then Ok text else Error "empty judge response"
+  | Error msg -> Error msg
+
 (** Prompt/model helpers - from Chain_utils *)
 let is_complex_prompt = Chain_utils.is_complex_prompt
 let is_glm_model = Chain_utils.is_glm_model

@@ -343,7 +343,7 @@ let handle_get_mcp ~(deps : deps) ?legacy_messages_endpoint
                     ignore
                       (Server_mcp_transport_http_sse.send_raw info event)
               in
-              let client_id, evicted =
+              let client_id, event_stream, evicted =
                 Sse.register session_id ~push
                   ~last_event_id:(Option.value ~default:0 last_event_id)
               in
@@ -386,6 +386,27 @@ let handle_get_mcp ~(deps : deps) ?legacy_messages_endpoint
               | None -> ());
               (match (deps.get_sw (), deps.get_clock ()) with
               | Some sw, Some clock ->
+                  (* Drain fiber for per-session event stream *)
+                  Eio.Fiber.fork ~sw (fun () ->
+                      let rec drain () =
+                        let event = Eio.Stream.take event_stream in
+                        (try
+                          if not (info.closed || !(info.stop)) then
+                            ignore
+                              (Server_mcp_transport_http_sse.send_raw info event)
+                        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                          Log.Server.error "mcp drain write error: %s"
+                            (Printexc.to_string exn);
+                          Server_mcp_transport_http_sse.stop_sse_session
+                            info.session_id);
+                        if not !(info.stop) then drain ()
+                      in
+                      try drain ()
+                      with Eio.Cancel.Cancelled _ -> ()
+                         | exn ->
+                           Log.Server.error "mcp drain loop error: %s"
+                             (Printexc.to_string exn));
+                  (* Ping fiber *)
                   Eio.Fiber.fork ~sw (fun () ->
                       let is_cancelled exn =
                         match exn with

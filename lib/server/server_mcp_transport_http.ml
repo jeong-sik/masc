@@ -550,7 +550,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
             | None -> ()
             | Some info -> ignore (send_raw info event)
           in
-          let client_id, evicted =
+          let client_id, event_stream, evicted =
             Sse.register session_id ~push
               ~last_event_id:(Option.value ~default:0 last_event_id)
           in
@@ -586,6 +586,28 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Mcp_eio.Full)
              (deps.get_sw (), deps.get_clock ())
            with
           | Some sw, Some clock ->
+              (* Drain fiber: reads from per-session event stream, writes to
+                 the HTTP body writer.  Decouples broadcast from per-client I/O.
+                 [Eio.Stream.take] suspends until an event is available; switch
+                 cancellation terminates the fiber when the connection closes. *)
+              Eio.Fiber.fork ~sw (fun () ->
+                  let rec drain () =
+                    let event = Eio.Stream.take event_stream in
+                    (try
+                      if not (info.closed || !(info.stop)) then
+                        ignore (send_raw info event)
+                    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                      Log.Server.error "drain write error: %s"
+                        (Printexc.to_string exn);
+                      stop_sse_session info.session_id);
+                    if not !(info.stop) then drain ()
+                  in
+                  try drain ()
+                  with Eio.Cancel.Cancelled _ -> ()
+                     | exn ->
+                       Log.Server.error "drain loop error: %s"
+                         (Printexc.to_string exn));
+              (* Ping fiber: keeps the connection alive *)
               Eio.Fiber.fork ~sw (fun () ->
                   let is_cancelled exn =
                     match exn with
@@ -831,7 +853,7 @@ let handle_ag_ui_events ~deps request reqd =
         | None -> ()
         | Some info -> ignore (send_raw info (ag_ui_event_of_masc_event ~room_id event))
       in
-      let client_id, evicted =
+      let client_id, event_stream, evicted =
         Sse.register session_id ~push
           ~last_event_id:(Option.value ~default:0 last_event_id)
       in
@@ -865,6 +887,25 @@ let handle_ag_ui_events ~deps request reqd =
          (deps.get_sw (), deps.get_clock ())
        with
       | Some sw, Some clock ->
+          (* Drain fiber for per-session event stream *)
+          Eio.Fiber.fork ~sw (fun () ->
+              let rec drain () =
+                let event = Eio.Stream.take event_stream in
+                (try
+                  if not (info.closed || !(info.stop)) then
+                    ignore (send_raw info event)
+                with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                  Log.Server.error "ag-ui drain write error: %s"
+                    (Printexc.to_string exn);
+                  stop_sse_session info.session_id);
+                if not !(info.stop) then drain ()
+              in
+              try drain ()
+              with Eio.Cancel.Cancelled _ -> ()
+                 | exn ->
+                   Log.Server.error "ag-ui drain loop error: %s"
+                     (Printexc.to_string exn));
+          (* Ping fiber *)
           Eio.Fiber.fork ~sw (fun () ->
               let rec loop () =
                 if not !(info.stop) then (

@@ -1,23 +1,39 @@
 (** SSE (Server-Sent Events) module for MCP Streamable HTTP Transport
     MCP Spec 2025-03-26 compliant
 
-    Concurrency: All access to [clients] Hashtbl is protected by
-    [registry_mutex] (Eio.Mutex).  [client_count_atomic] mirrors
-    Hashtbl.length for signal-handler-safe reads.
+    Concurrency model (per-session stream):
+    Each registered client owns an [Eio.Stream.t] mailbox.
+    [broadcast] and [send_to] push formatted SSE strings into per-client
+    streams under a read-only registry snapshot -- no global write-lock
+    during fan-out.  Each SSE connection fiber drains its own stream via
+    [pop], calling the transport-layer write independently.
+
+    The registry mutex ([registry_mutex]) only serialises Hashtbl
+    add/remove, not broadcast writes.
 
     Signal handler safety: [broadcast] and [close_all_clients] use
     try/with around mutex acquisition; if the mutex cannot be acquired
     (e.g. signal interrupted a fiber holding it), they fall back to
     best-effort lock-free execution since the process is shutting down. *)
 
-(** Maximum concurrent SSE clients — prevents connection storm on restart.
+(** Maximum concurrent SSE clients -- prevents connection storm on restart.
     Increased from 50 to 200 to handle Claude.ai MCP client reconnections. *)
 let max_clients = 200
 
-(** SSE client state *)
+(** Per-client event stream capacity.
+    Must be > 0 to avoid synchronous rendez-vous semantics
+    (Eio.Stream.create 0 blocks add until a matching take).
+    1024 is large enough that broadcast never blocks; a slow client
+    that falls 1024 events behind is already broken. *)
+let stream_capacity = 1024
+
+(** SSE client state.
+    [event_stream] is the per-session mailbox.  [broadcast] pushes here;
+    the SSE connection fiber pops and writes to the HTTP body writer. *)
 type client = {
   id: int;
-  push: string -> unit;
+  event_stream: string Eio.Stream.t;
+  push: string -> unit;  (** legacy direct-push callback (used by drain) *)
   mutable last_event_id: int;
   created_at: float;
   mutable last_seen_at: float;
@@ -26,11 +42,11 @@ type client = {
 (** Client registry - maps session_id to client *)
 let clients : (string, client) Hashtbl.t = Hashtbl.create 16
 
-(** Registry mutex — protects all [clients] Hashtbl access.
+(** Registry mutex -- protects all [clients] Hashtbl mutations.
     Pattern: mcp_agent_queue.ml, agent_identity.ml *)
 let registry_mutex = Eio.Mutex.create ()
 
-(** Atomic client count — mirrors Hashtbl.length for signal-handler-safe reads.
+(** Atomic client count -- mirrors Hashtbl.length for signal-handler-safe reads.
     Kept in sync inside [registry_mutex] critical sections. *)
 let client_count_atomic = Atomic.make 0
 
@@ -115,9 +131,10 @@ let next_id () =
   Atomic.fetch_and_add event_counter 1 + 1
 
 (** Register a new SSE client.
-    Returns (client_id, evicted_session_id option).
-    Evicts the oldest client when at capacity.
-    ID generation + collision check + add are atomic under [registry_mutex]. *)
+    Returns (client_id, event_stream, evicted_session_id option).
+    The caller should spawn a fiber that drains [event_stream] and
+    writes events to the transport.  Evicts the oldest client when at
+    capacity.  ID generation + add are atomic under [registry_mutex]. *)
 let register session_id ~push ~last_event_id =
   with_registry_rw (fun () ->
     (* Evict oldest if at capacity *)
@@ -139,12 +156,20 @@ let register session_id ~push ~last_event_id =
     in
     let now = Time_compat.now () in
     let new_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
-    let client = { id = new_id; push; last_event_id; created_at = now; last_seen_at = now } in
+    let event_stream = Eio.Stream.create stream_capacity in
+    let client = {
+      id = new_id;
+      event_stream;
+      push;
+      last_event_id;
+      created_at = now;
+      last_seen_at = now;
+    } in
     (* If session_id already exists, replace does not change count *)
     let was_present = Hashtbl.mem clients session_id in
     Hashtbl.replace clients session_id client;
     if not was_present then Atomic.incr client_count_atomic;
-    (client.id, evicted))
+    (client.id, client.event_stream, evicted))
 
 (** Unregister an SSE client *)
 let unregister session_id =
@@ -198,15 +223,20 @@ let set_clock (clock : float Eio.Time.clock_ty Eio.Resource.t) =
 let push_timeout_s = 5.0
 
 (** Broadcast event to all connected clients.
-    Uses snapshot-then-act: take snapshot under lock, push outside lock.
-    Per-client timeout prevents a single slow client from blocking all pushes.
-    Failed/timed-out clients are unregistered individually afterwards. *)
+    Pushes the formatted event string into each client's [event_stream].
+    The registry read-lock is held only for the Hashtbl snapshot; the
+    per-stream [Eio.Stream.add] calls happen outside any global lock.
+
+    [Eio.Stream.add] on a bounded (capacity 1024) stream returns
+    immediately as long as the stream is not full.  The per-client drain
+    fiber (see [pop]) delivers events to the transport writer
+    independently, so broadcast is decoupled from per-connection I/O. *)
 let broadcast json =
   let data = Yojson.Safe.to_string json in
   let current_event_id = Atomic.get event_counter + 1 in
   let event = format_event ~id:current_event_id ~event_type:"message" data in
   buffer_event current_event_id event;
-  (* Snapshot under lock *)
+  (* Snapshot under read-lock *)
   let clients_snapshot =
     with_registry_ro (fun () ->
       Hashtbl.fold (fun k v acc -> (k, v) :: acc) clients [])
@@ -215,27 +245,22 @@ let broadcast json =
   List.iter (fun (session_id, client) ->
     if current_event_id > client.last_event_id then begin
       (try
-        (match !clock_ref with
-        | Some clock ->
-            Eio.Time.with_timeout_exn clock push_timeout_s (fun () ->
-              client.push event)
-        | None ->
-            client.push event);
-        update_last_event_id session_id current_event_id
+        Eio.Stream.add client.event_stream event;
+        client.last_event_id <- current_event_id;
+        client.last_seen_at <- Time_compat.now ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | Eio.Time.Timeout ->
-          Log.Server.error "Push timed out for session %s (>%.0fs)" session_id push_timeout_s;
-          failed := session_id :: !failed
       | e ->
-          Log.Server.error "Push failed for session %s: %s" session_id (Printexc.to_string e);
+          Log.Server.error "Broadcast enqueue failed for session %s: %s"
+            session_id (Printexc.to_string e);
           failed := session_id :: !failed)
     end
   ) clients_snapshot;
   (* Remove failed connections *)
   List.iter (fun sid -> unregister sid) !failed
 
-(** Send a JSON-RPC message to a specific session (legacy SSE transport) *)
+(** Send a JSON-RPC message to a specific session.
+    Enqueues the event in the session's stream for asynchronous delivery. *)
 let send_to session_id json =
   let data = Yojson.Safe.to_string json in
   let current_event_id = Atomic.get event_counter + 1 in
@@ -248,10 +273,49 @@ let send_to session_id json =
   match client_opt with
   | None -> ()
   | Some client ->
-      (match client.push event with
-       | () -> update_last_event_id session_id current_event_id
-       | exception e ->
-         Log.Server.error "Push to %s failed: %s" session_id (Printexc.to_string e))
+      (try
+        Eio.Stream.add client.event_stream event;
+        client.last_event_id <- current_event_id;
+        client.last_seen_at <- Time_compat.now ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e ->
+          Log.Server.error "Enqueue to %s failed: %s"
+            session_id (Printexc.to_string e))
+
+(** Pop the next event from a client's stream.
+    Blocks the calling fiber until an event is available.
+    Returns [None] if the session does not exist (connection was closed).
+
+    The SSE connection fiber should call this in a loop:
+    {[
+      let rec drain () =
+        match Sse.pop session_id with
+        | None -> ()  (* session gone, stop *)
+        | Some event ->
+            send_raw info event;
+            drain ()
+      in
+      drain ()
+    ]} *)
+let pop session_id =
+  let client_opt =
+    with_registry_ro (fun () ->
+      Hashtbl.find_opt clients session_id)
+  in
+  match client_opt with
+  | None -> None
+  | Some client -> Some (Eio.Stream.take client.event_stream)
+
+(** Non-blocking pop. Returns [Some event] if one is queued, [None] otherwise. *)
+let try_pop session_id =
+  let client_opt =
+    with_registry_ro (fun () ->
+      Hashtbl.find_opt clients session_id)
+  in
+  match client_opt with
+  | None -> None
+  | Some client -> Eio.Stream.take_nonblocking client.event_stream
 
 (** Get client count.
     Uses [Atomic.get] so it is safe to call from signal handlers. *)

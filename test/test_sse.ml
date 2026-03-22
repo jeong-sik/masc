@@ -5,11 +5,11 @@ let test_unregister_if_current () =
   let session_id = "test_session" in
   let noop _ = () in
 
-  let (id1, _) = register session_id ~push:noop ~last_event_id:0 in
+  let (id1, _, _) = register session_id ~push:noop ~last_event_id:0 in
   check bool "registered" true (exists session_id);
 
   (* Re-register same session_id (simulates reconnect) *)
-  let (id2, _) = register session_id ~push:noop ~last_event_id:0 in
+  let (id2, _, _) = register session_id ~push:noop ~last_event_id:0 in
   check bool "still registered" true (exists session_id);
 
   (* Old connection cleanup must not unregister the new connection *)
@@ -26,8 +26,8 @@ let test_cleanup_stale_respects_touch () =
   let stale_sid = "stale_session_" ^ string_of_int (Random.int 1000000) in
   let alive_sid = "alive_session_" ^ string_of_int (Random.int 1000000) in
   let noop _ = () in
-  let (_id1, _) = register stale_sid ~push:noop ~last_event_id:0 in
-  let (_id2, _) = register alive_sid ~push:noop ~last_event_id:0 in
+  let (_id1, _, _) = register stale_sid ~push:noop ~last_event_id:0 in
+  let (_id2, _, _) = register alive_sid ~push:noop ~last_event_id:0 in
 
   Unix.sleepf 0.05;
   touch alive_sid;
@@ -52,7 +52,7 @@ let test_concurrent_register_unregister () =
     for i = 0 to n - 1 do
       Eio.Fiber.fork ~sw (fun () ->
         let sid = prefix ^ string_of_int i in
-        let (_id, _) = register sid ~push:noop ~last_event_id:0 in
+        let (_id, _, _) = register sid ~push:noop ~last_event_id:0 in
         Eio.Fiber.yield ();
         unregister sid)
     done);

@@ -284,9 +284,9 @@ export function OperationsSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
-      <section class="card rounded-xl min-h-[240px]">
-        <div class="card rounded-xl-title-row">
-          <div class="card rounded-xl-title">작전</div>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
+        <div class="pb-2 border-b border-[var(--card-border)] mb-3">
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">작전</h3>
         </div>
         ${snapshot && snapshot.operations.operations.length > 0
           ? html`<div class="cmd-card rounded-xl-stack">
@@ -294,9 +294,9 @@ export function OperationsSurface() {
             </div>`
           : html`<div class="empty-state">관리형 또는 투영된 작전이 없습니다.</div>`}
       </section>
-      <section class="card rounded-xl min-h-[240px]">
-        <div class="card rounded-xl-title-row">
-          <div class="card rounded-xl-title">분견대</div>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
+        <div class="pb-2 border-b border-[var(--card-border)] mb-3">
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">분견대</h3>
         </div>
         ${snapshot && snapshot.detachments.detachments.length > 0
           ? html`<div class="cmd-card rounded-xl-stack">
@@ -330,9 +330,9 @@ export function ChainsSurface() {
 
   return html`
     <div class="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4">
-      <section class="card rounded-xl min-h-[240px]">
-        <div class="card rounded-xl-title-row">
-          <div class="card rounded-xl-title">Chains</div>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
+        <div class="pb-2 border-b border-[var(--card-border)] mb-3">
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">Chains</h3>
         </div>
         <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${chainStatusTone(summary?.connection.status)}">
           <div class="flex justify-between gap-2.5 items-start">
@@ -384,9 +384,9 @@ export function ChainsSurface() {
         </div>
       </section>
 
-      <section class="card rounded-xl min-h-[240px]">
-        <div class="card rounded-xl-title-row">
-          <div class="card rounded-xl-title">체인 상세</div>
+      <section class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card)] min-h-[240px]">
+        <div class="pb-2 border-b border-[var(--card-border)] mb-3">
+          <h3 class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">체인 상세</h3>
         </div>
         ${selectedOverlay
           ? html`

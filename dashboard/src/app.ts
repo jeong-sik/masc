@@ -62,24 +62,29 @@ export function App() {
   const currentSection = currentSectionForRoute(route.value)
 
   return html`
-    <div class="app-shell">
-      <header class="dashboard-header">
-        <div class="header-title-wrap">
-          <h1>
-            MASC 대시보드
-            <${BuildIdentityBadge} />
-          </h1>
-          <p class="header-subtitle">${currentSection?.description ?? currentView?.description ?? '운영자 의사결정 및 실행 콘솔'}</p>
+    <div class="flex flex-col h-screen overflow-hidden bg-[var(--bg-0)]">
+      <!-- Top Bar (GCP-style slim header) -->
+      <header class="flex items-center justify-between h-12 px-5 border-b border-[var(--card-border)] bg-[rgba(8,15,29,0.95)] backdrop-blur-md shrink-0 z-50">
+        <div class="flex items-center gap-3">
+          <h1 class="text-[15px] font-semibold text-[var(--text-strong)] tracking-tight">MASC</h1>
+          <span class="text-[12px] text-[var(--text-muted)] hidden sm:inline">${currentSection?.description ?? currentView?.description ?? ''}</span>
+          <${BuildIdentityBadge} />
         </div>
-        <div class="header-right">
-          <${ConnectionStatus} />
-        </div>
+        <${ConnectionStatus} />
       </header>
 
-      <div class="dashboard-layout grid grid-cols-[280px_1fr] gap-5 px-5 pt-4 pb-8 max-w-[1600px] mx-auto max-[1200px]:grid-cols-1 max-[1200px]:gap-3.5">
-        <${SideRail} />
-        <main class="min-w-0">
-          <${DashboardMain} />
+      <!-- Body: Sidebar + Main -->
+      <div class="flex flex-1 overflow-hidden">
+        <!-- Sidebar (fixed 240px) -->
+        <aside class="w-60 shrink-0 border-r border-[var(--card-border)] bg-[rgba(10,18,34,0.6)] overflow-y-auto">
+          <${SideRail} />
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto p-6 min-w-0">
+          <div class="max-w-[1400px] mx-auto">
+            <${DashboardMain} />
+          </div>
         </main>
       </div>
 

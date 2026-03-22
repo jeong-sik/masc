@@ -1,5 +1,12 @@
 include Cp_unit_projection
 
+let safe_live_agents config =
+  let room_id = Room.current_room_id config in
+  Room.get_agents_raw_in_room config room_id
+  |> List.filter (fun (agent : Types.agent) ->
+         try Room.is_agent_joined config ~agent_name:agent.name with
+         | Sys_error _ | Not_found -> false)
+
 let validate_parent_kind child_kind parent_kind =
   match child_kind, parent_kind with
   | Company, _ -> false
@@ -48,7 +55,7 @@ let effective_units_for_validation config managed_units =
     managed_units
   else
     let live_names =
-      Room.get_agents_raw config
+      safe_live_agents config
       |> List.map (fun (agent : Types.agent) -> agent.name)
       |> List.sort_uniq String.compare
     in
@@ -394,11 +401,7 @@ let rec build_tree_json ~child_map ~unit_lookup ~agent_statuses ~live_agents ~op
           ])
 
 let topology_units config =
-  let agents =
-    Room.get_agents_raw config
-    |> List.filter (fun (agent : Types.agent) ->
-         try Room.is_agent_joined config ~agent_name:agent.name with Sys_error _ | Not_found -> false)
-  in
+  let agents = safe_live_agents config in
   let managed_units = read_units config in
   let normalized_units = augment_managed_units managed_units agents in
   let source =

@@ -438,7 +438,7 @@ let handle_stop ctx args =
     match Autoresearch.stop_loop ~base_path:ctx.base_path ~reason id with
     | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
     | Some state ->
-        let config = Room.default_config ctx.base_path in
+        let config = Room.default_config ctx.base_path |> Room.config_with_resolved_scope in
         (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
         | Some link ->
             (try
@@ -676,7 +676,7 @@ let handle_cycle ctx args =
                        state.baseline <- score_after);
                     state.current_cycle <- state.current_cycle + 1;
                     Autoresearch.save_state ~base_path:ctx.base_path state;
-                    let config = Room.default_config ctx.base_path in
+                    let config = Room.default_config ctx.base_path |> Room.config_with_resolved_scope in
                     (match Autoresearch.load_swarm_link_by_loop ~base_path:ctx.base_path id with
                     | Some link ->
                         (try

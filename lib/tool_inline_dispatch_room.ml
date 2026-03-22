@@ -51,13 +51,14 @@ let handle_start (ctx : context) : result option =
         if not (Sys.file_exists masc_dir && Sys.is_directory masc_dir) then begin
           (* Auto-create .masc/ and initialize room structure *)
           (try Unix.mkdir masc_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-          let tmp_config = Room.default_config expanded in
+          let tmp_config = Room.default_config expanded |> Room.config_with_resolved_scope in
           let _msg = Room.init tmp_config ~agent_name:(Some agent_name) in
           state.Mcp_server.room_config <- tmp_config;
           Ok tmp_config
         end else begin
-          state.Mcp_server.room_config <- Room.default_config expanded;
-          Ok state.Mcp_server.room_config
+          let cfg = Room.default_config expanded |> Room.config_with_resolved_scope in
+          state.Mcp_server.room_config <- cfg;
+          Ok cfg
         end
       end
     end
@@ -214,7 +215,7 @@ let handle_set_room (ctx : context) : result option =
     if not (Sys.file_exists masc_dir && Sys.is_directory masc_dir) then
       Some (false, Printf.sprintf "No .masc/ directory found in: %s\nRun masc_init to initialize, or choose a MASC-enabled directory." resolved)
     else begin
-      state.Mcp_server.room_config <- Room.default_config expanded;
+      state.Mcp_server.room_config <- Room.default_config expanded |> Room.config_with_resolved_scope;
       let rc = state.Mcp_server.room_config in
       let status = if Room.is_initialized rc then "ok" else "(not initialized)" in
       let workspace_note =

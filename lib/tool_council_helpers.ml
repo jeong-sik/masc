@@ -21,7 +21,7 @@ let gen_id prefix =
 let room_config_of_ctx (ctx : context) =
   match ctx.room_config with
   | Some config -> config
-  | None -> Room.default_config ctx.base_path
+  | None -> Room.default_config ctx.base_path |> Room.config_with_resolved_scope
 
 let ensure_room_ready (ctx : context) =
   let config = room_config_of_ctx ctx in

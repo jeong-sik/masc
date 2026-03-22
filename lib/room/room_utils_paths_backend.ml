@@ -58,15 +58,15 @@ let resolve_initial_scope config =
   | Some room_id -> Named room_id
 
 (** Scope-based directory resolution.
-    Named scope: pure, deterministic (no filesystem reads).
-    Default scope: reads current_room file for backward compatibility. *)
+    Both branches are pure — no filesystem reads.
+    Default scope resolves to the root .masc/ directory.
+    Named scope resolves to .masc/rooms/{id}/ (with legacy fallback).
+    Callers that need the current_room file must call
+    [config_with_resolved_scope] at config creation time. *)
 let masc_dir config =
   match config.scope with
   | Named id -> room_dir_for config id
-  | Default ->
-    match read_current_room config with
-    | Some room_id -> room_dir_for config room_id
-    | None -> masc_root_dir config
+  | Default -> masc_root_dir config
 
 let agents_dir config = Filename.concat (masc_dir config) "agents"
 let tasks_dir config = Filename.concat (masc_dir config) "tasks"

@@ -103,7 +103,7 @@ export function WarRoomHeroStrip({
           </div>
           <div class="mt-3 text-[rgba(226,232,240,0.86)] leading-[1.55] max-w-[82ch]">${heroSummary}</div>
           ${activeSummary?.summary
-            ? html`<div class="grid gap-1 mt-2.5 p-[10px_12px] rounded-[10px] border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.84)] text-[13px] leading-[1.45] cmd-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
+            ? html`<div class="grid gap-1 mt-2.5 p-[10px_12px] rounded-[10px] border border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-strong)] text-[13px] leading-[1.45] cmd-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
                 <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
                 <span>${activeSummary.summary}</span>
               </div>`

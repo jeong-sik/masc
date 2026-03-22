@@ -19,7 +19,7 @@ export function PulseStrip() {
   if (pulses.length === 0) {
     return html`
       <div class="pulse-strip rounded-xl">
-        <span class="text-[rgba(255,255,255,0.3)] text-[13px]">연결된 에이전트 없음</span>
+        <span class="text-[var(--text-dim)] text-[13px]">연결된 에이전트 없음</span>
       </div>
     `
   }

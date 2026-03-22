@@ -43,7 +43,7 @@ export function ActivityStream() {
     <div class="grid gap-2.5 grid-rows-[auto_auto_1fr] min-h-0">
       <div class="activity-stream-head">
         <h3 class="m-0 text-[15px] font-semibold">Activity Stream</h3>
-        <span class="text-xs text-[rgba(255,255,255,0.4)]">${entries.length} events</span>
+        <span class="text-xs text-[var(--text-muted)]">${entries.length} events</span>
       </div>
       <${FilterBar} />
       <div class="activity-stream-list">

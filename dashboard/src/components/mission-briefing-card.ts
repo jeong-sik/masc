@@ -65,13 +65,13 @@ export function MissionBriefingCard() {
                       ${section.evidence_quality ? html`<span class="rounded-full">${section.evidence_quality}</span>` : null}
                     </div>
                   </div>
-                  <p class="m-0 text-[rgba(255,255,255,0.8)] leading-normal">${section.summary}</p>
+                  <p class="m-0 text-[var(--text-strong)] leading-normal">${section.summary}</p>
                   ${section.evidence.length > 0
                     ? html`
                         <details class="pt-1 border-t border-[var(--white-6)] mt-2">
                           <summary>근거 보기</summary>
                           <div class="flex gap-2 flex-wrap mt-2.5">
-                            ${section.evidence.map(item => html`<span class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.76)] text-[13px] leading-[1.35]">${item}</span>`)}
+                            ${section.evidence.map(item => html`<span class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-body)] text-[13px] leading-[1.35]">${item}</span>`)}
                           </div>
                         </details>
                       `
@@ -101,7 +101,7 @@ export function MissionBriefingCard() {
                       <strong>${missionTargetTypeLabel(item.scope_type)}${item.scope_id ? ` · ${item.scope_id}` : ''}</strong>
                       <span class="rounded-full ${item.severity === 'watch' ? 'warn' : ''}">${statusLabel(item.severity)}</span>
                     </div>
-                    <p class="m-0 text-[rgba(255,255,255,0.78)] leading-[1.45]">${item.summary}</p>
+                    <p class="m-0 text-[var(--text-body)] leading-[1.45]">${item.summary}</p>
                   </article>
                 `)}
               </div>

@@ -93,7 +93,7 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
       <div class="flex justify-between gap-2.5 items-start">
         <div>
           <strong>${item.worker_name ?? item.worker_run_id}</strong>
-          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]">
+          <div class="flex flex-wrap gap-2.5 text-[var(--text-body)] text-[13px] leading-[1.45]">
             <span>${item.worker_run_id}</span>
             <span>${item.ts_iso ? relativeTime(item.ts_iso) : '기록 없음'}</span>
           </div>
@@ -108,13 +108,13 @@ export function WorkerRunEvidenceRow({ item }: { item: DashboardProofWorkerRunEv
       ${preview
         ? html`<div class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--white-8)] bg-[var(--white-4)]">
             <strong class="text-[var(--text-strong)]">${item.success === false || item.error || item.failure_reason ? '실패 요약' : '출력 요약'}</strong>
-            <span class="text-[rgba(255,255,255,0.8)] leading-normal">${preview}</span>
+            <span class="text-[var(--text-strong)] leading-normal">${preview}</span>
           </div>`
         : null}
       ${validationFailures.length > 0
         ? html`<div class="grid gap-1.5 py-3 px-3.5 rounded-xl border border-[var(--warn-soft)] bg-[rgba(251,191,36,0.08)]">
             <strong class="text-[var(--text-strong)]">검증 실패</strong>
-            <span class="text-[rgba(255,255,255,0.8)] leading-normal">${validationFailures.join(' · ')}</span>
+            <span class="text-[var(--text-strong)] leading-normal">${validationFailures.join(' · ')}</span>
           </div>`
         : null}
       ${toolNames.length > 0
@@ -161,7 +161,7 @@ export function ActorContributionRow({ item }: { item: DashboardProofActorContri
       <div class="flex justify-between gap-2.5 items-start">
         <div>
           <strong>${item.actor}</strong>
-          <div class="flex flex-wrap gap-2.5 text-[rgba(255,255,255,0.68)] text-[13px] leading-[1.45]">
+          <div class="flex flex-wrap gap-2.5 text-[var(--text-body)] text-[13px] leading-[1.45]">
             <span>${item.role ?? '참여자'}</span>
             <span>${lastSeen ? relativeTime(lastSeen) : '기록 없음'}</span>
           </div>

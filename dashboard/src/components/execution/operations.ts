@@ -27,7 +27,7 @@ export function OperationCard({ brief, selected }: { brief: DashboardExecutionOp
     >
       <div class="flex justify-between gap-2 items-start flex-wrap">
         <div>
-          <div class="text-[rgba(255,255,255,0.52)] text-[13px]">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
+          <div class="text-[var(--text-muted)] text-[13px]">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
           <div class="mission-card rounded-xl-title">${brief.objective}</div>
         </div>
         <span class="rounded-full ${terminal ? 'muted' : toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>

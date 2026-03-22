@@ -42,29 +42,29 @@ export function SessionBriefCard({
               <div class="mission-status-dot ${liveStateClass(brief.status, brief.health)} ${dotStateBg(liveStateClass(brief.status, brief.health))}"></div>
               <strong>${brief.goal}</strong>
             </div>
-            <div class="text-[rgba(255,255,255,0.52)] text-[13px]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
+            <div class="text-[var(--text-muted)] text-[13px]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           </div>
           <span class="rounded-full ${toneClass(brief.top_attention?.severity ?? brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
         </div>
 
         <div class="grid grid-cols-2 gap-2.5">
           <div class="p-3 rounded-xl bg-[var(--white-4)] border border-[var(--white-6)] grid gap-1">
-            <span class="text-[rgba(255,255,255,0.52)] text-[11px] tracking-[0.08em] uppercase">멤버</span>
+            <span class="text-[var(--text-muted)] text-[11px] tracking-[0.08em] uppercase">멤버</span>
             <strong class="text-[var(--text-strong)] text-lg">${brief.member_names.length}</strong>
             <small class="grid gap-1">${brief.member_names.slice(0, 3).join(', ') || '없음'}</small>
           </div>
           <div class="p-3 rounded-xl bg-[var(--white-4)] border border-[var(--white-6)] grid gap-1">
-            <span class="text-[rgba(255,255,255,0.52)] text-[11px] tracking-[0.08em] uppercase">가동 시간</span>
+            <span class="text-[var(--text-muted)] text-[11px] tracking-[0.08em] uppercase">가동 시간</span>
             <strong class="text-[var(--text-strong)] text-lg">${formatDuration(brief.elapsed_sec)}</strong>
             <small class="grid gap-1">${brief.started_at ? `${relativeTime(brief.started_at)} 시작` : '시작 시각 없음'}</small>
           </div>
           <div class="p-3 rounded-xl bg-[var(--white-4)] border border-[var(--white-6)] grid gap-1">
-            <span class="text-[rgba(255,255,255,0.52)] text-[11px] tracking-[0.08em] uppercase">최근 흐름</span>
+            <span class="text-[var(--text-muted)] text-[11px] tracking-[0.08em] uppercase">최근 흐름</span>
             <strong class="text-[var(--text-strong)] text-lg">${brief.last_event_at ? relativeTime(brief.last_event_at) : '기록 없음'}</strong>
             <small class="grid gap-1">${brief.communication_summary ?? '요약 없음'}</small>
           </div>
           <div class="p-3 rounded-xl bg-[var(--white-4)] border border-[var(--white-6)] grid gap-1">
-            <span class="text-[rgba(255,255,255,0.52)] text-[11px] tracking-[0.08em] uppercase">충원 상태</span>
+            <span class="text-[var(--text-muted)] text-[11px] tracking-[0.08em] uppercase">충원 상태</span>
             <strong class="text-[var(--text-strong)] text-lg">${liveCount}/${brief.required_count || 1}</strong>
             <small class="grid gap-1">live · seen ${seenCount} · planned ${plannedCount}</small>
           </div>
@@ -84,7 +84,7 @@ export function SessionBriefCard({
         ? html`
             <div class="flex gap-2 flex-wrap mt-2.5">
               ${brief.operation_badges.slice(0, 3).map(operation => html`
-                <span class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.76)] text-[13px] leading-[1.35]">
+                <span class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-body)] text-[13px] leading-[1.35]">
                   ${operation.operation_id} · ${statusLabel(operation.status)}${operation.stage ? ` · ${operation.stage}` : ''}
                 </span>
               `)}
@@ -98,11 +98,11 @@ export function SessionBriefCard({
               ${members.map(member => html`
                 <button class="w-full p-3 rounded-xl border border-[var(--white-6)] bg-[var(--white-3)] grid gap-1 text-left text-inherit" onClick=${() => openAgentDetail(member.agent_name)}>
                   <strong class="text-[var(--text-strong)]">${member.agent_name}</strong>
-                  <span class="text-[rgba(255,255,255,0.72)] leading-[1.45]">
+                  <span class="text-[var(--text-body)] leading-[1.45]">
                     ${member.current_work ?? '현재 작업 없음'}
                     ${member.is_live === false ? ' · archived' : member.is_live === true ? ' · live' : ''}
                   </span>
-                  <small class="text-[rgba(255,255,255,0.72)] leading-[1.45]">${member.recent_output_preview ?? member.recent_input_preview ?? '최근 입출력 없음'}</small>
+                  <small class="text-[var(--text-body)] leading-[1.45]">${member.recent_output_preview ?? member.recent_input_preview ?? '최근 입출력 없음'}</small>
                 </button>
               `)}
             </div>
@@ -154,7 +154,7 @@ export function SessionDetailCard({
     <${Card} title="세션 상세" class="mission-list-card rounded-xl">
       <div class="grid gap-1 mb-3">
         <h3 class="m-0 text-[var(--text-strong)] text-lg">${session.goal}</h3>
-        <p class="m-0 text-[rgba(255,255,255,0.68)] leading-normal">${session.session_id}${session.room ? ` · ${session.room}` : ''}</p>
+        <p class="m-0 text-[var(--text-body)] leading-normal">${session.session_id}${session.room ? ` · ${session.room}` : ''}</p>
       </div>
 
       ${error ? html`<div class="grid gap-1">${error}</div>` : null}
@@ -173,7 +173,7 @@ export function SessionDetailCard({
                       <strong>${item.summary}</strong>
                       <span>${item.timestamp ? relativeTime(item.timestamp) : '시각 없음'}</span>
                     </div>
-                    <small class="text-[rgba(255,255,255,0.68)] leading-[1.45]">${item.actor ? `${item.actor} · ` : ''}${item.event_type ?? '이벤트'}</small>
+                    <small class="text-[var(--text-body)] leading-[1.45]">${item.actor ? `${item.actor} · ` : ''}${item.event_type ?? '이벤트'}</small>
                   </article>
                 `)
               : html`<${EmptyState}>표시할 세션 이벤트가 없습니다.<//>`}
@@ -190,8 +190,8 @@ export function SessionDetailCard({
               ? detail.participants.map(participant => html`
                   <button class="w-full p-3 rounded-xl border border-[var(--white-6)] bg-[var(--white-3)] grid gap-1 text-left text-inherit" onClick=${() => openAgentDetail(participant.agent_name)}>
                     <strong class="text-[var(--text-strong)]">${participant.agent_name}</strong>
-                    <span class="text-[rgba(255,255,255,0.72)] leading-[1.45]">${participant.current_work ?? '현재 작업 없음'}</span>
-                    <small class="text-[rgba(255,255,255,0.72)] leading-[1.45]">
+                    <span class="text-[var(--text-body)] leading-[1.45]">${participant.current_work ?? '현재 작업 없음'}</span>
+                    <small class="text-[var(--text-body)] leading-[1.45]">
                       ${participant.recent_output_preview ?? participant.recent_input_preview ?? '최근 입출력 없음'}
                       ${participant.last_activity_at ? ` · ${relativeTime(participant.last_activity_at)}` : ''}
                     </small>
@@ -213,8 +213,8 @@ export function SessionDetailCard({
               ? detail.operations.map(operation => html`
                   <button class="w-full py-2.5 px-3 rounded-xl border border-[var(--white-6)] bg-[var(--white-3)] grid gap-1 text-left text-inherit cursor-pointer" onClick=${() => openSession('command', session.session_id)}>
                     <strong class="text-[var(--text-strong)]">${operation.operation_id}</strong>
-                    <span class="text-[rgba(255,255,255,0.7)] leading-[1.45]">${statusLabel(operation.status)}${operation.stage ? ` · ${operation.stage}` : ''}</span>
-                    <small class="text-[rgba(255,255,255,0.7)] leading-[1.45]">${operation.detachment_status ?? operation.objective ?? '분견대 정보 없음'}</small>
+                    <span class="text-[var(--text-body)] leading-[1.45]">${statusLabel(operation.status)}${operation.stage ? ` · ${operation.stage}` : ''}</span>
+                    <small class="text-[var(--text-body)] leading-[1.45]">${operation.detachment_status ?? operation.objective ?? '분견대 정보 없음'}</small>
                   </button>
                 `)
               : html`<${EmptyState}>연결된 작전이 없습니다.<//>`}
@@ -231,8 +231,8 @@ export function SessionDetailCard({
               ? detail.keepers.map(keeper => html`
                   <div class="w-full py-2.5 px-3 rounded-xl border border-[var(--white-6)] bg-[var(--white-3)] grid gap-1 text-left text-inherit cursor-default">
                     <strong class="text-[var(--text-strong)]">${keeper.name}</strong>
-                    <span class="text-[rgba(255,255,255,0.7)] leading-[1.45]">${statusLabel(keeper.status)}${keeper.generation != null ? ` · 세대 ${keeper.generation}` : ''}</span>
-                    <small class="text-[rgba(255,255,255,0.7)] leading-[1.45]">${keeper.current_work ?? '현재 작업 정보 없음'}</small>
+                    <span class="text-[var(--text-body)] leading-[1.45]">${statusLabel(keeper.status)}${keeper.generation != null ? ` · 세대 ${keeper.generation}` : ''}</span>
+                    <small class="text-[var(--text-body)] leading-[1.45]">${keeper.current_work ?? '현재 작업 정보 없음'}</small>
                   </div>
                 `)
               : html`<${EmptyState}>직접 연결된 키퍼는 없습니다.<//>`}

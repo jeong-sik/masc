@@ -29,7 +29,7 @@ export function FocusSidebar() {
     <div class="grid gap-2.5 grid-rows-[auto_1fr] min-h-0">
       <div class="focus-sidebar-head">
         <h3 class="m-0 text-[15px] font-semibold">Agents</h3>
-        <span class="text-xs text-[rgba(255,255,255,0.4)]">${list.length} active</span>
+        <span class="text-xs text-[var(--text-muted)]">${list.length} active</span>
       </div>
       <div class="grid gap-1.5 content-start overflow-y-auto max-h-[560px] pr-1">
         ${list.length === 0
@@ -56,7 +56,7 @@ export function FocusSidebar() {
               <div class="focus-agent-footer">
                 ${agent.lastActivityText
                   ? html`<span class="text-[11px] text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0">${agent.lastActivityText}</span>`
-                  : html`<span class="text-[11px] text-[var(--text-muted)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 italic text-[rgba(255,255,255,0.25)]">No recent activity</span>`}
+                  : html`<span class="text-[11px] text-[var(--text-dim)] whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 italic">No recent activity</span>`}
                 ${agent.lastActivityAt
                   ? html`<${TimeAgo} timestamp=${agent.lastActivityAt} />`
                   : null}

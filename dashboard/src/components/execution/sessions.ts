@@ -30,7 +30,7 @@ export function SessionCard({ brief, selected }: { brief: DashboardExecutionSess
     >
       <div class="flex justify-between gap-2 items-start flex-wrap">
         <div>
-          <div class="text-[rgba(255,255,255,0.52)] text-[13px]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
+          <div class="text-[var(--text-muted)] text-[13px]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           <div class="mission-card rounded-xl-title">${brief.goal}</div>
         </div>
         <span class="rounded-full ${terminal ? 'muted' : toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>

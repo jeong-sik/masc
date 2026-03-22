@@ -34,7 +34,7 @@ export function CommandWorkflowBanner() {
         <span class="rounded-full">${workflowTargetLabel(context)}</span>
         <span class="rounded-full">${workflowCommandSurfaceLabel(route.value.params.surface ?? 'warroom')}</span>
       </div>
-      <div class="text-[rgba(255,255,255,0.84)] leading-normal">${context.summary}</div>
+      <div class="text-[var(--text-strong)] leading-normal">${context.summary}</div>
       ${context.payload_preview
         ? html`<div class="p-[10px_12px] border border-[var(--white-8)] bg-[var(--white-5)] text-[var(--text-strong)] leading-[1.45] rounded-xl">${context.payload_preview}</div>`
         : null}

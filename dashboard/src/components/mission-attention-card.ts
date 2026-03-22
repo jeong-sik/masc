@@ -44,7 +44,7 @@ export function AttentionCard({
         <div class="flex justify-between gap-2 items-start flex-wrap">
           <div>
             <strong>${item.summary}</strong>
-            <div class="text-[rgba(255,255,255,0.52)] text-[13px]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</div>
+            <div class="text-[var(--text-muted)] text-[13px]">${missionTargetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</div>
           </div>
           <span class="rounded-full ${toneClass(action?.severity ?? item.severity)}">${action ? actionModeLabel(action) : item.severity}</span>
         </div>
@@ -94,7 +94,7 @@ export function AttentionCard({
           ? html`
               <div class="flex gap-2 flex-wrap mt-2.5">
                 ${item.related_agent_names.slice(0, 8).map(name => html`
-                  <button class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[rgba(255,255,255,0.76)] text-[13px] leading-[1.35] cursor-pointer" onClick=${() => openAgentDetail(name)}>${name}</button>
+                  <button class="px-2.5 py-1.5 rounded-full border border-[var(--white-8)] bg-[var(--white-4)] text-[var(--text-body)] text-[13px] leading-[1.35] cursor-pointer" onClick=${() => openAgentDetail(name)}>${name}</button>
                 `)}
               </div>
             `

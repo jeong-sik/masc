@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { CmdStatCard } from './cmd-stat-card'
 import { EmptyState } from '../common/empty-state'
 import { route } from '../../router'
 import { workflowContextForRoute } from '../../workflow-context'
@@ -41,10 +42,10 @@ export function SwarmOverviewPanel() {
         ? html`
             <${SwarmStoryboard} lanes=${lanes} />
             <div class="command-summary-grid mt-3">
-              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>활성 레인</span><strong>${overview?.active_lanes ?? 0}</strong><small>${overview?.moving_lanes ?? 0}개 이동 중</small></div>
-              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>정체</span><strong>${overview?.stalled_lanes ?? 0}</strong><small>${overview?.projected_lanes ?? 0}개 예상 레인</small></div>
-              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>마지막 이동</span><strong>${relativeTime(overview?.last_movement_at)}</strong><small>${swarm.generated_at ? `스냅샷 ${relativeTime(swarm.generated_at)}` : '방금 스냅샷'}</small></div>
-              <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>다음 액션</span><strong>${recommendation?.label ?? '운영자 상태 확인'}</strong><small>${recommendation?.tool ?? 'masc_operator_snapshot'}</small></div>
+              <${CmdStatCard} label="활성 레인" value=${overview?.active_lanes ?? 0} detail=${`${overview?.moving_lanes ?? 0}개 이동 중`} />
+              <${CmdStatCard} label="정체" value=${overview?.stalled_lanes ?? 0} detail=${`${overview?.projected_lanes ?? 0}개 예상 레인`} />
+              <${CmdStatCard} label="마지막 이동" value=${relativeTime(overview?.last_movement_at)} detail=${swarm.generated_at ? `스냅샷 ${relativeTime(swarm.generated_at)}` : '방금 스냅샷'} />
+              <${CmdStatCard} label="다음 액션" value=${recommendation?.label ?? '운영자 상태 확인'} detail=${recommendation?.tool ?? 'masc_operator_snapshot'} />
             </div>
 
             ${lanes.length > 0 ? html`<${SwarmHealthBar} lanes=${lanes} />` : null}

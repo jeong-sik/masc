@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { CmdStatCard } from './cmd-stat-card'
 import {
   commandPlaneChainSummary,
   commandPlaneSurface,
@@ -245,13 +246,13 @@ export function SummaryCards() {
   const cache = microarch?.cache
   return html`
     <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>유닛</span><strong>${topology?.total_units ?? 0}</strong><small>${topology?.managed_unit_count ?? 0}개 관리 중</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>작전</span><strong>${ops?.active ?? 0}</strong><small>${summary?.detachments.summary?.active ?? 0}개 실행체</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>승인</span><strong>${decisions?.pending ?? 0}</strong><small>${decisions?.total ?? 0}개 추적 중</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card ${highlightKey === 'alerts' ? 'highlight' : ''}"><span>알림</span><strong>${alerts?.bad ?? 0}</strong><small>${alerts?.warn ?? 0}건 주의</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card"><span>체인</span><strong>${chainSummary?.summary?.active_chains ?? 0}</strong><small>${chainSummary?.summary?.linked_operations ?? 0}개 연결</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card ${highlightKey === 'swarm' ? 'highlight' : ''}"><span>스웜</span><strong>${swarm?.active_lanes ?? 0}</strong><small>${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'}</small></div>
-      <div class="bg-[var(--white-4)] border border-[var(--white-8)] rounded-[14px] p-[14px_16px] flex flex-col gap-1.5 cmd-stat-card ${highlightKey === 'microarch' ? 'highlight' : ''}"><span>마이크로아크</span><strong>${issuePressure?.pending_ops ?? 0}</strong><small>${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}</small></div>
+      <${CmdStatCard} label="유닛" value=${topology?.total_units ?? 0} detail=${`${topology?.managed_unit_count ?? 0}개 관리 중`} />
+      <${CmdStatCard} label="작전" value=${ops?.active ?? 0} detail=${`${summary?.detachments.summary?.active ?? 0}개 실행체`} />
+      <${CmdStatCard} label="승인" value=${decisions?.pending ?? 0} detail=${`${decisions?.total ?? 0}개 추적 중`} />
+      <${CmdStatCard} label="알림" value=${alerts?.bad ?? 0} detail=${`${alerts?.warn ?? 0}건 주의`} highlight=${highlightKey === 'alerts'} />
+      <${CmdStatCard} label="체인" value=${chainSummary?.summary?.active_chains ?? 0} detail=${`${chainSummary?.summary?.linked_operations ?? 0}개 연결`} />
+      <${CmdStatCard} label="스웜" value=${swarm?.active_lanes ?? 0} detail=${swarm ? `${swarm.stalled_lanes ?? 0}개 정체 · ${relativeTime(swarm.last_movement_at)}` : 'lane snapshot 없음'} highlight=${highlightKey === 'swarm'} />
+      <${CmdStatCard} label="마이크로아크" value=${issuePressure?.pending_ops ?? 0} detail=${`${cache?.l1_hit_rate != null ? `${formatPercent(cache.l1_hit_rate)} L1 적중` : '캐시 데이터 없음'} · ${issuePressure?.tone ?? '정보 없음'}`} highlight=${highlightKey === 'microarch'} />
     </div>
   `
 }

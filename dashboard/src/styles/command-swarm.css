@@ -39,7 +39,6 @@
 .swarm-story-strip span {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
   padding: 4px 8px;
   background: var(--white-6);
   color: rgba(191,219,254,0.9);
@@ -275,7 +274,6 @@
   border-left: 3px solid var(--card-border, var(--white-10));
   background: var(--white-3);
   border-radius: 0 8px 8px 0;
-  transition: border-color 0.2s;
 }
 .swarm-lane-strip.ok { border-left-color: var(--ok); }
 .swarm-lane-strip.warn { border-left-color: var(--warn); }
@@ -308,7 +306,6 @@
 .swarm-lane-track {
   margin-top: 10px;
   height: 8px;
-  border-radius: 999px;
   background: var(--white-6);
   overflow: hidden;
 }
@@ -316,7 +313,6 @@
 .swarm-lane-track span {
   display: block;
   height: 100%;
-  border-radius: 999px;
   background: linear-gradient(90deg, rgba(103,232,249,0.92), rgba(74,222,128,0.92));
 }
 
@@ -360,7 +356,6 @@
 .swarm-lane-blockers {
   background: rgba(239,68,68,0.1);
   border: 1px solid rgba(239,68,68,0.25);
-  border-radius: 6px;
   padding: 6px 10px;
   font-size: 0.78rem;
   color: var(--bad);

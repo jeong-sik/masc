@@ -123,8 +123,8 @@ export function ChatMessageBubble({
           <div class="chat-bubble-identity-copy">
             <div class="chat-bubble-labels">
               <span class=${`chat-role-chip ${bubbleTone(entry)}`}>${entry.label}</span>
-              <span class="chat-delivery-chip">${deliveryLabel(entry)}</span>
-              ${entry.timestamp ? html`<span class="chat-time-chip">${timeLabel(entry.timestamp)}</span>` : null}
+              <span class="chat-delivery-chip rounded-full">${deliveryLabel(entry)}</span>
+              ${entry.timestamp ? html`<span class="chat-time-chip rounded-full">${timeLabel(entry.timestamp)}</span>` : null}
             </div>
             <div class="chat-identity-title">${avatarLabel(entry)}</div>
           </div>
@@ -133,7 +133,7 @@ export function ChatMessageBubble({
           ? html`
               <button
                 type="button"
-                class="chat-disclosure-btn"
+                class="chat-disclosure-btn rounded-full"
                 onClick=${() => { setExpanded(!expanded) }}
               >
                 ${expanded ? '상세 숨기기' : '상세 보기'}
@@ -143,8 +143,8 @@ export function ChatMessageBubble({
       </div>
 
       ${showMetadata && detailItems.length > 0
-        ? html`<div class="chat-detail-chip-row">
-            ${detailItems.map(item => html`<span class="chat-detail-chip">${item}</span>`)}
+        ? html`<div class="chat-detail-chip rounded-full-row">
+            ${detailItems.map(item => html`<span class="chat-detail-chip rounded-full">${item}</span>`)}
           </div>`
         : null}
 
@@ -153,12 +153,12 @@ export function ChatMessageBubble({
 
       ${expanded && entry.details
         ? html`
-            <div class="chat-detail-panel">
+            <div class="chat-detail-panel rounded-xl">
               ${overview.length > 0
                 ? html`
                     <div class="chat-overview-grid">
                       ${overview.map(item => html`
-                        <div class="chat-overview-card">
+                        <div class="chat-overview-card rounded-xl">
                           <div class="chat-overview-label">${item.label}</div>
                           <div class="chat-overview-value">${item.value}</div>
                         </div>
@@ -183,7 +183,7 @@ export function ChatMessageBubble({
                       <div class="chat-detail-section-title">상태 스냅샷</div>
                       <div class="chat-state-grid">
                         ${state.map(item => html`
-                          <div class="chat-state-card">
+                          <div class="chat-state-card rounded-xl">
                             <div class="chat-state-label">${item.label}</div>
                             <div class="chat-state-value">${item.value}</div>
                           </div>
@@ -197,7 +197,7 @@ export function ChatMessageBubble({
                     <div class="chat-detail-section">
                       <button
                         type="button"
-                        class="chat-raw-toggle"
+                        class="chat-raw-toggle rounded-full"
                         onClick=${() => { setRawExpanded(!rawExpanded) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}
@@ -282,16 +282,16 @@ export function ChatComposer({
   return html`
     <div class="chat-composer">
       <textarea
-        class="control-textarea min-h-[72px]"
+        class="control-textarea rounded-lg min-h-[72px]"
         placeholder=${placeholder}
         value=${draft}
         onInput=${(event: Event) => { onDraftChange((event.target as HTMLTextAreaElement).value) }}
         disabled=${disabled}
       ></textarea>
-      <div class="chat-composer-actions">
+      <div class="flex gap-2 items-center">
         <button
           type="button"
-          class="control-btn${warnClass}"
+          class="control-btn rounded-lg${warnClass}"
           onClick=${onSend}
           disabled=${disabled || streaming || draft.trim() === ''}
         >
@@ -301,7 +301,7 @@ export function ChatComposer({
           ? html`
               <button
                 type="button"
-                class="control-btn ghost"
+                class="control-btn rounded-lg ghost"
                 onClick=${onAbort}
               >
                 중지

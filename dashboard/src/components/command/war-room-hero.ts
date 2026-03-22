@@ -92,15 +92,15 @@ export function WarRoomHeroStrip({
     <section class="command-warroom-strip ${toneClass(stickyTone)} ${wallboard ? 'wallboard' : ''}">
       <div class="command-warroom-strip-head">
         <div>
-          <span class="command-hero-kicker">${wallboard ? 'War Room Wallboard' : '실시간 워룸'}</span>
+          <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">${wallboard ? 'War Room Wallboard' : '실시간 워룸'}</span>
           <strong>${heroTitle}</strong>
-          <div class="command-card-sub">
+          <div class="command-card rounded-xl-sub">
             ${swarmHasEvidence ? (swarm?.operation?.operation_id ?? '작전 정보 없음') : '세션 기준값'}
             ${selectedSession?.session_id ? ` · 세션 ${selectedSession.session_id}` : ''}
             ${swarmHasEvidence && swarm?.detachment?.detachment_id ? ` · 분견대 ${swarm.detachment.detachment_id}` : ''}
             ${activeLane ? ` · 대표 레인 ${activeLane.label}` : ''}
           </div>
-          <div class="command-warroom-summary">${heroSummary}</div>
+          <div class="mt-3 text-[rgba(226,232,240,0.86)] leading-[1.55] max-w-[82ch]">${heroSummary}</div>
           ${activeSummary?.summary
             ? html`<div class="command-warroom-guidance ${guidanceLayerTone(guidanceLayer)}">
                 <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
@@ -109,13 +109,13 @@ export function WarRoomHeroStrip({
             : null}
         </div>
         <div class="command-warroom-hero-actions">
-          <button class="control-btn ghost" onClick=${onRefresh}>새로고침</button>
+          <button class="control-btn rounded-lg ghost" onClick=${onRefresh}>새로고침</button>
           ${wallboard
             ? html`
-                <button class="control-btn ghost" onClick=${onToggleFullscreen}>
+                <button class="control-btn rounded-lg ghost" onClick=${onToggleFullscreen}>
                   ${fullscreenActive ? '전체 화면 해제' : '전체 화면'}
                 </button>
-                <button class="control-btn ghost" onClick=${standardView}>
+                <button class="control-btn rounded-lg ghost" onClick=${standardView}>
                   표준 보기
                 </button>
               `
@@ -139,27 +139,27 @@ export function WarRoomHeroStrip({
         </div>
       </div>
       <div class="command-warroom-strip-stats">
-        <div class="monitor-stat-card">
+        <div class="monitor-stat-card rounded-xl">
           <span>워커</span>
           <strong>${workerJoined ?? 0}/${workerExpected ?? 0}</strong>
           <small>${swarmHasEvidence ? (swarm?.summary?.completed_workers ?? 0) : 0} 완료 · ${workerCardCount} 카드</small>
         </div>
-        <div class="monitor-stat-card">
+        <div class="monitor-stat-card rounded-xl">
           <span>런타임</span>
           <strong>${swarmHasEvidence ? (swarm?.provider?.runtime_blocker ? '막힘' : swarm?.provider?.provider_reachable ? '준비됨' : selectedSession ? displayStatus(selectedSession.status) : '확인 필요') : (selectedSession ? displayStatus(selectedSession.status) : '확인 필요')}</strong>
           <small>${swarmHasEvidence ? `설정 ${swarm?.provider?.configured_capacity ?? 'n/a'} · 실제 ${swarm?.provider?.actual_slots ?? swarm?.provider?.total_slots ?? 0} · hot ${swarm?.summary?.peak_hot_slots ?? swarm?.provider?.peak_active_slots ?? 0}` : `세션 워커 ${workerCardCount}`}</small>
         </div>
-        <div class="monitor-stat-card ${toneClass(blockersCount > 0 || pendingApprovals > 0 || pendingConfirmTotal > 0 ? 'warn' : 'ok')}">
+        <div class="monitor-stat-card rounded-xl ${toneClass(blockersCount > 0 || pendingApprovals > 0 || pendingConfirmTotal > 0 ? 'warn' : 'ok')}">
           <span>압력</span>
           <strong>${blockersCount + pendingApprovals + pendingConfirmTotal}</strong>
           <small>막힘 ${blockersCount} · 승인 ${pendingApprovals} · 확인 ${pendingConfirmVisible}${pendingConfirmHidden > 0 ? `/${pendingConfirmTotal}` : ''}</small>
         </div>
-        <div class="monitor-stat-card ${toneClass(guidanceLayerTone(guidanceLayer))}">
+        <div class="monitor-stat-card rounded-xl ${toneClass(guidanceLayerTone(guidanceLayer))}">
           <span>상주 판정기</span>
           <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
           <small>${guidanceFreshnessLabel(activeSummary)}${residentRuntime?.model_used ? ` · ${residentRuntime.model_used}` : ''}</small>
         </div>
-        <div class="monitor-stat-card">
+        <div class="monitor-stat-card rounded-xl">
           <span>마지막 신호</span>
           <strong>${relativeTime(latestSignal)}</strong>
           <small>${latestMessage ? '메시지' : latestTrace ? '트레이스' : '대기 중'}</small>

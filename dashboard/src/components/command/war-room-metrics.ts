@@ -355,7 +355,7 @@ export function WarRoomJumpButton({
 }) {
   return html`
     <button
-      class="control-btn ghost"
+      class="control-btn rounded-lg ghost"
       onClick=${() => {
         if (surface) {
           setCommandPlaneSurface(surface)
@@ -378,22 +378,22 @@ export function WarRoomOrchestrationRail({
   linkedAutoresearch?: OperatorLinkedAutoresearch | null
 }) {
   if (!chainOverlay && !linkedAutoresearch) {
-    return html`<div class="command-guide-card"><p>이 세션에 붙은 chain/autoresearch 오버레이가 아직 없습니다.</p></div>`
+    return html`<div class="command-guide-card rounded-xl"><p>이 세션에 붙은 chain/autoresearch 오버레이가 아직 없습니다.</p></div>`
   }
 
   return html`
     <div class="warroom-orchestration-grid">
       ${chainOverlay
         ? html`
-            <article class="command-card warroom-orchestration-card min-h-[220px]">
-              <div class="command-card-head">
+            <article class="command-card rounded-xl warroom-orchestration-card min-h-[220px]">
+              <div class="command-card rounded-xl-head">
                 <div>
                   <strong>Chain Orchestration</strong>
-                  <div class="command-card-sub">${chainOverlay.operation.operation_id}</div>
+                  <div class="command-card rounded-xl-sub">${chainOverlay.operation.operation_id}</div>
                 </div>
-                <span class="command-chip ${toneClass(sessionStatusTone(chainOverlay.operation.status))}">${displayStatus(chainOverlay.operation.status)}</span>
+                <span class="command-chip rounded-full ${toneClass(sessionStatusTone(chainOverlay.operation.status))}">${displayStatus(chainOverlay.operation.status)}</span>
               </div>
-              <div class="command-card-grid">
+              <div class="command-card rounded-xl-grid">
                 <span>Chain</span><span>${chainOverlay.runtime?.chain_id ?? chainOverlay.preview_run?.chain_id ?? 'n/a'}</span>
                 <span>Progress</span><span>${formatPercent(chainOverlay.runtime?.progress)}</span>
                 <span>Elapsed</span><span>${formatElapsed(chainOverlay.runtime?.elapsed_sec)}</span>
@@ -411,15 +411,15 @@ export function WarRoomOrchestrationRail({
         : null}
       ${linkedAutoresearch
         ? html`
-            <article class="command-card warroom-orchestration-card min-h-[220px]">
-              <div class="command-card-head">
+            <article class="command-card rounded-xl warroom-orchestration-card min-h-[220px]">
+              <div class="command-card rounded-xl-head">
                 <div>
                   <strong>Autoresearch Loop</strong>
-                  <div class="command-card-sub">${linkedAutoresearch.loop_id ?? linkedAutoresearch.session_id ?? 'linked session'}</div>
+                  <div class="command-card rounded-xl-sub">${linkedAutoresearch.loop_id ?? linkedAutoresearch.session_id ?? 'linked session'}</div>
                 </div>
-                <span class="command-chip ${linkedAutoresearch.error ? 'bad' : linkedAutoresearch.status === 'running' ? 'warn' : 'ok'}">${linkedAutoresearch.status ?? 'unknown'}</span>
+                <span class="command-chip rounded-full ${linkedAutoresearch.error ? 'bad' : linkedAutoresearch.status === 'running' ? 'warn' : 'ok'}">${linkedAutoresearch.status ?? 'unknown'}</span>
               </div>
-              <div class="command-card-grid">
+              <div class="command-card rounded-xl-grid">
                 <span>Cycle</span><span>${linkedAutoresearch.current_cycle ?? 0}</span>
                 <span>Best score</span><span>${linkedAutoresearch.best_score ?? 'n/a'}</span>
                 <span>Target</span><span>${linkedAutoresearch.target_file ?? 'n/a'}</span>

@@ -35,22 +35,22 @@ export function AgentTimelineSection() {
   return html`
     <${Card} title="활동 타임라인 (${summary?.total_events ?? 0} events)">
       ${summary ? html`
-        <div class="agent-timeline-summary">
-          ${summary.tasks_completed > 0 ? html`<span class="pill">완료 ${summary.tasks_completed}</span>` : null}
-          ${summary.tasks_claimed > 0 ? html`<span class="pill">수임 ${summary.tasks_claimed}</span>` : null}
-          ${summary.messages_sent > 0 ? html`<span class="pill">메시지 ${summary.messages_sent}</span>` : null}
-          ${summary.active_duration_minutes > 0 ? html`<span class="pill">${Math.round(summary.active_duration_minutes)}분 활동</span>` : null}
+        <div class="flex gap-1.5 flex-wrap mb-2">
+          ${summary.tasks_completed > 0 ? html`<span class="pill rounded-full">완료 ${summary.tasks_completed}</span>` : null}
+          ${summary.tasks_claimed > 0 ? html`<span class="pill rounded-full">수임 ${summary.tasks_claimed}</span>` : null}
+          ${summary.messages_sent > 0 ? html`<span class="pill rounded-full">메시지 ${summary.messages_sent}</span>` : null}
+          ${summary.active_duration_minutes > 0 ? html`<span class="pill rounded-full">${Math.round(summary.active_duration_minutes)}분 활동</span>` : null}
         </div>
       ` : null}
       ${events.length === 0
-        ? html`<div class="empty-state">타임라인 이벤트 없음</div>`
+        ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">타임라인 이벤트 없음</div>`
         : html`
-            <div class="agent-timeline-list">
+            <div class="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">
               ${events.map((evt: AgentTimelineEvent, idx: number) => {
                 const detail = evt.detail as Record<string, string | undefined>
                 const title = detail.title ?? detail.content ?? ''
                 return html`
-                  <div class="agent-timeline-event" key=${idx}>
+                  <div class="agent-timeline-event rounded" key=${idx}>
                     <span class="agent-journal-kind">${timelineEventIcon(evt.type)}</span>
                     <span class="agent-timeline-type">${timelineEventLabel(evt.type)}</span>
                     ${title ? html`<span class="agent-timeline-detail">${compactCopy(title, 80)}</span>` : null}

@@ -12,7 +12,6 @@
   text-align: center;
   padding: 8px 4px;
   background: var(--white-3);
-  border-radius: 8px;
 }
 
 .goal-summary-value {
@@ -27,19 +26,6 @@
   margin-top: 2px;
 }
 
-.goal-filters {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-}
-
-.goal-filter-group {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .goal-filter-label {
   font-size: var(--fs-xs);
   color: var(--text-dim);
@@ -51,7 +37,6 @@
   border: 1px solid var(--white-8);
   color: #aaa;
   padding: 3px 10px;
-  border-radius: 12px;
   font-size: var(--fs-sm);
   cursor: pointer;
   transition: all 0.15s;
@@ -68,19 +53,12 @@
   color: #818cf8;
 }
 
-.goal-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .goal-row {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
   padding: 10px 12px;
-  border-radius: 8px;
   background: var(--white-2);
   transition: background 0.15s;
 }
@@ -90,7 +68,6 @@
 }
 .planning-loop-row {
   border: 1px solid var(--card-border);
-  border-radius: 12px;
   background: rgba(13, 22, 40, 0.58);
   padding: 14px;
 }
@@ -117,20 +94,6 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.planning-loop-badges {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.planning-loop-metrics {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  color: #b9c9ea;
-  font-size: var(--fs-sm);
-}
-
 .planning-loop-target {
   color: var(--text-body);
   font-size: var(--fs-base);
@@ -154,15 +117,6 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-}
-
-.goal-meta {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
 }
 
 .goal-review-note {
@@ -205,7 +159,6 @@
   font-size: var(--fs-2xs);
   font-weight: 700;
   padding: 2px 6px;
-  border-radius: 4px;
   letter-spacing: 0.5px;
   flex-shrink: 0;
   line-height: 1;
@@ -254,7 +207,6 @@
   padding: 4px 8px;
   border-left: 2px solid var(--white-6);
   cursor: pointer;
-  transition: color 0.15s;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;

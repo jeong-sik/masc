@@ -27,16 +27,16 @@ export function OperationCard({ brief, selected }: { brief: DashboardExecutionOp
       <div class="flex justify-between gap-2 items-start flex-wrap">
         <div>
           <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.operation_id}${brief.assigned_unit_label ? ` · ${brief.assigned_unit_label}` : ''}</div>
-          <div class="mission-card-title">${brief.objective}</div>
+          <div class="mission-card rounded-xl-title">${brief.objective}</div>
         </div>
-        <span class="command-chip ${terminal ? 'muted' : toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>
+        <span class="command-chip rounded-full ${terminal ? 'muted' : toneClass(brief.blocker_summary ? 'warn' : brief.status)}">${statusLabel(brief.status)}</span>
       </div>
-      <div class="mission-card-meta">
+      <div class="mission-card rounded-xl-meta">
         ${brief.stage ? html`<span>단계 · ${brief.stage}</span>` : null}
         ${brief.linked_session_id ? html`<span>세션 · ${brief.linked_session_id}</span>` : null}
         ${brief.updated_at ? html`<span><${TimeAgo} timestamp=${brief.updated_at} /></span>` : null}
       </div>
-      ${brief.blocker_summary ? html`<div class="mission-card-detail">${brief.blocker_summary}</div>` : null}
+      ${brief.blocker_summary ? html`<div class="mission-card rounded-xl-detail">${brief.blocker_summary}</div>` : null}
       ${brief.next_tool ? html`<div class="monitor-footnote">다음 도구 · ${brief.next_tool}</div>` : null}
       <${HandoffButtons} command=${brief.command_handoff} />
     </button>
@@ -56,7 +56,7 @@ export function OperationBriefsBody({ operationRows }: { operationRows: Dashboar
     <div class="monitor-list">
       ${hasActive
         ? activeOps.map(row => html`<${OperationCard} key=${row.operation_id} brief=${row} selected=${selectedOperationId.value === row.operation_id} />`)
-        : html`<div class="empty-state">${hasTerminal ? '진행 중인 작전이 없습니다.' : '선택된 실행과 연결된 작전이 없습니다.'}</div>`}
+        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${hasTerminal ? '진행 중인 작전이 없습니다.' : '선택된 실행과 연결된 작전이 없습니다.'}</div>`}
     </div>
     ${hasTerminal
       ? html`

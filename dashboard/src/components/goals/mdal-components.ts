@@ -14,20 +14,20 @@ export function LoopRow({ loop }: { loop: MdalLoop }) {
       : '아직 근거 없음'
 
   return html`
-    <div class="planning-loop-row">
+    <div class="planning-loop-row rounded-xl">
       <div class="grid gap-2.5">
         <div class="planning-loop-head">
           <div>
             <div class="planning-loop-id">${loop.profile}</div>
             <div class="planning-loop-sub">${loop.loop_id}</div>
           </div>
-          <div class="planning-loop-badges">
+          <div class="flex gap-1.5 flex-wrap">
             <${StatusBadge} status=${loop.status} />
-            <span class="pill">${loop.current_iteration}${loop.max_iterations > 0 ? `/${loop.max_iterations}` : ''}</span>
+            <span class="pill rounded-full">${loop.current_iteration}${loop.max_iterations > 0 ? `/${loop.max_iterations}` : ''}</span>
           </div>
         </div>
 
-        <div class="planning-loop-metrics">
+        <div class="flex gap-2.5 flex-wrap text-[#b9c9ea] text-[length:var(--fs-sm)]">
           <span>Baseline ${formatMetric(loop.baseline_metric)}</span>
           <span>현재 ${formatMetric(loop.current_metric)}</span>
           <span class=${formatMetricDelta(loop).startsWith('+') ? 'text-[#9af3ba]' : 'text-[#fda4af]'}>

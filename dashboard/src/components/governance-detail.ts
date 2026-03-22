@@ -22,14 +22,14 @@ import {
 export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['petitions'][number] }) {
   return html`
     <div class="governance-ledger-row">
-      <div class="governance-ledger-head">
-        <span class="governance-badge text-[#b7cbee]">청원</span>
+      <div class="flex flex-wrap items-center gap-2 text-[#9ab3de] text-[length:var(--fs-xs)]">
+        <span class="governance-badge rounded-full text-[#b7cbee]">청원</span>
         <strong>${petition.created_by || petition.origin || 'system'}</strong>
         ${petition.created_at ? html`<span><${TimeAgo} timestamp=${petition.created_at} /></span>` : null}
       </div>
       <div class="governance-ledger-body">${petition.title}</div>
-      <div class="governance-chip-row">
-        ${petition.source_refs.map(ref => html`<span class="governance-chip">${ref}</span>`)}
+      <div class="governance-chip rounded-full-row">
+        ${petition.source_refs.map(ref => html`<span class="governance-chip rounded-full">${ref}</span>`)}
       </div>
     </div>
   `
@@ -38,14 +38,14 @@ export function PetitionEntry({ petition }: { petition: GovernanceCaseBundle['pe
 export function BriefEntry({ brief }: { brief: GovernanceCaseBrief }) {
   return html`
     <div class="governance-ledger-row">
-      <div class="governance-ledger-head">
-        <span class="governance-badge ${governanceToneClass(brief.stance)}">${stanceLabel(brief.stance)}</span>
+      <div class="flex flex-wrap items-center gap-2 text-[#9ab3de] text-[length:var(--fs-xs)]">
+        <span class="governance-badge rounded-full ${governanceToneClass(brief.stance)}">${stanceLabel(brief.stance)}</span>
         <strong>${brief.author}</strong>
         ${brief.created_at ? html`<span><${TimeAgo} timestamp=${brief.created_at} /></span>` : null}
       </div>
       <div class="governance-ledger-body">${brief.summary}</div>
-      <div class="governance-chip-row">
-        ${brief.evidence_refs.map(ref => html`<span class="governance-chip">${ref}</span>`)}
+      <div class="governance-chip rounded-full-row">
+        ${brief.evidence_refs.map(ref => html`<span class="governance-chip rounded-full">${ref}</span>`)}
       </div>
     </div>
   `
@@ -64,11 +64,11 @@ export function DecisionDetail() {
      
     >
       ${detailLoading.value
-        ? html`<div class="loading-indicator">거버넌스 상세 불러오는 중...</div>`
+        ? html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">거버넌스 상세 불러오는 중...</div>`
         : !item || !detail
-          ? html`<div class="empty-state">왼쪽 수신함에서 사건을 선택하면 청원, 심의, 판정, 집행 기록이 여기에 표시됩니다.</div>`
+          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">왼쪽 수신함에서 사건을 선택하면 청원, 심의, 판정, 집행 기록이 여기에 표시됩니다.</div>`
           : html`
-              <div class="governance-detail-head">
+              <div class="flex justify-between items-start gap-4 mb-3.5">
                 <div>
                   <h3>${detail.case.title}</h3>
                   <div class="council-sub">
@@ -86,14 +86,14 @@ export function DecisionDetail() {
                   <span class="governance-balance"><strong>${orderStatusLabel(detail.execution_order?.status)}</strong></span>
                 </div>
               </div>
-              <div class="governance-ledger">
+              <div class="flex flex-col gap-2.5">
                 ${petitions.length === 0
-                  ? html`<div class="empty-state">기록된 청원이 없습니다.</div>`
+                  ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">기록된 청원이 없습니다.</div>`
                   : petitions.map(petition => html`<${PetitionEntry} key=${petition.id} petition=${petition} />`)}
               </div>
-              <div class="governance-ledger">
+              <div class="flex flex-col gap-2.5">
                 ${briefs.length === 0
-                  ? html`<div class="empty-state">심의 의견이 아직 없습니다.</div>`
+                  ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">심의 의견이 아직 없습니다.</div>`
                   : briefs.map(brief => html`<${BriefEntry} key=${brief.id} brief=${brief} />`)}
               </div>
             `}

@@ -27,7 +27,7 @@ const LazyLabSurface = lazy(async () => ({ default: (await import('./lab-unified
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 
 function lazyTabFallback(label: string) {
-  return html`<div class="loading-indicator">${label} 불러오는 중...</div>`
+  return html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">${label} 불러오는 중...</div>`
 }
 
 function formatDisconnectDuration(): string {
@@ -50,12 +50,12 @@ export function ConnectionStatus() {
     : `재연결 중...${formatDisconnectDuration()}`
 
   return html`
-    <div class="connection-status ${isConnected ? 'connected' : 'disconnected'}">
-      <span class="status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
+    <div class="flex items-center gap-2 text-[length:var(--fs-sm)] text-[color:var(--text-muted)] whitespace-nowrap connection-status ${isConnected ? 'connected' : 'disconnected'}">
+      <span class="size-[9px] rounded-full inline-block status-dot ${isConnected ? 'connected' : 'disconnected'}"></span>
       <span class="status-text">${statusLabel}</span>
       ${attentionCount > 0 ? html`
         <span
-          class="event-count attention-badge cursor-pointer"
+          class="event-count rounded-full attention-badge cursor-pointer"
           onClick=${() => navigate('home')}
         >주의 ${attentionCount}건</span>
       ` : null}
@@ -81,7 +81,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button
-        class="version-badge build-badge-trigger"
+        class="text-[11px] py-[2px] px-[9px] rounded-full border border-solid border-[rgba(71,184,255,0.35)] bg-[var(--accent-soft)] text-[#9ad9ff] build-badge-trigger"
         type="button"
         aria-expanded=${buildIdentityOpen.value}
         onClick=${() => {
@@ -93,25 +93,25 @@ export function BuildIdentityBadge() {
       ${buildIdentityOpen.value
         ? html`
             <div class="build-badge-panel">
-              <div class="build-badge-row">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>릴리즈</span>
-                <strong>${build?.release_version ?? status?.version ?? 'unknown'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               </div>
-              <div class="build-badge-row">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>커밋</span>
-                <strong>${build?.commit ?? '커밋 정보 없음'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${build?.commit ?? '커밋 정보 없음'}</strong>
               </div>
-              <div class="build-badge-row">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>서버 시작</span>
-                <strong>${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
               </div>
-              <div class="build-badge-row">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>업타임</span>
-                <strong>${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : '알 수 없음'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s` : '알 수 없음'}</strong>
               </div>
-              <div class="build-badge-row">
+              <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
                 <span>쉘 스냅샷</span>
-                <strong>${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
+                <strong class="text-[color:var(--text-strong)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
               </div>
             </div>
           `
@@ -129,13 +129,13 @@ export function SideRail() {
 
   return html`
     <aside class="dashboard-rail">
-      <section class="rail-card rail-card-compact">
-        <div class="rail-card-head">
-          <h3>탐색</h3>
+      <section class="rail-card rounded-xl py-2.5 px-3">
+        <div class="flex items-center justify-between gap-3">
+          <h3 class="mb-0">탐색</h3>
         </div>
 
         <!-- Primary surfaces (5 items) -->
-        <div class="rail-tab-list">
+        <div class="rail-tab-list grid grid-cols-1 gap-1.5">
           ${DASHBOARD_SURFACES.map(surface => {
             const isActive = surface.id === currentSurface
             return html`
@@ -145,9 +145,9 @@ export function SideRail() {
                 onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
               >
                 <span class="text-base leading-[1.2]">${surface.icon}</span>
-                <span class="rail-tab-copy">
-                  <strong>${surface.label}</strong>
-                  <span>${surface.description}</span>
+                <span class="min-w-0 grid gap-0.5">
+                  <strong class="text-[color:var(--text-strong)] text-[13px] leading-[1.3]">${surface.label}</strong>
+                  <span class="text-[color:var(--text-muted)] text-[11px] leading-[1.4]">${surface.description}</span>
                 </span>
               </button>
             `
@@ -160,16 +160,16 @@ export function SideRail() {
           return html`
             <div class="rail-nav-group mt-3">
               <div class="rail-group-label">${currentView?.label ?? currentSurface} 하위</div>
-              <div class="rail-tab-list mt-1.5">
+              <div class="rail-tab-list grid grid-cols-1 gap-1.5 mt-1.5">
                 ${sectionItems.map(item => html`
                   <button
                     class="rail-tab-btn py-2 px-2.5 ${currentSection?.id === item.id ? 'active' : ''}"
                     key=${item.id}
                     onClick=${() => navigate(currentSurface, item.params)}
                   >
-                    <span class="rail-tab-copy">
-                      <strong class="text-xs">${item.label}</strong>
-                      <span>${item.description}</span>
+                    <span class="min-w-0 grid gap-0.5">
+                      <strong class="text-[color:var(--text-strong)] text-xs leading-[1.3]">${item.label}</strong>
+                      <span class="text-[color:var(--text-muted)] text-[11px] leading-[1.4]">${item.description}</span>
                     </span>
                   </button>
                 `)}
@@ -178,10 +178,10 @@ export function SideRail() {
           `
         })()}
 
-        <div class="rail-view-note">
-          <div class="rail-view-note-label">현재 화면</div>
-          <strong>${currentSection ? `${currentView?.label ?? current} · ${currentSection.label}` : currentView?.label ?? current}</strong>
-          <p>${currentSection?.description ?? currentView?.description ?? '운영 화면'}</p>
+        <div class="mt-3.5 pt-2.5 border-t border-[var(--card-border)] grid gap-1">
+          <div class="text-[color:var(--text-muted)] text-[11px] tracking-[0.06em] uppercase">현재 화면</div>
+          <strong class="text-[color:var(--text-strong)] text-sm">${currentSection ? `${currentView?.label ?? current} · ${currentSection.label}` : currentView?.label ?? current}</strong>
+          <p class="text-[color:var(--text-muted)] text-xs leading-[1.45]">${currentSection?.description ?? currentView?.description ?? '운영 화면'}</p>
         </div>
       </section>
 
@@ -234,7 +234,7 @@ export function TabContent() {
 
 export function DashboardMain() {
   if (dashboardLoading.value && !connected.value && !roomTruthInitializing.value) {
-    return html`<div class="loading-indicator">대시보드 불러오는 중...</div>`
+    return html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">대시보드 불러오는 중...</div>`
   }
 
   const routeLabel = [
@@ -249,7 +249,7 @@ export function DashboardMain() {
 
   return html`
     ${roomTruthInitializing.value ? html`
-      <div class="loading-banner">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
+      <div class="text-center py-[6px] px-4 bg-[rgba(230,167,0,0.12)] border-b border-solid border-b-[rgba(230,167,0,0.3)] text-[#e6a700] text-[0.8rem] shrink-0">서버 데이터 준비 중 — 잠시 후 자동 갱신됩니다</div>
     ` : null}
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <${TabContent} />

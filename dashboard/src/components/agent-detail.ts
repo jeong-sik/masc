@@ -35,9 +35,9 @@ export { selectedAgentName, openAgentDetail, closeAgentDetail } from './agent-de
 
 function TaskSummary({ task }: { task: Task }) {
   return html`
-    <div class="agent-detail-task">
-      <span class="pill">${task.id}</span>
-      <span class="agent-detail-task-title">${task.title}</span>
+    <div class="agent-detail-task rounded-lg">
+      <span class="pill rounded-full">${task.id}</span>
+      <span class="agent-detail-task rounded-lg-title">${task.title}</span>
       <${StatusBadge} status=${task.status} />
     </div>
   `
@@ -47,7 +47,7 @@ function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   return html`
     <div class="agent-history-row">
       <div class="mb-2">
-        <span class="pill">${row.taskId}</span>
+        <span class="pill rounded-full">${row.taskId}</span>
       </div>
       <pre class="agent-history-pre">${row.text || 'No task history yet'}</pre>
     </div>
@@ -100,29 +100,29 @@ export function AgentDetailOverlay() {
       }}
     >
       <div class="agent-detail-modal">
-        <div class="agent-detail-header">
+        <div class="flex justify-between gap-3 mb-3.5">
           <div class="flex flex-col gap-2 flex-1">
             <div class="flex items-center gap-3">
               ${agentEmoji ? html`<span class="text-[2rem]">${agentEmoji}</span>` : ''}
               <div>
-                <h2 class="m-0 flex items-baseline gap-2">
+                <h2 class="m-0 flex items-baseline gap-2 text-[var(--text-strong)] text-xl">
                   ${displayName}
                   ${koreanName ? html`<span class="text-xs text-[var(--text-dim)]">(${koreanName})</span>` : ''}
                   ${secondaryLabel ? html`<span class="font-mono" class="text-xs text-[var(--text-dim)]">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div class="flex items-center gap-2 mt-1 flex-wrap">
                   <${StatusBadge} status=${headerStatus} />
-                  ${isArchivedParticipant ? html`<span class="pill">archived session participant</span>` : null}
+                  ${isArchivedParticipant ? html`<span class="pill rounded-full">archived session participant</span>` : null}
                   ${agent?.model ? html`<span class="font-mono" class="text-xs bg-[#2a2a4a] px-1.5 py-0.5 rounded">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-[var(--text-dim)]">${missionBrief.archived_reason}</span>`
                     : null}
-                  ${signalTruth ? html`<span class="pill">signal · ${signalTruth}</span>` : null}
-                  ${evidenceSource ? html`<span class="pill">source · ${evidenceSource}</span>` : null}
+                  ${signalTruth ? html`<span class="pill rounded-full">signal · ${signalTruth}</span>` : null}
+                  ${evidenceSource ? html`<span class="pill rounded-full">source · ${evidenceSource}</span>` : null}
                 </div>
               </div>
             </div>
-            <div class="agent-detail-sub">
+            <div class="mt-1.5 flex gap-2 flex-wrap text-[#9ab3de] text-[length:var(--fs-sm)]">
               ${agent?.current_task || missionBrief?.current_work
                 ? html`<span>Task: ${agent?.current_task ?? missionBrief?.current_work}</span>`
                 : null}
@@ -130,7 +130,7 @@ export function AgentDetailOverlay() {
             </div>
             ${keeper || continuitySummary || missionBrief?.related_session_id
               ? html`
-                  <div class="agent-detail-sub">
+                  <div class="mt-1.5 flex gap-2 flex-wrap text-[#9ab3de] text-[length:var(--fs-sm)]">
                     ${keeper
                       ? html`<span>Linked keeper: ${keeper.name}${keeperIdentity ? ` · ${keeperIdentity}` : ''}</span>`
                       : null}
@@ -141,26 +141,26 @@ export function AgentDetailOverlay() {
               : null}
           </div>
           <div class="flex gap-2">
-            <button class="control-btn ghost" onClick=${() => { void refreshAgentDetail() }} disabled=${loading.value}>
+            <button class="control-btn rounded-lg ghost" onClick=${() => { void refreshAgentDetail() }} disabled=${loading.value}>
               ${loading.value ? '새로고침 중...' : '새로고침'}
             </button>
-            <button class="control-btn ghost" onClick=${closeAgentDetail}>닫기</button>
+            <button class="control-btn rounded-lg ghost" onClick=${closeAgentDetail}>닫기</button>
           </div>
         </div>
 
-        ${detailError.value ? html`<div class="council-error">${detailError.value}</div>` : null}
+        ${detailError.value ? html`<div class="council-error rounded-lg">${detailError.value}</div>` : null}
 
-        <div class="agent-detail-grid">
+        <div class="grid grid-cols-2 gap-3 mb-3">
           <${Card} title="할당된 작업">
             ${ownedTasks.length === 0
-              ? html`<div class="empty-state">할당된 작업이 없습니다</div>`
-              : html`<div class="agent-detail-task-list">${ownedTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`}
+              ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">할당된 작업이 없습니다</div>`
+              : html`<div class="flex flex-col gap-2">${ownedTasks.map(t => html`<${TaskSummary} key=${t.id} task=${t} />`)}</div>`}
           <//>
 
           <${Card} title="최근 활동">
             ${lines.length === 0
-              ? html`<div class="empty-state">최근 활동 기록이 없습니다</div>`
-              : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) => html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
+              ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">최근 활동 기록이 없습니다</div>`
+              : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) => html`<div key=${idx} class="agent-activity-line rounded-lg">${line}</div>`)}</div>`}
           <//>
         </div>
 
@@ -169,14 +169,14 @@ export function AgentDetailOverlay() {
         <${AgentWorkerBrief} agentName=${agentName} />
         <${Card} title="작업 이력">
           ${taskHistories.value.length === 0
-            ? html`<div class="empty-state">작업 이력이 없습니다</div>`
-            : html`<div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`}
+            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">작업 이력이 없습니다</div>`
+            : html`<div class="flex flex-col gap-2.5">${taskHistories.value.map((row: TaskHistoryRow) => html`<${TaskHistoryPanel} key=${row.taskId} row=${row} />`)}</div>`}
         <//>
 
         <${Card} title="직접 멘션">
-          <div class="agent-mention-row">
+          <div class="grid grid-cols-[1fr_auto] gap-2">
             <input
-              class="control-input"
+              class="control-input rounded-lg"
               type="text"
               placeholder="@멘션 메시지"
               value=${mentionText.value}
@@ -185,7 +185,7 @@ export function AgentDetailOverlay() {
               disabled=${sendingMention.value}
             />
             <button
-              class="control-btn"
+              class="control-btn rounded-lg"
               onClick=${() => { void submitMention() }}
               disabled=${sendingMention.value || mentionText.value.trim() === ''}
             >

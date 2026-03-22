@@ -189,15 +189,15 @@ export function WarRoomSurface({ wallboard = false }: { wallboard?: boolean }) {
 
   if (!hasLiveRun && !selectedSession) {
     if (commandPlaneSwarmLoading.value || operatorLoading.value) {
-      return html`<div class="empty-state">실시간 워룸 불러오는 중…</div>`
+      return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">실시간 워룸 불러오는 중…</div>`
     }
     return html`
-      <section class="card min-h-[240px] command-warroom-empty ${wallboard ? 'wallboard' : ''}">
-        <div class="card-title-row">
-          <div class="card-title">실시간 워룸</div>
+      <section class="card rounded-xl min-h-[240px] command-warroom-empty ${wallboard ? 'wallboard' : ''}">
+        <div class="card rounded-xl-title-row">
+          <div class="card rounded-xl-title">실시간 워룸</div>
         </div>
         <div class="command-warroom-empty-copy">
-          <span class="command-hero-kicker">Narrative Playback</span>
+          <span class="inline-flex w-fit items-center gap-2 py-[5px] px-[10px] rounded-full text-[#7dd3fc] bg-[rgba(14,116,144,0.22)] border border-solid border-[rgba(125,211,252,0.18)] text-[length:var(--fs-xs)] tracking-[0.08em] uppercase">Narrative Playback</span>
           <strong>지금 붙잡을 live swarm 또는 team session이 없습니다</strong>
           <p>chain, autoresearch, worker wallboard는 활성 작전 또는 세션이 생기면 자동으로 붙습니다. 지금은 drill-down surface로 이동하는 편이 맞습니다.</p>
         </div>

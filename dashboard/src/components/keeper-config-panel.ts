@@ -98,7 +98,7 @@ export function resetKeeperConfig(): void {
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
-    <div class="keeper-signal-row">
+    <div class="keeper-signal-row rounded-lg">
       <span>${label}</span>
       <strong>${value}</strong>
     </div>
@@ -123,7 +123,7 @@ function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-[#666]">none</span>`
   return html`
     <div class="flex flex-wrap gap-1">
-      ${models.map(m => html`<span class="pill" style="font-size:11px;">${m}</span>`)}
+      ${models.map(m => html`<span class="pill rounded-full" style="font-size:11px;">${m}</span>`)}
     </div>
   `
 }
@@ -187,7 +187,7 @@ function EditCheckbox({ field, label }: { field: keyof EditDraft; label: string 
   if (!d) return null
   const val = d[field] as boolean
   return html`
-    <div class="keeper-signal-row" class="mt-1">
+    <div class="keeper-signal-row rounded-lg" class="mt-1">
       <span>${label}</span>
       <input
         type="checkbox"
@@ -203,7 +203,7 @@ function EditNumber({ field, label, min, max }: { field: keyof EditDraft; label:
   if (!d) return null
   const val = d[field] as number
   return html`
-    <div class="keeper-signal-row" class="mt-1">
+    <div class="keeper-signal-row rounded-lg" class="mt-1">
       <span>${label}</span>
       <input
         type="number"
@@ -231,11 +231,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   }
 
   if (state.status === 'loading') {
-    return html`<div class="keeper-signal-list"><div style="color:#888; font-size:13px; padding:12px 0;">Loading config...</div></div>`
+    return html`<div class="flex flex-col gap-1.5"><div style="color:#888; font-size:13px; padding:12px 0;">Loading config...</div></div>`
   }
 
   if (state.status === 'error') {
-    return html`<div class="keeper-signal-list"><div style="color:#ef4444; font-size:13px; padding:12px 0;">${state.message}</div></div>`
+    return html`<div class="flex flex-col gap-1.5"><div style="color:#ef4444; font-size:13px; padding:12px 0;">${state.message}</div></div>`
   }
 
   if (state.status !== 'loaded') return null
@@ -349,7 +349,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     ${c.drift.last_reason ? html`<${ConfigRow} label="Last reason" value=${c.drift.last_reason} />` : null}
   ` : html`
     <${SectionHeader} title="Drift" />
-    <div class="keeper-signal-row">
+    <div class="keeper-signal-row rounded-lg">
       <span>Enabled</span>
       <strong><${BoolBadge} value=${c.drift.enabled} /></strong>
     </div>
@@ -359,7 +359,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   `
 
   return html`
-    <div class="keeper-signal-list">
+    <div class="flex flex-col gap-1.5">
 
       ${toolbar}
 
@@ -368,7 +368,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${ConfigRow} label="Active model" value=${c.execution.active_model || '--'} />
       <${ConfigRow} label="Policy mode" value=${c.execution.policy_mode || '--'} />
       <${ConfigRow} label="Shell mode" value=${c.execution.policy_shell_mode || '--'} />
-      <div class="keeper-signal-row">
+      <div class="keeper-signal-row rounded-lg">
         <span>Verify</span>
         <strong><${BoolBadge} value=${c.execution.verify} /></strong>
       </div>
@@ -393,7 +393,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* --- Proactive (read-only) --- */}
       <${SectionHeader} title="Proactive" />
-      <div class="keeper-signal-row">
+      <div class="keeper-signal-row rounded-lg">
         <span>Enabled</span>
         <strong><${BoolBadge} value=${c.proactive.enabled} /></strong>
       </div>
@@ -405,7 +405,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* --- Initiative (read-only) --- */}
       <${SectionHeader} title="Initiative" />
-      <div class="keeper-signal-row">
+      <div class="keeper-signal-row rounded-lg">
         <span>Enabled</span>
         <strong><${BoolBadge} value=${c.initiative.enabled} /></strong>
       </div>
@@ -416,7 +416,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* --- Handoff (read-only) --- */}
       <${SectionHeader} title="Handoff" />
-      <div class="keeper-signal-row">
+      <div class="keeper-signal-row rounded-lg">
         <span>Auto</span>
         <strong><${BoolBadge} value=${c.handoff.auto} /></strong>
       </div>

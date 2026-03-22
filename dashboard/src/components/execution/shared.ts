@@ -135,9 +135,9 @@ export function MonitorStat({
   caption?: string
 }) {
   return html`
-    <div class="stat-card">
+    <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
       <div class="stat-label">${label}</div>
-      <div class="stat-value" style=${color ? `color:${color}` : ''}>${value}</div>
+      <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums" style=${color ? `color:${color}` : ''}>${value}</div>
       ${caption ? html`<div class="monitor-stat-caption">${caption}</div>` : null}
     </div>
   `
@@ -155,7 +155,7 @@ export function HandoffButtons({
       ${intervene
         ? html`
             <button
-              class="control-btn ghost"
+              class="control-btn rounded-lg ghost"
               data-testid="execution.handoff-intervene"
               onClick=${(event: Event) => {
                 event.stopPropagation()
@@ -169,7 +169,7 @@ export function HandoffButtons({
       ${command
         ? html`
             <button
-              class="control-btn ghost"
+              class="control-btn rounded-lg ghost"
               data-testid="execution.handoff-command"
               onClick=${(event: Event) => {
                 event.stopPropagation()

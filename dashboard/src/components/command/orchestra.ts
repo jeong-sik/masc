@@ -215,13 +215,13 @@ export function OrchestraSurface() {
   }, [])
 
   if (commandPlaneOrchestraLoading.value && !orchestra) {
-    return html`<section class="card min-h-[240px]"><div class="empty-state">오케스트라 맵 불러오는 중…</div></section>`
+    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">오케스트라 맵 불러오는 중…</div></section>`
   }
   if (commandPlaneOrchestraError.value) {
-    return html`<section class="card min-h-[240px]"><div class="empty-state error">${commandPlaneOrchestraError.value}</div></section>`
+    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneOrchestraError.value}</div></section>`
   }
   if (!orchestra) {
-    return html`<section class="card min-h-[240px]"><div class="empty-state">오케스트라 맵 데이터가 아직 없습니다.</div></section>`
+    return html`<section class="card rounded-xl min-h-[240px]"><div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">오케스트라 맵 데이터가 아직 없습니다.</div></section>`
   }
 
   const density = orchestraDensity.value
@@ -328,33 +328,33 @@ export function OrchestraSurface() {
   }
 
   return html`
-    <section class="card min-h-[240px] overflow-hidden">
-      <div class="card-title-row">
-        <div class="card-title">오케스트라 맵</div>
+    <section class="card rounded-xl min-h-[240px] overflow-hidden">
+      <div class="card rounded-xl-title-row">
+        <div class="card rounded-xl-title">오케스트라 맵</div>
       </div>
-      <p class="command-card-sub">
+      <p class="command-card rounded-xl-sub">
         룸 전체를 한 장의 작전판으로 읽는 시각화입니다. 확대/이동으로 밀집 구간을 읽고, 노드를 눌러 상세 신호와 연결 대상을 확인합니다.
       </p>
 
       <div class="orchestra-toolbar">
         <div class="orchestra-toolbar-group">
-          <button class="control-btn ghost" onClick=${applyFit}>맞춤 보기</button>
-          <button class="control-btn ghost" onClick=${resetView}>초기화</button>
+          <button class="control-btn rounded-lg ghost" onClick=${applyFit}>맞춤 보기</button>
+          <button class="control-btn rounded-lg ghost" onClick=${resetView}>초기화</button>
         </div>
         <div class="orchestra-toolbar-group">
           <button
-            class="control-btn ghost"
+            class="control-btn rounded-lg ghost"
             onClick=${() => zoomAround(viewport.width / 2, viewport.height / 2, 1.12)}
           >
             확대
           </button>
           <button
-            class="control-btn ghost"
+            class="control-btn rounded-lg ghost"
             onClick=${() => zoomAround(viewport.width / 2, viewport.height / 2, 0.9)}
           >
             축소
           </button>
-          <span class="command-chip">${Math.round(camera.zoom * 100)}%</span>
+          <span class="command-chip rounded-full">${Math.round(camera.zoom * 100)}%</span>
         </div>
         <div class="orchestra-toolbar-group">
           <button
@@ -375,7 +375,7 @@ export function OrchestraSurface() {
           >
             집약
           </button>
-          <span class="command-chip">${densityLabel(density)}</span>
+          <span class="command-chip rounded-full">${densityLabel(density)}</span>
         </div>
       </div>
 
@@ -420,13 +420,13 @@ export function OrchestraSurface() {
             </g>
           </svg>
           <div class="orchestra-summary-strip">
-            <span class="command-chip">세션 ${orchestra.summary?.session_count ?? 0}</span>
-            <span class="command-chip">워커 ${orchestra.summary?.worker_count ?? 0}</span>
-            <span class="command-chip">키퍼 ${orchestra.summary?.keeper_count ?? 0}</span>
-            <span class="command-chip ${toneClass(orchestra.signals.some(signalNode => signalNode.tone === 'bad') ? 'bad' : orchestra.signals.length > 0 ? 'warn' : 'ok')}">
+            <span class="command-chip rounded-full">세션 ${orchestra.summary?.session_count ?? 0}</span>
+            <span class="command-chip rounded-full">워커 ${orchestra.summary?.worker_count ?? 0}</span>
+            <span class="command-chip rounded-full">키퍼 ${orchestra.summary?.keeper_count ?? 0}</span>
+            <span class="command-chip rounded-full ${toneClass(orchestra.signals.some(signalNode => signalNode.tone === 'bad') ? 'bad' : orchestra.signals.length > 0 ? 'warn' : 'ok')}">
               신호 ${orchestra.summary?.signal_count ?? orchestra.signals.length}
             </span>
-            <span class="command-chip">갱신 ${relativeTime(orchestra.generated_at)}</span>
+            <span class="command-chip rounded-full">갱신 ${relativeTime(orchestra.generated_at)}</span>
           </div>
         </div>
 

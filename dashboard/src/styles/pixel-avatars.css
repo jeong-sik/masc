@@ -9,7 +9,6 @@
   grid-template: repeat(8, 1fr) / repeat(8, 1fr);
   width: 48px;
   height: 48px;
-  border-radius: 6px;
   overflow: visible;
   flex-shrink: 0;
   image-rendering: pixelated;
@@ -19,19 +18,16 @@
 .pixel-avatar--sm {
   width: 32px;
   height: 32px;
-  border-radius: 4px;
 }
 
 .pixel-avatar--lg {
   width: 64px;
   height: 64px;
-  border-radius: 8px;
 }
 
 .pixel-avatar--xl {
   width: 96px;
   height: 96px;
-  border-radius: 8px;
   box-shadow:
     0 0 0 2px var(--ff-navy),
     0 0 0 3px var(--ff-gold),
@@ -131,7 +127,6 @@
   transform: translateX(-50%);
   white-space: nowrap;
   padding: 3px 8px;
-  border-radius: 6px;
   background: rgba(30, 30, 40, 0.92);
   border: 1px solid var(--white-12);
   color: var(--text-strong);

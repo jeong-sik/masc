@@ -95,7 +95,7 @@ function MermaidGraph({ source }: { source: string }) {
 
   return html`
     <div class="mt-3 min-h-[160px]">
-      ${error ? html`<div class="empty-state error">${error}</div>` : null}
+      ${error ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${error}</div>` : null}
       <div class="command-chain-graph" ref=${hostRef}></div>
     </div>
   `
@@ -107,20 +107,20 @@ function ChainOperationListItem(
   const chain = overlay.operation.chain
   const runtime = overlay.runtime
   return html`
-    <button class="command-chain-item ${selected ? 'selected' : ''}" onClick=${onSelect}>
-      <div class="command-card-head">
+    <button class="command-chain-item rounded-xl ${selected ? 'selected' : ''}" onClick=${onSelect}>
+      <div class="command-card rounded-xl-head">
         <div>
           <strong>${overlay.operation.objective}</strong>
-          <div class="command-card-sub">${overlay.operation.operation_id}</div>
+          <div class="command-card rounded-xl-sub">${overlay.operation.operation_id}</div>
         </div>
-        <span class="command-chip ${chainStatusTone(chain?.status)}">${chain?.status ?? overlay.operation.status}</span>
+        <span class="command-chip rounded-full ${chainStatusTone(chain?.status)}">${chain?.status ?? overlay.operation.status}</span>
       </div>
-      <div class="command-tag-row">
-        <span class="command-tag">${chain?.kind ?? 'chain_dsl'}</span>
-        ${chain?.chain_id ? html`<span class="command-tag">${chain.chain_id}</span>` : null}
-        ${runtime ? html`<span class="command-tag ${chainStatusTone(chain?.status)}">${formatPercent(runtime.progress)} progress</span>` : null}
+      <div class="command-tag rounded-full-row">
+        <span class="command-tag rounded-full">${chain?.kind ?? 'chain_dsl'}</span>
+        ${chain?.chain_id ? html`<span class="command-tag rounded-full">${chain.chain_id}</span>` : null}
+        ${runtime ? html`<span class="command-tag rounded-full ${chainStatusTone(chain?.status)}">${formatPercent(runtime.progress)} progress</span>` : null}
       </div>
-      <div class="command-card-sub">${historySummary(overlay.history)}</div>
+      <div class="command-card rounded-xl-sub">${historySummary(overlay.history)}</div>
     </button>
   `
 }
@@ -130,10 +130,10 @@ function ChainHistoryRow({ item }: { item: ChainHistoryEventSummary }) {
     <article class="command-chain-history-row text-red-300">
       <div class="command-guide-head">
         <strong>${item.chain_id ?? '알 수 없는 체인'}</strong>
-        <span class="command-chip ${chainStatusTone(item.event)}">${item.event}</span>
+        <span class="command-chip rounded-full ${chainStatusTone(item.event)}">${item.event}</span>
       </div>
-      <div class="command-card-sub">${relativeTime(item.timestamp)}</div>
-      <div class="command-card-sub">${historySummary(item)}</div>
+      <div class="command-card rounded-xl-sub">${relativeTime(item.timestamp)}</div>
+      <div class="command-card rounded-xl-sub">${historySummary(item)}</div>
     </article>
   `
 }
@@ -143,13 +143,13 @@ function ChainRunNodeRow({ node }: { node: CommandPlaneChainRunNode }) {
     <article class="command-chain-node-row">
       <div class="command-guide-head">
         <strong>${node.id}</strong>
-        <span class="command-chip ${chainStatusTone(node.status)}">${node.status ?? '확인 필요'}</span>
+        <span class="command-chip rounded-full ${chainStatusTone(node.status)}">${node.status ?? '확인 필요'}</span>
       </div>
-      <div class="command-card-sub">
+      <div class="command-card rounded-xl-sub">
         ${node.type ?? '노드'}
         ${typeof node.duration_ms === 'number' ? ` · ${node.duration_ms}ms` : ''}
       </div>
-      ${node.error ? html`<div class="command-card-sub text-red-300">${node.error}</div>` : null}
+      ${node.error ? html`<div class="command-card rounded-xl-sub text-red-300">${node.error}</div>` : null}
     </article>
   `
 }
@@ -162,15 +162,15 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
   const chain = op.chain
   const runId = chain?.run_id ?? null
   return html`
-    <article class="command-card">
-      <div class="command-card-head">
+    <article class="command-card rounded-xl">
+      <div class="command-card rounded-xl-head">
         <div>
           <strong>${op.objective}</strong>
-          <div class="command-card-sub">${op.operation_id}</div>
+          <div class="command-card rounded-xl-sub">${op.operation_id}</div>
         </div>
-        <span class="command-chip ${toneClass(op.status === 'active' ? 'ok' : op.status === 'paused' ? 'warn' : op.status === 'failed' ? 'bad' : 'ok')}">${operationStatusLabel(op.status)}</span>
+        <span class="command-chip rounded-full ${toneClass(op.status === 'active' ? 'ok' : op.status === 'paused' ? 'warn' : op.status === 'failed' ? 'bad' : 'ok')}">${operationStatusLabel(op.status)}</span>
       </div>
-      <div class="command-card-grid">
+      <div class="command-card rounded-xl-grid">
         <span>유닛</span><span>${card.assigned_unit_label ?? op.assigned_unit_id}</span>
         <span>트레이스</span><span class="font-mono">${op.trace_id}</span>
         <span>자율성</span><span>${op.autonomy_level ?? '정보 없음'}</span>
@@ -180,20 +180,20 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
       </div>
       ${chain
         ? html`
-            <div class="command-tag-row">
-              <span class="command-tag">${chain.kind}</span>
-              <span class="command-tag ${chainStatusTone(chain.status)}">${operationStatusLabel(chain.status)}</span>
-              ${chain.chain_id ? html`<span class="command-tag">${chain.chain_id}</span>` : null}
-              ${chain.run_id ? html`<span class="command-tag">실행 ${chain.run_id}</span>` : null}
+            <div class="command-tag rounded-full-row">
+              <span class="command-tag rounded-full">${chain.kind}</span>
+              <span class="command-tag rounded-full ${chainStatusTone(chain.status)}">${operationStatusLabel(chain.status)}</span>
+              ${chain.chain_id ? html`<span class="command-tag rounded-full">${chain.chain_id}</span>` : null}
+              ${chain.run_id ? html`<span class="command-tag rounded-full">실행 ${chain.run_id}</span>` : null}
             </div>
           `
         : null}
       ${op.checkpoint_ref
-        ? html`<div class="command-card-foot">체크포인트 ${op.checkpoint_ref}</div>`
+        ? html`<div class="command-card rounded-xl-foot">체크포인트 ${op.checkpoint_ref}</div>`
         : null}
       <div class="command-action-row">
         <button
-          class="control-btn ghost"
+          class="control-btn rounded-lg ghost"
           onClick=${() => {
             setCommandPlaneSurface('swarm')
             navigate('operations', {
@@ -208,7 +208,7 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
         ${chain
           ? html`
               <button
-                class="control-btn ghost"
+                class="control-btn rounded-lg ghost"
                 onClick=${() => {
                   focusCommandPlaneChainOperation(op.operation_id)
                   setCommandPlaneSurface('chains')
@@ -221,17 +221,17 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
           : null}
         ${op.source === 'managed' && op.status === 'active'
           ? html`
-              <button class="control-btn ghost" disabled=${actionDisabled(pauseKey)} onClick=${() => fire(() => pauseCommandPlaneOperation(op.operation_id))}>
+              <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(pauseKey)} onClick=${() => fire(() => pauseCommandPlaneOperation(op.operation_id))}>
                 ${actionDisabled(pauseKey) ? '일시정지 중…' : '일시정지'}
               </button>
-              <button class="control-btn ghost" disabled=${actionDisabled(recallKey)} onClick=${() => fire(() => recallCommandPlaneOperation(op.operation_id))}>
+              <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(recallKey)} onClick=${() => fire(() => recallCommandPlaneOperation(op.operation_id))}>
                 ${actionDisabled(recallKey) ? '회수 중…' : '회수'}
               </button>
             `
           : null}
         ${op.source === 'managed' && op.status === 'paused'
           ? html`
-              <button class="control-btn ghost" disabled=${actionDisabled(resumeKey)} onClick=${() => fire(() => resumeCommandPlaneOperation(op.operation_id))}>
+              <button class="control-btn rounded-lg ghost" disabled=${actionDisabled(resumeKey)} onClick=${() => fire(() => resumeCommandPlaneOperation(op.operation_id))}>
                 ${actionDisabled(resumeKey) ? '재개 중…' : '재개'}
               </button>
             `
@@ -244,15 +244,15 @@ function OperationCard({ card }: { card: CommandPlaneOperationCard }) {
 function DetachmentCard({ card }: { card: CommandPlaneDetachmentCard }) {
   const detachment = card.detachment
   return html`
-    <article class="command-card p-3">
-      <div class="command-card-head">
+    <article class="command-card rounded-xl p-3">
+      <div class="command-card rounded-xl-head">
         <div>
           <strong>${detachment.detachment_id}</strong>
-          <div class="command-card-sub">${card.operation?.objective ?? detachment.operation_id}</div>
+          <div class="command-card rounded-xl-sub">${card.operation?.objective ?? detachment.operation_id}</div>
         </div>
-        <span class="command-chip ${toneClass(detachment.status)}">${detachment.status ?? 'active'}</span>
+        <span class="command-chip rounded-full ${toneClass(detachment.status)}">${detachment.status ?? 'active'}</span>
       </div>
-      <div class="command-card-grid">
+      <div class="command-card rounded-xl-grid">
         <span>유닛</span><span>${card.assigned_unit_label ?? detachment.assigned_unit_id}</span>
         <span>리더</span><span>${detachment.leader_id ?? '미지정'}</span>
         <span>편성</span><span>${detachment.roster.length}</span>
@@ -263,9 +263,9 @@ function DetachmentCard({ card }: { card: CommandPlaneDetachmentCard }) {
         <span>하트비트</span><span>${deadlineLabel(detachment.heartbeat_deadline)}</span>
         <span>최근 갱신</span><span>${relativeTime(detachment.updated_at)}</span>
       </div>
-      <div class="command-tag-row">
+      <div class="command-tag rounded-full-row">
         ${detachment.heartbeat_deadline
-          ? html`<span class="command-tag ${expiryTone(detachment.heartbeat_deadline)}">
+          ? html`<span class="command-tag rounded-full ${expiryTone(detachment.heartbeat_deadline)}">
               기한 ${detachment.heartbeat_deadline}
             </span>`
           : null}
@@ -278,25 +278,25 @@ export function OperationsSurface() {
   const snapshot = commandPlaneSnapshot.value
   return html`
     <div class="command-surface-grid">
-      <section class="card min-h-[240px]">
-        <div class="card-title-row">
-          <div class="card-title">작전</div>
+      <section class="card rounded-xl min-h-[240px]">
+        <div class="card rounded-xl-title-row">
+          <div class="card rounded-xl-title">작전</div>
         </div>
         ${snapshot && snapshot.operations.operations.length > 0
-          ? html`<div class="command-card-stack">
+          ? html`<div class="command-card rounded-xl-stack">
               ${snapshot.operations.operations.map(card => html`<${OperationCard} card=${card} />`)}
             </div>`
-          : html`<div class="empty-state">관리형 또는 투영된 작전이 없습니다.</div>`}
+          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">관리형 또는 투영된 작전이 없습니다.</div>`}
       </section>
-      <section class="card min-h-[240px]">
-        <div class="card-title-row">
-          <div class="card-title">분견대</div>
+      <section class="card rounded-xl min-h-[240px]">
+        <div class="card rounded-xl-title-row">
+          <div class="card rounded-xl-title">분견대</div>
         </div>
         ${snapshot && snapshot.detachments.detachments.length > 0
-          ? html`<div class="command-card-stack">
+          ? html`<div class="command-card rounded-xl-stack">
               ${snapshot.detachments.detachments.map(card => html`<${DetachmentCard} card=${card} />`)}
             </div>`
-          : html`<div class="empty-state">투영된 분견대가 없습니다.</div>`}
+          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">투영된 분견대가 없습니다.</div>`}
       </section>
     </div>
   `
@@ -324,17 +324,17 @@ export function ChainsSurface() {
 
   return html`
     <div class="command-grid">
-      <section class="card min-h-[240px]">
-        <div class="card-title-row">
-          <div class="card-title">Chains</div>
+      <section class="card rounded-xl min-h-[240px]">
+        <div class="card rounded-xl-title-row">
+          <div class="card rounded-xl-title">Chains</div>
         </div>
-        <article class="command-guide-card ${chainStatusTone(summary?.connection.status)}">
+        <article class="command-guide-card rounded-xl ${chainStatusTone(summary?.connection.status)}">
           <div class="command-guide-head">
             <strong>native chain 연결</strong>
-            <span class="command-chip ${chainStatusTone(summary?.connection.status)}">${summary?.connection.status ?? 'disconnected'}</span>
+            <span class="command-chip rounded-full ${chainStatusTone(summary?.connection.status)}">${summary?.connection.status ?? 'disconnected'}</span>
           </div>
           <p>${summary?.connection.message ?? '체인 요약은 MASC 프록시를 통해 집계됩니다.'}</p>
-          <div class="command-card-grid">
+          <div class="command-card rounded-xl-grid">
             <span>기준 URL</span><span>${summary?.connection.base_url ?? '정보 없음'}</span>
             <span>연결된 작전</span><span>${summary?.summary?.linked_operations ?? 0}</span>
             <span>활성 체인</span><span>${summary?.summary?.active_chains ?? 0}</span>
@@ -344,11 +344,11 @@ export function ChainsSurface() {
         </article>
 
         ${commandPlaneChainError.value
-          ? html`<div class="empty-state error">${commandPlaneChainError.value}</div>`
+          ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneChainError.value}</div>`
           : null}
 
         ${commandPlaneChainLoading.value && !summary
-          ? html`<div class="empty-state">체인 오버레이 불러오는 중…</div>`
+          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">체인 오버레이 불러오는 중…</div>`
           : overlays.length > 0
             ? html`
                 <div class="command-chain-list">
@@ -361,40 +361,40 @@ export function ChainsSurface() {
                   `)}
                 </div>
               `
-            : html`<div class="empty-state">체인 기반 작전이 아직 없습니다.</div>`}
+            : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">체인 기반 작전이 아직 없습니다.</div>`}
 
         <div class="command-chain-history">
           <div class="command-guide-head">
             <strong>최근 이력</strong>
-            <span class="command-chip">${summary?.recent_history.length ?? 0}</span>
+            <span class="command-chip rounded-full">${summary?.recent_history.length ?? 0}</span>
           </div>
           ${summary && summary.recent_history.length > 0
             ? html`
-                <div class="command-card-stack">
+                <div class="command-card rounded-xl-stack">
                   ${summary.recent_history.slice(0, 6).map(item => html`<${ChainHistoryRow} item=${item} />`)}
                 </div>
               `
-            : html`<div class="empty-state">최근 체인 이력이 없습니다.</div>`}
+            : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">최근 체인 이력이 없습니다.</div>`}
         </div>
       </section>
 
-      <section class="card min-h-[240px]">
-        <div class="card-title-row">
-          <div class="card-title">체인 상세</div>
+      <section class="card rounded-xl min-h-[240px]">
+        <div class="card rounded-xl-title-row">
+          <div class="card rounded-xl-title">체인 상세</div>
         </div>
         ${selectedOverlay
           ? html`
-              <article class="command-card">
-                <div class="command-card-head">
+              <article class="command-card rounded-xl">
+                <div class="command-card rounded-xl-head">
                   <div>
                     <strong>${selectedOverlay.operation.objective}</strong>
-                    <div class="command-card-sub">${selectedOverlay.operation.operation_id}</div>
+                    <div class="command-card rounded-xl-sub">${selectedOverlay.operation.operation_id}</div>
                   </div>
-                  <span class="command-chip ${chainStatusTone(selectedOverlay.operation.chain?.status)}">
+                  <span class="command-chip rounded-full ${chainStatusTone(selectedOverlay.operation.chain?.status)}">
                     ${selectedOverlay.operation.chain?.status ?? selectedOverlay.operation.status}
                   </span>
                 </div>
-                <div class="command-card-grid">
+                <div class="command-card rounded-xl-grid">
                   <span>종류</span><span>${selectedOverlay.operation.chain?.kind ?? 'chain_dsl'}</span>
                   <span>체인 ID</span><span>${selectedOverlay.operation.chain?.chain_id ?? 'goal-driven'}</span>
                   <span>실행 ID</span><span>${selectedRunId ?? '아직 구체화되지 않음'}</span>
@@ -403,54 +403,54 @@ export function ChainsSurface() {
                   <span>최근 갱신</span><span>${relativeTime(selectedOverlay.operation.chain?.last_sync_at ?? selectedOverlay.operation.updated_at)}</span>
                 </div>
                 ${selectedOverlay.operation.chain?.goal
-                  ? html`<div class="command-card-foot">${selectedOverlay.operation.chain.goal}</div>`
+                  ? html`<div class="command-card rounded-xl-foot">${selectedOverlay.operation.chain.goal}</div>`
                   : null}
               </article>
 
               ${selectedOverlay.mermaid
                 ? html`
-                    <div class="command-chain-panel">
+                    <div class="command-chain-panel rounded-xl">
                       <div class="command-guide-head">
                         <strong>Mermaid 그래프</strong>
-                        <span class="command-chip">${selectedOverlay.operation.chain?.chain_id ?? 'graph'}</span>
+                        <span class="command-chip rounded-full">${selectedOverlay.operation.chain?.chain_id ?? 'graph'}</span>
                       </div>
                       <${MermaidGraph} source=${selectedOverlay.mermaid} />
                     </div>
                   `
-                : html`<div class="empty-state">기록된 Mermaid 그래프가 아직 없습니다.</div>`}
+                : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">기록된 Mermaid 그래프가 아직 없습니다.</div>`}
 
-              <div class="command-chain-panel">
+              <div class="command-chain-panel rounded-xl">
                 <div class="command-guide-head">
                   <strong>실행 상세</strong>
-                  <span class="command-chip ${run?.success === false ? 'bad' : 'ok'}">
+                  <span class="command-chip rounded-full ${run?.success === false ? 'bad' : 'ok'}">
                     ${run
                       ? (run.success === false ? '실패' : isPreviewRun ? '미리보기' : '기록됨')
                       : '대기 중'}
                   </span>
                 </div>
                 ${commandPlaneChainRunLoading.value
-                  ? html`<div class="empty-state">실행 상세 불러오는 중…</div>`
+                  ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">실행 상세 불러오는 중…</div>`
                   : commandPlaneChainRunError.value
-                    ? html`<div class="empty-state error">${commandPlaneChainRunError.value}</div>`
+                    ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneChainRunError.value}</div>`
                     : run && run.nodes.length > 0
                       ? html`
-                          <div class="command-card-grid">
+                          <div class="command-card rounded-xl-grid">
                             <span>체인</span><span>${run.chain_id}</span>
                             <span>실행</span><span>${run.run_id ?? '미리보기만 있음'}</span>
                             <span>지속시간</span><span>${run.duration_ms != null ? `${run.duration_ms}ms` : '정보 없음'}</span>
                             <span>노드</span><span>${run.nodes.length}</span>
                           </div>
                           ${isPreviewRun
-                            ? html`<div class="command-card-foot">run-store에 기록되기 전, 설계된 체인으로 만든 미리보기입니다.</div>`
+                            ? html`<div class="command-card rounded-xl-foot">run-store에 기록되기 전, 설계된 체인으로 만든 미리보기입니다.</div>`
                             : null}
-                          <div class="command-card-stack">
+                          <div class="command-card rounded-xl-stack">
                             ${run.nodes.map(node => html`<${ChainRunNodeRow} node=${node} />`)}
                           </div>
                         `
-                      : html`<div class="empty-state">이 작전의 run-store 상세는 아직 없습니다.</div>`}
+                      : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">이 작전의 run-store 상세는 아직 없습니다.</div>`}
               </div>
             `
-          : html`<div class="empty-state">그래프와 실행 상세를 보려면 체인 기반 작전을 고르세요.</div>`}
+          : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">그래프와 실행 상세를 보려면 체인 기반 작전을 고르세요.</div>`}
       </section>
     </div>
   `

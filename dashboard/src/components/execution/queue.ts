@@ -30,11 +30,11 @@ export function QueueCard({ item, selected }: { item: DashboardExecutionQueueIte
       <div class="flex justify-between gap-2 items-start flex-wrap">
         <div>
           <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${item.kind === 'session' ? item.target_id : item.linked_session_id ?? item.target_id}</div>
-          <div class="mission-card-title">${item.summary}</div>
+          <div class="mission-card rounded-xl-title">${item.summary}</div>
         </div>
-        <span class="command-chip ${terminal ? 'muted' : toneClass(item.severity)}">${statusLabel(item.status ?? item.severity)}</span>
+        <span class="command-chip rounded-full ${terminal ? 'muted' : toneClass(item.severity)}">${statusLabel(item.status ?? item.severity)}</span>
       </div>
-      <div class="mission-card-meta">
+      <div class="mission-card rounded-xl-meta">
         <span>${queueKindLabel(item.kind)}</span>
         ${item.linked_operation_id ? html`<span>연결 작전 · ${item.linked_operation_id}</span>` : null}
         ${item.last_seen_at ? html`<span><${TimeAgo} timestamp=${item.last_seen_at} /></span>` : null}
@@ -60,7 +60,7 @@ export function ExecutionQueueBody({ queueRows }: { queueRows: DashboardExecutio
     <div class="monitor-alert-list">
       ${hasActive
         ? activeItems.map(item => html`<${QueueCard} key=${item.id} item=${item} selected=${selectedQueueId.value === item.id} />`)
-        : html`<div class="empty-state">지금은 개입이 필요한 실행이 없습니다.</div>`}
+        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금은 개입이 필요한 실행이 없습니다.</div>`}
     </div>
     ${hasTerminal
       ? html`

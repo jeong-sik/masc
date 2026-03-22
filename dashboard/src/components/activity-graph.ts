@@ -85,30 +85,30 @@ function eventSummary(event: ActivityGraphTimelineEvent): string {
 function StatsRow({ data }: { data: ActivityGraphResponse }) {
   const s = data.stats
   return html`
-    <div class="stats-grid">
-      <div class="stat-card">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3 mb-4">
+      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
         <div class="stat-label">노드</div>
-        <div class="stat-value">${s.node_count}</div>
+        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.node_count}</div>
       </div>
-      <div class="stat-card">
+      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
         <div class="stat-label">엣지</div>
-        <div class="stat-value">${s.edge_count}</div>
+        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.edge_count}</div>
       </div>
-      <div class="stat-card">
+      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
         <div class="stat-label">에이전트</div>
-        <div class="stat-value">${s.agent_count}</div>
+        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.agent_count}</div>
       </div>
-      <div class="stat-card">
+      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
         <div class="stat-label">활성</div>
-        <div class="stat-value" class="text-[var(--ok)]">${s.active_agents}</div>
+        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums text-[var(--ok)]">${s.active_agents}</div>
       </div>
-      <div class="stat-card">
+      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
         <div class="stat-label">작업</div>
-        <div class="stat-value">${s.task_count}</div>
+        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.task_count}</div>
       </div>
-      <div class="stat-card">
+      <div class="border border-[var(--card-border)] rounded-[var(--radius-md)] bg-[var(--card)] py-[15px] px-3.5">
         <div class="stat-label">이벤트</div>
-        <div class="stat-value">${s.event_count}</div>
+        <div class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${s.event_count}</div>
       </div>
     </div>
   `
@@ -116,15 +116,15 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 
 function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
   if (events.length === 0) {
-    return html`<div class="empty-state">최근 실행 이벤트가 없습니다.</div>`
+    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">최근 실행 이벤트가 없습니다.</div>`
   }
   return html`
     <div class="monitor-list">
       ${events.map(event => {
         const actor = eventActor(event)
         return html`
-          <div class="monitor-row p-3.5 ok" key=${event.seq}>
-            <div class="monitor-row-header">
+          <div class="monitor-row rounded-xl p-3.5 ok" key=${event.seq}>
+            <div class="monitor-row rounded-xl-header">
               <div class="min-w-0">
                 <div class="monitor-name-line">
                   <span class="monitor-title">${actor || '(unknown)'}</span>
@@ -132,7 +132,7 @@ function ActivityFeed({ events }: { events: ActivityGraphTimelineEvent[] }) {
                 </div>
                 <div class="monitor-note">${eventSummary(event)}</div>
               </div>
-              <span class="monitor-pill ok">${eventKindLabel(event.kind)}</span>
+              <span class="monitor-pill ok inline-flex items-center rounded-full px-2 py-[3px] text-[length:var(--fs-xs)] uppercase tracking-[0.06em]">${eventKindLabel(event.kind)}</span>
             </div>
             <div class="monitor-meta">
               <span>${event.room_id}</span>
@@ -153,7 +153,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
     .slice(0, 15)
 
   if (agentNodes.length === 0) {
-    return html`<div class="empty-state">활동 집계에 포함된 에이전트가 없습니다.</div>`
+    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">활동 집계에 포함된 에이전트가 없습니다.</div>`
   }
 
   const maxWeight = agentNodes[0]?.weight ?? 1
@@ -163,16 +163,16 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
       ${agentNodes.map((node, i) => {
         const pct = maxWeight > 0 ? (node.weight / maxWeight) * 100 : 0
         return html`
-          <div class="activity-graph-leaderboard-row" key=${node.id}>
-            <span class="activity-graph-leaderboard-rank">${i + 1}</span>
+          <div class="flex items-center gap-[10px] py-2 px-3 rounded-[10px] bg-[rgba(15,23,42,0.5)] border border-solid border-[var(--slate-gray-8)]" key=${node.id}>
+            <span class="w-[22px] text-center text-sm font-bold text-text-slate">${i + 1}</span>
             <div class="flex-1 flex flex-col gap-1 min-w-0">
               <span class="text-base font-semibold text-[var(--text-near-white)] whitespace-nowrap overflow-hidden text-ellipsis">${node.label}</span>
               <div class="activity-graph-leaderboard-bar-wrap">
                 <div class="activity-graph-leaderboard-bar" style="width:${pct}%"></div>
               </div>
             </div>
-            <span class="activity-graph-leaderboard-weight">${node.weight}</span>
-            <span class="activity-graph-leaderboard-status ${node.status === 'offline' || node.status === 'retired' ? 'inactive' : 'active'}">${node.status}</span>
+            <span class="text-sm font-semibold text-text-slate-light min-w-[32px] text-right">${node.weight}</span>
+            <span class="activity-graph-leaderboard-status rounded-md ${node.status === 'offline' || node.status === 'retired' ? 'inactive' : 'active'}">${node.status}</span>
           </div>
         `
       })}
@@ -188,13 +188,13 @@ function KindBreakdown({ nodes }: { nodes: ActivityGraphNode[] }) {
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1])
 
   if (sorted.length === 0) {
-    return html`<div class="empty-state">분석할 노드 종류가 없습니다.</div>`
+    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">분석할 노드 종류가 없습니다.</div>`
   }
 
   return html`
     <div class="flex flex-wrap gap-2">
       ${sorted.map(([kind, count]) => html`
-        <div class="activity-graph-kind-chip" key=${kind}>
+        <div class="activity-graph-kind-chip rounded-lg" key=${kind}>
           <span class="text-sm text-text-slate-light">${kindLabel(kind)}</span>
           <span class="text-base font-bold text-[var(--text-near-white)]">${count}</span>
         </div>
@@ -211,7 +211,7 @@ function EmptyActivityGraph() {
           <h2 class="monitor-headline">활동 그래프가 비어 있습니다</h2>
           <p class="monitor-subheadline">이 뷰는 런타임 실행 이벤트를 읽어 그래프를 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
         </div>
-        <div class="empty-state">
+        <div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">
           아직 claim, broadcast, team-session, board 같은 실행 이벤트가 activity feed에 기록되지 않았습니다.
         </div>
       <//>
@@ -229,22 +229,22 @@ export function ActivityGraphSurface() {
   const loading = graphLoading.value
 
   if (loading && !data) {
-    return html`<div class="loading-indicator">활동 그래프 불러오는 중...</div>`
+    return html`<div class="text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]">활동 그래프 불러오는 중...</div>`
   }
 
   if (error && !data) {
     return html`
       <div class="agents-monitor">
         <${Card} title="오류" class="section mb-3.5" testId="activity_graph.error">
-          <div class="empty-state">활동 그래프를 불러올 수 없습니다: ${error}</div>
-          <button class="control-btn ghost" onClick=${loadGraph}>다시 시도</button>
+          <div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">활동 그래프를 불러올 수 없습니다: ${error}</div>
+          <button class="control-btn rounded-lg ghost" onClick=${loadGraph}>다시 시도</button>
         <//>
       </div>
     `
   }
 
   if (!data) {
-    return html`<div class="empty-state">활동 데이터가 없습니다.</div>`
+    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">활동 데이터가 없습니다.</div>`
   }
 
   if ((data.stats.event_count ?? 0) === 0) {
@@ -268,7 +268,7 @@ export function ActivityGraphSurface() {
         </div>
       <//>
 
-      <div class="agents-workbench">
+      <div class="grid grid-cols-[minmax(0,1.08fr)_minmax(0,0.96fr)_minmax(0,0.88fr)] gap-4">
         <${Card} title="활동 주체 순위" class="section mb-3.5" testId="activity_graph.leaderboard">
           <div class="mb-3.5">
             <h2 class="monitor-headline">활동 주체 순위</h2>

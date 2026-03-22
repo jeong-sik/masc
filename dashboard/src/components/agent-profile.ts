@@ -210,7 +210,7 @@ function CharacterPlate({ name }: { name: string }) {
 
   return html`
     <div class="ff-plate">
-      <div class="ff-plate__portrait">
+      <div class="flex flex-col items-center gap-1.5">
         <${AgentAvatar}
           name=${name}
           status=${headerStatus}
@@ -223,34 +223,34 @@ function CharacterPlate({ name }: { name: string }) {
         ${isKeeper ? html`<div class="text-[9px] font-bold tracking-[1.5px] text-[color:var(--ff-gold)] uppercase text-center">KEEPER</div>` : null}
       </div>
 
-      <div class="ff-plate__info">
-        <div class="ff-plate__name-row">
+      <div class="flex flex-col gap-1.5 min-w-0">
+        <div class="flex items-baseline gap-2 flex-wrap">
           <h2 class="ff-plate__name">
             ${agentEmoji ? html`<span class="text-[1.4em]">${agentEmoji}</span>` : ''}
             ${displayName}
           </h2>
           ${koreanName ? html`<span class="text-[length:var(--fs-base)] text-[color:var(--text-muted)]">(${koreanName})</span>` : ''}
-          ${generation != null ? html`<span class="ff-plate__level">Lv.${generation}</span>` : null}
+          ${generation != null ? html`<span class="ff-plate__level rounded">Lv.${generation}</span>` : null}
         </div>
 
-        <div class="ff-plate__badges">
+        <div class="flex items-center gap-1.5 flex-wrap">
           <${StatusBadge} status=${headerStatus} />
-          ${model ? html`<span class="ff-plate__model">${model}</span>` : null}
-          ${autonomy ? html`<span class="ff-plate__autonomy">${autonomy}</span>` : null}
-          ${signalTruth ? html`<span class="ff-plate__signal ff-plate__signal--${signalTruth}">${signalTruth}</span>` : null}
+          ${model ? html`<span class="ff-plate__model rounded">${model}</span>` : null}
+          ${autonomy ? html`<span class="ff-plate__autonomy rounded">${autonomy}</span>` : null}
+          ${signalTruth ? html`<span class="ff-plate__signal rounded ff-plate__signal--${signalTruth}">${signalTruth}</span>` : null}
         </div>
 
         ${ctxPct != null ? html`
-          <div class="ff-plate__bar-row">
+          <div class="flex items-center gap-2 mt-0.5">
             <span class="ff-plate__bar-label">CTX</span>
-            <div class="ctx-bar" style="flex:1">
-              <div class="ctx-fill ${ctxBarClass(ctxRatio)}" style=${{ width: `${ctxPct}%` }}></div>
+            <div class="h-1.5 mt-1.5 rounded-full overflow-hidden bg-[var(--white-10)]" style="flex:1">
+              <div class="ctx-fill rounded-full ${ctxBarClass(ctxRatio)}" style=${{ width: `${ctxPct}%` }}></div>
             </div>
             <span class="ff-plate__bar-value">${ctxPct}%</span>
           </div>
         ` : null}
 
-        <div class="ff-plate__status-line">
+        <div class="flex gap-2 items-center flex-wrap">
           ${currentWork
             ? html`<span class="text-[length:var(--fs-base)] text-[#c8daf7]">${currentWork}</span>`
             : html`<span class="text-[length:var(--fs-base)] text-[#c8daf7] ff-plate__work--idle">대기 중</span>`
@@ -260,14 +260,14 @@ function CharacterPlate({ name }: { name: string }) {
         </div>
 
         ${lastSeenAt || lastActivity != null ? html`
-          <div class="ff-plate__meta-line">
+          <div class="flex gap-2.5 flex-wrap text-[length:var(--fs-sm)] text-[var(--text-muted)]">
             ${lastSeenAt ? html`<span>마지막 확인: <${TimeAgo} timestamp=${lastSeenAt} /></span>` : null}
             ${lastActivity != null ? html`<span>${formatDuration(lastActivity)} 전 활동</span>` : null}
           </div>
         ` : null}
 
         ${keeperIdent || continuitySummary || brief?.related_session_id ? html`
-          <div class="ff-plate__meta-line">
+          <div class="flex gap-2.5 flex-wrap text-[length:var(--fs-sm)] text-[var(--text-muted)]">
             ${keeperIdent ? html`<span>${keeperIdent}</span>` : null}
             ${brief?.related_session_id ? html`<span>세션 ${brief.related_session_id}</span>` : null}
             ${continuitySummary ? html`<span>${continuitySummary}</span>` : null}
@@ -277,38 +277,38 @@ function CharacterPlate({ name }: { name: string }) {
 
       ${isKeeper ? html`
         <div class="ff-plate__stats ff-plate__stats--keeper">
-          <div class="ff-stat">
+          <div class="ff-stat rounded-md">
             <span class="ff-stat__value">${ctxPct != null ? `${ctxPct}%` : '—'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">CTX</span>
           </div>
-          <div class="ff-stat">
+          <div class="ff-stat rounded-md">
             <span class="ff-stat__value">${generation ?? 0}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">세대</span>
           </div>
-          <div class="ff-stat">
+          <div class="ff-stat rounded-md">
             <span class="ff-stat__value">${keeper.turn_count ?? 0}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">턴</span>
           </div>
-          <div class="ff-stat">
+          <div class="ff-stat rounded-md">
             <span class="ff-stat__value">${keeper.autonomous_action_count ?? 0}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">행동</span>
           </div>
         </div>
       ` : summary ? html`
         <div class="ff-plate__stats">
-          <div class="ff-stat">
+          <div class="ff-stat rounded-md">
             <span class="ff-stat__value">${summary.tasks_completed}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">완료</span>
           </div>
-          <div class="ff-stat">
+          <div class="ff-stat rounded-md">
             <span class="ff-stat__value">${summary.tasks_claimed}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">수임</span>
           </div>
-          <div class="ff-stat">
+          <div class="ff-stat rounded-md">
             <span class="ff-stat__value">${summary.messages_sent}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">메시지</span>
           </div>
-          <div class="ff-stat">
+          <div class="ff-stat rounded-md">
             <span class="ff-stat__value">${summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : '0m'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">활동</span>
           </div>
@@ -333,14 +333,14 @@ export function AgentProfile({ name }: { name: string }) {
 
   return html`
     <div class="ff-profile ${isKeeper ? 'ff-profile--keeper' : ''}">
-      <div class="ff-profile__toolbar">
-        <button class="control-btn ghost" onClick=${() => navigate('status', { section: 'agents' })}>← 목록</button>
-        <button class="control-btn ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
+      <div class="flex gap-2 mb-3">
+        <button class="control-btn rounded-lg ghost" onClick=${() => navigate('status', { section: 'agents' })}>← 목록</button>
+        <button class="control-btn rounded-lg ghost" onClick=${() => { void loadProfile(name) }} disabled=${loading.value}>
           ${loading.value ? '...' : '새로고침'}
         </button>
       </div>
 
-      ${profileError.value ? html`<div class="council-error">${profileError.value}</div>` : null}
+      ${profileError.value ? html`<div class="council-error rounded-lg">${profileError.value}</div>` : null}
 
       <${CharacterPlate} name=${name} />
 
@@ -352,15 +352,15 @@ export function AgentProfile({ name }: { name: string }) {
         </div>
       ` : null}
 
-      <div class="ff-profile__grid">
+      <div class="grid grid-cols-2 gap-3.5 mb-3.5">
         ${!isKeeper ? html`
-        <${Card} title="태스크 (${owned.length})" class="ff-card">
+        <${Card} title="태스크 (${owned.length})" class="ff-card rounded-xl">
           ${owned.length === 0
-            ? html`<div class="empty-state">할당된 태스크 없음</div>`
-            : html`<div class="agent-detail-task-list">${owned.map(t => html`
-                <div class="agent-detail-task" key=${t.id}>
-                  <span class="pill">${t.id}</span>
-                  <span class="agent-detail-task-title">${t.title}</span>
+            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">할당된 태스크 없음</div>`
+            : html`<div class="flex flex-col gap-2">${owned.map(t => html`
+                <div class="agent-detail-task rounded-lg" key=${t.id}>
+                  <span class="pill rounded-full">${t.id}</span>
+                  <span class="agent-detail-task rounded-lg-title">${t.title}</span>
                   <${StatusBadge} status=${t.status} />
                 </div>
               `)}</div>`}
@@ -375,11 +375,11 @@ export function AgentProfile({ name }: { name: string }) {
           const hasData = collabs.length > 0 || interests.length > 0
           if (!hasData) return null
           return html`
-            <${Card} title="관계 (${collabs.length})" class="ff-card">
+            <${Card} title="관계 (${collabs.length})" class="ff-card rounded-xl">
               ${collabs.length > 0 ? html`
-                <div class="ff-relations-list">
+                <div class="flex flex-col gap-1">
                   ${collabs.map(c => html`
-                    <div class="ff-relation-row" key=${c.name}
+                    <div class="ff-relation-row rounded" key=${c.name}
                       onClick=${() => navigate('status', { section: 'agents', agent: c.name })}
                       style="cursor:pointer;"
                     >
@@ -393,7 +393,7 @@ export function AgentProfile({ name }: { name: string }) {
               ${interests.length > 0 ? html`
                 <div class="ff-interests" class="mt-2">
                   <span class="ff-interests-label">관심사</span>
-                  <div class="ff-interests-tags">
+                  <div class="flex flex-wrap gap-1 mt-1.5">
                     ${interests.slice(0, 12).map(t => html`<span class="ff-interest-tag" key=${t}>${t}</span>`)}
                     ${interests.length > 12 ? html`<span class="ff-interest-tag">+${interests.length - 12}</span>` : null}
                   </div>
@@ -403,14 +403,14 @@ export function AgentProfile({ name }: { name: string }) {
           `
         })()}
 
-        <${Card} title="타임라인" class="ff-card">
+        <${Card} title="타임라인" class="ff-card rounded-xl">
           ${!timeline || (timeline.events ?? []).length === 0
-            ? html`<div class="empty-state">이벤트 없음</div>`
-            : html`<div class="agent-timeline-list">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
+            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">이벤트 없음</div>`
+            : html`<div class="flex flex-col gap-0.5 max-h-[300px] overflow-y-auto">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
                 const detail = evt.detail as Record<string, string | undefined>
                 const title = detail.title ?? detail.content ?? ''
                 return html`
-                  <div class="agent-timeline-event" key=${idx}>
+                  <div class="agent-timeline-event rounded" key=${idx}>
                     <span class="ff-event-type">${timelineEventLabel(evt.type)}</span>
                     ${title ? html`<span class="ff-event-detail">${compactCopy(title, 80)}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
@@ -419,22 +419,22 @@ export function AgentProfile({ name }: { name: string }) {
               })}</div>`}
         <//>
 
-        <${Card} title="실시간" class="ff-card">
+        <${Card} title="실시간" class="ff-card rounded-xl">
           <${AgentLiveTimeline} name=${name} />
         <//>
 
-        <${Card} title="Room 활동" class="ff-card">
+        <${Card} title="Room 활동" class="ff-card rounded-xl">
           ${lines.length === 0
-            ? html`<div class="empty-state">관련 활동 없음</div>`
+            ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">관련 활동 없음</div>`
             : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) =>
-                html`<div key=${idx} class="agent-activity-line">${line}</div>`)}</div>`}
+                html`<div key=${idx} class="agent-activity-line rounded-lg">${line}</div>`)}</div>`}
         <//>
 
         ${taskHistories.value.length > 0 ? html`
-          <${Card} title="태스크 이력" class="ff-card col-span-full">
+          <${Card} title="태스크 이력" class="ff-card rounded-xl col-span-full">
             <div class="agent-history-list">${taskHistories.value.map((row: TaskHistoryRow) => html`
               <div class="agent-history-row" key=${row.taskId}>
-                <div class="mb-2"><span class="pill">${row.taskId}</span></div>
+                <div class="mb-2"><span class="pill rounded-full">${row.taskId}</span></div>
                 <pre class="agent-history-pre">${row.text || 'No history yet'}</pre>
               </div>
             `)}</div>
@@ -445,10 +445,10 @@ export function AgentProfile({ name }: { name: string }) {
       ${isKeeper ? html`
         <${KeeperChatPanel} name=${name} />
       ` : html`
-        <div class="ff-profile__mention">
-          <span class="ff-profile__mention-label">@${name}</span>
+        <div class="ff-profile__mention rounded-lg">
+          <span class="ff-profile__mention rounded-lg-label">@${name}</span>
           <input
-            class="control-input"
+            class="control-input rounded-lg"
             type="text"
             placeholder="메시지 입력..."
             value=${mentionText.value}
@@ -457,7 +457,7 @@ export function AgentProfile({ name }: { name: string }) {
             disabled=${sendingMention.value}
           />
           <button
-            class="control-btn"
+            class="control-btn rounded-lg"
             onClick=${() => { void submitMention(name) }}
             disabled=${sendingMention.value || mentionText.value.trim() === ''}
           >

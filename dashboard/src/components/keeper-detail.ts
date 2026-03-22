@@ -77,10 +77,10 @@ async function runSocialSweep(): Promise<void> {
 
 function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   return html`
-    <div class="keeper-comms-section">
-      <h3 class="keeper-comms-heading">Direct Comms</h3>
+    <div class="mt-5 border-t border-[var(--white-10)] pt-5">
+      <h3 class="m-0 mb-3.5 text-cyan text-[var(--fs-lg)]">Direct Comms</h3>
 
-      <div class="keeper-comms-layout">
+      <div class="flex flex-col gap-3.5">
         ${'' /* Chat takes full width — the primary interaction surface */}
         <div class="w-full">
           <${KeeperConversationPanel}
@@ -91,8 +91,8 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
 
         ${'' /* Diagnostics and actions in a collapsible panel below */}
         <details class="keeper-comms-diagnostics">
-          <summary class="keeper-comms-diagnostics-toggle">런타임 진단 및 액션</summary>
-          <div class="keeper-comms-diagnostics-body">
+          <summary class="keeper-comms-diagnostics-toggle cursor-pointer py-2.5 px-3.5 text-[var(--fs-sm)] text-text-muted tracking-[0.03em] list-none select-none">런타임 진단 및 액션</summary>
+          <div class="flex flex-col gap-3 px-3.5 pb-3.5">
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}
               actor=${currentOperatorActor()}
@@ -131,7 +131,7 @@ export function KeeperDetailOverlay() {
               ${keeper.koreanName ? html`<div class="text-[13px] text-[var(--text-dim)]">${keeper.koreanName}</div>` : null}
             </div>
             <${StatusBadge} status=${keeper.status} />
-            ${keeper.model ? html`<span class="pill">${keeper.model}</span>` : null}
+            ${keeper.model ? html`<span class="pill rounded-full">${keeper.model}</span>` : null}
           </div>
           <button
             onClick=${() => closeKeeperDetail()}
@@ -230,12 +230,12 @@ export function KeeperDetailOverlay() {
           <//>
 
           <${Card} title="메모리 및 컨텍스트">
-            <div class="keeper-signal-list">
-              <div class="keeper-signal-row">
+            <div class="flex flex-col gap-1.5">
+              <div class="keeper-signal-row rounded-lg">
                 <span>Context source</span>
                 <strong>${keeper.context_source ?? keeper.context?.source ?? '-'}</strong>
               </div>
-              <div class="keeper-signal-row">
+              <div class="keeper-signal-row rounded-lg">
                 <span>Context tokens</span>
                 <strong>
                   ${keeper.context_tokens ?? keeper.context?.context_tokens ?? '-'}
@@ -245,11 +245,11 @@ export function KeeperDetailOverlay() {
               </div>
               ${keeper.memory_recent_note
                 ? html`
-                  <div class="keeper-memory-note">
+                  <div class="keeper-memory-note rounded-lg">
                     ${keeper.memory_recent_note}
                   </div>
                 `
-                : html`<div class="empty-state" class="text-xs">No recent memory note</div>`}
+                : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" class="text-xs">No recent memory note</div>`}
             </div>
           <//>
         </div>

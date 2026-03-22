@@ -68,7 +68,7 @@ export function AgentsUnified() {
   const agentOnlyCount = totalCount - keeperCount
 
   return html`
-    <div class="agents-unified">
+    <div class="grid gap-[var(--space-md,16px)]">
       <div class="flex gap-1.5">
         ${CHIPS.map(c => html`
           <button
@@ -80,9 +80,9 @@ export function AgentsUnified() {
             }}
           >
             ${c.label}
-            ${c.id === 'all' ? html`<span class="agents-chip-count">${totalCount}</span>` : null}
-            ${c.id === 'agents' ? html`<span class="agents-chip-count">${agentOnlyCount}</span>` : null}
-            ${c.id === 'keepers' ? html`<span class="agents-chip-count">${keeperCount}</span>` : null}
+            ${c.id === 'all' ? html`<span class="agents-chip-count rounded-lg">${totalCount}</span>` : null}
+            ${c.id === 'agents' ? html`<span class="agents-chip-count rounded-lg">${agentOnlyCount}</span>` : null}
+            ${c.id === 'keepers' ? html`<span class="agents-chip-count rounded-lg">${keeperCount}</span>` : null}
           </button>
         `)}
       </div>

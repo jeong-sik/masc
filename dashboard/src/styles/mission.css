@@ -89,7 +89,6 @@
 }
 .mission-action-preview {
   padding: 10px 12px;
-  border-radius: 12px;
   background: var(--white-5);
   border: 1px solid var(--white-8);
   color: var(--text-strong);
@@ -100,7 +99,6 @@
   display: grid;
   gap: 6px;
   padding: 12px 14px;
-  border-radius: 12px;
   border: 1px solid var(--white-8);
   background: var(--white-4);
 }
@@ -172,7 +170,6 @@
 
 .mission-briefing-section {
   padding: 12px;
-  border-radius: 12px;
   border: 1px solid var(--white-8);
   background: var(--white-4);
   display: grid;
@@ -201,7 +198,6 @@
 
 .mission-briefing-gap {
   padding: 12px;
-  border-radius: 12px;
   border: 1px solid var(--white-8);
   background: var(--white-3);
   display: grid;
@@ -217,7 +213,6 @@
 .mission-selection-bar {
   margin-top: 14px;
   padding: 10px 12px;
-  border-radius: 12px;
   border: 1px solid var(--white-8);
   background: var(--white-4);
   display: flex;
@@ -287,7 +282,6 @@
 .mission-link-row {
   width: 100%;
   padding: 10px 12px;
-  border-radius: 12px;
   border: 1px solid var(--white-6);
   background: var(--white-3);
   display: grid;
@@ -310,7 +304,6 @@
 
 .mission-pill {
   padding: 6px 10px;
-  border-radius: 999px;
   border: 1px solid var(--white-8);
   background: var(--white-4);
   color: rgba(255,255,255,0.76);
@@ -324,7 +317,6 @@
 
 .mission-evidence-list span {
   padding: 10px 12px;
-  border-radius: 12px;
   border: 1px solid var(--white-6);
   background: var(--white-3);
   color: var(--white-72);
@@ -355,7 +347,6 @@
 
 .mission-fact-tile {
   padding: 12px;
-  border-radius: 12px;
   background: var(--white-4);
   border: 1px solid var(--white-6);
   display: grid;
@@ -373,7 +364,6 @@
 .mission-member-preview {
   width: 100%;
   padding: 12px;
-  border-radius: 12px;
   border: 1px solid var(--white-6);
   background: var(--white-3);
   display: grid;
@@ -428,7 +418,6 @@
 .mission-io-item,
 .mission-timeline-row {
   padding: 12px;
-  border-radius: 12px;
   background: var(--white-3);
   border: 1px solid var(--white-6);
   display: grid;

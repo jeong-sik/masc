@@ -19,22 +19,22 @@ export function Operations() {
   const section = currentSection()
 
   return html`
-    <div class="tab-unified">
-      <div class="tab-pill-bar">
+    <div class="tab-unified grid gap-[var(--space-md,16px)]">
+      <div class="tab-pill rounded-full-bar flex flex-wrap gap-1.5">
         <button
-          class="tab-pill ${section === 'intervene' ? 'tab-pill--active' : ''}"
+          class="tab-pill rounded-full ${section === 'intervene' ? 'tab-pill--active' : ''}"
           onClick=${() => navigate('operations', { section: 'intervene' })}
         >
           개입
         </button>
         <button
-          class="tab-pill ${section === 'command' ? 'tab-pill--active' : ''}"
+          class="tab-pill rounded-full ${section === 'command' ? 'tab-pill--active' : ''}"
           onClick=${() => navigate('operations', { section: 'command' })}
         >
           지휘
         </button>
         <button
-          class="tab-pill ${section === 'tools' ? 'tab-pill--active' : ''}"
+          class="tab-pill rounded-full ${section === 'tools' ? 'tab-pill--active' : ''}"
           onClick=${() => navigate('operations', { section: 'tools' })}
         >
           도구

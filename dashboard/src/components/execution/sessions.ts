@@ -30,20 +30,20 @@ export function SessionCard({ brief, selected }: { brief: DashboardExecutionSess
       <div class="flex justify-between gap-2 items-start flex-wrap">
         <div>
           <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
-          <div class="mission-card-title">${brief.goal}</div>
+          <div class="mission-card rounded-xl-title">${brief.goal}</div>
         </div>
-        <span class="command-chip ${terminal ? 'muted' : toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
+        <span class="command-chip rounded-full ${terminal ? 'muted' : toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
       </div>
-      <div class="mission-card-meta">
+      <div class="mission-card rounded-xl-meta">
         <span>건강도 · ${statusLabel(brief.health ?? 'ok')}</span>
         <span>live ${liveCount} · seen ${seenCount} · planned ${plannedCount}</span>
         ${brief.linked_operation_id ? html`<span>연결 작전 · ${brief.linked_operation_id}</span>` : null}
         ${brief.last_activity_at ? html`<span><${TimeAgo} timestamp=${brief.last_activity_at} /></span>` : null}
       </div>
       ${brief.runtime_blocker
-        ? html`<div class="mission-card-detail">${brief.runtime_blocker}</div>`
+        ? html`<div class="mission-card rounded-xl-detail">${brief.runtime_blocker}</div>`
         : brief.last_activity_summary
-          ? html`<div class="mission-card-detail">${brief.last_activity_summary}</div>`
+          ? html`<div class="mission-card rounded-xl-detail">${brief.last_activity_summary}</div>`
           : null}
       <div class="monitor-footnote">
         ${brief.worker_gap_summary ?? `관측 기준 · ${brief.counts_basis ?? 'recent_turns'}`}
@@ -69,7 +69,7 @@ export function SessionBriefsBody({ sessionRows }: { sessionRows: DashboardExecu
     <div class="monitor-list">
       ${hasActive
         ? activeSessions.map(row => html`<${SessionCard} key=${row.session_id} brief=${row} selected=${selectedSessionId.value === row.session_id} />`)
-        : html`<div class="empty-state">${hasTerminal ? '진행 중인 세션이 없습니다.' : '선택된 실행과 연결된 세션이 없습니다.'}</div>`}
+        : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${hasTerminal ? '진행 중인 세션이 없습니다.' : '선택된 실행과 연결된 세션이 없습니다.'}</div>`}
     </div>
     ${hasTerminal
       ? html`

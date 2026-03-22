@@ -6,7 +6,6 @@
   background: var(--white-4);
   border-radius: 10px;
   border: 1px solid var(--white-8);
-  transition: border-color 0.2s;
   color: inherit;
   font: inherit;
   text-align: left;
@@ -22,14 +21,6 @@
 .agent-card .agent-emoji { font-size: 24px; }
 .agent-card .agent-name { font-size: var(--fs-lg); font-weight: 600; }
 /* ── Agent Journal Stream (Phase 2) ───────────────────────── */
-.agent-journal-stream {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 280px;
-  overflow-y: auto;
-}
-
 .agent-journal-entry,
 .agent-timeline-event {
   display: flex;
@@ -37,7 +28,6 @@
   gap: 6px;
   padding: 4px 8px;
   font-size: var(--fs-sm);
-  border-radius: 4px;
   transition: background 0.1s;
 }
 
@@ -79,26 +69,6 @@
 }
 
 /* ── Agent Worker Brief ───────────────────────────────────── */
-.agent-worker-brief {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.agent-worker-brief__row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: var(--fs-sm);
-}
-
-.agent-worker-brief__label {
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-  min-width: 60px;
-  flex-shrink: 0;
-}
-
 .agent-worker-brief__preview {
   color: var(--text-body);
   font-style: italic;
@@ -109,21 +79,6 @@
 }
 
 /* ── Agent Timeline Section (Phase 3) ─────────────────────── */
-.agent-timeline-summary {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
-
-.agent-timeline-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
 .agent-timeline-type {
   font-size: var(--fs-xs);
   font-weight: 500;
@@ -133,11 +88,6 @@
 }
 
 /* ── Agents Unified Tab (chip toggle) ────────── */
-.agents-unified {
-  display: grid;
-  gap: var(--space-md, 16px);
-}
-
 .agents-chip {
   padding: 4px 14px;
   border-radius: 16px;
@@ -164,7 +114,6 @@
   text-align: center;
   padding: 1px 5px;
   margin-left: 4px;
-  border-radius: 8px;
   background: var(--white-12);
   color: inherit;
 }

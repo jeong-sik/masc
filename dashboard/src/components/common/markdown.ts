@@ -57,7 +57,7 @@ function parseBlocks(src: string) {
       }
       const inner = thinkLines.join('\n').trim()
       nodes.push(html`
-        <details class="think-block">
+        <details class="think-block rounded-lg">
           <summary>Thinking...</summary>
           <div>${inlineToVdom(inner)}</div>
         </details>

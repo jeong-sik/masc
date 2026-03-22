@@ -79,9 +79,9 @@ export function WarRoomBodyGrid({
   return html`
     <div class="command-warroom-grid ${wallboard ? 'wallboard' : ''}">
       <div class="command-warroom-column">
-        <section class="card min-h-[240px]">
-          <div class="card-title-row">
-            <div class="card-title">실행 흐름</div>
+        <section class="card rounded-xl min-h-[240px]">
+          <div class="card rounded-xl-title-row">
+            <div class="card rounded-xl-title">실행 흐름</div>
           </div>
           ${liveLanes.length > 0
             ? html`
@@ -90,103 +90,103 @@ export function WarRoomBodyGrid({
               `
             : selectedSession
               ? html`
-                  <article class="command-guide-card">
+                  <article class="command-guide-card rounded-xl">
                     <div class="command-guide-head">
                       <strong>${selectedSession.session_id}</strong>
-                      <span class="command-chip ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
+                      <span class="command-chip rounded-full ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
                     </div>
                     <p>스웜 실시간 증거는 아직 약합니다. 이 카드는 세션 요약과 워커 기록을 기준으로 유지합니다.</p>
-                    <div class="command-card-grid">
+                    <div class="command-card rounded-xl-grid">
                       <span>진행률</span><span>${selectedSession.progress_pct != null ? `${selectedSession.progress_pct}%` : '정보 없음'}</span>
                       <span>경과</span><span>${formatElapsed(selectedSession.elapsed_sec)}</span>
                       <span>남은 시간</span><span>${formatElapsed(selectedSession.remaining_sec)}</span>
                     </div>
                   </article>
                 `
-              : html`<div class="empty-state">보이는 레인이 아직 없습니다.</div>`}
+              : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">보이는 레인이 아직 없습니다.</div>`}
         </section>
 
-        <section class="card min-h-[240px]">
-          <div class="card-title-row">
-            <div class="card-title">오케스트레이션</div>
+        <section class="card rounded-xl min-h-[240px]">
+          <div class="card rounded-xl-title-row">
+            <div class="card rounded-xl-title">오케스트레이션</div>
           </div>
           <${WarRoomOrchestrationRail} chainOverlay=${chainOverlay} linkedAutoresearch=${linkedAutoresearch} />
         </section>
 
-        <section class="card min-h-[240px]">
-          <div class="card-title-row">
-            <div class="card-title">워커 현황</div>
+        <section class="card rounded-xl min-h-[240px]">
+          <div class="card rounded-xl-title-row">
+            <div class="card rounded-xl-title">워커 현황</div>
           </div>
           ${workers.length > 0
-            ? html`<div class="command-card-stack">
+            ? html`<div class="command-card rounded-xl-stack">
                 ${workers.map(worker => html`<${WarRoomWorkerCard} worker=${worker} />`)}
               </div>`
-            : html`<div class="empty-state">활성 워커 카드가 아직 없습니다.</div>`}
+            : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">활성 워커 카드가 아직 없습니다.</div>`}
         </section>
       </div>
 
       <div class="command-warroom-column">
-        <section class="card min-h-[240px]">
-          <div class="card-title-row">
-            <div class="card-title">상황 피드</div>
+        <section class="card rounded-xl min-h-[240px]">
+          <div class="card rounded-xl-title-row">
+            <div class="card rounded-xl-title">상황 피드</div>
           </div>
           ${feedItems.length > 0
             ? html`<div class="command-trace-stack">
                 ${feedItems.map(item => html`<${WarRoomFeedCard} item=${item} />`)}
               </div>`
-            : html`<div class="empty-state">메시지, chain, autoresearch, attention feed가 아직 없습니다.</div>`}
+            : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">메시지, chain, autoresearch, attention feed가 아직 없습니다.</div>`}
         </section>
 
-        <section class="card min-h-[240px]">
-          <div class="card-title-row">
-            <div class="card-title">트레이스 흐름</div>
+        <section class="card rounded-xl min-h-[240px]">
+          <div class="card rounded-xl-title-row">
+            <div class="card rounded-xl-title">트레이스 흐름</div>
           </div>
           ${swarm && swarm.recent_trace_events.length > 0
             ? html`<div class="command-trace-stack">
                 ${swarm.recent_trace_events.map(event => html`<${TraceRow} event=${event} />`)}
               </div>`
-            : html`<div class="empty-state">실행 범위 트레이스 이벤트가 아직 없습니다.</div>`}
+            : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">실행 범위 트레이스 이벤트가 아직 없습니다.</div>`}
         </section>
       </div>
 
       <div class="command-warroom-column">
-        <section class="card min-h-[240px]">
-          <div class="card-title-row">
-            <div class="card-title">Agents</div>
+        <section class="card rounded-xl min-h-[240px]">
+          <div class="card rounded-xl-title-row">
+            <div class="card rounded-xl-title">Agents</div>
           </div>
           ${agentViews.length > 0
             ? html`<div class="warroom-presence-grid">
                 ${agentViews.map(item => html`<${WarRoomPresenceCard} item=${item} />`)}
               </div>`
-            : html`<div class="empty-state">가시적인 active agent가 아직 없습니다.</div>`}
+            : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">가시적인 active agent가 아직 없습니다.</div>`}
         </section>
 
-        <section class="card min-h-[240px]">
-          <div class="card-title-row">
-            <div class="card-title">Keepers</div>
+        <section class="card rounded-xl min-h-[240px]">
+          <div class="card rounded-xl-title-row">
+            <div class="card rounded-xl-title">Keepers</div>
           </div>
           ${keeperViews.length > 0
             ? html`<div class="warroom-presence-grid">
                 ${keeperViews.map(item => html`<${WarRoomPresenceCard} item=${item} />`)}
               </div>`
-            : html`<div class="empty-state">가시적인 keeper/runtime 카드가 아직 없습니다.</div>`}
+            : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">가시적인 keeper/runtime 카드가 아직 없습니다.</div>`}
         </section>
 
-        <section class="card min-h-[240px]">
-          <div class="card-title-row">
-            <div class="card-title">압력</div>
+        <section class="card rounded-xl min-h-[240px]">
+          <div class="card rounded-xl-title-row">
+            <div class="card rounded-xl-title">압력</div>
           </div>
-          <div class="command-card-stack">
+          <div class="command-card rounded-xl-stack">
             ${swarmHasEvidence && swarm ? html`<${SwarmRunResolutionCard} swarm=${swarm} />` : null}
             ${blockers.length > 0
               ? blockers.map(blocker => html`<${SwarmBlockerCard} blocker=${blocker} />`)
-              : html`<div class="command-guide-card ok"><p>지금 보이는 blocker는 없습니다.</p></div>`}
+              : html`<div class="command-guide-card rounded-xl ok"><p>지금 보이는 blocker는 없습니다.</p></div>`}
             ${pendingApprovals > 0
               ? html`
-                  <article class="command-guide-card warn">
+                  <article class="command-guide-card rounded-xl warn">
                     <div class="command-guide-head">
                       <strong>승인 대기</strong>
-                      <span class="command-chip warn">${pendingApprovals}</span>
+                      <span class="command-chip rounded-full warn">${pendingApprovals}</span>
                     </div>
                     <p>엄격 액션이 묶여 있습니다. 실제 승인 처리는 제어 표면에서 합니다.</p>
                   </article>
@@ -194,32 +194,32 @@ export function WarRoomBodyGrid({
               : null}
             ${pendingConfirmTotal > 0
               ? html`
-                  <article class="command-guide-card warn">
+                  <article class="command-guide-card rounded-xl warn">
                     <div class="command-guide-head">
                       <strong>확인 대기</strong>
-                      <span class="command-chip warn">${pendingConfirmHidden > 0 ? `${pendingConfirmVisible}/${pendingConfirmTotal}` : pendingConfirmTotal}</span>
+                      <span class="command-chip rounded-full warn">${pendingConfirmHidden > 0 ? `${pendingConfirmVisible}/${pendingConfirmTotal}` : pendingConfirmTotal}</span>
                     </div>
                     <p>
                       운영자 미리보기가 사람 확인을 기다리고 있습니다.
                       ${pendingConfirmHidden > 0 ? ` 현재 actor 기준으로는 ${pendingConfirmVisible}건만 보입니다.` : ''}
                     </p>
-                    <div class="command-tag-row">
-                      ${pendingConfirms.slice(0, 3).map(item => html`<span class="command-tag">${item.confirm_token}</span>`)}
+                    <div class="command-tag rounded-full-row">
+                      ${pendingConfirms.slice(0, 3).map(item => html`<span class="command-tag rounded-full">${item.confirm_token}</span>`)}
                     </div>
                   </article>
                 `
               : null}
             ${activeLane
               ? html`
-                  <article class="command-card p-3">
-                    <div class="command-card-head">
+                  <article class="command-card rounded-xl p-3">
+                    <div class="command-card rounded-xl-head">
                       <div>
                         <strong>${activeLane.label}</strong>
-                        <div class="command-card-sub">${activeLane.kind} · ${activeLane.phase}</div>
+                        <div class="command-card rounded-xl-sub">${activeLane.kind} · ${activeLane.phase}</div>
                       </div>
-                      <span class="command-chip ${toneClass(sessionStatusTone(activeLane.motion_state))}">${displayStatus(activeLane.motion_state)}</span>
+                      <span class="command-chip rounded-full ${toneClass(sessionStatusTone(activeLane.motion_state))}">${displayStatus(activeLane.motion_state)}</span>
                     </div>
-                    <div class="command-card-grid">
+                    <div class="command-card rounded-xl-grid">
                       <span>현재 단계</span><span>${activeLane.current_step}</span>
                       <span>이동 사유</span><span>${activeLane.movement_reason}</span>
                       <span>막힘 수</span><span>${activeLane.blockers.length}</span>
@@ -230,15 +230,15 @@ export function WarRoomBodyGrid({
               : null}
             ${swarmHasEvidence && swarm?.detachment
               ? html`
-                  <article class="command-card p-3">
-                    <div class="command-card-head">
+                  <article class="command-card rounded-xl p-3">
+                    <div class="command-card rounded-xl-head">
                       <div>
                         <strong>${swarm.detachment.detachment_id}</strong>
-                        <div class="command-card-sub">${swarm.detachment.assigned_unit_id}</div>
+                        <div class="command-card rounded-xl-sub">${swarm.detachment.assigned_unit_id}</div>
                       </div>
-                      <span class="command-chip ${toneClass(sessionStatusTone(swarm.detachment.status))}">${displayStatus(swarm.detachment.status ?? 'active')}</span>
+                      <span class="command-chip rounded-full ${toneClass(sessionStatusTone(swarm.detachment.status))}">${displayStatus(swarm.detachment.status ?? 'active')}</span>
                     </div>
-                    <div class="command-card-grid">
+                    <div class="command-card rounded-xl-grid">
                       <span>리더</span><span>${swarm.detachment.leader_id ?? '미지정'}</span>
                       <span>편성</span><span>${swarm.detachment.roster.length}</span>
                       <span>세션</span><span>${swarm.detachment.session_id ?? '연결 없음'}</span>
@@ -248,15 +248,15 @@ export function WarRoomBodyGrid({
                 `
               : selectedSession
                 ? html`
-                    <article class="command-card p-3">
-                      <div class="command-card-head">
+                    <article class="command-card rounded-xl p-3">
+                      <div class="command-card rounded-xl-head">
                         <div>
                           <strong>${selectedSession.session_id}</strong>
-                          <div class="command-card-sub">현재 세션 기준</div>
+                          <div class="command-card rounded-xl-sub">현재 세션 기준</div>
                         </div>
-                        <span class="command-chip ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
+                        <span class="command-chip rounded-full ${toneClass(sessionStatusTone(selectedSession.status))}">${displayStatus(selectedSession.status)}</span>
                       </div>
-                      <div class="command-card-grid">
+                      <div class="command-card rounded-xl-grid">
                         <span>진행률</span><span>${selectedSession.progress_pct != null ? `${selectedSession.progress_pct}%` : '정보 없음'}</span>
                         <span>경과</span><span>${formatElapsed(selectedSession.elapsed_sec)}</span>
                         <span>남은 시간</span><span>${formatElapsed(selectedSession.remaining_sec)}</span>

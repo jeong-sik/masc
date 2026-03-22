@@ -192,51 +192,51 @@ function GuidedPanel() {
 
   return html`
     <div class="command-guided-layout">
-      <section class="card min-h-[240px]">
-        <div class="card-title-row">
-          <div class="card-title">즉시 조치</div>
+      <section class="card rounded-xl min-h-[240px]">
+        <div class="card rounded-xl-title-row">
+          <div class="card rounded-xl-title">즉시 조치</div>
         </div>
-        <div class="command-guide-card highlight mb-3">
+        <div class="command-guide-card rounded-xl highlight mb-3">
           <div class="command-guide-head">
             <strong>${nextStep?.title ?? nextTool}</strong>
-            <span class="command-chip ok">${nextTool}</span>
+            <span class="command-chip rounded-full ok">${nextTool}</span>
           </div>
           <p>${nextStep?.summary ?? '지금 막고 있는 병목을 풀기 위해 canonical flow의 다음 tool부터 실행합니다.'}</p>
           ${nextStep?.success_signals?.length
-            ? html`<div class="command-tag-row">
-                ${nextStep.success_signals.map(signal => html`<span class="command-tag ok">${signal}</span>`)}
+            ? html`<div class="command-tag rounded-full-row">
+                ${nextStep.success_signals.map(signal => html`<span class="command-tag rounded-full ok">${signal}</span>`)}
               </div>`
             : null}
         </div>
 
         <div class="command-readiness-list">
           ${readiness.map(item => html`
-            <article class="command-readiness-row ${toneClass(item.tone)}">
+            <article class="command-readiness-row rounded-xl ${toneClass(item.tone)}">
               <div>
                 <div class="command-readiness-title-row">
                   <strong>${item.title}</strong>
-                  <span class="command-chip ${toneClass(item.tone)}">${item.tone}</span>
+                  <span class="command-chip rounded-full ${toneClass(item.tone)}">${item.tone}</span>
                 </div>
                 <p>${item.detail}</p>
               </div>
-              <div class="command-card-foot">Next tool: ${item.tool}</div>
+              <div class="command-card rounded-xl-foot">Next tool: ${item.tool}</div>
             </article>
           `)}
         </div>
 
         ${pitfalls.length > 0
           ? html`
-              <div class="command-guide-card warn">
+              <div class="command-guide-card rounded-xl warn">
                 <div class="command-guide-head">
                   <strong>자주 막히는 지점</strong>
-                  <span class="command-chip warn">${pitfalls.length}</span>
+                  <span class="command-chip rounded-full warn">${pitfalls.length}</span>
                 </div>
                 <div class="command-guide-list">
                   ${pitfalls.map(pitfall => html`
                     <article class="command-guide-inline">
                       <strong>${pitfall.title}</strong>
                       <div>${pitfall.symptom}</div>
-                      <div class="command-card-sub">${pitfall.fix_tool} 로 해결: ${pitfall.fix_summary}</div>
+                      <div class="command-card rounded-xl-sub">${pitfall.fix_tool} 로 해결: ${pitfall.fix_summary}</div>
                     </article>
                   `)}
                 </div>
@@ -245,24 +245,24 @@ function GuidedPanel() {
           : null}
       </section>
 
-      <section class="card min-h-[240px]">
-        <div class="card-title-row">
-          <div class="card-title">운영 경로</div>
+      <section class="card rounded-xl min-h-[240px]">
+        <div class="card rounded-xl-title-row">
+          <div class="card rounded-xl-title">운영 경로</div>
         </div>
         ${commandPlaneHelpLoading.value
-          ? html`<div class="empty-state">CPv2 runbook 불러오는 중…</div>`
+          ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">CPv2 runbook 불러오는 중…</div>`
           : commandPlaneHelpError.value
-            ? html`<div class="empty-state error">${commandPlaneHelpError.value}</div>`
+            ? html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneHelpError.value}</div>`
             : html`
                 <div class="grid gap-3">
                   ${renderedPaths.map(path => html`
-                    <article class="command-guide-card">
+                    <article class="command-guide-card rounded-xl">
                       <div class="command-guide-head">
                         <strong>${path.title}</strong>
-                        <span class="command-chip">${path.id}</span>
+                        <span class="command-chip rounded-full">${path.id}</span>
                       </div>
                       <p>${path.summary}</p>
-                      <div class="command-card-sub">${path.when_to_use}</div>
+                      <div class="command-card rounded-xl-sub">${path.when_to_use}</div>
                       <div class="command-step-list compact">
                         ${path.steps.slice(0, 4).map(step => html`
                           <div class="command-step-row">
@@ -276,7 +276,7 @@ function GuidedPanel() {
                 </div>
                 ${docs.length > 0
                   ? html`<div class="command-doc-links">
-                      ${docs.map(doc => html`<span class="command-tag">${doc.title}: ${doc.path}</span>`)}
+                      ${docs.map(doc => html`<span class="command-tag rounded-full">${doc.title}: ${doc.path}</span>`)}
                     </div>`
                   : null}
               `}
@@ -295,10 +295,10 @@ export function SummarySurface() {
 
 export function DetailLoadingState() {
   if (commandPlaneDetailLoading.value) {
-    return html`<div class="empty-state">command-plane detail 불러오는 중…</div>`
+    return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">command-plane detail 불러오는 중…</div>`
   }
   if (commandPlaneDetailError.value) {
-    return html`<div class="empty-state error">${commandPlaneDetailError.value}</div>`
+    return html`<div class="empty-state error text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">${commandPlaneDetailError.value}</div>`
   }
-  return html`<div class="empty-state">surface를 선택하면 command-plane detail을 로드합니다.</div>`
+  return html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">surface를 선택하면 command-plane detail을 로드합니다.</div>`
 }

@@ -23,47 +23,11 @@
   padding: 18px;
 }
 
-.agent-detail-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 14px;
-
-  & h2 {
-    color: var(--text-strong);
-    font-size: 20px;
-    margin: 0;
-  }
-}
-
-.agent-detail-sub {
-  margin-top: 6px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  color: #9ab3de;
-  font-size: var(--fs-sm);
-}
-
-.agent-detail-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.agent-detail-task-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .agent-detail-task {
   display: flex;
   align-items: center;
   gap: 8px;
   border: 1px solid var(--card-border);
-  border-radius: 8px;
   background: var(--white-3);
   padding: 8px 10px;
 }
@@ -83,19 +47,12 @@
 
 .agent-activity-line {
   border: 1px solid var(--card-border);
-  border-radius: 8px;
   background: var(--white-3);
   padding: 8px 10px;
   font-family: "IBM Plex Mono", "Fira Code", monospace;
   font-size: var(--fs-sm);
   color: #c8daf7;
   line-height: 1.4;
-}
-
-.agent-history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 
 .agent-history-row {
@@ -114,22 +71,10 @@
   font-family: "IBM Plex Mono", "Fira Code", monospace;
 }
 
-.agent-mention-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-}
-
 /* ── FF Character Sheet — Agent Profile ──────────────────── */
 
 .ff-profile {
   padding: 0 4px;
-}
-
-.ff-profile__toolbar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
 }
 
 /* --- Character Plate (top section) --- */
@@ -153,27 +98,6 @@
     inset 0 1px 0 var(--ff-gold-8);
 }
 
-.ff-plate__portrait {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.ff-plate__info {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.ff-plate__name-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .ff-plate__name {
   margin: 0;
   font-size: 20px;
@@ -189,16 +113,8 @@
   color: var(--accent);
   background: var(--accent-10);
   border: 1px solid rgba(71, 184, 255, 0.25);
-  border-radius: 4px;
   padding: 1px 6px;
   font-variant-numeric: tabular-nums;
-}
-
-.ff-plate__badges {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
 }
 
 .ff-plate__model {
@@ -207,7 +123,6 @@
   color: var(--text-muted);
   background: var(--accent-8);
   border: 1px solid rgba(71, 184, 255, 0.15);
-  border-radius: 4px;
   padding: 1px 5px;
 }
 
@@ -216,7 +131,6 @@
   color: var(--ff-gold);
   background: var(--ff-gold-10);
   border: 1px solid var(--ff-gold-20);
-  border-radius: 4px;
   padding: 1px 5px;
 }
 
@@ -224,7 +138,6 @@
   font-size: var(--fs-2xs);
   font-weight: 600;
   letter-spacing: 0.5px;
-  border-radius: 4px;
   padding: 1px 5px;
 }
 
@@ -246,14 +159,6 @@
   border: 1px solid rgba(128, 128, 128, 0.15);
 }
 
-/* CTX bar row */
-.ff-plate__bar-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-}
-
 .ff-plate__bar-label {
   font-size: var(--fs-xs);
   font-weight: 700;
@@ -270,14 +175,6 @@
   text-align: right;
 }
 
-/* Status line */
-.ff-plate__status-line {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
 .ff-plate__work--idle {
   color: #6b7fa0;
   font-style: italic;
@@ -289,14 +186,6 @@
   background: var(--accent-8);
   padding: 1px 5px;
   border-radius: 3px;
-}
-
-.ff-plate__meta-line {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
 }
 
 /* Stats panel (right side) */
@@ -313,7 +202,6 @@
   flex-direction: column;
   align-items: center;
   padding: 6px 8px;
-  border-radius: 6px;
   background: rgba(200, 168, 78, 0.05);
   border: 1px solid var(--ff-gold-10);
 }
@@ -326,13 +214,6 @@
 }
 
 /* --- Grid and Cards --- */
-
-.ff-profile__grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin-bottom: 14px;
-}
 
 /* Timeline events - compact FF style */
 .ff-event-type {
@@ -354,7 +235,6 @@
   gap: 8px;
   align-items: center;
   padding: 10px 14px;
-  border-radius: 8px;
   background: rgba(10, 22, 40, 0.8);
   border: 1px solid var(--ff-gold-15);
 
@@ -384,18 +264,11 @@
 
 /* --- Agent Relations Card --- */
 
-.ff-relations-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .ff-relation-row {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: 4px;
   transition: background 0.15s;
 
   &:hover {
@@ -419,13 +292,6 @@
 .ff-interests {
   border-top: 1px solid var(--white-6);
   padding-top: 8px;
-}
-
-.ff-interests-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
 }
 
 .ff-interest-tag {

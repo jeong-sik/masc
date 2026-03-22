@@ -27,13 +27,11 @@
 .markdown-content code {
   background: var(--white-8);
   padding: 1px 5px;
-  border-radius: 4px;
   font-size: var(--fs-sm);
 }
 .markdown-content pre {
   background: rgba(0,0,0,0.3);
   padding: 12px;
-  border-radius: 8px;
   overflow-x: auto;
   font-size: var(--fs-sm);
 }
@@ -47,7 +45,6 @@
 .think-block {
   background: rgba(167,139,250,0.06);
   border: 1px solid rgba(167,139,250,0.15);
-  border-radius: 8px;
   padding: 10px 14px;
   margin: 8px 0;
 
@@ -61,7 +58,6 @@
 .main-tab-bar {
   margin: 0;
   padding: 8px;
-  border-radius: 12px;
   border: 1px solid var(--border-slate-22);
   background: rgba(17, 26, 46, 0.8);
   backdrop-filter: blur(8px);
@@ -231,7 +227,6 @@ button.monitor-row {
   color: inherit;
   font: inherit;
   text-align: left;
-  border-radius: 12px;
   cursor: pointer;
   transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
 
@@ -326,7 +321,6 @@ button.monitor-alert.bad,
   gap: 4px;
   font-size: var(--fs-xs);
   padding: 2px 8px;
-  border-radius: 999px;
 }
 .status-badge.active { background: var(--ok-soft); color: var(--ok); }
 .status-badge.busy { background: var(--warn-15); color: var(--warn); }
@@ -348,7 +342,6 @@ button.monitor-alert.bad,
 /* ── Card (generic wrapper) ────────────────────────────────── */
 .card {
   background: var(--white-3);
-  border-radius: 12px;
   padding: 20px;
   border: 1px solid var(--white-8);
 }

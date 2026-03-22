@@ -46,11 +46,11 @@ export function LogViewer() {
   })
 
   return html`
-    <div class="logs-viewer">
-      <div class="logs-toolbar">
-        <div class="logs-filters">
+    <div class="logs-viewer flex flex-col gap-2 h-full min-h-0">
+      <div class="logs-toolbar flex justify-between items-center gap-4 py-2 shrink-0">
+        <div class="logs-filters flex gap-2 items-center">
           <select
-            class="logs-select"
+            class="logs-select rounded"
             value=${levelFilter.value}
             onChange=${(e: Event) => {
               levelFilter.value = (e.target as HTMLSelectElement).value
@@ -64,7 +64,7 @@ export function LogViewer() {
           </select>
 
           <input
-            class="logs-module-input"
+            class="logs-module-input rounded"
             type="text"
             placeholder="module filter"
             value=${moduleFilter.value}
@@ -77,7 +77,7 @@ export function LogViewer() {
           />
 
           <select
-            class="logs-select"
+            class="logs-select rounded"
             value=${String(logLimit.value)}
             onChange=${(e: Event) => {
               logLimit.value = parseInt((e.target as HTMLSelectElement).value, 10)
@@ -91,9 +91,9 @@ export function LogViewer() {
           </select>
         </div>
 
-        <div class="logs-actions">
+        <div class="logs-actions flex gap-3 items-center text-[0.75rem] text-[color:var(--text-muted)]">
           <span class="tabular-nums">${(logTotal.value ?? 0).toLocaleString()}건</span>
-          <label class="logs-auto-label">
+          <label class="logs-auto-label flex items-center gap-1 cursor-pointer">
             <input
               type="checkbox"
               checked=${autoRefresh.value}
@@ -101,7 +101,7 @@ export function LogViewer() {
             />
             자동
           </label>
-          <button class="logs-refresh-btn" onClick=${() => { void loadLogs() }}
+          <button class="logs-refresh-btn rounded" onClick=${() => { void loadLogs() }}
             disabled=${logLoading.value}>
             ${logLoading.value ? '...' : '새로고침'}
           </button>
@@ -109,27 +109,27 @@ export function LogViewer() {
       </div>
 
       ${logError.value ? html`
-        <div class="logs-error">${logError.value}</div>
+        <div class="p-2 bg-[rgba(224,80,80,0.15)] border border-solid border-[#e05050] text-[#e05050] text-[0.8rem] rounded">${logError.value}</div>
       ` : null}
 
-      <div class="logs-table-wrap">
+      <div class="logs-table-wrap rounded">
         <table class="logs-table">
           <thead>
             <tr>
-              <th class="logs-col-ts">timestamp</th>
-              <th class="logs-col-level">level</th>
-              <th class="logs-col-module">module</th>
+              <th class="logs-col-ts w-44 whitespace-nowrap text-[color:var(--text-muted)]">timestamp</th>
+              <th class="logs-col-level w-14 whitespace-nowrap font-semibold">level</th>
+              <th class="logs-col-module w-32 whitespace-nowrap text-[color:var(--accent)]">module</th>
               <th class="break-words">message</th>
             </tr>
           </thead>
           <tbody>
             ${logEntries.value.map(entry => html`
               <tr key=${entry.seq} class="logs-row logs-level-${entry.level.toLowerCase()}">
-                <td class="logs-col-ts">${entry.ts.replace('T', ' ').replace('Z', '')}</td>
-                <td class="logs-col-level" style="color: ${LEVEL_COLORS[entry.level] ?? 'inherit'}">
+                <td class="logs-col-ts w-44 whitespace-nowrap text-[color:var(--text-muted)]">${entry.ts.replace('T', ' ').replace('Z', '')}</td>
+                <td class="logs-col-level w-14 whitespace-nowrap font-semibold" style="color: ${LEVEL_COLORS[entry.level] ?? 'inherit'}">
                   ${entry.level}
                 </td>
-                <td class="logs-col-module">${entry.module}</td>
+                <td class="logs-col-module w-32 whitespace-nowrap text-[color:var(--accent)]">${entry.module}</td>
                 <td class="break-words">${entry.message}</td>
               </tr>
             `)}

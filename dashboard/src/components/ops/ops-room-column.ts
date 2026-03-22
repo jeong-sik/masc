@@ -69,7 +69,7 @@ export function OpsRoomColumn() {
           <div class="card-title">추천 개입</div>
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">백엔드 digest가 지금 가장 작은 다음 행동을 추천합니다.</p>
-        <article class="ops-guidance-card ${guidanceLayerTone(guidanceLayer)}">
+        <article class="ops-guidance-card p-3 rounded-[10px] border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-2 ${guidanceLayerTone(guidanceLayer)}">
           <div class="flex flex-wrap gap-2 text-text-muted text-[var(--fs-xs)]">
             <strong>${guidanceLayerLabel(guidanceLayer)}</strong>
             <span>${residentRuntime?.keeper_name ?? roomDigest?.judgment_owner ?? 'judge 없음'}</span>
@@ -84,17 +84,17 @@ export function OpsRoomColumn() {
           </div>
         </article>
         ${operatorDigestLoading.value && !roomDigest ? html`
-          <div class="ops-empty">개입 추천을 불러오는 중입니다...</div>
+          <div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">개입 추천을 불러오는 중입니다...</div>
         ` : activeRecommendedActions.length > 0 ? html`
           <div class="flex flex-col gap-2">
             ${activeRecommendedActions.map(item => html`
-              <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="ops-log-entry ${item.severity}">
-                <div class="ops-log-head">
+              <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'room'}`} class="ops-log-entry p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${item.severity}">
+                <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                   <span>${deliveryModeLabel(item.confirm_required)}</span>
                 </div>
-                <div class="ops-log-body">${item.reason}</div>
+                <div class="mt-1.5 whitespace-pre-wrap break-words">${item.reason}</div>
                 ${item.suggested_payload ? html`
                   <div class="flex justify-between items-center gap-3 mt-2.5 max-[880px]:flex-col max-[880px]:items-start">
                     <button class="control-btn ghost" onClick=${() => { hydrateRecommendedAction(item); openRoomControlDisclosure() }} disabled=${operatorActionBusy.value}>
@@ -106,7 +106,7 @@ export function OpsRoomColumn() {
             `)}
           </div>
         ` : html`
-          <div class="ops-empty">지금 떠 있는 추천 개입은 없습니다.</div>
+          <div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">지금 떠 있는 추천 개입은 없습니다.</div>
         `}
       </section>
 
@@ -122,13 +122,13 @@ export function OpsRoomColumn() {
         ${confirmRequiredActions.length > 0 ? html`
           <div class="flex flex-col gap-2">
             ${confirmRequiredActions.map(item => html`
-              <article key=${`${item.action_type}:${item.target_type}`} class="ops-log-entry">
-                <div class="ops-log-head">
+              <article key=${`${item.action_type}:${item.target_type}`} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)]">
+                <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}</span>
                   <span>${deliveryModeLabel(item.confirm_required)}</span>
                 </div>
-                <div class="ops-log-body">${item.description ?? '설명 확인 필요'}</div>
+                <div class="mt-1.5 whitespace-pre-wrap break-words">${item.description ?? '설명 확인 필요'}</div>
               </article>
             `)}
           </div>
@@ -136,13 +136,13 @@ export function OpsRoomColumn() {
         ${pendingConfirms.length > 0 ? html`
           <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
             ${pendingConfirms.map(item => html`
-              <article key=${item.confirm_token} class="ops-confirmation-card">
+              <article key=${item.confirm_token} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)]">
                 <div class="flex flex-wrap gap-2 text-text-muted text-[var(--fs-xs)]">
                   <strong>${actionTypeLabel(item.action_type)}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
                   <span>${item.delegated_tool ?? '위임 도구 확인 필요'}</span>
                 </div>
-                ${item.preview ? html`<pre class="ops-code-block compact">${prettyJson(item.preview)}</pre>` : null}
+                ${item.preview ? html`<pre class="mt-2 py-[10px] px-3 rounded-[10px] bg-[rgba(8,15,29,0.82)] border border-solid border-[var(--white-8)] text-[#b9d6ff] text-[length:var(--fs-xs)] leading-[1.45] overflow-x-auto whitespace-pre-wrap break-words max-h-[180px]">${prettyJson(item.preview)}</pre>` : null}
                 <div class="flex justify-between items-center gap-3 mt-2.5 max-[880px]:flex-col max-[880px]:items-start">
                   <button class="control-btn" onClick=${() => { void confirmPending(item.confirm_token) }} disabled=${operatorActionBusy.value}>
                     실행
@@ -156,7 +156,7 @@ export function OpsRoomColumn() {
             `)}
           </div>
         ` : html`
-          <div class="ops-empty">
+          <div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">
             ${hiddenCount > 0 && actorFilter
               ? `현재 선택한 actor(${actorFilter}) 기준 승인 대기는 0건입니다. 다른 actor 대기 ${hiddenCount}건${hiddenActors.length > 0 ? ` · ${hiddenActors.join(', ')}` : ''}`
               : '지금 승인 대기는 없습니다. 위 목록의 preview-confirm 액션을 먼저 만들어야 여기에 쌓입니다.'}
@@ -170,24 +170,24 @@ export function OpsRoomColumn() {
         </div>
         <p class="-mt-0.5 text-text-muted text-[var(--fs-sm)] leading-[1.45]">평소에는 추천 개입만 보면 됩니다. room 전체를 건드릴 때만 아래 고급 제어를 여세요.</p>
 
-        <div class="ops-stat-grid">
-          <div class="ops-stat">
+        <div class="grid grid-cols-2 gap-2.5 max-[880px]:grid-cols-1">
+          <div class="ops-stat p-3 rounded-[10px] border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
             <span>Room</span>
             <strong>${room.current_room ?? room.room_id ?? 'default'}</strong>
           </div>
-          <div class="ops-stat">
+          <div class="ops-stat p-3 rounded-[10px] border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
             <span>프로젝트</span>
             <strong>${room.project ?? '확인 없음'}</strong>
           </div>
-          <div class="ops-stat">
+          <div class="ops-stat p-3 rounded-[10px] border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1">
             <span>클러스터</span>
             <strong>${room.cluster ?? '확인 없음'}</strong>
           </div>
-          <div class="ops-stat ${room.paused ? 'warn' : 'ok'}">
+          <div class="ops-stat p-3 rounded-[10px] border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1 ${room.paused ? 'warn' : 'ok'}">
             <span>상태</span>
             <strong>${room.paused ? '일시정지' : '진행 중'}</strong>
           </div>
-          <div class="ops-stat ${runtimeJudgeTone(residentRuntime)}">
+          <div class="ops-stat p-3 rounded-[10px] border border-[var(--white-8)] bg-[var(--white-3)] flex flex-col gap-1 ${runtimeJudgeTone(residentRuntime)}">
             <span>Resident Judge</span>
             <strong>${runtimeJudgeLabel(residentRuntime)}</strong>
           </div>
@@ -195,16 +195,16 @@ export function OpsRoomColumn() {
 
         <details
           ref=${roomControlDisclosureRef}
-          class="ops-control-disclosure"
+          class="ops-control-disclosure mt-0.5 border border-[var(--white-8)] rounded-xl bg-[var(--white-2)]"
           open=${room.paused ? true : undefined}
         >
-          <summary class="ops-control-summary">
+          <summary class="ops-control-summary list-none cursor-pointer grid gap-1 p-3 px-3.5">
             <span class="text-[#9fe6b5] text-[var(--fs-2xs)] tracking-[0.08em] uppercase">고급 room 제어</span>
             <strong>${room.paused ? '지금은 room이 멈춰 있어 재개 동선이 열려 있습니다.' : '방송 · 일시정지/재개 · 작업 주입'}</strong>
             <span>${room.paused ? '운영 점검 후 재개하거나 공지를 보내세요.' : 'room 전체에 영향 주는 액션만 이 안에 넣었습니다.'}</span>
           </summary>
 
-          <div class="ops-control-body">
+          <div class="grid gap-3 px-3.5 pb-3.5 border-t border-[var(--white-8)]">
             <label class="control-label" for="ops-broadcast">Room 방송</label>
             <div class="control-row">
               <input
@@ -286,16 +286,16 @@ export function OpsRoomColumn() {
         ${roomFeed.length > 0 ? html`
           <div class="flex items-center justify-between gap-2.5 text-[var(--fs-sm)] text-text-muted">
             ${roomFeed.map(message => html`
-              <article key=${message.seq ?? message.id ?? message.timestamp} class="ops-feed-item">
-                <div class="ops-feed-meta">
+              <article key=${message.seq ?? message.id ?? message.timestamp} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)]">
+                <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${message.from}</strong>
                   <span>${message.timestamp}</span>
                 </div>
-                <div class="ops-feed-content">${formatMessageContent(message.content)}</div>
+                <div class="mt-1.5 whitespace-pre-wrap break-words">${formatMessageContent(message.content)}</div>
               </article>
             `)}
           </div>
-        ` : html`<div class="ops-empty">최근 room 메시지가 없습니다.</div>`}
+        ` : html`<div class="p-3 rounded-[10px] border border-dashed border-[var(--white-12)] text-text-muted text-[var(--fs-base)]">최근 room 메시지가 없습니다.</div>`}
       </section>
     </div>
   `

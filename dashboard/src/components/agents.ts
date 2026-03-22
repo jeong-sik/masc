@@ -128,14 +128,14 @@ export function Execution() {
       >
         ${allClear
           ? html`
-              <div class="empty-state ok" data-testid="execution.all-clear">
+              <div class="empty-state ok text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]" data-testid="execution.all-clear">
                 정상 운영 중. 주의가 필요한 항목이 없습니다.
               </div>
             `
           : html`<${ExecutionQueueBody} queueRows=${queueRows} />`}
       <//>
 
-      <div class="agents-workbench">
+      <div class="grid grid-cols-[minmax(0,1.08fr)_minmax(0,0.96fr)_minmax(0,0.88fr)] gap-4">
         <${Card}
           title="관련 세션"
           class="section mb-3.5"
@@ -162,7 +162,7 @@ export function Execution() {
         >
           <div class="monitor-list">
             ${workerSupportRows.length === 0
-              ? html`<div class="empty-state">참여 에이전트가 없습니다.</div>`
+              ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">참여 에이전트가 없습니다.</div>`
               : workerSupportRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.worker-card" />`)}
           </div>
         <//>
@@ -175,7 +175,7 @@ export function Execution() {
         >
           <div class="monitor-list">
             ${continuityRows.length === 0
-              ? html`<div class="empty-state">연속성 경고 없음</div>`
+              ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">연속성 경고 없음</div>`
               : continuityRows.map(row => html`<${ContinuityRow} key=${row.name} row=${row} />`)}
           </div>
         <//>
@@ -188,7 +188,7 @@ export function Execution() {
         >
           <div class="monitor-list">
             ${offlineRows.length === 0
-              ? html`<div class="empty-state">오프라인 에이전트 없음</div>`
+              ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">오프라인 에이전트 없음</div>`
               : offlineRows.map(row => html`<${WorkerSupportRow} key=${row.name} row=${row} testId="execution.offline-worker-card" />`)}
           </div>
         <//>

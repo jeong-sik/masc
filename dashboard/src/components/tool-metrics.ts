@@ -69,19 +69,19 @@ function TierDistribution({ dist }: { dist: Record<string, number> }) {
   const standardPct = total > 0 ? ((standardOnly / total) * 100).toFixed(1) : '0'
   const fullOnlyPct = total > 0 ? ((fullOnly / total) * 100).toFixed(1) : '0'
   return html`
-    <div class="tier-dist">
-      <div class="tier-dist-row">
-        <span class="tier-dist-label badge-essential">필수</span>
+    <div class="flex flex-col gap-2">
+      <div class="flex items-center gap-2.5">
+        <span class="tier-dist-label rounded badge-essential">필수</span>
         <span class="tier-dist-count">${essential}</span>
         <span class="tier-dist-pct">${essentialPct}%</span>
       </div>
-      <div class="tier-dist-row">
-        <span class="tier-dist-label badge-standard">표준</span>
+      <div class="flex items-center gap-2.5">
+        <span class="tier-dist-label rounded badge-standard">표준</span>
         <span class="tier-dist-count">${standardOnly}</span>
         <span class="tier-dist-pct">${standardPct}%</span>
       </div>
-      <div class="tier-dist-row">
-        <span class="tier-dist-label badge-full">전체 전용</span>
+      <div class="flex items-center gap-2.5">
+        <span class="tier-dist-label rounded badge-full">전체 전용</span>
         <span class="tier-dist-count">${fullOnly}</span>
         <span class="tier-dist-pct">${fullOnlyPct}%</span>
       </div>
@@ -101,11 +101,11 @@ export function ToolMetrics() {
   }, [])
 
   return html`
-    <div class="tool-metrics">
-      <div class="tool-metrics-header">
+    <div class="flex flex-col gap-4">
+      <div class="flex justify-between items-center">
         <h3 class="tool-metrics-title">도구 사용 현황</h3>
         <button
-          class="control-btn ghost"
+          class="control-btn rounded-lg ghost"
           onClick=${() => void loadMetrics()}
           disabled=${loading}
         >
@@ -113,28 +113,28 @@ export function ToolMetrics() {
         </button>
       </div>
 
-      ${error ? html`<div class="tool-metrics-error">${error}</div>` : null}
+      ${error ? html`<div class="tool-metrics-error rounded-lg">${error}</div>` : null}
 
       ${data ? html`
         <div class="tool-metrics-summary">
           <div class="tool-metrics-stat">
-            <span class="stat-value">${data.total_calls}</span>
+            <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.total_calls}</span>
             <span class="stat-label">총 호출 수</span>
           </div>
           <div class="tool-metrics-stat">
-            <span class="stat-value">${data.distinct_tools_called}</span>
+            <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.distinct_tools_called}</span>
             <span class="stat-label">사용된 도구</span>
           </div>
           <div class="tool-metrics-stat">
-            <span class="stat-value">${data.never_called_count}</span>
+            <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.never_called_count}</span>
             <span class="stat-label">미사용 도구</span>
           </div>
           <div class="tool-metrics-stat">
-            <span class="stat-value">${data.registered_count}</span>
+            <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.registered_count}</span>
             <span class="stat-label">등록됨 (v2)</span>
           </div>
           <div class="tool-metrics-stat">
-            <span class="stat-value">${data.dispatch_v2_enabled ? 'ON' : 'OFF'}</span>
+            <span class="mt-1.5 text-[color:var(--text-strong)] text-[30px] font-bold leading-none tabular-nums">${data.dispatch_v2_enabled ? 'ON' : 'OFF'}</span>
             <span class="stat-label">Dispatch v2</span>
           </div>
         </div>

@@ -30,7 +30,7 @@ export function PipelineStageBar({ stage }: { stage?: PipelineStage | null }) {
     return html`
       <div class="pipeline-stage-bar">
         <div class="pipeline-stage-node active stage-offline">
-          <span class="pipeline-stage-dot"></span>
+          <span class="pipeline-stage-dot transition-all duration-300"></span>
           <span class="pipeline-stage-label">offline</span>
         </div>
       </div>
@@ -54,7 +54,7 @@ export function PipelineStageBar({ stage }: { stage?: PipelineStage | null }) {
         return html`
           ${i > 0 ? html`<span class="pipeline-stage-connector"></span>` : null}
           <div class=${nodeClass}>
-            <span class="pipeline-stage-dot"></span>
+            <span class="pipeline-stage-dot transition-all duration-300"></span>
             ${isActive
               ? html`<span class="pipeline-stage-label">${s.label}</span>`
               : null}
@@ -79,7 +79,7 @@ export function PipelineStageBadge({
     STAGES.find((s) => s.key === current)?.label ?? current
 
   return html`
-    <span class="pipeline-stage-badge stage-${current}">
+    <span class="pipeline-stage-badge rounded-full stage-${current}">
       ${label}
     </span>
   `

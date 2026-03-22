@@ -110,7 +110,6 @@
 
 .command-focus-preview {
   padding: 10px 12px;
-  border-radius: 12px;
   border: 1px solid var(--white-8);
   background: var(--white-5);
   color: var(--text-strong);
@@ -145,12 +144,6 @@
   }
 }
 
-.command-entry-label {
-  color: rgba(148, 163, 184, 0.92);
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
 
 .command-summary-grid {
   display: grid;
@@ -212,20 +205,6 @@
   }
 }
 
-.command-hero-kicker {
-  display: inline-flex;
-  width: fit-content;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  color: #7dd3fc;
-  background: rgba(14, 116, 144, 0.22);
-  border: 1px solid rgba(125, 211, 252, 0.18);
-  font-size: var(--fs-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 
 .command-hero-badges,
 .command-tab-group-items {
@@ -251,7 +230,6 @@
 .command-tree-node {
   background: var(--white-4);
   border: 1px solid var(--white-8);
-  border-radius: 12px;
   padding: 14px;
 
   &.depth-3 {
@@ -287,7 +265,6 @@
   flex-direction: column;
   gap: 10px;
   padding: 14px;
-  border-radius: 12px;
   border: 1px solid var(--white-8);
   background: var(--white-3);
 
@@ -393,7 +370,6 @@
   border: 1px solid var(--white-12);
   background: var(--white-4);
   color: var(--white-72);
-  border-radius: 999px;
   padding: 8px 14px;
   text-transform: capitalize;
 
@@ -498,12 +474,6 @@
   }
 }
 
-.command-warroom-summary {
-  margin-top: 12px;
-  color: rgba(226,232,240,0.86);
-  line-height: 1.55;
-  max-width: 82ch;
-}
 
 .command-warroom-hero-actions {
   display: flex;
@@ -548,13 +518,6 @@
   gap: 10px;
 }
 
-.warroom-feed-detail {
-  color: rgba(226,232,240,0.86);
-  line-height: 1.55;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
 
 @media (max-width: 1450px) {
 
@@ -622,7 +585,6 @@
 .command-topology-explainer {
   margin-bottom: 14px;
   padding: 14px;
-  border-radius: 12px;
   background: var(--white-4);
   border: 1px solid var(--white-8);
 }
@@ -670,7 +632,6 @@
   cursor: pointer;
   background: var(--white-4);
   border: 1px solid var(--white-8);
-  border-radius: 12px;
   padding: 14px;
 
   &.selected {
@@ -683,7 +644,6 @@
 .command-chain-panel {
   margin-top: 14px;
   padding: 14px;
-  border-radius: 12px;
   background: var(--white-4);
   border: 1px solid var(--white-8);
 }
@@ -707,7 +667,6 @@
   display: inline-flex;
   align-items: center;
   padding: 3px 8px;
-  border-radius: 999px;
   font-size: var(--fs-xs);
   letter-spacing: 0.02em;
   background: var(--white-8);
@@ -838,17 +797,6 @@
   gap: 12px;
 }
 
-.command-gauge-card {
-  display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
-  padding: 12px;
-  border-radius: 16px;
-  background: rgba(255,255,255,0.045);
-  border: 1px solid var(--white-8);
-  min-width: 0;
-}
 
 .command-gauge-ring {
   width: 88px;
@@ -859,17 +807,6 @@
   box-shadow: inset 0 0 0 1px var(--white-4);
 }
 
-.command-gauge-core {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background: rgba(8, 14, 28, 0.92);
-  border: 1px solid var(--white-6);
-  display: grid;
-  place-items: center;
-  align-content: center;
-  text-align: center;
-}
 
 .command-gauge-core strong,
 .command-signal-copy strong {
@@ -939,7 +876,6 @@
 .command-signal-bar {
   position: relative;
   height: 8px;
-  border-radius: 999px;
   overflow: hidden;
   background: var(--white-6);
 }
@@ -947,7 +883,6 @@
 .command-signal-bar span {
   display: block;
   height: 100%;
-  border-radius: 999px;
   background: linear-gradient(90deg, rgba(103,232,249,0.86), rgba(74,222,128,0.9));
 }
 

@@ -138,7 +138,7 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     Hashtbl.replace supervised_registry meta.name entry;
     (* Backward compat: register in legacy keepalive registry *)
     Keeper_keepalive.register_keepalive meta.name
-      { Keeper_keepalive.stop; started_at = now };
+      { Keeper_keepalive.stop; started_at = now; grpc_close = None };
     (* Room initialization *)
     (try
        if not (Room_utils.is_initialized ctx.config) then
@@ -202,7 +202,7 @@ let sweep_and_recover (ctx : _ context) =
         } in
         Hashtbl.replace supervised_registry name new_entry;
         Keeper_keepalive.register_keepalive name
-          { Keeper_keepalive.stop = new_entry.stop; started_at = now };
+          { Keeper_keepalive.stop = new_entry.stop; started_at = now; grpc_close = None };
         launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta new_entry;
         publish_lifecycle "restarted" name
           (Printf.sprintf "attempt %d" attempt);

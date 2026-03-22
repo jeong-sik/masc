@@ -55,6 +55,22 @@ let int64_of_json key json =
     | _ -> 0L)
   | _ -> 0L
 
+let int_of_json key json =
+  match json with
+  | `Assoc fields -> (
+    match List.assoc_opt key fields with
+    | Some (`Int n) -> n
+    | _ -> 0)
+  | _ -> 0
+
+let bool_of_json key json =
+  match json with
+  | `Assoc fields -> (
+    match List.assoc_opt key fields with
+    | Some (`Bool b) -> b
+    | _ -> false)
+  | _ -> false
+
 let string_map_of_json key json =
   match json with
   | `Assoc fields -> (
@@ -101,6 +117,16 @@ let agent_info_to_json (a : agent_info) : Yojson.Safe.t =
     ("current_task_id", `String a.current_task_id);
   ]
 
+let agent_info_of_json (json : Yojson.Safe.t) : agent_info =
+  {
+    name = string_of_json "name" json;
+    status = string_of_json "status" json;
+    capabilities = string_list_of_json "capabilities" json;
+    last_heartbeat_ms = int64_of_json "last_heartbeat_ms" json;
+    joined_at_ms = int64_of_json "joined_at_ms" json;
+    current_task_id = string_of_json "current_task_id" json;
+  }
+
 module JoinResponse = struct
   type t = {
     success : bool;
@@ -108,6 +134,22 @@ module JoinResponse = struct
     session_id : string;
     active_agents : agent_info list;
   }
+
+  let of_bytes bytes =
+    let json = Yojson.Safe.from_string bytes in
+    let active_agents = match json with
+      | `Assoc fields -> (
+        match List.assoc_opt "active_agents" fields with
+        | Some (`List items) -> List.map agent_info_of_json items
+        | _ -> [])
+      | _ -> []
+    in
+    {
+      success = bool_of_json "success" json;
+      message = string_of_json "message" json;
+      session_id = string_of_json "session_id" json;
+      active_agents;
+    }
 
   let to_bytes t =
     `Assoc [
@@ -146,6 +188,13 @@ module LeaveResponse = struct
     message : string;
   }
 
+  let of_bytes bytes =
+    let json = Yojson.Safe.from_string bytes in
+    {
+      success = bool_of_json "success" json;
+      message = string_of_json "message" json;
+    }
+
   let to_bytes t =
     `Assoc [
       ("success", `Bool t.success);
@@ -172,6 +221,15 @@ module HeartbeatPing = struct
       timestamp_ms = int64_of_json "timestamp_ms" json;
       current_task_id = string_of_json "current_task_id" json;
     }
+
+  let to_bytes t =
+    `Assoc [
+      ("agent_name", `String t.agent_name);
+      ("session_id", `String t.session_id);
+      ("timestamp_ms", `Intlit (Int64.to_string t.timestamp_ms));
+      ("current_task_id", `String t.current_task_id);
+    ]
+    |> Yojson.Safe.to_string
 end
 
 module HeartbeatAck = struct
@@ -181,6 +239,15 @@ module HeartbeatAck = struct
     pending_task_count : int;
     directives : string list;
   }
+
+  let of_bytes bytes =
+    let json = Yojson.Safe.from_string bytes in
+    {
+      timestamp_ms = int64_of_json "timestamp_ms" json;
+      active_agent_count = int_of_json "active_agent_count" json;
+      pending_task_count = int_of_json "pending_task_count" json;
+      directives = string_list_of_json "directives" json;
+    }
 
   let to_bytes t =
     `Assoc [
@@ -212,6 +279,17 @@ module SubscribeRequest = struct
     }
 end
 
+module SubscribeRequest_serde = struct
+  let to_bytes (t : SubscribeRequest.t) =
+    `Assoc [
+      ("agent_name", `String t.agent_name);
+      ("session_id", `String t.session_id);
+      ("event_types", `List (List.map (fun s -> `String s) t.event_types));
+      ("since_seq", `Intlit (Int64.to_string t.since_seq));
+    ]
+    |> Yojson.Safe.to_string
+end
+
 module Event = struct
   type t = {
     seq : int64;
@@ -220,6 +298,16 @@ module Event = struct
     timestamp_ms : int64;
     payload_json : string;
   }
+
+  let of_bytes bytes =
+    let json = Yojson.Safe.from_string bytes in
+    {
+      seq = int64_of_json "seq" json;
+      event_type = string_of_json "event_type" json;
+      source_agent = string_of_json "source_agent" json;
+      timestamp_ms = int64_of_json "timestamp_ms" json;
+      payload_json = string_of_json "payload_json" json;
+    }
 
   let to_bytes t =
     `Assoc [
@@ -250,6 +338,15 @@ module ToolCallRequest = struct
       tool_name = string_of_json "tool_name" json;
       arguments_json = string_of_json "arguments_json" json;
     }
+
+  let to_bytes t =
+    `Assoc [
+      ("agent_name", `String t.agent_name);
+      ("session_id", `String t.session_id);
+      ("tool_name", `String t.tool_name);
+      ("arguments_json", `String t.arguments_json);
+    ]
+    |> Yojson.Safe.to_string
 end
 
 module ToolCallResponse = struct
@@ -259,6 +356,15 @@ module ToolCallResponse = struct
     error_message : string;
     error_code : int;
   }
+
+  let of_bytes bytes =
+    let json = Yojson.Safe.from_string bytes in
+    {
+      success = bool_of_json "success" json;
+      result_json = string_of_json "result_json" json;
+      error_message = string_of_json "error_message" json;
+      error_code = int_of_json "error_code" json;
+    }
 
   let to_bytes t =
     `Assoc [
@@ -286,6 +392,14 @@ module BroadcastRequest = struct
       message = string_of_json "message" json;
       mentions = string_list_of_json "mentions" json;
     }
+
+  let to_bytes t =
+    `Assoc [
+      ("agent_name", `String t.agent_name);
+      ("message", `String t.message);
+      ("mentions", `List (List.map (fun s -> `String s) t.mentions));
+    ]
+    |> Yojson.Safe.to_string
 end
 
 module BroadcastResponse = struct
@@ -293,6 +407,13 @@ module BroadcastResponse = struct
     success : bool;
     seq : int64;
   }
+
+  let of_bytes bytes =
+    let json = Yojson.Safe.from_string bytes in
+    {
+      success = bool_of_json "success" json;
+      seq = int64_of_json "seq" json;
+    }
 
   let to_bytes t =
     `Assoc [
@@ -313,6 +434,15 @@ let task_info_to_json (t : task_info) : Yojson.Safe.t =
     ("priority", `Int t.priority);
   ]
 
+let task_info_of_json (json : Yojson.Safe.t) : task_info =
+  {
+    id = string_of_json "id" json;
+    title = string_of_json "title" json;
+    status = string_of_json "status" json;
+    assigned_to = string_of_json "assigned_to" json;
+    priority = int_of_json "priority" json;
+  }
+
 module StatusResponse = struct
   type t = {
     agents : agent_info list;
@@ -320,6 +450,29 @@ module StatusResponse = struct
     message_count : int;
     room_path : string;
   }
+
+  let of_bytes bytes =
+    let json = Yojson.Safe.from_string bytes in
+    let agents = match json with
+      | `Assoc fields -> (
+        match List.assoc_opt "agents" fields with
+        | Some (`List items) -> List.map agent_info_of_json items
+        | _ -> [])
+      | _ -> []
+    in
+    let tasks = match json with
+      | `Assoc fields -> (
+        match List.assoc_opt "tasks" fields with
+        | Some (`List items) -> List.map task_info_of_json items
+        | _ -> [])
+      | _ -> []
+    in
+    {
+      agents;
+      tasks;
+      message_count = int_of_json "message_count" json;
+      room_path = string_of_json "room_path" json;
+    }
 
   let to_bytes t =
     `Assoc [

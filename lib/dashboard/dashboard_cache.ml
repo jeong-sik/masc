@@ -188,8 +188,13 @@ let get_or_compute_eio key ~ttl compute =
             | _ -> ());
           Eio.Condition.broadcast cond
       in
+      (* Background revalidation: fork on the main domain's switch if available.
+         When called from Executor_pool (different domain), fork would raise
+         "Switch accessed from wrong domain!" — fall back to inline compute. *)
       (match !_bg_sw with
-       | Some sw -> Eio.Fiber.fork ~sw do_bg_compute
+       | Some sw ->
+           (try Eio.Fiber.fork ~sw do_bg_compute
+            with Invalid_argument _ -> do_bg_compute ())
        | None -> do_bg_compute ());
       stale_value
     | `Compute cond ->

@@ -73,19 +73,26 @@ type run_result = {
 (* Internal: resolve provider                                        *)
 (* ================================================================ *)
 
+(** Resolve a Model_spec.model_spec to an OAS Provider.config.
+    Uses Oas_type_adapters as primary path. Falls back to constructing
+    from Model_spec.to_provider_config bridge when the adapter returns None. *)
 let resolve_provider (spec : Model_spec.model_spec) : Oas.Provider.config =
   match Oas_type_adapters.to_oas_provider spec with
   | Some cfg -> cfg
   | None ->
+    (* Fallback: use the migration bridge to get Provider_config.t,
+       then map to the Agent_sdk.Provider.config expected by Builder.
+       This avoids reaching into model_spec fields directly. *)
+    let pc = Model_spec.to_provider_config spec in
     { Oas.Provider.provider =
         Oas.Provider.OpenAICompat {
-          base_url = spec.api_url;
+          base_url = pc.base_url;
           auth_header = None;
-          path = "/v1/chat/completions";
+          path = pc.request_path;
           static_token = None;
         };
-      model_id = spec.model_id;
-      api_key_env = Option.value ~default:"" spec.api_key_env;
+      model_id = pc.model_id;
+      api_key_env = pc.api_key;
     }
 
 (* ================================================================ *)
@@ -385,15 +392,11 @@ let run_named
   let named_cascade = Oas.Api.named_cascade ?config_path
     ~name:cascade_name ~defaults () in
   let name = Printf.sprintf "oas-%s" cascade_name in
-  (* Use first available model as primary for Builder *)
+  (* Use first available model as primary for Builder.
+     Fallback to glm_cloud preset when no cascade models resolve. *)
   let primary_spec = match resolve_cascade_specs ~cascade_name with
     | spec :: _ -> spec
-    | [] ->
-      let pricing = Llm_provider.Pricing.pricing_for_model "auto" in
-      { Model_spec.provider = Model_spec.Glm_cloud; model_id = "auto";
-        max_context = 8192; api_url = ""; api_key_env = None;
-        cost_per_1k_input = pricing.input_per_million /. 1000.0;
-        cost_per_1k_output = pricing.output_per_million /. 1000.0 }
+    | [] -> Model_spec.glm_cloud
   in
   let config =
     config_for_model ~name ~model_spec:primary_spec ~system_prompt ~tools

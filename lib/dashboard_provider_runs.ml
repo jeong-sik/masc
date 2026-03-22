@@ -471,8 +471,12 @@ let resolve_provider_run_request ~provider ~model_opt ~prompt =
               Ok (snapshot, model))
 
 let oas_provider_config_of_spec (spec : Model_spec.model_spec) =
-  match spec.provider with
-  | Model_spec.Gemini -> (
+  (* Use registry_name_of_provider to identify Gemini instead of
+     matching the Model_spec.provider constructor directly.
+     Migration: callers will eventually receive Provider_config.t
+     and check kind = Gemini. *)
+  match Model_spec.registry_name_of_provider spec.provider with
+  | "gemini" -> (
       match Provider_adapter.resolve_gemini_direct_auth () with
       | Provider_adapter.Gemini_api_key -> Oas_type_adapters.to_oas_provider spec
       | Provider_adapter.Gemini_vertex_adc _ -> None

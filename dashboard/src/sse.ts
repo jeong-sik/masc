@@ -184,7 +184,17 @@ export function connectSSE(): void {
 }
 
 function handleEvent(event: SSEEvent): void {
-  const type = event.type
+  // Normalize: server may emit "masc/agent_joined" or "agent_joined".
+  // Strip the "masc/" prefix for the core event types so both forms match
+  // the same switch cases.  Keep the original type for OAS/namespaced events
+  // that genuinely use colons or other prefixes.
+  const rawType = event.type
+  const MASC_PREFIX = 'masc/'
+  const type =
+    rawType.startsWith(MASC_PREFIX)
+    && !rawType.startsWith('masc/board_')   // board_post/board_comment already have explicit cases
+      ? rawType.slice(MASC_PREFIX.length)
+      : rawType
   const agent = event.agent ?? event.author ?? event.from ?? event.from_agent ?? ''
 
   switch (type) {

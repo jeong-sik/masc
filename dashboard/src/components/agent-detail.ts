@@ -108,12 +108,12 @@ export function AgentDetailOverlay() {
                 <h2 class="m-0 flex items-baseline gap-2 text-[var(--text-strong)] text-xl">
                   ${displayName}
                   ${koreanName ? html`<span class="text-xs text-[var(--text-dim)]">(${koreanName})</span>` : ''}
-                  ${secondaryLabel ? html`<span class="font-mono" class="text-xs text-[var(--text-dim)]">${secondaryLabel}</span>` : ''}
+                  ${secondaryLabel ? html`<span class="font-mono text-xs text-[var(--text-dim)]">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div class="flex items-center gap-2 mt-1 flex-wrap">
                   <${StatusBadge} status=${headerStatus} />
                   ${isArchivedParticipant ? html`<span class="text-[length:var(--fs-2xs)] py-0.5 px-2 border border-solid border-[rgba(71,184,255,0.36)] bg-[var(--accent-12)] text-[#9ad9ff] whitespace-nowrap rounded-full">archived session participant</span>` : null}
-                  ${agent?.model ? html`<span class="font-mono" class="text-xs bg-[#2a2a4a] px-1.5 py-0.5 rounded">${agent.model}</span>` : ''}
+                  ${agent?.model ? html`<span class="font-mono text-xs bg-[#2a2a4a] px-1.5 py-0.5 rounded">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-[var(--text-dim)]">${missionBrief.archived_reason}</span>`
                     : null}

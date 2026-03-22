@@ -179,10 +179,10 @@ export function Mission() {
       </div>
 
       <nav class="mission-jump-strip flex gap-2 flex-wrap">
-        <a class="px-2.5 py-1 border border-[var(--border-slate-22)] bg-[var(--white-3)] text-[#9fb8e1] text-[length:var(--fs-sm)] no-underline transition-colors duration-150 hover:bg-[var(--white-8)] rounded-full" href="#mission-sessions">세션 ${sessionRows.length}</a>
-        <a class="px-2.5 py-1 border border-[var(--border-slate-22)] bg-[var(--white-3)] text-[#9fb8e1] text-[length:var(--fs-sm)] no-underline transition-colors duration-150 hover:bg-[var(--white-8)] rounded-full" href="#mission-keepers">키퍼 ${keeperRows.length}</a>
-        <a class="px-2.5 py-1 border border-[var(--border-slate-22)] bg-[var(--white-3)] text-[#9fb8e1] text-[length:var(--fs-sm)] no-underline transition-colors duration-150 hover:bg-[var(--white-8)] rounded-full" href="#mission-output">활동</a>
-        <a class="px-2.5 py-1 border border-[var(--border-slate-22)] bg-[var(--white-3)] text-[#9fb8e1] text-[length:var(--fs-sm)] no-underline transition-colors duration-150 hover:bg-[var(--white-8)] rounded-full" href="#mission-attention">우선순위 ${attentionQueue.length}</a>
+        <a class="px-2.5 py-1 border border-[var(--border-slate-22)] bg-[var(--white-3)] text-[#9fb8e1] text-[length:var(--fs-sm)] no-underline transition-colors duration-150 hover:bg-[var(--white-8)] rounded-full cursor-pointer" onClick=${(e: Event) => { e.preventDefault(); document.getElementById('mission-sessions')?.scrollIntoView({ behavior: 'smooth' }) }}>세션 ${sessionRows.length}</a>
+        <a class="px-2.5 py-1 border border-[var(--border-slate-22)] bg-[var(--white-3)] text-[#9fb8e1] text-[length:var(--fs-sm)] no-underline transition-colors duration-150 hover:bg-[var(--white-8)] rounded-full cursor-pointer" onClick=${(e: Event) => { e.preventDefault(); document.getElementById('mission-keepers')?.scrollIntoView({ behavior: 'smooth' }) }}>키퍼 ${keeperRows.length}</a>
+        <a class="px-2.5 py-1 border border-[var(--border-slate-22)] bg-[var(--white-3)] text-[#9fb8e1] text-[length:var(--fs-sm)] no-underline transition-colors duration-150 hover:bg-[var(--white-8)] rounded-full cursor-pointer" onClick=${(e: Event) => { e.preventDefault(); document.getElementById('mission-output')?.scrollIntoView({ behavior: 'smooth' }) }}>활동</a>
+        <a class="px-2.5 py-1 border border-[var(--border-slate-22)] bg-[var(--white-3)] text-[#9fb8e1] text-[length:var(--fs-sm)] no-underline transition-colors duration-150 hover:bg-[var(--white-8)] rounded-full cursor-pointer" onClick=${(e: Event) => { e.preventDefault(); document.getElementById('mission-attention')?.scrollIntoView({ behavior: 'smooth' }) }}>우선순위 ${attentionQueue.length}</a>
       </nav>
 
       ${activeSessionId

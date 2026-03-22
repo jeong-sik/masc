@@ -146,7 +146,7 @@ export function Proof() {
       </div>
       <details class="mb-3">
         <summary style="cursor: pointer; color: rgba(255,255,255,0.5); font-size: 13px; padding: 6px 0;">상세 지표 (${8}개)</summary>
-        <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3" class="mt-2">
+        <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3 mt-2">
           <div class="summary-stat-card rounded-xl ${verdictTone(liveVerdict)}">
             <span>Live 판정</span>
             <strong>${liveVerdict}</strong>

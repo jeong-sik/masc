@@ -1,37 +1,39 @@
 [@@@warning "-32-69"]
 (* MASC TUI - Terminal User Interface for Multi-Agent Coordination
 
-    A simple ANSI-based TUI dashboard that connects to the MASC server
-    and displays real-time agent status, tasks, and events.
+    Phase 1: keeper selector + detail view
+    Phase 2: keeper log viewer, message sending, live context status
 
     Usage: masc-tui [--port PORT] [--room ROOM] [--refresh SECONDS]
 
     Modes:
-    - Dashboard: agents/tasks/events overview (original)
+    - Dashboard: agents/tasks/events overview
     - Keepers: keeper list + detail view (Tab to switch)
+    - Keeper Detail: identity, runtime stats, live context, behavior
+    - Keeper Logs: recent heartbeat/metrics from JSONL files
+    - Keeper Message: type and send messages to a keeper via HTTP API
 
-    Layout (Dashboard):
+    Layout (Keeper Logs):
     +---------------------------------------------+
-    |            MASC Dashboard                   |
-    +---------------------+-----------------------+
-    |      Agents         |       Events          |
-    |  - claude: working  |  [12:00:01] joined    |
-    |  - gemini: idle     |  [12:00:05] task done |
-    +---------------------+-----------------------+
-    |              Tasks                          |
-    |  [task-001] Fix bug (in_progress @claude)   |
-    |  [task-002] Review PR (pending)             |
+    |  Keeper Logs: sangsu                        |
+    +---------------------------------------------+
+    |  14:31:08 hb  ctx:55% 70629/128000 msgs:430|
+    |  14:31:32 hb  ctx:55% 70629/128000 msgs:430|
+    |  14:33:03 hb  ctx:55% 70629/128000 msgs:430|
+    +---------------------------------------------+
+    | j/k:scroll  Esc:back  q:quit                |
     +---------------------------------------------+
 
-    Layout (Keepers):
+    Layout (Message Input):
     +---------------------------------------------+
-    |            MASC Keepers                     |
+    |  Message to: sangsu                         |
     +---------------------------------------------+
-    |  > sangsu       relationship  gen:0  llama  |
-    |    dm-keeper    balanced      gen:0  llama  |
-    |    qa-ui-smoke  delivery      gen:0  llama  |
+    |  > hello, how are you?_                     |
     +---------------------------------------------+
-    | j/k: move  Enter: detail  Tab: dashboard  q |
+    |  Response:                                  |
+    |  (waiting for reply...)                     |
+    +---------------------------------------------+
+    | Enter:send  Esc:cancel  q:quit              |
     +---------------------------------------------+
 *)
 
@@ -133,11 +135,41 @@ type keeper = {
   k_updated_at: string;
 }
 
+(** A single metrics/log entry parsed from JSONL *)
+type log_entry = {
+  le_ts: string;
+  le_channel: string;
+  le_context_ratio: float;
+  le_context_tokens: int;
+  le_context_max: int;
+  le_message_count: int;
+  le_model_used: string;
+  le_input_tokens: int;
+  le_output_tokens: int;
+  le_latency_ms: int;
+  le_cost_usd: float;
+  le_work_kind: string;
+  le_tools_used: string list;
+  le_compacted: bool;
+  le_goal_alignment: float;
+  le_repetition_risk: float;
+  le_guardrail_stop: bool;
+}
+
+(** Message history entry *)
+type msg_entry = {
+  me_role: string;       (* "user" or "assistant" *)
+  me_text: string;
+  me_timestamp: string;
+}
+
 (** TUI view mode *)
 type view_mode =
   | Dashboard
   | Keeper_list
   | Keeper_detail
+  | Keeper_logs
+  | Keeper_message
 
 (** Dashboard state *)
 type state = {
@@ -149,6 +181,19 @@ type state = {
   mutable last_refresh: float;
   mutable view: view_mode;
   mutable keeper_cursor: int;
+  (* Phase 2: log viewer state *)
+  mutable log_entries: log_entry list;
+  mutable log_scroll: int;
+  (* Phase 2: live context from latest metrics *)
+  mutable live_context_ratio: float;
+  mutable live_context_tokens: int;
+  mutable live_context_max: int;
+  mutable live_message_count: int;
+  (* Phase 2: message input state *)
+  mutable msg_input: Buffer.t;
+  mutable msg_history: msg_entry list;
+  mutable msg_sending: bool;
+  mutable detail_scroll: int;
   room: string;
   port: int;
   refresh_interval: float;
@@ -164,6 +209,16 @@ let create_state ~room ~port ~refresh_interval = {
   last_refresh = 0.0;
   view = Dashboard;
   keeper_cursor = 0;
+  log_entries = [];
+  log_scroll = 0;
+  live_context_ratio = 0.0;
+  live_context_tokens = 0;
+  live_context_max = 0;
+  live_message_count = 0;
+  msg_input = Buffer.create 256;
+  msg_history = [];
+  msg_sending = false;
+  detail_scroll = 0;
   room;
   port;
   refresh_interval;
@@ -260,6 +315,67 @@ let short_ts s =
   if String.length s > 19 then String.sub s 0 19
   else if String.length s = 0 then "(never)"
   else s
+
+(** Context ratio color: green < 50%, yellow 50-80%, red > 80% *)
+let ctx_color ratio =
+  if ratio >= 0.8 then Ansi.red
+  else if ratio >= 0.5 then Ansi.yellow
+  else Ansi.green
+
+(** Format context ratio as a visual bar *)
+let ctx_bar ratio width =
+  let filled = int_of_float (ratio *. float_of_int width) in
+  let filled = max 0 (min width filled) in
+  let empty = width - filled in
+  let color = ctx_color ratio in
+  Printf.sprintf "%s%s%s%s"
+    color
+    (String.make filled '#')
+    (Ansi.gray ^ String.make empty '-' ^ Ansi.reset)
+    Ansi.reset
+
+(** Format channel name with color *)
+let channel_color ch =
+  match ch with
+  | "heartbeat" -> Ansi.dim ^ "hb" ^ Ansi.reset
+  | "turn" -> Ansi.cyan ^ "turn" ^ Ansi.reset
+  | "compaction" -> Ansi.yellow ^ "comp" ^ Ansi.reset
+  | "handoff" -> Ansi.magenta ^ "hand" ^ Ansi.reset
+  | "initiative" -> Ansi.blue ^ "init" ^ Ansi.reset
+  | s -> s
+
+(** ---- RENDERING ---- *)
+
+(** Shared helper: draw box top border *)
+let box_top buf cols =
+  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
+    Ansi.gray Ansi.box_tl (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset)
+
+(** Shared helper: draw box bottom border *)
+let box_bottom buf cols =
+  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
+    Ansi.gray Ansi.box_bl (draw_hline (cols - 2)) Ansi.box_br Ansi.reset)
+
+(** Shared helper: draw box divider *)
+let box_divider buf cols =
+  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
+    Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset)
+
+(** Shared helper: draw a line inside a box *)
+let box_line buf cols content =
+  let inner = cols - 4 in
+  Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
+    Ansi.gray Ansi.box_v Ansi.reset
+    (fit_width content inner)
+    Ansi.gray Ansi.box_v Ansi.reset)
+
+(** Shared helper: empty line inside a box *)
+let box_empty buf cols =
+  let inner = cols - 4 in
+  Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
+    Ansi.gray Ansi.box_v Ansi.reset
+    (String.make inner ' ')
+    Ansi.gray Ansi.box_v Ansi.reset)
 
 (** Render the dashboard (original view) *)
 let render_dashboard (state : state) =
@@ -517,9 +633,9 @@ let render_keeper_list (state : state) =
   print_string (Buffer.contents buf);
   flush stdout
 
-(** Render keeper detail view *)
+(** Render keeper detail view with live context and scrolling *)
 let render_keeper_detail (state : state) =
-  let (_rows, cols) = get_terminal_size () in
+  let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
   Buffer.add_string buf Ansi.clear;
@@ -533,46 +649,17 @@ let render_keeper_detail (state : state) =
     let k = List.nth state.keepers state.keeper_cursor in
     let inner = cols - 4 in  (* width inside borders *)
 
-    (* Top border *)
-    Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-      Ansi.gray Ansi.box_tl (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset);
-
-    (* Title *)
-    let title = Printf.sprintf " Keeper: %s%s%s " Ansi.bold k.k_name Ansi.reset in
-    Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s%s%s\n"
-      Ansi.gray Ansi.box_v Ansi.reset
-      title
-      (String.make (max 0 (inner - String.length title + 10)) ' ')
-      Ansi.gray Ansi.box_v Ansi.reset);
-
-    (* Divider *)
-    Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-      Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
+    (* Build all detail lines first, then apply scroll *)
+    let lines = ref [] in
+    let add_line s = lines := s :: !lines in
 
     (* Helper to add a labeled row *)
     let add_row label value =
-      let line = Printf.sprintf "  %s%-22s%s %s" Ansi.cyan label Ansi.reset value in
-      Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-        Ansi.gray Ansi.box_v Ansi.reset
-        (fit_width line (inner))
-        Ansi.gray Ansi.box_v Ansi.reset)
+      add_line (Printf.sprintf "  %s%-22s%s %s" Ansi.cyan label Ansi.reset value)
     in
-
-    (* Empty row helper *)
-    let add_empty () =
-      Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-        Ansi.gray Ansi.box_v Ansi.reset
-        (String.make inner ' ')
-        Ansi.gray Ansi.box_v Ansi.reset)
-    in
-
-    (* Section header *)
+    let add_empty () = add_line "" in
     let add_section title =
-      let line = Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset in
-      Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-        Ansi.gray Ansi.box_v Ansi.reset
-        (fit_width line (inner))
-        Ansi.gray Ansi.box_v Ansi.reset)
+      add_line (Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset)
     in
 
     (* Identity section *)
@@ -590,6 +677,21 @@ let render_keeper_detail (state : state) =
     add_section "Goals";
     add_row "Goal:" (fit_width k.k_goal (inner - 26));
     add_row "Short Goal:" (fit_width k.k_short_goal (inner - 26));
+    add_empty ();
+
+    (* Live Context section (Phase 2) *)
+    add_section "Live Context";
+    if state.live_context_max > 0 then begin
+      let pct = state.live_context_ratio *. 100.0 in
+      let bar_width = min 30 (inner - 40) in
+      add_row "Context:" (Printf.sprintf "%s%.1f%%%s  %s  %d / %d tokens"
+        (ctx_color state.live_context_ratio) pct Ansi.reset
+        (ctx_bar state.live_context_ratio bar_width)
+        state.live_context_tokens state.live_context_max);
+      add_row "Messages:" (string_of_int state.live_message_count);
+    end else begin
+      add_row "Context:" (Ansi.dim ^ "(no metrics data)" ^ Ansi.reset);
+    end;
     add_empty ();
 
     (* Model section *)
@@ -622,12 +724,256 @@ let render_keeper_detail (state : state) =
     add_row "Created:" (short_ts k.k_created_at);
     add_row "Updated:" (short_ts k.k_updated_at);
 
+    (* Reverse to get correct order *)
+    let all_lines = List.rev !lines in
+    let total_lines = List.length all_lines in
+
+    (* Top border *)
+    box_top buf cols;
+
+    (* Title *)
+    let title = Printf.sprintf " Keeper: %s%s%s " Ansi.bold k.k_name Ansi.reset in
+    Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s%s%s\n"
+      Ansi.gray Ansi.box_v Ansi.reset
+      title
+      (String.make (max 0 (inner - String.length title + 10)) ' ')
+      Ansi.gray Ansi.box_v Ansi.reset);
+
+    (* Divider *)
+    box_divider buf cols;
+
+    (* Content area with scrolling *)
+    let content_height = rows - 6 in  (* header + title + divider + bottom + footer + extra *)
+    let visible_lines = min content_height total_lines in
+    let scroll = min state.detail_scroll (max 0 (total_lines - content_height)) in
+
+    for i = 0 to visible_lines - 1 do
+      let idx = i + scroll in
+      if idx < total_lines then
+        box_line buf cols (List.nth all_lines idx)
+      else
+        box_empty buf cols
+    done;
+
+    (* Fill remaining space *)
+    for _ = visible_lines to content_height - 1 do
+      box_empty buf cols
+    done;
+
+    (* Scroll indicator *)
+    if total_lines > content_height then begin
+      let indicator = Printf.sprintf "%s[%d/%d]%s" Ansi.dim (scroll + 1) (total_lines - content_height + 1) Ansi.reset in
+      box_line buf cols indicator
+    end;
+
     (* Bottom border *)
-    Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-      Ansi.gray Ansi.box_bl (draw_hline (cols - 2)) Ansi.box_br Ansi.reset);
+    box_bottom buf cols;
 
     (* Footer *)
-    Buffer.add_string buf (Printf.sprintf "%s  Esc:back  Tab:dashboard  q:quit  r:refresh%s\n"
+    Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  l:logs  m:message  Esc:back  Tab:dashboard  q:quit  r:refresh%s\n"
+      Ansi.dim Ansi.reset);
+
+    print_string (Buffer.contents buf);
+    flush stdout
+  end
+
+(** Render keeper log view *)
+let render_keeper_logs (state : state) =
+  let (rows, cols) = get_terminal_size () in
+  let buf = Buffer.create 4096 in
+
+  Buffer.add_string buf Ansi.clear;
+  Buffer.add_string buf Ansi.hide_cursor;
+
+  if state.keeper_cursor >= List.length state.keepers then begin
+    Buffer.add_string buf "No keeper selected.\n";
+    print_string (Buffer.contents buf);
+    flush stdout
+  end else begin
+    let k = List.nth state.keepers state.keeper_cursor in
+    let total_entries = List.length state.log_entries in
+
+    (* Header *)
+    let header = Printf.sprintf " Keeper Logs: %s%s%s  (%d entries)"
+      Ansi.bold k.k_name Ansi.reset total_entries in
+
+    box_top buf cols;
+    box_line buf cols header;
+    box_divider buf cols;
+
+    (* Column header *)
+    let col_hdr = Printf.sprintf "%s  %-8s %-5s %-7s %12s %8s %7s %6s  %-10s%s"
+      Ansi.dim "Time" "Chan" "Ctx" "Tokens" "In/Out" "Lat" "Cost" "Work" Ansi.reset in
+    box_line buf cols col_hdr;
+    box_divider buf cols;
+
+    (* Content area *)
+    let content_height = rows - 8 in
+    let scroll = min state.log_scroll (max 0 (total_entries - content_height)) in
+
+    if total_entries = 0 then begin
+      box_line buf cols (Ansi.dim ^ "  (no log entries found)" ^ Ansi.reset);
+      for _ = 1 to content_height - 1 do
+        box_empty buf cols
+      done
+    end else begin
+      for i = 0 to content_height - 1 do
+        let idx = i + scroll in
+        if idx < total_entries then begin
+          let e = List.nth state.log_entries idx in
+          (* Extract just the time portion from ts *)
+          let time_str =
+            if String.length e.le_ts >= 19 then
+              String.sub e.le_ts 11 8  (* HH:MM:SS *)
+            else e.le_ts
+          in
+          let pct = e.le_context_ratio *. 100.0 in
+          let ctx_str = Printf.sprintf "%s%5.1f%%%s"
+            (ctx_color e.le_context_ratio) pct Ansi.reset in
+          let tokens_str = Printf.sprintf "%6d/%6d"
+            e.le_context_tokens e.le_context_max in
+          let io_str = Printf.sprintf "%4d/%4d"
+            e.le_input_tokens e.le_output_tokens in
+          let lat_str =
+            if e.le_latency_ms > 0 then
+              Printf.sprintf "%5dms" e.le_latency_ms
+            else
+              Ansi.dim ^ "     --" ^ Ansi.reset
+          in
+          let cost_str =
+            if e.le_cost_usd > 0.0 then Printf.sprintf "$%.3f" e.le_cost_usd
+            else Ansi.dim ^ "   --" ^ Ansi.reset
+          in
+          let tools_str =
+            if List.length e.le_tools_used > 0 then
+              " " ^ Ansi.dim ^ (String.concat "," (List.filteri (fun i _ -> i < 2) e.le_tools_used)) ^ Ansi.reset
+            else ""
+          in
+          let guardrail_str =
+            if e.le_guardrail_stop then Ansi.red ^ " STOP" ^ Ansi.reset else ""
+          in
+          let line = Printf.sprintf "  %s %s %s %s %s %s %s  %-10s%s%s"
+            time_str (channel_color e.le_channel) ctx_str tokens_str
+            io_str lat_str cost_str e.le_work_kind tools_str guardrail_str
+          in
+          box_line buf cols line
+        end else
+          box_empty buf cols
+      done
+    end;
+
+    (* Scroll indicator *)
+    if total_entries > content_height then begin
+      let indicator = Printf.sprintf "%s[%d/%d entries, scroll %d]%s"
+        Ansi.dim total_entries (total_entries) scroll Ansi.reset in
+      box_line buf cols indicator
+    end;
+
+    box_bottom buf cols;
+
+    (* Footer *)
+    Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  q:quit  r:refresh%s\n"
+      Ansi.dim Ansi.reset);
+
+    print_string (Buffer.contents buf);
+    flush stdout
+  end
+
+(** Render message input/conversation view *)
+let render_keeper_message (state : state) =
+  let (rows, cols) = get_terminal_size () in
+  let buf = Buffer.create 4096 in
+
+  Buffer.add_string buf Ansi.clear;
+  Buffer.add_string buf Ansi.show_cursor;  (* Show cursor for text input *)
+
+  if state.keeper_cursor >= List.length state.keepers then begin
+    Buffer.add_string buf "No keeper selected.\n";
+    print_string (Buffer.contents buf);
+    flush stdout
+  end else begin
+    let k = List.nth state.keepers state.keeper_cursor in
+
+    (* Header *)
+    let header = Printf.sprintf " Message to: %s%s%s  (port %d)"
+      Ansi.bold k.k_name Ansi.reset state.port in
+
+    box_top buf cols;
+    box_line buf cols header;
+    box_divider buf cols;
+
+    (* Message history *)
+    let history_height = rows - 10 in  (* Reserve space for input area *)
+    let msg_count = List.length state.msg_history in
+    let start_idx = max 0 (msg_count - history_height) in
+
+    if msg_count = 0 then begin
+      box_line buf cols (Ansi.dim ^ "  (no messages yet -- type below and press Enter)" ^ Ansi.reset);
+      for _ = 1 to history_height - 1 do
+        box_empty buf cols
+      done
+    end else begin
+      let displayed = ref 0 in
+      List.iteri (fun i m ->
+        if i >= start_idx && !displayed < history_height then begin
+          let role_color = match m.me_role with
+            | "user" -> Ansi.cyan
+            | "assistant" -> Ansi.green
+            | _ -> Ansi.white
+          in
+          let role_label = match m.me_role with
+            | "user" -> "you"
+            | "assistant" -> k.k_name
+            | s -> s
+          in
+          let prefix = Printf.sprintf "  %s[%s] %s:%s "
+            role_color m.me_timestamp role_label Ansi.reset in
+          (* Word-wrap the message text across multiple lines *)
+          let text_width = max 20 (cols - 30) in
+          let text = m.me_text in
+          let text_len = String.length text in
+          if text_len <= text_width then begin
+            box_line buf cols (prefix ^ text);
+            incr displayed
+          end else begin
+            (* First line with prefix *)
+            box_line buf cols (prefix ^ String.sub text 0 text_width);
+            incr displayed;
+            (* Continuation lines *)
+            let indent = String.make (String.length "  [HH:MM:SS] xxxxxxx: ") ' ' in
+            let pos = ref text_width in
+            while !pos < text_len && !displayed < history_height do
+              let chunk_len = min text_width (text_len - !pos) in
+              box_line buf cols (indent ^ String.sub text !pos chunk_len);
+              pos := !pos + chunk_len;
+              incr displayed
+            done
+          end
+        end
+      ) state.msg_history;
+      (* Fill remaining space *)
+      for _ = !displayed to history_height - 1 do
+        box_empty buf cols
+      done
+    end;
+
+    (* Input area divider *)
+    box_divider buf cols;
+
+    (* Input line *)
+    let input_text = Buffer.contents state.msg_input in
+    let prompt =
+      if state.msg_sending then
+        Printf.sprintf "  %s(sending...)%s" Ansi.yellow Ansi.reset
+      else
+        Printf.sprintf "  %s>%s %s" Ansi.cyan Ansi.reset input_text
+    in
+    box_line buf cols prompt;
+
+    box_bottom buf cols;
+
+    (* Footer *)
+    Buffer.add_string buf (Printf.sprintf "%s  Enter:send  Esc:back  Ctrl-U:clear line%s\n"
       Ansi.dim Ansi.reset);
 
     print_string (Buffer.contents buf);
@@ -640,6 +986,8 @@ let render (state : state) =
   | Dashboard -> render_dashboard state
   | Keeper_list -> render_keeper_list state
   | Keeper_detail -> render_keeper_detail state
+  | Keeper_logs -> render_keeper_logs state
+  | Keeper_message -> render_keeper_message state
 
 (** Load keepers from .masc/perpetual-keepers/ *)
 let load_keepers (base_path : string) : keeper list =
@@ -699,6 +1047,134 @@ let load_keepers (base_path : string) : keeper list =
        )
     |> List.sort (fun a b -> String.compare a.k_name b.k_name)
   else []
+
+(** Read the last N lines from a file (tail) *)
+let read_last_lines path n =
+  try
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        (* Read all lines then take last N -- simple for JSONL files < 1MB *)
+        let lines = ref [] in
+        (try while true do
+           lines := input_line ic :: !lines
+         done with End_of_file -> ());
+        let all = List.rev !lines in
+        let len = List.length all in
+        if len <= n then all
+        else
+          List.filteri (fun i _ -> i >= len - n) all)
+  with _ -> []
+
+(** Parse a single metrics JSONL line into a log_entry *)
+let parse_log_entry (line : string) : log_entry option =
+  try
+    let json = Yojson.Safe.from_string line in
+    let open Yojson.Safe.Util in
+    let str key default = try json |> member key |> to_string with _ -> default in
+    let int_ key default = try json |> member key |> to_int with _ -> default in
+    let float_ key default = try json |> member key |> to_number with _ -> default in
+    let bool_ key default = try json |> member key |> to_bool with _ -> default in
+    let str_list key = try json |> member key |> to_list |> List.map to_string with _ -> [] in
+    Some {
+      le_ts = str "ts" "";
+      le_channel = str "channel" "unknown";
+      le_context_ratio = float_ "context_ratio" 0.0;
+      le_context_tokens = int_ "context_tokens" 0;
+      le_context_max = int_ "context_max" 0;
+      le_message_count = int_ "message_count" 0;
+      le_model_used = str "model_used" "";
+      le_input_tokens = (try json |> member "usage" |> member "input_tokens" |> to_int with _ -> 0);
+      le_output_tokens = (try json |> member "usage" |> member "output_tokens" |> to_int with _ -> 0);
+      le_latency_ms = int_ "latency_ms" 0;
+      le_cost_usd = float_ "cost_usd" 0.0;
+      le_work_kind = str "work_kind" "";
+      le_tools_used = str_list "tools_used";
+      le_compacted = bool_ "compacted" false;
+      le_goal_alignment = float_ "goal_alignment" 0.0;
+      le_repetition_risk = float_ "repetition_risk" 0.0;
+      le_guardrail_stop = bool_ "guardrail_stop" false;
+    }
+  with _ -> None
+
+(** Find the most recent metrics file for a keeper *)
+let find_metrics_files (base_path : string) (keeper_name : string) : string list =
+  let metrics_dir = Filename.concat
+    (Filename.concat
+       (Filename.concat base_path ".masc")
+       "perpetual-keepers")
+    (Filename.concat keeper_name "metrics") in
+  if not (Sys.file_exists metrics_dir && Sys.is_directory metrics_dir) then []
+  else begin
+    (* List year-month directories, pick the most recent *)
+    let months = Sys.readdir metrics_dir
+      |> Array.to_list
+      |> List.filter (fun d ->
+           let full = Filename.concat metrics_dir d in
+           Sys.is_directory full)
+      |> List.sort (fun a b -> String.compare b a)  (* Reverse sort: most recent first *)
+    in
+    match months with
+    | [] -> []
+    | month :: _ ->
+      let month_dir = Filename.concat metrics_dir month in
+      Sys.readdir month_dir
+      |> Array.to_list
+      |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
+      |> List.sort (fun a b -> String.compare b a)  (* Most recent first *)
+      |> List.map (fun f -> Filename.concat month_dir f)
+  end
+
+(** Load log entries for the currently selected keeper *)
+let load_keeper_logs (base_path : string) (keeper_name : string) (max_entries : int) : log_entry list =
+  let files = find_metrics_files base_path keeper_name in
+  let entries = ref [] in
+  let remaining = ref max_entries in
+  List.iter (fun path ->
+    if !remaining > 0 then begin
+      let lines = read_last_lines path !remaining in
+      let parsed = List.filter_map parse_log_entry lines in
+      entries := parsed @ !entries;
+      remaining := !remaining - List.length parsed
+    end
+  ) files;
+  (* Return in chronological order, limited to max_entries *)
+  let all = List.rev !entries in
+  let len = List.length all in
+  if len <= max_entries then all
+  else List.filteri (fun i _ -> i >= len - max_entries) all
+
+(** Load live context status from the latest metrics entry *)
+let load_live_context (state : state) (base_path : string) (keeper_name : string) =
+  let files = find_metrics_files base_path keeper_name in
+  match files with
+  | [] ->
+    state.live_context_ratio <- 0.0;
+    state.live_context_tokens <- 0;
+    state.live_context_max <- 0;
+    state.live_message_count <- 0
+  | latest_file :: _ ->
+    (* Read just the last line *)
+    let lines = read_last_lines latest_file 1 in
+    (match lines with
+     | [] ->
+       state.live_context_ratio <- 0.0;
+       state.live_context_tokens <- 0;
+       state.live_context_max <- 0;
+       state.live_message_count <- 0
+     | line :: _ ->
+       match parse_log_entry line with
+       | None ->
+         state.live_context_ratio <- 0.0;
+         state.live_context_tokens <- 0;
+         state.live_context_max <- 0;
+         state.live_message_count <- 0
+       | Some e ->
+         state.live_context_ratio <- e.le_context_ratio;
+         state.live_context_tokens <- e.le_context_tokens;
+         state.live_context_max <- e.le_context_max;
+         state.live_message_count <- e.le_message_count)
 
 (** Load state from .masc directory *)
 let load_from_masc_dir (state : state) (base_path : string) =
@@ -762,6 +1238,12 @@ let load_from_masc_dir (state : state) (base_path : string) =
   if state.keeper_cursor >= List.length state.keepers then
     state.keeper_cursor <- max 0 (List.length state.keepers - 1);
 
+  (* Load live context for selected keeper *)
+  if state.keeper_cursor < List.length state.keepers then begin
+    let k = List.nth state.keepers state.keeper_cursor in
+    load_live_context state base_path k.k_name
+  end;
+
   state.last_refresh <- Unix.gettimeofday ()
 
 (** Add event to the event log *)
@@ -771,6 +1253,111 @@ let add_event (state : state) event_type content =
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let ev = { timestamp; event_type; content } in
   state.events <- ev :: (List.filteri (fun i _ -> i < 10) state.events)
+
+(** Send a message to a keeper via HTTP POST to /api/v1/keepers/chat/stream *)
+let send_keeper_message (state : state) (keeper_name : string) (message : string) : string =
+  try
+    let host = "127.0.0.1" in
+    let port = state.port in
+    let addr = Unix.ADDR_INET (Unix.inet_addr_of_string host, port) in
+    let (ic, oc) = Unix.open_connection addr in
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.shutdown_connection ic;
+        close_in_noerr ic;
+        close_out_noerr oc)
+      (fun () ->
+        (* Build JSON body *)
+        let body = Printf.sprintf {|{"name":"%s","message":"%s","models":[]}|}
+          (String.escaped keeper_name)
+          (String.escaped message) in
+        let body_len = String.length body in
+
+        (* Send HTTP request *)
+        let request = Printf.sprintf
+          "POST /api/v1/keepers/chat/stream HTTP/1.1\r\n\
+           Host: %s:%d\r\n\
+           Content-Type: application/json\r\n\
+           Content-Length: %d\r\n\
+           Connection: close\r\n\
+           \r\n\
+           %s"
+          host port body_len body in
+        output_string oc request;
+        flush oc;
+
+        (* Read response *)
+        let buf = Buffer.create 4096 in
+        (try while true do
+           let line = input_line ic in
+           Buffer.add_string buf line;
+           Buffer.add_char buf '\n'
+         done with End_of_file -> ());
+
+        let response = Buffer.contents buf in
+
+        (* Parse SSE response: look for data: lines *)
+        let lines = String.split_on_char '\n' response in
+        let result = Buffer.create 1024 in
+        List.iter (fun line ->
+          let line = String.trim line in
+          if String.length line > 6 && String.sub line 0 6 = "data: " then begin
+            let data = String.sub line 6 (String.length line - 6) in
+            (* Try to parse JSON and extract delta *)
+            (try
+              let json = Yojson.Safe.from_string data in
+              let open Yojson.Safe.Util in
+              let typ = try json |> member "type" |> to_string with _ -> "" in
+              if typ = "content_delta" || typ = "delta" then begin
+                let delta = try json |> member "delta" |> to_string with _ -> "" in
+                Buffer.add_string result delta
+              end else if typ = "content_complete" || typ = "complete" then begin
+                (* Check for full text in content field *)
+                let text = try json |> member "text" |> to_string with _ -> "" in
+                if text <> "" && Buffer.length result = 0 then
+                  Buffer.add_string result text
+              end
+            with _ -> ())
+          end
+        ) lines;
+
+        let reply = Buffer.contents result in
+        if String.length reply > 0 then reply
+        else begin
+          (* Fallback: look for JSON response body *)
+          let body_start = try
+            let idx = ref 0 in
+            let found = ref false in
+            while not !found && !idx < String.length response - 3 do
+              if String.sub response !idx 4 = "\r\n\r\n" then begin
+                found := true;
+                idx := !idx + 4
+              end else
+                incr idx
+            done;
+            if !found then !idx else 0
+          with _ -> 0 in
+          if body_start > 0 then begin
+            let body_str = String.sub response body_start (String.length response - body_start) in
+            (* Try parsing as JSON *)
+            (try
+              let json = Yojson.Safe.from_string (String.trim body_str) in
+              let open Yojson.Safe.Util in
+              let text = try json |> member "result" |> member "text" |> to_string with _ -> "" in
+              if text <> "" then text
+              else
+                let msg = try json |> member "error" |> member "message" |> to_string with _ -> "" in
+                if msg <> "" then "(error: " ^ msg ^ ")"
+                else "(no response parsed)"
+            with _ -> "(response parsing failed)")
+          end else "(empty response)"
+        end)
+  with
+  | Unix.Unix_error (err, _, _) ->
+    Printf.sprintf "(connection failed: %s -- is MASC server running on port %d?)"
+      (Unix.error_message err) state.port
+  | exn ->
+    Printf.sprintf "(error: %s)" (Printexc.to_string exn)
 
 (** Read a single byte from stdin, returning Some char or None *)
 let read_byte () : char option =
@@ -840,6 +1427,79 @@ let parse_args () =
 
   (base, r, !port, !refresh)
 
+(** Handle key input for message mode *)
+let handle_message_key (state : state) (base_path : string) (key : string) : bool =
+  match key with
+  | "esc" ->
+    state.view <- Keeper_detail;
+    state.detail_scroll <- 0;
+    true
+  | "\r" | "\n" ->
+    (* Send the message *)
+    let text = Buffer.contents state.msg_input in
+    if String.length (String.trim text) > 0 then begin
+      let keeper_name =
+        if state.keeper_cursor < List.length state.keepers then
+          (List.nth state.keepers state.keeper_cursor).k_name
+        else "unknown"
+      in
+      (* Add user message to history *)
+      let now = Unix.localtime (Unix.gettimeofday ()) in
+      let ts = Printf.sprintf "%02d:%02d:%02d"
+        now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+      state.msg_history <- state.msg_history @ [{
+        me_role = "user";
+        me_text = text;
+        me_timestamp = ts;
+      }];
+      Buffer.clear state.msg_input;
+
+      (* Render to show "sending..." *)
+      state.msg_sending <- true;
+      render state;
+
+      (* Send and get reply *)
+      let reply = send_keeper_message state keeper_name text in
+
+      (* Add reply to history *)
+      let now2 = Unix.localtime (Unix.gettimeofday ()) in
+      let ts2 = Printf.sprintf "%02d:%02d:%02d"
+        now2.Unix.tm_hour now2.Unix.tm_min now2.Unix.tm_sec in
+      state.msg_history <- state.msg_history @ [{
+        me_role = "assistant";
+        me_text = reply;
+        me_timestamp = ts2;
+      }];
+      state.msg_sending <- false;
+      add_event state "message" (Printf.sprintf "Sent to %s" keeper_name);
+
+      (* Refresh data after message *)
+      load_from_masc_dir state base_path
+    end;
+    true
+  | "\127" | "\b" ->
+    (* Backspace: delete last character *)
+    let len = Buffer.length state.msg_input in
+    if len > 0 then begin
+      let new_content = Buffer.sub state.msg_input 0 (len - 1) in
+      Buffer.clear state.msg_input;
+      Buffer.add_string state.msg_input new_content
+    end;
+    true
+  | s when String.length s = 1 ->
+    let c = Char.code s.[0] in
+    if c = 21 then begin
+      (* Ctrl-U: clear line *)
+      Buffer.clear state.msg_input;
+      true
+    end else if c >= 32 && c < 127 then begin
+      (* Printable character *)
+      Buffer.add_string state.msg_input s;
+      true
+    end else
+      true  (* Consume but ignore other control chars *)
+  | _ -> true
+
 (** Main loop *)
 let main () =
   let (base_path, room, port, refresh) = parse_args () in
@@ -872,41 +1532,101 @@ let main () =
       (* Check for input *)
       let key = read_key () in
       (match key with
+       | Some k when state.view = Keeper_message ->
+           let _handled = handle_message_key state base_path k in
+           ()
        | Some "q" | Some "Q" -> raise Exit
        | Some "r" | Some "R" ->
            load_from_masc_dir state base_path;
+           (* Also reload logs if in log view *)
+           (match state.view with
+            | Keeper_logs when state.keeper_cursor < List.length state.keepers ->
+                let k = List.nth state.keepers state.keeper_cursor in
+                state.log_entries <- load_keeper_logs base_path k.k_name 200
+            | _ -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
            (* Tab toggles between Dashboard and Keeper_list *)
            (match state.view with
             | Dashboard -> state.view <- Keeper_list
             | Keeper_list -> state.view <- Dashboard
-            | Keeper_detail -> state.view <- Dashboard)
+            | Keeper_detail ->
+                state.view <- Dashboard;
+                state.detail_scroll <- 0
+            | Keeper_logs ->
+                state.view <- Dashboard;
+                state.log_scroll <- 0
+            | Keeper_message ->
+                state.view <- Dashboard)
        | Some "esc" ->
-           (* Esc goes back from detail to list *)
+           (* Esc goes back *)
            (match state.view with
-            | Keeper_detail -> state.view <- Keeper_list
+            | Keeper_detail ->
+                state.view <- Keeper_list;
+                state.detail_scroll <- 0
+            | Keeper_logs ->
+                state.view <- Keeper_detail;
+                state.log_scroll <- 0;
+                state.detail_scroll <- 0
+            | Keeper_message ->
+                state.view <- Keeper_detail;
+                state.detail_scroll <- 0
             | _ -> ())
        | Some "j" | Some "down" ->
-           (* Move cursor down in keeper list *)
            (match state.view with
             | Keeper_list ->
-                if state.keeper_cursor < List.length state.keepers - 1 then
-                  state.keeper_cursor <- state.keeper_cursor + 1
+                if state.keeper_cursor < List.length state.keepers - 1 then begin
+                  state.keeper_cursor <- state.keeper_cursor + 1;
+                  (* Update live context for new selection *)
+                  let k = List.nth state.keepers state.keeper_cursor in
+                  load_live_context state base_path k.k_name
+                end
+            | Keeper_detail ->
+                state.detail_scroll <- state.detail_scroll + 1
+            | Keeper_logs ->
+                state.log_scroll <- state.log_scroll + 1
             | _ -> ())
        | Some "k" | Some "up" ->
-           (* Move cursor up in keeper list *)
            (match state.view with
             | Keeper_list ->
-                if state.keeper_cursor > 0 then
-                  state.keeper_cursor <- state.keeper_cursor - 1
+                if state.keeper_cursor > 0 then begin
+                  state.keeper_cursor <- state.keeper_cursor - 1;
+                  let k = List.nth state.keepers state.keeper_cursor in
+                  load_live_context state base_path k.k_name
+                end
+            | Keeper_detail ->
+                if state.detail_scroll > 0 then
+                  state.detail_scroll <- state.detail_scroll - 1
+            | Keeper_logs ->
+                if state.log_scroll > 0 then
+                  state.log_scroll <- state.log_scroll - 1
             | _ -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
             | Keeper_list ->
-                if List.length state.keepers > 0 then
-                  state.view <- Keeper_detail
+                if List.length state.keepers > 0 then begin
+                  state.view <- Keeper_detail;
+                  state.detail_scroll <- 0;
+                  let k = List.nth state.keepers state.keeper_cursor in
+                  load_live_context state base_path k.k_name
+                end
+            | _ -> ())
+       | Some "l" | Some "L" ->
+           (* L opens log view from detail *)
+           (match state.view with
+            | Keeper_detail when state.keeper_cursor < List.length state.keepers ->
+                let k = List.nth state.keepers state.keeper_cursor in
+                state.log_entries <- load_keeper_logs base_path k.k_name 200;
+                state.log_scroll <- max 0 (List.length state.log_entries - 1);
+                state.view <- Keeper_logs
+            | _ -> ())
+       | Some "m" | Some "M" ->
+           (* M opens message view from detail *)
+           (match state.view with
+            | Keeper_detail when state.keeper_cursor < List.length state.keepers ->
+                Buffer.clear state.msg_input;
+                state.view <- Keeper_message
             | _ -> ())
        | _ -> ());
 
@@ -914,6 +1634,12 @@ let main () =
       let now = Unix.gettimeofday () in
       if now -. !last_check >= refresh then begin
         load_from_masc_dir state base_path;
+        (* Also refresh logs if viewing them *)
+        (match state.view with
+         | Keeper_logs when state.keeper_cursor < List.length state.keepers ->
+             let k = List.nth state.keepers state.keeper_cursor in
+             state.log_entries <- load_keeper_logs base_path k.k_name 200
+         | _ -> ());
         last_check := now
       end;
 

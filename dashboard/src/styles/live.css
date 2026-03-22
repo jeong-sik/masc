@@ -20,11 +20,6 @@
   box-shadow: 0 0 8px var(--blue-400-15);
 }
 
-@keyframes livePulse {
-  0%, 100% { box-shadow: 0 0 0 0 var(--ok-25); }
-  50% { box-shadow: 0 0 8px 2px var(--ok-12); }
-}
-
 /* ── Activity Stream ── */
 .activity-filter-btn {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -56,11 +51,6 @@
 
 .activity-item-new {
   animation: activityFadeIn 0.3s ease-out;
-}
-
-@keyframes activityFadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 
 .activity-kind-chip.live-event-broadcast { background: var(--blue-400-15); color: var(--accent); }

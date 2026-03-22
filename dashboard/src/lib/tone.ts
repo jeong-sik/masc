@@ -79,6 +79,19 @@ export function expiryTone(iso?: string | null): string {
   return ts <= Date.now() ? 'bad' : 'ok'
 }
 
+const TONE_BORDER: Record<string, string> = { ok: 'tone-border-ok', warn: 'tone-border-warn', bad: 'tone-border-bad' }
+const TONE_BG: Record<string, string> = { ok: 'tone-bg-ok', warn: 'tone-bg-warn', bad: 'tone-bg-bad' }
+
+/** Returns the tone-border-* utility class for a given tone value. */
+export function toneBorder(tone?: string | null): string {
+  return TONE_BORDER[toneClass(tone)] ?? 'tone-border-ok'
+}
+
+/** Returns the tone-bg-* utility class for a given tone value. */
+export function toneBg(tone?: string | null): string {
+  return TONE_BG[toneClass(tone)] ?? 'tone-bg-ok'
+}
+
 /** Governance tone — maps governance decision values to 'positive' | 'negative' | 'neutral'. */
 export function governanceToneClass(raw: string | null | undefined): string {
   const value = (raw || '').toLowerCase()

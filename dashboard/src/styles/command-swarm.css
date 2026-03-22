@@ -96,15 +96,6 @@
 }
 .orchestra-signal-glyph { fill: var(--text-near-white); font-size: var(--fs-xs); font-weight: 700; }
 
-@keyframes orchestraFlow {
-  to { stroke-dashoffset: -40; }
-}
-
-@keyframes orchestraPulse {
-  0%, 100% { transform: scale(1); opacity: 0.92; }
-  50% { transform: scale(1.06); opacity: 1; }
-}
-
 /* ── SwarmHealthBar ────────────────────────────── */
 .swarm-health-seg { transition: flex 0.3s ease; }
 .swarm-health-seg.moving { background: var(--ok); }

@@ -56,11 +56,6 @@
   color: var(--ff-gold, var(--ff-gold));
 }
 
-@keyframes keeper-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
 /* Scrollbar */
 .keeper-chat__messages::-webkit-scrollbar {
   width: 4px;

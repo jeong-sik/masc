@@ -52,11 +52,6 @@
   animation: blocker-pulse 1.5s ease-in-out infinite;
 }
 
-@keyframes blocker-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.4); }
-  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.7); }
-}
-
 /* Activity dot — positioned absolute */
 .pixel-avatar__activity-dot {
   position: absolute;

@@ -19,12 +19,12 @@ import { operatorSnapshot } from '../../operator-store'
 import { route } from '../../router'
 import type { DashboardWorkflowContext } from '../../workflow-context'
 import { relativeTime, formatElapsed } from '../../lib/format-time'
-import { toneClass, chainStatusTone, sessionStatusTone, expiryTone } from '../../lib/tone'
+import { toneClass, toneBorder, toneBg, chainStatusTone, sessionStatusTone, expiryTone } from '../../lib/tone'
 import { prettyJson, displayStatus } from '../../lib/status-label'
 
 // ── Pure helpers ──────────────────────────────
 
-export { relativeTime, formatElapsed, toneClass, chainStatusTone, sessionStatusTone, expiryTone, prettyJson, displayStatus }
+export { relativeTime, formatElapsed, toneClass, toneBorder, toneBg, chainStatusTone, sessionStatusTone, expiryTone, prettyJson, displayStatus }
 
 export function alertBorderTone(tone: string): string {
   if (tone === 'warn') return 'border-[rgba(251,191,36,0.26)]'

@@ -1,15 +1,6 @@
-/* --- Sticky header --- */
-.tool-inventory-sticky-header {
-  position: sticky;
-  top: var(--header-h);
-  z-index: var(--z-tab-sticky);
-  background: rgba(11, 18, 32, 0.95);
-  backdrop-filter: blur(8px);
-  padding: 12px 0;
-  border-bottom: 1px solid var(--slate-gray-12);
-}
+/* ── Tools — kept: auto-fit grid, webkit-line-clamp, back-to-top,
+   bar-row grid, tier badges, responsive, surface-count active ── */
 
-/* --- Summary stats --- */
 .tool-inventory-summary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -17,114 +8,7 @@
   margin: 18px 0;
 }
 
-.tool-inventory-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-}
-
-.tool-inventory-stat .stat-value {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--text-near-white);
-}
-
-.tool-inventory-stat .stat-label {
-  font-size: var(--fs-sm);
-  color: var(--text-slate);
-}
-
-/* --- Surface tabs --- */
-.tool-surface-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.tool-surface-tabs .control-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-sm);
-}
-
-.tool-surface-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 18px;
-  padding: 0 5px;
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  background: rgba(148, 163, 184, 0.18);
-  color: var(--text-slate);
-}
-
-.control-btn.is-active .tool-surface-count {
-  background: rgba(14, 165, 233, 0.25);
-  color: #7dd3fc;
-}
-
-/* --- Filters --- */
-.tool-inventory-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 0;
-}
-
-.tool-inventory-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-sm);
-  color: var(--text-slate-light);
-}
-
-/* --- Virtual scroll container --- */
-.tool-inventory-virtual-container {
-  overflow-y: auto;
-  max-height: calc(100vh - 420px);
-  min-height: 300px;
-}
-
-/* --- List & rows --- */
-.tool-inventory-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.tool-inventory-row {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  border-radius: 16px;
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.16);
-}
-
-.tool-inventory-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.tool-inventory-name {
-  font-size: var(--fs-lg);
-  font-weight: 700;
-  color: var(--text-near-white);
-}
-
+/* webkit-line-clamp — not expressible in Tailwind v4 */
 .tool-inventory-desc {
   margin-top: 4px;
   font-size: var(--fs-base);
@@ -140,27 +24,6 @@
   -webkit-line-clamp: unset;
 }
 
-.tool-inventory-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  justify-content: flex-end;
-}
-
-.tool-inventory-meta,
-.tool-inventory-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  font-size: var(--fs-sm);
-  color: var(--text-slate);
-}
-
-.tool-inventory-meta strong,
-.tool-inventory-links strong {
-  color: var(--text-slate-light);
-}
-
 .tool-inventory-reason {
   font-size: var(--fs-sm);
   color: var(--warn);
@@ -170,13 +33,7 @@
   overflow: hidden;
 }
 
-.tool-inventory-usage-hint {
-  margin-bottom: 12px;
-  font-size: var(--fs-sm);
-  color: var(--text-slate);
-}
-
-/* --- Back to top --- */
+/* Back to top — visibility/hover transitions */
 .tool-back-to-top {
   position: fixed;
   bottom: 24px;
@@ -208,81 +65,13 @@
   color: var(--text-near-white);
 }
 
-/* --- Responsive --- */
-@media (max-width: 880px) {
-  .tool-inventory-head {
-    flex-direction: column;
-  }
-
-  .tool-inventory-badges {
-    justify-content: flex-start;
-  }
-
-  .tool-inventory-virtual-container {
-    max-height: calc(100vh - 480px);
-  }
+/* Surface count active state */
+.control-btn.is-active .tool-surface-count {
+  background: rgba(14, 165, 233, 0.25);
+  color: #7dd3fc;
 }
 
-/* --- Tool Summary View --- */
-
-
-.tool-summary-heading {
-  font-size: var(--fs-base);
-  font-weight: 600;
-  color: var(--white-60);
-  margin: 0 0 10px 0;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.tool-bar-chart {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.tool-summary-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  background: var(--panel-dark-60);
-  border: 1px solid var(--slate-gray-8);
-}
-
-.tool-summary-name {
-  font-size: var(--fs-base);
-  font-weight: 500;
-  color: var(--text-slate-light);
-  min-width: 180px;
-  flex-shrink: 0;
-}
-
-.tool-summary-desc {
-  font-size: var(--fs-sm);
-  color: var(--white-40);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* ── Tool Metrics (P4 Phase 4.5) ──────────────────────────── */
-.tool-metrics-title {
-  color: var(--text-strong);
-  font-size: var(--fs-lg);
-  font-weight: 600;
-  margin: 0;
-}
-
-.tool-metrics-error {
-  padding: 10px 12px;
-  background: var(--bad-12);
-  border: 1px solid rgba(239, 68, 68, 0.34);
-  color: #fecaca;
-  font-size: var(--fs-base);
-}
-
-/* ── Summary stats row ──────────────────────────────────── */
+/* ── Tool Metrics ── */
 .tool-metrics-summary {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -301,61 +90,13 @@
   text-align: center;
 }
 
-.tool-metrics-stat .stat-value {
-  color: var(--text-strong);
-  font-size: 22px;
-  font-weight: 600;
-  line-height: 1.1;
-}
-
-.tool-metrics-stat .stat-label {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* ── Two-column sections ────────────────────────────────── */
 .tool-metrics-sections {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   gap: 16px;
 }
 
-.tool-metrics-section h4 {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 0 0 10px;
-}
-
-/* ── Tier distribution ──────────────────────────────────── */
-.tier-dist-label {
-  display: inline-block;
-  min-width: 72px;
-  padding: 2px 8px;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  text-align: center;
-}
-
-.tier-dist-count {
-  color: var(--text-strong);
-  font-size: var(--fs-md);
-  font-weight: 600;
-  min-width: 36px;
-  text-align: right;
-}
-
-.tier-dist-pct {
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  min-width: 48px;
-  text-align: right;
-}
-
-/* ── Tier badges ────────────────────────────────────────── */
+/* Tier badges */
 .badge-essential {
   background: var(--ok-18);
   color: var(--ok);
@@ -371,7 +112,7 @@
   color: var(--text-muted);
 }
 
-/* ── Bar chart ──────────────────────────────────────────── */
+/* Bar chart row — complex grid template */
 .tool-bar-row {
   display: grid;
   grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
@@ -380,47 +121,12 @@
   font-size: var(--fs-sm);
 }
 
-.tool-bar-name {
-  color: var(--text-body);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: var(--fs-xs);
-}
-
-.tool-bar-tier {
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  text-align: center;
-}
-
-.tool-bar-track {
-  height: 14px;
-  border-radius: 3px;
-  background: var(--white-6);
-  overflow: hidden;
-}
-
-.tool-bar-fill {
-  height: 100%;
-  border-radius: 3px;
-  background: var(--accent);
-  min-width: 2px;
-  transition: width 0.3s ease;
-}
-
-.tool-bar-count {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
-  text-align: right;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-/* ── Responsive ─────────────────────────────────────────── */
+/* ── Responsive ── */
 @media (max-width: 880px) {
+  .tool-inventory-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   .tool-metrics-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

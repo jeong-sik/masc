@@ -35,9 +35,9 @@ export { selectedAgentName, openAgentDetail, closeAgentDetail } from './agent-de
 
 function TaskSummary({ task }: { task: Task }) {
   return html`
-    <div class="agent-detail-task rounded-lg">
+    <div class="flex items-center gap-2 border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 rounded-lg">
       <span class="pill rounded-full">${task.id}</span>
-      <span class="agent-detail-task rounded-lg-title">${task.title}</span>
+      <span class="flex-1 text-[#d7e7ff]">${task.title}</span>
       <${StatusBadge} status=${task.status} />
     </div>
   `
@@ -45,11 +45,11 @@ function TaskSummary({ task }: { task: Task }) {
 
 function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   return html`
-    <div class="agent-history-row">
+    <div class="border border-[var(--card-border)] rounded-[10px] bg-[var(--white-2)] p-2.5">
       <div class="mb-2">
         <span class="pill rounded-full">${row.taskId}</span>
       </div>
-      <pre class="agent-history-pre">${row.text || 'No task history yet'}</pre>
+      <pre class="m-0 whitespace-pre-wrap text-[length:var(--fs-sm)] leading-[1.5] text-[#cfe0ff] font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace]">${row.text || 'No task history yet'}</pre>
     </div>
   `
 }
@@ -93,13 +93,13 @@ export function AgentDetailOverlay() {
 
   return html`
     <div
-      class="agent-detail-overlay"
+      class="agent-detail-overlay fixed inset-0 z-[var(--z-overlay-agent,3030)] bg-black/64 backdrop-blur-[4px] isolate flex items-center justify-center p-5"
       data-testid="agent-detail-overlay"
       onClick=${(e: Event) => {
         if ((e.target as HTMLElement).classList.contains('agent-detail-overlay')) closeAgentDetail()
       }}
     >
-      <div class="agent-detail-modal">
+      <div class="w-[min(1020px,100%)] max-h-[90vh] overflow-y-auto rounded-[14px] border border-[var(--border-slate-30)] bg-[rgba(16,25,45,0.95)] p-[18px]">
         <div class="flex justify-between gap-3 mb-3.5">
           <div class="flex flex-col gap-2 flex-1">
             <div class="flex items-center gap-3">
@@ -160,7 +160,7 @@ export function AgentDetailOverlay() {
           <${Card} title="최근 활동">
             ${lines.length === 0
               ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">최근 활동 기록이 없습니다</div>`
-              : html`<div class="agent-activity-list">${lines.map((line: string, idx: number) => html`<div key=${idx} class="agent-activity-line rounded-lg">${line}</div>`)}</div>`}
+              : html`<div class="max-h-[210px] overflow-y-auto flex flex-col gap-1.5">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-[var(--card-border)] bg-[var(--white-3)] px-2.5 py-2 font-[family-name:'IBM_Plex_Mono','Fira_Code',monospace] text-[length:var(--fs-sm)] text-[#c8daf7] leading-[1.4] rounded-lg">${line}</div>`)}</div>`}
           <//>
         </div>
 

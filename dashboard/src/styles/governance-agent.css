@@ -1,83 +1,4 @@
-/* ── Agent Detail Overlay ─────────────────────────────────── */
-.agent-detail-overlay {
-  /* Uses --z-overlay-agent */
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-overlay-agent, 3030);
-  background: rgba(0, 0, 0, 0.64);
-  backdrop-filter: blur(4px);
-  isolation: isolate;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-}
-
-.agent-detail-modal {
-  width: min(1020px, 100%);
-  max-height: 90vh;
-  overflow-y: auto;
-  border-radius: 14px;
-  border: 1px solid var(--border-slate-30);
-  background: rgba(16, 25, 45, 0.95);
-  padding: 18px;
-}
-
-.agent-detail-task {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--card-border);
-  background: var(--white-3);
-  padding: 8px 10px;
-}
-
-.agent-detail-task-title {
-  flex: 1;
-  color: #d7e7ff;
-}
-
-.agent-activity-list {
-  max-height: 210px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.agent-activity-line {
-  border: 1px solid var(--card-border);
-  background: var(--white-3);
-  padding: 8px 10px;
-  font-family: "IBM Plex Mono", "Fira Code", monospace;
-  font-size: var(--fs-sm);
-  color: #c8daf7;
-  line-height: 1.4;
-}
-
-.agent-history-row {
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  background: var(--white-2);
-  padding: 10px;
-}
-
-.agent-history-pre {
-  margin: 0;
-  white-space: pre-wrap;
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-  color: #cfe0ff;
-  font-family: "IBM Plex Mono", "Fira Code", monospace;
-}
-
-/* ── FF Character Sheet — Agent Profile ──────────────────── */
-
-.ff-profile {
-  padding: 0 4px;
-}
-
-/* --- Character Plate (top section) --- */
+/* ── FF Character Sheet — kept: gradient plate, signal variants, responsive ── */
 
 .ff-plate {
   display: grid;
@@ -98,49 +19,7 @@
     inset 0 1px 0 var(--ff-gold-8);
 }
 
-.ff-plate__name {
-  margin: 0;
-  font-size: 20px;
-  color: var(--ff-gold);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.ff-plate__level {
-  font-size: var(--fs-md);
-  font-weight: 700;
-  color: var(--accent);
-  background: var(--accent-10);
-  border: 1px solid rgba(71, 184, 255, 0.25);
-  padding: 1px 6px;
-  font-variant-numeric: tabular-nums;
-}
-
-.ff-plate__model {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-  background: var(--accent-8);
-  border: 1px solid rgba(71, 184, 255, 0.15);
-  padding: 1px 5px;
-}
-
-.ff-plate__autonomy {
-  font-size: var(--fs-xs);
-  color: var(--ff-gold);
-  background: var(--ff-gold-10);
-  border: 1px solid var(--ff-gold-20);
-  padding: 1px 5px;
-}
-
-.ff-plate__signal {
-  font-size: var(--fs-2xs);
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  padding: 1px 5px;
-}
-
+/* Signal badges — stateful variants */
 .ff-plate__signal--live {
   color: var(--ok);
   background: var(--ok-10);
@@ -159,95 +38,9 @@
   border: 1px solid rgba(128, 128, 128, 0.15);
 }
 
-.ff-plate__bar-label {
-  font-size: var(--fs-xs);
-  font-weight: 700;
-  color: var(--ff-gold);
-  letter-spacing: 1px;
-  width: 28px;
-}
-
-.ff-plate__bar-value {
-  font-size: var(--fs-sm);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-strong);
-  min-width: 36px;
-  text-align: right;
-}
-
-.ff-plate__work--idle {
-  color: #6b7fa0;
-  font-style: italic;
-}
-
-.ff-plate__worker-state {
-  font-size: var(--fs-xs);
-  color: var(--accent);
-  background: var(--accent-8);
-  padding: 1px 5px;
-  border-radius: 3px;
-}
-
-/* Stats panel (right side) */
-.ff-plate__stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  align-self: center;
-  min-width: 100px;
-}
-
-.ff-stat {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 6px 8px;
-  background: rgba(200, 168, 78, 0.05);
-  border: 1px solid var(--ff-gold-10);
-}
-
-.ff-stat__value {
-  font-size: 16px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-strong);
-}
-
-/* --- Grid and Cards --- */
-
-/* Timeline events - compact FF style */
-.ff-event-type {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--ff-gold);
-  min-width: 32px;
-}
-
-.ff-event-detail {
+/* Mention bar — nested .control-input override */
+.ff-profile__mention .control-input {
   flex: 1;
-  font-size: var(--fs-sm);
-  color: #c8daf7;
-}
-
-/* Mention bar */
-.ff-profile__mention {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 14px;
-  background: rgba(10, 22, 40, 0.8);
-  border: 1px solid var(--ff-gold-15);
-
-  & .control-input {
-    flex: 1;
-  }
-}
-
-.ff-profile__mention-label {
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--ff-gold);
-  white-space: nowrap;
 }
 
 @media (max-width: 768px) {
@@ -260,45 +53,4 @@
   .ff-plate__name-row { justify-content: center; }
   .ff-plate__badges { justify-content: center; }
   .ff-profile__grid { grid-template-columns: 1fr; }
-}
-
-/* --- Agent Relations Card --- */
-
-.ff-relation-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  transition: background 0.15s;
-
-  &:hover {
-    background: rgba(255, 215, 0, 0.08);
-  }
-}
-
-.ff-relation-name {
-  color: var(--ff-gold);
-  font-weight: 600;
-  font-size: var(--fs-base);
-  flex: 1;
-}
-
-.ff-relation-count {
-  color: var(--white-50);
-  font-size: var(--fs-sm);
-  font-variant-numeric: tabular-nums;
-}
-
-.ff-interests {
-  border-top: 1px solid var(--white-6);
-  padding-top: 8px;
-}
-
-.ff-interest-tag {
-  background: rgba(255, 215, 0, 0.1);
-  color: var(--white-70);
-  padding: 2px 8px;
-  border-radius: 3px;
-  font-size: var(--fs-xs);
-  border: 1px solid rgba(255, 215, 0, 0.15);
 }

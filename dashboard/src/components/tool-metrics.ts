@@ -42,17 +42,17 @@ function tierBadgeClass(tier: string): string {
 function BarChart({ items, maxCount }: { items: ToolMetricsTopEntry[]; maxCount: number }) {
   if (items.length === 0) return html`<p class="muted">아직 도구 호출 기록이 없습니다.</p>`
   return html`
-    <div class="tool-bar-chart">
+    <div class="flex flex-col gap-1.5">
       ${items.map(item => {
         const pct = maxCount > 0 ? (item.call_count / maxCount) * 100 : 0
         return html`
           <div class="tool-bar-row" key=${item.name}>
-            <span class="tool-bar-name">${item.name}</span>
-            <span class="tool-bar-tier ${tierBadgeClass(item.tier)}">${tierLabel(item.tier)}</span>
-            <div class="tool-bar-track">
-              <div class="tool-bar-fill" style=${{ width: `${pct}%` }} />
+            <span class="text-[color:var(--text-body)] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[length:var(--fs-xs)]">${item.name}</span>
+            <span class="px-1.5 py-px rounded-[3px] text-[length:var(--fs-2xs)] font-semibold text-center ${tierBadgeClass(item.tier)}">${tierLabel(item.tier)}</span>
+            <div class="h-3.5 rounded-[3px] bg-[var(--white-6)] overflow-hidden">
+              <div class="h-full rounded-[3px] bg-[var(--accent)] min-w-0.5 transition-[width] duration-300 ease-in-out" style=${{ width: `${pct}%` }} />
             </div>
-            <span class="tool-bar-count">${item.call_count}</span>
+            <span class="text-[color:var(--text-muted)] text-[length:var(--fs-xs)] text-right font-mono">${item.call_count}</span>
           </div>
         `
       })}
@@ -71,19 +71,19 @@ function TierDistribution({ dist }: { dist: Record<string, number> }) {
   return html`
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-2.5">
-        <span class="tier-dist-label rounded badge-essential">필수</span>
-        <span class="tier-dist-count">${essential}</span>
-        <span class="tier-dist-pct">${essentialPct}%</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[length:var(--fs-xs)] font-semibold text-center rounded badge-essential">필수</span>
+        <span class="text-[color:var(--text-strong)] text-[length:var(--fs-md)] font-semibold min-w-9 text-right">${essential}</span>
+        <span class="text-[color:var(--text-muted)] text-[length:var(--fs-sm)] min-w-12 text-right">${essentialPct}%</span>
       </div>
       <div class="flex items-center gap-2.5">
-        <span class="tier-dist-label rounded badge-standard">표준</span>
-        <span class="tier-dist-count">${standardOnly}</span>
-        <span class="tier-dist-pct">${standardPct}%</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[length:var(--fs-xs)] font-semibold text-center rounded badge-standard">표준</span>
+        <span class="text-[color:var(--text-strong)] text-[length:var(--fs-md)] font-semibold min-w-9 text-right">${standardOnly}</span>
+        <span class="text-[color:var(--text-muted)] text-[length:var(--fs-sm)] min-w-12 text-right">${standardPct}%</span>
       </div>
       <div class="flex items-center gap-2.5">
-        <span class="tier-dist-label rounded badge-full">전체 전용</span>
-        <span class="tier-dist-count">${fullOnly}</span>
-        <span class="tier-dist-pct">${fullOnlyPct}%</span>
+        <span class="inline-block min-w-[72px] px-2 py-0.5 text-[length:var(--fs-xs)] font-semibold text-center rounded badge-full">전체 전용</span>
+        <span class="text-[color:var(--text-strong)] text-[length:var(--fs-md)] font-semibold min-w-9 text-right">${fullOnly}</span>
+        <span class="text-[color:var(--text-muted)] text-[length:var(--fs-sm)] min-w-12 text-right">${fullOnlyPct}%</span>
       </div>
     </div>
   `
@@ -103,7 +103,7 @@ export function ToolMetrics() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex justify-between items-center">
-        <h3 class="tool-metrics-title">도구 사용 현황</h3>
+        <h3 class="text-[color:var(--text-strong)] text-[length:var(--fs-lg)] font-semibold m-0">도구 사용 현황</h3>
         <button
           class="control-btn rounded-lg ghost"
           onClick=${() => void loadMetrics()}
@@ -113,7 +113,7 @@ export function ToolMetrics() {
         </button>
       </div>
 
-      ${error ? html`<div class="tool-metrics-error rounded-lg">${error}</div>` : null}
+      ${error ? html`<div class="px-2.5 py-3 bg-[var(--bad-12)] border border-[rgba(239,68,68,0.34)] text-[#fecaca] text-[length:var(--fs-base)] rounded-lg">${error}</div>` : null}
 
       ${data ? html`
         <div class="tool-metrics-summary">
@@ -140,12 +140,12 @@ export function ToolMetrics() {
         </div>
 
         <div class="tool-metrics-sections">
-          <div class="tool-metrics-section">
-            <h4>계층 분포</h4>
+          <div>
+            <h4 class="text-[color:var(--text-muted)] text-[length:var(--fs-xs)] uppercase tracking-[0.05em] mb-2.5 mt-0">계층 분포</h4>
             <${TierDistribution} dist=${data.tier_distribution} />
           </div>
-          <div class="tool-metrics-section">
-            <h4>상위 20 도구</h4>
+          <div>
+            <h4 class="text-[color:var(--text-muted)] text-[length:var(--fs-xs)] uppercase tracking-[0.05em] mb-2.5 mt-0">상위 20 도구</h4>
             <${BarChart}
               items=${data.top_20}
               maxCount=${data.top_20.length > 0 ? data.top_20[0]!.call_count : 0}

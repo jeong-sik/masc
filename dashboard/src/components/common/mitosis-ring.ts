@@ -13,7 +13,7 @@ export function MitosisRing({ ratio, size = 40, stroke = 4 }: { ratio?: number; 
   else if (ratio >= 0.5) colorClass = 'mitosis-warn'
 
   return html`
-    <div class="mitosis-ring-container" title="Mitosis Context Load: ${Math.round(ratio * 100)}%">
+    <div class="relative inline-flex items-center justify-center ml-auto mr-2.5" title="Mitosis Context Load: ${Math.round(ratio * 100)}%">
       <svg class="mitosis-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
         <circle class="mitosis-ring-bg" cx="${c}" cy="${c}" r="${r}" stroke-width="${stroke}" />
         <circle 
@@ -24,7 +24,7 @@ export function MitosisRing({ ratio, size = 40, stroke = 4 }: { ratio?: number; 
           stroke-dashoffset="${dashoffset}" 
         />
       </svg>
-      <span class="mitosis-text ${colorClass}">${Math.round(ratio * 100)}%</span>
+      <span class="absolute text-[0.65rem] font-bold ${colorClass}">${Math.round(ratio * 100)}%</span>
     </div>
   `
 }

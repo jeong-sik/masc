@@ -77,14 +77,14 @@ let test_next_id_sequential () =
 let test_register_creates_client () =
   let session_id = "test_register_" ^ string_of_int (Random.int 10000) in
   let push _ = () in
-  let (_id, _) = Sse.register session_id ~push ~last_event_id:0 in
+  let (_id, _, _) = Sse.register session_id ~push ~last_event_id:0 in
   check bool "exists after register" true (Sse.exists session_id);
   Sse.unregister session_id
 
 let test_unregister_removes_client () =
   let session_id = "test_unregister_" ^ string_of_int (Random.int 10000) in
   let push _ = () in
-  let (_id, _) = Sse.register session_id ~push ~last_event_id:0 in
+  let (_id, _, _) = Sse.register session_id ~push ~last_event_id:0 in
   Sse.unregister session_id;
   check bool "not exists after unregister" false (Sse.exists session_id)
 
@@ -95,8 +95,8 @@ let test_register_returns_unique_id () =
   let session1 = "test_unique1_" ^ string_of_int (Random.int 10000) in
   let session2 = "test_unique2_" ^ string_of_int (Random.int 10000) in
   let push _ = () in
-  let (id1, _) = Sse.register session1 ~push ~last_event_id:0 in
-  let (id2, _) = Sse.register session2 ~push ~last_event_id:0 in
+  let (id1, _, _) = Sse.register session1 ~push ~last_event_id:0 in
+  let (id2, _, _) = Sse.register session2 ~push ~last_event_id:0 in
   check bool "unique ids" true (id1 <> id2);
   Sse.unregister session1;
   Sse.unregister session2
@@ -112,7 +112,7 @@ let test_client_count_increments () =
   let before = Sse.client_count () in
   let session_id = "test_count_" ^ string_of_int (Random.int 10000) in
   let push _ = () in
-  let (_id, _) = Sse.register session_id ~push ~last_event_id:0 in
+  let (_id, _, _) = Sse.register session_id ~push ~last_event_id:0 in
   let after = Sse.client_count () in
   Sse.unregister session_id;
   check bool "incremented" true (after > before || after = before)
@@ -147,7 +147,7 @@ let test_client_type_fields () =
   let session_id = "test_client_" ^ string_of_int (Random.int 10000) in
   let received = ref [] in
   let push msg = received := msg :: !received in
-  let (_id, _) = Sse.register session_id ~push ~last_event_id:5 in
+  let (_id, _, _) = Sse.register session_id ~push ~last_event_id:5 in
   check bool "exists" true (Sse.exists session_id);
   Sse.unregister session_id
 
@@ -158,7 +158,7 @@ let test_client_type_fields () =
 let test_unregister_if_current_matches () =
   let session_id = "test_unreg_match_" ^ string_of_int (Random.int 10000) in
   let push _ = () in
-  let (client_id, _) = Sse.register session_id ~push ~last_event_id:0 in
+  let (client_id, _, _) = Sse.register session_id ~push ~last_event_id:0 in
   check bool "exists before" true (Sse.exists session_id);
   Sse.unregister_if_current session_id client_id;
   check bool "removed when matching" false (Sse.exists session_id)
@@ -166,7 +166,7 @@ let test_unregister_if_current_matches () =
 let test_unregister_if_current_no_match () =
   let session_id = "test_unreg_nomatch_" ^ string_of_int (Random.int 10000) in
   let push _ = () in
-  let (_client_id, _) = Sse.register session_id ~push ~last_event_id:0 in
+  let (_client_id, _, _) = Sse.register session_id ~push ~last_event_id:0 in
   check bool "exists before" true (Sse.exists session_id);
   Sse.unregister_if_current session_id 999999;  (* wrong client id *)
   check bool "not removed when not matching" true (Sse.exists session_id);
@@ -183,7 +183,7 @@ let test_unregister_if_current_nonexistent () =
 let test_update_last_event_id_exists () =
   let session_id = "test_update_id_" ^ string_of_int (Random.int 10000) in
   let push _ = () in
-  let (_id, _) = Sse.register session_id ~push ~last_event_id:0 in
+  let (_id, _, _) = Sse.register session_id ~push ~last_event_id:0 in
   Sse.update_last_event_id session_id 42;
   ();
   Sse.unregister session_id
@@ -198,11 +198,12 @@ let test_update_last_event_id_nonexistent () =
 
 let test_broadcast_sends_to_clients () =
   let session_id = "test_broadcast_" ^ string_of_int (Random.int 10000) in
-  let received = ref [] in
-  let push msg = received := msg :: !received in
-  let (_id, _) = Sse.register session_id ~push ~last_event_id:0 in
+  let push _ = () in
+  let (_id, _, _) = Sse.register session_id ~push ~last_event_id:0 in
   Sse.broadcast (`Assoc [("test", `String "value")]);
-  check bool "received broadcast" true (List.length !received > 0);
+  (* Events are queued in the per-session stream, not pushed directly *)
+  let event = Sse.try_pop session_id in
+  check bool "received broadcast via stream" true (event <> None);
   Sse.unregister session_id
 
 let test_broadcast_empty_clients () =
@@ -219,11 +220,12 @@ let test_broadcast_empty_clients () =
 
 let test_send_to_existing () =
   let session_id = "test_send_to_" ^ string_of_int (Random.int 10000) in
-  let received = ref [] in
-  let push msg = received := msg :: !received in
-  let (_id, _) = Sse.register session_id ~push ~last_event_id:0 in
+  let push _ = () in
+  let (_id, _, _) = Sse.register session_id ~push ~last_event_id:0 in
   Sse.send_to session_id (`Assoc [("direct", `String "message")]);
-  check bool "received message" true (List.length !received > 0);
+  (* Events are queued in the per-session stream *)
+  let event = Sse.try_pop session_id in
+  check bool "received message via stream" true (event <> None);
   Sse.unregister session_id
 
 let test_send_to_nonexistent () =

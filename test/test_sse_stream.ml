@@ -107,6 +107,73 @@ let test_broadcast_event_contains_data () =
        !has_data);
     Sse.unregister "s-data"
 
+(* ============================================================
+   broadcast_to targeting (session_kind separation)
+   ============================================================ *)
+
+let test_broadcast_to_observers_only () =
+  reset ();
+  ignore (Sse.register ~kind:Observer "s-obs" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register ~kind:Coordinator "s-coord" ~push:dummy_push ~last_event_id:0);
+  Sse.broadcast_to Observers (`Assoc [("target", `String "observers")]);
+  let got_obs = Sse.try_pop "s-obs" in
+  let got_coord = Sse.try_pop "s-coord" in
+  Alcotest.(check bool) "observer got event" true (got_obs <> None);
+  Alcotest.(check bool) "coordinator did not" true (got_coord = None);
+  Sse.unregister "s-obs";
+  Sse.unregister "s-coord"
+
+let test_broadcast_to_coordinators_only () =
+  reset ();
+  ignore (Sse.register ~kind:Observer "s-obs2" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register ~kind:Coordinator "s-coord2" ~push:dummy_push ~last_event_id:0);
+  Sse.broadcast_to Coordinators (`Assoc [("target", `String "coordinators")]);
+  let got_obs = Sse.try_pop "s-obs2" in
+  let got_coord = Sse.try_pop "s-coord2" in
+  Alcotest.(check bool) "observer did not get event" true (got_obs = None);
+  Alcotest.(check bool) "coordinator got event" true (got_coord <> None);
+  Sse.unregister "s-obs2";
+  Sse.unregister "s-coord2"
+
+let test_broadcast_to_all () =
+  reset ();
+  ignore (Sse.register ~kind:Observer "s-all-obs" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register ~kind:Coordinator "s-all-coord" ~push:dummy_push ~last_event_id:0);
+  Sse.broadcast_to All (`Assoc [("target", `String "all")]);
+  let got_obs = Sse.try_pop "s-all-obs" in
+  let got_coord = Sse.try_pop "s-all-coord" in
+  Alcotest.(check bool) "observer got event" true (got_obs <> None);
+  Alcotest.(check bool) "coordinator got event" true (got_coord <> None);
+  Sse.unregister "s-all-obs";
+  Sse.unregister "s-all-coord"
+
+let test_broadcast_equals_broadcast_to_all () =
+  reset ();
+  ignore (Sse.register ~kind:Observer "s-eq-obs" ~push:dummy_push ~last_event_id:0);
+  ignore (Sse.register ~kind:Coordinator "s-eq-coord" ~push:dummy_push ~last_event_id:0);
+  (* broadcast (no target) should reach everyone, same as broadcast_to All *)
+  Sse.broadcast (`Assoc [("compat", `Bool true)]);
+  let got_obs = Sse.try_pop "s-eq-obs" in
+  let got_coord = Sse.try_pop "s-eq-coord" in
+  Alcotest.(check bool) "observer got broadcast" true (got_obs <> None);
+  Alcotest.(check bool) "coordinator got broadcast" true (got_coord <> None);
+  Sse.unregister "s-eq-obs";
+  Sse.unregister "s-eq-coord"
+
+let test_register_defaults_to_coordinator () =
+  reset ();
+  (* Register without explicit kind *)
+  ignore (Sse.register "s-default" ~push:dummy_push ~last_event_id:0);
+  (* Should be Coordinator: receives Coordinators-targeted broadcast *)
+  Sse.broadcast_to Coordinators (`Assoc [("default_kind", `Bool true)]);
+  let got = Sse.try_pop "s-default" in
+  Alcotest.(check bool) "default kind is Coordinator" true (got <> None);
+  (* Should not receive Observers-targeted broadcast *)
+  Sse.broadcast_to Observers (`Assoc [("observer_only", `Bool true)]);
+  let got2 = Sse.try_pop "s-default" in
+  Alcotest.(check bool) "default does not receive Observers" true (got2 = None);
+  Sse.unregister "s-default"
+
 let () =
   Eio_main.run @@ fun _env ->
   Alcotest.run "sse-stream"
@@ -130,5 +197,13 @@ let () =
       ( "pop_blocking",
         [
           Alcotest.test_case "blocks then receives" `Quick test_pop_blocks_then_receives;
+        ] );
+      ( "broadcast_to_targeting",
+        [
+          Alcotest.test_case "observers only" `Quick test_broadcast_to_observers_only;
+          Alcotest.test_case "coordinators only" `Quick test_broadcast_to_coordinators_only;
+          Alcotest.test_case "all targets" `Quick test_broadcast_to_all;
+          Alcotest.test_case "broadcast = broadcast_to All" `Quick test_broadcast_equals_broadcast_to_all;
+          Alcotest.test_case "default kind is Coordinator" `Quick test_register_defaults_to_coordinator;
         ] );
     ]

@@ -70,6 +70,7 @@ val handle_get_mcp :
   deps:deps ->
   ?legacy_messages_endpoint:(string -> string) ->
   ?profile:Mcp_server_eio.tool_profile ->
+  ?sse_kind:Sse.session_kind ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
   unit

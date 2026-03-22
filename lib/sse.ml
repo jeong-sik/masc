@@ -11,10 +11,27 @@
     The registry mutex ([registry_mutex]) only serialises Hashtbl
     add/remove, not broadcast writes.
 
+    Session kinds:
+    [Observer] sessions receive dashboard snapshots but not agent
+    coordination traffic.  [Coordinator] sessions receive heartbeats
+    and task events but not dashboard snapshots.  [broadcast_to All]
+    reaches every session (backward-compatible with the old [broadcast]).
+
     Signal handler safety: [broadcast] and [close_all_clients] use
     try/with around mutex acquisition; if the mutex cannot be acquired
     (e.g. signal interrupted a fiber holding it), they fall back to
     best-effort lock-free execution since the process is shutting down. *)
+
+(** Classification of an SSE session's traffic role. *)
+type session_kind =
+  | Observer     (** Dashboard / read-only viewers *)
+  | Coordinator  (** MCP agent connections *)
+
+(** Broadcast targeting selector. *)
+type broadcast_target =
+  | All          (** Every connected session (backward-compatible default) *)
+  | Observers    (** Only [Observer] sessions *)
+  | Coordinators (** Only [Coordinator] sessions *)
 
 (** Maximum concurrent SSE clients -- prevents connection storm on restart.
     Increased from 50 to 200 to handle Claude.ai MCP client reconnections. *)
@@ -32,6 +49,7 @@ let stream_capacity = 1024
     the SSE connection fiber pops and writes to the HTTP body writer. *)
 type client = {
   id: int;
+  kind: session_kind;
   event_stream: string Eio.Stream.t;
   push: string -> unit;  (** legacy direct-push callback (used by drain) *)
   mutable last_event_id: int;
@@ -134,8 +152,9 @@ let next_id () =
     Returns (client_id, event_stream, evicted_session_id option).
     The caller should spawn a fiber that drains [event_stream] and
     writes events to the transport.  Evicts the oldest client when at
-    capacity.  ID generation + add are atomic under [registry_mutex]. *)
-let register session_id ~push ~last_event_id =
+    capacity.  ID generation + add are atomic under [registry_mutex].
+    [kind] defaults to [Coordinator] for backward compatibility. *)
+let register ?(kind = Coordinator) session_id ~push ~last_event_id =
   with_registry_rw (fun () ->
     (* Evict oldest if at capacity *)
     let evicted =
@@ -159,6 +178,7 @@ let register session_id ~push ~last_event_id =
     let event_stream = Eio.Stream.create stream_capacity in
     let client = {
       id = new_id;
+      kind;
       event_stream;
       push;
       last_event_id;
@@ -222,16 +242,24 @@ let set_clock (clock : float Eio.Time.clock_ty Eio.Resource.t) =
     5s is generous for a local TCP write; slow clients beyond this are dropped. *)
 let push_timeout_s = 5.0
 
-(** Broadcast event to all connected clients.
-    Pushes the formatted event string into each client's [event_stream].
-    The registry read-lock is held only for the Hashtbl snapshot; the
-    per-stream [Eio.Stream.add] calls happen outside any global lock.
+(** Test whether a client matches a broadcast target. *)
+let client_matches_target target (client : client) =
+  match target with
+  | All -> true
+  | Observers -> client.kind = Observer
+  | Coordinators -> client.kind = Coordinator
+
+(** Internal broadcast implementation shared by [broadcast] and [broadcast_to].
+    Pushes the formatted event string into each matching client's
+    [event_stream].  The registry read-lock is held only for the Hashtbl
+    snapshot; the per-stream [Eio.Stream.add] calls happen outside any
+    global lock.
 
     [Eio.Stream.add] on a bounded (capacity 1024) stream returns
     immediately as long as the stream is not full.  The per-client drain
     fiber (see [pop]) delivers events to the transport writer
     independently, so broadcast is decoupled from per-connection I/O. *)
-let broadcast json =
+let broadcast_impl target json =
   let data = Yojson.Safe.to_string json in
   let current_event_id = Atomic.get event_counter + 1 in
   let event = format_event ~id:current_event_id ~event_type:"message" data in
@@ -243,7 +271,8 @@ let broadcast json =
   in
   let failed = ref [] in
   List.iter (fun (session_id, client) ->
-    if current_event_id > client.last_event_id then begin
+    if client_matches_target target client
+       && current_event_id > client.last_event_id then begin
       (try
         Eio.Stream.add client.event_stream event;
         client.last_event_id <- current_event_id;
@@ -258,6 +287,15 @@ let broadcast json =
   ) clients_snapshot;
   (* Remove failed connections *)
   List.iter (fun sid -> unregister sid) !failed
+
+(** Broadcast event to all connected clients (backward-compatible). *)
+let broadcast json = broadcast_impl All json
+
+(** Broadcast event to sessions matching [target].
+    - [All]: every session (same as [broadcast])
+    - [Observers]: dashboard / read-only viewers only
+    - [Coordinators]: MCP agent sessions only *)
+let broadcast_to target json = broadcast_impl target json
 
 (** Send a JSON-RPC message to a specific session.
     Enqueues the event in the session's stream for asynchronous delivery. *)

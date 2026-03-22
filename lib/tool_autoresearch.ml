@@ -90,7 +90,7 @@ let get_generator loop_id =
 (* ================================================================ *)
 
 let broadcast_cycle_result (state : Autoresearch.loop_state) (record : Autoresearch.cycle_record) =
-  try Sse.broadcast (`Assoc [
+  try Sse.broadcast_to Coordinators (`Assoc [
     ("type", `String "autoresearch_cycle");
     ("loop_id", `String state.loop_id);
     ("cycle", `Int record.cycle);

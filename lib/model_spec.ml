@@ -463,3 +463,92 @@ let find_model_id_for_used ~labels ~model_used =
 let cost_usd_of_model_id ~model_id ~input_tokens ~output_tokens =
   let pricing = Llm_provider.Pricing.pricing_for_model model_id in
   Llm_provider.Pricing.estimate_cost ~pricing ~input_tokens ~output_tokens ()
+
+(* ================================================================ *)
+(* OAS Migration Bridge (Phase 1)                                    *)
+(* Bidirectional conversion: Model_spec.model_spec <-> OAS types.    *)
+(* Callers should migrate from Model_spec.model_spec to              *)
+(* Llm_provider.Provider_config.t or Agent_sdk.Provider.config.      *)
+(* ================================================================ *)
+
+(** Map MASC provider enum to OAS provider_kind.
+    Inverse of {!provider_of_oas}. Note that multiple MASC providers
+    map to OpenAI_compat (Llama, OpenAI, OpenRouter, Custom).
+    Glm_cloud maps to Glm (dedicated kind since OAS v0.83.0). *)
+let provider_kind_of_masc : provider -> Llm_provider.Provider_config.provider_kind =
+  function
+  | Claude -> Anthropic
+  | Gemini -> Gemini
+  | Glm_cloud -> Glm
+  | Llama | OpenAI | OpenRouter | Custom _ -> OpenAI_compat
+
+(** Map MASC provider enum to OAS registry name.
+    Used for Provider_registry lookups during conversion. *)
+let registry_name_of_provider : provider -> string = function
+  | Llama -> "llama"
+  | Claude -> "claude"
+  | Gemini -> "gemini"
+  | Glm_cloud -> "glm"
+  | OpenAI -> "openrouter"
+  | OpenRouter -> "openrouter"
+  | Custom _ -> "custom"
+
+(** Convert a MASC model_spec to an OAS Provider_config.t.
+
+    This is the forward migration path: callers holding a model_spec
+    can obtain the OAS wire-level config for passing to
+    Llm_provider.Complete.complete or Cascade_config functions.
+
+    Fields not present in model_spec (temperature, top_p, etc.)
+    use Provider_config.make defaults. *)
+let to_provider_config (spec : model_spec) : Llm_provider.Provider_config.t =
+  let kind = provider_kind_of_masc spec.provider in
+  let api_key =
+    match spec.api_key_env with
+    | Some env_name ->
+      Sys.getenv_opt env_name |> Option.value ~default:""
+    | None -> ""
+  in
+  Llm_provider.Provider_config.make
+    ~kind
+    ~model_id:spec.model_id
+    ~base_url:spec.api_url
+    ~api_key
+    ~request_path:(match kind with
+      | Anthropic -> "/v1/messages"
+      | Gemini -> "/v1beta/chat/completions"
+      | Glm -> "/chat/completions"
+      | OpenAI_compat -> "/v1/chat/completions"
+      | Claude_code -> "")
+    ()
+
+(** Convert an OAS Provider_config.t back to a MASC model_spec.
+
+    This is the backward-compat path: modules that still expect
+    model_spec can receive one from OAS-native callers. The
+    registry_name is required to disambiguate OpenAI_compat sub-families.
+
+    Pricing and max_context are looked up from OAS registries. *)
+let of_provider_config ?(registry_name : string option)
+    (pc : Llm_provider.Provider_config.t) : model_spec =
+  let rn = match registry_name with
+    | Some n -> n
+    | None -> (
+        match pc.kind with
+        | Anthropic -> "claude"
+        | Gemini -> "gemini"
+        | Glm -> "glm"
+        | Claude_code -> "claude"
+        | OpenAI_compat -> "openrouter")
+  in
+  model_spec_of_provider_config ~registry_name:rn pc
+
+(** Extract pricing info from a model_spec as an OAS Pricing.pricing record.
+    Avoids callers reaching into model_spec.cost_per_1k_* fields directly. *)
+let pricing_of_spec (spec : model_spec) : Llm_provider.Pricing.pricing =
+  Llm_provider.Pricing.pricing_for_model spec.model_id
+
+(** Extract max_context from a model_spec.
+    Callers should migrate to Provider_registry.entry.max_context
+    or Capabilities.capabilities.max_context_tokens. *)
+let max_context (spec : model_spec) : int = spec.max_context

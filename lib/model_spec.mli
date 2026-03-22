@@ -112,3 +112,41 @@ val find_model_id_for_used : labels:string list -> model_used:string -> string
 (** Estimate cost in USD from token usage and a model_id string.
     Delegates to OAS [Llm_provider.Pricing]. *)
 val cost_usd_of_model_id : model_id:string -> input_tokens:int -> output_tokens:int -> float
+
+(** {2 OAS Migration Bridge (Phase 1)}
+
+    Bidirectional conversions between MASC [model_spec] and OAS types.
+    New callers should use OAS types directly
+    ({!Llm_provider.Provider_config.t}, {!Llm_provider.Cascade_config}).
+    Existing callers can migrate incrementally using these adapters. *)
+
+(** Map MASC provider to OAS provider_kind.
+    Glm_cloud maps to Glm. Llama, OpenAI, OpenRouter, Custom
+    all map to OpenAI_compat. *)
+val provider_kind_of_masc : provider -> Llm_provider.Provider_config.provider_kind
+
+(** Map MASC provider to OAS registry name (e.g. Llama -> "llama"). *)
+val registry_name_of_provider : provider -> string
+
+(** Convert model_spec to OAS Provider_config.t.
+    Forward migration path: callers holding a model_spec can obtain
+    the OAS wire-level config. Fields not present in model_spec
+    (temperature, top_p, etc.) use Provider_config.make defaults. *)
+val to_provider_config : model_spec -> Llm_provider.Provider_config.t
+
+(** Convert OAS Provider_config.t back to model_spec.
+    Backward-compat path. [registry_name] disambiguates
+    OpenAI_compat sub-families; omit to use kind-based default. *)
+val of_provider_config :
+  ?registry_name:string ->
+  Llm_provider.Provider_config.t ->
+  model_spec
+
+(** Extract pricing for a model_spec as OAS Pricing.pricing.
+    Prefer this over accessing cost_per_1k_* fields directly. *)
+val pricing_of_spec : model_spec -> Llm_provider.Pricing.pricing
+
+(** Extract max_context from a model_spec.
+    Migration target: Provider_registry.entry.max_context
+    or Capabilities.capabilities.max_context_tokens. *)
+val max_context : model_spec -> int

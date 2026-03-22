@@ -124,7 +124,7 @@ export function LogViewer() {
           </thead>
           <tbody>
             ${logEntries.value.map(entry => html`
-              <tr key=${entry.seq} class="logs-row logs-level-${entry.level.toLowerCase()}">
+              <tr key=${entry.seq} class="logs-row ${entry.level === 'ERROR' ? 'bg-[rgba(224,80,80,0.06)]' : entry.level === 'WARN' ? 'bg-[rgba(230,167,0,0.04)]' : ''}">
                 <td class="logs-col-ts w-44 whitespace-nowrap text-[color:var(--text-muted)]">${entry.ts.replace('T', ' ').replace('Z', '')}</td>
                 <td class="logs-col-level w-14 whitespace-nowrap font-semibold" style="color: ${LEVEL_COLORS[entry.level] ?? 'inherit'}">
                   ${entry.level}

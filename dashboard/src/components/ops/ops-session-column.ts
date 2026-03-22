@@ -40,6 +40,7 @@ import {
   teamTaskPriority,
   teamTaskTitle,
   teamTurnKind,
+  logEntryBorderClass,
 } from './helpers'
 
 const autoresearchHypothesis = signal('')
@@ -191,7 +192,7 @@ export function OpsSessionColumn() {
           ${activeRecommendedActions.length > 0 ? html`
             <div class="flex flex-col gap-2">
               ${activeRecommendedActions.map(item => html`
-                <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'session'}`} class="ops-log-entry p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${item.severity}">
+                <article key=${`${item.action_type}:${item.target_type}:${item.target_id ?? 'session'}`} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(item.severity)}">
                   <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                     <strong>${actionTypeLabel(item.action_type)}</strong>
                     <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>
@@ -203,7 +204,7 @@ export function OpsSessionColumn() {
           ` : null}
           <div class="flex flex-col gap-2">
             ${sessionDigest.attention_items.length > 0 ? sessionDigest.attention_items.map(item => html`
-              <article key=${`${item.kind}:${item.target_id ?? 'session'}`} class="ops-log-entry p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${item.severity}">
+              <article key=${`${item.kind}:${item.target_id ?? 'session'}`} class="p-3 rounded-[10px] bg-[var(--white-3)] border border-[var(--white-8)] ${logEntryBorderClass(item.severity)}">
                 <div class="text-[var(--fs-xs)] text-text-muted mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
                   <strong>${item.kind}</strong>
                   <span>${targetTypeLabel(item.target_type)}${item.target_id ? ` · ${item.target_id}` : ''}</span>

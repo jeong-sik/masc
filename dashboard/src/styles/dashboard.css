@@ -510,10 +510,3 @@
   background: var(--white-3);
 }
 
-.logs-level-error {
-  background: rgba(224, 80, 80, 0.06);
-}
-
-.logs-level-warn {
-  background: rgba(230, 167, 0, 0.04);
-}

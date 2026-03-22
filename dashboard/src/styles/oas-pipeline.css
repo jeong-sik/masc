@@ -7,13 +7,6 @@
   margin-top: 12px;
 }
 
-.oas-pipeline__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
 .oas-pipeline__title {
   font-size: var(--fs-base);
   font-weight: 600;
@@ -43,12 +36,6 @@
 }
 
 /* Agent event list */
-
-.oas-event-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
 
 .oas-event-row {
   display: flex;
@@ -102,12 +89,6 @@
 
 /* Keeper snapshot list */
 
-.oas-keeper-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .oas-keeper-row {
   display: flex;
   align-items: center;
@@ -154,13 +135,6 @@
   min-width: 48px;
 }
 /* ── Pipeline Stage Indicator ─────────────────────────── */
-
-.pipeline-stage-bar {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 6px 0;
-}
 
 .pipeline-stage-node {
   display: flex;

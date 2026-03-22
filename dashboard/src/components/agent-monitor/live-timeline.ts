@@ -126,7 +126,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
 
   return html`
     <div class="agent-live-timeline">
-      <div class="agent-live-header">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
         <div class="agent-live-filter-bar">
           ${FILTER_CHIPS.map(chip => html`
             <button
@@ -138,7 +138,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
             </button>
           `)}
         </div>
-        <div class="agent-live-meta">
+        <div class="flex items-center gap-2 text-[length:var(--fs-xs)]">
           <span class="agent-event-rate rounded-lg">${eventsPerMin}/min</span>
           <span class="text-text-muted">${filtered.length} events</span>
           <button
@@ -151,7 +151,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
         </div>
       </div>
 
-      <div class="agent-live-stream" ref=${scrollRef}>
+      <div class="flex flex-col gap-0.5 max-h-[320px] overflow-y-auto" ref=${scrollRef}>
         ${filtered.length === 0
           ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">필터에 맞는 이벤트 없음</div>`
           : filtered.map((entry: JournalEntry, idx: number) => html`

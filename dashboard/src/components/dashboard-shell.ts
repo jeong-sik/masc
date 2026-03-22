@@ -145,7 +145,7 @@ export function SideRail() {
                 onClick=${() => navigate(surface.defaultTab, surface.defaultParams)}
               >
                 <span class="text-base leading-[1.2]">${surface.icon}</span>
-                <span class="min-w-0 grid gap-0.5">
+                <span class="rail-tab-copy min-w-0 grid gap-0.5">
                   <strong class="text-[color:var(--text-strong)] text-[13px] leading-[1.3]">${surface.label}</strong>
                   <span class="text-[color:var(--text-muted)] text-[11px] leading-[1.4]">${surface.description}</span>
                 </span>
@@ -167,7 +167,7 @@ export function SideRail() {
                     key=${item.id}
                     onClick=${() => navigate(currentSurface, item.params)}
                   >
-                    <span class="min-w-0 grid gap-0.5">
+                    <span class="rail-tab-copy min-w-0 grid gap-0.5">
                       <strong class="text-[color:var(--text-strong)] text-xs leading-[1.3]">${item.label}</strong>
                       <span class="text-[color:var(--text-muted)] text-[11px] leading-[1.4]">${item.description}</span>
                     </span>

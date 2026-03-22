@@ -73,14 +73,6 @@
 
 /* ── Live Timeline ─────────────────────────────────────────── */
 
-.agent-live-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 /* Filter chips row */
 
 .agent-live-chip {
@@ -102,13 +94,6 @@
   background: var(--ff-gold-dim);
   border-color: var(--ff-gold);
   color: var(--ff-gold-bright);
-}
-
-.agent-live-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-xs);
 }
 
 .agent-event-rate {
@@ -136,15 +121,6 @@
   background: var(--ok-10);
   border-color: var(--ok-25);
   color: var(--ok);
-}
-
-/* Scrolling event stream */
-.agent-live-stream {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 320px;
-  overflow-y: auto;
 }
 
 /* Event row */

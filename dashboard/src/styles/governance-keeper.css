@@ -79,14 +79,6 @@
   background: var(--white-2);
 }
 
-.governance-case-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  gap: 8px;
-}
-
 .governance-case-topic {
   font-size: var(--fs-base);
   font-weight: 500;
@@ -128,13 +120,6 @@
 }
 
 /* ── Lifecycle progress indicator ────────────────────────── */
-
-.governance-lifecycle {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-}
 
 .lifecycle-step {
   font-size: var(--fs-xs);

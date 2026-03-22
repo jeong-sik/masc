@@ -453,12 +453,7 @@ a:hover {
   color: var(--text-muted, var(--text-muted));
 }
 
-.loading-indicator {
-  text-align: center;
-  border: 1px dashed var(--card-border);
-  padding: 48px 16px;
-  color: var(--text-muted);
-}
+/* loading-indicator → Tailwind (text-center border border-dashed border-[var(--card-border)] rounded-xl py-12 px-4 text-[color:var(--text-muted)]) */
 
 
 @keyframes fadeSlide {
@@ -546,14 +541,7 @@ a:hover {
 
 /* ── Status / badges (merged from status.css) ── */
 /* ── Status / badges (extracted from global.css) ─────────── */
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-sm);
-  color: var(--text-muted);
-  white-space: nowrap;
-}
+/* connection-status → Tailwind (flex items-center gap-2 text-[length:var(--fs-sm)] text-[color:var(--text-muted)] whitespace-nowrap) */
 
 .connection-status.connected {
   color: #9af3ba;
@@ -563,12 +551,7 @@ a:hover {
   color: #f7b7b7;
 }
 
-.status-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  display: inline-block;
-}
+/* status-dot → Tailwind (size-[9px] rounded-full inline-block) */
 
 .status-dot.connected,
 .status-dot.active {
@@ -603,12 +586,7 @@ a:hover {
   background: #5f7199;
 }
 
-.status-dot-inline {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  display: inline-block;
-}
+/* status-dot-inline → Tailwind (size-1.5 rounded-full inline-block) */
 
 .status-dot-inline.active {
   background: var(--ok);
@@ -643,12 +621,7 @@ a:hover {
   color: #9ad9ff;
   white-space: nowrap;
 }
-.ctx-bar {
-  height: 6px;
-  margin-top: 6px;
-  overflow: hidden;
-  background: var(--white-10);
-}
+/* ctx-bar → Tailwind (h-1.5 mt-1.5 rounded-full overflow-hidden bg-[var(--white-10)]) */
 
 .ctx-fill {
   height: 100%;
@@ -724,9 +697,4 @@ button.monitor-row.state-offline:hover {
   text-decoration: line-through;
 }
 
-/* Agent group headers (alive/offline separation) */
-.agents-workbench {
-  display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.96fr) minmax(0, 0.88fr);
-  gap: 16px;
-}
+/* agents-workbench → Tailwind (grid grid-cols-[minmax(0,1.08fr)_minmax(0,0.96fr)_minmax(0,0.88fr)] gap-4) */

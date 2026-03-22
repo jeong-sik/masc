@@ -28,7 +28,7 @@ export function PipelineStageBar({ stage }: { stage?: PipelineStage | null }) {
 
   if (current === 'offline') {
     return html`
-      <div class="pipeline-stage-bar">
+      <div class="flex items-center py-1.5">
         <div class="pipeline-stage-node active stage-offline">
           <span class="pipeline-stage-dot transition-all duration-300"></span>
           <span class="pipeline-stage-label">offline</span>
@@ -38,7 +38,7 @@ export function PipelineStageBar({ stage }: { stage?: PipelineStage | null }) {
   }
 
   return html`
-    <div class="pipeline-stage-bar">
+    <div class="flex items-center py-1.5">
       ${STAGES.map((s, i) => {
         const isActive = s.key === current
         const isPassed = i < currentIdx

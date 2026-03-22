@@ -122,15 +122,15 @@ export function SituationBanner({ snap, roomHealth }: SituationBannerProps) {
       </span>
     </div>
     ${showReasons ? html`
-      <details class="situation-reasons-collapse mb-2" open=${reasons.length <= 5}>
-        <summary class="situation-reasons-collapse__summary">
+      <details class="mb-2" open=${reasons.length <= 5}>
+        <summary class="cursor-pointer text-[length:var(--fs-xs)] text-[color:var(--text-muted,var(--text-slate))] py-1 px-[var(--space-md,16px)] tracking-[0.04em] hover:text-[color:var(--text-strong)]">
           상세 ${reasons.length}건
         </summary>
-        <div class="situation-reasons">
+        <div class="flex flex-col gap-1 py-1.5 px-[var(--space-md,16px)] border-l-2 border-l-[var(--color-ff-border)]">
           ${reasons.map((r, i) => html`
-            <div class="situation-reason situation-reason--${r.severity}" key=${i}>
-              <span class="situation-reason__tag">${CATEGORY_LABELS[r.category] ?? r.category}</span>
-              <span class="situation-reason__text">${r.text}</span>
+            <div class="flex items-center gap-[var(--space-sm,8px)] text-[length:var(--fs-sm)] ${r.severity === 'bad' ? 'text-[rgba(239,68,68,0.9)]' : r.severity === 'warn' ? 'text-[color:var(--ff-gold)]' : 'text-[color:var(--white-55)]'}" key=${i}>
+              <span class="text-[9px] py-px px-1.5 rounded-sm bg-[rgba(212,169,75,0.08)] border border-[var(--ff-border-subtle)] whitespace-nowrap uppercase tracking-[0.5px] font-semibold">${CATEGORY_LABELS[r.category] ?? r.category}</span>
+              <span class="overflow-hidden text-ellipsis whitespace-nowrap">${r.text}</span>
             </div>
           `)}
         </div>

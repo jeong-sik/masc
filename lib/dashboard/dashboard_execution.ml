@@ -89,11 +89,11 @@ let message_json (message : Types.message) =
     ]
 
 
-let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
-  let effective_actor = Option.value ~default:"dashboard" actor in
-  match dashboard_fixture_name ?fixture () with
-  | Some "execution_smoke" -> execution_smoke_fixture_json ()
-  | _ ->
+(** Maximum wall-clock time for a single dashboard render.
+    Prevents unbounded waits when PG connections drop mid-render. *)
+let render_timeout_s = 30.0
+
+let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let ctx : _ Operator_control.context =
         {
           config;
@@ -284,3 +284,23 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
           (base_fields @ task_fields @ [
             ("messages", `List (List.map message_json messages));
           ])
+
+let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
+  let effective_actor = Option.value ~default:"dashboard" actor in
+  match dashboard_fixture_name ?fixture () with
+  | Some "execution_smoke" -> execution_smoke_fixture_json ()
+  | _ ->
+    (* Guard: abort render if it exceeds render_timeout_s.
+       PG connection failures during render can block fibers for hours
+       (observed: 11,018s render on 2026-03-21). *)
+    match Eio.Time.with_timeout clock render_timeout_s (fun () ->
+      Ok (json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ())
+    ) with
+    | Ok result -> result
+    | Error `Timeout ->
+      Log.Dashboard.error "[dashboard_execution] render timed out after %.0fs" render_timeout_s;
+      `Assoc [
+        ("generated_at", `String (Types.now_iso ()));
+        ("error", `String (Printf.sprintf "render timed out after %.0fs" render_timeout_s));
+        ("status", room_status_json config);
+      ]

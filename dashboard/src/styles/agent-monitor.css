@@ -18,12 +18,7 @@
   flex-wrap: wrap;
 }
 
-.agent-runtime-metric {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-sm);
-}
+/* agent-runtime-metric: migrated to inline Tailwind (flex items-center gap-1.5 text-[length:var(--fs-sm)]) */
 
 .agent-runtime-label {
   font-size: var(--fs-2xs);
@@ -123,19 +118,7 @@
   color: var(--ok);
 }
 
-/* Event row */
-.agent-live-event {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 4px 8px;
-  font-size: var(--fs-sm);
-  transition: background 0.1s;
-}
-
-.agent-live-event:hover {
-  background: var(--white-4, var(--white-4));
-}
+/* agent-live-event: migrated to inline Tailwind (flex items-baseline gap-1.5 ...) */
 
 /* Event kind badge */
 .agent-event-badge {

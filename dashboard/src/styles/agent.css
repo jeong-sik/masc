@@ -21,20 +21,7 @@
 .agent-card .agent-emoji { font-size: 24px; }
 .agent-card .agent-name { font-size: var(--fs-lg); font-weight: 600; }
 /* ── Agent Journal Stream (Phase 2) ───────────────────────── */
-.agent-journal-entry,
-.agent-timeline-event {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 4px 8px;
-  font-size: var(--fs-sm);
-  transition: background 0.1s;
-}
-
-.agent-journal-entry:hover,
-.agent-timeline-event:hover {
-  background: var(--white-4);
-}
+/* agent-journal-entry, agent-timeline-event: layout+hover migrated to inline Tailwind */
 
 .agent-journal-kind {
   font-size: var(--fs-2xs);

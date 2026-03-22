@@ -155,13 +155,13 @@ export function AgentLiveTimeline({ name }: { name: string }) {
         ${filtered.length === 0
           ? html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">필터에 맞는 이벤트 없음</div>`
           : filtered.map((entry: JournalEntry, idx: number) => html`
-              <div class="agent-live-event rounded" key=${idx}>
+              <div class="flex items-baseline gap-1.5 py-1 px-2 text-[length:var(--fs-sm)] transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
                 <span class="agent-event-badge ${eventKindBadgeClass(entry.eventType)}">
                   ${eventKindLabel(entry.eventType)}
                 </span>
-                <span class="agent-live-event rounded-text">${compactText(entry.text)}</span>
+                <span class="agent-live-event-text">${compactText(entry.text)}</span>
                 ${entry.timestamp ? html`
-                  <span class="agent-live-event rounded-time"><${TimeAgo} timestamp=${entry.timestamp} /></span>
+                  <span class="agent-live-event-time"><${TimeAgo} timestamp=${entry.timestamp} /></span>
                 ` : null}
               </div>
             `)}

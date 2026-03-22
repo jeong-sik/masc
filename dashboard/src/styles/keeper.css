@@ -66,11 +66,8 @@
   overflow: hidden;
 }
 
+/* keeper-chat__header: layout migrated to inline Tailwind (flex items-center justify-between) */
 .keeper-chat__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
   border-bottom: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
   background: var(--ff-navy-60);
 }
@@ -87,16 +84,7 @@
   color: var(--ff-hp-low, var(--bad-light));
 }
 
-.keeper-chat__messages {
-  flex: 1;
-  min-height: 200px;
-  max-height: 400px;
-  overflow-y: auto;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+/* keeper-chat__messages: layout migrated to inline Tailwind (flex-1 min-h-[200px] max-h-[400px] ...) */
 
 .keeper-chat__msg--user .keeper-chat__role {
   text-align: right;
@@ -141,10 +129,8 @@
   border-top: 1px solid var(--bad-15);
 }
 
+/* keeper-chat__input-row: layout migrated to inline Tailwind (flex gap-2) */
 .keeper-chat__input-row {
-  display: flex;
-  gap: 8px;
-  padding: 10px 14px;
   border-top: 1px solid var(--ff-border-subtle, var(--ff-border-subtle));
   background: var(--ff-navy-60);
 }

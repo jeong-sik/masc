@@ -152,14 +152,14 @@ let handle_read_resource_eio state id params =
                   ("text/markdown", Some (Institution_eio.format_for_injection inst))
                 with
                 | Yojson.Json_error _ | Sys_error _ ->
-                  let content = In_channel.with_open_text file In_channel.input_all in
+                  let content = Fs_compat.load_file file in
                   ("application/json", Some content)
               else
                 ("text/markdown", Some "No institution memory found. Create one with masc_init.")
           | "institution.json" ->
               let file = Filename.concat config.base_path ".masc/institution.json" in
               if Sys.file_exists file then
-                let content = In_channel.with_open_text file In_channel.input_all in
+                let content = Fs_compat.load_file file in
                 ("application/json", Some content)
               else
                 ("application/json", Some "{\"error\": \"No institution memory found\"}")
@@ -170,49 +170,49 @@ let handle_read_resource_eio state id params =
               else begin
                 let parse_frontmatter path fallback_name =
                   try
-                    In_channel.with_open_text path (fun ic ->
-                      match In_channel.input_line ic with
-                      | Some "---" ->
-                          let title = ref fallback_name in
-                          let source = ref "" in
-                          let verified_by = ref "" in
-                          let date = ref "" in
-                          let tags = ref [] in
-                          let rec scan () =
-                            match In_channel.input_line ic with
-                            | Some "---" -> ()
-                            | Some line ->
-                                let try_field prefix r =
-                                  let plen = String.length prefix in
-                                  if String.length line > plen
-                                     && String.sub line 0 plen = prefix then
-                                    r := String.trim (String.sub line plen (String.length line - plen))
+                    let content = Fs_compat.load_file path in
+                    let lines = String.split_on_char '\n' content in
+                    match lines with
+                    | "---" :: rest ->
+                        let title = ref fallback_name in
+                        let source = ref "" in
+                        let verified_by = ref "" in
+                        let date = ref "" in
+                        let tags = ref [] in
+                        let rec scan = function
+                          | [] -> ()
+                          | "---" :: _ -> ()
+                          | line :: tl ->
+                              let try_field prefix r =
+                                let plen = String.length prefix in
+                                if String.length line > plen
+                                   && String.sub line 0 plen = prefix then
+                                  r := String.trim (String.sub line plen (String.length line - plen))
+                              in
+                              try_field "title: " title;
+                              try_field "source: " source;
+                              try_field "verified_by: " verified_by;
+                              try_field "date: " date;
+                              let tp = "tags: " in
+                              let tplen = String.length tp in
+                              if String.length line > tplen
+                                 && String.sub line 0 tplen = tp then begin
+                                let raw = String.trim (String.sub line tplen (String.length line - tplen)) in
+                                let inner =
+                                  if String.length raw >= 2
+                                     && raw.[0] = '[' && raw.[String.length raw - 1] = ']' then
+                                    String.sub raw 1 (String.length raw - 2)
+                                  else raw
                                 in
-                                try_field "title: " title;
-                                try_field "source: " source;
-                                try_field "verified_by: " verified_by;
-                                try_field "date: " date;
-                                let tp = "tags: " in
-                                let tplen = String.length tp in
-                                if String.length line > tplen
-                                   && String.sub line 0 tplen = tp then begin
-                                  let raw = String.trim (String.sub line tplen (String.length line - tplen)) in
-                                  let inner =
-                                    if String.length raw >= 2
-                                       && raw.[0] = '[' && raw.[String.length raw - 1] = ']' then
-                                      String.sub raw 1 (String.length raw - 2)
-                                    else raw
-                                  in
-                                  tags := String.split_on_char ',' inner
-                                    |> List.map String.trim
-                                    |> List.filter (fun s -> s <> "")
-                                end;
-                                scan ()
-                            | None -> ()
-                          in
-                          scan ();
-                          (!title, !source, !verified_by, !date, !tags)
-                      | _ -> (fallback_name, "", "", "", []))
+                                tags := String.split_on_char ',' inner
+                                  |> List.map String.trim
+                                  |> List.filter (fun s -> s <> "")
+                              end;
+                              scan tl
+                        in
+                        scan rest;
+                        (!title, !source, !verified_by, !date, !tags)
+                    | _ -> (fallback_name, "", "", "", [])
                   with Sys_error _ -> (fallback_name, "", "", "", [])
                 in
                 let strip_frontmatter content =
@@ -289,7 +289,7 @@ let handle_read_resource_eio state id params =
                 end else if is_json then begin
                   let path = Filename.concat library_dir (topic ^ ".md") in
                   if Sys.file_exists path then begin
-                    let raw = In_channel.with_open_text path In_channel.input_all in
+                    let raw = Fs_compat.load_file path in
                     let (title, source, verified_by, date, tags) = parse_frontmatter path topic in
                     let body = strip_frontmatter raw in
                     let json = `Assoc [
@@ -307,7 +307,7 @@ let handle_read_resource_eio state id params =
                 end else begin
                   let path = Filename.concat library_dir (topic ^ ".md") in
                   if Sys.file_exists path then
-                    let content = In_channel.with_open_text path In_channel.input_all in
+                    let content = Fs_compat.load_file path in
                     ("text/markdown", Some content)
                   else
                     ("text/markdown", Some (Printf.sprintf "Library document '%s' not found." topic))

@@ -365,76 +365,85 @@ let execute_fallback ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execut
   in
   try_nodes (primary :: fallbacks) []
 
-(** Execute race node - run all in parallel, first result wins (with timeout) *)
+(** Exception used to signal race completion and cancel non-winning fibers. *)
+exception Race_done
 
-let execute_race ctx ~sw ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_node_fn) ~tool_exec (parent : node)
+(** Execute race node - run all in parallel, first result wins (with timeout).
+    Uses a sub-switch to cancel non-winning fibers on resolution. *)
+
+let execute_race ctx ~sw:_ ~clock ~(exec_fn : exec_fn) ~(execute_node : execute_node_fn) ~tool_exec (parent : node)
     ~nodes ~timeout : (string, string) result =
   record_start ctx parent.id;
   let start = Time_compat.now () in
   let winner = ref None in
   let winner_mutex = Eio.Mutex.create () in
-  let winner_cond = Eio.Condition.create () in
   let all_errors = ref [] in
   let finished_count = ref 0 in
   let total_nodes = List.length nodes in
+  let timeout_sec = match timeout with Some t -> t | None -> 300.0 in
+  let timed_out = ref false in
+  let resolved = ref false in
 
-  (* Fork all race nodes in parallel *)
-  List.iter (fun (node : node) ->
-    Eio.Fiber.fork ~sw (fun () ->
-      let already_won = Eio.Mutex.use_rw winner_mutex ~protect:true (fun () -> Option.is_some !winner) in
-      if not already_won then begin
-        match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node with
-        | Ok output ->
-            Eio.Mutex.use_rw winner_mutex ~protect:true (fun () ->
-              if Option.is_none !winner then begin
-                winner := Some (node.id, output);
-                Eio.Condition.broadcast winner_cond
-              end;
-              incr finished_count)
-        | Error msg ->
-            Eio.Mutex.use_rw winner_mutex ~protect:true (fun () ->
-              all_errors := (node.id ^ ": " ^ msg) :: !all_errors;
-              incr finished_count;
-              (* Wake up waiter if all have failed *)
-              if !finished_count = total_nodes then
-                Eio.Condition.broadcast winner_cond)
-      end)
-  ) nodes;
+  (* Run all racers inside a sub-switch so non-winning fibers get cancelled.
+     A single Race_done exception is used to terminate the switch.
+     The [resolved] flag prevents multiple Switch.fail calls. *)
+  (try
+    Eio.Switch.run (fun race_sw ->
+      let signal_done () =
+        if not !resolved then begin
+          resolved := true;
+          Eio.Switch.fail race_sw Race_done
+        end
+      in
+      (* Timeout fiber: sleep then signal if no resolution yet *)
+      Eio.Fiber.fork ~sw:race_sw (fun () ->
+        (try Eio.Time.sleep clock timeout_sec
+         with Eio.Cancel.Cancelled _ -> ());
+        if not !resolved then begin
+          timed_out := true;
+          signal_done ()
+        end);
+      (* Racer fibers *)
+      List.iter (fun (node : node) ->
+        Eio.Fiber.fork ~sw:race_sw (fun () ->
+          let already_won = Eio.Mutex.use_rw winner_mutex ~protect:true
+            (fun () -> Option.is_some !winner) in
+          if not already_won then
+            match execute_node ctx ~sw:race_sw ~clock ~exec_fn ~tool_exec node with
+            | Ok output ->
+                Eio.Mutex.use_rw winner_mutex ~protect:true (fun () ->
+                  if Option.is_none !winner then
+                    winner := Some (node.id, output);
+                  incr finished_count);
+                signal_done ()
+            | Error msg ->
+                Eio.Mutex.use_rw winner_mutex ~protect:true (fun () ->
+                  all_errors := (node.id ^ ": " ^ msg) :: !all_errors;
+                  incr finished_count);
+                if !finished_count = total_nodes then
+                  signal_done ()
+            | exception Eio.Cancel.Cancelled _ -> ()
+        )
+      ) nodes)
+  with Race_done -> ());
 
-  (* Wait for winner with optional timeout *)
-  let timeout_sec = match timeout with Some t -> t | None -> 300.0 in (* Default 5 min *)
-  let wait_for_winner () =
-    Eio.Mutex.use_rw winner_mutex ~protect:true (fun () ->
-      while Option.is_none !winner && !finished_count < total_nodes do
-        Eio.Condition.await winner_cond winner_mutex
-      done;
-      !winner)
-  in
-
-  let duration_ms = ref 0 in
-  let result =
-    try
-      Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
-        let r = wait_for_winner () in
-        duration_ms := int_of_float ((Time_compat.now () -. start) *. 1000.0);
-        match r with
-        | Some (winner_id, output) ->
-            record_complete ctx parent.id ~duration_ms:!duration_ms ~success:true;
-            store_node_output ctx parent (Printf.sprintf "[winner: %s] %s" winner_id output);
-            Ok output
-        | None ->
-            let msg = Printf.sprintf "All racers failed: %s" (String.concat "; " !all_errors) in
-            record_complete ctx parent.id ~duration_ms:!duration_ms ~success:false;
-            record_error ctx parent.id msg;
-            Error msg)
-    with Eio.Time.Timeout ->
-      duration_ms := int_of_float ((Time_compat.now () -. start) *. 1000.0);
-      let msg = Printf.sprintf "Race timeout after %.1fs" timeout_sec in
-      record_complete ctx parent.id ~duration_ms:!duration_ms ~success:false;
-      record_error ctx parent.id msg;
-      Error msg
-  in
-  result
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
+  if !timed_out then begin
+    let msg = Printf.sprintf "Race timeout after %.1fs" timeout_sec in
+    record_complete ctx parent.id ~duration_ms ~success:false;
+    record_error ctx parent.id msg;
+    Error msg
+  end else
+    match !winner with
+    | Some (winner_id, output) ->
+        record_complete ctx parent.id ~duration_ms ~success:true;
+        store_node_output ctx parent (Printf.sprintf "[winner: %s] %s" winner_id output);
+        Ok output
+    | None ->
+        let msg = Printf.sprintf "All racers failed: %s" (String.concat "; " !all_errors) in
+        record_complete ctx parent.id ~duration_ms ~success:false;
+        record_error ctx parent.id msg;
+        Error msg
 
 (** Execute StreamMerge node - process results progressively as they arrive *)
 

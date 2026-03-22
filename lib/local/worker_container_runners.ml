@@ -383,9 +383,9 @@ let run_worker ~sw ~base_path ~worker_name ~model_label ~team_session_id
     ~(prompt : string) ~(allowed_tools : string list) ~(timeout_sec : int) :
     unit -> (run_result, string) result =
   let provider = oas_provider_of_label model_label in
-  let model_id = match Model_spec.model_spec_of_string model_label with
-    | Ok spec -> spec.model_id
-    | Error _ -> model_label
+  let model_id = match Llm_provider.Cascade_config.parse_model_string model_label with
+    | Some cfg -> cfg.Llm_provider.Provider_config.model_id
+    | None -> model_label
   in
   run_worker_oas ~sw ~base_path ~worker_name ~provider ~model_id
     ~team_session_id

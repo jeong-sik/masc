@@ -718,7 +718,9 @@ let handle_record_finding ctx args =
     let cycle_end = Safe_ops.json_int_opt "cycle_end" args in
     let cycle_range = match cycle_start, cycle_end with
       | Some a, Some b -> Some (a, b)
-      | _ -> None
+      | Some a, None -> Some (a, a)  (* single cycle *)
+      | None, Some b -> Some (b, b)
+      | None, None -> None
     in
     let finding : Autoresearch_knowledge.finding = {
       id = Autoresearch_knowledge.generate_finding_id ();

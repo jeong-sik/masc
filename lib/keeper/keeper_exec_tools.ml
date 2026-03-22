@@ -51,6 +51,9 @@ let keeper_autoresearch_tool_names =
   Tool_shard.autoresearch_keeper_tools
   |> List.map (fun (t : Types.tool_schema) -> t.name)
 
+let is_research_profile (meta : keeper_meta) =
+  meta.soul_profile = "research"
+
 let keeper_coding_tool_names = Tool_code_write.tool_names
 
 let dedupe_tool_names names =
@@ -71,7 +74,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
       else with_voice
     in
     let with_research =
-      if meta.soul_profile = "research" then
+      if is_research_profile meta then
         keeper_autoresearch_tool_names @ with_shell
       else with_shell
     in
@@ -84,7 +87,7 @@ let keeper_allowed_tool_names ?(write_done = false) (meta : keeper_meta) :
   else
     let base_names = keeper_model_tools |> List.map (fun tool -> tool.Types.name) in
     let with_research =
-      if meta.soul_profile = "research" then
+      if is_research_profile meta then
         keeper_autoresearch_tool_names @ base_names
       else base_names
     in
@@ -100,7 +103,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
   else
     let base = keeper_model_tools in
     let with_research =
-      if meta.soul_profile = "research" then
+      if is_research_profile meta then
         base @ Tool_shard.autoresearch_keeper_tools
       else base
     in

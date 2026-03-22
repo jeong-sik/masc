@@ -29,7 +29,8 @@ type finding = {
 let confidence_to_string = function
   | High -> "high" | Medium -> "medium" | Low -> "low"
 
-let confidence_of_string = function
+let confidence_of_string s =
+  match String.lowercase_ascii (String.trim s) with
   | "high" -> High | "medium" -> Medium | "low" -> Low
   | _ -> Medium
 
@@ -101,36 +102,42 @@ let load_all_findings () : finding list =
   let path = findings_file () in
   if not (Sys.file_exists path) then []
   else
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
-      let findings = ref [] in
-      (try while true do
-        let line = input_line ic in
-        if String.trim line <> "" then
-          match Yojson.Safe.from_string line |> finding_of_yojson with
-          | Ok f -> findings := f :: !findings
-          | Error _ -> ()
-      done with End_of_file -> ());
-      List.rev !findings)
+    Fs_compat.load_jsonl path
+    |> List.filter_map (fun json ->
+         match finding_of_yojson json with
+         | Ok f -> Some f
+         | Error msg ->
+           Log.Keeper.warn "Skipping malformed finding: %s" msg;
+           None)
+
+let contains_ci ~needle haystack =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen = 0 then true
+  else if nlen > hlen then false
+  else
+    let rec scan i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else scan (i + 1)
+    in
+    scan 0
+
+let rec take n = function
+  | [] -> []
+  | _ when n <= 0 -> []
+  | x :: rest -> x :: take (n - 1) rest
 
 let search_findings ~query ?(limit=10) () : finding list =
   let query_lower = String.lowercase_ascii query in
   load_all_findings ()
+  |> List.rev  (* most recent first — load_all returns oldest first *)
   |> List.filter (fun f ->
     let haystack = String.lowercase_ascii
       (f.goal ^ " " ^ f.hypothesis ^ " " ^ f.evidence ^ " " ^
        f.conclusion ^ " " ^ String.concat " " f.tags) in
-    let rec find_sub i =
-      if i + String.length query_lower > String.length haystack then false
-      else if String.sub haystack i (String.length query_lower) = query_lower then true
-      else find_sub (i + 1)
-    in
-    find_sub 0)
-  |> List.rev  (* most recent first *)
-  |> fun results ->
-    if List.length results > limit then
-      List.filteri (fun i _ -> i < limit) results
-    else results
+    contains_ci ~needle:query_lower haystack)
+  |> take limit
 
 (** {1 GraphQL Sync (best-effort)} *)
 

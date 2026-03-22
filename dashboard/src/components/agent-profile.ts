@@ -276,39 +276,39 @@ function CharacterPlate({ name }: { name: string }) {
       </div>
 
       ${isKeeper ? html`
-        <div class="grid grid-cols-2 gap-1.5 self-center min-w-[100px]">
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+        <div class="grid grid-cols-4 gap-2 w-full mt-2">
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
             <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${ctxPct != null ? `${ctxPct}%` : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">CTX</span>
           </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
             <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${generation ?? 0}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">세대</span>
           </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
             <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${keeper.turn_count ?? 0}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">턴</span>
           </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
             <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${keeper.autonomous_action_count ?? 0}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">행동</span>
           </div>
         </div>
       ` : html`
-        <div class="grid grid-cols-2 gap-1.5 self-center min-w-[100px]">
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+        <div class="grid grid-cols-4 gap-2 w-full mt-2">
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
             <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary ? summary.tasks_completed : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">완료</span>
           </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
             <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary ? summary.tasks_claimed : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">수임</span>
           </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
             <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary ? summary.messages_sent : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">메시지</span>
           </div>
-          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md">
+          <div class="flex flex-col items-center px-2 py-1.5 bg-[rgba(200,168,78,0.05)] border border-[var(--ff-gold-10)] rounded-md flex-1">
             <span class="text-[16px] font-bold tabular-nums text-[color:var(--text-strong)]">${summary && summary.active_duration_minutes > 0 ? `${Math.round(summary.active_duration_minutes)}m` : summary ? '0m' : 'N/A'}</span>
             <span class="text-[length:var(--fs-2xs)] text-[color:var(--ff-gold)] tracking-[0.5px]">활동</span>
           </div>

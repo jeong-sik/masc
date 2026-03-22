@@ -451,7 +451,7 @@ let run_proactive_generation
     ~(continuity_snapshot : keeper_state_snapshot option)
     ~(continuity_summary : string)
     ~(idle_seconds : int) : proactive_generation_result option =
-  let primary_model_id = Model_spec.resolve_primary_model_id model_labels in
+  let primary_model_id = (match Llm_provider.Cascade_config.parse_model_strings model_labels with c :: _ -> c.Llm_provider.Provider_config.model_id | [] -> "auto") in
   let base_prompt =
     proactive_prompt_for_keeper ~meta ~idle_seconds continuity_snapshot continuity_summary
   in
@@ -510,9 +510,14 @@ let run_proactive_generation
       | Error _ -> None
       | Ok result ->
           let resp = result.Oas_worker.response in
+          let model_used_raw = resp.model in
           let used_model_id =
-            Model_spec.find_model_id_for_used ~labels:model_labels
-              ~model_used:resp.model
+            let cfgs = Llm_provider.Cascade_config.parse_model_strings model_labels in
+            let strip s = if String.length s > 7 && String.sub s (String.length s - 7) 7 = ":latest" then String.sub s 0 (String.length s - 7) else s in
+            let u = strip model_used_raw in
+            match List.find_opt (fun (c : Llm_provider.Provider_config.t) -> c.model_id = model_used_raw || c.model_id = u) cfgs with
+            | Some c -> c.model_id
+            | None -> (match cfgs with c :: _ -> c.model_id | [] -> model_used_raw)
           in
           let attempt_usage = usage_of_response resp in
           let attempt_cost_usd =

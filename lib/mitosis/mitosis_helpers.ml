@@ -160,7 +160,7 @@ let set_bool_arg args key value =
       `Assoc [ (key, `Bool value) ]
 
 let default_verifier_models =
-  Model_spec.default_verifier_model_labels ()
+  Provider_adapter.preferred_verifier_model_labels ()
 
 let default_verifier_perspectives = [
   "A: continuity archivist (value-neutral)";
@@ -415,21 +415,21 @@ let run_handoff_verifier ~ctx ~args ~(parsed_result : Yojson.Safe.t) : (Yojson.S
     let checks =
       List.mapi (fun idx model_str ->
         let perspective = perspective_at perspectives idx in
-        match Model_spec.model_spec_of_string model_str with
-        | Error err ->
+        match Llm_provider.Cascade_config.parse_model_string model_str with
+        | None ->
             incr warn_count;
             `Assoc [
               ("model", `String model_str);
               ("perspective", `String perspective);
               ("verdict", `String "WARN: model_parse_error");
               ("status", `String "warn");
-              ("reason", `String err);
+              ("reason", `String (Printf.sprintf "Cannot parse: %s" model_str));
               ("recheck_count_requested", `Int recheck_count);
               ("recheck_count_completed", `Int 0);
               ("recheck_status_samples", `List [`String "warn"]);
               ("recheck_stability", `Float 1.0);
             ]
-        | Ok _model ->
+        | Some _cfg ->
             let req = Verifier_oas.{
               action_description =
                 Printf.sprintf "masc_mitosis_handoff outcome review (%s)" perspective;

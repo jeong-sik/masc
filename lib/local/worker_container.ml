@@ -472,9 +472,9 @@ let oas_provider_of_label (label : string) : Oas.Provider.config =
   | Some config -> config
   | None ->
     (* Fallback: parse label to extract api_url, model_id etc. *)
-    match Model_spec.model_spec_of_string label with
-    | Ok spec ->
-      let pc = Model_spec.to_provider_config spec in
+    match Llm_provider.Cascade_config.parse_model_string label with
+    | Some pc ->
+      (* pc already is Provider_config.t *)
       { Oas.Provider.provider =
           Oas.Provider.OpenAICompat
             {
@@ -486,7 +486,7 @@ let oas_provider_of_label (label : string) : Oas.Provider.config =
         model_id = pc.model_id;
         api_key_env = if pc.api_key <> "" then pc.api_key else "DUMMY_KEY";
       }
-    | Error _ ->
+    | None ->
       (* Last resort: treat label as model_id with glm defaults *)
       { Oas.Provider.provider =
           Oas.Provider.OpenAICompat
@@ -501,9 +501,9 @@ let oas_provider_of_label (label : string) : Oas.Provider.config =
     Returns the provider config and model_id on success. *)
 let resolve_oas_provider_of_label (label : string) :
     (Oas.Provider.config * string, string) result =
-  match Model_spec.model_spec_of_string label with
-  | Error msg -> Error msg
-  | Ok spec -> Ok (oas_provider_of_label label, spec.model_id)
+  match Llm_provider.Cascade_config.parse_model_string label with
+  | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
+  | Some pc -> Ok (oas_provider_of_label label, pc.Llm_provider.Provider_config.model_id)
 
 let oas_tool_names (tools : Oas.Tool.t list) =
   List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools

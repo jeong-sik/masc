@@ -269,9 +269,9 @@ let dispatch (ctx : context) ~(name : string) : result option =
               if String.contains raw ':' then raw else "llama:" ^ raw
             in
             (* Validate the label parses without retaining model_spec *)
-            Model_spec.model_spec_of_string spec_name |> Result.map (fun _ -> ())
+            (match Llm_provider.Cascade_config.parse_model_string spec_name with Some _ -> Ok () | None -> Error "invalid model spec")
         | _ ->
-            Model_spec.default_execution_model_spec () |> Result.map (fun _ -> ())
+            (match Provider_adapter.preferred_execution_model_labels () with _ :: _ -> Ok () | [] -> Error "no execution model")
       in
       let module U = Yojson.Safe.Util in
       let working_dir = match arguments |> U.member "working_dir" with

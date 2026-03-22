@@ -230,13 +230,13 @@ let keepers_dashboard_json ?(compact = false) (config : Room.config) : Yojson.Sa
                   ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
                 ]
             | None ->
-                (let specs = Model_spec.available_model_specs_of_strings m.models in
-                 match specs with
+                (let cfgs = Llm_provider.Cascade_config.parse_model_strings m.models in
+                 match cfgs with
                  | [] when m.models <> [] ->
                      `Assoc [("has_checkpoint", `Bool false)]
                  | _ ->
                      let primary_max_context =
-                       Model_spec.resolve_primary_max_context m.models
+                       (match Llm_provider.Cascade_config.parse_model_strings m.models with c :: _ -> c.Llm_provider.Provider_config.max_tokens | [] -> 128_000)
                      in
                      let base_dir = Keeper_types.session_base_dir config in
                      let (_session, ctx_opt) =

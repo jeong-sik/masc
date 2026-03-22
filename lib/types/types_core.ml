@@ -726,3 +726,19 @@ type tool_schema = {
   description: string;
   input_schema: Yojson.Safe.t;
 }
+
+(** Structured result for claim_next scheduling (avoids brittle string parsing).
+    Defined here so that both Room_task_schedule (producer) and consumers
+    (tool_task, room_walph, orchestrator) can reference the type without
+    triggering warning 34 from [include] re-export. *)
+type claim_next_result =
+  | Claim_next_claimed of {
+      task_id : string;
+      title : string;
+      priority : int;
+      released_task_id : string option;  (** Previous task auto-released, if any *)
+      message : string;
+    }
+  | Claim_next_no_unclaimed
+  | Claim_next_no_eligible of { excluded_count : int }
+  | Claim_next_error of string

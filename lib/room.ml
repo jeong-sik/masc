@@ -29,8 +29,11 @@ let init config ~agent_name =
 (* Room status display *)
 include Room_status
 
-(* Task lifecycle: add, claim, transition, complete, cancel, claim_next *)
+(* Task lifecycle: add, claim, transition, complete, cancel *)
 include Room_task
+
+(* Task scheduling: claim_next, release_stale_claims *)
+include Room_task_schedule
 
 (* Walph control system: state machine, loop, presets *)
 include Room_walph

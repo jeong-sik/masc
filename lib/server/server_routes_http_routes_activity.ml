@@ -189,6 +189,31 @@ let add_routes router =
          )
        ) request reqd)
 
+  |> Http.Router.post "/api/v1/tools/masc_board_post" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_board_post"
+         (fun _state _req reqd ->
+         let agent_name = Option.bind (Httpun.Headers.get request.Httpun.Request.headers "x-masc-agent") (fun s -> if s = "" then None else Some s) |> Option.value ~default:"dashboard" in
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let args =
+               Yojson.Safe.from_string body_str
+               |> json_upsert_string_field "author" agent_name
+             in
+             let (ok, msg) = Tool_board.handle_tool "masc_board_post" args in
+             let status = if ok then `Created else `Bad_request in
+             respond_json_with_cors ~status request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool ok); ("message", `String msg)
+               ]))
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_with_cors ~status:`Bad_request request reqd
+               (Yojson.Safe.to_string (`Assoc [
+                 ("ok", `Bool false);
+                 ("message", `String (Printexc.to_string exn))
+               ]))
+         )
+       ) request reqd)
+
   |> Http.Router.post "/api/v1/tools/masc_board_comment" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_comment"
          (fun _state _req reqd ->

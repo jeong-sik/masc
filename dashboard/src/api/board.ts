@@ -467,6 +467,15 @@ export function voteBoardTool(postId: string, vote: 'up' | 'down', voter: string
   })
 }
 
+export function createPost(title: string, content: string, author: string, kind = 'internal'): Promise<unknown> {
+  return post(`/api/v1/tools/masc_board_post`, {
+    title,
+    content,
+    author,
+    kind,
+  })
+}
+
 export function commentPost(postId: string, author: string, content: string): Promise<unknown> {
   return post(`/api/v1/tools/masc_board_comment`, {
     post_id: postId,

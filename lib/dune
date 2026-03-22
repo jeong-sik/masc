@@ -4,6 +4,7 @@
  (name masc_mcp)
  (public_name masc_mcp)
  (modules
+   a2a_types
    a2a_tools
    ag_ui
    agent_card

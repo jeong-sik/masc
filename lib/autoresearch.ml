@@ -32,6 +32,16 @@ include Autoresearch_types
 let active_loops : (string, loop_state) Hashtbl.t = Hashtbl.create 4
 let latest_loop_id : string option ref = ref None
 
+(** Eio.Mutex protecting [active_loops] and [latest_loop_id] against
+    concurrent reads/writes from parallel tool handlers. *)
+let loops_mu = Eio.Mutex.create ()
+
+(** Execute [f] under exclusive write lock on the loops registry. *)
+let with_loops_rw f = Eio.Mutex.use_rw ~protect:true loops_mu (fun () -> f ())
+
+(** Execute [f] under shared read lock on the loops registry. *)
+let with_loops_ro f = Eio.Mutex.use_ro loops_mu (fun () -> f ())
+
 let generate_loop_id () =
   let rnd = Mirage_crypto_rng.generate 4 in
   let hex = String.concat "" (
@@ -83,6 +93,7 @@ let latest_cycle_record = Autoresearch_storage.latest_cycle_record
 (* ================================================================ *)
 
 let contains_substring = Autoresearch_metric.contains_substring
+let validate_metric_fn = Autoresearch_metric.validate_metric_fn
 let measure_metric = Autoresearch_metric.measure_metric
 let measure_metric_with_retry = Autoresearch_metric.measure_metric_with_retry
 
@@ -202,7 +213,8 @@ let record_cycle (state : loop_state) ~hypothesis ~score_before ~score_after
 let should_continue (state : loop_state) =
   state.status = Running && state.current_cycle < state.max_cycles
 
-(** Stop a running or persisted loop. *)
+(** Stop a running or persisted loop.
+    Acquires [loops_mu] write lock internally. *)
 let stop_loop ~base_path ?reason loop_id =
   let stop_state (state : loop_state) =
     state.status <- Stopped;
@@ -211,80 +223,83 @@ let stop_loop ~base_path ?reason loop_id =
     save_state ~base_path state;
     state
   in
-  match Hashtbl.find_opt active_loops loop_id with
-  | Some state -> Some (stop_state state)
-  | None -> (
-      match load_state ~base_path loop_id with
-      | None -> None
-      | Some persisted ->
-          let now = Time_compat.now () in
-          let state =
-            {
-              loop_id = persisted.loop_id;
-              goal = persisted.goal;
-              metric_fn = persisted.metric_fn;
-              model_model = persisted.model_model;
-              target_file = persisted.target_file;
-              status = persisted.status;
-              error_message = persisted.error_message;
-              current_cycle = persisted.current_cycle;
-              baseline = persisted.baseline;
-              best_score = persisted.best_score;
-              best_cycle = persisted.best_cycle;
-              queued_hypothesis = persisted.queued_hypothesis;
-              history = [];
-              total_keeps = persisted.total_keeps;
-              total_discards = persisted.total_discards;
-              insights = [];
-              start_time = now -. max 0.0 persisted.elapsed_s;
-              updated_at = now;
-              cycle_timeout_s = persisted.cycle_timeout_s;
-              max_cycles = persisted.max_cycles;
-              workdir = persisted.workdir;
-              source_workdir = persisted.source_workdir;
-              program_note = persisted.program_note;
-              warnings = persisted.warnings;
-            }
-          in
-          Some (stop_state state))
+  with_loops_rw (fun () ->
+    match Hashtbl.find_opt active_loops loop_id with
+    | Some state -> Some (stop_state state)
+    | None -> (
+        match load_state ~base_path loop_id with
+        | None -> None
+        | Some persisted ->
+            let now = Time_compat.now () in
+            let state =
+              {
+                loop_id = persisted.loop_id;
+                goal = persisted.goal;
+                metric_fn = persisted.metric_fn;
+                model_model = persisted.model_model;
+                target_file = persisted.target_file;
+                status = persisted.status;
+                error_message = persisted.error_message;
+                current_cycle = persisted.current_cycle;
+                baseline = persisted.baseline;
+                best_score = persisted.best_score;
+                best_cycle = persisted.best_cycle;
+                queued_hypothesis = persisted.queued_hypothesis;
+                history = [];
+                total_keeps = persisted.total_keeps;
+                total_discards = persisted.total_discards;
+                insights = [];
+                start_time = now -. max 0.0 persisted.elapsed_s;
+                updated_at = now;
+                cycle_timeout_s = persisted.cycle_timeout_s;
+                max_cycles = persisted.max_cycles;
+                workdir = persisted.workdir;
+                source_workdir = persisted.source_workdir;
+                program_note = persisted.program_note;
+                warnings = persisted.warnings;
+              }
+            in
+            Some (stop_state state)))
 
-(** Linked loop status JSON for swarm integration. *)
+(** Linked loop status JSON for swarm integration.
+    Acquires [loops_mu] read lock internally. *)
 let linked_status_json ~base_path (link : swarm_link) =
   let current_cycle, status, best_score, error_message, workdir, source_workdir,
       program_note, warnings, queued_hypothesis =
-    match Hashtbl.find_opt active_loops link.loop_id with
-    | Some state ->
-        ( state.current_cycle,
-          status_to_string state.status,
-          state.best_score,
-          state.error_message,
-          state.workdir,
-          state.source_workdir,
-          state.program_note,
-          state.warnings,
-          state.queued_hypothesis )
-    | None -> (
-        match load_state ~base_path link.loop_id with
-        | Some persisted ->
-            ( persisted.current_cycle,
-              status_to_string persisted.status,
-              persisted.best_score,
-              persisted.error_message,
-              persisted.workdir,
-              persisted.source_workdir,
-              persisted.program_note,
-              persisted.warnings,
-              persisted.queued_hypothesis )
-        | None ->
-            ( 0,
-              "missing",
-              0.0,
-              Some "state file missing",
-              managed_worktree_dir ~base_path link.loop_id,
-              "",
-              link.program_note,
-              [],
-              None ))
+    with_loops_ro (fun () ->
+      match Hashtbl.find_opt active_loops link.loop_id with
+      | Some state ->
+          ( state.current_cycle,
+            status_to_string state.status,
+            state.best_score,
+            state.error_message,
+            state.workdir,
+            state.source_workdir,
+            state.program_note,
+            state.warnings,
+            state.queued_hypothesis )
+      | None -> (
+          match load_state ~base_path link.loop_id with
+          | Some persisted ->
+              ( persisted.current_cycle,
+                status_to_string persisted.status,
+                persisted.best_score,
+                persisted.error_message,
+                persisted.workdir,
+                persisted.source_workdir,
+                persisted.program_note,
+                persisted.warnings,
+                persisted.queued_hypothesis )
+          | None ->
+              ( 0,
+                "missing",
+                0.0,
+                Some "state file missing",
+                managed_worktree_dir ~base_path link.loop_id,
+                "",
+                link.program_note,
+                [],
+                None )))
   in
   let last_decision =
     match latest_cycle_record ~base_path link.loop_id with

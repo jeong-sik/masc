@@ -357,18 +357,18 @@ function PostCard({ post }: { post: BoardPost }) {
 
   return html`
     <div
-      class="board-post group flex gap-3 rounded-xl p-4 border border-[var(--card-border)] bg-[var(--card)] hover:bg-[var(--white-6)] hover:border-[rgba(71,184,255,0.26)] transition-all duration-200 cursor-pointer"
+      class="group flex gap-3 rounded-xl p-4 border border-[var(--card-border)] bg-[var(--card)] hover:bg-[var(--white-6)] hover:border-[rgba(71,184,255,0.26)] transition-all duration-200 cursor-pointer"
       onClick=${() => navigateToPost(post.id)}
     >
       <!-- Vote column -->
       <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-[36px]">
         <button
-          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[#ff4500] hover:bg-[rgba(255,69,0,0.1)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[#ff4500] hover:bg-[rgba(255,69,0,0.1)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('up', event)}
         >▲</button>
         <span class="text-[13px] font-semibold tabular-nums text-[var(--text-strong)]">${post.votes ?? 0}</span>
         <button
-          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[#7193ff] hover:bg-[rgba(113,147,255,0.1)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="w-7 h-5 flex items-center justify-center rounded text-[11px] text-[var(--text-muted)] hover:text-[#7193ff] hover:bg-[rgba(113,147,255,0.1)] transition-colors cursor-pointer border-0 bg-transparent"
           onClick=${(event: Event) => handleVote('down', event)}
         >▼</button>
       </div>
@@ -422,7 +422,7 @@ function CommentItem({ comment }: { comment: BoardComment }) {
   const needsTruncation = (comment.content?.length ?? 0) > 300
 
   return html`
-    <div class="board-comment rounded-lg p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)]">
+    <div class="rounded-lg p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)]">
       <div class="flex items-center gap-2 mb-1.5">
         <span class="text-[12px]">${authorAvatar(comment.author)}</span>
         <a class="text-[12px] font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer" onClick=${() => navigate('status', { section: 'agents', agent: comment.author })}>${comment.author}</a>
@@ -541,11 +541,11 @@ function PostDetail({ post }: { post: BoardPost }) {
           <!-- Vote buttons -->
           <div class="flex gap-2">
             <button
-              class="vote-btn upvote px-3 py-1.5 rounded-lg text-[12px] font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[#ff4500] hover:border-[rgba(255,69,0,0.3)] hover:bg-[rgba(255,69,0,0.08)] transition-all cursor-pointer"
+              class="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[#ff4500] hover:border-[rgba(255,69,0,0.3)] hover:bg-[rgba(255,69,0,0.08)] transition-all cursor-pointer"
               onClick=${() => handleVote('up')}
             >▲ 추천</button>
             <button
-              class="vote-btn downvote px-3 py-1.5 rounded-lg text-[12px] font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[#7193ff] hover:border-[rgba(113,147,255,0.3)] hover:bg-[rgba(113,147,255,0.08)] transition-all cursor-pointer"
+              class="px-3 py-1.5 rounded-lg text-[12px] font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[#7193ff] hover:border-[rgba(113,147,255,0.3)] hover:bg-[rgba(113,147,255,0.08)] transition-all cursor-pointer"
               onClick=${() => handleVote('down')}
             >▼ 비추천</button>
           </div>

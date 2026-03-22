@@ -124,8 +124,8 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
           />
         </div>
 
-        <details class="keeper-comms-diagnostics group">
-          <summary class="keeper-comms-diagnostics-toggle cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)]">Runtime diagnostics</summary>
+        <details class="group">
+          <summary class="cursor-pointer py-2.5 px-4 text-xs text-[var(--text-muted)] tracking-wider uppercase list-none select-none rounded-lg hover:bg-[var(--white-3)]">Runtime diagnostics</summary>
           <div class="flex flex-col gap-3 px-4 pb-4 pt-2">
             <${KeeperDiagnosticSummary} keeper=${keeper} />
             <${KeeperRuntimeActions}

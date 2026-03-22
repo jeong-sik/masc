@@ -6,7 +6,7 @@ import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { navigate, route } from '../router'
 import { agents, keepers } from '../store'
-import { missionSnapshot } from '../mission-store'
+import { missionKeeperBriefs } from '../mission-signals'
 import { AgentRoster } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 import { Execution } from './agents'
@@ -23,9 +23,7 @@ function keeperNameSet(): Set<string> {
       ?? (k as { agent_name?: string }).agent_name
     if (name) names.add(name)
   }
-  const snap = missionSnapshot.value
-  const briefs = snap?.keeper_briefs ?? []
-  for (const kb of briefs) {
+  for (const kb of missionKeeperBriefs.value) {
     const name = (kb as { name?: string; agent_name?: string }).name
       ?? (kb as { agent_name?: string }).agent_name
     if (name) names.add(name)

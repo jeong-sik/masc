@@ -7,7 +7,7 @@ import { useState } from 'preact/hooks'
 import type { Agent, Keeper } from '../types'
 import type { DashboardMissionKeeperBrief } from '../types/dashboard-mission'
 import { agents, keepers } from '../store'
-import { missionSnapshot } from '../mission-store'
+import { missionKeeperBriefs, missionAgentBriefs } from '../mission-signals'
 import { AgentAvatar } from './overview/agent-avatar'
 import { openAgentDetail } from './agent-detail'
 import { formatDuration } from './mission-utils'
@@ -82,9 +82,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   const agentList = agents.value
   const keeperList = keepers.value
-  const snap = missionSnapshot.value
-  const briefs = snap?.agent_briefs ?? []
-  const keeperBriefs = snap?.keeper_briefs ?? []
+  const briefs = missionAgentBriefs.value
+  const keeperBriefs = missionKeeperBriefs.value
 
   const briefMap = new Map(briefs.map(b => [b.agent_name, b]))
 

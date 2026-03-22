@@ -19,44 +19,6 @@ function shortCommit(commit: string | null | undefined): string {
   return value.length > 10 ? value.slice(0, 10) : value
 }
 
-function residentStatusLabel(
-  status: 'live' | 'quiet' | 'starting' | 'idle' | 'disabled',
-) {
-  if (status === 'live') return '가동 중'
-  if (status === 'quiet') return '조용함'
-  if (status === 'starting') return '기동 중'
-  if (status === 'idle') return '대기 중'
-  return '비활성'
-}
-
-function renderRuntimeStat(label: string, value: ComponentChildren) {
-  return html`
-    <div class="flex justify-between gap-3 text-xs text-[color:var(--text-muted)]">
-      <span>${label}</span>
-      <strong class="text-[color:var(--text-strong)] text-right">${value}</strong>
-    </div>
-  `
-}
-
-function renderResidentRuntimeCard(
-  title: string,
-  statusLabel: string,
-  tone: 'ok' | 'warn' | 'bad',
-  rows: ComponentChildren[],
-  hint?: ComponentChildren,
-) {
-  return html`
-    <div style="padding-top:12px; border-top:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; gap:6px;">
-      <div class="flex items-center justify-between gap-3 m-0">
-        <h3 class="text-xs">${title}</h3>
-        <span class="rail-section-chip rounded-full ${tone}">${statusLabel}</span>
-      </div>
-      ${rows}
-      ${hint ? html`<div class="mt-2.5 text-xs text-[color:var(--text-muted)]">${hint}</div>` : null}
-    </div>
-  `
-}
-
 export function SnapshotCard({ currentTab }: { currentTab: string }) {
   const liveConnected = connected.value
   const build = serverStatus.value?.build

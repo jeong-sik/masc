@@ -21,6 +21,40 @@ function actionBadge(action: string | undefined): string {
   }
 }
 
+function eventTypeLabel(type: string): string {
+  switch (type) {
+    case 'selected': return 'selected'
+    case 'decision': return 'decision'
+    case 'action_executed': return 'executed'
+    case 'keeper_resident_lifecycle': return 'resident'
+    case 'trust_updated': return 'trust'
+    case 'reputation_changed': return 'reputation'
+    default: return type
+  }
+}
+
+function eventDetail(ev: (typeof oasAgentEvents.value)[number]): string {
+  switch (ev.type) {
+    case 'selected':
+      return ev.trigger ? `trigger ${ev.trigger}` : 'selection updated'
+    case 'decision':
+      return [ev.action, ev.trigger_reason].filter(Boolean).join(' · ') || 'decision updated'
+    case 'action_executed':
+      return [ev.action, ev.success != null ? (ev.success ? 'ok' : 'fail') : null].filter(Boolean).join(' · ')
+    case 'keeper_resident_lifecycle':
+      return [ev.event, ev.detail].filter(Boolean).join(' · ') || 'resident lifecycle'
+    case 'trust_updated':
+      return [ev.secondary_agent, ev.trust_score != null ? `score ${ev.trust_score.toFixed(2)}` : null].filter(Boolean).join(' · ')
+    case 'reputation_changed':
+      return [
+        ev.old_score != null && ev.new_score != null ? `${ev.old_score.toFixed(2)} → ${ev.new_score.toFixed(2)}` : null,
+        ev.trend ?? null,
+      ].filter(Boolean).join(' · ')
+    default:
+      return ''
+  }
+}
+
 function OasSummaryLines() {
   const events = oasAgentEvents.value
   const snapshots = oasKeeperSnapshots.value
@@ -79,10 +113,11 @@ function OasRawEventList() {
         <div class="oas-event-row rounded" key=${i}>
           <span class="oas-event-ts">${formatTs(ev.timestamp)}</span>
           <span class="oas-event-agent">${ev.agent_name}</span>
-          <span class="oas-event-type">${ev.type}</span>
+          <span class="oas-event-type">${eventTypeLabel(ev.type)}</span>
           ${ev.action ? html`<span class="oas-event-badge ${actionBadge(ev.action)}">${ev.action}</span>` : null}
           ${ev.trigger ? html`<span class="oas-event-trigger">${ev.trigger}</span>` : null}
           ${ev.success != null ? html`<span class="oas-event-ok ${ev.success ? 'ok' : 'fail'}">${ev.success ? 'ok' : 'fail'}</span>` : null}
+          ${eventDetail(ev) ? html`<span class="oas-event-trigger">${eventDetail(ev)}</span>` : null}
         </div>
       `)}
     </div>

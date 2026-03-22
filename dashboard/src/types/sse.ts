@@ -29,6 +29,9 @@ export type SSEEventType =
   | 'oas:masc:lodge:agent_action_executed'
   | 'oas:masc:keeper:snapshot'
   | 'oas:masc:keeper:tick'
+  | 'oas:masc:keeper:resident_lifecycle'
+  | 'oas:masc:trust_updated'
+  | 'oas:masc:reputation_changed'
 
 export interface SSEEvent {
   type: SSEEventType
@@ -84,6 +87,7 @@ export type JournalEventType =
   | 'keeper_compaction'
   | 'keeper_guardrail'
   | 'oas_keeper_snapshot'
+  | 'oas_event'
   | 'unknown'
 
 export interface JournalEntry {

@@ -290,21 +290,48 @@ let test_stats_all_tiers () =
 
 let test_jsonl_backend_persist () =
   let sid = Printf.sprintf "test-persist-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
-  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-jsonl" ~session_id:sid in
+  let backend =
+    Memory_oas_bridge.make_backend ~agent_name:"test-jsonl" ~session_id:sid ()
+  in
   let result = backend.persist ~key:"test" (`String "value") in
   Alcotest.(check bool) "persist returns Ok" true (Result.is_ok result)
 
 let test_jsonl_backend_retrieve () =
   let sid = Printf.sprintf "test-retrieve-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
-  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-jsonl" ~session_id:sid in
+  let backend =
+    Memory_oas_bridge.make_backend ~agent_name:"test-jsonl" ~session_id:sid ()
+  in
   let result = backend.retrieve ~key:"nonexistent" in
   Alcotest.(check bool) "retrieve returns None for missing key" true (Option.is_none result)
 
 let test_jsonl_backend_query () =
   let sid = Printf.sprintf "test-query-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
-  let backend = Memory_oas_bridge.make_backend ~agent_name:"test-jsonl" ~session_id:sid in
+  let backend =
+    Memory_oas_bridge.make_backend ~agent_name:"test-jsonl" ~session_id:sid ()
+  in
   let result = backend.query ~prefix:"test" ~limit:10 in
   Alcotest.(check int) "query returns empty on fresh session" 0 (List.length result)
+
+let test_jsonl_backend_uses_explicit_base_dir () =
+  let dir = setup_tmp_dir () in
+  let base_dir = Filename.concat dir ".masc-room-a" in
+  let sid = Printf.sprintf "test-scope-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let backend =
+    Memory_oas_bridge.make_backend
+      ~base_dir
+      ~agent_name:"test-jsonl"
+      ~session_id:sid
+      ()
+  in
+  let result = backend.persist ~key:"scoped" (`String "value") in
+  Alcotest.(check bool) "persist returns Ok" true (Result.is_ok result);
+  let expected_path =
+    Filename.concat
+      (Filename.concat (Filename.concat base_dir "memory") "test-jsonl")
+      (sid ^ ".jsonl")
+  in
+  Alcotest.(check bool) "writes under explicit base_dir" true (Sys.file_exists expected_path);
+  cleanup_tmp_dir dir
 
 let test_seed_memory_bank_legacy_noop () =
   let dir = setup_tmp_dir () in
@@ -442,6 +469,8 @@ let () =
       Alcotest.test_case "persist returns Ok" `Quick test_jsonl_backend_persist;
       Alcotest.test_case "retrieve returns None" `Quick test_jsonl_backend_retrieve;
       Alcotest.test_case "query returns empty" `Quick test_jsonl_backend_query;
+      Alcotest.test_case "uses explicit base_dir" `Quick
+        test_jsonl_backend_uses_explicit_base_dir;
       Alcotest.test_case "seed_memory_bank legacy noop" `Quick
         test_seed_memory_bank_legacy_noop;
       Alcotest.test_case "seed_episodes loads recent jsonl" `Quick

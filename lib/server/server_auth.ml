@@ -141,7 +141,7 @@ let bearer_token_from_header value =
 let auth_token_from_request request =
   match Httpun.Headers.get request.Httpun.Request.headers "authorization" with
   | Some v -> bearer_token_from_header v
-  | None -> query_param request "token"
+  | None -> None
 
 (** TTS proxy — forwards text to ElevenLabs and returns audio/mpeg bytes.
     Reads ELEVENLABS_API_KEY from environment. *)
@@ -327,6 +327,37 @@ let authorize_tool_request ~base_path ~tool_name request :
           else
             Auth.authorize_tool base_path ~agent_name ~token ~tool_name)
 
+let authorize_token_bound_permission_request ~base_path ~permission request :
+    (string, Types.masc_error) result =
+  let auth_cfg = Auth.load_auth_config base_path in
+  if not auth_cfg.enabled then
+    Error
+      (Types.Unauthorized
+         "HTTP mutation requires room auth enabled with require_token=true.")
+  else if not auth_cfg.require_token then
+    Error
+      (Types.Unauthorized
+         "HTTP mutation requires bearer token auth (require_token=true).")
+  else
+    match auth_token_from_request request with
+    | None ->
+        Error
+          (Types.Unauthorized
+             "Authentication required. Use 'Authorization: Bearer <token>' header.")
+    | Some token -> (
+        match Auth.find_credential_by_token base_path ~token with
+        | Error err -> Error err
+        | Ok cred ->
+            if Types.has_permission cred.role permission then
+              Ok cred.agent_name
+            else
+              Error
+                (Types.Forbidden
+                   {
+                     agent = cred.agent_name;
+                     action = Types.show_permission permission;
+                   }))
+
 let rec with_public_read handler request reqd =
   let strict = http_auth_strict_enabled () in
   let path = Http_server_eio.Request.path request in
@@ -362,6 +393,15 @@ and with_tool_auth ~tool_name handler request reqd =
       let base_path = state.Mcp_server.room_config.base_path in
       match authorize_tool_request ~base_path ~tool_name request with
       | Ok () -> handler state request reqd
+      | Error err -> respond_auth_error request reqd err
+
+and with_token_permission_auth ~permission handler request reqd =
+  match !server_state with
+  | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
+  | Some state ->
+      let base_path = state.Mcp_server.room_config.base_path in
+      match authorize_token_bound_permission_request ~base_path ~permission request with
+      | Ok agent_name -> handler state agent_name request reqd
       | Error err -> respond_auth_error request reqd err
 
 let serve_agent_card ~host ~port request reqd =

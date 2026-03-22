@@ -13,7 +13,8 @@ let add_routes ~sw router =
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/agent-runs" (fun request reqd ->
-       with_public_read (fun _state _req reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         (fun _state _agent_name _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
              try
                let json = Yojson.Safe.from_string body_str in

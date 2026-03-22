@@ -260,6 +260,30 @@ let test_permission_for_tool_interrupt () =
   | Some Types.CanInterrupt -> ()
   | _ -> fail "expected CanInterrupt"
 
+(* ============================================================
+   HTTP auth extraction regressions
+   ============================================================ *)
+
+let test_http_auth_token_from_header_only () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let headers =
+    Httpun.Headers.of_list [ ("authorization", "Bearer header-token") ]
+  in
+  let request =
+    Httpun.Request.create ~headers `GET
+      "/api/v1/tools/masc_board_vote?token=query-token"
+  in
+  check (option string) "header bearer token extracted" (Some "header-token")
+    (Server_auth.auth_token_from_request request)
+
+let test_http_auth_rejects_query_token_fallback () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let request =
+    Httpun.Request.create `GET "/api/v1/tools/masc_board_vote?token=query-token"
+  in
+  check (option string) "query token ignored" None
+    (Server_auth.auth_token_from_request request)
+
 let test_permission_for_tool_approve () =
   match Auth.permission_for_tool "masc_approve" with
   | Some Types.CanApprove -> ()
@@ -530,5 +554,10 @@ let () =
       (* gardener permission tests removed — Gardener deleted (#1834) *)
       test_case "unknown" `Quick test_permission_for_tool_unknown;
       test_case "empty" `Quick test_permission_for_tool_empty;
+    ];
+    "http_auth", [
+      test_case "header token only" `Quick test_http_auth_token_from_header_only;
+      test_case "reject query token fallback" `Quick
+        test_http_auth_rejects_query_token_fallback;
     ];
   ]

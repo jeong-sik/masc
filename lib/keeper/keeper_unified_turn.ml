@@ -16,13 +16,23 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let used_model_id =
-    Model_spec.find_model_id_for_used ~labels:meta.models
-      ~model_used:result.model_used
+    let strip_latest s =
+      if String.length s > 7 && String.sub s (String.length s - 7) 7 = ":latest"
+      then String.sub s 0 (String.length s - 7) else s
+    in
+    let used = strip_latest result.model_used in
+    let cfgs = Llm_provider.Cascade_config.parse_model_strings meta.models in
+    match List.find_opt (fun (c : Llm_provider.Provider_config.t) ->
+      c.model_id = result.model_used || c.model_id = used
+    ) cfgs with
+    | Some c -> c.model_id
+    | None -> (match cfgs with c :: _ -> c.model_id | [] -> result.model_used)
   in
   let turn_cost =
-    Model_spec.cost_usd_of_model_id ~model_id:used_model_id
+    let pricing = Llm_provider.Pricing.pricing_for_model used_model_id in
+    Llm_provider.Pricing.estimate_cost ~pricing
       ~input_tokens:result.usage.input_tokens
-      ~output_tokens:result.usage.output_tokens
+      ~output_tokens:result.usage.output_tokens ()
   in
   let has_tool_calls = result.tools_used <> [] in
   let has_text =

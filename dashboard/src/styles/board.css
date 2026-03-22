@@ -118,7 +118,26 @@
   margin-bottom: 8px;
 }
 .board-comment .comment-author { font-size: var(--fs-sm); font-weight: 600; color: var(--purple); }
-.board-comment .comment-text { font-size: var(--fs-base); margin-top: 4px; }
+.board-comment .comment-text {
+  font-size: var(--fs-base);
+  margin-top: 4px;
+  max-height: 120px;
+  overflow: hidden;
+  position: relative;
+  transition: max-height 0.3s ease;
+}
+.board-comment .comment-text.expanded { max-height: none; }
+.board-comment .comment-expand-btn {
+  display: none;
+  margin-top: 4px;
+  background: none;
+  border: none;
+  color: var(--purple);
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  padding: 0;
+}
+.board-comment .comment-expand-btn:hover { text-decoration: underline; }
 .board-comment .comment-time { font-size: var(--fs-xs); color: var(--text-dim); }
 
 /* ── Activity Tab ──────────────────────────────────────────── */

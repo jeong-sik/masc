@@ -51,25 +51,25 @@ function GovernanceSummaryStrip() {
         테스트 잔재일 가능성이 높습니다.
       </div>
     ` : null}
-    <div class="board-summary-strip">
-      <div class="board-summary-item">
-        <span class="board-summary-label">열린 케이스</span>
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2.5 mb-3">
+      <div class="board-summary-item flex flex-col gap-1">
+        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">열린 케이스</span>
         <strong>${summary?.cases_open ?? governanceData.value?.items?.length ?? 0}</strong>
       </div>
-      <div class="board-summary-item">
-        <span class="board-summary-label">판정 대기</span>
+      <div class="board-summary-item flex flex-col gap-1">
+        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">판정 대기</span>
         <strong>${summary?.pending_ruling ?? 0}</strong>
       </div>
-      <div class="board-summary-item">
-        <span class="board-summary-label">자동집행 준비</span>
+      <div class="board-summary-item flex flex-col gap-1">
+        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">자동집행 준비</span>
         <strong>${summary?.ready_auto_execute ?? 0}</strong>
       </div>
-      <div class="board-summary-item">
-        <span class="board-summary-label">관리자 승인 대기</span>
+      <div class="board-summary-item flex flex-col gap-1">
+        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">관리자 승인 대기</span>
         <strong>${summary?.needs_human_gate ?? 0}</strong>
       </div>
-      <div class="board-summary-item">
-        <span class="board-summary-label">집행 완료</span>
+      <div class="board-summary-item flex flex-col gap-1">
+        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">집행 완료</span>
         <strong>${summary?.executed ?? 0}</strong>
       </div>
     </div>

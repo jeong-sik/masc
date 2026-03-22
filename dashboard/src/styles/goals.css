@@ -2,31 +2,9 @@
 
 /* goal-summary: migrated to inline Tailwind (flex gap-3 flex-wrap) */
 
-.goal-summary-item {
-  flex: 1;
-  min-width: 60px;
-  text-align: center;
-  padding: 8px 4px;
-  background: var(--white-3);
-}
+/* goal-summary-item/value/label: migrated to inline Tailwind */
 
-.goal-summary-value {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--text-near-white);
-}
-
-.goal-summary-label {
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
-  margin-top: 2px;
-}
-
-.goal-filter-label {
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
-  margin-right: 4px;
-}
+/* goal-filter-label: migrated to inline Tailwind */
 
 .goal-filter-btn {
   background: var(--white-5);
@@ -49,19 +27,7 @@
   color: #818cf8;
 }
 
-.goal-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 10px 12px;
-  background: var(--white-2);
-  transition: background 0.15s;
-}
-
-.goal-row:hover {
-  background: var(--white-5);
-}
+/* goal-row: migrated to inline Tailwind (flex justify-between items-start gap-3 ...) */
 .planning-loop-row {
   border: 1px solid var(--card-border);
   background: rgba(13, 22, 40, 0.58);
@@ -70,60 +36,13 @@
 
 /* planning-loop-head: migrated to inline Tailwind */
 
-.planning-loop-id {
-  color: var(--text-strong);
-  font-size: var(--fs-lg);
-  font-weight: 650;
-  text-transform: capitalize;
-}
+/* planning-loop-id/sub/target/footnote: migrated to inline Tailwind */
 
-.planning-loop-sub {
-  color: var(--text-muted);
-  font-size: var(--fs-xs);
-  margin-top: 2px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.planning-loop-target {
-  color: var(--text-body);
-  font-size: var(--fs-base);
-  line-height: 1.5;
-}
-
-.planning-loop-footnote {
-  color: var(--text-muted);
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-}
-
-.goal-title {
-  font-size: var(--fs-base);
-  font-weight: 500;
-  color: var(--text-near-white);
-}
-
-.goal-horizon-badge {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.goal-review-note {
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
-  font-style: italic;
-  margin-top: 4px;
-  padding-left: 8px;
-  border-left: 2px solid var(--white-8);
-}
+/* goal-title, goal-horizon-badge, goal-review-note: migrated to inline Tailwind */
 
 /* goal-row-right: migrated to inline Tailwind (flex flex-col items-end gap-1 shrink-0) */
 
-.goal-updated {
-  font-size: var(--fs-xs);
-  color: var(--text-dim);
-}
+/* goal-updated: migrated to inline Tailwind */
 
 /* planning-toolbar: migrated to inline Tailwind (flex justify-end py-2 mb-1) */
 
@@ -165,14 +84,7 @@
   border: 1px solid var(--white-8);
 }
 
-/* -- Kanban card header (badge + title row) -- */
-
-.kanban-card-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-left: 8px;
-}
+/* kanban-card-header: removed (unused) */
 
 /* -- Task description preview (truncated, expandable) -- */
 

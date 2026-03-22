@@ -88,14 +88,14 @@ export function KeeperChatPanel({ name }: { name: string }) {
 
   return html`
     <div class="keeper-chat">
-      <div class="keeper-chat__header">
+      <div class="keeper-chat__header flex items-center justify-between py-2.5 px-3.5">
         <span class="keeper-chat__title">@${name} 대화</span>
         ${isStreaming ? html`
           <button class="control-btn rounded-lg ghost keeper-chat__cancel" onClick=${cancelStream}>중단</button>
         ` : null}
       </div>
 
-      <div class="keeper-chat__messages" ref=${scrollRef}>
+      <div class="keeper-chat__messages flex-1 min-h-[200px] max-h-[400px] overflow-y-auto py-3 px-3.5 flex flex-col gap-2.5" ref=${scrollRef}>
         ${messages.length === 0 && !isStreaming ? html`
           <div class="text-[var(--white-20)] text-[var(--fs-base)] text-center py-10">keeper에게 메시지를 보내세요</div>
         ` : null}
@@ -122,7 +122,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
 
       ${chatError.value ? html`<div class="keeper-chat__error">${chatError.value}</div>` : null}
 
-      <div class="keeper-chat__input-row">
+      <div class="keeper-chat__input-row flex gap-2 py-2.5 px-3.5">
         <input
           class="control-input rounded-lg flex-1"
           type="text"

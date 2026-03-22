@@ -219,25 +219,25 @@ function MemorySummary() {
   const grouped = splitVisiblePosts(boardPosts.value)
   const visibleCount = grouped.human.length + grouped.operations.length
   return html`
-    <div class="board-summary-strip">
-      <div class="board-summary-item">
-        <span class="board-summary-label">보이는 글</span>
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-2.5 mb-3">
+      <div class="board-summary-item flex flex-col gap-1">
+        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">보이는 글</span>
         <strong>${visibleCount}</strong>
       </div>
-      <div class="board-summary-item">
-        <span class="board-summary-label">정렬</span>
+      <div class="board-summary-item flex flex-col gap-1">
+        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">정렬</span>
         <strong>${sortLabel}</strong>
       </div>
-      <div class="board-summary-item">
-        <span class="board-summary-label">잡음 필터</span>
+      <div class="board-summary-item flex flex-col gap-1">
+        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">잡음 필터</span>
         <strong>${hideAutomationPosts.value ? `자동화 ${grouped.hiddenAutomation}건 숨김` : '분리된 레인 표시'}</strong>
       </div>
-      <div class="board-summary-item">
-        <span class="board-summary-label">시스템 글 정책</span>
+      <div class="board-summary-item flex flex-col gap-1">
+        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">시스템 글 정책</span>
         <strong>${boardExcludeSystem.value ? '시스템 글 숨김' : '시스템 레인 표시'}</strong>
       </div>
-      <div class="board-summary-item">
-        <span class="board-summary-label">최근 갱신</span>
+      <div class="board-summary-item flex flex-col gap-1">
+        <span class="board-summary-label text-[color:var(--text-muted)] text-[length:var(--fs-xs)] tracking-[0.06em] uppercase">최근 갱신</span>
         <strong>${lastBoardRefreshAt.value ? html`<${TimeAgo} timestamp=${lastBoardRefreshAt.value} />` : '아직 불러오지 않음'}</strong>
       </div>
     </div>
@@ -273,7 +273,7 @@ function PostCard({ post }: { post: BoardPost }) {
                 ${post.visibility ? html`<span class="board-meta-chip rounded-full">${post.visibility}</span>` : null}
               </div>
             </div>
-          <div class="post-meta flex gap-2.5 items-center flex-wrap">
+          <div class="flex gap-2.5 items-center flex-wrap text-[length:var(--fs-xs)] text-[#90a4cc]">
             <span>작성자 <a class="author-link" class="cursor-pointer underline" onClick=${(e: Event) => { e.stopPropagation(); navigate('status', { section: 'agents', agent: post.author }) }}>${post.author}</a></span>
             <span><${TimeAgo} timestamp=${post.created_at} /></span>
             ${isUpdated(post) ? html`<span>수정 <${TimeAgo} timestamp=${post.updated_at} /></span>` : null}
@@ -281,7 +281,7 @@ function PostCard({ post }: { post: BoardPost }) {
             <span>투표 ${post.votes ?? 0}</span>
           </div>
         </div>
-        <div class="post-snippet">${previewText(stripStateBlocks(post.body))}</div>
+        <div class="text-[color:var(--text-body)] text-[length:var(--fs-base)] leading-[1.6]">${previewText(stripStateBlocks(post.body))}</div>
       </div>
     </div>
   `
@@ -373,7 +373,7 @@ function PostDetail({ post }: { post: BoardPost }) {
           <div class="post-body">
             <${Markdown} text=${stripStateBlocks(post.body)} />
           </div>
-          <div class="post-meta flex gap-2.5 items-center flex-wrap mt-3">
+          <div class="flex gap-2.5 items-center flex-wrap mt-3 text-[length:var(--fs-xs)] text-[#90a4cc]">
             <span><a class="author-link" class="cursor-pointer underline" onClick=${() => navigate('status', { section: 'agents', agent: post.author })}>${post.author}</a></span>
             <${TimeAgo} timestamp=${post.created_at} />
             <span>${post.votes ?? 0} votes</span>

@@ -41,6 +41,9 @@ let default ?(repo = default_repo_config ()) () : t =
        Propose ONE focused, small change per experiment. Prioritize: \
        bug fixes > simplification > performance > readability. \
        Keep changes to 1-3 files, under 50 lines. All tests must pass. \
+       CRITICAL: Only use functions that appear in the 'Public API signatures' section. \
+       Do NOT invent module names or function names. If a function does not appear \
+       in the .mli signatures provided, it does not exist. \
        Respond ONLY with a JSON object: \
        {\"description\": \"...\", \"target_file\": \"...\", \"rationale\": \"...\", \"patch\": \"...\"}";
   }

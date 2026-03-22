@@ -108,6 +108,29 @@ After masc_case_brief_submit may trigger a ruling; pair with masc_execution_orde
       ];
     `Assoc
       [
+        ("name", `String "masc_governance_rule");
+        ("description", `String "Submit an explicit ruling on a Governance V2 case. \
+Approve, deny, or dismiss a pending case with a summary and optional evidence. \
+Use when a case needs a decision: stale cases can be dismissed, valid petitions approved or denied. \
+After masc_case_status shows a pending case; pair with masc_ruling_status to verify.");
+        ( "inputSchema",
+          `Assoc
+            [
+              ("type", `String "object");
+              ( "properties",
+                `Assoc
+                  [
+                    ("case_id", `Assoc [ ("type", `String "string"); ("description", `String "Governance V2 case ID") ]);
+                    ("decision", `Assoc [ ("type", `String "string"); ("enum", `List [ `String "approve"; `String "deny"; `String "dismiss" ]); ("description", `String "Ruling decision") ]);
+                    ("summary", `Assoc [ ("type", `String "string"); ("description", `String "Ruling rationale") ]);
+                    ("confidence", `Assoc [ ("type", `String "number"); ("description", `String "Confidence 0-1 (default 0.9)") ]);
+                    ("evidence_refs", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]); ("description", `String "Evidence references") ]);
+                  ] );
+              ("required", `List [ `String "case_id"; `String "decision"; `String "summary" ]);
+            ] );
+      ];
+    `Assoc
+      [
         ("name", `String "masc_execution_orders");
         ("description", `String "List execution orders, inspect a case order, or confirm/deny a human gate decision. \
 Use when reviewing or acting on enforcement actions from governance rulings. \

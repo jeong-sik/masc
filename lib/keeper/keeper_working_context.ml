@@ -196,10 +196,7 @@ let offload_messages
       |> String.concat "\n\n"
     in
     let content = sprintf "## Compacted at %s\n\n%s\n\n" timestamp rendered in
-    let fd = Unix.openfile path
-      [Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC] 0o644 in
-    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-      let _ = Unix.write_substring fd content 0 (String.length content) in ());
+    Fs_compat.save_file path content;
     Some path
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Memory.error "offload_messages failed: %s"

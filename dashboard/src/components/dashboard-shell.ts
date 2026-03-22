@@ -178,15 +178,17 @@ export function SideRail() {
           `
         })()}
 
-        <div class="mt-3.5 pt-2.5 border-t border-[var(--card-border)] grid gap-1">
-          <div class="text-[color:var(--text-muted)] text-[11px] tracking-[0.06em] uppercase">현재 화면</div>
-          <strong class="text-[color:var(--text-strong)] text-sm">${currentSection ? `${currentView?.label ?? current} · ${currentSection.label}` : currentView?.label ?? current}</strong>
-          <p class="text-[color:var(--text-muted)] text-xs leading-[1.45]">${currentSection?.description ?? currentView?.description ?? '운영 화면'}</p>
-        </div>
+        ${current !== 'home' ? html`
+          <div class="mt-3.5 pt-2.5 border-t border-[var(--card-border)] grid gap-1">
+            <div class="text-[color:var(--text-muted)] text-[11px] tracking-[0.06em] uppercase">현재 화면</div>
+            <strong class="text-[color:var(--text-strong)] text-sm">${currentSection ? `${currentView?.label ?? current} · ${currentSection.label}` : currentView?.label ?? current}</strong>
+            <p class="text-[color:var(--text-muted)] text-xs leading-[1.45]">${currentSection?.description ?? currentView?.description ?? '운영 화면'}</p>
+          </div>
+        ` : null}
       </section>
 
       <${SnapshotCard} currentTab=${current} />
-      <${InterveneRailCard} />
+      ${current !== 'home' ? html`<${InterveneRailCard} />` : null}
     </aside>
   `
 }

@@ -372,6 +372,7 @@ let run_named
     ?hooks
     ?context_reducer
     ?memory
+    ?raw_trace
     ?on_event
     ?agent_ref
     ()
@@ -401,7 +402,7 @@ let run_named
       ~description:(Some (Printf.sprintf "cascade:%s" cascade_name))
       ()
   in
-  let config = { config with named_cascade = Some named_cascade; initial_messages } in
+  let config = { config with named_cascade = Some named_cascade; initial_messages; raw_trace } in
   match run ~sw ~net ~config ?on_event ?agent_ref goal with
   | Ok result when accept result.response -> Ok result
   | Ok _ -> Error (Printf.sprintf "cascade %s: response rejected by accept" cascade_name)
@@ -457,36 +458,17 @@ let run_named_with_masc_tools
     ?on_event
     ()
   : (run_result, string) result =
-  match require_eio () with
-  | Error e -> Error e
-  | Ok (sw, net) ->
-  let specs = resolve_cascade_specs ~cascade_name in
-  let rec try_specs last_error = function
-    | [] ->
-      let err = match last_error with
-        | Some e -> e
-        | None -> Printf.sprintf "No models available for cascade '%s'" cascade_name
-      in
-      Error err
-    | (spec : Model_spec.model_spec) :: rest ->
-      let name = Printf.sprintf "oas-%s" cascade_name in
-      let config =
-        config_for_model ~name ~model_spec:spec ~system_prompt ~tools:[]
-          ~max_turns ~max_tokens ~temperature ?guardrails ?hooks
-          ?memory
-          ~description:(Some (Printf.sprintf "cascade:%s" cascade_name))
-          ()
-      in
-      let config = { config with raw_trace } in
-      match run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch ?on_event goal with
-      | Ok result -> Ok result
-      | Error e when rest <> [] ->
-        Log.Misc.info "[oas_worker] cascade %s: model %s failed (%s), trying next"
-          cascade_name spec.model_id e;
-        try_specs (Some e) rest
-      | Error e -> Error e
-  in
-  try_specs None specs
+  (* Convert MASC tools to OAS tools, then delegate to run_named.
+     OAS named_cascade handles model fallback internally. *)
+  let oas_tools = List.map (fun (td : Types.tool_schema) ->
+    Tool_bridge.oas_tool_of_masc
+      ~name:td.name ~description:td.description
+      ~input_schema:td.input_schema
+      (fun input -> dispatch ~name:td.name ~args:input)
+  ) masc_tools in
+  run_named ~cascade_name ~goal ~system_prompt ~tools:oas_tools
+    ~max_turns ~temperature ~max_tokens ?guardrails ?hooks ?memory
+    ?raw_trace ?on_event ()
 
 let run_model_with_masc_tools
     ~model_spec

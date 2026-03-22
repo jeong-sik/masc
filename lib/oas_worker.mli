@@ -47,6 +47,7 @@ val run_named :
   ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
+  ?raw_trace:Oas.Raw_trace.t ->
   ?on_event:(Oas.Types.sse_event -> unit) ->
   ?agent_ref:Oas.Agent.t option ref ->
   unit ->

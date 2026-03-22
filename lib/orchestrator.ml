@@ -204,7 +204,7 @@ let make_zero_zombie_consumer ~room_config
         (* Stale claim release: auto-release tasks held beyond TTL *)
         let ttl = Env_config_runtime.Claim.ttl_seconds in
         (try
-          let released = Room_task.release_stale_claims room_config ~ttl_seconds:ttl in
+          let released = Room_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl in
           if released <> [] then
             Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
               (List.length released)

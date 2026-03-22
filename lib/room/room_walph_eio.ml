@@ -416,15 +416,15 @@ let walph_loop config ~net:_net ~clock ~agent_name
 	              else begin
 	                (* Try to claim next task *)
 	                let claim_result =
-	                  Room_task.claim_next_r config ~agent_name
+	                  Room_task_schedule.claim_next_r config ~agent_name
 	                    ~exclude_task_ids:(failed_task_id_list ()) ()
 	                in
 	                match claim_result with
-	                | Room_task.Claim_next_no_unclaimed ->
+	                | Claim_next_no_unclaimed ->
 	                    stop_reason := "backlog drained"
-	                | Room_task.Claim_next_no_eligible _ ->
+	                | Claim_next_no_eligible _ ->
 	                    stop_reason := "no eligible tasks (failed_this_run)"
-	                | Room_task.Claim_next_error err_msg ->
+	                | Claim_next_error err_msg ->
 	                    let cutoff = note_error err_msg in
 	                    log_loop_error ~error:err_msg ~release_status:"n/a" ();
 	                    let _ = Room_state.broadcast config ~from_agent:agent_name
@@ -435,7 +435,7 @@ let walph_loop config ~net:_net ~clock ~agent_name
 	                      maybe_backoff ();
 	                      loop ()
 	                    end
-	                | Room_task.Claim_next_claimed { task_id; message = claim_message; title = task_title; _ } ->
+	                | Claim_next_claimed { task_id; message = claim_message; title = task_title; _ } ->
 	                    note_claim ~task_id;
 
 	                    (* Execute chain if preset has one (not drain) *)

@@ -263,17 +263,17 @@ let walph_loop config ~agent_name ?(preset="drain") ?(max_iterations=10) ?target
 	              else begin
 	                (* Try to claim next task *)
 	                let claim_result =
-	                  Room_task.claim_next_r config ~agent_name
+	                  Room_task_schedule.claim_next_r config ~agent_name
 	                    ~exclude_task_ids:(failed_task_id_list ()) ()
 	                in
 	                match claim_result with
-	                | Room_task.Claim_next_no_unclaimed ->
+	                | Claim_next_no_unclaimed ->
 	                    stop_reason := "backlog drained"
-	                | Room_task.Claim_next_no_eligible _ ->
+	                | Claim_next_no_eligible _ ->
 	                    stop_reason := "no eligible tasks (failed_this_run)"
-	                | Room_task.Claim_next_error err ->
+	                | Claim_next_error err ->
 	                    stop_reason := Printf.sprintf "claim error: %s" err
-	                | Room_task.Claim_next_claimed { task_id; message = claim_message; _ } ->
+	                | Claim_next_claimed { task_id; message = claim_message; _ } ->
 	                    if preset = "drain" then begin
 	                      let done_result =
 	                        Room_task.transition_task_r config ~agent_name ~task_id ~action:"done"

@@ -1,8 +1,7 @@
 // MASC Dashboard — Situation Banner
-// Synthesizes situation summary with reasons from mission snapshot data.
+// Clean alert bar: icon + text hierarchy + severity indicator.
 
 import { html } from 'htm/preact'
-import { HealthBeacon } from './health-beacon'
 import { missionError, missionLoading } from '../../mission-store'
 import type {
   DashboardMissionResponse,
@@ -43,14 +42,12 @@ function synthesizeSituation(snap: DashboardMissionResponse | null): SituationRe
   const hasAnyAgents = (snap.agent_briefs?.length ?? 0) > 0
   const hasAnyKeepers = (snap.keeper_briefs?.length ?? 0) > 0
 
-  // Honest empty state: no sessions AND no agents/keepers means the room is idle
   if (total === 0 && !hasAnyAgents && !hasAnyKeepers) {
     return { text: '유휴 상태. 세션, 에이전트, 키퍼 모두 비활성.', tone: 'ok', reasons: [] }
   }
 
   const reasons: SituationReason[] = []
 
-  // Collect blocker reasons (top 3 — full count shown in summary text)
   let blockerCount = 0
   for (const s of sessions) {
     if (s.blocker_summary) {
@@ -65,7 +62,6 @@ function synthesizeSituation(snap: DashboardMissionResponse | null): SituationRe
     }
   }
 
-  // Collect attention reasons
   for (const item of attentionItems.slice(0, 5)) {
     reasons.push({
       category: 'attention',
@@ -74,7 +70,6 @@ function synthesizeSituation(snap: DashboardMissionResponse | null): SituationRe
     })
   }
 
-  // Collect incident reasons
   const incidents = snap.incidents ?? []
   for (const inc of incidents.slice(0, 3)) {
     reasons.push({
@@ -105,36 +100,55 @@ const CATEGORY_LABELS: Record<string, string> = {
   incident: '인시던트',
 }
 
+function toneIcon(tone: SituationTone): string {
+  if (tone === 'bad') return '\u26A0'
+  if (tone === 'warn') return '\u25C9'
+  return '\u2713'
+}
+
+function toneBorderClass(tone: SituationTone): string {
+  if (tone === 'bad') return 'border-l-[var(--bad)]'
+  if (tone === 'warn') return 'border-l-[var(--warn)]'
+  return 'border-l-[var(--ok)]'
+}
+
+function toneBgClass(tone: SituationTone): string {
+  if (tone === 'bad') return 'bg-[rgba(239,68,68,0.06)]'
+  if (tone === 'warn') return 'bg-[rgba(251,191,36,0.05)]'
+  return 'bg-[var(--white-3)]'
+}
+
+function toneTextClass(tone: SituationTone): string {
+  if (tone === 'bad') return 'text-[var(--bad)]'
+  if (tone === 'warn') return 'text-[var(--warn)]'
+  return 'text-[var(--ok)]'
+}
+
 interface SituationBannerProps {
   snap: DashboardMissionResponse | null
   roomHealth?: string | null
 }
 
-export function SituationBanner({ snap, roomHealth }: SituationBannerProps) {
+export function SituationBanner({ snap }: SituationBannerProps) {
   const { text, tone, reasons } = synthesizeSituation(snap)
   const showReasons = tone !== 'ok' && reasons.length > 0
 
   return html`
-    <div class="flex items-center gap-3 py-3.5 px-[18px] bg-[var(--color-ff-panel)] border border-[var(--border-subtle,var(--ff-gold-15))] border-l-[3px] border-l-[var(--ok)] text-[length:var(--fs-md)] font-medium text-[color:var(--text-strong)] leading-[1.4] rounded-md situation-banner--${tone}">
-      <${HealthBeacon} health=${roomHealth ?? tone} />
-      <span class="flex-1 min-w-0">${text}</span>
-      <span class="inline-flex items-center shrink-0">
-      </span>
-    </div>
-    ${showReasons ? html`
-      <details class="mb-2" open=${reasons.length <= 5}>
-        <summary class="cursor-pointer text-[length:var(--fs-xs)] text-[color:var(--text-muted,var(--text-slate))] py-1 px-[var(--space-md,16px)] tracking-[0.04em] hover:text-[color:var(--text-strong)]">
-          상세 ${reasons.length}건
-        </summary>
-        <div class="flex flex-col gap-1 py-1.5 px-[var(--space-md,16px)] border-l-2 border-l-[var(--color-ff-border)]">
+    <div class="flex flex-col gap-0">
+      <div class="flex items-center gap-3 px-4 py-3 rounded-lg border border-[var(--card-border)] border-l-[3px] ${toneBorderClass(tone)} ${toneBgClass(tone)}">
+        <span class="shrink-0 w-5 h-5 flex items-center justify-center text-sm ${toneTextClass(tone)}">${toneIcon(tone)}</span>
+        <span class="flex-1 min-w-0 text-sm font-medium text-[var(--text-strong)] leading-snug">${text}</span>
+      </div>
+      ${showReasons ? html`
+        <div class="flex flex-col gap-1 px-4 py-2 border-l-[3px] ${toneBorderClass(tone)} ml-0">
           ${reasons.map((r, i) => html`
-            <div class="flex items-center gap-[var(--space-sm,8px)] text-[length:var(--fs-sm)] ${r.severity === 'bad' ? 'text-[rgba(239,68,68,0.9)]' : r.severity === 'warn' ? 'text-[color:var(--ff-gold)]' : 'text-[color:var(--white-55)]'}" key=${i}>
-              <span class="text-[9px] py-px px-1.5 rounded-sm bg-[rgba(212,169,75,0.08)] border border-[var(--ff-border-subtle)] whitespace-nowrap uppercase tracking-[0.5px] font-semibold">${CATEGORY_LABELS[r.category] ?? r.category}</span>
-              <span class="overflow-hidden text-ellipsis whitespace-nowrap">${r.text}</span>
+            <div class="flex items-center gap-2 text-xs" key=${i}>
+              <span class="shrink-0 px-1.5 py-px rounded text-[10px] font-semibold uppercase tracking-wide ${r.severity === 'bad' ? 'bg-[var(--bad-8)] text-[var(--bad-light)]' : 'bg-[var(--warn-12)] text-[var(--warn)]'}">${CATEGORY_LABELS[r.category] ?? r.category}</span>
+              <span class="truncate text-[var(--text-muted)]">${r.text}</span>
             </div>
           `)}
         </div>
-      </details>
-    ` : null}
+      ` : null}
+    </div>
   `
 }

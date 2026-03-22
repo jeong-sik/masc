@@ -47,12 +47,18 @@ function eventDetail(ev: (typeof oasAgentEvents.value)[number]): string {
       return [ev.secondary_agent, ev.trust_score != null ? `score ${ev.trust_score.toFixed(2)}` : null].filter(Boolean).join(' · ')
     case 'reputation_changed':
       return [
-        ev.old_score != null && ev.new_score != null ? `${ev.old_score.toFixed(2)} → ${ev.new_score.toFixed(2)}` : null,
+        ev.old_score != null && ev.new_score != null ? `${ev.old_score.toFixed(2)} -> ${ev.new_score.toFixed(2)}` : null,
         ev.trend ?? null,
       ].filter(Boolean).join(' · ')
     default:
       return ''
   }
+}
+
+function barColor(pct: number): string {
+  if (pct > 70) return 'bg-[var(--warn)]'
+  if (pct > 50) return 'bg-[var(--accent)]'
+  return 'bg-[var(--ok)]'
 }
 
 function OasSummaryLines() {
@@ -66,9 +72,9 @@ function OasSummaryLines() {
   const agoMin = lastEventTs != null ? Math.round((Date.now() / 1000 - lastEventTs) / 60) : null
 
   return html`
-    <div class="flex gap-3 text-[13px] text-[var(--text-body)] mb-3">
-      <span>활성 에이전트 ${activeAgents.size}명</span>
-      <span>${health.totalEvents}건${snapshots.size > 0 ? ` · 키퍼 ${snapshots.size}명` : ''}</span>
+    <div class="flex gap-4 text-xs text-[var(--text-muted)] mb-4">
+      <span>에이전트 ${activeAgents.size}명</span>
+      <span>${health.totalEvents}건${snapshots.size > 0 ? ` / 키퍼 ${snapshots.size}명` : ''}</span>
       <span>${agoMin != null ? `${agoMin}분 전` : '이벤트 대기 중'}</span>
     </div>
   `
@@ -81,19 +87,19 @@ function OasKeeperBars() {
   const entries = [...snapshots.values()].sort((a, b) => b.timestamp - a.timestamp)
 
   return html`
-    <div class="flex flex-col gap-1">
+    <div class="flex flex-col gap-2 mb-4">
+      <div class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-semibold mb-1">키퍼 컨텍스트</div>
       ${entries.map(snap => {
         const pct = Math.round(snap.context_ratio * 100)
-        const barClass = pct > 70 ? 'bar--warn' : pct > 50 ? 'bar--mid' : 'bar--ok'
         return html`
-          <div class="oas-keeper-row rounded" key=${snap.keeper_name}>
-            <span class="text-[color:var(--text-strong,var(--text-near-white))] font-medium min-w-[80px] max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">${snap.keeper_name}</span>
-            <span class="text-[color:var(--text-muted,#666)] text-[length:var(--fs-2xs)] min-w-[40px]">gen ${snap.generation}</span>
-            <div class="oas-keeper-bar-wrap">
-              <div class="oas-keeper-bar ${barClass}" style=${{ width: `${pct}%` }}></div>
+          <div class="flex items-center gap-3 text-xs" key=${snap.keeper_name}>
+            <span class="text-[var(--text-strong)] font-medium w-20 truncate">${snap.keeper_name}</span>
+            <span class="text-[var(--text-muted)] text-[10px] w-8">g${snap.generation}</span>
+            <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-full overflow-hidden">
+              <div class="h-full rounded-full transition-all ${barColor(pct)}" style=${{ width: `${pct}%` }}></div>
             </div>
-            <span class="text-[color:var(--text-muted,#888)] tabular-nums min-w-[32px] text-right">${pct}%</span>
-            <span class="text-[color:var(--text-muted,#666)] text-[length:var(--fs-2xs)] min-w-[48px]">${snap.message_count} msgs</span>
+            <span class="text-[var(--text-muted)] tabular-nums w-8 text-right">${pct}%</span>
+            <span class="text-[var(--text-muted)] text-[10px] w-12">${snap.message_count} msg</span>
           </div>
         `
       })}
@@ -104,20 +110,20 @@ function OasKeeperBars() {
 function OasRawEventList() {
   const events = oasAgentEvents.value
   if (events.length === 0) {
-    return html`<div class="text-[length:var(--fs-xs)] text-[color:var(--text-muted,#666)] py-2">OAS 에이전트 이벤트 대기 중...</div>`
+    return html`<div class="text-xs text-[var(--text-muted)] py-3 text-center">OAS 에이전트 이벤트 대기 중...</div>`
   }
 
   return html`
     <div class="flex flex-col gap-0.5">
       ${events.slice(0, 15).map((ev, i) => html`
-        <div class="oas-event-row rounded" key=${i}>
-          <span class="text-[color:var(--text-muted,#666)] tabular-nums min-w-[56px]">${formatTs(ev.timestamp)}</span>
-          <span class="text-[color:var(--text-strong,var(--text-near-white))] font-medium min-w-[80px] max-w-[120px] overflow-hidden text-ellipsis whitespace-nowrap">${ev.agent_name}</span>
-          <span class="text-[color:var(--text-muted,#888)] min-w-[60px]">${eventTypeLabel(ev.type)}</span>
+        <div class="flex items-center gap-3 py-1 text-xs" key=${i}>
+          <span class="text-[var(--text-muted)] tabular-nums w-14 shrink-0">${formatTs(ev.timestamp)}</span>
+          <span class="text-[var(--text-strong)] font-medium w-20 truncate shrink-0">${ev.agent_name}</span>
+          <span class="text-[var(--text-muted)] w-14 shrink-0">${eventTypeLabel(ev.type)}</span>
           ${ev.action ? html`<span class="oas-event-badge ${actionBadge(ev.action)}">${ev.action}</span>` : null}
           ${ev.trigger ? html`<span class="oas-event-trigger">${ev.trigger}</span>` : null}
-          ${ev.success != null ? html`<span class="oas-event-ok ${ev.success ? 'ok' : 'fail'}">${ev.success ? 'ok' : 'fail'}</span>` : null}
-          ${eventDetail(ev) ? html`<span class="oas-event-trigger">${eventDetail(ev)}</span>` : null}
+          ${ev.success != null ? html`<span class="text-[10px] ${ev.success ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}">${ev.success ? 'ok' : 'fail'}</span>` : null}
+          ${eventDetail(ev) ? html`<span class="text-[var(--text-muted)] truncate">${eventDetail(ev)}</span>` : null}
         </div>
       `)}
     </div>
@@ -126,25 +132,22 @@ function OasRawEventList() {
 
 export function OasPipeline() {
   const health = oasHealthSummary.value
-  const eventLabel = `${health.totalEvents}건`
 
   return html`
-    <div class="card">
-      <div class="flex justify-between items-center mb-4">
-        <span class="text-sm font-semibold text-[var(--text-strong)] uppercase tracking-wider">실행 흐름</span>
-        <span class="text-xs text-[var(--text-muted)] tabular-nums">${eventLabel}</span>
+    <div class="p-4 rounded-lg border border-[var(--card-border)] bg-[var(--card)]">
+      <div class="flex justify-between items-center mb-3">
+        <span class="text-xs font-semibold text-[var(--text-strong)] uppercase tracking-wider">실행 흐름</span>
+        <span class="text-[10px] text-[var(--text-muted)] tabular-nums">${health.totalEvents}건</span>
       </div>
 
       <${OasSummaryLines} />
+      <${OasKeeperBars} />
 
-      <div class="mb-3">
-        <div class="text-xs text-[var(--text-muted)] uppercase tracking-wider font-medium mb-1.5">키퍼 컨텍스트</div>
-        <${OasKeeperBars} />
-      </div>
-
-      <details class="oas-pipeline__raw-toggle">
-        <summary>에이전트 실행 (raw events)</summary>
-        <${OasRawEventList} />
+      <details class="group">
+        <summary class="cursor-pointer text-xs text-[var(--text-muted)] py-1 hover:text-[var(--accent)] transition-colors">에이전트 실행 (raw events)</summary>
+        <div class="mt-2">
+          <${OasRawEventList} />
+        </div>
       </details>
     </div>
   `

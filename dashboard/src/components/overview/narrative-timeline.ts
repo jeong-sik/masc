@@ -1,6 +1,5 @@
-// MASC Dashboard — Narrative Timeline (Phase 5)
-// Replaces raw log-line ActivityTicker with grouped, narrative-style timeline.
-// Groups events by time window and actor, synthesizes Korean descriptions.
+// MASC Dashboard — Narrative Timeline
+// Grouped event feed with timestamps and actor attribution.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -73,6 +72,11 @@ function groupByTime(events: NarrativeEvent[]): TimeGroup[] {
   return groups
 }
 
+function formatTimestamp(ts: number): string {
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps) {
   const baseLimit = maxItems ?? 8
   const limit = baseLimit + expandedItems.value
@@ -81,15 +85,11 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
 
   if (raw.length === 0) {
     return html`
-      <div class="narrative-timeline">
-        <div class="empty-state">
-          <span class="empty-state-icon">📡</span>
-          <div class="empty-state-title">이벤트 대기 중</div>
-          <div class="empty-state-desc">에이전트 활동, 세션 변경, 시스템 이벤트가 여기에 실시간으로 나타납니다.</div>
-        </div>
+      <div class="flex flex-col items-center gap-2 py-8 text-center">
+        <div class="text-[var(--text-muted)] text-sm">이벤트 대기 중</div>
+        <div class="text-[var(--text-muted)] text-xs leading-relaxed">에이전트 활동, 세션 변경, 시스템 이벤트가 여기에 나타납니다.</div>
       </div>
     `
-
   }
 
   const narratives = raw.map(buildNarrative)
@@ -97,18 +97,19 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
   const hasMore = totalAvailable > limit
 
   return html`
-    <div class="narrative-timeline">
+    <div class="flex flex-col gap-3">
       ${groups.map(group => html`
-        <div class="flex flex-col gap-1" key=${group.label}>
-          <div class="text-text-muted text-[length:var(--fs-xs)] font-semibold tracking-[0.04em] pb-0.5 border-b border-[var(--border-slate-8)]">${group.label}</div>
-          <div class="flex flex-col gap-0.5">
+        <div class="flex flex-col gap-0" key=${group.label}>
+          <div class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider pb-1.5 mb-1 border-b border-[var(--white-6)]">${group.label}</div>
+          <div class="flex flex-col">
             ${group.events.map(event => html`
-              <div class="py-1" key=${event.timestamp}>
-                <span class="text-text-body text-sm leading-[1.45]">${event.text}</span>
-                <details class="narrative-event__raw mt-0.5">
-                  <summary>원본</summary>
-                  <span>${event.raw}</span>
-                </details>
+              <div class="flex items-start gap-3 py-1.5 group" key=${event.timestamp}>
+                <span class="text-[10px] text-[var(--text-muted)] tabular-nums shrink-0 mt-0.5 w-8">${formatTimestamp(event.timestamp)}</span>
+                <div class="w-1.5 h-1.5 rounded-full bg-[var(--card-border)] shrink-0 mt-1.5"></div>
+                <div class="flex-1 min-w-0">
+                  ${event.actor ? html`<span class="text-xs font-medium text-[var(--accent)] mr-1.5">${event.actor}</span>` : null}
+                  <span class="text-xs text-[var(--text-body)] leading-relaxed">${event.text}</span>
+                </div>
               </div>
             `)}
           </div>
@@ -116,7 +117,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
       `)}
       ${hasMore ? html`
         <button
-          class="block w-full p-2 mt-1 bg-transparent border border-dashed border-[var(--card-border,var(--white-10))] text-[color:var(--text-muted)] text-[length:var(--fs-xs)] cursor-pointer text-center rounded-md hover:border-[var(--accent)] hover:text-[color:var(--accent)]"
+          class="w-full py-2 bg-transparent border border-dashed border-[var(--card-border)] text-[var(--text-muted)] text-xs cursor-pointer text-center rounded-md hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
           onClick=${() => { expandedItems.value += baseLimit }}
         >
           더 보기 (${totalAvailable - limit}건 남음)

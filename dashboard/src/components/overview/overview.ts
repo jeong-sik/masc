@@ -69,7 +69,7 @@ function HomeSectionHeader({
       </div>
       <div class="inline-flex items-center gap-2 flex-wrap justify-end">
         ${linkLabel && onLink
-          ? html`<a class="home-section-link" onClick=${onLink}>${linkLabel}</a>`
+          ? html`<a class="text-[length:var(--fs-xs)] text-accent cursor-pointer no-underline hover:underline" onClick=${onLink}>${linkLabel}</a>`
           : null}
       </div>
     </div>
@@ -91,11 +91,11 @@ function renderSessionCard(s: DashboardMissionSessionBrief) {
       ${secondary ? html`<div class="hot-session-card__context">${secondary}</div>` : null}
       <div class="flex flex-wrap gap-1.5 mt-2">
         ${creator
-          ? html`<span class="hot-session-card__chip rounded-full ${systemSession ? 'border-[rgba(34,197,94,0.22)] bg-[rgba(34,197,94,0.12)] text-[#b7f3c9]' : ''}">
+          ? html`<span class="inline-flex items-center min-h-5 px-2 border border-[var(--border-slate-18)] bg-[var(--border-slate-8)] text-[color:var(--text-muted)] text-[length:var(--fs-2xs)] tracking-[0.02em] rounded-full ${systemSession ? 'border-[rgba(34,197,94,0.22)] bg-[rgba(34,197,94,0.12)] text-[#b7f3c9]' : ''}">
               ${systemSession ? '시스템' : '주체'} · ${creator}
             </span>`
           : null}
-        ${s.status ? html`<span class="hot-session-card__chip rounded-full">${statusLabel(s.status)}</span>` : null}
+        ${s.status ? html`<span class="inline-flex items-center min-h-5 px-2 border border-[var(--border-slate-18)] bg-[var(--border-slate-8)] text-[color:var(--text-muted)] text-[length:var(--fs-2xs)] tracking-[0.02em] rounded-full">${statusLabel(s.status)}</span>` : null}
       </div>
       <div class="flex gap-2 flex-wrap text-xs text-text-muted mt-2">
         ${s.member_names?.length ? html`
@@ -208,7 +208,7 @@ function AgentPulse() {
       <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1">
         ${agents.map((a: ObservatoryAgent) => html`
           <div
-            class="agent-pulse-card rounded-xl rounded-md agent-pulse-card--${a.state}"
+            class="flex items-center gap-2 py-1.5 px-2.5 cursor-pointer transition-[background] duration-150 hover:bg-[var(--white-4)] rounded-xl rounded-md agent-pulse-card--${a.state}"
             key=${a.name}
             onClick=${() => navigate('status', { section: 'agents', agent: a.name })}
           >

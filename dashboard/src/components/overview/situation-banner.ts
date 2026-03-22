@@ -115,7 +115,7 @@ export function SituationBanner({ snap, roomHealth }: SituationBannerProps) {
   const showReasons = tone !== 'ok' && reasons.length > 0
 
   return html`
-    <div class="situation-banner rounded-md situation-banner--${tone}">
+    <div class="flex items-center gap-3 py-3.5 px-[18px] bg-[var(--color-ff-panel)] border border-[var(--border-subtle,var(--ff-gold-15))] border-l-[3px] border-l-[var(--ok)] text-[length:var(--fs-md)] font-medium text-[color:var(--text-strong)] leading-[1.4] rounded-md situation-banner--${tone}">
       <${HealthBeacon} health=${roomHealth ?? tone} />
       <span class="flex-1 min-w-0">${text}</span>
       <span class="inline-flex items-center shrink-0">

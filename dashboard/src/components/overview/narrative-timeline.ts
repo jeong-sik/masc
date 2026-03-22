@@ -85,6 +85,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
         <div class="text-text-muted text-center p-3 text-sm">이벤트 대기 중...</div>
       </div>
     `
+
   }
 
   const narratives = raw.map(buildNarrative)
@@ -95,7 +96,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
     <div class="narrative-timeline">
       ${groups.map(group => html`
         <div class="flex flex-col gap-1" key=${group.label}>
-          <div class="narrative-group__label">${group.label}</div>
+          <div class="text-text-muted text-[length:var(--fs-xs)] font-semibold tracking-[0.04em] pb-0.5 border-b border-[var(--border-slate-8)]">${group.label}</div>
           <div class="flex flex-col gap-0.5">
             ${group.events.map(event => html`
               <div class="py-1" key=${event.timestamp}>
@@ -111,7 +112,7 @@ export function NarrativeTimeline({ entries, maxItems }: NarrativeTimelineProps)
       `)}
       ${hasMore ? html`
         <button
-          class="narrative-timeline__load-more rounded-md"
+          class="block w-full p-2 mt-1 bg-transparent border border-dashed border-[var(--card-border,var(--white-10))] text-[color:var(--text-muted)] text-[length:var(--fs-xs)] cursor-pointer text-center rounded-md hover:border-[var(--accent)] hover:text-[color:var(--accent)]"
           onClick=${() => { expandedItems.value += baseLimit }}
         >
           더 보기 (${totalAvailable - limit}건 남음)

@@ -31,8 +31,10 @@ let activity_graph_http_json ~state request =
 
 let json_upsert_string_field name value = function
   | `Assoc fields ->
-      `Assoc ((name, `String value) :: List.remove_assoc name fields)
-  | json -> json
+      let fields = List.filter (fun (k, _) -> k <> name) fields in
+      `Assoc ((name, `String value) :: fields)
+  | _non_object ->
+      failwith (Printf.sprintf "json_upsert_string_field: expected JSON object, got non-object for field %S" name)
 
 let add_routes router =
   router

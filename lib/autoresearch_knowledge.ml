@@ -77,7 +77,9 @@ let finding_of_yojson (json : Yojson.Safe.t) : (finding, string) result =
       timestamp = (try member "timestamp" json |> to_float
                    with _ -> Unix.gettimeofday ());
     }
-  with exn -> Error (Printexc.to_string exn)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> Error (Printexc.to_string exn)
 
 (** {1 Storage (JSONL)} *)
 

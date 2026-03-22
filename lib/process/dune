@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name masc_process)
+ (public_name masc_mcp.masc_process)
+ (wrapped false)
+ (modules process_eio file_lock_eio)
+ (libraries masc_core eio eio.unix unix))

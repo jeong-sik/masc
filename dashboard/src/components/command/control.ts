@@ -34,15 +34,15 @@ function DecisionCard({ decision }: { decision: CommandPlaneDecisionRecord }) {
   const denyKey = `deny:${decision.decision_id}`
   const isLegacy = decision.source === 'projected_operator'
   return html`
-    <article class="command-card rounded-xl ${toneClass(decision.status)}">
-      <div class="command-card rounded-xl-head">
+    <article class="cmd-card rounded-xl ${toneClass(decision.status)}">
+      <div class="cmd-card rounded-xl-head">
         <div>
           <strong>${decision.requested_action}</strong>
-          <div class="command-card rounded-xl-sub">${decision.scope_type}:${decision.scope_id}</div>
+          <div class="cmd-card rounded-xl-sub">${decision.scope_type}:${decision.scope_id}</div>
         </div>
-        <span class="command-chip rounded-full ${toneClass(decision.status)}">${controlStatusLabel(decision.status ?? 'pending')}</span>
+        <span class="cmd-chip rounded-full ${toneClass(decision.status)}">${controlStatusLabel(decision.status ?? 'pending')}</span>
       </div>
-      <div class="command-card rounded-xl-grid">
+      <div class="cmd-card rounded-xl-grid">
         <span>결정 ID</span><span>${decision.decision_id}</span>
         <span>요청자</span><span>${decision.requested_by ?? '알 수 없음'}</span>
         <span>출처</span><span>${decision.source ?? 'managed'}</span>
@@ -62,7 +62,7 @@ function DecisionCard({ decision }: { decision: CommandPlaneDecisionRecord }) {
             </div>
           `
         : null}
-      ${isLegacy ? html`<div class="command-card rounded-xl-foot">레거시 operator 승인입니다. 실제 실행은 operator control에서 처리합니다.</div>` : null}
+      ${isLegacy ? html`<div class="cmd-card rounded-xl-foot">레거시 operator 승인입니다. 실제 실행은 operator control에서 처리합니다.</div>` : null}
     </article>
   `
 }
@@ -75,15 +75,15 @@ function CapacityRowCard({ row }: { row: CommandPlaneCapacityRow }) {
   const killSwitch = !!unit.policy?.kill_switch
   const utilization = Math.round((row.utilization ?? 0) * 100)
   return html`
-    <article class="command-card rounded-xl p-3">
-      <div class="command-card rounded-xl-head">
+    <article class="cmd-card rounded-xl p-3">
+      <div class="cmd-card rounded-xl-head">
         <div>
           <strong>${unit.label}</strong>
-          <div class="command-card rounded-xl-sub">${unit.unit_id}</div>
+          <div class="cmd-card rounded-xl-sub">${unit.unit_id}</div>
         </div>
-        <span class="command-chip rounded-full ${toneClass(utilization > 100 ? 'bad' : utilization > 70 ? 'warn' : 'ok')}">${utilization}%</span>
+        <span class="cmd-chip rounded-full ${toneClass(utilization > 100 ? 'bad' : utilization > 70 ? 'warn' : 'ok')}">${utilization}%</span>
       </div>
-      <div class="command-card rounded-xl-grid">
+      <div class="cmd-card rounded-xl-grid">
         <span>편성</span><span>${row.roster_live ?? 0}/${row.roster_total ?? 0}</span>
         <span>정원</span><span>${row.headcount_cap ?? 0}</span>
         <span>작전</span><span>${row.active_operations ?? 0}/${row.active_operation_cap ?? 0}</span>
@@ -112,7 +112,7 @@ export function ControlSurface() {
           <div class="card rounded-xl-title">승인 대기</div>
         </div>
         ${snapshot && snapshot.decisions.decisions.length > 0
-          ? html`<div class="command-card rounded-xl-stack">
+          ? html`<div class="cmd-card rounded-xl-stack">
               ${snapshot.decisions.decisions.map(decision => html`<${DecisionCard} decision=${decision} />`)}
             </div>`
           : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금 승인 대기 항목은 없습니다.</div>`}
@@ -123,7 +123,7 @@ export function ControlSurface() {
           <div class="card rounded-xl-title">유닛 제어</div>
         </div>
         ${snapshot && snapshot.capacity.capacity.length > 0
-          ? html`<div class="command-card rounded-xl-stack">
+          ? html`<div class="cmd-card rounded-xl-stack">
               ${snapshot.capacity.capacity.map(row => html`<${CapacityRowCard} row=${row} />`)}
             </div>`
           : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">제어할 용량 행이 아직 없습니다.</div>`}

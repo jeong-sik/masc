@@ -50,10 +50,10 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
             <strong class="text-[color:var(--text-near-white)] text-[16px] leading-[1.25]">${lane.label}</strong>
           </div>
         </div>
-        <div class="command-tag rounded-full-row">
-          <span class="command-chip rounded-full ${toneClass(tone)}">${lane.phase}</span>
-          <span class="command-chip rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
-          <span class="command-chip rounded-full">${relativeTime(lane.last_movement_at)}</span>
+        <div class="cmd-tag rounded-full-row">
+          <span class="cmd-chip rounded-full ${toneClass(tone)}">${lane.phase}</span>
+          <span class="cmd-chip rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
+          <span class="cmd-chip rounded-full">${relativeTime(lane.last_movement_at)}</span>
         </div>
       </div>
       <p class="mt-2.5 mb-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.movement_reason}</p>
@@ -91,7 +91,7 @@ export function SwarmLaneStrip({ lane }: { lane: CommandPlaneSwarmLane }) {
       ${lane.hard_flags.length > 0
         ? html`
             <div class="flex flex-wrap gap-1 mt-1">
-              ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<span class="command-chip rounded-full ${toneClass(flag.severity)}">${flag.code}</span>`)}
+              ${lane.hard_flags.map((flag: CommandPlaneSwarmFlag) => html`<span class="cmd-chip rounded-full ${toneClass(flag.severity)}">${flag.code}</span>`)}
             </div>
           `
         : null}
@@ -112,8 +112,8 @@ export function SwarmStoryboard({ lanes }: { lanes: CommandPlaneSwarmLane[] }) {
         return html`
           <article class="swarm-story-card rounded-xl ${toneClass(tone)}">
             <div class="swarm-story-topline flex justify-between gap-1.5 flex-wrap">
-              <span class="command-chip rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
-              <span class="command-chip rounded-full">${lane.phase}</span>
+              <span class="cmd-chip rounded-full ${toneClass(tone)}">${lane.motion_state}</span>
+              <span class="cmd-chip rounded-full">${lane.phase}</span>
             </div>
             <strong class="text-[color:var(--text-near-white)] text-[length:var(--fs-lg)] leading-[1.3]">${lane.label}</strong>
             <p class="m-0 text-[color:var(--frost-72)] leading-[1.5]">${lane.current_step}</p>
@@ -229,10 +229,10 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
   }
 
   return html`
-    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card ${toneClass(tone)}">
+    <article class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card ${toneClass(tone)}">
       <div class="flex justify-between gap-2.5 items-start">
         <strong>Run Resolution</strong>
-        <span class="command-chip rounded-full ${toneClass(tone)}">
+        <span class="cmd-chip rounded-full ${toneClass(tone)}">
           ${runResolutionLabel(resolution?.status ?? recommendation?.recommended_kind ?? null)}
         </span>
       </div>
@@ -241,7 +241,7 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
           ? `이 run은 ${resolution.decided_by}가 ${relativeTime(resolution.decided_at)}에 soft abandon 처리했습니다. ${resolution.reason}`
           : recommendation?.reason ?? '이 run에 대한 별도 resolution recommendation은 아직 없습니다.'}
       </p>
-      <div class="command-card rounded-xl-grid">
+      <div class="cmd-card rounded-xl-grid">
         <span>Run</span><span>${runId}</span>
         <span>Provenance</span><span><${ProvenanceChip} item=${{ kind: recommendation?.provenance ?? 'recorded' }} /></span>
         <span>Engine</span><span>${recommendation?.decision_engine ?? 'operator_record'}</span>
@@ -249,22 +249,22 @@ export function SwarmRunResolutionCard({ swarm }: { swarm: CommandPlaneSwarmResp
       </div>
       ${recommendation?.evidence
         ? html`
-            <div class="command-tag rounded-full-row">
-              <span class="command-tag rounded-full">joined ${recommendation.evidence.joined_workers ?? 0}</span>
-              <span class="command-tag rounded-full">trace ${recommendation.evidence.trace_events ?? 0}</span>
-              <span class="command-tag rounded-full">message ${recommendation.evidence.message_events ?? 0}</span>
+            <div class="cmd-tag rounded-full-row">
+              <span class="cmd-tag rounded-full">joined ${recommendation.evidence.joined_workers ?? 0}</span>
+              <span class="cmd-tag rounded-full">trace ${recommendation.evidence.trace_events ?? 0}</span>
+              <span class="cmd-tag rounded-full">message ${recommendation.evidence.message_events ?? 0}</span>
               ${recommendation.evidence.runtime_blocker
-                ? html`<span class="command-tag rounded-full ${toneClass('bad')}">${recommendation.evidence.runtime_blocker}</span>`
+                ? html`<span class="cmd-tag rounded-full ${toneClass('bad')}">${recommendation.evidence.runtime_blocker}</span>`
                 : null}
             </div>
           `
         : null}
       ${pendingConfirm
         ? html`
-            <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-guide-card warn">
+            <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-guide-card warn">
               <div class="flex justify-between gap-2.5 items-start">
                 <strong>확인 대기</strong>
-                <span class="command-chip rounded-full warn">${pendingConfirm.confirm_token}</span>
+                <span class="cmd-chip rounded-full warn">${pendingConfirm.confirm_token}</span>
               </div>
               ${pendingConfirm.preview ? html`<pre class="m-0 p-3 rounded-[10px] bg-[rgba(9,12,20,0.75)] text-[rgba(224,242,254,0.92)] text-[length:var(--fs-sm)] leading-[1.45] max-h-[220px] overflow-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere]">${previewText(pendingConfirm.preview)}</pre>` : null}
               <div class="flex gap-2.5 flex-wrap mt-3">

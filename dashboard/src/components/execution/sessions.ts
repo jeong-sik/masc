@@ -32,7 +32,7 @@ export function SessionCard({ brief, selected }: { brief: DashboardExecutionSess
           <div class="text-[rgba(255,255,255,0.52)] text-[length:var(--fs-sm)]">${brief.session_id}${brief.room ? ` · ${brief.room}` : ''}</div>
           <div class="mission-card rounded-xl-title">${brief.goal}</div>
         </div>
-        <span class="command-chip rounded-full ${terminal ? 'muted' : toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
+        <span class="cmd-chip rounded-full ${terminal ? 'muted' : toneClass(brief.health ?? brief.status)}">${statusLabel(brief.status)}</span>
       </div>
       <div class="mission-card rounded-xl-meta">
         <span>건강도 · ${statusLabel(brief.health ?? 'ok')}</span>

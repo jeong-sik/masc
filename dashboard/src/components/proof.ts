@@ -115,9 +115,9 @@ export function Proof() {
           <p>이 세션이 실제로 여러 참여자의 흔적, 상호작용, 산출물, 실행 backing을 남겼는지 읽는 표면입니다.</p>
         </div>
         <div class="flex gap-2 flex-wrap items-center">
-          <span class="command-chip rounded-full ${verdictTone(verdict)}">${verdictChipLabel(verdict)}</span>
-          ${snapshot?.session_id ? html`<span class="command-chip rounded-full">${snapshot.session_id}</span>` : null}
-          ${snapshot?.generated_at ? html`<span class="command-chip rounded-full">${relativeTime(snapshot.generated_at)}</span>` : null}
+          <span class="cmd-chip rounded-full ${verdictTone(verdict)}">${verdictChipLabel(verdict)}</span>
+          ${snapshot?.session_id ? html`<span class="cmd-chip rounded-full">${snapshot.session_id}</span>` : null}
+          ${snapshot?.generated_at ? html`<span class="cmd-chip rounded-full">${relativeTime(snapshot.generated_at)}</span>` : null}
         </div>
       </div>
 

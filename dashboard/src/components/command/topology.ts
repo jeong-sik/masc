@@ -71,17 +71,17 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
   const source = node.unit.source ?? 'unknown'
   const connectionLabel = activeOps > 0 ? `${activeOps}개 작전 연결` : '실행 연결 없음'
   return html`
-    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl command-tree-node depth-${Math.min(depth, 3)} ${depth <= 2 ? 'border-[rgba(248,113,113,0.3)]' : ''}">
+    <div class="bg-[var(--white-4)] border border-[var(--white-8)] p-3.5 rounded-xl cmd-tree-node depth-${Math.min(depth, 3)} ${depth <= 2 ? 'border-[rgba(248,113,113,0.3)]' : ''}">
       <div class="flex justify-between items-start">
         <div>
           <div class="flex justify-between items-start flex-wrap gap-2">
             <strong>${node.unit.label}</strong>
-            <span class="command-chip rounded-full">${unitKindLabel(node.unit.kind)}</span>
-            <span class="command-chip rounded-full ${toneClass(node.health)}">${node.health ?? 'ok'}</span>
-            <span class="command-chip rounded-full ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
-            <span class="command-chip rounded-full ${activeOps > 0 ? 'ok' : 'warn'}">${connectionLabel}</span>
-            ${policy?.frozen ? html`<span class="command-chip rounded-full warn">동결됨</span>` : null}
-            ${policy?.kill_switch ? html`<span class="command-chip rounded-full bad">킬 스위치</span>` : null}
+            <span class="cmd-chip rounded-full">${unitKindLabel(node.unit.kind)}</span>
+            <span class="cmd-chip rounded-full ${toneClass(node.health)}">${node.health ?? 'ok'}</span>
+            <span class="cmd-chip rounded-full ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
+            <span class="cmd-chip rounded-full ${activeOps > 0 ? 'ok' : 'warn'}">${connectionLabel}</span>
+            ${policy?.frozen ? html`<span class="cmd-chip rounded-full warn">동결됨</span>` : null}
+            ${policy?.kill_switch ? html`<span class="cmd-chip rounded-full bad">킬 스위치</span>` : null}
           </div>
           <div class="flex gap-2 flex-wrap mt-2 text-[var(--white-56)] text-[length:var(--fs-sm)]">
             <span>ID ${node.unit.unit_id}</span>
@@ -90,10 +90,10 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
             <span>작전 ${activeOps}</span>
             <span>자율성 ${policy?.autonomy_level ?? '정보 없음'}</span>
           </div>
-          <div class="command-card rounded-xl-sub">${nodeRealitySummary(node)}</div>
+          <div class="cmd-card rounded-xl-sub">${nodeRealitySummary(node)}</div>
           ${node.reasons && node.reasons.length > 0
-            ? html`<div class="command-tag rounded-full-row">
-                ${node.reasons.map(reason => html`<span class="command-tag rounded-full warn">${reason}</span>`)}
+            ? html`<div class="cmd-tag rounded-full-row">
+                ${node.reasons.map(reason => html`<span class="cmd-tag rounded-full warn">${reason}</span>`)}
               </div>`
             : null}
         </div>
@@ -109,10 +109,10 @@ function TopologyNode({ node, depth = 0 }: { node: CommandPlaneTreeNode; depth?:
 
 function AlertCard({ alert }: { alert: CommandPlaneAlert }) {
   return html`
-    <article class="command-alert ${toneClass(alert.severity)} ${alertBorderTone(toneClass(alert.severity))}">
-      <div class="command-card rounded-xl-head">
+    <article class="cmd-alert ${toneClass(alert.severity)} ${alertBorderTone(toneClass(alert.severity))}">
+      <div class="cmd-card rounded-xl-head">
         <strong>${alert.title ?? alert.kind ?? alert.alert_id}</strong>
-        <span class="command-chip rounded-full ${toneClass(alert.severity)}">${alert.severity ?? 'warn'}</span>
+        <span class="cmd-chip rounded-full ${toneClass(alert.severity)}">${alert.severity ?? 'warn'}</span>
       </div>
       <div class="flex justify-between items-start">
         <span>${alert.scope_type ?? '범위'}:${alert.scope_id ?? '정보 없음'}</span>
@@ -129,10 +129,10 @@ export function TraceRow({ event }: { event: CommandPlaneTraceEvent }) {
       <div class="min-w-0 [overflow-wrap:anywhere] break-words">
         <div class="flex justify-between items-start">
           <strong>${event.event_type}</strong>
-          <span class="command-chip rounded-full">${event.source ?? 'control_plane'}</span>
-          <span class="command-chip rounded-full">${relativeTime(event.timestamp)}</span>
+          <span class="cmd-chip rounded-full">${event.source ?? 'control_plane'}</span>
+          <span class="cmd-chip rounded-full">${relativeTime(event.timestamp)}</span>
         </div>
-        <div class="command-card rounded-xl-sub">
+        <div class="cmd-card rounded-xl-sub">
           ${event.operation_id ?? event.trace_id}
           ${event.unit_id ? ` · ${event.unit_id}` : ''}
           ${event.actor ? ` · ${event.actor}` : ''}
@@ -159,9 +159,9 @@ export function TopologySurface() {
         ? html`
             <div class="mb-3.5 p-3.5 bg-[var(--white-4)] border border-[var(--white-8)] rounded-xl">
               <div class="flex justify-between items-start flex-wrap gap-2">
-                <span class="command-chip rounded-full ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
-                <span class="command-chip rounded-full">관리 유닛 ${managedUnits}</span>
-                <span class="command-chip rounded-full ${activeOps > 0 ? 'ok' : 'warn'}">활성 작전 ${activeOps}</span>
+                <span class="cmd-chip rounded-full ${topologySourceTone(source)}">${topologySourceLabel(source)}</span>
+                <span class="cmd-chip rounded-full">관리 유닛 ${managedUnits}</span>
+                <span class="cmd-chip rounded-full ${activeOps > 0 ? 'ok' : 'warn'}">활성 작전 ${activeOps}</span>
               </div>
               <p>${topologySourceExplanation(source)}</p>
             </div>
@@ -182,7 +182,7 @@ export function AlertsSurface() {
         <div class="card rounded-xl-title">경보</div>
       </div>
       ${snapshot && snapshot.alerts.alerts.length > 0
-        ? html`<div class="command-card rounded-xl-stack">
+        ? html`<div class="cmd-card rounded-xl-stack">
             ${snapshot.alerts.alerts.map(alert => html`<${AlertCard} alert=${alert} />`)}
           </div>`
         : html`<div class="empty-state text-center border border-dashed border-[var(--card-border)] rounded-[10px] py-[22px] px-4 text-[color:var(--text-muted)]">지금 올라온 지휘면 경보는 없습니다.</div>`}

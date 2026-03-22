@@ -120,9 +120,9 @@ export function Mission() {
           <p>지금 어떤 세션이 돌고 있고, 누가 참여하며, 어디가 막혔는지를 한 시점에서 읽는 기본 관찰면입니다.</p>
         </div>
         <div class="flex gap-2 flex-wrap items-center">
-          <span class="command-chip rounded-full ${toneClass(mission.summary.room_health)}">${statusLabel(mission.summary.room_health)}</span>
-          <span class="command-chip rounded-full">${mission.summary.project ?? '프로젝트 미지정'}${mission.summary.current_room ? ` · ${mission.summary.current_room}` : ''}</span>
-          <span class="command-chip rounded-full">${mission.generated_at ? relativeTime(mission.generated_at) : '기록 없음'}</span>
+          <span class="cmd-chip rounded-full ${toneClass(mission.summary.room_health)}">${statusLabel(mission.summary.room_health)}</span>
+          <span class="cmd-chip rounded-full">${mission.summary.project ?? '프로젝트 미지정'}${mission.summary.current_room ? ` · ${mission.summary.current_room}` : ''}</span>
+          <span class="cmd-chip rounded-full">${mission.generated_at ? relativeTime(mission.generated_at) : '기록 없음'}</span>
         </div>
       </div>
 

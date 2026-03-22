@@ -35,6 +35,7 @@
         test_keeper_resident_supervisor
         test_metrics_rotation
         test_tool_tier
+        test_tool_budget
         test_tool_exposure
         test_code_swarm
         test_autonomy_liberation
@@ -55,6 +56,7 @@
           test_keeper_resident_supervisor
           test_metrics_rotation
           test_tool_tier
+          test_tool_budget
           test_tool_exposure
           test_code_swarm
           test_autonomy_liberation

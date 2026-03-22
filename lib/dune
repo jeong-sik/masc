@@ -385,6 +385,7 @@
    tool_mdal_schemas
    tool_mdal_handlers
    tool_library
+   tool_budget
    tool_catalog
    tool_result
    tool_dispatch
